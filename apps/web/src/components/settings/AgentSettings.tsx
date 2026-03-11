@@ -19,6 +19,8 @@ import { IconPlus, IconTrash } from '@tabler/icons-react';
 import { api, type ApiChannel } from '../../lib/api';
 import { useAgentStore } from '../../stores/agentStore';
 import { getGlobalDefaultChannel } from '../../lib/default-channel';
+import { notifyError, notifySuccess } from '../../lib/notify';
+import { DEFAULT_WORKSPACE_SETTING_KEY, pickDefaultWorkspaceId } from '../../lib/agent-default-workspace';
 
 type MCPServer = {
   id: string;
@@ -64,21 +66,34 @@ export function AgentSettings() {
   const loadAll = async () => {
     setLoading(true);
     try {
-      const [{ channels }, { workspaces }, { servers }] = await Promise.all([
+      const [{ channels }, { workspaces }, { servers }, { settings }] = await Promise.all([
         api.channels.list(),
         api.workspaces.list(),
         api.mcp.listServers(),
+        api.settings.get([DEFAULT_WORKSPACE_SETTING_KEY]),
       ]);
       setChannels(channels);
       setWorkspaces(workspaces as Workspace[]);
       setMcpServers(servers as MCPServer[]);
 
       const typedWorkspaces = workspaces as Workspace[];
-      if (!selectedWorkspaceId && typedWorkspaces.length > 0) {
-        setSelectedWorkspaceId(typedWorkspaces[0].id);
+      const picked = pickDefaultWorkspaceId(
+        typedWorkspaces as any[],
+        settings?.[DEFAULT_WORKSPACE_SETTING_KEY] || null
+      );
+      if (picked) {
+        setSelectedWorkspaceId(picked);
+        if (picked !== (settings?.[DEFAULT_WORKSPACE_SETTING_KEY] || null)) {
+          try {
+            await api.settings.set(DEFAULT_WORKSPACE_SETTING_KEY, picked);
+          } catch {
+            // ignore
+          }
+        }
       }
     } catch (error) {
       console.error('Failed to load agent settings:', error);
+      notifyError('加载失败', error instanceof Error ? error.message : '无法加载 Agent 设置');
     } finally {
       setLoading(false);
     }
@@ -90,6 +105,19 @@ export function AgentSettings() {
   );
 
   const selectedWorkspace = workspaces.find((ws) => ws.id === selectedWorkspaceId) || null;
+
+  const handleSelectWorkspace = async (value: string | null) => {
+    const nextId = value || null;
+    const prev = selectedWorkspaceId;
+    setSelectedWorkspaceId(nextId);
+    try {
+      await api.settings.set(DEFAULT_WORKSPACE_SETTING_KEY, nextId);
+      notifySuccess('已保存', '默认 Workspace 已更新');
+    } catch (error) {
+      setSelectedWorkspaceId(prev);
+      notifyError('保存失败', error instanceof Error ? error.message : '无法保存默认 Workspace');
+    }
+  };
 
   const handleCreateWorkspace = async () => {
     if (!workspaceName.trim()) return;
@@ -108,7 +136,7 @@ export function AgentSettings() {
       setWorkspaceCwd('');
       await loadAll();
     } catch (error) {
-      alert(error instanceof Error ? error.message : 'Failed to create workspace');
+      notifyError('创建失败', error instanceof Error ? error.message : 'Failed to create workspace');
     } finally {
       setLoading(false);
     }
@@ -120,10 +148,15 @@ export function AgentSettings() {
       await api.workspaces.delete(id);
       if (selectedWorkspaceId === id) {
         setSelectedWorkspaceId(null);
+        try {
+          await api.settings.set(DEFAULT_WORKSPACE_SETTING_KEY, null);
+        } catch {
+          // ignore
+        }
       }
       await loadAll();
     } catch (error) {
-      alert(error instanceof Error ? error.message : 'Failed to delete workspace');
+      notifyError('删除失败', error instanceof Error ? error.message : 'Failed to delete workspace');
     } finally {
       setLoading(false);
     }
@@ -139,8 +172,9 @@ export function AgentSettings() {
         cwd: selectedWorkspace.cwd,
       });
       await loadAll();
+      notifySuccess('已保存', 'Workspace 已更新');
     } catch (error) {
-      alert(error instanceof Error ? error.message : 'Failed to update workspace');
+      notifyError('保存失败', error instanceof Error ? error.message : 'Failed to update workspace');
     } finally {
       setLoading(false);
     }
@@ -152,7 +186,7 @@ export function AgentSettings() {
     try {
       parsedConfig = JSON.parse(mcpConfig);
     } catch (error) {
-      alert('MCP config must be valid JSON');
+      notifyError('配置错误', 'MCP config 必须是合法 JSON');
       return;
     }
 
@@ -168,8 +202,9 @@ export function AgentSettings() {
       setMcpType('stdio');
       setMcpConfig('{\n  \n}');
       await loadAll();
+      notifySuccess('已创建', 'MCP Server 已添加');
     } catch (error) {
-      alert(error instanceof Error ? error.message : 'Failed to create MCP server');
+      notifyError('创建失败', error instanceof Error ? error.message : 'Failed to create MCP server');
     } finally {
       setLoading(false);
     }
@@ -180,8 +215,9 @@ export function AgentSettings() {
     try {
       await api.mcp.deleteServer(id);
       await loadAll();
+      notifySuccess('已删除', 'MCP Server 已删除');
     } catch (error) {
-      alert(error instanceof Error ? error.message : 'Failed to delete MCP server');
+      notifyError('删除失败', error instanceof Error ? error.message : 'Failed to delete MCP server');
     } finally {
       setMcpBusyId(null);
     }
@@ -194,8 +230,9 @@ export function AgentSettings() {
         isEnabled: !server.isEnabled,
       });
       await loadAll();
+      notifySuccess('已更新', 'MCP Server 状态已更新');
     } catch (error) {
-      alert(error instanceof Error ? error.message : 'Failed to update MCP server');
+      notifyError('更新失败', error instanceof Error ? error.message : 'Failed to update MCP server');
     } finally {
       setMcpBusyId(null);
     }
@@ -239,7 +276,7 @@ export function AgentSettings() {
             <Select
               data={workspaceOptions}
               value={selectedWorkspaceId}
-              onChange={(value) => setSelectedWorkspaceId(value || null)}
+              onChange={(value) => void handleSelectWorkspace(value)}
               placeholder="Select workspace"
             />
 
