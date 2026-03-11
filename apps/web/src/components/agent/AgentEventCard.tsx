@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { Badge, Button, Collapse, Group, Paper, Text } from '@mantine/core';
 import type { AgentEvent } from '@/stores/agentStore';
-import { AGENT_WRAP_TEXT } from './agentTextStyles';
+import { WRAP_TEXT } from '@/components/ui/wrapText';
 
 export function AgentEventCard({ event }: { event: AgentEvent }) {
   const [open, setOpen] = useState(false);
@@ -20,7 +20,7 @@ export function AgentEventCard({ event }: { event: AgentEvent }) {
   if (event.type === 'text') {
     return (
       <Paper p="sm" radius="md" bg={background} style={{ maxWidth: '100%' }}>
-        <Text size="sm" style={AGENT_WRAP_TEXT}>
+        <Text size="sm" style={WRAP_TEXT}>
           {event.content}
         </Text>
       </Paper>
@@ -53,7 +53,7 @@ export function AgentEventCard({ event }: { event: AgentEvent }) {
                 margin: 0,
                 fontSize: 'var(--mantine-font-size-xs)',
                 fontFamily: 'var(--mantine-font-family-monospace)',
-                ...AGENT_WRAP_TEXT,
+                ...WRAP_TEXT,
               }}
             >
               {JSON.stringify(event.toolInput ?? {}, null, 2)}
@@ -85,7 +85,7 @@ export function AgentEventCard({ event }: { event: AgentEvent }) {
                 margin: 0,
                 fontSize: 'var(--mantine-font-size-xs)',
                 fontFamily: 'var(--mantine-font-family-monospace)',
-                ...AGENT_WRAP_TEXT,
+                ...WRAP_TEXT,
               }}
             >
               {typeof event.content === 'string'
@@ -101,7 +101,7 @@ export function AgentEventCard({ event }: { event: AgentEvent }) {
   if (event.type === 'error') {
     return (
       <Paper p="sm" radius="md" bg={background} style={{ maxWidth: '100%' }}>
-        <Text size="sm" c="red" style={AGENT_WRAP_TEXT}>
+        <Text size="sm" c="red" style={WRAP_TEXT}>
           {event.content}
         </Text>
       </Paper>

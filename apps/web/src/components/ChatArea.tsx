@@ -8,6 +8,7 @@ import { streamChatMessage } from '../lib/chat-stream';
 import { uploadAttachments } from '../lib/attachments';
 import { getEffectiveModelForConversation } from '@/lib/effective-model';
 import { ChatHeader } from '@/components/chat/ChatHeader';
+import { WRAP_TEXT } from '@/components/ui/wrapText';
 
 const PAGE_PAD = 'var(--mantine-spacing-md)';
 // Keep bottom safe area, but avoid adding extra desktop gap.
@@ -177,7 +178,7 @@ export function ChatArea() {
                 maxWidth: '80%',
               }}
             >
-              <Text size="sm" style={{ whiteSpace: 'pre-wrap' }}>
+              <Text size="sm" style={WRAP_TEXT}>
                 {msg.content}
               </Text>
             </Paper>

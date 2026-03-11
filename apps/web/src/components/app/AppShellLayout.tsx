@@ -16,6 +16,8 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
   const [aside, setAside] = useState<React.ReactNode | null>(null);
   const pathname = usePathname();
   const isChat = pathname === '/chat' || pathname?.startsWith('/chat/');
+  const isAgent = pathname === '/agent' || pathname?.startsWith('/agent/');
+  const edgeToEdge = isChat || isAgent;
 
   const resetSlots = useCallback(() => {
     setTitle(DEFAULT_TITLE);
@@ -35,7 +37,7 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
         navbar={{ width: 240, breakpoint: 'sm', collapsed: { mobile: !mobileOpened } }}
         aside={aside ? { width: 360, breakpoint: 'md', collapsed: { mobile: true } } : undefined}
         // Chat wants an edge-to-edge composer; other pages keep comfortable padding.
-        padding={isChat ? 0 : 'md'}
+        padding={edgeToEdge ? 0 : 'md'}
         styles={{
           main: {
             background: 'var(--mantine-color-gray-0)',

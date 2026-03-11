@@ -1,9 +1,10 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Paper, TextInput, Button, Stack, Text, Group, ScrollArea, Badge, Loader, FileButton, Select, ActionIcon, Menu } from '@mantine/core';
+import { Paper, TextInput, Button, Stack, Text, Group, ScrollArea, Badge, FileButton, ActionIcon, Menu, Alert, Textarea } from '@mantine/core';
 import { modals } from '@mantine/modals';
-import { IconCheck, IconDots, IconPencil, IconSend, IconPlus, IconRobot, IconTrash } from '@tabler/icons-react';
+import Link from 'next/link';
+import { IconCheck, IconDots, IconPencil, IconSend, IconPlus, IconRobot, IconTrash, IconSettings, IconBriefcase } from '@tabler/icons-react';
 import { useAgentStore, type AgentEvent } from '@/stores/agentStore';
 import { useAuthStore } from '@/stores/authStore';
 import { api } from '@/lib/api';
@@ -13,6 +14,18 @@ import { AppShellSlot } from '@/components/app/AppShellSlot';
 import { notifyError, notifySuccess } from '@/lib/notify';
 import { DEFAULT_WORKSPACE_SETTING_KEY, pickDefaultWorkspaceId } from '@/lib/agent-default-workspace';
 import { AgentEventCard } from '@/components/agent/AgentEventCard';
+
+const PAGE_PAD = 'var(--mantine-spacing-md)';
+const COMPOSER_PAD_BOTTOM = 'env(safe-area-inset-bottom, 0px)';
+
+function formatNewAgentSessionTitle() {
+  const d = new Date();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  const hh = String(d.getHours()).padStart(2, '0');
+  const min = String(d.getMinutes()).padStart(2, '0');
+  return `任务 ${mm}-${dd} ${hh}:${min}`;
+}
 
 export default function AgentPage() {
   const { user } = useAuthStore();
@@ -33,7 +46,8 @@ export default function AgentPage() {
     setSelectedWorkspaceId,
   } = useAgentStore();
   
-  const [newSessionTitle, setNewSessionTitle] = useState('');
+  const [query, setQuery] = useState('');
+  const [creating, setCreating] = useState(false);
   const [taskInput, setTaskInput] = useState('');
   const [files, setFiles] = useState<File[]>([]);
   const [bootstrapping, setBootstrapping] = useState(false);
@@ -83,7 +97,6 @@ export default function AgentPage() {
     }
   };
 
-  const workspaceOptions = workspaces.map((ws) => ({ value: ws.id, label: ws.name }));
   const handleWorkspaceChange = async (nextId: string | null) => {
     const prev = selectedWorkspaceId;
     setSelectedWorkspaceId(nextId);
@@ -97,19 +110,19 @@ export default function AgentPage() {
   };
 
   const handleNewSession = async () => {
-    if (!newSessionTitle.trim()) return;
-    
+    setCreating(true);
     try {
       const { session } = await api.agent.createSession({
-        title: newSessionTitle.trim(),
-        workspaceId: selectedWorkspaceId || undefined,
+        title: formatNewAgentSessionTitle(),
       });
       addSession(session as never);
       setCurrentSession(session as never);
-      setNewSessionTitle('');
       await loadSessions();
+      notifySuccess('已创建', '新会话已创建');
     } catch (error) {
       notifyError('创建失败', error instanceof Error ? error.message : '无法创建会话');
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -229,63 +242,76 @@ export default function AgentPage() {
     }
   };
 
+  const selectedWorkspace = selectedWorkspaceId
+    ? workspaces.find((ws) => ws.id === selectedWorkspaceId) ?? null
+    : null;
+
+  const filteredSessions = (() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return sessions;
+    return sessions.filter((s: any) => (s.title || '').toLowerCase().includes(q));
+  })();
+
   return (
     <>
       <AppShellSlot
         title="Agent"
         aside={
-          <Stack h="100%" gap="sm">
-            <Group justify="space-between" wrap="nowrap">
-              <Text fw={600}>会话</Text>
-              {(bootstrapping || isRunning) && <Loader size="xs" />}
-            </Group>
+          <Paper
+            style={{
+              height: '100%',
+              border: '1px solid var(--mantine-color-gray-3)',
+              borderRadius: 'var(--mantine-radius-md)',
+            }}
+            p="sm"
+          >
+            <Stack h="100%" gap="sm">
+              <Button
+                leftSection={<IconPlus size={16} />}
+                onClick={() => void handleNewSession()}
+                loading={creating}
+              >
+                新会话
+              </Button>
 
-            <TextInput
-              placeholder="新建会话标题..."
-              value={newSessionTitle}
-              onChange={(e) => setNewSessionTitle(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleNewSession()}
-              rightSection={
-                <Button size="xs" variant="light" onClick={handleNewSession}>
-                  <IconPlus size={16} />
-                </Button>
-              }
-            />
+              <TextInput
+                placeholder="搜索会话..."
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
 
-            <ScrollArea style={{ flex: 1 }}>
-              <Stack gap="xs">
-                {sessions.map((session) => (
-                  <Paper
-                    key={session.id}
-                    p="sm"
-                    radius="sm"
-                    withBorder={currentSession?.id === session.id}
-                    style={{ cursor: 'pointer' }}
-                    onClick={() => setCurrentSession(session as never)}
-                  >
-                    <Group justify="space-between" wrap="nowrap" style={{ alignItems: 'center' }}>
-                      <IconRobot size={16} />
-                      <Text
-                        size="sm"
-                        truncate
-                        style={{ flex: 1, minWidth: 0 }}
-                      >
-                        {session.title}
-                      </Text>
-                      <Group gap="xs" wrap="nowrap" style={{ minWidth: 'fit-content' }}>
-                        <Badge size="xs" variant="light">
-                          {session.status === 'active' ? '进行中' : session.status === 'completed' ? '已完成' : '已取消'}
-                        </Badge>
-                        <Menu withinPortal position="bottom-end" shadow="md">
+              <ScrollArea flex={1} scrollbarSize={8}>
+                <Stack gap="xs">
+                  {filteredSessions.map((session: any) => (
+                    <Paper
+                      key={session.id}
+                      p="sm"
+                      radius="md"
+                      withBorder
+                      style={{
+                        cursor: 'pointer',
+                        backgroundColor: currentSession?.id === session.id
+                          ? 'var(--mantine-color-blue-0)'
+                          : undefined,
+                      }}
+                      onClick={() => setCurrentSession(session as never)}
+                    >
+                      <Group justify="space-between" wrap="nowrap">
+                        <Group gap="xs" wrap="nowrap" style={{ flex: 1, minWidth: 0 }}>
+                          <IconRobot size={16} />
+                          <Text size="sm" truncate style={{ flex: 1 }}>
+                            {session.title}
+                          </Text>
+                        </Group>
+                        <Menu shadow="md" width={160} position="bottom-end">
                           <Menu.Target>
                             <ActionIcon
                               variant="subtle"
+                              size="sm"
                               aria-label="会话操作"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                              }}
+                              onClick={(e) => e.stopPropagation()}
                             >
-                              <IconDots size={16} />
+                              <IconDots size={14} />
                             </ActionIcon>
                           </Menu.Target>
                           <Menu.Dropdown>
@@ -309,8 +335,8 @@ export default function AgentPage() {
                             </Menu.Item>
                             <Menu.Divider />
                             <Menu.Item
-                              color="red"
                               leftSection={<IconTrash size={14} />}
+                              color="red"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 handleDeleteSession(session);
@@ -321,144 +347,196 @@ export default function AgentPage() {
                           </Menu.Dropdown>
                         </Menu>
                       </Group>
-                    </Group>
-                  </Paper>
-                ))}
 
-                {sessions.length === 0 && (
-                  <Text size="sm" c="dimmed" ta="center" py="xl">
-                    还没有会话
-                  </Text>
-                )}
-              </Stack>
-            </ScrollArea>
-          </Stack>
+                      <Group gap={6} mt={6}>
+                        <Badge size="xs" variant="light" color={session.status === 'completed' ? 'green' : 'gray'}>
+                          {session.status === 'active' ? '进行中' : session.status === 'completed' ? '已完成' : '已取消'}
+                        </Badge>
+                      </Group>
+                    </Paper>
+                  ))}
+
+                  {filteredSessions.length === 0 && (
+                    <Text size="sm" c="dimmed" ta="center" py="xl">
+                      没有匹配的会话
+                    </Text>
+                  )}
+                </Stack>
+              </ScrollArea>
+            </Stack>
+          </Paper>
         }
       />
 
-      <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
-        <Paper style={{ flex: 1, minHeight: 0 }} p="md" radius="md" withBorder>
-          <Stack h="100%" gap="sm">
-            <Group justify="space-between" wrap="nowrap">
-              <Text fw={600} truncate style={{ minWidth: 0, flex: 1 }}>
-                {currentSession ? currentSession.title : '请选择一个会话'}
+      <Paper
+        style={{
+          flex: 1,
+          minHeight: 0,
+          display: 'flex',
+          flexDirection: 'column',
+        }}
+        p={0}
+      >
+        <div style={{ padding: PAGE_PAD, paddingBottom: 'var(--mantine-spacing-xs)' }}>
+          <Group justify="space-between" mb="md" wrap="nowrap">
+            <div style={{ minWidth: 0 }}>
+              <Text fw={600} truncate>
+                {currentSession ? currentSession.title : 'Agent'}
               </Text>
-              <Group gap="xs" wrap="nowrap">
-                {(isRunning || bootstrapping) && <Loader size="sm" />}
-                <Button size="xs" variant="light" onClick={() => void loadSessions()}>
-                  刷新
-                </Button>
-              </Group>
-            </Group>
+              {(bootstrapping || isRunning) && <Text size="xs" c="blue">运行中...</Text>}
+            </div>
 
-            <Group justify="space-between" wrap="nowrap">
-              <Select
-                data={workspaceOptions}
-                value={selectedWorkspaceId}
-                onChange={(value) => void handleWorkspaceChange(value || null)}
-                placeholder={workspaces.length === 0 ? '没有 Workspace' : '选择默认 Workspace'}
-                disabled={workspaces.length === 0}
-                style={{ flex: 1, minWidth: 0 }}
-              />
-              <Button component="a" href="/settings" variant="light">
-                管理
+            <Group gap="xs" wrap="nowrap">
+              <Menu shadow="md" width={260} position="bottom-end" withinPortal>
+                <Menu.Target>
+                  <Button
+                    size="xs"
+                    variant="light"
+                    leftSection={<IconBriefcase size={14} />}
+                    disabled={workspaces.length === 0}
+                    styles={{ label: { fontWeight: 600 } }}
+                  >
+                    {selectedWorkspace ? selectedWorkspace.name : workspaces.length ? '选择默认 Workspace' : '未创建 Workspace'}
+                  </Button>
+                </Menu.Target>
+                <Menu.Dropdown>
+                  <Menu.Label>默认 Workspace（账号级）</Menu.Label>
+                  {workspaces.map((ws) => (
+                    <Menu.Item
+                      key={ws.id}
+                      leftSection={ws.id === selectedWorkspaceId ? <IconCheck size={14} /> : undefined}
+                      onClick={() => void handleWorkspaceChange(ws.id)}
+                    >
+                      {ws.name}
+                    </Menu.Item>
+                  ))}
+                  <Menu.Divider />
+                  <Menu.Item component={Link} href="/settings" leftSection={<IconSettings size={14} />}>
+                    管理 Workspace
+                  </Menu.Item>
+                </Menu.Dropdown>
+              </Menu>
+
+              <Button size="xs" variant="light" onClick={() => void loadSessions()}>
+                刷新
               </Button>
             </Group>
+          </Group>
 
-            {workspaces.length === 0 && (
-              <Text size="sm" c="dimmed">
-                需要先创建 Workspace 才能运行 Agent。
-              </Text>
-            )}
+          {!currentSession && (
+            <Text c="dimmed">在右侧栏选择或创建会话，然后在底部输入任务运行。</Text>
+          )}
+        </div>
 
-            {!currentSession && (
+        {/* Custom scroll container so we can keep short timelines pinned to bottom. */}
+        <div
+          style={{
+            flex: 1,
+            minHeight: 0,
+            overflowY: 'auto',
+            display: 'flex',
+            flexDirection: 'column',
+            paddingLeft: PAGE_PAD,
+            paddingRight: PAGE_PAD,
+          }}
+        >
+          <Stack gap="md" pb="md" style={{ marginTop: 'auto' }}>
+            {currentSession && events.map((event, index) => (
+              <AgentEventCard key={index} event={event} />
+            ))}
+
+            {currentSession && events.length === 0 && (
               <Text c="dimmed" ta="center" py="xl">
-                在左侧选择或创建会话，然后在底部输入任务开始运行。
+                开始输入任务并运行...
               </Text>
-            )}
-
-            {currentSession && (
-              <>
-                <ScrollArea style={{ flex: 1 }}>
-                  <Stack gap="sm">
-                    {events.map((event, index) => (
-                      <AgentEventCard key={index} event={event} />
-                    ))}
-
-                    {events.length === 0 && (
-                      <Text c="dimmed" ta="center" py="xl">
-                        在底部输入任务并运行
-                      </Text>
-                    )}
-                  </Stack>
-                </ScrollArea>
-
-                <Paper withBorder p="sm" radius="md">
-                  <Stack gap="xs">
-                    {files.length > 0 && (
-                      <Stack gap={4}>
-                        {files.map((file) => (
-                          <Group key={`${file.name}-${file.size}`} gap="xs" wrap="nowrap">
-                            <Text size="xs" c="dimmed" truncate style={{ flex: 1, minWidth: 0 }}>
-                              {file.name}
-                            </Text>
-                            <Button
-                              size="xs"
-                              variant="subtle"
-                              color="red"
-                              onClick={() => setFiles((prev) => prev.filter((f) => f !== file))}
-                            >
-                              移除
-                            </Button>
-                          </Group>
-                        ))}
-                      </Stack>
-                    )}
-                    <Group wrap="nowrap">
-                      <TextInput
-                        placeholder="描述你希望 Agent 做什么..."
-                        value={taskInput}
-                        onChange={(e) => setTaskInput(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' && !e.shiftKey) {
-                            e.preventDefault();
-                            handleRun();
-                          }
-                        }}
-                        style={{ flex: 1, minWidth: 0 }}
-                        disabled={!currentSession || isRunning || workspaces.length === 0}
-                      />
-                      <FileButton
-                        onChange={(selected) => {
-                          if (!selected) return;
-                          const list = Array.isArray(selected) ? selected : [selected];
-                          setFiles((prev) => [...prev, ...list]);
-                        }}
-                        accept="image/png,image/jpeg,image/webp,application/pdf,text/plain,text/markdown"
-                        multiple
-                      >
-                        {(props) => (
-                          <Button variant="light" {...props} disabled={!currentSession || isRunning || workspaces.length === 0}>
-                            附件
-                          </Button>
-                        )}
-                      </FileButton>
-                      <Button
-                        onClick={handleRun}
-                        loading={isRunning}
-                        disabled={!currentSession || (!taskInput.trim() && files.length === 0) || workspaces.length === 0}
-                        aria-label="运行"
-                      >
-                        <IconSend size={18} />
-                      </Button>
-                    </Group>
-                  </Stack>
-                </Paper>
-              </>
             )}
           </Stack>
-        </Paper>
-      </div>
+        </div>
+
+        {workspaces.length === 0 && (
+          <div style={{ paddingLeft: PAGE_PAD, paddingRight: PAGE_PAD }}>
+            <Alert color="orange" mb="sm" title="需要先创建 Workspace">
+              未创建 Workspace，Agent 无法运行。请先去设置页面创建 Workspace。
+              <Button component={Link} href="/settings" size="xs" variant="light" ml="sm">
+                去设置
+              </Button>
+            </Alert>
+          </div>
+        )}
+
+        <div style={{ paddingLeft: PAGE_PAD, paddingRight: PAGE_PAD, paddingBottom: COMPOSER_PAD_BOTTOM }}>
+          <Paper
+            p="sm"
+            radius="lg"
+            withBorder
+            style={{ backgroundColor: 'var(--mantine-color-gray-0)' }}
+          >
+            <Stack gap="xs">
+              {files.length > 0 && (
+                <Stack gap={4}>
+                  {files.map((file) => (
+                    <Group key={`${file.name}-${file.size}`} gap="xs" wrap="nowrap">
+                      <Text size="xs" c="dimmed" truncate style={{ flex: 1, minWidth: 0 }}>
+                        {file.name}
+                      </Text>
+                      <Button
+                        size="xs"
+                        variant="subtle"
+                        color="red"
+                        onClick={() => setFiles((prev) => prev.filter((f) => f !== file))}
+                      >
+                        移除
+                      </Button>
+                    </Group>
+                  ))}
+                </Stack>
+              )}
+
+              <Group gap="sm" wrap="nowrap" align="flex-end">
+                <Textarea
+                  placeholder={currentSession ? '输入任务...' : '请先选择一个会话'}
+                  value={taskInput}
+                  onChange={(e) => setTaskInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      handleRun();
+                    }
+                  }}
+                  style={{ flex: 1, minWidth: 0 }}
+                  autosize
+                  minRows={1}
+                  maxRows={6}
+                  disabled={!currentSession || isRunning || workspaces.length === 0}
+                />
+                <FileButton
+                  onChange={(selected) => {
+                    if (!selected) return;
+                    const list = Array.isArray(selected) ? selected : [selected];
+                    setFiles((prev) => [...prev, ...list]);
+                  }}
+                  accept="image/png,image/jpeg,image/webp,application/pdf,text/plain,text/markdown"
+                  multiple
+                >
+                  {(props) => (
+                    <Button variant="light" {...props} disabled={!currentSession || isRunning || workspaces.length === 0}>
+                      附件
+                    </Button>
+                  )}
+                </FileButton>
+                <Button
+                  onClick={handleRun}
+                  loading={isRunning}
+                  disabled={!currentSession || (!taskInput.trim() && files.length === 0) || workspaces.length === 0}
+                  aria-label="运行"
+                >
+                  <IconSend size={18} />
+                </Button>
+              </Group>
+            </Stack>
+          </Paper>
+        </div>
+      </Paper>
     </>
   );
 }
