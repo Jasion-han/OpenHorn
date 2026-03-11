@@ -10,6 +10,7 @@ import agentRoutes from './routes/agent';
 import workspaceRoutes from './routes/workspace';
 import mcpRoutes from './routes/mcp';
 import attachmentRoutes from './routes/attachments';
+import settingsRoutes from './routes/settings';
 import { bootstrapDatabase } from './db/bootstrap';
 
 await bootstrapDatabase();
@@ -32,6 +33,7 @@ app.route('/attachments', attachmentRoutes);
 app.route('/agent', agentRoutes);
 app.route('/workspaces', workspaceRoutes);
 app.route('/mcp', mcpRoutes);
+app.route('/settings', settingsRoutes);
 
 const port = parseInt(process.env.PORT || '3000');
 
