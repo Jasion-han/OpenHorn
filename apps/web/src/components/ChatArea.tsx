@@ -9,6 +9,9 @@ import { uploadAttachments } from '../lib/attachments';
 import { getEffectiveModelForConversation } from '@/lib/effective-model';
 import { ChatHeader } from '@/components/chat/ChatHeader';
 
+const PAGE_PAD = 'var(--mantine-spacing-md)';
+const COMPOSER_PAD_BOTTOM = 'calc(var(--mantine-spacing-md) + env(safe-area-inset-bottom, 0px))';
+
 export function ChatArea() {
   const {
     currentConversation,
@@ -142,9 +145,11 @@ export function ChatArea() {
         display: 'flex',
         flexDirection: 'column',
       }}
-      p="md"
+      p={0}
     >
-      <ChatHeader />
+      <div style={{ padding: PAGE_PAD, paddingBottom: 'var(--mantine-spacing-xs)' }}>
+        <ChatHeader />
+      </div>
 
       {/* Custom scroll container so we can reliably pin short conversations to bottom. */}
       <div
@@ -155,6 +160,8 @@ export function ChatArea() {
           overflowY: 'auto',
           display: 'flex',
           flexDirection: 'column',
+          paddingLeft: PAGE_PAD,
+          paddingRight: PAGE_PAD,
         }}
       >
         <Stack gap="md" pb="md" style={{ marginTop: 'auto' }}>
@@ -184,80 +191,84 @@ export function ChatArea() {
       </div>
 
       {!effectiveModel && (
-        <Alert color="orange" mb="sm" title="需要先完成设置">
-          未配置默认渠道或模型，请先完成设置后再开始对话。
-          <Button component="a" href="/settings" size="xs" variant="light" ml="sm">
-            去设置
-          </Button>
-        </Alert>
+        <div style={{ paddingLeft: PAGE_PAD, paddingRight: PAGE_PAD }}>
+          <Alert color="orange" mb="sm" title="需要先完成设置">
+            未配置默认渠道或模型，请先完成设置后再开始对话。
+            <Button component="a" href="/settings" size="xs" variant="light" ml="sm">
+              去设置
+            </Button>
+          </Alert>
+        </div>
       )}
 
-      <Paper
-        p="sm"
-        radius="lg"
-        withBorder
-        style={{ backgroundColor: 'var(--mantine-color-gray-0)' }}
-      >
-        <Stack gap="xs">
-          {files.length > 0 && (
-            <Stack gap={4}>
-              {files.map((file) => (
-                <Group key={`${file.name}-${file.size}`} gap="xs">
-                  <Text size="xs" c="dimmed">{file.name}</Text>
-                  <Button
-                    size="xs"
-                    variant="subtle"
-                    color="red"
-                    onClick={() => setFiles((prev) => prev.filter((f) => f !== file))}
-                  >
-                    Remove
-                  </Button>
-                </Group>
-              ))}
-            </Stack>
-          )}
-          <Group gap="sm">
-            <Textarea
-              placeholder="Type your message..."
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              style={{ flex: 1 }}
-              autosize
-              minRows={1}
-              maxRows={6}
-              disabled={!effectiveModel || isLoading || isUploading}
-            />
-            <FileButton
-              onChange={(selected) => {
-                if (!selected) return;
-                const list = Array.isArray(selected) ? selected : [selected];
-                setFiles((prev) => [...prev, ...list]);
-              }}
-              accept="image/png,image/jpeg,image/webp,application/pdf,text/plain,text/markdown"
-              multiple
-            >
-              {(props) => (
-                <Button variant="light" {...props} disabled={!effectiveModel || isLoading || isUploading}>
-                  Attach
-                </Button>
-              )}
-            </FileButton>
-            {effectiveModel && (
-              <Badge variant="light" color="gray">
-                {effectiveModel.label}
-              </Badge>
+      <div style={{ paddingLeft: PAGE_PAD, paddingRight: PAGE_PAD, paddingBottom: COMPOSER_PAD_BOTTOM }}>
+        <Paper
+          p="sm"
+          radius="lg"
+          withBorder
+          style={{ backgroundColor: 'var(--mantine-color-gray-0)' }}
+        >
+          <Stack gap="xs">
+            {files.length > 0 && (
+              <Stack gap={4}>
+                {files.map((file) => (
+                  <Group key={`${file.name}-${file.size}`} gap="xs">
+                    <Text size="xs" c="dimmed">{file.name}</Text>
+                    <Button
+                      size="xs"
+                      variant="subtle"
+                      color="red"
+                      onClick={() => setFiles((prev) => prev.filter((f) => f !== file))}
+                    >
+                      Remove
+                    </Button>
+                  </Group>
+                ))}
+              </Stack>
             )}
-            <Button
-              onClick={handleSend}
-              loading={isLoading || isUploading}
-              disabled={!canSend}
-            >
-              <IconSend size={18} />
-            </Button>
-          </Group>
-        </Stack>
-      </Paper>
+            <Group gap="sm">
+              <Textarea
+                placeholder="Type your message..."
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                style={{ flex: 1 }}
+                autosize
+                minRows={1}
+                maxRows={6}
+                disabled={!effectiveModel || isLoading || isUploading}
+              />
+              <FileButton
+                onChange={(selected) => {
+                  if (!selected) return;
+                  const list = Array.isArray(selected) ? selected : [selected];
+                  setFiles((prev) => [...prev, ...list]);
+                }}
+                accept="image/png,image/jpeg,image/webp,application/pdf,text/plain,text/markdown"
+                multiple
+              >
+                {(props) => (
+                  <Button variant="light" {...props} disabled={!effectiveModel || isLoading || isUploading}>
+                    Attach
+                  </Button>
+                )}
+              </FileButton>
+              {effectiveModel && (
+                <Badge variant="light" color="gray">
+                  {effectiveModel.label}
+                </Badge>
+              )}
+              <Button
+                onClick={handleSend}
+                loading={isLoading || isUploading}
+                disabled={!canSend}
+              >
+                <IconSend size={18} />
+              </Button>
+            </Group>
+          </Stack>
+        </Paper>
+      </div>
     </Paper>
   );
 }
