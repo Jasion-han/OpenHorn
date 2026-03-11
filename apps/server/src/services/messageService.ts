@@ -103,6 +103,12 @@ export async function getMessages(conversationId: string) {
   return result;
 }
 
+export async function getMessagesForUser(userId: string, conversationId: string) {
+  // Ownership guard: prevent cross-user reads of messages by guessing conversationId.
+  await getConversationForUser(userId, conversationId);
+  return getMessages(conversationId);
+}
+
 export async function sendMessage(userId: string, input: SendMessageInput) {
   const conversation = await getConversationForUser(userId, input.conversationId);
   

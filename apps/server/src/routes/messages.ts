@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { getCookie } from 'hono/cookie';
 import { verifyToken, getUserById } from '../services/authService';
-import { getMessages, sendMessage, deleteMessage, streamMessage } from '../services/messageService';
+import { getMessagesForUser, sendMessage, deleteMessage, streamMessage } from '../services/messageService';
 
 const messages = new Hono();
 
@@ -21,9 +21,14 @@ messages.get('/:conversationId', async (c) => {
     return c.json({ error: 'Unauthorized' }, 401);
   }
   
-  const conversationId = c.req.param('conversationId');
-  const result = await getMessages(conversationId);
-  return c.json({ messages: result });
+  try {
+    const conversationId = c.req.param('conversationId');
+    const result = await getMessagesForUser(user.id, conversationId);
+    return c.json({ messages: result });
+  } catch (error) {
+    // Avoid leaking which conversation ids exist to other users.
+    return c.json({ error: 'Conversation not found' }, 404);
+  }
 });
 
 messages.post('/', async (c) => {
