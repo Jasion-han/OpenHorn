@@ -5,16 +5,33 @@ import { generateId } from '../utils';
 
 export interface CreateConversationInput {
   title: string;
-  channelId?: string;
+  channelId?: string | null;
+  modelId?: string | null;
   systemPrompt?: string;
   contextLength?: number;
 }
 
 export interface UpdateConversationInput {
   title?: string;
+  channelId?: string | null;
+  modelId?: string | null;
   systemPrompt?: string;
   contextLength?: number;
   isPinned?: boolean;
+}
+
+export function normalizeConversationModelInput(input: {
+  channelId?: string | null;
+  modelId?: string | null;
+}): { channelId: string | null; modelId: string | null } {
+  const channelId = typeof input.channelId === 'string' ? input.channelId : null;
+  const modelId = typeof input.modelId === 'string' ? input.modelId : null;
+
+  if (channelId && modelId) {
+    return { channelId, modelId };
+  }
+
+  return { channelId: null, modelId: null };
 }
 
 export async function getConversations(userId: string) {
@@ -39,11 +56,13 @@ export async function getConversationById(userId: string, conversationId: string
 export async function createConversation(userId: string, input: CreateConversationInput) {
   const id = generateId();
   const now = new Date();
+  const model = normalizeConversationModelInput(input);
   
   await db.insert(conversations).values({
     id,
     userId,
-    channelId: null,
+    channelId: model.channelId,
+    modelId: model.modelId,
     title: input.title,
     systemPrompt: input.systemPrompt || null,
     contextLength: input.contextLength || 4096,
@@ -55,7 +74,8 @@ export async function createConversation(userId: string, input: CreateConversati
   return {
     id,
     userId,
-    channelId: null,
+    channelId: model.channelId,
+    modelId: model.modelId,
     title: input.title,
     systemPrompt: input.systemPrompt,
     contextLength: input.contextLength || 4096,
@@ -86,6 +106,11 @@ export async function updateConversation(
   };
   
   if (input.title) updates.title = input.title;
+  if (input.channelId !== undefined || input.modelId !== undefined) {
+    const model = normalizeConversationModelInput(input);
+    updates.channelId = model.channelId;
+    updates.modelId = model.modelId;
+  }
   if (input.systemPrompt !== undefined) updates.systemPrompt = input.systemPrompt;
   if (input.contextLength) updates.contextLength = input.contextLength;
   if (input.isPinned !== undefined) updates.isPinned = input.isPinned;

@@ -3,7 +3,7 @@ import { messages, conversations } from 'db';
 import { eq, and, asc } from 'drizzle-orm';
 import { generateId } from '../utils';
 import { createAdapter } from '../agent-adapters';
-import { getResolvedChannelForUser } from './channelService';
+import { getResolvedChannelForConversation } from './channelService';
 import { createSseStream } from '../utils/sse';
 import { buildAttachmentContextFromIds, linkAttachmentsToMessage } from './attachmentService';
 
@@ -132,7 +132,7 @@ export async function sendMessage(userId: string, input: SendMessageInput) {
   let responseContent = '';
   let responseModel: string | null = null;
   
-  const resolvedChannel = await getResolvedChannelForUser(userId, null);
+  const resolvedChannel = await getResolvedChannelForConversation(userId, conversation);
 
   if (resolvedChannel) {
     const adapter = createAdapter(
@@ -232,7 +232,7 @@ export async function streamMessage(userId: string, input: StreamMessageInput): 
     const conversationMessages = await getMessages(input.conversationId);
     const chatMessages = await buildChatMessages(conversationMessages, conversation.systemPrompt);
 
-    const resolvedChannel = await getResolvedChannelForUser(userId, null);
+    const resolvedChannel = await getResolvedChannelForConversation(userId, conversation);
     if (!resolvedChannel) {
       send({ type: 'error', message: 'No channel configured' });
       return;

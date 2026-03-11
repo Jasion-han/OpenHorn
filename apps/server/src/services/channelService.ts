@@ -714,11 +714,7 @@ export async function getResolvedChannelForUser(userId: string, requestedChannel
   }
 
   const row = await getOwnedChannelRow(userId, targetChannel.id);
-  const defaultModel = targetChannel.models.find((model) => model.isDefault && model.enabled)
-    || targetChannel.models.find((model) => model.enabled)
-    || null;
-
-  const modelId = defaultModel?.modelId || targetChannel.legacyModel;
+  const modelId = resolveModelIdFromChannelItem(targetChannel, null);
   if (!modelId) {
     return null;
   }
@@ -733,6 +729,55 @@ export async function getResolvedChannelForUser(userId: string, requestedChannel
     apiKey: decrypt(row.apiKey),
     modelId,
   };
+}
+
+export function resolveModelIdFromChannelItem(channel: ChannelItem, requestedModelId?: string | null): string | null {
+  if (requestedModelId) {
+    const exact = channel.models.find((model) => model.modelId === requestedModelId && model.enabled);
+    if (exact) {
+      return exact.modelId;
+    }
+  }
+
+  const fallback = channel.models.find((model) => model.isDefault && model.enabled)
+    || channel.models.find((model) => model.enabled)
+    || null;
+
+  return fallback?.modelId || channel.legacyModel || null;
+}
+
+export async function getResolvedChannelForConversation(
+  userId: string,
+  conversation: { channelId?: string | null; modelId?: string | null }
+): Promise<ResolvedChannel | null> {
+  const requestedChannelId = typeof conversation.channelId === 'string' ? conversation.channelId : null;
+  const requestedModelId = typeof conversation.modelId === 'string' ? conversation.modelId : null;
+
+  if (requestedChannelId) {
+    try {
+      const targetChannel = await getOwnedChannelItem(userId, requestedChannelId);
+      if (targetChannel?.enabled) {
+        const row = await getOwnedChannelRow(userId, targetChannel.id);
+        const modelId = resolveModelIdFromChannelItem(targetChannel, requestedModelId);
+        if (modelId) {
+          const channelWithRuntimeBaseUrl: ChannelItem = {
+            ...targetChannel,
+            baseUrl: getRuntimeBaseUrl(targetChannel.provider, row.baseUrl || targetChannel.baseUrl),
+          };
+
+          return {
+            channel: channelWithRuntimeBaseUrl,
+            apiKey: decrypt(row.apiKey),
+            modelId,
+          };
+        }
+      }
+    } catch {
+      // Fall back to the global default resolution.
+    }
+  }
+
+  return getResolvedChannelForUser(userId, null);
 }
 
 export async function getResolvedChannelById(userId: string, channelId: string) {
