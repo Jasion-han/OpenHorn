@@ -174,11 +174,11 @@ export function ChatArea() {
         }}
       >
         <div style={{ width: '100%', maxWidth: 980, margin: '0 auto', display: 'flex', flexDirection: 'column' }}>
-          <Stack gap="sm" pb="md" style={{ marginTop: 'auto' }}>
+          <Stack gap="xs" pb="sm" style={{ marginTop: 'auto' }}>
           {messages.map((msg) => (
             <Paper
               key={msg.id}
-              p="md"
+              p="sm"
               radius="lg"
               bg={msg.role === 'user' ? 'blue.0' : 'gray.0'}
               style={{
