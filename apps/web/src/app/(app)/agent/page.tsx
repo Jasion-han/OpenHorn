@@ -456,7 +456,7 @@ export default function AgentPage() {
             paddingRight: PAGE_PAD,
           }}
         >
-          <div style={{ width: '100%', maxWidth: 980, margin: '0 auto', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ width: '100%', maxWidth: 1240, margin: '0 auto', display: 'flex', flexDirection: 'column' }}>
             <Stack gap="xs" pb="sm" style={{ marginTop: 'auto' }}>
             {currentSession && events.map((event, index) => (
               <AgentEventCard key={index} event={event} />

@@ -20,7 +20,7 @@ export function AgentEventCard({ event }: { event: AgentEvent }) {
 
   if (event.type === 'text') {
     return (
-      <Paper p="sm" radius="md" bg={background} style={{ maxWidth: '100%' }}>
+      <Paper p="sm" radius="md" bg={background} style={{ maxWidth: '100%', width: '100%' }}>
         <div style={WRAP_TEXT}>
           <MarkdownMessage content={event.content || ''} />
         </div>
@@ -30,7 +30,7 @@ export function AgentEventCard({ event }: { event: AgentEvent }) {
 
   if (event.type === 'tool_start') {
     return (
-      <Paper p="sm" radius="md" bg={background} style={{ maxWidth: '100%' }}>
+      <Paper p="sm" radius="md" bg={background} style={{ maxWidth: '100%', width: '100%' }}>
         <Group justify="space-between" align="center" wrap="nowrap">
           <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
             <Badge size="sm" color="blue">
@@ -67,7 +67,7 @@ export function AgentEventCard({ event }: { event: AgentEvent }) {
 
   if (event.type === 'tool_result') {
     return (
-      <Paper p="sm" radius="md" bg={background} style={{ maxWidth: '100%' }}>
+      <Paper p="sm" radius="md" bg={background} style={{ maxWidth: '100%', width: '100%' }}>
         <Group justify="space-between" align="center" wrap="nowrap">
           <Badge size="sm" color="green">
             结果
@@ -101,7 +101,7 @@ export function AgentEventCard({ event }: { event: AgentEvent }) {
 
   if (event.type === 'error') {
     return (
-      <Paper p="sm" radius="md" bg={background} style={{ maxWidth: '100%' }}>
+      <Paper p="sm" radius="md" bg={background} style={{ maxWidth: '100%', width: '100%' }}>
         <Text size="sm" c="red" style={WRAP_TEXT}>
           {event.content}
         </Text>
@@ -110,7 +110,7 @@ export function AgentEventCard({ event }: { event: AgentEvent }) {
   }
 
   return (
-    <Paper p="sm" radius="md" bg={background} style={{ maxWidth: '100%' }}>
+    <Paper p="sm" radius="md" bg={background} style={{ maxWidth: '100%', width: '100%' }}>
       <Badge color="green">完成</Badge>
     </Paper>
   );

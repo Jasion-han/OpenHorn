@@ -32,6 +32,8 @@ export function ChatArea() {
   const [isUploading, setIsUploading] = useState(false);
   const viewportRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const ASSISTANT_BUBBLE_WIDTH = '92%';
+  const USER_BUBBLE_MAX_WIDTH = '72%';
 
   useEffect(() => {
     if (viewportRef.current) {
@@ -184,7 +186,7 @@ export function ChatArea() {
           paddingRight: PAGE_PAD,
         }}
       >
-        <div style={{ width: '100%', maxWidth: 980, margin: '0 auto', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ width: '100%', maxWidth: 1240, margin: '0 auto', display: 'flex', flexDirection: 'column' }}>
           <Stack gap="xs" pb="sm" style={{ marginTop: 'auto' }}>
           {messages.map((msg) => (
             <Paper
@@ -194,7 +196,8 @@ export function ChatArea() {
               bg={msg.role === 'user' ? 'blue.0' : 'gray.0'}
               style={{
                 alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
-                maxWidth: '80%',
+                width: msg.role === 'assistant' ? ASSISTANT_BUBBLE_WIDTH : undefined,
+                maxWidth: msg.role === 'assistant' ? ASSISTANT_BUBBLE_WIDTH : USER_BUBBLE_MAX_WIDTH,
               }}
             >
               {msg.role === 'assistant' ? (
