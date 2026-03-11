@@ -10,7 +10,8 @@ import { getEffectiveModelForConversation } from '@/lib/effective-model';
 import { ChatHeader } from '@/components/chat/ChatHeader';
 
 const PAGE_PAD = 'var(--mantine-spacing-md)';
-const COMPOSER_PAD_BOTTOM = 'calc(var(--mantine-spacing-md) + env(safe-area-inset-bottom, 0px))';
+// Keep bottom safe area, but avoid adding extra desktop gap.
+const COMPOSER_PAD_BOTTOM = 'env(safe-area-inset-bottom, 0px)';
 
 export function ChatArea() {
   const {
