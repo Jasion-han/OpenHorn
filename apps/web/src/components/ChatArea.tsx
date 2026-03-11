@@ -129,6 +129,12 @@ export function ChatArea() {
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
+      const ne = e.nativeEvent as any;
+      // When using IME (e.g. Chinese input method), Enter confirms composition.
+      // Don't treat it as "send".
+      if (ne?.isComposing || ne?.keyCode === 229) {
+        return;
+      }
       e.preventDefault();
       handleSend();
     }

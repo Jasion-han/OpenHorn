@@ -515,12 +515,16 @@ export default function AgentPage() {
                   placeholder={currentSession ? '输入任务...' : '请先选择一个会话'}
                   value={taskInput}
                   onChange={(e) => setTaskInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault();
-                      handleRun();
-                    }
-                  }}
+	                  onKeyDown={(e) => {
+	                    if (e.key === 'Enter' && !e.shiftKey) {
+	                      const ne = e.nativeEvent as any;
+	                      if (ne?.isComposing || ne?.keyCode === 229) {
+	                        return;
+	                      }
+	                      e.preventDefault();
+	                      handleRun();
+	                    }
+	                  }}
                   style={{ flex: 1, minWidth: 0 }}
                   autosize
                   minRows={1}
