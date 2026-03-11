@@ -56,6 +56,8 @@ export interface ApiMessage {
   createdAt: string;
 }
 
+export type ApiSettingsMap = Record<string, string>;
+
 async function fetchApi<T>(
   endpoint: string,
   options: RequestInit = {}
@@ -320,6 +322,19 @@ export const api = {
     testServer: (id: string) =>
       fetchApi<{ success: boolean; error?: string }>(`/mcp/servers/${id}/test`, {
         method: 'POST',
+      }),
+  },
+
+  settings: {
+    get: (keys: string[]) => {
+      const query = encodeURIComponent((keys || []).join(','));
+      return fetchApi<{ settings: ApiSettingsMap }>(`/settings?keys=${query}`);
+    },
+
+    set: (key: string, value: string | null) =>
+      fetchApi<{ success: boolean }>(`/settings/${encodeURIComponent(key)}`, {
+        method: 'PUT',
+        body: JSON.stringify({ value }),
       }),
   },
 };
