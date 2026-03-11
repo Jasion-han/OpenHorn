@@ -129,13 +129,15 @@ export function ChatArea() {
     return (
       <Paper
         style={{
-          height: '100%',
+          flex: 1,
+          minHeight: 0,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
+          width: '100%',
         }}
       >
-        <Text c="dimmed">Select a conversation or start a new one</Text>
+        <Text c="dimmed">在右侧选择一个对话，或创建新对话开始聊天</Text>
       </Paper>
     );
   }
