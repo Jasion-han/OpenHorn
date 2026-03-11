@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Paper, TextInput, Button, Stack, Text, Group, ScrollArea, Badge, FileButton, ActionIcon, Menu, Alert, Textarea } from '@mantine/core';
 import { modals } from '@mantine/modals';
 import Link from 'next/link';
@@ -51,12 +51,19 @@ export default function AgentPage() {
   const [taskInput, setTaskInput] = useState('');
   const [files, setFiles] = useState<File[]>([]);
   const [bootstrapping, setBootstrapping] = useState(false);
+  const viewportRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (user) {
       void bootstrap();
     }
   }, [user]);
+
+  useEffect(() => {
+    if (viewportRef.current) {
+      viewportRef.current.scrollTo({ top: viewportRef.current.scrollHeight });
+    }
+  }, [events]);
 
   const bootstrap = async () => {
     setBootstrapping(true);
@@ -205,10 +212,14 @@ export default function AgentPage() {
     if ((!hasInput && !hasFiles) || !currentSession || isRunning) return;
 
     const hasWorkspace = Boolean(selectedWorkspaceId || currentSession.workspaceId);
-    if (!hasWorkspace) return;
+    if (!hasWorkspace) {
+      notifyError('无法运行', '请先选择默认 Workspace');
+      return;
+    }
     
     setIsRunning(true);
     clearEvents();
+    addEvent({ type: 'text', content: '已开始运行...' });
     
     try {
       let attachmentIds: string[] = [];
@@ -245,6 +256,7 @@ export default function AgentPage() {
   const selectedWorkspace = selectedWorkspaceId
     ? workspaces.find((ws) => ws.id === selectedWorkspaceId) ?? null
     : null;
+  const hasEffectiveWorkspace = Boolean(selectedWorkspaceId || currentSession?.workspaceId);
 
   const filteredSessions = (() => {
     const q = query.trim().toLowerCase();
@@ -430,6 +442,7 @@ export default function AgentPage() {
 
         {/* Custom scroll container so we can keep short timelines pinned to bottom. */}
         <div
+          ref={viewportRef}
           style={{
             flex: 1,
             minHeight: 0,
@@ -507,7 +520,7 @@ export default function AgentPage() {
                   autosize
                   minRows={1}
                   maxRows={6}
-                  disabled={!currentSession || isRunning || workspaces.length === 0}
+                  disabled={!currentSession || isRunning || workspaces.length === 0 || !hasEffectiveWorkspace}
                 />
                 <FileButton
                   onChange={(selected) => {
@@ -519,7 +532,7 @@ export default function AgentPage() {
                   multiple
                 >
                   {(props) => (
-                    <Button variant="light" {...props} disabled={!currentSession || isRunning || workspaces.length === 0}>
+                    <Button variant="light" {...props} disabled={!currentSession || isRunning || workspaces.length === 0 || !hasEffectiveWorkspace}>
                       附件
                     </Button>
                   )}
@@ -527,7 +540,7 @@ export default function AgentPage() {
                 <Button
                   onClick={handleRun}
                   loading={isRunning}
-                  disabled={!currentSession || (!taskInput.trim() && files.length === 0) || workspaces.length === 0}
+                  disabled={!currentSession || (!taskInput.trim() && files.length === 0) || workspaces.length === 0 || !hasEffectiveWorkspace}
                   aria-label="运行"
                 >
                   <IconSend size={18} />

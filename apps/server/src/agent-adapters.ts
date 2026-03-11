@@ -216,7 +216,10 @@ export class AnthropicAdapter implements ProviderAdapter {
           try {
             const parsed = JSON.parse(data);
             if (parsed.type === 'content_block_delta') {
-              yield parsed.delta.text;
+              const text = parsed?.delta?.text;
+              if (typeof text === 'string' && text.length > 0) {
+                yield text;
+              }
             }
           } catch {
             // Skip invalid JSON

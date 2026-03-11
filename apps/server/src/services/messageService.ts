@@ -154,6 +154,9 @@ export async function sendMessage(userId: string, input: SendMessageInput) {
     });
     
     for await (const chunk of stream) {
+      if (typeof chunk !== 'string' || chunk.length === 0) {
+        continue;
+      }
       responseContent += chunk;
     }
     responseModel = resolvedChannel.modelId;
@@ -259,6 +262,10 @@ export async function streamMessage(userId: string, input: StreamMessageInput): 
     });
 
     for await (const chunk of stream) {
+      // Some adapters may yield undefined/empty chunks; never leak "undefined" into the UI.
+      if (typeof chunk !== 'string' || chunk.length === 0) {
+        continue;
+      }
       responseContent += chunk;
       send({ type: 'delta', content: chunk });
     }
