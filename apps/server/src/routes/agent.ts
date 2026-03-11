@@ -134,6 +134,9 @@ agent.put('/sessions/:id', async (c) => {
     await renameAgentSession(user.id, sessionId, title);
     return c.json({ success: true });
   } catch (error) {
+    if (error instanceof Error && error.message === 'Session not found') {
+      return c.json({ error: 'Session not found' }, 404);
+    }
     return c.json({
       error: error instanceof Error ? error.message : 'Failed to update session',
     }, 400);
