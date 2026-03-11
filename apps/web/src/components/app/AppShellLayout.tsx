@@ -41,9 +41,12 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
         styles={{
           main: {
             background: 'var(--mantine-color-gray-0)',
-            minHeight: 'calc(100dvh - var(--app-shell-header-height, 56px))',
+            // Fix the main area height so chat/agent can manage their own scroll + pinned composer.
+            height: 'calc(100dvh - var(--app-shell-header-height, 56px))',
+            minHeight: 0,
             display: 'flex',
             flexDirection: 'column',
+            overflow: edgeToEdge ? 'hidden' : 'auto',
           },
         }}
       >

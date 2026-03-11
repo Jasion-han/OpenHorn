@@ -9,6 +9,7 @@ import { uploadAttachments } from '../lib/attachments';
 import { getEffectiveModelForConversation } from '@/lib/effective-model';
 import { ChatHeader } from '@/components/chat/ChatHeader';
 import { WRAP_TEXT } from '@/components/ui/wrapText';
+import { MarkdownMessage } from '@/components/ui/MarkdownMessage';
 
 const PAGE_PAD = 'var(--mantine-spacing-md)';
 // Keep bottom safe area, but avoid adding extra desktop gap.
@@ -178,9 +179,15 @@ export function ChatArea() {
                 maxWidth: '80%',
               }}
             >
-              <Text size="sm" style={WRAP_TEXT}>
-                {msg.content}
-              </Text>
+              {msg.role === 'assistant' ? (
+                <div style={WRAP_TEXT}>
+                  <MarkdownMessage content={msg.content} />
+                </div>
+              ) : (
+                <Text size="sm" style={WRAP_TEXT}>
+                  {msg.content}
+                </Text>
+              )}
             </Paper>
           ))}
 

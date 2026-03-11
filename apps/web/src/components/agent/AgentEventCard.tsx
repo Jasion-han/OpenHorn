@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Badge, Button, Collapse, Group, Paper, Text } from '@mantine/core';
 import type { AgentEvent } from '@/stores/agentStore';
 import { WRAP_TEXT } from '@/components/ui/wrapText';
+import { MarkdownMessage } from '@/components/ui/MarkdownMessage';
 
 export function AgentEventCard({ event }: { event: AgentEvent }) {
   const [open, setOpen] = useState(false);
@@ -20,9 +21,9 @@ export function AgentEventCard({ event }: { event: AgentEvent }) {
   if (event.type === 'text') {
     return (
       <Paper p="sm" radius="md" bg={background} style={{ maxWidth: '100%' }}>
-        <Text size="sm" style={WRAP_TEXT}>
-          {event.content}
-        </Text>
+        <div style={WRAP_TEXT}>
+          <MarkdownMessage content={event.content || ''} />
+        </div>
       </Paper>
     );
   }
