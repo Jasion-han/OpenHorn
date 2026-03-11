@@ -1,5 +1,5 @@
 import { db } from '../db';
-import { workspaces } from '../schema';
+import { workspaces } from 'db';
 import { eq, and } from 'drizzle-orm';
 import { generateId } from '../utils';
 

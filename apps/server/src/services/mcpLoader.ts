@@ -1,5 +1,5 @@
 import { db } from '../db';
-import { mcpServers } from '../schema';
+import { mcpServers } from 'db';
 import { eq } from 'drizzle-orm';
 
 export type McpServerConfigMap = Record<string, Record<string, unknown>>;

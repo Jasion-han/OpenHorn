@@ -1,5 +1,5 @@
 import { db } from '../db';
-import { conversations, messages } from '../schema';
+import { conversations, messages } from 'db';
 import { eq, and, desc } from 'drizzle-orm';
 import { generateId } from '../utils';
 

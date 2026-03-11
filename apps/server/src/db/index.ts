@@ -1,6 +1,6 @@
 import { drizzle } from 'drizzle-orm/libsql';
 import { createClient } from '@libsql/client';
-import * as schema from '../schema';
+import * as schema from 'db';
 
 const client = createClient({
   // Use env override in all environments; fall back to repo-local sqlite file.

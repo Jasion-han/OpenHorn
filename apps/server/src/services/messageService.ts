@@ -1,5 +1,5 @@
 import { db } from '../db';
-import { messages, conversations } from '../schema';
+import { messages, conversations } from 'db';
 import { eq, and, asc } from 'drizzle-orm';
 import { generateId } from '../utils';
 import { createAdapter } from '../agent-adapters';

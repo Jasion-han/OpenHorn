@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { getCookie } from 'hono/cookie';
 import { and, eq } from 'drizzle-orm';
 import { db } from '../db';
-import { agentSessions, conversations } from '../schema';
+import { agentSessions, conversations } from 'db';
 import { verifyToken, getUserById } from '../services/authService';
 import { storeAttachment } from '../services/attachmentService';
 

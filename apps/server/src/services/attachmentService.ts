@@ -3,7 +3,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { inArray } from 'drizzle-orm';
 import { db } from '../db';
-import { attachments } from '../schema';
+import { attachments } from 'db';
 import { generateId } from '../utils';
 import { formatAttachmentContext, parseAttachmentContent } from './attachmentParser';
 

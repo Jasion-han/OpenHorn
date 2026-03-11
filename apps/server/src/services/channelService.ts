@@ -1,6 +1,6 @@
 import { and, eq, inArray } from 'drizzle-orm';
 import { db } from '../db';
-import { channelModels, channels } from '../schema';
+import { channelModels, channels } from 'db';
 import { decrypt, encrypt, generateId } from '../utils';
 
 type ChannelRow = typeof channels.$inferSelect;

@@ -1,5 +1,5 @@
 import { db } from '../db';
-import { agentSessions, workspaces } from '../schema';
+import { agentSessions, workspaces } from 'db';
 import { eq, and } from 'drizzle-orm';
 import { generateId } from '../utils';
 import { getResolvedChannelForUser } from './channelService';
