@@ -1,6 +1,9 @@
 import type { Metadata } from 'next';
 import { ColorSchemeScript, MantineProvider } from '@mantine/core';
 import '@mantine/core/styles.css';
+import { ModalsProvider } from '@mantine/modals';
+import { Notifications } from '@mantine/notifications';
+import '@mantine/notifications/styles.css';
 
 import { theme } from '../theme';
 
@@ -20,7 +23,12 @@ export default function RootLayout({
         <ColorSchemeScript />
       </head>
       <body>
-        <MantineProvider theme={theme}>{children}</MantineProvider>
+        <MantineProvider theme={theme}>
+          <ModalsProvider>
+            <Notifications position="top-right" />
+            {children}
+          </ModalsProvider>
+        </MantineProvider>
       </body>
     </html>
   );

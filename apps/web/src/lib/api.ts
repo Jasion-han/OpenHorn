@@ -33,6 +33,29 @@ export interface ApiChannel {
   hasApiKey: boolean;
 }
 
+export interface ApiConversation {
+  id: string;
+  userId: string;
+  title: string;
+  channelId: string | null;
+  modelId: string | null;
+  systemPrompt: string | null;
+  contextLength: number;
+  isPinned: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ApiMessage {
+  id: string;
+  conversationId: string;
+  role: 'user' | 'assistant';
+  content: string;
+  model: string | null;
+  attachments: string | null;
+  createdAt: string;
+}
+
 async function fetchApi<T>(
   endpoint: string,
   options: RequestInit = {}
@@ -153,19 +176,21 @@ export const api = {
   
   conversations: {
     list: () =>
-      fetchApi<{ conversations: unknown[] }>('/conversations'),
+      fetchApi<{ conversations: ApiConversation[] }>('/conversations'),
     
     get: (id: string) =>
-      fetchApi<{ conversation: unknown }>(`/conversations/${id}`),
+      fetchApi<{ conversation: ApiConversation }>(`/conversations/${id}`),
     
-    create: (data: { title: string; channelId?: string }) =>
-      fetchApi<{ conversation: unknown }>('/conversations', {
+    create: (data: { title: string; channelId?: string | null; modelId?: string | null }) =>
+      fetchApi<{ conversation: ApiConversation }>('/conversations', {
         method: 'POST',
         body: JSON.stringify(data),
       }),
     
     update: (id: string, data: {
       title?: string;
+      channelId?: string | null;
+      modelId?: string | null;
       systemPrompt?: string;
       contextLength?: number;
       isPinned?: boolean;
@@ -183,10 +208,10 @@ export const api = {
   
   messages: {
     list: (conversationId: string) =>
-      fetchApi<{ messages: unknown[] }>(`/messages/${conversationId}`),
+      fetchApi<{ messages: ApiMessage[] }>(`/messages/${conversationId}`),
     
     send: (data: { conversationId: string; content: string; attachments?: string[] }) =>
-      fetchApi<{ userMessage: unknown; assistantMessage: unknown }>('/messages', {
+      fetchApi<{ userMessage: ApiMessage; assistantMessage: ApiMessage }>('/messages', {
         method: 'POST',
         body: JSON.stringify(data),
       }),

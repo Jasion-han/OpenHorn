@@ -4,19 +4,18 @@ import { useState, useRef, useEffect } from 'react';
 import { Paper, Textarea, Button, Group, Stack, ScrollArea, Text, Alert, Badge, FileButton } from '@mantine/core';
 import { IconSend } from '@tabler/icons-react';
 import { useChatStore } from '../stores/chatStore';
-import { api } from '../lib/api';
 import { streamChatMessage } from '../lib/chat-stream';
-import { getGlobalDefaultChannel } from '../lib/default-channel';
 import { uploadAttachments } from '../lib/attachments';
+import { getEffectiveModelForConversation } from '@/lib/effective-model';
+import { ChatHeader } from '@/components/chat/ChatHeader';
 
 export function ChatArea() {
   const {
     currentConversation,
     messages,
     isLoading,
-    isStreaming,
     addMessage,
-    setMessages,
+    loadMessages,
     setIsLoading,
     setIsStreaming,
     channels,
@@ -33,10 +32,10 @@ export function ChatArea() {
     }
   }, [messages]);
 
-  const defaultChannel = getGlobalDefaultChannel(channels);
+  const effectiveModel = getEffectiveModelForConversation(channels, currentConversation);
   const hasInput = Boolean(input.trim());
   const hasFiles = files.length > 0;
-  const canSend = Boolean(defaultChannel) && Boolean(currentConversation) && !isLoading && !isUploading && (hasInput || hasFiles);
+  const canSend = Boolean(effectiveModel) && Boolean(currentConversation) && !isLoading && !isUploading && (hasInput || hasFiles);
 
   const handleSend = async () => {
     if (!canSend || !currentConversation) return;
@@ -93,8 +92,7 @@ export function ChatArea() {
             useChatStore.getState().updateMessage(assistantMessageId, assistantContent);
           },
           onDone: async () => {
-            const { messages } = await api.messages.list(conversationId);
-            setMessages(messages as never[]);
+            await loadMessages(conversationId);
           },
           onError: (message) => {
             useChatStore.getState().updateMessage(assistantMessageId, `Error: ${message}`);
@@ -145,10 +143,7 @@ export function ChatArea() {
       }}
       p="md"
     >
-      <Group justify="space-between" mb="md">
-        <Text fw={500}>{currentConversation.title}</Text>
-        {isStreaming && <Text size="xs" c="blue">Thinking...</Text>}
-      </Group>
+      <ChatHeader />
 
       <ScrollArea flex={1} viewportRef={viewportRef}>
         <Stack gap="md" mb="md">
@@ -177,7 +172,7 @@ export function ChatArea() {
         </Stack>
       </ScrollArea>
 
-      {!defaultChannel && (
+      {!effectiveModel && (
         <Alert color="orange" mb="sm" title="需要先完成设置">
           未配置默认渠道或模型，请先完成设置后再开始对话。
           <Button component="a" href="/settings" size="xs" variant="light" ml="sm">
@@ -220,7 +215,7 @@ export function ChatArea() {
               autosize
               minRows={1}
               maxRows={6}
-              disabled={!defaultChannel || isLoading || isUploading}
+              disabled={!effectiveModel || isLoading || isUploading}
             />
             <FileButton
               onChange={(selected) => {
@@ -232,14 +227,14 @@ export function ChatArea() {
               multiple
             >
               {(props) => (
-                <Button variant="light" {...props} disabled={!defaultChannel || isLoading || isUploading}>
+                <Button variant="light" {...props} disabled={!effectiveModel || isLoading || isUploading}>
                   Attach
                 </Button>
               )}
             </FileButton>
-            {defaultChannel && (
+            {effectiveModel && (
               <Badge variant="light" color="gray">
-                {defaultChannel.label}
+                {effectiveModel.label}
               </Badge>
             )}
             <Button

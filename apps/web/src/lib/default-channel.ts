@@ -1,6 +1,7 @@
 import type { ApiChannel } from './api';
 
 export interface DefaultChannelInfo {
+  channelId: string;
   provider: string;
   modelId: string;
   label: string;
@@ -20,6 +21,7 @@ export function getGlobalDefaultChannel(channels: ApiChannel[]): DefaultChannelI
   }
 
   return {
+    channelId: defaultChannel.id,
     provider: defaultChannel.provider,
     modelId: defaultModel.modelId,
     label: `${defaultChannel.provider} · ${defaultModel.modelId}`,

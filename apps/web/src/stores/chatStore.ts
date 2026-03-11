@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { api, type ApiChannel } from '../lib/api';
+import { api, type ApiChannel, type ApiConversation, type ApiMessage } from '../lib/api';
 
 export type Channel = ApiChannel;
 
@@ -7,6 +7,7 @@ export interface Conversation {
   id: string;
   title: string;
   channelId?: string;
+  modelId?: string;
   systemPrompt?: string;
   contextLength: number;
   isPinned: boolean;
@@ -21,6 +22,31 @@ export interface Message {
   content: string;
   model?: string;
   createdAt: Date;
+}
+
+function parseConversation(conv: ApiConversation): Conversation {
+  return {
+    id: conv.id,
+    title: conv.title,
+    channelId: conv.channelId || undefined,
+    modelId: conv.modelId || undefined,
+    systemPrompt: conv.systemPrompt || undefined,
+    contextLength: conv.contextLength ?? 4096,
+    isPinned: Boolean(conv.isPinned),
+    createdAt: new Date(conv.createdAt),
+    updatedAt: new Date(conv.updatedAt),
+  };
+}
+
+function parseMessage(msg: ApiMessage): Message {
+  return {
+    id: msg.id,
+    conversationId: msg.conversationId,
+    role: msg.role,
+    content: msg.content,
+    model: msg.model || undefined,
+    createdAt: new Date(msg.createdAt),
+  };
 }
 
 interface ChatState {
@@ -44,6 +70,8 @@ interface ChatState {
   loadConversations: () => Promise<void>;
   createConversation: (title: string) => Promise<Conversation>;
   deleteConversation: (id: string) => Promise<void>;
+  loadMessages: (conversationId: string) => Promise<void>;
+  setConversationModel: (conversationId: string, channelId: string | null, modelId: string | null) => Promise<void>;
   
   setMessages: (messages: Message[]) => void;
   addMessage: (message: Message) => void;
@@ -54,7 +82,7 @@ interface ChatState {
   setIsStreaming: (streaming: boolean) => void;
 }
 
-export const useChatStore = create<ChatState>((set) => ({
+export const useChatStore = create<ChatState>((set, get) => ({
   channels: [],
   conversations: [],
   currentConversation: null,
@@ -97,7 +125,7 @@ export const useChatStore = create<ChatState>((set) => ({
   loadConversations: async () => {
     try {
       const { conversations } = await api.conversations.list();
-      set({ conversations: conversations as Conversation[] });
+      set({ conversations: conversations.map(parseConversation) });
     } catch (error) {
       console.error('Failed to load conversations:', error);
     }
@@ -105,7 +133,7 @@ export const useChatStore = create<ChatState>((set) => ({
   
   createConversation: async (title: string) => {
     const { conversation } = await api.conversations.create({ title });
-    const newConv = conversation as Conversation;
+    const newConv = parseConversation(conversation);
     set((state) => ({ 
       conversations: [newConv, ...state.conversations] 
     }));
@@ -120,6 +148,43 @@ export const useChatStore = create<ChatState>((set) => ({
         ? null 
         : state.currentConversation,
     }));
+  },
+
+  loadMessages: async (conversationId: string) => {
+    const { messages } = await api.messages.list(conversationId);
+    set({ messages: messages.map(parseMessage) });
+  },
+
+  setConversationModel: async (conversationId: string, channelId: string | null, modelId: string | null) => {
+    const state = get();
+    const existing = state.conversations.find((c) => c.id === conversationId) || null;
+    const prev = existing ? { channelId: existing.channelId, modelId: existing.modelId } : null;
+
+    set((s) => ({
+      conversations: s.conversations.map((c) => (
+        c.id === conversationId ? { ...c, channelId: channelId || undefined, modelId: modelId || undefined } : c
+      )),
+      currentConversation: s.currentConversation?.id === conversationId
+        ? { ...s.currentConversation, channelId: channelId || undefined, modelId: modelId || undefined }
+        : s.currentConversation,
+    }));
+
+    try {
+      await api.conversations.update(conversationId, { channelId, modelId });
+    } catch (error) {
+      // rollback best-effort
+      if (prev) {
+        set((s) => ({
+          conversations: s.conversations.map((c) => (
+            c.id === conversationId ? { ...c, channelId: prev.channelId, modelId: prev.modelId } : c
+          )),
+          currentConversation: s.currentConversation?.id === conversationId
+            ? { ...s.currentConversation, channelId: prev.channelId, modelId: prev.modelId }
+            : s.currentConversation,
+        }));
+      }
+      throw error;
+    }
   },
   
   setMessages: (messages) => set({ messages }),
