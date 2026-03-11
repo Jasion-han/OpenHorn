@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { Paper, Textarea, Button, Group, Stack, ScrollArea, Text, Alert, Badge, FileButton } from '@mantine/core';
+import { Paper, Textarea, Button, Group, Stack, Text, Alert, Badge, FileButton } from '@mantine/core';
 import { IconSend } from '@tabler/icons-react';
 import { useChatStore } from '../stores/chatStore';
 import { streamChatMessage } from '../lib/chat-stream';
@@ -145,18 +145,17 @@ export function ChatArea() {
     >
       <ChatHeader />
 
-      <ScrollArea
-        flex={1}
-        viewportRef={viewportRef}
-        type="auto"
-        styles={{
-          viewport: {
-            display: 'flex',
-            flexDirection: 'column',
-          },
+      {/* Custom scroll container so we can reliably pin short conversations to bottom. */}
+      <div
+        ref={viewportRef}
+        style={{
+          flex: 1,
+          minHeight: 0,
+          overflowY: 'auto',
+          display: 'flex',
+          flexDirection: 'column',
         }}
       >
-        {/* Keep short conversations pinned to the bottom, while still allowing scroll for long histories. */}
         <Stack gap="md" pb="md" style={{ marginTop: 'auto' }}>
           {messages.map((msg) => (
             <Paper
@@ -181,7 +180,7 @@ export function ChatArea() {
             </Text>
           )}
         </Stack>
-      </ScrollArea>
+      </div>
 
       {!effectiveModel && (
         <Alert color="orange" mb="sm" title="需要先完成设置">
