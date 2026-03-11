@@ -453,7 +453,8 @@ export default function AgentPage() {
             paddingRight: PAGE_PAD,
           }}
         >
-          <Stack gap="md" pb="md" style={{ marginTop: 'auto' }}>
+          <div style={{ width: '100%', maxWidth: 980, margin: '0 auto', display: 'flex', flexDirection: 'column' }}>
+            <Stack gap="sm" pb="md" style={{ marginTop: 'auto' }}>
             {currentSession && events.map((event, index) => (
               <AgentEventCard key={index} event={event} />
             ))}
@@ -463,7 +464,8 @@ export default function AgentPage() {
                 开始输入任务并运行...
               </Text>
             )}
-          </Stack>
+            </Stack>
+          </div>
         </div>
 
         {workspaces.length === 0 && (

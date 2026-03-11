@@ -1,0 +1,67 @@
+.root {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.6;
+}
+
+.root p {
+  margin: 0;
+}
+
+.root p + p {
+  margin-top: 0.6em;
+}
+
+.root ul,
+.root ol {
+  margin: 0.4em 0;
+  padding-left: 1.2em;
+}
+
+.root li {
+  margin: 0.15em 0;
+}
+
+.root h1,
+.root h2,
+.root h3,
+.root h4 {
+  margin: 0.65em 0 0.35em;
+  font-weight: 700;
+}
+
+.root pre {
+  margin: 0.5em 0;
+  padding: 0.75em;
+  border-radius: var(--mantine-radius-md);
+  background: var(--mantine-color-gray-1);
+  overflow-x: auto;
+}
+
+.root code {
+  font-family: var(--mantine-font-family-monospace);
+  font-size: 0.95em;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.root :not(pre) > code {
+  background: var(--mantine-color-gray-1);
+  padding: 0.1em 0.25em;
+  border-radius: 4px;
+}
+
+.root blockquote {
+  margin: 0.5em 0;
+  padding-left: 0.75em;
+  border-left: 3px solid var(--mantine-color-gray-4);
+  color: var(--mantine-color-gray-7);
+}
+
+.root hr {
+  margin: 0.75em 0;
+  border: 0;
+  border-top: 1px solid var(--mantine-color-gray-3);
+}
+

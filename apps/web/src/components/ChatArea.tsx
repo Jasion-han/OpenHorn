@@ -167,7 +167,8 @@ export function ChatArea() {
           paddingRight: PAGE_PAD,
         }}
       >
-        <Stack gap="md" pb="md" style={{ marginTop: 'auto' }}>
+        <div style={{ width: '100%', maxWidth: 980, margin: '0 auto', display: 'flex', flexDirection: 'column' }}>
+          <Stack gap="sm" pb="md" style={{ marginTop: 'auto' }}>
           {messages.map((msg) => (
             <Paper
               key={msg.id}
@@ -196,7 +197,8 @@ export function ChatArea() {
               Start the conversation...
             </Text>
           )}
-        </Stack>
+          </Stack>
+        </div>
       </div>
 
       {!effectiveModel && (
