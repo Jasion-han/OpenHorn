@@ -6,6 +6,9 @@ import { getResolvedChannelForUser } from './channelService';
 import { runClaudeAgentSdk } from './agentSdk';
 import { loadEnabledMcpServers } from './mcpLoader';
 import { buildAttachmentContextFromIds } from './attachmentService';
+import { getSettingValues } from './settingsService';
+
+const DEFAULT_WORKSPACE_SETTING_KEY = 'agent.defaultWorkspaceId';
 
 export interface CreateAgentSessionInput {
   workspaceId?: string;
@@ -40,11 +43,25 @@ export async function getAgentSessionById(userId: string, sessionId: string) {
 export async function createAgentSession(userId: string, input: CreateAgentSessionInput) {
   const id = generateId();
   const now = new Date();
+
+  let workspaceId: string | null = input.workspaceId || null;
+  if (!workspaceId) {
+    const values = await getSettingValues(userId, [DEFAULT_WORKSPACE_SETTING_KEY]);
+    const candidate = values[DEFAULT_WORKSPACE_SETTING_KEY];
+    if (candidate) {
+      const owned = await db.select({ id: workspaces.id }).from(workspaces)
+        .where(and(eq(workspaces.id, candidate), eq(workspaces.userId, userId)))
+        .limit(1);
+      if (owned.length > 0) {
+        workspaceId = candidate;
+      }
+    }
+  }
   
   await db.insert(agentSessions).values({
     id,
     userId,
-    workspaceId: input.workspaceId || null,
+    workspaceId,
     channelId: input.channelId || null,
     title: input.title,
     status: 'active',
@@ -55,7 +72,7 @@ export async function createAgentSession(userId: string, input: CreateAgentSessi
   return {
     id,
     userId,
-    workspaceId: input.workspaceId,
+    workspaceId: workspaceId || undefined,
     channelId: input.channelId,
     title: input.title,
     status: 'active',
@@ -108,22 +125,31 @@ export async function* runAgent(
     return;
   }
 
-  let cwd: string | undefined;
-  if (session.workspaceId) {
-    const workspace = await db.select().from(workspaces)
-      .where(and(eq(workspaces.id, session.workspaceId), eq(workspaces.userId, userId)))
-      .limit(1);
-
-    if (workspace.length === 0) {
-      yield { type: 'error', content: 'Workspace not found' };
-      return;
-    }
-
-    cwd = workspace[0].cwd || undefined;
-  } else {
+  const values = await getSettingValues(userId, [DEFAULT_WORKSPACE_SETTING_KEY]);
+  const defaultWorkspaceId = values[DEFAULT_WORKSPACE_SETTING_KEY] || null;
+  const effectiveWorkspaceId = defaultWorkspaceId || session.workspaceId || null;
+  if (!effectiveWorkspaceId) {
     yield { type: 'error', content: 'Workspace not selected' };
     return;
   }
+
+  const workspace = await db.select().from(workspaces)
+    .where(and(eq(workspaces.id, effectiveWorkspaceId), eq(workspaces.userId, userId)))
+    .limit(1);
+
+  if (workspace.length === 0) {
+    yield { type: 'error', content: 'Workspace not found' };
+    return;
+  }
+
+  // Keep the session in sync with global default so UI stays consistent.
+  if (effectiveWorkspaceId !== session.workspaceId) {
+    await db.update(agentSessions)
+      .set({ workspaceId: effectiveWorkspaceId, updatedAt: new Date() })
+      .where(and(eq(agentSessions.id, sessionId), eq(agentSessions.userId, userId)));
+  }
+
+  const cwd = workspace[0].cwd || undefined;
   
   try {
     const attachmentContext = await buildAttachmentContextFromIds(attachmentIds);
