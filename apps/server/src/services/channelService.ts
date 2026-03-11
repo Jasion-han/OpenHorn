@@ -758,7 +758,9 @@ export async function getResolvedChannelForConversation(
       const targetChannel = await getOwnedChannelItem(userId, requestedChannelId);
       if (targetChannel?.enabled) {
         const row = await getOwnedChannelRow(userId, targetChannel.id);
-        const modelId = resolveModelIdFromChannelItem(targetChannel, requestedModelId);
+        const modelId = requestedModelId
+          ? (targetChannel.models.find((model) => model.modelId === requestedModelId && model.enabled)?.modelId || null)
+          : resolveModelIdFromChannelItem(targetChannel, null);
         if (modelId) {
           const channelWithRuntimeBaseUrl: ChannelItem = {
             ...targetChannel,
