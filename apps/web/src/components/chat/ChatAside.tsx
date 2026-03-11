@@ -14,7 +14,7 @@ import {
   Collapse,
 } from '@mantine/core';
 import { modals } from '@mantine/modals';
-import { IconDots, IconMessage, IconPlus, IconTrash, IconPin, IconPencil } from '@tabler/icons-react';
+import { IconChevronDown, IconChevronRight, IconDots, IconMessage, IconPlus, IconTrash, IconPin, IconPencil } from '@tabler/icons-react';
 import { useChatStore, type Conversation } from '../../stores/chatStore';
 import { notifyError, notifySuccess } from '@/lib/notify';
 import { api } from '@/lib/api';
@@ -198,7 +198,7 @@ export function ChatAside() {
                 <Group justify="space-between" mt="xs">
                   <Text size="xs" c="dimmed" fw={600}>置顶</Text>
                   <ActionIcon variant="subtle" size="sm" onClick={() => setPinnedOpen((v) => !v)}>
-                    <IconDots size={14} />
+                    {pinnedOpen ? <IconChevronDown size={14} /> : <IconChevronRight size={14} />}
                   </ActionIcon>
                 </Group>
                 <Collapse in={pinnedOpen}>
