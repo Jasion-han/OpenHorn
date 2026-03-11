@@ -272,6 +272,12 @@ export const api = {
         method: 'POST',
         body: JSON.stringify(data),
       }),
+
+    renameSession: (id: string, title: string) =>
+      fetchApi<{ success: boolean }>(`/agent/sessions/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ title }),
+      }),
     
     runSession: (sessionId: string, prompt: string, attachments?: string[]) => {
       return fetch(`${API_BASE}/agent/sessions/${sessionId}/run`, {

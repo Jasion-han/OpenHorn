@@ -96,6 +96,31 @@ export async function updateAgentSessionStatus(
   return { success: true };
 }
 
+export async function renameAgentSession(
+  userId: string,
+  sessionId: string,
+  title: string
+) {
+  const nextTitle = title.trim();
+  if (!nextTitle) {
+    throw new Error('title is required');
+  }
+
+  const result = await db.update(agentSessions)
+    .set({ title: nextTitle, updatedAt: new Date() })
+    .where(and(
+      eq(agentSessions.id, sessionId),
+      eq(agentSessions.userId, userId)
+    ));
+
+  const affected = (result as any)?.rowsAffected as number | undefined;
+  if (typeof affected === 'number' && affected === 0) {
+    throw new Error('Session not found');
+  }
+
+  return { success: true };
+}
+
 export async function deleteAgentSession(userId: string, sessionId: string) {
   await db.delete(agentSessions)
     .where(and(
@@ -116,6 +141,13 @@ export async function* runAgent(
   if (!session) {
     yield { type: 'error', content: 'Session not found' };
     return;
+  }
+
+  // If user runs a completed/cancelled session, treat it as reopening.
+  if (session.status !== 'active') {
+    await db.update(agentSessions)
+      .set({ status: 'active', updatedAt: new Date() })
+      .where(and(eq(agentSessions.id, sessionId), eq(agentSessions.userId, userId)));
   }
   
   const resolvedChannel = await getResolvedChannelForUser(userId, null);

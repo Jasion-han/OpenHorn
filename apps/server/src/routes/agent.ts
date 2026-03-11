@@ -6,6 +6,7 @@ import {
   getAgentSessionById,
   createAgentSession,
   updateAgentSessionStatus,
+  renameAgentSession,
   deleteAgentSession,
   runAgent,
 } from '../services/agentService';
@@ -114,6 +115,29 @@ agent.put('/sessions/:id/status', async (c) => {
   
   await updateAgentSessionStatus(user.id, sessionId, status);
   return c.json({ success: true });
+});
+
+agent.put('/sessions/:id', async (c) => {
+  const user = await getUser(c);
+  if (!user) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+
+  try {
+    const sessionId = c.req.param('id');
+    const body = await c.req.json();
+    const title = body?.title;
+    if (typeof title !== 'string' || !title.trim()) {
+      return c.json({ error: 'title is required' }, 400);
+    }
+
+    await renameAgentSession(user.id, sessionId, title);
+    return c.json({ success: true });
+  } catch (error) {
+    return c.json({
+      error: error instanceof Error ? error.message : 'Failed to update session',
+    }, 400);
+  }
 });
 
 agent.delete('/sessions/:id', async (c) => {

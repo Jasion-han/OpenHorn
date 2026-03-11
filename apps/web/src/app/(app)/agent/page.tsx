@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Container, Grid, Paper, TextInput, Button, Stack, Text, Group, ScrollArea, Badge, Loader, Collapse, FileButton, Select } from '@mantine/core';
-import { IconSend, IconPlus, IconRobot } from '@tabler/icons-react';
+import { Container, Grid, Paper, TextInput, Button, Stack, Text, Group, ScrollArea, Badge, Loader, Collapse, FileButton, Select, ActionIcon, Menu } from '@mantine/core';
+import { modals } from '@mantine/modals';
+import { IconCheck, IconDots, IconPencil, IconSend, IconPlus, IconRobot, IconTrash } from '@tabler/icons-react';
 import { useAgentStore, type AgentEvent } from '@/stores/agentStore';
 import { useAuthStore } from '@/stores/authStore';
 import { api } from '@/lib/api';
@@ -111,6 +112,79 @@ export default function AgentPage() {
     }
   };
 
+  const handleRenameSession = (session: any) => {
+    let value = session.title || '';
+    modals.openConfirmModal({
+      title: '重命名会话',
+      children: (
+        <TextInput
+          label="标题"
+          defaultValue={session.title || ''}
+          onChange={(e) => {
+            value = e.target.value;
+          }}
+        />
+      ),
+      labels: { confirm: '保存', cancel: '取消' },
+      onConfirm: () => {
+        const nextTitle = value.trim();
+        if (!nextTitle) return;
+        void (async () => {
+          try {
+            await api.agent.renameSession(session.id, nextTitle);
+            setSessions(sessions.map((s) => (s.id === session.id ? { ...s, title: nextTitle } : s)) as never[]);
+            if (currentSession?.id === session.id) {
+              setCurrentSession({ ...(currentSession as any), title: nextTitle } as never);
+            }
+            notifySuccess('已保存', '会话已重命名');
+          } catch (error) {
+            notifyError('保存失败', error instanceof Error ? error.message : '无法重命名会话');
+            await loadSessions();
+          }
+        })();
+      },
+    });
+  };
+
+  const handleToggleCompleted = async (session: any) => {
+    const next = session.status === 'completed' ? 'active' : 'completed';
+    try {
+      await api.agent.updateStatus(session.id, next);
+      setSessions(sessions.map((s) => (s.id === session.id ? { ...s, status: next } : s)) as never[]);
+      if (currentSession?.id === session.id) {
+        setCurrentSession({ ...(currentSession as any), status: next } as never);
+      }
+      notifySuccess('已更新', next === 'completed' ? '已标记完成' : '已恢复为进行中');
+    } catch (error) {
+      notifyError('更新失败', error instanceof Error ? error.message : '无法更新状态');
+      await loadSessions();
+    }
+  };
+
+  const handleDeleteSession = (session: any) => {
+    modals.openConfirmModal({
+      title: '删除会话',
+      children: <Text size="sm">确定删除该会话？此操作不可恢复。</Text>,
+      labels: { confirm: '删除', cancel: '取消' },
+      confirmProps: { color: 'red' },
+      onConfirm: () => {
+        void (async () => {
+          try {
+            await api.agent.deleteSession(session.id);
+            setSessions(sessions.filter((s) => s.id !== session.id) as never[]);
+            if (currentSession?.id === session.id) {
+              setCurrentSession(null);
+            }
+            notifySuccess('已删除', '会话已删除');
+          } catch (error) {
+            notifyError('删除失败', error instanceof Error ? error.message : '无法删除会话');
+            await loadSessions();
+          }
+        })();
+      },
+    });
+  };
+
   const handleRun = async () => {
     const hasInput = taskInput.trim().length > 0;
     const hasFiles = files.length > 0;
@@ -190,14 +264,59 @@ export default function AgentPage() {
                       style={{ cursor: 'pointer' }}
                       onClick={() => setCurrentSession(session as never)}
                     >
-                      <Group>
+                      <Group justify="space-between" wrap="nowrap">
                         <IconRobot size={16} />
                         <Text size="sm" truncate style={{ flex: 1 }}>
                           {session.title}
                         </Text>
-                        <Badge size="xs" variant="light">
-                          {session.status}
-                        </Badge>
+                        <Group gap="xs" wrap="nowrap">
+                          <Badge size="xs" variant="light">
+                            {session.status}
+                          </Badge>
+                          <Menu withinPortal position="bottom-end" shadow="md">
+                            <Menu.Target>
+                              <ActionIcon
+                                variant="subtle"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                }}
+                              >
+                                <IconDots size={16} />
+                              </ActionIcon>
+                            </Menu.Target>
+                            <Menu.Dropdown>
+                              <Menu.Item
+                                leftSection={<IconPencil size={14} />}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleRenameSession(session);
+                                }}
+                              >
+                                重命名
+                              </Menu.Item>
+                              <Menu.Item
+                                leftSection={<IconCheck size={14} />}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  void handleToggleCompleted(session);
+                                }}
+                              >
+                                {session.status === 'completed' ? '恢复进行中' : '标记完成'}
+                              </Menu.Item>
+                              <Menu.Divider />
+                              <Menu.Item
+                                color="red"
+                                leftSection={<IconTrash size={14} />}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDeleteSession(session);
+                                }}
+                              >
+                                删除
+                              </Menu.Item>
+                            </Menu.Dropdown>
+                          </Menu>
+                        </Group>
                       </Group>
                     </Paper>
                   ))}
