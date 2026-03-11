@@ -31,6 +31,7 @@ export function ChatArea() {
   const [files, setFiles] = useState<File[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const viewportRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     if (viewportRef.current) {
@@ -72,6 +73,8 @@ export function ChatArea() {
     });
 
     setInput('');
+    // Keep the cursor in the input so users can continue typing while streaming.
+    queueMicrotask(() => inputRef.current?.focus());
     setIsLoading(true);
     setIsStreaming(true);
 
@@ -115,6 +118,7 @@ export function ChatArea() {
       setIsUploading(false);
       setIsLoading(false);
       setIsStreaming(false);
+      queueMicrotask(() => inputRef.current?.focus());
     }
   };
 
@@ -249,7 +253,9 @@ export function ChatArea() {
                 autosize
                 minRows={1}
                 maxRows={6}
-                disabled={!effectiveModel || isLoading || isUploading}
+                // Allow typing while streaming; only sending is blocked via canSend.
+                disabled={!effectiveModel || isUploading}
+                ref={inputRef}
               />
               <FileButton
                 onChange={(selected) => {

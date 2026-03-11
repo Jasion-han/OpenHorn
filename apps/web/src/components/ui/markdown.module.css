@@ -2,7 +2,7 @@
   max-width: 100%;
   overflow-wrap: anywhere;
   word-break: break-word;
-  line-height: 1.6;
+  line-height: 1.45;
 }
 
 .root p {
@@ -10,24 +10,24 @@
 }
 
 .root p + p {
-  margin-top: 0.6em;
+  margin-top: 0.45em;
 }
 
 .root ul,
 .root ol {
-  margin: 0.4em 0;
-  padding-left: 1.2em;
+  margin: 0.25em 0;
+  padding-left: 1.1em;
 }
 
 .root li {
-  margin: 0.15em 0;
+  margin: 0.05em 0;
 }
 
 .root h1,
 .root h2,
 .root h3,
 .root h4 {
-  margin: 0.65em 0 0.35em;
+  margin: 0.55em 0 0.3em;
   font-weight: 700;
 }
 
@@ -64,4 +64,3 @@
   border: 0;
   border-top: 1px solid var(--mantine-color-gray-3);
 }
-

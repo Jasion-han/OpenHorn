@@ -52,6 +52,7 @@ export default function AgentPage() {
   const [files, setFiles] = useState<File[]>([]);
   const [bootstrapping, setBootstrapping] = useState(false);
   const viewportRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     if (user) {
@@ -232,8 +233,9 @@ export default function AgentPage() {
         setFiles([]);
       }
 
-      const prompt = taskInput.trim();
-      setTaskInput('');
+    const prompt = taskInput.trim();
+    setTaskInput('');
+    queueMicrotask(() => inputRef.current?.focus());
       const response = await api.agent.runSession(currentSession.id, prompt, attachmentIds);
       
       if (!response.ok) {
@@ -250,6 +252,7 @@ export default function AgentPage() {
       });
     } finally {
       setIsRunning(false);
+      queueMicrotask(() => inputRef.current?.focus());
     }
   };
 
@@ -522,7 +525,9 @@ export default function AgentPage() {
                   autosize
                   minRows={1}
                   maxRows={6}
-                  disabled={!currentSession || isRunning || workspaces.length === 0 || !hasEffectiveWorkspace}
+                  // Allow drafting next task while agent is running; only "Run" is locked.
+                  disabled={!currentSession || workspaces.length === 0 || !hasEffectiveWorkspace}
+                  ref={inputRef}
                 />
                 <FileButton
                   onChange={(selected) => {
