@@ -145,34 +145,42 @@ export function ChatArea() {
     >
       <ChatHeader />
 
-      <ScrollArea flex={1} viewportRef={viewportRef} type="auto">
+      <ScrollArea
+        flex={1}
+        viewportRef={viewportRef}
+        type="auto"
+        styles={{
+          viewport: {
+            display: 'flex',
+            flexDirection: 'column',
+          },
+        }}
+      >
         {/* Keep short conversations pinned to the bottom, while still allowing scroll for long histories. */}
-        <div style={{ minHeight: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
-          <Stack gap="md" pb="md">
-            {messages.map((msg) => (
-              <Paper
-                key={msg.id}
-                p="md"
-                radius="lg"
-                bg={msg.role === 'user' ? 'blue.0' : 'gray.0'}
-                style={{
-                  alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
-                  maxWidth: '80%',
-                }}
-              >
-                <Text size="sm" style={{ whiteSpace: 'pre-wrap' }}>
-                  {msg.content}
-                </Text>
-              </Paper>
-            ))}
-
-            {messages.length === 0 && (
-              <Text c="dimmed" ta="center" py="xl">
-                Start the conversation...
+        <Stack gap="md" pb="md" style={{ marginTop: 'auto' }}>
+          {messages.map((msg) => (
+            <Paper
+              key={msg.id}
+              p="md"
+              radius="lg"
+              bg={msg.role === 'user' ? 'blue.0' : 'gray.0'}
+              style={{
+                alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
+                maxWidth: '80%',
+              }}
+            >
+              <Text size="sm" style={{ whiteSpace: 'pre-wrap' }}>
+                {msg.content}
               </Text>
-            )}
-          </Stack>
-        </div>
+            </Paper>
+          ))}
+
+          {messages.length === 0 && (
+            <Text c="dimmed" ta="center" py="xl">
+              Start the conversation...
+            </Text>
+          )}
+        </Stack>
       </ScrollArea>
 
       {!effectiveModel && (
