@@ -3,6 +3,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import { AppShell, Burger } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
+import { usePathname } from 'next/navigation';
 import { AppNav } from './AppNav';
 import { AppHeader } from './AppHeader';
 import { AppShellProvider } from './AppShellContext';
@@ -13,6 +14,8 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
   const [mobileOpened, { toggle: toggleMobile }] = useDisclosure(false);
   const [title, setTitle] = useState(DEFAULT_TITLE);
   const [aside, setAside] = useState<React.ReactNode | null>(null);
+  const pathname = usePathname();
+  const isChat = pathname === '/chat' || pathname?.startsWith('/chat/');
 
   const resetSlots = useCallback(() => {
     setTitle(DEFAULT_TITLE);
@@ -31,7 +34,8 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
         header={{ height: 56 }}
         navbar={{ width: 240, breakpoint: 'sm', collapsed: { mobile: !mobileOpened } }}
         aside={aside ? { width: 360, breakpoint: 'md', collapsed: { mobile: true } } : undefined}
-        padding="md"
+        // Chat wants an edge-to-edge composer; other pages keep comfortable padding.
+        padding={isChat ? 0 : 'md'}
         styles={{
           main: {
             background: 'var(--mantine-color-gray-0)',
