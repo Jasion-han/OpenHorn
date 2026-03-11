@@ -10,8 +10,7 @@ import { readSseStream } from '@/lib/sse';
 import { uploadAttachments } from '@/lib/attachments';
 import { AppShellSlot } from '@/components/app/AppShellSlot';
 import { notifyError, notifySuccess } from '@/lib/notify';
-
-const DEFAULT_WORKSPACE_SETTING_KEY = 'agent.defaultWorkspaceId';
+import { DEFAULT_WORKSPACE_SETTING_KEY, pickDefaultWorkspaceId } from '@/lib/agent-default-workspace';
 
 export default function AgentPage() {
   const { user } = useAuthStore();
@@ -55,23 +54,15 @@ export default function AgentPage() {
       setSessions(sessions as never[]);
       setWorkspaces(workspacesResp as never[]);
 
-      const defaultWorkspaceId = settings?.[DEFAULT_WORKSPACE_SETTING_KEY] || null;
-      const exists = typeof defaultWorkspaceId === 'string'
-        && (workspacesResp as any[]).some((ws: any) => ws?.id === defaultWorkspaceId);
-
-      if (exists) {
-        setSelectedWorkspaceId(defaultWorkspaceId);
-        return;
-      }
-
-      const first = (workspacesResp as any[])[0]?.id as string | undefined;
-      if (first) {
-        setSelectedWorkspaceId(first);
-        // Best-effort: keep server setting in sync.
-        try {
-          await api.settings.set(DEFAULT_WORKSPACE_SETTING_KEY, first);
-        } catch {
-          // Ignore; user can still switch manually.
+      const picked = pickDefaultWorkspaceId(workspacesResp as any[], settings?.[DEFAULT_WORKSPACE_SETTING_KEY] || null);
+      if (picked) {
+        setSelectedWorkspaceId(picked);
+        if (picked !== (settings?.[DEFAULT_WORKSPACE_SETTING_KEY] || null)) {
+          try {
+            await api.settings.set(DEFAULT_WORKSPACE_SETTING_KEY, picked);
+          } catch {
+            // Ignore; user can still switch manually.
+          }
         }
       }
     } catch (error) {
