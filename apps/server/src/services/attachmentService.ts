@@ -1,0 +1,166 @@
+import { existsSync } from 'node:fs';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { inArray } from 'drizzle-orm';
+import { db } from '../db';
+import { attachments } from '../schema';
+import { generateId } from '../utils';
+import { formatAttachmentContext, parseAttachmentContent } from './attachmentParser';
+
+export const MAX_ATTACHMENT_SIZE = 20 * 1024 * 1024;
+
+const ALLOWED_MIME_TYPES = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/webp',
+  'application/pdf',
+  'text/plain',
+  'text/markdown',
+]);
+
+const EXTENSION_MIME_MAP: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.pdf': 'application/pdf',
+  '.txt': 'text/plain',
+  '.md': 'text/markdown',
+};
+
+export function isAllowedMimeType(mime: string) {
+  return ALLOWED_MIME_TYPES.has(mime);
+}
+
+function resolveMimeType(file: File) {
+  if (isAllowedMimeType(file.type)) {
+    return file.type;
+  }
+
+  const lowerName = file.name.toLowerCase();
+  const extension = Object.keys(EXTENSION_MIME_MAP)
+    .find((ext) => lowerName.endsWith(ext));
+
+  if (extension) {
+    return EXTENSION_MIME_MAP[extension];
+  }
+
+  return file.type || '';
+}
+
+export function buildAttachmentDir(input: { conversationId?: string; sessionId?: string }) {
+  const dataDir = resolveDataDir();
+  if (input.sessionId) {
+    return join(dataDir, 'attachments', 'agent', input.sessionId);
+  }
+
+  if (!input.conversationId) {
+    throw new Error('conversationId or sessionId is required');
+  }
+
+  return join(dataDir, 'attachments', input.conversationId);
+}
+
+function sanitizeFileName(name: string) {
+  return name.replace(/[^a-zA-Z0-9._-]/g, '_');
+}
+
+function resolveDataDir() {
+  if (process.env.OPENHORN_DATA_DIR) {
+    return process.env.OPENHORN_DATA_DIR;
+  }
+
+  const rootDataDir = join(process.cwd(), '..', '..', 'data');
+  if (existsSync(rootDataDir)) {
+    return rootDataDir;
+  }
+
+  const localDataDir = join(process.cwd(), 'data');
+  if (existsSync(localDataDir)) {
+    return localDataDir;
+  }
+
+  return localDataDir;
+}
+
+export async function storeAttachment(params: {
+  conversationId?: string;
+  sessionId?: string;
+  file: File;
+}) {
+  const resolvedType = resolveMimeType(params.file);
+
+  if (!isAllowedMimeType(resolvedType)) {
+    throw new Error('Unsupported file type');
+  }
+
+  if (params.file.size > MAX_ATTACHMENT_SIZE) {
+    throw new Error('File too large');
+  }
+
+  const id = generateId();
+  const dir = buildAttachmentDir(params);
+  await mkdir(dir, { recursive: true });
+
+  const safeName = sanitizeFileName(params.file.name);
+  const filePath = join(dir, `${id}-${safeName}`);
+  const buffer = Buffer.from(await params.file.arrayBuffer());
+
+  await writeFile(filePath, buffer);
+
+  await db.insert(attachments).values({
+    id,
+    conversationId: params.conversationId || null,
+    messageId: null,
+    fileName: params.file.name,
+    filePath,
+    fileType: resolvedType,
+    fileSize: params.file.size,
+    createdAt: new Date(),
+  });
+
+  return {
+    id,
+    fileName: params.file.name,
+    filePath,
+    fileType: resolvedType,
+    fileSize: params.file.size,
+  };
+}
+
+export async function linkAttachmentsToMessage(attachmentIds: string[], messageId: string) {
+  if (attachmentIds.length === 0) return;
+
+  await db.update(attachments)
+    .set({ messageId })
+    .where(inArray(attachments.id, attachmentIds));
+}
+
+export async function getAttachmentsByIds(attachmentIds: string[]) {
+  if (attachmentIds.length === 0) return [];
+
+  return db.select().from(attachments)
+    .where(inArray(attachments.id, attachmentIds));
+}
+
+export async function buildAttachmentContextFromIds(attachmentIds: string[]) {
+  if (attachmentIds.length === 0) return '';
+
+  const records = await getAttachmentsByIds(attachmentIds);
+  const parsed: Array<{ fileName: string; text: string }> = [];
+
+  for (const record of records) {
+    try {
+      const text = await parseAttachmentContent({
+        fileName: record.fileName,
+        filePath: record.filePath,
+        fileType: record.fileType,
+      });
+      parsed.push({ fileName: record.fileName, text });
+    } catch {
+      parsed.push({ fileName: record.fileName, text: '' });
+    }
+  }
+
+  return formatAttachmentContext(parsed);
+}

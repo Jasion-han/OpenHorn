@@ -1,0 +1,20 @@
+FROM oven/bun:1 as base
+
+WORKDIR /app
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY apps/server/package.json apps/server/
+COPY packages/*/package.json packages/*/
+
+RUN pnpm install --frozen-lockfile
+
+COPY apps/server/src apps/server/src
+COPY packages/*/src packages/*/
+
+FROM base as production
+
+ENV NODE_ENV=production
+
+EXPOSE 3000
+
+CMD ["bun", "run", "start"]

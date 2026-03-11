@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "skills": {
+    "knowledge-absorber": {
+      "source": "yujunzhixue/studyanalysis-skills",
+      "sourceType": "github",
+      "computedHash": "5e9367e4b5c0754329e3f13a3316292fa9e83ce5f69debf09a93d073ccc11fd9"
+    }
+  }
+}

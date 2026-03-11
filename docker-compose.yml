@@ -1,0 +1,30 @@
+services:
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data:/app/data
+      - ./attachments:/app/attachments
+    environment:
+      - DATABASE_URL=file:/app/data/openhorn.db
+      - JWT_SECRET=${JWT_SECRET}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+      - NODE_ENV=production
+
+  mysql:
+    image: mysql:8.0
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: openhorn
+    volumes:
+      - mysql_data:/var/lib/mysql
+    profiles:
+      - with-mysql
+
+volumes:
+  mysql_data:

@@ -1,0 +1,27 @@
+{
+  "name": "openhorn",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev:web": "pnpm --filter web dev",
+    "dev:desktop": "pnpm --filter desktop dev",
+    "dev:server": "pnpm --filter server dev",
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "build:web": "pnpm --filter web build",
+    "build:server": "pnpm --filter server build",
+    "build:desktop": "pnpm --filter desktop build",
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "typecheck": "turbo typecheck"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.0.0",
+    "turbo": "^2.0.0",
+    "typescript": "^5.0.0"
+  },
+  "packageManager": "pnpm@9.0.0"
+}
