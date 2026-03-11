@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Container, Grid, Paper, TextInput, Button, Stack, Text, Group, ScrollArea, Badge, Loader, Collapse, FileButton } from '@mantine/core';
+import { Container, Grid, Paper, TextInput, Button, Stack, Text, Group, ScrollArea, Badge, Loader, Collapse, FileButton, Select } from '@mantine/core';
 import { IconSend, IconPlus, IconRobot } from '@tabler/icons-react';
 import { useAgentStore, type AgentEvent } from '@/stores/agentStore';
 import { useAuthStore } from '@/stores/authStore';
@@ -9,6 +9,9 @@ import { api } from '@/lib/api';
 import { readSseStream } from '@/lib/sse';
 import { uploadAttachments } from '@/lib/attachments';
 import { AppShellSlot } from '@/components/app/AppShellSlot';
+import { notifyError, notifySuccess } from '@/lib/notify';
+
+const DEFAULT_WORKSPACE_SETTING_KEY = 'agent.defaultWorkspaceId';
 
 export default function AgentPage() {
   const { user } = useAuthStore();
@@ -18,52 +21,112 @@ export default function AgentPage() {
     events,
     isRunning,
     addSession,
+    setSessions,
     setCurrentSession,
     addEvent,
     clearEvents,
     setIsRunning,
+    workspaces,
+    setWorkspaces,
     selectedWorkspaceId,
+    setSelectedWorkspaceId,
   } = useAgentStore();
   
-  const [input, setInput] = useState('');
+  const [newSessionTitle, setNewSessionTitle] = useState('');
+  const [taskInput, setTaskInput] = useState('');
   const [files, setFiles] = useState<File[]>([]);
-  const [sessionsList, setSessionsList] = useState<typeof sessions>([]);
+  const [bootstrapping, setBootstrapping] = useState(false);
 
   useEffect(() => {
     if (user) {
-      loadSessions();
+      void bootstrap();
     }
   }, [user]);
 
+  const bootstrap = async () => {
+    setBootstrapping(true);
+    try {
+      const [{ sessions }, { workspaces: workspacesResp }, { settings }] = await Promise.all([
+        api.agent.listSessions(),
+        api.workspaces.list(),
+        api.settings.get([DEFAULT_WORKSPACE_SETTING_KEY]),
+      ]);
+
+      setSessions(sessions as never[]);
+      setWorkspaces(workspacesResp as never[]);
+
+      const defaultWorkspaceId = settings?.[DEFAULT_WORKSPACE_SETTING_KEY] || null;
+      const exists = typeof defaultWorkspaceId === 'string'
+        && (workspacesResp as any[]).some((ws: any) => ws?.id === defaultWorkspaceId);
+
+      if (exists) {
+        setSelectedWorkspaceId(defaultWorkspaceId);
+        return;
+      }
+
+      const first = (workspacesResp as any[])[0]?.id as string | undefined;
+      if (first) {
+        setSelectedWorkspaceId(first);
+        // Best-effort: keep server setting in sync.
+        try {
+          await api.settings.set(DEFAULT_WORKSPACE_SETTING_KEY, first);
+        } catch {
+          // Ignore; user can still switch manually.
+        }
+      }
+    } catch (error) {
+      notifyError('加载失败', error instanceof Error ? error.message : '无法加载 Agent 数据');
+    } finally {
+      setBootstrapping(false);
+    }
+  };
+
   const loadSessions = async () => {
     try {
-      const { sessions: s } = await api.agent.listSessions();
-      setSessionsList(s as never[]);
+      const { sessions } = await api.agent.listSessions();
+      setSessions(sessions as never[]);
     } catch (error) {
-      console.error('Failed to load sessions:', error);
+      notifyError('刷新失败', error instanceof Error ? error.message : '无法刷新会话列表');
+    }
+  };
+
+  const workspaceOptions = workspaces.map((ws) => ({ value: ws.id, label: ws.name }));
+  const handleWorkspaceChange = async (nextId: string | null) => {
+    const prev = selectedWorkspaceId;
+    setSelectedWorkspaceId(nextId);
+    try {
+      await api.settings.set(DEFAULT_WORKSPACE_SETTING_KEY, nextId);
+      notifySuccess('已保存', '默认 Workspace 已更新');
+    } catch (error) {
+      setSelectedWorkspaceId(prev);
+      notifyError('保存失败', error instanceof Error ? error.message : '无法保存默认 Workspace');
     }
   };
 
   const handleNewSession = async () => {
-    if (!input.trim()) return;
+    if (!newSessionTitle.trim()) return;
     
     try {
       const { session } = await api.agent.createSession({
-        title: input.trim(),
+        title: newSessionTitle.trim(),
         workspaceId: selectedWorkspaceId || undefined,
       });
       addSession(session as never);
       setCurrentSession(session as never);
-      setInput('');
+      setNewSessionTitle('');
+      await loadSessions();
     } catch (error) {
-      console.error('Failed to create session:', error);
+      notifyError('创建失败', error instanceof Error ? error.message : '无法创建会话');
     }
   };
 
   const handleRun = async () => {
-    const hasInput = input.trim().length > 0;
+    const hasInput = taskInput.trim().length > 0;
     const hasFiles = files.length > 0;
-    if ((!hasInput && !hasFiles) || !currentSession || isRunning || !selectedWorkspaceId) return;
+    if ((!hasInput && !hasFiles) || !currentSession || isRunning) return;
+
+    const hasWorkspace = Boolean(selectedWorkspaceId || currentSession.workspaceId);
+    if (!hasWorkspace) return;
     
     setIsRunning(true);
     clearEvents();
@@ -79,7 +142,9 @@ export default function AgentPage() {
         setFiles([]);
       }
 
-      const response = await api.agent.runSession(currentSession.id, input.trim(), attachmentIds);
+      const prompt = taskInput.trim();
+      setTaskInput('');
+      const response = await api.agent.runSession(currentSession.id, prompt, attachmentIds);
       
       if (!response.ok) {
         throw new Error('Failed to run agent');
@@ -113,8 +178,8 @@ export default function AgentPage() {
               
               <TextInput
                 placeholder="New task..."
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
+                value={newSessionTitle}
+                onChange={(e) => setNewSessionTitle(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleNewSession()}
                 rightSection={
                   <Button size="xs" variant="light" onClick={handleNewSession}>
@@ -125,7 +190,7 @@ export default function AgentPage() {
               
               <ScrollArea flex={1}>
                 <Stack gap="xs">
-                  {sessionsList.map((session) => (
+                  {sessions.map((session) => (
                     <Paper
                       key={session.id}
                       p="sm"
@@ -146,7 +211,7 @@ export default function AgentPage() {
                     </Paper>
                   ))}
                   
-              {sessionsList.length === 0 && (
+              {sessions.length === 0 && (
                 <Text size="sm" c="dimmed" ta="center" py="xl">
                   No sessions yet
                 </Text>
@@ -164,11 +229,31 @@ export default function AgentPage() {
             <Text fw={500}>
               {currentSession ? currentSession.title : 'Select a session'}
             </Text>
-            {isRunning && <Loader size="sm" />}
+            <Group gap="xs">
+              {(isRunning || bootstrapping) && <Loader size="sm" />}
+              <Button size="xs" variant="light" onClick={() => void loadSessions()}>
+                Refresh
+              </Button>
+            </Group>
           </Group>
-          {!selectedWorkspaceId && (
+
+          <Group justify="space-between" wrap="nowrap">
+            <Select
+              data={workspaceOptions}
+              value={selectedWorkspaceId}
+              onChange={(value) => void handleWorkspaceChange(value || null)}
+              placeholder={workspaces.length === 0 ? 'No workspaces' : 'Select workspace'}
+              disabled={workspaces.length === 0}
+              style={{ flex: 1 }}
+            />
+            <Button component="a" href="/settings" variant="light">
+              Workspaces
+            </Button>
+          </Group>
+
+          {workspaces.length === 0 && (
             <Text size="sm" c="dimmed">
-              Select a workspace in Settings &gt; Agent to run tasks.
+              需要先创建 Workspace 才能运行 Agent。
             </Text>
           )}
               
@@ -208,8 +293,8 @@ export default function AgentPage() {
                   <Group>
                     <TextInput
                       placeholder="Describe what you want the agent to do..."
-                      value={input}
-                      onChange={(e) => setInput(e.target.value)}
+                      value={taskInput}
+                      onChange={(e) => setTaskInput(e.target.value)}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter' && !e.shiftKey) {
                           e.preventDefault();
@@ -217,7 +302,7 @@ export default function AgentPage() {
                         }
                       }}
                       style={{ flex: 1 }}
-                      disabled={!currentSession || isRunning || !selectedWorkspaceId}
+                      disabled={!currentSession || isRunning || workspaces.length === 0}
                     />
                     <FileButton
                       onChange={(selected) => {
@@ -229,7 +314,7 @@ export default function AgentPage() {
                       multiple
                     >
                       {(props) => (
-                        <Button variant="light" {...props} disabled={!currentSession || isRunning || !selectedWorkspaceId}>
+                        <Button variant="light" {...props} disabled={!currentSession || isRunning || workspaces.length === 0}>
                           Attach
                         </Button>
                       )}
@@ -237,7 +322,7 @@ export default function AgentPage() {
                     <Button
                       onClick={handleRun}
                       loading={isRunning}
-                      disabled={!currentSession || (!input.trim() && files.length === 0) || !selectedWorkspaceId}
+                      disabled={!currentSession || (!taskInput.trim() && files.length === 0) || workspaces.length === 0}
                     >
                       <IconSend size={18} />
                     </Button>
