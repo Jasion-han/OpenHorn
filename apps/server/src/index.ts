@@ -10,6 +10,9 @@ import agentRoutes from './routes/agent';
 import workspaceRoutes from './routes/workspace';
 import mcpRoutes from './routes/mcp';
 import attachmentRoutes from './routes/attachments';
+import { bootstrapDatabase } from './db/bootstrap';
+
+await bootstrapDatabase();
 
 const app = new Hono();
 

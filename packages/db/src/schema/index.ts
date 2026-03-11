@@ -38,6 +38,7 @@ export const conversations = sqliteTable('conversations', {
   id: text('id').primaryKey(),
   userId: text('user_id').notNull().references(() => users.id),
   channelId: text('channel_id').references(() => channels.id),
+  modelId: text('model_id'),
   title: text('title').notNull(),
   systemPrompt: text('system_prompt'),
   contextLength: integer('context_length').default(4096),

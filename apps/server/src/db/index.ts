@@ -1,10 +1,13 @@
 import { drizzle } from 'drizzle-orm/libsql';
 import { createClient } from '@libsql/client';
 import * as schema from 'db';
+import { fileURLToPath } from 'node:url';
 
-const client = createClient({
-  // Use env override in all environments; fall back to repo-local sqlite file.
-  url: process.env.DATABASE_URL || 'file:./data/openhorn.db',
+const defaultDbFilePath = fileURLToPath(new URL('../../../../data/openhorn.db', import.meta.url));
+const defaultDbUrl = `file:${defaultDbFilePath}`;
+
+export const client = createClient({
+  url: process.env.DATABASE_URL || defaultDbUrl,
 });
 
 export const db = drizzle(client, { schema });
