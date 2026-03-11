@@ -12,7 +12,7 @@ import {
   Paper,
   Button,
 } from '@mantine/core';
-import { IconSearch } from '@tabler/icons-react';
+import { IconRefresh, IconSearch } from '@tabler/icons-react';
 import { api, type ApiChannel } from '@/lib/api';
 import { notifyError, notifySuccess } from '@/lib/notify';
 import { useChatStore } from '@/stores/chatStore';
@@ -71,6 +71,42 @@ export function ModelPickerModal(props: {
       .filter((g) => g.models.length > 0);
   }, [groups, query]);
 
+  const handleSyncModels = async () => {
+    setBusy(true);
+    try {
+      const { channels: currentChannels } = await api.channels.list();
+      const enabled = currentChannels.filter((c) => c.enabled);
+
+      const results = await Promise.allSettled(
+        enabled.map(async (c) => ({ channel: c, result: await api.channels.fetchModels(c.id) }))
+      );
+
+      const failed: Array<{ name: string; error: string }> = [];
+      for (const r of results) {
+        if (r.status === 'rejected') {
+          failed.push({ name: '未知渠道', error: r.reason instanceof Error ? r.reason.message : '同步失败' });
+          continue;
+        }
+        if (!r.value.result.success) {
+          failed.push({ name: r.value.channel.name, error: r.value.result.error || '同步失败' });
+        }
+      }
+
+      const { channels: next } = await api.channels.list();
+      setChannels(next);
+
+      if (failed.length > 0) {
+        notifyError('同步未完成', `${failed[0].name}: ${failed[0].error}`);
+      } else {
+        notifySuccess('同步完成', '已更新模型列表');
+      }
+    } catch (error) {
+      notifyError('同步失败', error instanceof Error ? error.message : '无法同步模型列表');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const handleSelect = async (channelId: string, modelId: string) => {
     setBusy(true);
     try {
@@ -87,12 +123,23 @@ export function ModelPickerModal(props: {
   return (
     <Modal opened={opened} onClose={onClose} title="选择模型" size="lg" centered>
       <Stack gap="sm">
-        <TextInput
-          placeholder="搜索渠道或模型..."
-          leftSection={<IconSearch size={16} />}
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
+        <Group gap="sm" wrap="nowrap" align="flex-start">
+          <TextInput
+            style={{ flex: 1 }}
+            placeholder="搜索渠道或模型..."
+            leftSection={<IconSearch size={16} />}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+          <Button
+            variant="light"
+            leftSection={<IconRefresh size={16} />}
+            onClick={() => void handleSyncModels()}
+            loading={busy}
+          >
+            同步
+          </Button>
+        </Group>
 
         <ScrollArea h={420} type="auto">
           <Stack gap="md" pr="sm">
@@ -158,4 +205,3 @@ export function ModelPickerModal(props: {
     </Modal>
   );
 }
-

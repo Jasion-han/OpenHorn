@@ -78,7 +78,8 @@ export interface ResolvedChannel {
 const PROVIDER_DEFAULT_BASE_URLS: Record<string, string> = {
   anthropic: 'https://api.anthropic.com',
   openai: 'https://api.openai.com/v1',
-  deepseek: 'https://api.deepseek.com',
+  // DeepSeek is OpenAI-compatible; include /v1 so runtime endpoints resolve correctly.
+  deepseek: 'https://api.deepseek.com/v1',
   google: 'https://generativelanguage.googleapis.com',
 };
 
@@ -97,6 +98,16 @@ function normalizeBaseUrl(baseUrl: string): string {
   return baseUrl.trim().replace(/\/+$/, '');
 }
 
+function normalizeOpenAICompatibleApiBaseUrl(baseUrl: string): string {
+  let url = normalizeBaseUrl(baseUrl);
+  // Accept users pasting full endpoints; canonicalize to .../v1
+  url = url.replace(/\/(chat\/completions|completions|models)$/, '');
+  if (!url.match(/\/v\d+$/)) {
+    url = `${url}/v1`;
+  }
+  return url;
+}
+
 function normalizeAnthropicApiBaseUrl(baseUrl: string): string {
   let url = normalizeBaseUrl(baseUrl);
   url = url.replace(/\/messages$/, '');
@@ -110,6 +121,20 @@ function normalizeAnthropicRuntimeBaseUrl(baseUrl: string): string {
   let url = normalizeBaseUrl(baseUrl);
   url = url.replace(/\/messages$/, '');
   return url.replace(/\/v\d+$/, '');
+}
+
+function normalizeChannelBaseUrl(provider: string, baseUrl: string): string {
+  if (provider === 'anthropic') {
+    // Store whatever user provides (root or /v1); runtime/API normalizers handle both.
+    return normalizeBaseUrl(baseUrl);
+  }
+
+  if (provider === 'google') {
+    return normalizeBaseUrl(baseUrl);
+  }
+
+  // Default: OpenAI-compatible
+  return normalizeOpenAICompatibleApiBaseUrl(baseUrl);
 }
 
 function ensureSingleDefaultModel(models: UpdateChannelModelsInput['models']) {
@@ -276,11 +301,16 @@ function getRuntimeBaseUrl(provider: string, baseUrl: string | null) {
     return normalizeAnthropicRuntimeBaseUrl(url);
   }
 
-  return url || undefined;
+  if (provider === 'google') {
+    return url || undefined;
+  }
+
+  // OpenAI / DeepSeek and most relays are OpenAI-compatible. Make sure /v1 is present.
+  return normalizeOpenAICompatibleApiBaseUrl(url) || undefined;
 }
 
 async function fetchOpenAICompatibleModels(baseUrl: string, apiKey: string) {
-  const response = await fetch(`${normalizeBaseUrl(baseUrl)}/models`, {
+  const response = await fetch(`${normalizeOpenAICompatibleApiBaseUrl(baseUrl)}/models`, {
     headers: {
       Authorization: `Bearer ${apiKey}`,
     },
@@ -361,7 +391,7 @@ async function fetchProviderModels(provider: string, baseUrl: string, apiKey: st
 }
 
 async function testOpenAICompatibleChannel(baseUrl: string, apiKey: string) {
-  const response = await fetch(`${normalizeBaseUrl(baseUrl)}/models`, {
+  const response = await fetch(`${normalizeOpenAICompatibleApiBaseUrl(baseUrl)}/models`, {
     headers: {
       Authorization: `Bearer ${apiKey}`,
     },
@@ -441,7 +471,7 @@ export async function createChannel(userId: string, input: CreateChannelInput) {
     name: input.name.trim(),
     provider: input.provider,
     apiKey: encrypt(input.apiKey.trim()),
-    baseUrl: normalizeBaseUrl(input.baseUrl || getDefaultBaseUrl(input.provider) || ''),
+    baseUrl: normalizeChannelBaseUrl(input.provider, input.baseUrl || getDefaultBaseUrl(input.provider) || ''),
     enabled: input.enabled ?? true,
     isDefault: shouldSetDefault,
     createdAt: now,
@@ -470,7 +500,7 @@ export async function createChannel(userId: string, input: CreateChannelInput) {
 }
 
 export async function updateChannel(userId: string, channelId: string, input: UpdateChannelInput) {
-  await getOwnedChannelRow(userId, channelId);
+  const current = await getOwnedChannelRow(userId, channelId);
 
   if (input.isDefault) {
     await setDefaultChannelInternal(userId, channelId);
@@ -485,7 +515,8 @@ export async function updateChannel(userId: string, channelId: string, input: Up
   }
 
   if (input.baseUrl !== undefined) {
-    updates.baseUrl = normalizeBaseUrl(input.baseUrl);
+    const trimmed = input.baseUrl.trim();
+    updates.baseUrl = trimmed ? normalizeChannelBaseUrl(current.provider, trimmed) : null;
   }
 
   if (input.enabled !== undefined) {
@@ -669,6 +700,22 @@ export async function fetchChannelModels(userId: string, channelId: string): Pro
       models: await listChannelModels(userId, channelId),
     };
   } catch (error) {
+    // Common pitfall: many "Claude relay" services expose an OpenAI-compatible API.
+    // If user picked "anthropic" but the endpoint only supports OpenAI-compatible /v1/models,
+    // give a concrete suggestion instead of a generic error.
+    if (channel.provider === 'anthropic') {
+      try {
+        await testOpenAICompatibleChannel(baseUrl, apiKey);
+        return {
+          success: false,
+          error: '该 Base URL 看起来是 OpenAI 兼容接口（支持 /v1/models）。请把 Provider 改为 OpenAI/DeepSeek（OpenAI 兼容），再点击同步模型。',
+          models: [],
+        };
+      } catch {
+        // Ignore; fall through to the original error.
+      }
+    }
+
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Failed to fetch models',
@@ -688,7 +735,19 @@ export async function testChannel(userId: string, channelId: string): Promise<Ch
     }
 
     if (channel.provider === 'anthropic') {
-      await testAnthropicChannel(baseUrl, apiKey);
+      try {
+        await testAnthropicChannel(baseUrl, apiKey);
+      } catch (error) {
+        try {
+          await testOpenAICompatibleChannel(baseUrl, apiKey);
+          return {
+            success: false,
+            error: '你选择了 Anthropic，但该 Base URL/API Key 更像 OpenAI 兼容接口。建议把 Provider 改为 OpenAI/DeepSeek（OpenAI 兼容）。',
+          };
+        } catch {
+          throw error;
+        }
+      }
     } else if (channel.provider === 'google') {
       await testGoogleChannel(baseUrl, apiKey);
     } else {

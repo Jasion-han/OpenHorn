@@ -20,6 +20,7 @@ import {
 import { IconCheck, IconChevronDown, IconChevronUp, IconPlus, IconRefresh, IconStar, IconTrash } from '@tabler/icons-react';
 import { useChatStore } from '../../stores/chatStore';
 import { api, type ApiChannel, type ApiChannelModel } from '../../lib/api';
+import { notifyError, notifySuccess } from '../../lib/notify';
 
 const PROVIDERS = {
   openai: {
@@ -32,7 +33,7 @@ const PROVIDERS = {
   },
   deepseek: {
     name: 'DeepSeek',
-    defaultBaseUrl: 'https://api.deepseek.com',
+    defaultBaseUrl: 'https://api.deepseek.com/v1',
   },
   google: {
     name: 'Google',
@@ -90,19 +91,29 @@ export function ChannelSettings() {
 
     setLoading(true);
     try {
-      await api.channels.create({
+      const { channel } = await api.channels.create({
         name: name.trim(),
         provider,
         apiKey: apiKey.trim(),
         baseUrl: baseUrl.trim() || undefined,
         enabled: true,
       });
+      // Best-effort: try to sync model list right after creating the channel.
+      try {
+        const synced = await api.channels.fetchModels(channel.id);
+        if (!synced.success) {
+          notifyError('模型同步失败', synced.error || '无法获取模型列表');
+        }
+      } catch (error) {
+        notifyError('模型同步失败', error instanceof Error ? error.message : '无法获取模型列表');
+      }
       setModalOpen(false);
       resetForm();
       await loadChannels();
+      notifySuccess('已创建渠道', '渠道已保存');
     } catch (error) {
       console.error('Failed to create channel:', error);
-      alert(error instanceof Error ? error.message : 'Failed to create channel');
+      notifyError('创建失败', error instanceof Error ? error.message : 'Failed to create channel');
     } finally {
       setLoading(false);
     }
@@ -114,7 +125,7 @@ export function ChannelSettings() {
       await action();
     } catch (error) {
       console.error('Channel action failed:', error);
-      alert(error instanceof Error ? error.message : 'Operation failed');
+      notifyError('操作失败', error instanceof Error ? error.message : 'Operation failed');
     } finally {
       setBusyKey(null);
     }
@@ -133,7 +144,11 @@ export function ChannelSettings() {
   const handleTest = async (channelId: string) => {
     await runChannelAction(`test:${channelId}`, async () => {
       const result = await api.channels.test(channelId);
-      alert(result.success ? 'Connection successful' : `Connection failed: ${result.error}`);
+      if (result.success) {
+        notifySuccess('连接成功', '该渠道可用');
+      } else {
+        notifyError('连接失败', result.error || '无法连接该渠道');
+      }
     });
   };
 
