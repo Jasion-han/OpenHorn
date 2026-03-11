@@ -183,7 +183,7 @@ export function ChatArea() {
           {messages.map((msg) => (
             <Paper
               key={msg.id}
-              p="sm"
+              p="xs"
               radius="lg"
               bg={msg.role === 'user' ? 'blue.0' : 'gray.0'}
               style={{
