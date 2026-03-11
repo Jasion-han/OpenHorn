@@ -13,8 +13,8 @@ export function getGlobalDefaultChannel(channels: ApiChannel[]): DefaultChannelI
     return null;
   }
 
-  const defaultModel = defaultChannel.models.find((model) => model.isDefault && model.enabled)
-    || defaultChannel.models.find((model) => model.enabled);
+  // Strict: only use the explicitly configured default model.
+  const defaultModel = defaultChannel.models.find((model) => model.isDefault && model.enabled);
 
   if (!defaultModel) {
     return null;

@@ -138,26 +138,25 @@ function normalizeChannelBaseUrl(provider: string, baseUrl: string): string {
 }
 
 function ensureSingleDefaultModel(models: UpdateChannelModelsInput['models']) {
+  // Do not silently pick a default; only ensure there's at most one.
+  // If callers want a default, they must explicitly set it.
   let defaultAssigned = false;
-
-  return models.map((model, index) => {
-    const isDefault = Boolean(model.isDefault);
-    if (isDefault && !defaultAssigned) {
-      defaultAssigned = true;
-      return { ...model, isDefault: true };
-    }
-
-    if (isDefault && defaultAssigned) {
+  return models.map((model) => {
+    const wantsDefault = Boolean(model.isDefault);
+    if (!wantsDefault) {
       return { ...model, isDefault: false };
     }
-
-    if (!defaultAssigned && index === 0) {
-      defaultAssigned = true;
-      return { ...model, isDefault: true };
+    if (defaultAssigned) {
+      return { ...model, isDefault: false };
     }
-
-    return { ...model, isDefault: false };
+    defaultAssigned = true;
+    return { ...model, isDefault: true };
   });
+}
+
+function resolveStrictDefaultModelId(channel: ChannelItem): string | null {
+  const def = channel.models.find((m) => m.isDefault && m.enabled);
+  return def?.modelId || null;
 }
 
 async function ensureLegacyModelMigrated(channelId: string) {
@@ -520,6 +519,9 @@ export async function updateChannel(userId: string, channelId: string, input: Up
   }
 
   if (input.enabled !== undefined) {
+    if (input.enabled === false && current.isDefault) {
+      throw new Error('该渠道是默认渠道，禁用前请先把其他渠道设为默认。');
+    }
     updates.enabled = input.enabled;
   }
 
@@ -545,7 +547,14 @@ export async function updateChannel(userId: string, channelId: string, input: Up
 }
 
 export async function deleteChannel(userId: string, channelId: string) {
-  await getOwnedChannelRow(userId, channelId);
+  const channel = await getOwnedChannelRow(userId, channelId);
+  if (channel.isDefault) {
+    const others = await db.select({ id: channels.id }).from(channels)
+      .where(and(eq(channels.userId, userId), eq(channels.isDefault, false)));
+    if (others.length > 0) {
+      throw new Error('该渠道是默认渠道，删除前请先把其他渠道设为默认。');
+    }
+  }
 
   await db.delete(channelModels).where(eq(channelModels.channelId, channelId));
   await db.delete(channels)
@@ -573,6 +582,16 @@ export async function updateChannelModels(userId: string, channelId: string, inp
       }))
       .filter((model) => model.modelId.length > 0)
   );
+
+  const defaults = normalizedModels.filter((m) => m.isDefault);
+  if (defaults.some((m) => !m.enabled)) {
+    throw new Error('默认模型必须是启用状态。请先启用该模型，或选择其他启用的模型作为默认。');
+  }
+
+  const enabledModels = normalizedModels.filter((m) => m.enabled);
+  if (enabledModels.length > 0 && defaults.length === 0) {
+    throw new Error('请设置一个启用的默认模型（用于 Chat/Agent）。');
+  }
 
   const existingModels = await db.select().from(channelModels)
     .where(eq(channelModels.channelId, channelId));
@@ -626,18 +645,27 @@ export async function updateChannelModels(userId: string, channelId: string, inp
 }
 
 export async function setDefaultChannel(userId: string, channelId: string) {
-  await getOwnedChannelRow(userId, channelId);
+  const channel = await getOwnedChannelRow(userId, channelId);
+  if (!channel.enabled) {
+    throw new Error('该渠道已被禁用，无法设为默认。');
+  }
   await setDefaultChannelInternal(userId, channelId);
   return { success: true };
 }
 
 export async function setDefaultChannelModel(userId: string, channelId: string, modelId: string) {
-  await getOwnedChannelRow(userId, channelId);
+  const channel = await getOwnedChannelRow(userId, channelId);
+  if (!channel.enabled) {
+    throw new Error('该渠道已被禁用，无法设置默认模型。');
+  }
 
   const models = await listChannelModels(userId, channelId);
   const target = models.find((model) => model.modelId === modelId);
   if (!target) {
     throw new Error('Model not found');
+  }
+  if (!target.enabled) {
+    throw new Error('该模型已被禁用，无法设为默认。');
   }
 
   await setDefaultModelInternal(channelId, modelId);
@@ -766,7 +794,7 @@ export async function testChannel(userId: string, channelId: string): Promise<Ch
 export async function getResolvedChannelForUser(userId: string, requestedChannelId?: string | null): Promise<ResolvedChannel | null> {
   const targetChannel = requestedChannelId
     ? await getOwnedChannelItem(userId, requestedChannelId)
-    : (await getChannels(userId)).find((channel) => channel.isDefault) || null;
+    : (await getChannels(userId)).find((channel) => channel.isDefault && channel.enabled) || null;
 
   if (!targetChannel || !targetChannel.enabled) {
     return null;
@@ -796,13 +824,10 @@ export function resolveModelIdFromChannelItem(channel: ChannelItem, requestedMod
     if (exact) {
       return exact.modelId;
     }
+    return null;
   }
 
-  const fallback = channel.models.find((model) => model.isDefault && model.enabled)
-    || channel.models.find((model) => model.enabled)
-    || null;
-
-  return fallback?.modelId || channel.legacyModel || null;
+  return resolveStrictDefaultModelId(channel);
 }
 
 export async function getResolvedChannelForConversation(
@@ -813,29 +838,28 @@ export async function getResolvedChannelForConversation(
   const requestedModelId = typeof conversation.modelId === 'string' ? conversation.modelId : null;
 
   if (requestedChannelId) {
-    try {
-      const targetChannel = await getOwnedChannelItem(userId, requestedChannelId);
-      if (targetChannel?.enabled) {
-        const row = await getOwnedChannelRow(userId, targetChannel.id);
-        const modelId = requestedModelId
-          ? (targetChannel.models.find((model) => model.modelId === requestedModelId && model.enabled)?.modelId || null)
-          : resolveModelIdFromChannelItem(targetChannel, null);
-        if (modelId) {
-          const channelWithRuntimeBaseUrl: ChannelItem = {
-            ...targetChannel,
-            baseUrl: getRuntimeBaseUrl(targetChannel.provider, row.baseUrl || targetChannel.baseUrl),
-          };
-
-          return {
-            channel: channelWithRuntimeBaseUrl,
-            apiKey: decrypt(row.apiKey),
-            modelId,
-          };
-        }
-      }
-    } catch {
-      // Fall back to the global default resolution.
+    const targetChannel = await getOwnedChannelItem(userId, requestedChannelId);
+    if (!targetChannel?.enabled) {
+      return null;
     }
+    const row = await getOwnedChannelRow(userId, targetChannel.id);
+    const modelId = requestedModelId
+      ? (targetChannel.models.find((model) => model.modelId === requestedModelId && model.enabled)?.modelId || null)
+      : resolveModelIdFromChannelItem(targetChannel, null);
+    if (!modelId) {
+      return null;
+    }
+
+    const channelWithRuntimeBaseUrl: ChannelItem = {
+      ...targetChannel,
+      baseUrl: getRuntimeBaseUrl(targetChannel.provider, row.baseUrl || targetChannel.baseUrl),
+    };
+
+    return {
+      channel: channelWithRuntimeBaseUrl,
+      apiKey: decrypt(row.apiKey),
+      modelId,
+    };
   }
 
   return getResolvedChannelForUser(userId, null);

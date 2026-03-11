@@ -94,9 +94,15 @@ channels.delete('/:id', async (c) => {
     return c.json({ error: 'Unauthorized' }, 401);
   }
   
-  const channelId = c.req.param('id');
-  await deleteChannel(user.id, channelId);
-  return c.json({ success: true });
+  try {
+    const channelId = c.req.param('id');
+    await deleteChannel(user.id, channelId);
+    return c.json({ success: true });
+  } catch (error) {
+    return c.json({
+      error: error instanceof Error ? error.message : 'Failed to delete channel',
+    }, 400);
+  }
 });
 
 channels.post('/:id/test', async (c) => {

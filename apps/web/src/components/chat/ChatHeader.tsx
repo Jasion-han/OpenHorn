@@ -33,7 +33,7 @@ export function ChatHeader() {
           {isStreaming && <Text size="xs" c="blue">Thinking...</Text>}
         </div>
 
-        {effective ? (
+        {effective.ok ? (
           <Group gap="xs" wrap="nowrap">
             {effective.source === 'global' && (
               <Badge variant="light" color="gray">继承默认</Badge>
@@ -45,6 +45,18 @@ export function ChatHeader() {
               styles={{ label: { fontWeight: 600 } }}
             >
               {effective.label}
+            </Button>
+          </Group>
+        ) : effective.scope === 'conversation' ? (
+          <Group gap="xs" wrap="nowrap">
+            <Badge variant="light" color="orange">对话模型异常</Badge>
+            <Button
+              size="xs"
+              variant="light"
+              onClick={() => setOpened(true)}
+              styles={{ label: { fontWeight: 600 } }}
+            >
+              修复模型
             </Button>
           </Group>
         ) : (
@@ -60,15 +72,20 @@ export function ChatHeader() {
         )}
       </Group>
 
-      {effective && (
+      {opened && (
         <ModelPickerModal
           opened={opened}
           onClose={() => setOpened(false)}
           conversationId={currentConversation.id}
-          current={{ channelId: effective.channelId, modelId: effective.modelId }}
+          current={
+            currentConversation.channelId && currentConversation.modelId
+              ? { channelId: currentConversation.channelId, modelId: currentConversation.modelId }
+              : effective.ok
+                ? { channelId: effective.channelId, modelId: effective.modelId }
+                : null
+          }
         />
       )}
     </>
   );
 }
-

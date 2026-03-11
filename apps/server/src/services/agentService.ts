@@ -153,7 +153,7 @@ export async function* runAgent(
   const resolvedChannel = await getResolvedChannelForUser(userId, null);
 
   if (!resolvedChannel) {
-    yield { type: 'error', content: 'No channel configured' };
+    yield { type: 'error', content: '未配置可用的默认渠道/默认模型。请先在设置中完成配置。' };
     return;
   }
 

@@ -208,13 +208,13 @@ export function ChannelSettings() {
     <Stack gap="md">
       <Group justify="space-between">
         <div>
-          <Text fw={600}>AI Channels</Text>
+          <Text fw={600}>渠道配置</Text>
           <Text size="sm" c="dimmed">
-            Global user-level providers shared by Chat and Agent.
+            全局用户级配置，Chat 与 Agent 共用。
           </Text>
         </div>
         <Button leftSection={<IconPlus size={16} />} onClick={() => setModalOpen(true)}>
-          Add Channel
+          添加渠道
         </Button>
       </Group>
 
@@ -227,8 +227,8 @@ export function ChannelSettings() {
                 <div>
                   <Group gap="xs" mb={4}>
                     <Text fw={600}>{channel.name}</Text>
-                    {channel.isDefault && <Badge color="blue">Default</Badge>}
-                    {!channel.enabled && <Badge color="gray">Disabled</Badge>}
+                    {channel.isDefault && <Badge color="blue">默认</Badge>}
+                    {!channel.enabled && <Badge color="gray">已禁用</Badge>}
                   </Group>
                   <Group gap="xs">
                     <Badge variant="light">{channel.provider}</Badge>
@@ -236,7 +236,7 @@ export function ChannelSettings() {
                       <Badge variant="outline">{channel.defaultModelId}</Badge>
                     )}
                     <Text size="sm" c="dimmed">
-                      {channel.baseUrl || 'No Base URL'}
+                      {channel.baseUrl || '未设置 Base URL'}
                     </Text>
                   </Group>
                 </div>
@@ -286,15 +286,15 @@ export function ChannelSettings() {
               <Collapse in={isExpanded}>
                 <Stack gap="xs" mt="sm">
                   <Group justify="space-between">
-                    <Text size="sm" fw={500}>Models</Text>
+                    <Text size="sm" fw={500}>模型</Text>
                     <Text size="xs" c="dimmed">
-                      {channel.models.length} synced
+                      已同步 {channel.models.length} 个
                     </Text>
                   </Group>
 
                   {channel.models.length === 0 ? (
                     <Text size="sm" c="dimmed">
-                      No models yet. Use refresh to sync models from the provider.
+                      暂无模型。点击上方同步按钮拉取模型列表。
                     </Text>
                   ) : (
                     channel.models.map((model) => (
@@ -317,7 +317,7 @@ export function ChannelSettings() {
                             onClick={() => void handleSetDefaultModel(channel, model.modelId)}
                             loading={busyKey === `default-model:${channel.id}:${model.modelId}`}
                           >
-                            {model.isDefault ? 'Default' : 'Set Default'}
+                            {model.isDefault ? '默认' : '设为默认'}
                           </Button>
                         </Group>
                       </Card>
@@ -333,23 +333,23 @@ export function ChannelSettings() {
       {channels.length === 0 && (
         <Card withBorder>
           <Text c="dimmed" ta="center" py="xl">
-            No channels configured. Add a channel to connect your models.
+            还没有渠道。添加一个渠道来连接你的模型。
           </Text>
         </Card>
       )}
 
-      <Modal opened={modalOpen} onClose={() => setModalOpen(false)} title="Add Channel">
+      <Modal opened={modalOpen} onClose={() => setModalOpen(false)} title="添加渠道">
         <Stack gap="md">
           <TextInput
-            label="Name"
-            placeholder="My OpenAI"
+            label="名称"
+            placeholder="例如：我的 OpenAI"
             value={name}
             onChange={(event) => setName(event.target.value)}
             required
           />
 
           <Select
-            label="Provider"
+            label="厂商"
             value={provider}
             onChange={handleProviderChange}
             data={providerOptions}
@@ -363,7 +363,7 @@ export function ChannelSettings() {
 
           <PasswordInput
             label="API Key"
-            placeholder="Enter your API key"
+            placeholder="输入 API Key"
             value={apiKey}
             onChange={(event) => setApiKey(event.target.value)}
             required
@@ -371,10 +371,10 @@ export function ChannelSettings() {
 
           <Group justify="flex-end">
             <Button variant="subtle" onClick={() => setModalOpen(false)}>
-              Cancel
+              取消
             </Button>
             <Button onClick={() => void handleCreate()} loading={loading}>
-              Create
+              创建
             </Button>
           </Group>
         </Stack>
@@ -383,7 +383,7 @@ export function ChannelSettings() {
       {busyKey && (
         <Group gap="xs">
           <Loader size="sm" />
-          <Text size="sm" c="dimmed">Applying channel update...</Text>
+          <Text size="sm" c="dimmed">正在应用配置...</Text>
         </Group>
       )}
     </Stack>

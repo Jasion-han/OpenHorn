@@ -1,7 +1,7 @@
 import { test, expect } from 'bun:test';
 import { resolveModelIdFromChannelItem } from './channelService';
 
-test('resolveModelIdFromChannelItem prefers explicit modelId when enabled, otherwise falls back to default', () => {
+test('resolveModelIdFromChannelItem returns explicit modelId only when enabled; otherwise returns null; global default is strict', () => {
   const channel: any = {
     id: 'c1',
     enabled: true,
@@ -13,6 +13,6 @@ test('resolveModelIdFromChannelItem prefers explicit modelId when enabled, other
   };
 
   expect(resolveModelIdFromChannelItem(channel, 'm1')).toBe('m1');
-  expect(resolveModelIdFromChannelItem(channel, 'disabled')).toBe('m2');
+  expect(resolveModelIdFromChannelItem(channel, 'disabled')).toBe(null);
+  expect(resolveModelIdFromChannelItem(channel, null)).toBe('m2');
 });
-

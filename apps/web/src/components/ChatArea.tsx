@@ -39,10 +39,15 @@ export function ChatArea() {
     }
   }, [messages]);
 
-  const effectiveModel = getEffectiveModelForConversation(channels, currentConversation);
+  const effective = getEffectiveModelForConversation(channels, currentConversation);
   const hasInput = Boolean(input.trim());
   const hasFiles = files.length > 0;
-  const canSend = Boolean(effectiveModel) && Boolean(currentConversation) && !isLoading && !isUploading && (hasInput || hasFiles);
+  const canSend =
+    effective.ok
+    && Boolean(currentConversation)
+    && !isLoading
+    && !isUploading
+    && (hasInput || hasFiles);
 
   const handleSend = async () => {
     if (!canSend || !currentConversation) return;
@@ -207,14 +212,23 @@ export function ChatArea() {
         </div>
       </div>
 
-      {!effectiveModel && (
+      {!effective.ok && (
         <div style={{ paddingLeft: PAGE_PAD, paddingRight: PAGE_PAD }}>
-          <Alert color="orange" mb="sm" title="需要先完成设置">
-            未配置默认渠道或模型，请先完成设置后再开始对话。
-            <Button component="a" href="/settings" size="xs" variant="light" ml="sm">
-              去设置
-            </Button>
-          </Alert>
+          {effective.scope === 'conversation' ? (
+            <Alert color="orange" mb="sm" title="当前对话模型不可用">
+              {effective.reason}
+              <Text size="xs" c="dimmed" mt={6}>
+                点击顶部右侧的「修复模型」即可重新选择。
+              </Text>
+            </Alert>
+          ) : (
+            <Alert color="orange" mb="sm" title="需要先完成设置">
+              {effective.reason}
+              <Button component="a" href="/settings" size="xs" variant="light" ml="sm">
+                去设置
+              </Button>
+            </Alert>
+          )}
         </div>
       )}
 
@@ -254,7 +268,7 @@ export function ChatArea() {
                 minRows={1}
                 maxRows={6}
                 // Allow typing while streaming; only sending is blocked via canSend.
-                disabled={!effectiveModel || isUploading}
+                disabled={!effective.ok || isUploading}
                 ref={inputRef}
               />
               <FileButton
@@ -267,14 +281,14 @@ export function ChatArea() {
                 multiple
               >
                 {(props) => (
-                  <Button variant="light" {...props} disabled={!effectiveModel || isLoading || isUploading}>
+                  <Button variant="light" {...props} disabled={!effective.ok || isUploading}>
                     Attach
                   </Button>
                 )}
               </FileButton>
-              {effectiveModel && (
+              {effective.ok && (
                 <Badge variant="light" color="gray">
-                  {effectiveModel.label}
+                  {effective.label}
                 </Badge>
               )}
               <Button

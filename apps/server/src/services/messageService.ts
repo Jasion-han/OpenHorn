@@ -161,7 +161,9 @@ export async function sendMessage(userId: string, input: SendMessageInput) {
     }
     responseModel = resolvedChannel.modelId;
   } else {
-    responseContent = 'No channel configured. Please set up a channel first.';
+    responseContent = conversation.channelId
+      ? '该对话选择的渠道/模型不可用（可能已被禁用或已删除）。请在对话中重新选择模型。'
+      : '未配置可用的默认渠道/默认模型。请先在设置中完成配置后再开始对话。';
   }
   
   const assistantMessageId = generateId();
@@ -243,7 +245,12 @@ export async function streamMessage(userId: string, input: StreamMessageInput): 
 
     const resolvedChannel = await getResolvedChannelForConversation(userId, conversation);
     if (!resolvedChannel) {
-      send({ type: 'error', message: 'No channel configured' });
+      send({
+        type: 'error',
+        message: conversation.channelId
+          ? '该对话选择的渠道/模型不可用（可能已被禁用或已删除）。请在对话中重新选择模型。'
+          : '未配置可用的默认渠道/默认模型。请先在设置中完成配置后再开始对话。',
+      });
       return;
     }
 
