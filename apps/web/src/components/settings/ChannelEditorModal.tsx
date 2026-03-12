@@ -35,8 +35,7 @@ export type ChannelEditorMode = 'create' | 'edit';
 
 export type ChannelEditorModalProps = {
   opened: boolean;
-  mode: ChannelEditorMode;
-  channel?: ApiChannel | null;
+  channels: ApiChannel[];
   onClose: () => void;
   onSaved: (channelId: string) => void | Promise<void>;
   applyFetchModelsOutcome: (channelId: string, result: { success: boolean; error?: string }) => void;
@@ -62,7 +61,10 @@ function readLastBaseUrl(): string {
 }
 
 export function ChannelEditorModal(props: ChannelEditorModalProps) {
-  const { opened, mode, channel, onClose, onSaved, applyFetchModelsOutcome } = props;
+  const { opened, channels, onClose, onSaved, applyFetchModelsOutcome } = props;
+
+  const [mode, setMode] = useState<ChannelEditorMode>('create');
+  const [selectedChannelId, setSelectedChannelId] = useState<string | null>(null);
 
   const [name, setName] = useState('');
   const [provider, setProvider] = useState<ProviderKey>('openai');
@@ -76,45 +78,114 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
     []
   );
 
-  useEffect(() => {
-    if (!opened) return;
+  const modeOptions = useMemo(
+    () => ([
+      { value: 'edit', label: '编辑已有渠道' },
+      { value: 'create', label: '新增渠道' },
+    ] satisfies Array<{ value: ChannelEditorMode; label: string }>),
+    []
+  );
 
-    if (mode === 'edit') {
-      const c = channel;
-      const p = c && c.provider in PROVIDERS ? (c.provider as ProviderKey) : 'openai';
-      setName(c?.name || '');
-      setProvider(p);
-      setBaseUrl(c?.baseUrl || '');
-      setEnabled(Boolean(c?.enabled ?? true));
-      setApiKey(c?.hasApiKey ? API_KEY_MASK : '');
-      return;
+  const channelOptions = useMemo(() => {
+    return channels.map((c) => ({
+      value: c.id,
+      label: `${c.name}（${c.provider}${c.enabled ? '' : ' · 已禁用'}${c.isDefault ? ' · 默认' : ''}）`,
+    }));
+  }, [channels]);
+
+  const selectedChannel = useMemo(
+    () => (selectedChannelId ? channels.find((c) => c.id === selectedChannelId) || null : null),
+    [channels, selectedChannelId]
+  );
+
+  const setProviderAndRemember = (next: ProviderKey) => {
+    setProvider(next);
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(LAST_PROVIDER_KEY, next);
     }
+  };
 
-    // create
+  const setBaseUrlAndRemember = (next: string) => {
+    setBaseUrl(next);
+    if (typeof window !== 'undefined' && next.trim()) {
+      window.localStorage.setItem(LAST_BASEURL_KEY, next.trim());
+    }
+  };
+
+  const prefillCreateDefaults = () => {
     const lastProvider = readLastProvider();
     setName('');
     setProvider(lastProvider);
     setBaseUrl(readLastBaseUrl());
     setEnabled(true);
     setApiKey('');
-  }, [opened, mode, channel?.id]);
+  };
+
+  const prefillFromChannel = (c: ApiChannel) => {
+    const p = c.provider in PROVIDERS ? (c.provider as ProviderKey) : 'openai';
+    setName(c.name || '');
+    setProvider(p);
+    setBaseUrl(c.baseUrl || '');
+    setEnabled(Boolean(c.enabled ?? true));
+    setApiKey(c.hasApiKey ? API_KEY_MASK : '');
+  };
+
+  const pickDefaultChannelId = () => {
+    const enabled = channels.filter((c) => c.enabled);
+    const enabledDefault = enabled.find((c) => c.isDefault);
+    if (enabledDefault) return enabledDefault.id;
+    const anyDefault = channels.find((c) => c.isDefault);
+    if (anyDefault) return anyDefault.id;
+    if (channels.length === 0) return null;
+    return channels
+      .slice()
+      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())[0]?.id || null;
+  };
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    window.localStorage.setItem(LAST_PROVIDER_KEY, provider);
-  }, [provider]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    if (baseUrl.trim()) {
-      window.localStorage.setItem(LAST_BASEURL_KEY, baseUrl.trim());
+    if (!opened) return;
+    const nextMode: ChannelEditorMode = channels.length > 0 ? 'edit' : 'create';
+    setMode(nextMode);
+    if (nextMode === 'edit') {
+      const id = pickDefaultChannelId();
+      setSelectedChannelId(id);
+      const c = id ? channels.find((ch) => ch.id === id) || null : null;
+      if (c) {
+        prefillFromChannel(c);
+      }
+    } else {
+      setSelectedChannelId(null);
+      prefillCreateDefaults();
     }
-  }, [baseUrl]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [opened]);
 
-  const title = mode === 'create' ? '添加渠道' : '编辑渠道';
+  useEffect(() => {
+    if (!opened) return;
+    if (mode === 'create') {
+      setSelectedChannelId(null);
+      prefillCreateDefaults();
+      return;
+    }
+
+    // edit
+    if (!selectedChannelId) {
+      const id = pickDefaultChannelId();
+      setSelectedChannelId(id);
+      return;
+    }
+    const c = channels.find((ch) => ch.id === selectedChannelId) || null;
+    if (c) {
+      prefillFromChannel(c);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, selectedChannelId, opened]);
+
+  const title = '渠道编辑器';
   const submitLabel = mode === 'create' ? '创建并同步模型' : '保存并同步模型';
 
   const canSubmitCreate = normalizeCompareText(name) && normalizeCompareText(apiKey) && apiKey.trim() !== API_KEY_MASK;
+  const canSubmitEdit = Boolean(selectedChannel?.id) && normalizeCompareText(name);
 
   const handleSubmit = async () => {
     if (saving) return;
@@ -144,10 +215,11 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
       }
 
       // edit
-      if (!channel?.id) {
+      if (!selectedChannel?.id) {
         notifyError('保存失败', 'Channel not found');
         return;
       }
+      const channel = selectedChannel;
 
       const payload: Record<string, unknown> = {};
 
@@ -190,6 +262,24 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
   return (
     <Modal opened={opened} onClose={onClose} title={title}>
       <Stack gap="md">
+        <Select
+          label="操作"
+          value={mode}
+          onChange={(value) => setMode((value as ChannelEditorMode) || 'edit')}
+          data={modeOptions as any}
+        />
+
+        {mode === 'edit' && (
+          <Select
+            label="选择要编辑的渠道"
+            value={selectedChannelId}
+            onChange={(value) => setSelectedChannelId(value || null)}
+            data={channelOptions}
+            searchable
+            nothingFoundMessage="未找到渠道"
+          />
+        )}
+
         <TextInput
           label="名称"
           value={name}
@@ -200,7 +290,7 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
         <Select
           label="厂商"
           value={provider}
-          onChange={(value) => setProvider((value || 'openai') as ProviderKey)}
+          onChange={(value) => setProviderAndRemember((value || 'openai') as ProviderKey)}
           data={providerOptions}
         />
 
@@ -208,10 +298,10 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
           <TextInput
             label="Base URL"
             value={baseUrl}
-            onChange={(event) => setBaseUrl(event.target.value)}
+            onChange={(event) => setBaseUrlAndRemember(event.target.value)}
             style={{ flex: 1 }}
           />
-          <Button size="xs" variant="light" onClick={() => setBaseUrl(PROVIDERS[provider].defaultBaseUrl)}>
+          <Button size="xs" variant="light" onClick={() => setBaseUrlAndRemember(PROVIDERS[provider].defaultBaseUrl)}>
             填入默认
           </Button>
         </Group>
@@ -235,7 +325,11 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
           <Button variant="subtle" onClick={onClose}>
             取消
           </Button>
-          <Button onClick={() => void handleSubmit()} loading={saving} disabled={mode === 'create' ? !canSubmitCreate : false}>
+          <Button
+            onClick={() => void handleSubmit()}
+            loading={saving}
+            disabled={mode === 'create' ? !canSubmitCreate : !canSubmitEdit}
+          >
             {submitLabel}
           </Button>
         </Group>
@@ -243,4 +337,3 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
     </Modal>
   );
 }
-

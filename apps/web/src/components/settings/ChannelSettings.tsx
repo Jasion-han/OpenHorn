@@ -16,7 +16,7 @@ import {
   Text,
   TextInput,
 } from '@mantine/core';
-import { IconCheck, IconChevronDown, IconChevronUp, IconPencil, IconPlus, IconRefresh, IconRobot, IconStar, IconTrash } from '@tabler/icons-react';
+import { IconCheck, IconChevronDown, IconChevronUp, IconPlus, IconRefresh, IconRobot, IconStar, IconTrash } from '@tabler/icons-react';
 import { useChatStore } from '../../stores/chatStore';
 import { api, type ApiChannel, type ApiChannelModel } from '../../lib/api';
 import { notifyError, notifySuccess } from '../../lib/notify';
@@ -39,8 +39,6 @@ export function ChannelSettings() {
   const router = useRouter();
   const search = useSearchParams();
   const [editorOpen, setEditorOpen] = useState(false);
-  const [editorMode, setEditorMode] = useState<'create' | 'edit'>('create');
-  const [editorChannelId, setEditorChannelId] = useState<string | null>(null);
   const [agentCheckOpen, setAgentCheckOpen] = useState(false);
   const [agentCheckChannelId, setAgentCheckChannelId] = useState<string | null>(null);
   const [agentCheckModelId, setAgentCheckModelId] = useState('');
@@ -74,19 +72,9 @@ export function ChannelSettings() {
 
   const closeEditor = () => {
     setEditorOpen(false);
-    setEditorChannelId(null);
-    setEditorMode('create');
   };
 
-  const openCreate = () => {
-    setEditorMode('create');
-    setEditorChannelId(null);
-    setEditorOpen(true);
-  };
-
-  const openEdit = (channel: ApiChannel) => {
-    setEditorMode('edit');
-    setEditorChannelId(channel.id);
+  const openEditor = () => {
     setEditorOpen(true);
   };
 
@@ -270,7 +258,7 @@ export function ChannelSettings() {
       }
 
       if (!target) {
-        openCreate();
+        openEditor();
       } else {
         setExpandedChannelId(target.id);
         queueMicrotask(() => {
@@ -302,8 +290,8 @@ export function ChannelSettings() {
             全局用户级配置，Chat 与 Agent 共用。
           </Text>
         </div>
-        <Button leftSection={<IconPlus size={16} />} onClick={openCreate}>
-          添加渠道
+        <Button leftSection={<IconPlus size={16} />} onClick={openEditor}>
+          渠道编辑器
         </Button>
       </Group>
 
@@ -335,13 +323,6 @@ export function ChannelSettings() {
                 </div>
 
                 <Group gap="xs">
-                  <ActionIcon
-                    variant="subtle"
-                    onClick={() => openEdit(channel)}
-                    loading={busyKey === `edit:${channel.id}`}
-                  >
-                    <IconPencil size={18} />
-                  </ActionIcon>
                   <ActionIcon
                     variant="subtle"
                     color="grape"
@@ -494,8 +475,7 @@ export function ChannelSettings() {
 
       <ChannelEditorModal
         opened={editorOpen}
-        mode={editorMode}
-        channel={editorMode === 'edit' ? channels.find((c) => c.id === editorChannelId) || null : null}
+        channels={channels}
         onClose={closeEditor}
         onSaved={async (channelId) => {
           await loadChannels();
