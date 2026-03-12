@@ -19,6 +19,7 @@ import { getGlobalDefaultChannel } from '../../lib/default-channel';
 import { api } from '../../lib/api';
 import { useBackendStatusStore } from '../../stores/backendStatusStore';
 import { hideNotification, notifyErrorOnce, notifySuccess } from '../../lib/notify';
+import { buildSettingsLink } from '../../lib/settings-link';
 
 export function AppHeader({ title }: { title: string }) {
   const router = useRouter();
@@ -74,7 +75,7 @@ export function AppHeader({ title }: { title: string }) {
         ) : (
           <Button
             component={Link}
-            href="/settings"
+            href={buildSettingsLink({ tab: 'channels', focus: 'default' })}
             size="xs"
             variant="light"
             leftSection={<IconSettings size={14} />}

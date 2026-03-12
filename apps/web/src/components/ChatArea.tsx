@@ -10,6 +10,7 @@ import { getEffectiveModelForConversation } from '@/lib/effective-model';
 import { ChatHeader } from '@/components/chat/ChatHeader';
 import { WRAP_TEXT } from '@/components/ui/wrapText';
 import { MarkdownMessage } from '@/components/ui/MarkdownMessage';
+import { buildSettingsLink } from '@/lib/settings-link';
 
 const PAGE_PAD = 'var(--mantine-spacing-md)';
 // Keep bottom safe area, but avoid adding extra desktop gap.
@@ -233,7 +234,7 @@ export function ChatArea() {
           ) : (
             <Alert color="orange" mb="sm" title="需要先完成设置">
               {effective.reason}
-              <Button component="a" href="/settings" size="xs" variant="light" ml="sm">
+              <Button component="a" href={buildSettingsLink({ tab: 'channels', focus: 'default' })} size="xs" variant="light" ml="sm">
                 去设置
               </Button>
             </Alert>

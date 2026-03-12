@@ -7,6 +7,7 @@ import { IconSettings } from '@tabler/icons-react';
 import { useChatStore } from '@/stores/chatStore';
 import { getEffectiveModelForConversation } from '@/lib/effective-model';
 import { ModelPickerModal } from './ModelPickerModal';
+import { buildSettingsLink } from '@/lib/settings-link';
 
 export function ChatHeader() {
   const { currentConversation, channels, isStreaming } = useChatStore();
@@ -62,7 +63,7 @@ export function ChatHeader() {
         ) : (
           <Button
             component={Link}
-            href="/settings"
+            href={buildSettingsLink({ tab: 'channels', focus: 'default' })}
             size="xs"
             variant="light"
             leftSection={<IconSettings size={14} />}

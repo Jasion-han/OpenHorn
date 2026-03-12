@@ -22,6 +22,7 @@ import { getGlobalDefaultChannel } from '../../lib/default-channel';
 import { notifyError, notifySuccess } from '../../lib/notify';
 import { DEFAULT_WORKSPACE_SETTING_KEY, pickDefaultWorkspaceId } from '../../lib/agent-default-workspace';
 import { BACKEND_UP_EVENT } from '../../stores/backendStatusStore';
+import { buildSettingsLink } from '@/lib/settings-link';
 
 type MCPServer = {
   id: string;
@@ -262,7 +263,7 @@ export function AgentSettings() {
           {defaultChannel ? (
             <Badge variant="light">{defaultChannel.label}</Badge>
           ) : (
-            <Button component="a" href="/settings" variant="light" size="xs">
+            <Button component="a" href={buildSettingsLink({ tab: 'channels', focus: 'default' })} variant="light" size="xs">
               Go to Channels
             </Button>
           )}
