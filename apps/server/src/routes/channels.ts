@@ -14,6 +14,7 @@ import {
   setDefaultChannel,
   setDefaultChannelModel,
 } from '../services/channelService';
+import { checkChannelAgentCompatibility } from '../services/channelAgentCheckService';
 
 const channels = new Hono();
 
@@ -191,6 +192,27 @@ channels.post('/:id/models/:modelId/set-default', async (c) => {
     return c.json({
       error: error instanceof Error ? error.message : 'Failed to set default model',
     }, 400);
+  }
+});
+
+channels.post('/:id/agent-check', async (c) => {
+  const user = await getUser(c);
+  if (!user) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+
+  try {
+    const channelId = c.req.param('id');
+    const body = await c.req.json().catch(() => ({}));
+    const modelId = typeof (body as any)?.modelId === 'string' ? (body as any).modelId : '';
+
+    const result = await checkChannelAgentCompatibility(user.id, channelId, modelId);
+    return c.json(result);
+  } catch (error) {
+    return c.json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Agent check failed',
+    });
   }
 });
 

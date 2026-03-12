@@ -13,6 +13,9 @@ type SdkOptions = {
   mcpServers?: Record<string, Record<string, unknown>>;
   baseUrl?: string;
   abortController?: AbortController;
+  permissionMode?: string;
+  allowDangerouslySkipPermissions?: boolean;
+  maxTurns?: number;
 };
 
 export async function* runClaudeAgentSdk(options: SdkOptions): AsyncGenerator<AgentEvent> {
@@ -35,8 +38,12 @@ export async function* runClaudeAgentSdk(options: SdkOptions): AsyncGenerator<Ag
       model: options.model,
       apiKey: options.apiKey,
       cwd: options.cwd,
-      permissionMode: 'bypassPermissions',
-      allowDangerouslySkipPermissions: true,
+      permissionMode: options.permissionMode || 'bypassPermissions',
+      allowDangerouslySkipPermissions:
+        options.permissionMode === 'bypassPermissions' || !options.permissionMode
+          ? (options.allowDangerouslySkipPermissions ?? true)
+          : options.allowDangerouslySkipPermissions,
+      maxTurns: options.maxTurns,
       ...(options.mcpServers && Object.keys(options.mcpServers).length > 0
         ? { mcpServers: options.mcpServers }
         : {}),

@@ -879,3 +879,21 @@ export async function getResolvedChannelForConversation(
 export async function getResolvedChannelById(userId: string, channelId: string) {
   return getResolvedChannelForUser(userId, channelId);
 }
+
+export async function getChannelRuntimeCredentialsById(userId: string, channelId: string): Promise<{
+  channel: ChannelItem;
+  apiKey: string;
+}> {
+  const channel = await getOwnedChannelItem(userId, channelId);
+  const row = await getOwnedChannelRow(userId, channelId);
+
+  const channelWithRuntimeBaseUrl: ChannelItem = {
+    ...channel,
+    baseUrl: getRuntimeBaseUrl(channel.provider, row.baseUrl || channel.baseUrl),
+  };
+
+  return {
+    channel: channelWithRuntimeBaseUrl,
+    apiKey: decrypt(row.apiKey),
+  };
+}
