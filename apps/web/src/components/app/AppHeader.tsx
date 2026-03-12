@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
@@ -16,11 +17,15 @@ import { useAuthStore } from '../../stores/authStore';
 import { useChatStore } from '../../stores/chatStore';
 import { getGlobalDefaultChannel } from '../../lib/default-channel';
 import { api } from '../../lib/api';
+import { useBackendStatusStore } from '../../stores/backendStatusStore';
+import { notifyErrorOnce, notifySuccess } from '../../lib/notify';
 
 export function AppHeader({ title }: { title: string }) {
   const router = useRouter();
   const { user, logout } = useAuthStore();
   const { channels, setChannels } = useChatStore();
+  const backend = useBackendStatusStore();
+  const [retrying, setRetrying] = useState(false);
 
   const defaultChannel = getGlobalDefaultChannel(channels);
 
@@ -36,10 +41,33 @@ export function AppHeader({ title }: { title: string }) {
     }
   };
 
+  const handleRetry = async () => {
+    if (retrying) return;
+    setRetrying(true);
+    try {
+      const ok = await backend.retry();
+      if (ok) {
+        notifySuccess('连接已恢复', '已重新连接后端');
+      } else {
+        notifyErrorOnce('backend_down', '后端不可用', '仍然无法连接到后端服务（http://localhost:3000）。');
+      }
+    } finally {
+      setRetrying(false);
+    }
+  };
+
   return (
     <Group justify="space-between" h="100%" px="md">
       <Group gap="sm">
         <Text fw={600}>{title}</Text>
+        {backend.status === 'down' && (
+          <Group gap="xs" wrap="nowrap">
+            <Badge color="red" variant="filled">后端离线</Badge>
+            <Button size="xs" variant="light" color="red" onClick={() => void handleRetry()} loading={retrying}>
+              Retry
+            </Button>
+          </Group>
+        )}
         {defaultChannel ? (
           <Badge variant="light" color="gray">{defaultChannel.label}</Badge>
         ) : (
@@ -80,4 +108,3 @@ export function AppHeader({ title }: { title: string }) {
     </Group>
   );
 }
-
