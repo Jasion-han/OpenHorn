@@ -1,3 +1,6 @@
+import { notifyErrorOnce } from './notify';
+import { useBackendStatusStore } from '../stores/backendStatusStore';
+
 export const API_BASE = 'http://localhost:3000';
 
 export interface ApiUser {
@@ -62,14 +65,26 @@ async function fetchApi<T>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<T> {
-  const response = await fetch(`${API_BASE}${endpoint}`, {
-    ...options,
-    credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      ...options.headers,
-    },
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}${endpoint}`, {
+      ...options,
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        ...options.headers,
+      },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to fetch';
+    // Backend is likely down/unreachable. Mark global status + dedupe the toast.
+    useBackendStatusStore.getState().markDown(message);
+    notifyErrorOnce('backend_down', '后端不可用', '无法连接到后端服务（http://localhost:3000）。请启动 server 后点击 Retry。');
+    throw error;
+  }
+
+  // We got an HTTP response: backend is reachable (even if it's 401/500).
+  useBackendStatusStore.getState().markUp();
   
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: 'Request failed' }));
