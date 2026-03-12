@@ -186,7 +186,7 @@ export function ChatArea() {
           paddingRight: PAGE_PAD,
         }}
       >
-        <div style={{ width: '100%', maxWidth: 1240, margin: '0 auto', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
           <Stack gap="xs" pb="sm" style={{ marginTop: 'auto' }}>
           {messages.map((msg) => (
             <Paper
