@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ActionIcon,
   Badge,
@@ -11,7 +11,6 @@ import {
   Group,
   Loader,
   Modal,
-  PasswordInput,
   Select,
   Stack,
   Text,
@@ -23,31 +22,7 @@ import { api, type ApiChannel, type ApiChannelModel } from '../../lib/api';
 import { notifyError, notifySuccess } from '../../lib/notify';
 import { BACKEND_UP_EVENT } from '../../stores/backendStatusStore';
 import { useRouter, useSearchParams } from 'next/navigation';
-
-const PROVIDERS = {
-  openai: {
-    name: 'OpenAI',
-    defaultBaseUrl: 'https://api.openai.com/v1',
-  },
-  anthropic: {
-    name: 'Anthropic',
-    defaultBaseUrl: 'https://api.anthropic.com',
-  },
-  deepseek: {
-    name: 'DeepSeek',
-    defaultBaseUrl: 'https://api.deepseek.com/v1',
-  },
-  google: {
-    name: 'Google',
-    defaultBaseUrl: 'https://generativelanguage.googleapis.com',
-  },
-};
-
-type ProviderKey = keyof typeof PROVIDERS;
-
-const LAST_PROVIDER_KEY = 'channels.lastProvider';
-const LAST_BASEURL_KEY = 'channels.lastBaseUrl';
-const API_KEY_MASK = '********';
+import { ChannelEditorModal } from './ChannelEditorModal';
 
 function getPreferredChannelToFix(channels: ApiChannel[]): ApiChannel | null {
   const enabled = channels.filter((c) => c.enabled);
@@ -63,39 +38,16 @@ export function ChannelSettings() {
   const { channels, setChannels } = useChatStore();
   const router = useRouter();
   const search = useSearchParams();
-  const [modalOpen, setModalOpen] = useState(false);
-  const [editOpen, setEditOpen] = useState(false);
-  const [editChannelId, setEditChannelId] = useState<string | null>(null);
-  const [editName, setEditName] = useState('');
-  const [editProvider, setEditProvider] = useState<ProviderKey>('openai');
-  const [editBaseUrl, setEditBaseUrl] = useState('');
-  const [editEnabled, setEditEnabled] = useState(true);
-  const [editApiKey, setEditApiKey] = useState('');
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editorMode, setEditorMode] = useState<'create' | 'edit'>('create');
+  const [editorChannelId, setEditorChannelId] = useState<string | null>(null);
   const [agentCheckOpen, setAgentCheckOpen] = useState(false);
   const [agentCheckChannelId, setAgentCheckChannelId] = useState<string | null>(null);
   const [agentCheckModelId, setAgentCheckModelId] = useState('');
-  const [loading, setLoading] = useState(false);
   const [expandedChannelId, setExpandedChannelId] = useState<string | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const didApplyFocusRef = useRef(false);
   const [channelNotice, setChannelNotice] = useState<Record<string, { kind: 'error' | 'warn'; title?: string; message: string; action?: 'switch_openai' }>>({});
-
-  const [name, setName] = useState('');
-  const [provider, setProvider] = useState<ProviderKey>(() => {
-    if (typeof window === 'undefined') return 'openai';
-    const raw = window.localStorage.getItem(LAST_PROVIDER_KEY);
-    return (raw && raw in PROVIDERS ? (raw as ProviderKey) : 'openai');
-  });
-  const [apiKey, setApiKey] = useState('');
-  const [baseUrl, setBaseUrl] = useState(() => {
-    if (typeof window === 'undefined') return PROVIDERS.openai.defaultBaseUrl;
-    return window.localStorage.getItem(LAST_BASEURL_KEY) || PROVIDERS.openai.defaultBaseUrl;
-  });
-
-  const providerOptions = useMemo(
-    () => Object.entries(PROVIDERS).map(([value, item]) => ({ value, label: item.name })),
-    []
-  );
 
   useEffect(() => {
     void loadChannels();
@@ -120,31 +72,22 @@ export function ChannelSettings() {
     }
   };
 
-  const resetForm = () => {
-    setName('');
-    setApiKey('');
-    // Keep last provider/baseUrl preference; only clear per-channel fields.
+  const closeEditor = () => {
+    setEditorOpen(false);
+    setEditorChannelId(null);
+    setEditorMode('create');
   };
 
-  const closeEdit = () => {
-    setEditOpen(false);
-    setEditChannelId(null);
-    setEditName('');
-    setEditProvider('openai');
-    setEditBaseUrl('');
-    setEditEnabled(true);
-    setEditApiKey('');
+  const openCreate = () => {
+    setEditorMode('create');
+    setEditorChannelId(null);
+    setEditorOpen(true);
   };
 
   const openEdit = (channel: ApiChannel) => {
-    const p = (channel.provider in PROVIDERS ? (channel.provider as ProviderKey) : 'openai');
-    setEditChannelId(channel.id);
-    setEditName(channel.name);
-    setEditProvider(p);
-    setEditBaseUrl(channel.baseUrl || '');
-    setEditEnabled(Boolean(channel.enabled));
-    setEditApiKey(channel.hasApiKey ? API_KEY_MASK : '');
-    setEditOpen(true);
+    setEditorMode('edit');
+    setEditorChannelId(channel.id);
+    setEditorOpen(true);
   };
 
   const closeAgentCheck = () => {
@@ -159,71 +102,6 @@ export function ChannelSettings() {
     setAgentCheckOpen(true);
   };
 
-  const handleProviderChange = (value: string | null) => {
-    const nextProvider = (value || 'openai') as ProviderKey;
-    setProvider(nextProvider);
-    const nextBaseUrl = PROVIDERS[nextProvider].defaultBaseUrl;
-    setBaseUrl(nextBaseUrl);
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem(LAST_PROVIDER_KEY, nextProvider);
-      window.localStorage.setItem(LAST_BASEURL_KEY, nextBaseUrl);
-    }
-  };
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    window.localStorage.setItem(LAST_PROVIDER_KEY, provider);
-  }, [provider]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    if (baseUrl.trim()) {
-      window.localStorage.setItem(LAST_BASEURL_KEY, baseUrl.trim());
-    }
-  }, [baseUrl]);
-
-  const handleCreate = async () => {
-    if (!name.trim() || !apiKey.trim()) return;
-
-    setLoading(true);
-    try {
-      const { channel } = await api.channels.create({
-        name: name.trim(),
-        provider,
-        apiKey: apiKey.trim(),
-        baseUrl: baseUrl.trim() || undefined,
-        enabled: true,
-      });
-      // Best-effort: try to sync model list right after creating the channel.
-      try {
-        const synced = await api.channels.fetchModels(channel.id);
-        if (!synced.success) {
-          setChannelNotice((prev) => {
-            const msg = synced.error || '无法获取模型列表';
-            const action = msg.includes('Provider') || msg.includes('OpenAI 兼容') ? 'switch_openai' : undefined;
-            return { ...prev, [channel.id]: { kind: 'error', message: msg, action } };
-          });
-        }
-        if (synced.success && synced.error) {
-          setChannelNotice((prev) => ({ ...prev, [channel.id]: { kind: 'warn', message: synced.error || '' } }));
-        }
-      } catch (error) {
-        const msg = error instanceof Error ? error.message : '无法获取模型列表';
-        setChannelNotice((prev) => ({ ...prev, [channel.id]: { kind: 'error', message: msg } }));
-      }
-      setModalOpen(false);
-      resetForm();
-      await loadChannels();
-      setExpandedChannelId(channel.id);
-      notifySuccess('已创建渠道', '渠道已保存');
-    } catch (error) {
-      console.error('Failed to create channel:', error);
-      notifyError('创建失败', error instanceof Error ? error.message : 'Failed to create channel');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const runChannelAction = async (key: string, action: () => Promise<void>) => {
     setBusyKey(key);
     try {
@@ -235,10 +113,6 @@ export function ChannelSettings() {
       setBusyKey(null);
     }
   };
-
-  const normalizeCompareText = (value: string | null | undefined) => (value || '').trim();
-  const normalizeCompareBaseUrl = (value: string | null | undefined) =>
-    normalizeCompareText(value).replace(/\/+$/, '');
 
   const applyFetchModelsOutcome = (
     channelId: string,
@@ -302,65 +176,6 @@ export function ChannelSettings() {
       if (outcome.ok && !outcome.warn) {
         notifySuccess('同步完成', '已更新模型列表');
       }
-    });
-  };
-
-  const handleSaveEdit = async () => {
-    if (!editChannelId) return;
-
-    const original = channels.find((c) => c.id === editChannelId) || null;
-    if (!original) {
-      notifyError('保存失败', 'Channel not found');
-      return;
-    }
-
-    const payload: Record<string, unknown> = {};
-
-    if (normalizeCompareText(editName) !== normalizeCompareText(original.name)) {
-      payload.name = editName.trim();
-    }
-    if (normalizeCompareText(editProvider) !== normalizeCompareText(original.provider)) {
-      payload.provider = editProvider;
-    }
-    if (normalizeCompareBaseUrl(editBaseUrl) !== normalizeCompareBaseUrl(original.baseUrl)) {
-      payload.baseUrl = editBaseUrl.trim();
-    }
-    if (Boolean(editEnabled) !== Boolean(original.enabled)) {
-      payload.enabled = Boolean(editEnabled);
-    }
-
-    const apiKeyTrimmed = editApiKey.trim();
-    const wantsChangeKey = apiKeyTrimmed.length > 0 && apiKeyTrimmed !== API_KEY_MASK;
-    if (wantsChangeKey) {
-      payload.apiKey = apiKeyTrimmed;
-    }
-
-    await runChannelAction(`edit:${editChannelId}`, async () => {
-      // If no fields changed, skip update but still sync models (user explicitly clicked Save).
-      if (Object.keys(payload).length > 0) {
-        await api.channels.update(editChannelId, payload as any);
-      }
-
-      const sync = await api.channels.fetchModels(editChannelId);
-      await loadChannels();
-      setExpandedChannelId(editChannelId);
-
-      const outcome = applyFetchModelsOutcome(editChannelId, sync);
-      if (Object.keys(payload).length > 0) {
-        if (outcome.ok && !outcome.warn) {
-          notifySuccess('已保存', '已同步模型列表');
-        } else {
-          notifySuccess('已保存', '模型同步结果请看该渠道的提示');
-        }
-      } else {
-        if (outcome.ok && !outcome.warn) {
-          notifySuccess('同步完成', '已更新模型列表');
-        } else {
-          notifySuccess('已执行同步', '模型同步结果请看该渠道的提示');
-        }
-      }
-
-      closeEdit();
     });
   };
 
@@ -455,7 +270,7 @@ export function ChannelSettings() {
       }
 
       if (!target) {
-        setModalOpen(true);
+        openCreate();
       } else {
         setExpandedChannelId(target.id);
         queueMicrotask(() => {
@@ -487,7 +302,7 @@ export function ChannelSettings() {
             全局用户级配置，Chat 与 Agent 共用。
           </Text>
         </div>
-        <Button leftSection={<IconPlus size={16} />} onClick={() => setModalOpen(true)}>
+        <Button leftSection={<IconPlus size={16} />} onClick={openCreate}>
           添加渠道
         </Button>
       </Group>
@@ -677,111 +492,17 @@ export function ChannelSettings() {
         </Card>
       )}
 
-      <Modal opened={modalOpen} onClose={() => setModalOpen(false)} title="添加渠道">
-        <Stack gap="md">
-          <TextInput
-            label="名称"
-            placeholder="例如：我的 OpenAI"
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            required
-          />
-
-          <Select
-            label="厂商"
-            value={provider}
-            onChange={handleProviderChange}
-            data={providerOptions}
-          />
-
-          <TextInput
-            label="Base URL"
-            value={baseUrl}
-            onChange={(event) => setBaseUrl(event.target.value)}
-          />
-
-          <PasswordInput
-            label="API Key"
-            placeholder="输入 API Key"
-            value={apiKey}
-            onChange={(event) => setApiKey(event.target.value)}
-            required
-          />
-
-          <Group justify="flex-end">
-            <Button variant="subtle" onClick={() => setModalOpen(false)}>
-              取消
-            </Button>
-            <Button onClick={() => void handleCreate()} loading={loading}>
-              创建
-            </Button>
-          </Group>
-        </Stack>
-      </Modal>
-
-      <Modal
-        opened={editOpen}
-        onClose={closeEdit}
-        title="编辑渠道"
-      >
-        <Stack gap="md">
-          <TextInput
-            label="名称"
-            value={editName}
-            onChange={(event) => setEditName(event.target.value)}
-            required
-          />
-
-          <Select
-            label="厂商"
-            value={editProvider}
-            onChange={(value) => setEditProvider((value || 'openai') as ProviderKey)}
-            data={providerOptions}
-          />
-
-          <Group align="flex-end">
-            <TextInput
-              label="Base URL"
-              value={editBaseUrl}
-              onChange={(event) => setEditBaseUrl(event.target.value)}
-              style={{ flex: 1 }}
-            />
-            <Button
-              size="xs"
-              variant="light"
-              onClick={() => setEditBaseUrl(PROVIDERS[editProvider].defaultBaseUrl)}
-            >
-              填入默认
-            </Button>
-          </Group>
-
-          <Checkbox
-            label="启用该渠道"
-            checked={editEnabled}
-            onChange={(event) => setEditEnabled(event.currentTarget.checked)}
-          />
-
-          <PasswordInput
-            label="API Key"
-            placeholder="留空或保持为掩码表示不修改"
-            value={editApiKey}
-            onChange={(event) => setEditApiKey(event.target.value)}
-            description="出于安全原因，Web 端不会展示已保存的明文 Key。输入新 Key 才会更新。"
-          />
-
-          <Group justify="flex-end">
-            <Button variant="subtle" onClick={closeEdit}>
-              取消
-            </Button>
-            <Button
-              onClick={() => void handleSaveEdit()}
-              loading={editChannelId ? busyKey === `edit:${editChannelId}` : false}
-            >
-              保存并同步模型
-            </Button>
-          </Group>
-        </Stack>
-      </Modal>
+      <ChannelEditorModal
+        opened={editorOpen}
+        mode={editorMode}
+        channel={editorMode === 'edit' ? channels.find((c) => c.id === editorChannelId) || null : null}
+        onClose={closeEditor}
+        onSaved={async (channelId) => {
+          await loadChannels();
+          setExpandedChannelId(channelId);
+        }}
+        applyFetchModelsOutcome={applyFetchModelsOutcome}
+      />
 
       <Modal
         opened={agentCheckOpen}
