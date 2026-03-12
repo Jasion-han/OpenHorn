@@ -17,7 +17,7 @@ import {
   Text,
   TextInput,
 } from '@mantine/core';
-import { IconCheck, IconChevronDown, IconChevronUp, IconPlus, IconRefresh, IconStar, IconTrash } from '@tabler/icons-react';
+import { IconCheck, IconChevronDown, IconChevronUp, IconPlus, IconRefresh, IconRobot, IconStar, IconTrash } from '@tabler/icons-react';
 import { useChatStore } from '../../stores/chatStore';
 import { api, type ApiChannel, type ApiChannelModel } from '../../lib/api';
 import { notifyError, notifySuccess } from '../../lib/notify';
@@ -63,11 +63,14 @@ export function ChannelSettings() {
   const router = useRouter();
   const search = useSearchParams();
   const [modalOpen, setModalOpen] = useState(false);
+  const [agentCheckOpen, setAgentCheckOpen] = useState(false);
+  const [agentCheckChannelId, setAgentCheckChannelId] = useState<string | null>(null);
+  const [agentCheckModelId, setAgentCheckModelId] = useState('');
   const [loading, setLoading] = useState(false);
   const [expandedChannelId, setExpandedChannelId] = useState<string | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const didApplyFocusRef = useRef(false);
-  const [channelNotice, setChannelNotice] = useState<Record<string, { kind: 'error' | 'warn'; message: string; action?: 'switch_openai' }>>({});
+  const [channelNotice, setChannelNotice] = useState<Record<string, { kind: 'error' | 'warn'; title?: string; message: string; action?: 'switch_openai' }>>({});
 
   const [name, setName] = useState('');
   const [provider, setProvider] = useState<ProviderKey>(() => {
@@ -113,6 +116,18 @@ export function ChannelSettings() {
     setName('');
     setApiKey('');
     // Keep last provider/baseUrl preference; only clear per-channel fields.
+  };
+
+  const closeAgentCheck = () => {
+    setAgentCheckOpen(false);
+    setAgentCheckChannelId(null);
+    setAgentCheckModelId('');
+  };
+
+  const openAgentCheck = (channel: ApiChannel) => {
+    setAgentCheckChannelId(channel.id);
+    setAgentCheckModelId(channel.defaultModelId || channel.models.find((m) => m.isDefault)?.modelId || '');
+    setAgentCheckOpen(true);
   };
 
   const handleProviderChange = (value: string | null) => {
@@ -249,6 +264,35 @@ export function ChannelSettings() {
     });
   };
 
+  const handleAgentCheck = async (channelId: string, modelId: string) => {
+    const trimmed = modelId.trim();
+    if (!trimmed) {
+      notifyError('缺少模型', '请选择或输入一个 modelId');
+      return;
+    }
+
+    await runChannelAction(`agent-check:${channelId}`, async () => {
+      const result = await api.channels.agentCheck(channelId, { modelId: trimmed });
+      if (result.success) {
+        setChannelNotice((prev) => {
+          if (!prev[channelId]) return prev;
+          const { [channelId]: _, ...rest } = prev;
+          return rest;
+        });
+        notifySuccess('Agent 兼容', '该渠道可用于 Agent');
+        closeAgentCheck();
+        return;
+      }
+
+      const msg = result.error || 'Agent 检查失败';
+      setChannelNotice((prev) => ({
+        ...prev,
+        [channelId]: { kind: 'error', title: 'Agent 检查失败', message: msg },
+      }));
+      closeAgentCheck();
+    });
+  };
+
   const handleSetDefaultChannel = async (channelId: string) => {
     await runChannelAction(`default-channel:${channelId}`, async () => {
       await api.channels.setDefault(channelId);
@@ -352,6 +396,7 @@ export function ChannelSettings() {
         const isExpanded = expandedChannelId === channel.id;
         const needsDefaultModel = Boolean(channel.isDefault && channel.enabled && !channel.defaultModelId);
         const notice = channelNotice[channel.id] || null;
+        const agentCheckKey = `agent-check:${channel.id}`;
         return (
           <Card key={channel.id} withBorder id={`channel-${channel.id}`}>
             <Stack gap="sm">
@@ -375,6 +420,14 @@ export function ChannelSettings() {
                 </div>
 
                 <Group gap="xs">
+                  <ActionIcon
+                    variant="subtle"
+                    color="grape"
+                    onClick={() => openAgentCheck(channel)}
+                    disabled={busyKey === agentCheckKey}
+                  >
+                    <IconRobot size={18} />
+                  </ActionIcon>
                   <ActionIcon
                     variant="subtle"
                     color="blue"
@@ -421,7 +474,7 @@ export function ChannelSettings() {
                   <Group justify="space-between" wrap="nowrap" align="flex-start">
                     <div style={{ minWidth: 0 }}>
                       <Text size="sm" fw={600}>
-                        {notice.kind === 'error' ? '同步失败' : '需要处理'}
+                        {notice.title || (notice.kind === 'error' ? '同步失败' : '需要处理')}
                       </Text>
                       <Text size="sm" c="dimmed" style={{ whiteSpace: 'pre-wrap' }}>
                         {notice.message}
@@ -554,6 +607,68 @@ export function ChannelSettings() {
             </Button>
             <Button onClick={() => void handleCreate()} loading={loading}>
               创建
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      <Modal
+        opened={agentCheckOpen}
+        onClose={closeAgentCheck}
+        title="Agent 兼容性检查"
+      >
+        <Stack gap="md">
+          {(() => {
+            const channel = channels.find((c) => c.id === agentCheckChannelId) || null;
+            const items = (channel?.models || []).map((m) => ({
+              value: m.modelId,
+              label: m.enabled ? m.displayName : `${m.displayName}（已禁用）`,
+            }));
+
+            if (!channel) {
+              return (
+                <Text size="sm" c="dimmed">
+                  请选择一个渠道。
+                </Text>
+              );
+            }
+
+            if (items.length === 0) {
+              return (
+                <TextInput
+                  label="modelId"
+                  placeholder="例如：claude-4.5-sonnet"
+                  value={agentCheckModelId}
+                  onChange={(e) => setAgentCheckModelId(e.target.value)}
+                  required
+                />
+              );
+            }
+
+            return (
+              <Select
+                label="选择 modelId"
+                value={agentCheckModelId}
+                onChange={(v) => setAgentCheckModelId(v || '')}
+                data={items}
+                searchable
+                nothingFoundMessage="未找到模型"
+              />
+            );
+          })()}
+
+          <Group justify="flex-end">
+            <Button variant="subtle" onClick={closeAgentCheck}>
+              取消
+            </Button>
+            <Button
+              onClick={() => {
+                if (!agentCheckChannelId) return;
+                void handleAgentCheck(agentCheckChannelId, agentCheckModelId);
+              }}
+              loading={agentCheckChannelId ? busyKey === `agent-check:${agentCheckChannelId}` : false}
+            >
+              开始检查
             </Button>
           </Group>
         </Stack>
