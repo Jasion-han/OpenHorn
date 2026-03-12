@@ -92,6 +92,7 @@ const SCHEMA_DDL: string[] = [
 
   `CREATE TABLE IF NOT EXISTS mcp_servers (
     id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
     workspace_id TEXT,
     name TEXT NOT NULL,
     type TEXT NOT NULL,
@@ -99,6 +100,7 @@ const SCHEMA_DDL: string[] = [
     is_enabled INTEGER DEFAULT 1,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id),
     FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
   );`,
 
@@ -134,6 +136,35 @@ async function ensureConversationModelIdColumn(): Promise<void> {
   }
 }
 
+async function ensureMcpServerUserIdColumn(): Promise<void> {
+  const result = await client.execute(`PRAGMA table_info('mcp_servers');`);
+  const rows = (result as any).rows as Array<Record<string, unknown>> | undefined;
+  const hasColumn = (rows || []).some((row) => row.name === 'user_id' || row['name'] === 'user_id');
+  if (!hasColumn) {
+    await client.execute(`ALTER TABLE mcp_servers ADD COLUMN user_id TEXT;`);
+
+    // Best-effort backfill: prefer deriving ownership from workspace_id.
+    // If a server isn't bound to a workspace, and there's exactly one user, attach it to that user.
+    await client.execute(`
+      UPDATE mcp_servers
+      SET user_id = (
+        SELECT user_id FROM workspaces WHERE workspaces.id = mcp_servers.workspace_id
+      )
+      WHERE user_id IS NULL AND workspace_id IS NOT NULL;
+    `);
+
+    const users = await client.execute(`SELECT id FROM users LIMIT 2;`);
+    const userRows = (users as any).rows as Array<{ id?: string }> | undefined;
+    if (Array.isArray(userRows) && userRows.length === 1 && userRows[0]?.id) {
+      await client.execute(`
+        UPDATE mcp_servers
+        SET user_id = '${userRows[0].id}'
+        WHERE user_id IS NULL;
+      `);
+    }
+  }
+}
+
 export async function bootstrapDatabase(): Promise<void> {
   await client.execute('PRAGMA foreign_keys=ON;');
 
@@ -143,5 +174,5 @@ export async function bootstrapDatabase(): Promise<void> {
 
   // Backward compatible alter for databases created before model_id existed.
   await ensureConversationModelIdColumn();
+  await ensureMcpServerUserIdColumn();
 }
-

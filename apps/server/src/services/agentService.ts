@@ -4,7 +4,7 @@ import { eq, and } from 'drizzle-orm';
 import { generateId } from '../utils';
 import { getResolvedChannelForUser } from './channelService';
 import { runClaudeAgentSdk } from './agentSdk';
-import { loadEnabledMcpServers } from './mcpLoader';
+import { loadEnabledMcpServersForUser } from './mcpLoader';
 import { buildAttachmentContextFromIds } from './attachmentService';
 import { getSettingValues } from './settingsService';
 
@@ -189,7 +189,7 @@ export async function* runAgent(
       ? (prompt.trim() ? `${prompt}\n\n${attachmentContext}` : attachmentContext)
       : prompt;
 
-    const mcpServers = await loadEnabledMcpServers();
+    const mcpServers = await loadEnabledMcpServersForUser(userId);
     for await (const event of runClaudeAgentSdk({
       apiKey: resolvedChannel.apiKey,
       model: resolvedChannel.modelId,

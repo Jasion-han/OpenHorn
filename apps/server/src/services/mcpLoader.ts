@@ -1,6 +1,6 @@
 import { db } from '../db';
 import { mcpServers } from 'db';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 
 export type McpServerConfigMap = Record<string, Record<string, unknown>>;
 
@@ -13,8 +13,9 @@ type RawMcpServer = {
 };
 
 export async function loadEnabledMcpServers(): Promise<McpServerConfigMap> {
+export async function loadEnabledMcpServersForUser(userId: string): Promise<McpServerConfigMap> {
   const rows = await db.select().from(mcpServers)
-    .where(eq(mcpServers.isEnabled, true));
+    .where(and(eq(mcpServers.userId, userId), eq(mcpServers.isEnabled, true)));
 
   return buildMcpServerMap(rows as RawMcpServer[]);
 }

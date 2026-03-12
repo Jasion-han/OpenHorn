@@ -81,6 +81,7 @@ export const agentSessions = sqliteTable('agent_sessions', {
 
 export const mcpServers = sqliteTable('mcp_servers', {
   id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id),
   workspaceId: text('workspace_id').references(() => workspaces.id),
   name: text('name').notNull(),
   type: text('type').notNull(),
