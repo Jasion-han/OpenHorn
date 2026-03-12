@@ -352,6 +352,7 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
                         style={{
                           background: selected ? 'var(--mantine-color-blue-light)' : undefined,
                           opacity: c.enabled ? 1 : 0.72,
+                          cursor: 'pointer',
                         }}
                       >
                         <Group justify="space-between" wrap="nowrap" gap="xs">
@@ -376,7 +377,7 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
                             </Group>
                           </div>
                           <Text size="xs" c="dimmed" style={{ whiteSpace: 'nowrap' }}>
-                            {c.models.length}
+                            {c.models.length} 模型
                           </Text>
                         </Group>
                       </Paper>
@@ -412,7 +413,7 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
                   style={{ flex: 1 }}
                   label="渠道"
                   value={isCreate ? null : activeKey}
-                  placeholder="选择一个渠道..."
+                  placeholder={isCreate ? '新建草稿' : '选择一个渠道...'}
                   onChange={(value) => {
                     if (!value) return;
                     openEdit(value);
@@ -445,10 +446,19 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
                   Provider 切换不会自动修改 Base URL。保存后会自动同步模型列表。
                 </Text>
               </div>
-              {!isCreate && activeChannel?.isDefault && (
-                <Badge variant="outline" color="blue">
-                  默认
-                </Badge>
+              {!isCreate && (
+                <Group gap={6} wrap="nowrap">
+                  {activeChannel?.isDefault && (
+                    <Badge variant="outline" color="blue">
+                      默认
+                    </Badge>
+                  )}
+                  {activeChannel && !activeChannel.enabled && (
+                    <Badge color="gray">
+                      已禁用
+                    </Badge>
+                  )}
+                </Group>
               )}
             </Group>
 
