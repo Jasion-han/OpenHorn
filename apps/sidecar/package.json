@@ -1,0 +1,21 @@
+{
+  "name": "sidecar",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun run --watch src/index.ts",
+    "start": "bun run src/index.ts",
+    "build": "bun build src/index.ts --outdir dist",
+    "compile:mac": "bun build src/index.ts --compile --outfile dist/openhorn-sidecar",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "bun-types": "^1.2.0",
+    "typescript": "^5.0.0"
+  }
+}
+
