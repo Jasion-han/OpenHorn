@@ -8,6 +8,8 @@ import { useAuthStore } from '../../stores/authStore';
 import { useChatStore } from '../../stores/chatStore';
 import { BACKEND_UP_EVENT } from '../../stores/backendStatusStore';
 
+const UNAUTHORIZED_EVENT = 'openhorn:unauthorized';
+
 export function AuthBootstrap({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -48,10 +50,19 @@ export function AuthBootstrap({ children }: { children: React.ReactNode }) {
     const onBackendUp = () => {
       void run();
     };
+    const onUnauthorized = () => {
+      logout();
+      setChannels([]);
+      if (!cancelled && pathname !== '/login') {
+        router.replace('/login');
+      }
+    };
     window.addEventListener(BACKEND_UP_EVENT, onBackendUp);
+    window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
     return () => {
       cancelled = true;
       window.removeEventListener(BACKEND_UP_EVENT, onBackendUp);
+      window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
     };
   }, [logout, pathname, router, setChannels, setUser]);
 

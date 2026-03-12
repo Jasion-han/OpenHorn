@@ -2,6 +2,14 @@ import { notifications } from '@mantine/notifications';
 
 const lastShownAt = new Map<string, number>();
 
+export function hideNotification(id: string) {
+  try {
+    notifications.hide(id);
+  } catch {
+    // Best-effort; ignore if notifications provider isn't ready.
+  }
+}
+
 export function notifyErrorOnce(key: string, title: string, message: string, ttlMs = 10_000) {
   const now = Date.now();
   const prev = lastShownAt.get(key) ?? 0;

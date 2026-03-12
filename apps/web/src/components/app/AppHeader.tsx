@@ -18,7 +18,7 @@ import { useChatStore } from '../../stores/chatStore';
 import { getGlobalDefaultChannel } from '../../lib/default-channel';
 import { api } from '../../lib/api';
 import { useBackendStatusStore } from '../../stores/backendStatusStore';
-import { notifyErrorOnce, notifySuccess } from '../../lib/notify';
+import { hideNotification, notifyErrorOnce, notifySuccess } from '../../lib/notify';
 
 export function AppHeader({ title }: { title: string }) {
   const router = useRouter();
@@ -47,6 +47,7 @@ export function AppHeader({ title }: { title: string }) {
     try {
       const ok = await backend.retry();
       if (ok) {
+        hideNotification('backend_down');
         notifySuccess('连接已恢复', '已重新连接后端');
       } else {
         notifyErrorOnce('backend_down', '后端不可用', '仍然无法连接到后端服务（http://localhost:3000）。');

@@ -1,7 +1,11 @@
 import { notifyErrorOnce } from './notify';
 import { useBackendStatusStore } from '../stores/backendStatusStore';
+import { useAuthStore } from '../stores/authStore';
+import { useChatStore } from '../stores/chatStore';
 
 export const API_BASE = 'http://localhost:3000';
+
+const UNAUTHORIZED_EVENT = 'openhorn:unauthorized';
 
 export interface ApiUser {
   id: string;
@@ -85,6 +89,20 @@ async function fetchApi<T>(
 
   // We got an HTTP response: backend is reachable (even if it's 401/500).
   useBackendStatusStore.getState().markUp();
+
+  if (response.status === 401) {
+    notifyErrorOnce('unauthorized', '登录已失效', '登录状态已失效，请重新登录。');
+    // Best-effort: clear client auth state so UI doesn't look "logged in but broken".
+    try {
+      useAuthStore.getState().logout();
+      useChatStore.getState().setChannels([]);
+    } catch {
+      // ignore
+    }
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
+    }
+  }
   
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: 'Request failed' }));
