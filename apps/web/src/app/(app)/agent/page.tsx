@@ -254,7 +254,6 @@ export default function AgentPage() {
     
     setIsRunning(true);
     clearEvents();
-    addEvent({ type: 'text', content: '已开始运行...' });
     
     try {
       let attachmentIds: string[] = [];
@@ -277,15 +276,29 @@ export default function AgentPage() {
         throw new Error(errorText || 'Failed to run agent');
       }
       
+      // Best-effort: mark as active when starting a new run.
+      setSessions(sessions.map((s: any) => (s.id === currentSession.id ? { ...s, status: 'active' } : s)) as never[]);
+
+      let sawError = false;
       await readSseStream(response, (event) => {
+        if ((event as any)?.type === 'error') {
+          sawError = true;
+        }
         addEvent(event as AgentEvent);
       });
+
+      // Mark completed when the stream ends without an error event.
+      if (!sawError) {
+        try {
+          await api.agent.updateStatus(currentSession.id, 'completed');
+          await loadSessions();
+        } catch {
+          // ignore
+        }
+      }
     } catch (error) {
       // User-initiated cancel: do not show as error.
       if (abortController.signal.aborted || (error instanceof DOMException && error.name === 'AbortError')) {
-        if (!didCancelRef.current) {
-          addEvent({ type: 'text', content: '已停止运行。' });
-        }
         return;
       }
       addEvent({ 
@@ -304,13 +317,23 @@ export default function AgentPage() {
   const handleCancel = () => {
     didCancelRef.current = true;
     try {
-      runAbortRef.current?.abort();
+      // Provide a reason for server-side abort handling where supported.
+      (runAbortRef.current as any)?.abort?.('user');
     } catch {
       // ignore
     }
     runAbortRef.current = null;
     setIsRunning(false);
-    addEvent({ type: 'text', content: '已停止运行。' });
+    if (currentSession) {
+      void (async () => {
+        try {
+          await api.agent.updateStatus(currentSession.id, 'cancelled');
+          await loadSessions();
+        } catch {
+          // ignore
+        }
+      })();
+    }
     queueMicrotask(() => inputRef.current?.focus());
   };
 
@@ -423,9 +446,15 @@ export default function AgentPage() {
                       </Group>
 
                       <Group gap={6} mt={6}>
-                        <Badge size="xs" variant="light" color={session.status === 'completed' ? 'green' : 'gray'}>
-                          {session.status === 'active' ? '进行中' : session.status === 'completed' ? '已完成' : '已取消'}
-                        </Badge>
+                        {isRunning && currentSession?.id === session.id ? (
+                          <Badge size="xs" variant="light" color="blue">
+                            运行中
+                          </Badge>
+                        ) : (
+                          <Badge size="xs" variant="light" color={session.status === 'completed' ? 'green' : session.status === 'cancelled' ? 'red' : 'gray'}>
+                            {session.status === 'active' ? '进行中' : session.status === 'completed' ? '已完成' : '已取消'}
+                          </Badge>
+                        )}
                       </Group>
                     </Paper>
                   ))}

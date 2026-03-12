@@ -217,7 +217,7 @@ export async function deleteMessage(userId: string, messageId: string) {
 }
 
 export async function streamMessage(userId: string, input: StreamMessageInput): Promise<ReadableStream> {
-  return createSseStream(async (send) => {
+  return createSseStream(async (send, _ctx) => {
     const conversation = await getConversationForUser(userId, input.conversationId);
 
     const userMessageId = generateId();

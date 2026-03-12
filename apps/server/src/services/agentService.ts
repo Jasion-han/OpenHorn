@@ -138,6 +138,8 @@ export async function* runAgent(
   attachmentIds: string[] = [],
   abortController?: AbortController
 ): AsyncGenerator<AgentEvent> {
+  const controller = abortController || new AbortController();
+  const signal = controller.signal;
   const session = await getAgentSessionById(userId, sessionId);
   if (!session) {
     yield { type: 'error', content: 'Session not found' };
@@ -185,24 +187,48 @@ export async function* runAgent(
   const cwd = workspace[0].cwd || undefined;
   
   try {
-    const attachmentContext = await buildAttachmentContextFromIds(attachmentIds);
-    const finalPrompt = attachmentContext
-      ? (prompt.trim() ? `${prompt}\n\n${attachmentContext}` : attachmentContext)
-      : prompt;
+    try {
+      const attachmentContext = await buildAttachmentContextFromIds(attachmentIds);
+      const finalPrompt = attachmentContext
+        ? (prompt.trim() ? `${prompt}\n\n${attachmentContext}` : attachmentContext)
+        : prompt;
 
-    const mcpServers = await loadEnabledMcpServersForUser(userId);
-    for await (const event of runClaudeAgentSdk({
-      apiKey: resolvedChannel.apiKey,
-      model: resolvedChannel.modelId,
-      prompt: finalPrompt,
-      cwd,
-      baseUrl: resolvedChannel.channel.baseUrl || undefined,
-      mcpServers,
-      abortController,
-    })) {
-      yield event;
+      const mcpServers = await loadEnabledMcpServersForUser(userId);
+      for await (const event of runClaudeAgentSdk({
+        apiKey: resolvedChannel.apiKey,
+        model: resolvedChannel.modelId,
+        prompt: finalPrompt,
+        cwd,
+        baseUrl: resolvedChannel.channel.baseUrl || undefined,
+        mcpServers,
+        abortController: controller,
+      })) {
+        yield event;
+      }
+    } finally {
+      // Timers are managed at the route layer (first output / idle). Keep this clean.
     }
   } catch (error) {
+    if (signal.aborted) {
+      const reason = (signal as any).reason;
+      if (reason === 'client_disconnect' || reason === 'user') {
+        return;
+      }
+      if (reason === 'first_output_timeout') {
+        yield {
+          type: 'error',
+          content: '模型长时间无响应（20s）已停止。可能当前渠道不支持 Agent 运行模式，请检查 Provider/Base URL/模型配置。',
+        };
+        return;
+      }
+      if (reason === 'idle_timeout') {
+        yield {
+          type: 'error',
+          content: '运行过程中长时间无响应（120s）已停止。请检查渠道配置或减少任务复杂度后重试。',
+        };
+        return;
+      }
+    }
     yield {
       type: 'error',
       content: error instanceof Error ? error.message : 'Agent error',

@@ -30,7 +30,7 @@ export function createSseStream(
           // If the client disconnects, enqueue may throw. Treat it as closed.
           closed = true;
           try {
-            abortController?.abort();
+            abortController?.abort('client_disconnect');
           } catch {
             // ignore
           }
@@ -61,7 +61,7 @@ export function createSseStream(
     cancel() {
       // Client disconnected: abort the handler so upstream operations can stop.
       try {
-        abortController?.abort();
+        abortController?.abort('client_disconnect');
       } catch {
         // ignore
       }

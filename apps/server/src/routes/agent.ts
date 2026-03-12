@@ -84,15 +84,52 @@ agent.post('/sessions/:id/run', async (c) => {
   }
   
   const stream = createSseStream(async (send, ctx) => {
-    send({ type: 'text', content: '已连接 Agent 服务，开始执行...' });
-    for await (const event of runAgent(
+    let sawAny = false;
+    let idleTimer: ReturnType<typeof setTimeout> | null = null;
+    const clearIdle = () => {
+      if (idleTimer) clearTimeout(idleTimer);
+      idleTimer = null;
+    };
+
+    // If the provider doesn't produce any output quickly, fail fast instead of hanging forever.
+    const firstOutputTimer = setTimeout(() => {
+      try {
+        ctx.abortController.abort('first_output_timeout');
+      } catch {
+        // ignore
+      }
+    }, 20_000);
+
+    const armIdle = () => {
+      clearIdle();
+      idleTimer = setTimeout(() => {
+        try {
+          ctx.abortController.abort('idle_timeout');
+        } catch {
+          // ignore
+        }
+      }, 120_000);
+    };
+
+    try {
+      armIdle();
+      for await (const event of runAgent(
       user.id,
       sessionId,
       typeof prompt === 'string' ? prompt : '',
       Array.isArray(attachments) ? attachments : [],
       ctx.abortController
     )) {
+        if (!sawAny) {
+          sawAny = true;
+          clearTimeout(firstOutputTimer);
+        }
+        armIdle();
       send(event);
+    }
+    } finally {
+      clearTimeout(firstOutputTimer);
+      clearIdle();
     }
   });
   

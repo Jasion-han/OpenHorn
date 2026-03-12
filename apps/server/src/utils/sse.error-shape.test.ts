@@ -29,4 +29,3 @@ describe('createSseStream', () => {
     expect(payload.content).toBe('boom');
   });
 });
-
