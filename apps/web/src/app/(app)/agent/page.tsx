@@ -60,6 +60,13 @@ export default function AgentPage() {
   const runAbortRef = useRef<AbortController | null>(null);
   const didCancelRef = useRef(false);
 
+  const patchSessionStatus = (sessionId: string, status: 'active' | 'completed' | 'cancelled') => {
+    const st = useAgentStore.getState();
+    st.setSessions(
+      st.sessions.map((s: any) => (s.id === sessionId ? { ...s, status } : s)) as never[]
+    );
+  };
+
   const bootstrap = useCallback(async () => {
     setBootstrapping(true);
     try {
@@ -231,6 +238,8 @@ export default function AgentPage() {
     const hasFiles = files.length > 0;
     if ((!hasInput && !hasFiles) || !currentSession || isRunning) return;
 
+    const sessionId = currentSession.id;
+
     if (!defaultChannel) {
       notifyError('无法运行', '未配置可用的默认渠道/默认模型，请先在设置中完成配置。');
       return;
@@ -254,6 +263,15 @@ export default function AgentPage() {
     
     setIsRunning(true);
     clearEvents();
+    // Show what the user asked, so the timeline is never "blank".
+    const userText = hasInput
+      ? taskInput.trim()
+      : files.length > 0
+        ? `附件：${files.map((f) => f.name).join(', ')}`
+        : '';
+    if (userText) {
+      addEvent({ type: 'user', content: userText });
+    }
     
     try {
       let attachmentIds: string[] = [];
@@ -266,10 +284,10 @@ export default function AgentPage() {
         setFiles([]);
       }
 
-    const prompt = taskInput.trim();
-    setTaskInput('');
-    queueMicrotask(() => inputRef.current?.focus());
-      const response = await api.agent.runSession(currentSession.id, prompt, attachmentIds, { signal: abortController.signal });
+      const prompt = taskInput.trim();
+      setTaskInput('');
+      queueMicrotask(() => inputRef.current?.focus());
+      const response = await api.agent.runSession(sessionId, prompt, attachmentIds, { signal: abortController.signal });
       
       if (!response.ok) {
         const errorText = await response.text().catch(() => '');
@@ -277,7 +295,7 @@ export default function AgentPage() {
       }
       
       // Best-effort: mark as active when starting a new run.
-      setSessions(sessions.map((s: any) => (s.id === currentSession.id ? { ...s, status: 'active' } : s)) as never[]);
+      patchSessionStatus(sessionId, 'active');
 
       let sawError = false;
       await readSseStream(response, (event) => {
@@ -290,7 +308,16 @@ export default function AgentPage() {
       // Mark completed when the stream ends without an error event.
       if (!sawError) {
         try {
-          await api.agent.updateStatus(currentSession.id, 'completed');
+          await api.agent.updateStatus(sessionId, 'completed');
+          patchSessionStatus(sessionId, 'completed');
+          await loadSessions();
+        } catch {
+          // ignore
+        }
+      } else {
+        try {
+          await api.agent.updateStatus(sessionId, 'cancelled');
+          patchSessionStatus(sessionId, 'cancelled');
           await loadSessions();
         } catch {
           // ignore
@@ -305,6 +332,13 @@ export default function AgentPage() {
         type: 'error', 
         content: error instanceof Error ? error.message : 'Error running agent' 
       });
+      try {
+        await api.agent.updateStatus(sessionId, 'cancelled');
+        patchSessionStatus(sessionId, 'cancelled');
+        await loadSessions();
+      } catch {
+        // ignore
+      }
     } finally {
       setIsRunning(false);
       if (runAbortRef.current === abortController) {
@@ -328,6 +362,7 @@ export default function AgentPage() {
       void (async () => {
         try {
           await api.agent.updateStatus(currentSession.id, 'cancelled');
+          patchSessionStatus(currentSession.id, 'cancelled');
           await loadSessions();
         } catch {
           // ignore

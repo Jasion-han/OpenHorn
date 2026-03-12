@@ -9,6 +9,24 @@ import { MarkdownMessage } from '@/components/ui/MarkdownMessage';
 export function AgentEventCard({ event }: { event: AgentEvent }) {
   const [open, setOpen] = useState(false);
 
+  if (event.type === 'user') {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'flex-end', width: '100%' }}>
+        <Paper
+          p="sm"
+          radius="md"
+          bg="blue.0"
+          withBorder
+          style={{ maxWidth: '72%' }}
+        >
+          <Text size="sm" style={WRAP_TEXT}>
+            {event.content || ''}
+          </Text>
+        </Paper>
+      </div>
+    );
+  }
+
   const background =
     event.type === 'error'
       ? 'red.0'

@@ -18,7 +18,8 @@ export interface AgentSession {
 }
 
 export interface AgentEvent {
-  type: 'text' | 'tool_start' | 'tool_result' | 'done' | 'error';
+  // 'user' is a local-only event to show what the user just ran.
+  type: 'user' | 'text' | 'tool_start' | 'tool_result' | 'done' | 'error';
   content?: string;
   toolName?: string;
   toolInput?: unknown;
