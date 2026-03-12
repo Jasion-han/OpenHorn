@@ -1,13 +1,13 @@
 'use client';
 
-import { useCallback, useState, useEffect, useRef } from 'react';
+import { useCallback, useState, useEffect, useRef, useMemo } from 'react';
 import { Paper, TextInput, Button, Stack, Text, Group, ScrollArea, Badge, FileButton, ActionIcon, Menu, Alert, Textarea } from '@mantine/core';
 import { modals } from '@mantine/modals';
 import Link from 'next/link';
 import { IconCheck, IconDots, IconPencil, IconSend, IconPlus, IconRobot, IconTrash, IconSettings, IconBriefcase } from '@tabler/icons-react';
 import { useAgentStore, type AgentEvent } from '@/stores/agentStore';
 import { useAuthStore } from '@/stores/authStore';
-import { api } from '@/lib/api';
+import { api, type ApiChannel } from '@/lib/api';
 import { readSseStream } from '@/lib/sse';
 import { uploadAttachments } from '@/lib/attachments';
 import { AppShellSlot } from '@/components/app/AppShellSlot';
@@ -15,6 +15,8 @@ import { notifyError, notifySuccess } from '@/lib/notify';
 import { DEFAULT_WORKSPACE_SETTING_KEY, pickDefaultWorkspaceId } from '@/lib/agent-default-workspace';
 import { AgentEventCard } from '@/components/agent/AgentEventCard';
 import { BACKEND_UP_EVENT } from '@/stores/backendStatusStore';
+import { getGlobalDefaultChannel } from '@/lib/default-channel';
+import { buildSettingsLink } from '@/lib/settings-link';
 
 const PAGE_PAD = 'var(--mantine-spacing-md)';
 const COMPOSER_PAD_BOTTOM = 'env(safe-area-inset-bottom, 0px)';
@@ -52,20 +54,23 @@ export default function AgentPage() {
   const [taskInput, setTaskInput] = useState('');
   const [files, setFiles] = useState<File[]>([]);
   const [bootstrapping, setBootstrapping] = useState(false);
+  const [channels, setChannels] = useState<ApiChannel[]>([]);
   const viewportRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const bootstrap = useCallback(async () => {
     setBootstrapping(true);
     try {
-      const [{ sessions }, { workspaces: workspacesResp }, { settings }] = await Promise.all([
+      const [{ sessions }, { workspaces: workspacesResp }, { settings }, { channels: channelsResp }] = await Promise.all([
         api.agent.listSessions(),
         api.workspaces.list(),
         api.settings.get([DEFAULT_WORKSPACE_SETTING_KEY]),
+        api.channels.list(),
       ]);
 
       setSessions(sessions as never[]);
       setWorkspaces(workspacesResp as never[]);
+      setChannels(channelsResp);
 
       const picked = pickDefaultWorkspaceId(workspacesResp as any[], settings?.[DEFAULT_WORKSPACE_SETTING_KEY] || null);
       if (picked) {
@@ -224,6 +229,11 @@ export default function AgentPage() {
     const hasFiles = files.length > 0;
     if ((!hasInput && !hasFiles) || !currentSession || isRunning) return;
 
+    if (!defaultChannel) {
+      notifyError('无法运行', '未配置可用的默认渠道/默认模型，请先在设置中完成配置。');
+      return;
+    }
+
     const hasWorkspace = Boolean(selectedWorkspaceId || currentSession.workspaceId);
     if (!hasWorkspace) {
       notifyError('无法运行', '请先选择默认 Workspace');
@@ -272,6 +282,7 @@ export default function AgentPage() {
     ? workspaces.find((ws) => ws.id === selectedWorkspaceId) ?? null
     : null;
   const hasEffectiveWorkspace = Boolean(selectedWorkspaceId || currentSession?.workspaceId);
+  const defaultChannel = useMemo(() => getGlobalDefaultChannel(channels), [channels]);
 
   const filteredSessions = (() => {
     const q = query.trim().toLowerCase();
@@ -414,6 +425,41 @@ export default function AgentPage() {
             </div>
 
             <Group gap="xs" wrap="nowrap">
+              {defaultChannel ? (
+                <>
+                  <Badge variant="light" color="gray">继承默认</Badge>
+                  <Button
+                    component={Link}
+                    href={buildSettingsLink({ tab: 'channels', focus: 'default' })}
+                    size="xs"
+                    variant="light"
+                    styles={{ label: { fontWeight: 600 } }}
+                  >
+                    <span
+                      style={{
+                        maxWidth: 240,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        display: 'block',
+                      }}
+                    >
+                      {defaultChannel.label}
+                    </span>
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  component={Link}
+                  href={buildSettingsLink({ tab: 'channels', focus: 'default' })}
+                  size="xs"
+                  variant="light"
+                  leftSection={<IconSettings size={14} />}
+                >
+                  去设置默认模型
+                </Button>
+              )}
+
               <Menu shadow="md" width={260} position="bottom-end" withinPortal>
                 <Menu.Target>
                   <Button
