@@ -39,7 +39,8 @@ export async function checkChannelAgentCompatibility(
     return { success: false, error: 'modelId is required' };
   }
 
-  const { channel, apiKey } = await getChannelRuntimeCredentialsById(userId, channelId);
+  // Claude Agent SDK expects an Anthropic-style runtime base URL (no trailing /v1 or /messages).
+  const { channel, apiKey } = await getChannelRuntimeCredentialsById(userId, channelId, { runtime: 'anthropic' });
   const baseUrl = channel.baseUrl || undefined;
   if (!baseUrl) {
     return { success: false, error: 'Base URL is required' };
@@ -84,4 +85,3 @@ export async function checkChannelAgentCompatibility(
     clearTimeout(timer);
   }
 }
-
