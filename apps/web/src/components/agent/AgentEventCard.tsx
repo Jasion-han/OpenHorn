@@ -9,6 +9,10 @@ import { MarkdownMessage } from '@/components/ui/MarkdownMessage';
 export function AgentEventCard({ event }: { event: AgentEvent }) {
   const [open, setOpen] = useState(false);
 
+  if (event.type === 'meta') {
+    return null;
+  }
+
   if (event.type === 'user') {
     return (
       <div style={{ display: 'flex', justifyContent: 'flex-end', width: '100%' }}>

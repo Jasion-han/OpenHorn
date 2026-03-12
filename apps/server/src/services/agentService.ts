@@ -17,7 +17,8 @@ export interface CreateAgentSessionInput {
 }
 
 export interface AgentEvent {
-  type: 'text' | 'tool_start' | 'tool_result' | 'done' | 'error';
+  // 'meta' is an internal keepalive/progress signal for SDK/system events. UI may ignore it.
+  type: 'meta' | 'text' | 'tool_start' | 'tool_result' | 'done' | 'error';
   content?: string;
   toolName?: string;
   toolInput?: unknown;

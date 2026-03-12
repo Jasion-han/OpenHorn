@@ -302,6 +302,10 @@ export default function AgentPage() {
         if ((event as any)?.type === 'error') {
           sawError = true;
         }
+        // Ignore meta/keepalive events in the UI, but they still help the server avoid false timeouts.
+        if ((event as any)?.type === 'meta') {
+          return;
+        }
         addEvent(event as AgentEvent);
       });
 

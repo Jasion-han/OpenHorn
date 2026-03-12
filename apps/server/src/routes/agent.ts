@@ -124,9 +124,12 @@ agent.post('/sessions/:id/run', async (c) => {
           sawAny = true;
           clearTimeout(firstOutputTimer);
         }
-        armIdle();
-      send(event);
-    }
+        // Don't treat meta/keepalive as activity for the idle timer.
+        if ((event as any)?.type !== 'meta') {
+          armIdle();
+        }
+        send(event);
+      }
     } finally {
       clearTimeout(firstOutputTimer);
       clearIdle();

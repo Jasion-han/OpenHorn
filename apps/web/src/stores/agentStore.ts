@@ -19,7 +19,8 @@ export interface AgentSession {
 
 export interface AgentEvent {
   // 'user' is a local-only event to show what the user just ran.
-  type: 'user' | 'text' | 'tool_start' | 'tool_result' | 'done' | 'error';
+  // 'meta' is a server-originated keepalive/progress signal. UI will ignore it.
+  type: 'user' | 'meta' | 'text' | 'tool_start' | 'tool_result' | 'done' | 'error';
   content?: string;
   toolName?: string;
   toolInput?: unknown;
