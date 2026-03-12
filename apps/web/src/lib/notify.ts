@@ -43,3 +43,11 @@ export function notifySuccess(title: string, message: string) {
     message,
   });
 }
+
+export function notifyWarning(title: string, message: string) {
+  notifications.show({
+    color: 'orange',
+    title,
+    message,
+  });
+}

@@ -78,6 +78,7 @@ export function ChatHeader() {
           opened={opened}
           onClose={() => setOpened(false)}
           conversationId={currentConversation.id}
+          conversationFixReason={!effective.ok && effective.scope === 'conversation' ? effective.reason : null}
           current={
             currentConversation.channelId && currentConversation.modelId
               ? { channelId: currentConversation.channelId, modelId: currentConversation.modelId }
