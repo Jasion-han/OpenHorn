@@ -52,7 +52,7 @@ export function AgentEventCard({ event, isNewTurn = false, onDelete, onRetry }: 
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
       >
-        <Paper px="md" py="sm" radius="md" bg="blue.0" withBorder style={{ maxWidth: '72%' }}>
+        <Paper px="md" py="sm" radius="md" bg="blue.0" withBorder style={{ maxWidth: '72%', display: 'inline-block' }}>
           <Text size="sm" style={WRAP_TEXT}>{event.content || ''}</Text>
         </Paper>
         <div style={{ marginTop: 2, opacity: hovered ? 1 : 0, transition: 'opacity 0.15s', pointerEvents: hovered ? 'auto' : 'none' }}>
@@ -74,10 +74,11 @@ export function AgentEventCard({ event, isNewTurn = false, onDelete, onRetry }: 
   if (event.type === 'text') {
     return (
       <div
+        style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', maxWidth: '92%' }}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
       >
-        <Paper px="md" py="sm" radius="md" bg={background} style={{ maxWidth: '100%', width: '100%' }}>
+        <Paper px="md" py="sm" radius="md" bg={background} style={{ display: 'inline-block', maxWidth: '100%' }}>
           <div style={WRAP_TEXT}>
             <MarkdownMessage content={event.content || ''} />
           </div>

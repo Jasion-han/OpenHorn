@@ -45,7 +45,13 @@ function MessageBubble({
 
   return (
     <div
-      style={{ alignSelf: isAssistant ? 'flex-start' : 'flex-end', width: isAssistant ? assistantWidth : undefined, maxWidth: isAssistant ? assistantWidth : userMaxWidth }}
+      style={{
+        alignSelf: isAssistant ? 'flex-start' : 'flex-end',
+        maxWidth: isAssistant ? assistantWidth : userMaxWidth,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: isAssistant ? 'flex-start' : 'flex-end',
+      }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
@@ -54,6 +60,7 @@ function MessageBubble({
         py="xs"
         radius="lg"
         bg={isAssistant ? 'gray.0' : 'blue.0'}
+        style={{ display: 'inline-block', maxWidth: '100%' }}
       >
         {isAssistant ? (
           <div style={WRAP_TEXT}>
