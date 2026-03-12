@@ -7,11 +7,12 @@ import { streamChatMessage } from '../lib/chat-stream';
 import { uploadAttachments } from '../lib/attachments';
 import { api } from '../lib/api';
 import { getEffectiveModelForConversation } from '@/lib/effective-model';
-import { IconSend, IconCopy, IconRefresh, IconTrash, IconCheck } from '@tabler/icons-react';
+import { IconSend, IconCopy, IconRefresh, IconTrash, IconCheck, IconPencil } from '@tabler/icons-react';
 import { ChatHeader } from '@/components/chat/ChatHeader';
 import { WRAP_TEXT } from '@/components/ui/wrapText';
 import { MarkdownMessage } from '@/components/ui/MarkdownMessage';
 import { buildSettingsLink } from '@/lib/settings-link';
+import { IconActionButton } from '@/components/ui/IconActionButton';
 
 const PAGE_PAD = 'var(--mantine-spacing-md)';
 // Keep bottom safe area, but avoid adding extra desktop gap.
@@ -20,6 +21,7 @@ const COMPOSER_PAD_BOTTOM = 'env(safe-area-inset-bottom, 0px)';
 function MessageBubble({
   msg,
   isStreaming,
+  onEdit,
   onRetry,
   onDelete,
   assistantWidth,
@@ -27,6 +29,7 @@ function MessageBubble({
 }: {
   msg: { id: string; role: 'user' | 'assistant'; content: string };
   isStreaming: boolean;
+  onEdit: () => void;
   onRetry: () => void;
   onDelete: () => void;
   assistantWidth: string;
@@ -81,72 +84,28 @@ function MessageBubble({
           pointerEvents: hovered && !isStreaming ? 'auto' : 'none',
         }}
       >
-        <ActionButton onClick={handleCopy} title={copied ? '已复制' : '复制'}>
-          {copied ? <IconCheck size={13} /> : <IconCopy size={13} />}
-        </ActionButton>
-        {isAssistant && (
-          <ActionButton onClick={onRetry} title="重新生成">
-            <IconRefresh size={13} />
-          </ActionButton>
+        {!isAssistant && (
+          <IconActionButton onClick={onEdit} title="编辑">
+            <IconPencil size={13} />
+          </IconActionButton>
         )}
-        <ActionButton onClick={onDelete} title="删除" danger>
+        <IconActionButton onClick={handleCopy} title={copied ? '已复制' : '复制'}>
+          {copied ? <IconCheck size={13} /> : <IconCopy size={13} />}
+        </IconActionButton>
+        {isAssistant && (
+          <IconActionButton onClick={onRetry} title="重新生成">
+            <IconRefresh size={13} />
+          </IconActionButton>
+        )}
+        <IconActionButton onClick={onDelete} title="删除" danger>
           <IconTrash size={13} />
-        </ActionButton>
+        </IconActionButton>
       </div>
     </div>
   );
 }
 
-function ActionButton({
-  children,
-  onClick,
-  title,
-  danger,
-}: {
-  children: React.ReactNode;
-  onClick: () => void;
-  title: string;
-  danger?: boolean;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      title={title}
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: '3px 6px',
-        border: '1px solid var(--mantine-color-gray-3)',
-        borderRadius: 'var(--mantine-radius-sm)',
-        background: 'transparent',
-        color: danger ? 'var(--mantine-color-red-5)' : 'var(--mantine-color-gray-5)',
-        cursor: 'pointer',
-        fontSize: 11,
-        gap: 3,
-        fontFamily: 'inherit',
-        transition: 'background 0.12s, color 0.12s',
-      }}
-      onMouseEnter={(e) => {
-        (e.currentTarget as HTMLButtonElement).style.background = danger
-          ? 'var(--mantine-color-red-0)'
-          : 'var(--mantine-color-gray-1)';
-        (e.currentTarget as HTMLButtonElement).style.color = danger
-          ? 'var(--mantine-color-red-7)'
-          : 'var(--mantine-color-gray-8)';
-      }}
-      onMouseLeave={(e) => {
-        (e.currentTarget as HTMLButtonElement).style.background = 'transparent';
-        (e.currentTarget as HTMLButtonElement).style.color = danger
-          ? 'var(--mantine-color-red-5)'
-          : 'var(--mantine-color-gray-5)';
-      }}
-    >
-      {children}
-      {title && <span>{title}</span>}
-    </button>
-  );
-}
+// Icon-only actions are shared via IconActionButton; no local ActionButton needed.
 
 export function ChatArea() {
   const {
@@ -372,6 +331,11 @@ export function ChatArea() {
               key={msg.id}
               msg={msg}
               isStreaming={isLoading && idx === messages.length - 1}
+              onEdit={() => {
+                if (msg.role !== 'user') return;
+                setInput(msg.content || '');
+                queueMicrotask(() => inputRef.current?.focus());
+              }}
               onRetry={() => handleRetry(idx)}
               onDelete={() => deleteMessage(msg.id)}
               assistantWidth={ASSISTANT_BUBBLE_WIDTH}

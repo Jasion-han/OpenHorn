@@ -2,10 +2,11 @@
 
 import { useState } from 'react';
 import { Badge, Button, Collapse, Group, Paper, Text } from '@mantine/core';
-import { IconCopy, IconCheck, IconTrash, IconRefresh } from '@tabler/icons-react';
+import { IconCopy, IconCheck, IconTrash, IconRefresh, IconPencil } from '@tabler/icons-react';
 import type { AgentEvent } from '@/stores/agentStore';
 import { WRAP_TEXT } from '@/components/ui/wrapText';
 import { MarkdownMessage } from '@/components/ui/MarkdownMessage';
+import { IconActionButton } from '@/components/ui/IconActionButton';
 
 function CopyAction({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
@@ -15,29 +16,25 @@ function CopyAction({ text }: { text: string }) {
     setTimeout(() => setCopied(false), 2000);
   };
   return (
-    <button
-      onClick={handleCopy}
-      title={copied ? '已复制' : '复制'}
-      style={{
-        display: 'inline-flex', alignItems: 'center', gap: 3,
-        padding: '3px 6px',
-        border: '1px solid var(--mantine-color-gray-3)',
-        borderRadius: 'var(--mantine-radius-sm)',
-        background: 'transparent',
-        color: 'var(--mantine-color-gray-5)',
-        cursor: 'pointer', fontSize: 11, fontFamily: 'inherit',
-        transition: 'background 0.12s, color 0.12s',
-      }}
-      onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--mantine-color-gray-1)'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--mantine-color-gray-8)'; }}
-      onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--mantine-color-gray-5)'; }}
-    >
+    <IconActionButton onClick={handleCopy} title={copied ? '已复制' : '复制'}>
       {copied ? <IconCheck size={13} /> : <IconCopy size={13} />}
-      <span>{copied ? '已复制' : '复制'}</span>
-    </button>
+    </IconActionButton>
   );
 }
 
-export function AgentEventCard({ event, isNewTurn = false, onDelete, onRetry }: { event: AgentEvent; isNewTurn?: boolean; onDelete?: () => void; onRetry?: () => void }) {
+export function AgentEventCard({
+  event,
+  isNewTurn = false,
+  onDelete,
+  onRetry,
+  onEdit,
+}: {
+  event: AgentEvent;
+  isNewTurn?: boolean;
+  onDelete?: () => void;
+  onRetry?: () => void;
+  onEdit?: () => void;
+}) {
   const [open, setOpen] = useState(false);
   const [hovered, setHovered] = useState(false);
 
@@ -56,7 +53,19 @@ export function AgentEventCard({ event, isNewTurn = false, onDelete, onRetry }: 
           <Text size="sm" style={WRAP_TEXT}>{event.content || ''}</Text>
         </Paper>
         <div style={{ marginTop: 2, opacity: hovered ? 1 : 0, transition: 'opacity 0.15s', pointerEvents: hovered ? 'auto' : 'none' }}>
-          <CopyAction text={event.content || ''} />
+          <Group gap={2}>
+            {onEdit && (
+              <IconActionButton onClick={onEdit} title="编辑">
+                <IconPencil size={13} />
+              </IconActionButton>
+            )}
+            <CopyAction text={event.content || ''} />
+            {onDelete && event.id && (
+              <IconActionButton onClick={onDelete} title="删除" danger>
+                <IconTrash size={13} />
+              </IconActionButton>
+            )}
+          </Group>
         </div>
       </div>
     );
@@ -86,46 +95,14 @@ export function AgentEventCard({ event, isNewTurn = false, onDelete, onRetry }: 
         <div style={{ display: 'flex', gap: 2, marginTop: 2, opacity: hovered ? 1 : 0, transition: 'opacity 0.15s', pointerEvents: hovered ? 'auto' : 'none' }}>
           <CopyAction text={event.content || ''} />
           {onRetry && (
-            <button
-              onClick={onRetry}
-              title="重新生成"
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: 3,
-                padding: '3px 6px',
-                border: '1px solid var(--mantine-color-gray-3)',
-                borderRadius: 'var(--mantine-radius-sm)',
-                background: 'transparent',
-                color: 'var(--mantine-color-gray-5)',
-                cursor: 'pointer', fontSize: 11, fontFamily: 'inherit',
-                transition: 'background 0.12s, color 0.12s',
-              }}
-              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--mantine-color-gray-1)'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--mantine-color-gray-8)'; }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--mantine-color-gray-5)'; }}
-            >
+            <IconActionButton onClick={onRetry} title="重试">
               <IconRefresh size={13} />
-              <span>重试</span>
-            </button>
+            </IconActionButton>
           )}
           {onDelete && event.id && (
-            <button
-              onClick={onDelete}
-              title="删除"
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: 3,
-                padding: '3px 6px',
-                border: '1px solid var(--mantine-color-gray-3)',
-                borderRadius: 'var(--mantine-radius-sm)',
-                background: 'transparent',
-                color: 'var(--mantine-color-red-5)',
-                cursor: 'pointer', fontSize: 11, fontFamily: 'inherit',
-                transition: 'background 0.12s, color 0.12s',
-              }}
-              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--mantine-color-red-0)'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--mantine-color-red-7)'; }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--mantine-color-red-5)'; }}
-            >
+            <IconActionButton onClick={onDelete} title="删除" danger>
               <IconTrash size={13} />
-              <span>删除</span>
-            </button>
+            </IconActionButton>
           )}
         </div>
       </div>

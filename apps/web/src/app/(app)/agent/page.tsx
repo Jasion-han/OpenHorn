@@ -608,11 +608,15 @@ export default function AgentPage() {
 	        >
 	            <div style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
 	              <Stack gap="xs" pb="sm" style={{ marginTop: 'auto' }}>
-	              {events.map((event, index) => (
-	                <AgentEventCard
-	                  key={index}
+              {events.map((event, index) => (
+                <AgentEventCard
+                  key={index}
                   event={event}
                   isNewTurn={event.type === 'user' && index > 0}
+                  onEdit={event.type === 'user' ? () => {
+                    setTaskInput(event.content || '');
+                    queueMicrotask(() => inputRef.current?.focus());
+                  } : undefined}
                   onRetry={event.type === 'text' && !isRunning ? () => handleRetry(index) : undefined}
                   onDelete={event.id ? () => {
                     void api.agent.deleteEvent(event.id!).then(() => removeEvent(event.id!)).catch(() => {});
@@ -627,7 +631,7 @@ export default function AgentPage() {
               )}
               </Stack>
             </div>
-        </div>
+          </div>
         )}
 
         {currentSession && workspaces.length === 0 && (
