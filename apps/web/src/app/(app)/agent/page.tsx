@@ -261,7 +261,8 @@ export default function AgentPage() {
       const response = await api.agent.runSession(currentSession.id, prompt, attachmentIds);
       
       if (!response.ok) {
-        throw new Error('Failed to run agent');
+        const errorText = await response.text().catch(() => '');
+        throw new Error(errorText || 'Failed to run agent');
       }
       
       await readSseStream(response, (event) => {

@@ -20,9 +20,13 @@ export function createSseStream(
       try {
         await handler(send);
       } catch (error) {
+        const message = error instanceof Error ? error.message : 'Error';
         send({
           type: 'error',
-          message: error instanceof Error ? error.message : 'Error',
+          message,
+          // Keep compatibility with consumers that expect "content" (Agent UI),
+          // while still providing "message" (Chat UI).
+          content: message,
         });
       } finally {
         controller.close();
