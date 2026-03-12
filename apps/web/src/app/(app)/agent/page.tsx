@@ -4,7 +4,7 @@ import { useCallback, useState, useEffect, useRef, useMemo } from 'react';
 import { Paper, TextInput, Button, Stack, Text, Group, ScrollArea, Badge, FileButton, ActionIcon, Menu, Alert, Textarea } from '@mantine/core';
 import { modals } from '@mantine/modals';
 import Link from 'next/link';
-import { IconCheck, IconDots, IconPencil, IconSend, IconPlus, IconRobot, IconTrash, IconSettings, IconBriefcase, IconPlayerStop } from '@tabler/icons-react';
+import { IconCheck, IconDots, IconPencil, IconSend, IconPlus, IconRobot, IconTrash, IconSettings, IconPlayerStop } from '@tabler/icons-react';
 import { useAgentStore, type AgentEvent } from '@/stores/agentStore';
 import { useAuthStore } from '@/stores/authStore';
 import { api, type ApiChannel } from '@/lib/api';
@@ -14,6 +14,7 @@ import { AppShellSlot } from '@/components/app/AppShellSlot';
 import { notifyError, notifySuccess } from '@/lib/notify';
 import { DEFAULT_WORKSPACE_SETTING_KEY, pickDefaultWorkspaceId } from '@/lib/agent-default-workspace';
 import { AgentEventCard } from '@/components/agent/AgentEventCard';
+import { ModelPickerModal } from '@/components/chat/ModelPickerModal';
 import { BACKEND_UP_EVENT } from '@/stores/backendStatusStore';
 import { getGlobalDefaultChannel } from '@/lib/default-channel';
 import { buildSettingsLink } from '@/lib/settings-link';
@@ -40,8 +41,10 @@ export default function AgentPage() {
     addSession,
     setSessions,
     setCurrentSession,
+    patchCurrentSession,
     addEvent,
-    clearEvents,
+    setEvents,
+    removeEvent,
     setIsRunning,
     workspaces,
     setWorkspaces,
@@ -55,6 +58,7 @@ export default function AgentPage() {
   const [files, setFiles] = useState<File[]>([]);
   const [bootstrapping, setBootstrapping] = useState(false);
   const [channels, setChannels] = useState<ApiChannel[]>([]);
+  const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const viewportRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const runAbortRef = useRef<AbortController | null>(null);
@@ -128,18 +132,6 @@ export default function AgentPage() {
       setSessions(sessions as never[]);
     } catch (error) {
       notifyError('刷新失败', error instanceof Error ? error.message : '无法刷新会话列表');
-    }
-  };
-
-  const handleWorkspaceChange = async (nextId: string | null) => {
-    const prev = selectedWorkspaceId;
-    setSelectedWorkspaceId(nextId);
-    try {
-      await api.settings.set(DEFAULT_WORKSPACE_SETTING_KEY, nextId);
-      notifySuccess('已保存', '默认 Workspace 已更新');
-    } catch (error) {
-      setSelectedWorkspaceId(prev);
-      notifyError('保存失败', error instanceof Error ? error.message : '无法保存默认 Workspace');
     }
   };
 
@@ -262,7 +254,6 @@ export default function AgentPage() {
     didCancelRef.current = false;
     
     setIsRunning(true);
-    clearEvents();
     // Show what the user asked, so the timeline is never "blank".
     const userText = hasInput
       ? taskInput.trim()
@@ -296,6 +287,16 @@ export default function AgentPage() {
       
       // Best-effort: mark as active when starting a new run.
       patchSessionStatus(sessionId, 'active');
+
+      // Auto-rename if still using the default title.
+      if (userText && /^任务 \d{2}-\d{2} \d{2}:\d{2}$/.test(currentSession.title)) {
+        void api.agent.autoTitle(sessionId, userText).then((res) => {
+          if (res.success && res.title) {
+            setSessions(sessions.map((s) => s.id === sessionId ? { ...s, title: res.title! } : s) as never[]);
+            patchCurrentSession({ title: res.title! });
+          }
+        }).catch(() => {});
+      }
 
       let sawError = false;
       await readSseStream(response, (event) => {
@@ -352,6 +353,14 @@ export default function AgentPage() {
     }
   };
 
+  const handleRetry = (eventIndex: number) => {
+    // Find the nearest user event before this index
+    const userEvent = events.slice(0, eventIndex).reverse().find((e) => e.type === 'user');
+    if (!userEvent?.content || isRunning) return;
+    setTaskInput(userEvent.content);
+    queueMicrotask(() => void handleRun());
+  };
+
   const handleCancel = () => {
     didCancelRef.current = true;
     try {
@@ -376,9 +385,18 @@ export default function AgentPage() {
     queueMicrotask(() => inputRef.current?.focus());
   };
 
-  const selectedWorkspace = selectedWorkspaceId
-    ? workspaces.find((ws) => ws.id === selectedWorkspaceId) ?? null
-    : null;
+  const handleSelectSession = (session: any) => {
+    setCurrentSession(session as never);
+    void (async () => {
+      try {
+        const { events } = await api.agent.listEvents(session.id);
+        setEvents(events as any);
+      } catch {
+        // Best-effort; show empty if load fails.
+      }
+    })();
+  };
+
   const hasEffectiveWorkspace = Boolean(selectedWorkspaceId || currentSession?.workspaceId);
   const defaultChannel = useMemo(() => getGlobalDefaultChannel(channels), [channels]);
 
@@ -430,7 +448,7 @@ export default function AgentPage() {
                           ? 'var(--mantine-color-blue-0)'
                           : undefined,
                       }}
-                      onClick={() => setCurrentSession(session as never)}
+                    onClick={() => handleSelectSession(session)}
                     >
                       <Group justify="space-between" wrap="nowrap">
                         <Group gap="xs" wrap="nowrap" style={{ flex: 1, minWidth: 0 }}>
@@ -519,121 +537,100 @@ export default function AgentPage() {
         }}
         p={0}
       >
+        {currentSession && (
         <div style={{ padding: PAGE_PAD, paddingBottom: 'var(--mantine-spacing-xs)' }}>
-          <Group justify="space-between" mb="md" wrap="nowrap">
-            <div style={{ minWidth: 0 }}>
-              <Text fw={600} truncate>
-                {currentSession ? currentSession.title : 'Agent'}
-              </Text>
-              {(bootstrapping || isRunning) && <Text size="xs" c="blue">运行中...</Text>}
-            </div>
+            <Group justify="space-between" mb="md" wrap="nowrap">
+              <div style={{ minWidth: 0 }}>
+                <Text fw={600} truncate>
+                  {currentSession.title}
+                </Text>
+                {(bootstrapping || isRunning) && <Text size="xs" c="blue">运行中...</Text>}
+              </div>
 
-            <Group gap="xs" wrap="nowrap">
-              {defaultChannel ? (
-                <>
-                  <Badge variant="light" color="gray">继承默认</Badge>
-                  <Button
-                    component={Link}
-                    href={buildSettingsLink({ tab: 'channels', focus: 'default' })}
-                    size="xs"
-                    variant="light"
-                    styles={{ label: { fontWeight: 600 } }}
-                  >
-                    <span
-                      style={{
-                        maxWidth: 240,
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                        display: 'block',
-                      }}
+              <Group gap="xs" wrap="nowrap">
+                {(() => {
+                  const sessionChannel = currentSession.channelId
+                    ? channels.find((c) => c.id === currentSession.channelId)
+                    : null;
+                  const sessionModelId = (currentSession as any).modelId as string | null | undefined;
+                  const hasSessionModel = Boolean(sessionChannel && sessionModelId);
+                  const label = hasSessionModel
+                    ? `${sessionChannel!.provider} · ${sessionModelId}`
+                    : defaultChannel
+                      ? defaultChannel.label
+                      : null;
+                  return label ? (
+                    <Group gap="xs" wrap="nowrap">
+                      {!hasSessionModel && <Badge variant="light" color="gray">继承默认</Badge>}
+                      <Button
+                        size="xs"
+                        variant="light"
+                        onClick={() => setModelPickerOpen(true)}
+                        styles={{ label: { fontWeight: 600 } }}
+                      >
+                        {label}
+                      </Button>
+                    </Group>
+                  ) : (
+                    <Button
+                      component={Link}
+                      href={buildSettingsLink({ tab: 'channels', focus: 'default' })}
+                      size="xs"
+                      variant="light"
+                      leftSection={<IconSettings size={14} />}
                     >
-                      {defaultChannel.label}
-                    </span>
-                  </Button>
-                </>
-              ) : (
-                <Button
-                  component={Link}
-                  href={buildSettingsLink({ tab: 'channels', focus: 'default' })}
-                  size="xs"
-                  variant="light"
-                  leftSection={<IconSettings size={14} />}
-                >
-                  去设置默认模型
-                </Button>
-              )}
-
-              <Menu shadow="md" width={260} position="bottom-end" withinPortal>
-                <Menu.Target>
-                  <Button
-                    size="xs"
-                    variant="light"
-                    leftSection={<IconBriefcase size={14} />}
-                    disabled={workspaces.length === 0}
-                    styles={{ label: { fontWeight: 600 } }}
-                  >
-                    {selectedWorkspace ? selectedWorkspace.name : workspaces.length ? '选择默认 Workspace' : '未创建 Workspace'}
-                  </Button>
-                </Menu.Target>
-                <Menu.Dropdown>
-                  <Menu.Label>默认 Workspace（账号级）</Menu.Label>
-                  {workspaces.map((ws) => (
-                    <Menu.Item
-                      key={ws.id}
-                      leftSection={ws.id === selectedWorkspaceId ? <IconCheck size={14} /> : undefined}
-                      onClick={() => void handleWorkspaceChange(ws.id)}
-                    >
-                      {ws.name}
-                    </Menu.Item>
-                  ))}
-                  <Menu.Divider />
-                  <Menu.Item component={Link} href="/settings" leftSection={<IconSettings size={14} />}>
-                    管理 Workspace
-                  </Menu.Item>
-                </Menu.Dropdown>
-              </Menu>
-
-              <Button size="xs" variant="light" onClick={() => void loadSessions()}>
-                刷新
-              </Button>
+                      去设置默认模型
+                    </Button>
+                  );
+                })()}
+              </Group>
             </Group>
-          </Group>
-
-          {!currentSession && (
-            <Text c="dimmed">在右侧栏选择或创建会话，然后在底部输入任务运行。</Text>
-          )}
         </div>
+        )}
 
         {/* Custom scroll container so we can keep short timelines pinned to bottom. */}
-        <div
-          ref={viewportRef}
-          style={{
-            flex: 1,
-            minHeight: 0,
-            overflowY: 'auto',
-            display: 'flex',
-            flexDirection: 'column',
-            paddingLeft: PAGE_PAD,
-            paddingRight: PAGE_PAD,
-          }}
-        >
-          <div style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
-            <Stack gap="xs" pb="sm" style={{ marginTop: 'auto' }}>
-            {currentSession && events.map((event, index) => (
-              <AgentEventCard key={index} event={event} />
-            ))}
+        {!currentSession ? (
+          <Paper style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%' }}>
+            <Text c="dimmed">在右侧栏选择或创建会话，然后在底部输入任务运行。</Text>
+          </Paper>
+        ) : (
+	        <div
+	          ref={viewportRef}
+	          style={{
+	            flex: 1,
+	            minHeight: 0,
+	            overflowY: 'auto',
+	            display: 'flex',
+	            flexDirection: 'column',
+	            paddingLeft: PAGE_PAD,
+	            paddingRight: PAGE_PAD,
+	          }}
+	        >
+	            <div style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
+	              <Stack gap="xs" pb="sm" style={{ marginTop: 'auto' }}>
+	              {events.map((event, index) => (
+	                <AgentEventCard
+	                  key={index}
+                  event={event}
+                  isNewTurn={event.type === 'user' && index > 0}
+                  onRetry={event.type === 'text' && !isRunning ? () => handleRetry(index) : undefined}
+                  onDelete={event.id ? () => {
+                    void api.agent.deleteEvent(event.id!).then(() => removeEvent(event.id!)).catch(() => {});
+                  } : undefined}
+                />
+              ))}
 
-            {currentSession && events.length === 0 && (
-              <Text c="dimmed" ta="center" py="xl">
-                开始输入任务并运行...
-              </Text>
-            )}
-            </Stack>
-          </div>
+              {events.length === 0 && (
+                <Text c="dimmed" ta="center" py="xl">
+                  开始输入任务并运行...
+                </Text>
+              )}
+              </Stack>
+            </div>
         </div>
+        )}
 
-        {workspaces.length === 0 && (
+        {currentSession && workspaces.length === 0 && (
           <div style={{ paddingLeft: PAGE_PAD, paddingRight: PAGE_PAD }}>
             <Alert color="orange" mb="sm" title="需要先创建 Workspace">
               未创建 Workspace，Agent 无法运行。请先去设置页面创建 Workspace。
@@ -645,7 +642,7 @@ export default function AgentPage() {
         )}
 
         <div style={{ paddingLeft: PAGE_PAD, paddingRight: PAGE_PAD, paddingBottom: COMPOSER_PAD_BOTTOM }}>
-          <Paper
+          {currentSession && <Paper
             p="sm"
             radius="lg"
             withBorder
@@ -731,9 +728,28 @@ export default function AgentPage() {
                 )}
               </Group>
             </Stack>
-          </Paper>
+          </Paper>}
         </div>
       </Paper>
+
+      {currentSession && modelPickerOpen && (
+        <ModelPickerModal
+          opened={modelPickerOpen}
+          onClose={() => setModelPickerOpen(false)}
+          conversationId={currentSession.id}
+          current={
+            currentSession.channelId && (currentSession as any).modelId
+              ? { channelId: currentSession.channelId, modelId: (currentSession as any).modelId }
+              : defaultChannel
+                ? { channelId: defaultChannel.channelId, modelId: defaultChannel.modelId }
+                : null
+          }
+          onSelect={async (channelId, modelId) => {
+            await api.agent.updateChannel(currentSession.id, channelId, modelId);
+            setCurrentSession({ ...currentSession, channelId, modelId } as any);
+          }}
+        />
+      )}
     </>
   );
 }
