@@ -12,7 +12,6 @@ type RawMcpServer = {
   isEnabled: boolean;
 };
 
-export async function loadEnabledMcpServers(): Promise<McpServerConfigMap> {
 export async function loadEnabledMcpServersForUser(userId: string): Promise<McpServerConfigMap> {
   const rows = await db.select().from(mcpServers)
     .where(and(eq(mcpServers.userId, userId), eq(mcpServers.isEnabled, true)));
