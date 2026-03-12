@@ -2,11 +2,12 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { Paper, Textarea, Button, Group, Stack, Text, Alert, Badge, FileButton } from '@mantine/core';
-import { IconSend } from '@tabler/icons-react';
 import { useChatStore } from '../stores/chatStore';
 import { streamChatMessage } from '../lib/chat-stream';
 import { uploadAttachments } from '../lib/attachments';
+import { api } from '../lib/api';
 import { getEffectiveModelForConversation } from '@/lib/effective-model';
+import { IconSend, IconCopy, IconRefresh, IconTrash, IconCheck } from '@tabler/icons-react';
 import { ChatHeader } from '@/components/chat/ChatHeader';
 import { WRAP_TEXT } from '@/components/ui/wrapText';
 import { MarkdownMessage } from '@/components/ui/MarkdownMessage';
@@ -15,6 +16,130 @@ import { buildSettingsLink } from '@/lib/settings-link';
 const PAGE_PAD = 'var(--mantine-spacing-md)';
 // Keep bottom safe area, but avoid adding extra desktop gap.
 const COMPOSER_PAD_BOTTOM = 'env(safe-area-inset-bottom, 0px)';
+
+function MessageBubble({
+  msg,
+  isStreaming,
+  onRetry,
+  onDelete,
+  assistantWidth,
+  userMaxWidth,
+}: {
+  msg: { id: string; role: 'user' | 'assistant'; content: string };
+  isStreaming: boolean;
+  onRetry: () => void;
+  onDelete: () => void;
+  assistantWidth: string;
+  userMaxWidth: string;
+}) {
+  const [hovered, setHovered] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(msg.content);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const isAssistant = msg.role === 'assistant';
+
+  return (
+    <div
+      style={{ alignSelf: isAssistant ? 'flex-start' : 'flex-end', width: isAssistant ? assistantWidth : undefined, maxWidth: isAssistant ? assistantWidth : userMaxWidth }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      <Paper
+        px="md"
+        py="xs"
+        radius="lg"
+        bg={isAssistant ? 'gray.0' : 'blue.0'}
+      >
+        {isAssistant ? (
+          <div style={WRAP_TEXT}>
+            <MarkdownMessage content={msg.content} />
+          </div>
+        ) : (
+          <Text size="sm" style={WRAP_TEXT}>{msg.content}</Text>
+        )}
+      </Paper>
+      <div
+        style={{
+          display: 'flex',
+          gap: 2,
+          marginTop: 2,
+          justifyContent: isAssistant ? 'flex-start' : 'flex-end',
+          opacity: hovered && !isStreaming ? 1 : 0,
+          transition: 'opacity 0.15s',
+          pointerEvents: hovered && !isStreaming ? 'auto' : 'none',
+        }}
+      >
+        <ActionButton onClick={handleCopy} title={copied ? '已复制' : '复制'}>
+          {copied ? <IconCheck size={13} /> : <IconCopy size={13} />}
+        </ActionButton>
+        {isAssistant && (
+          <ActionButton onClick={onRetry} title="重新生成">
+            <IconRefresh size={13} />
+          </ActionButton>
+        )}
+        <ActionButton onClick={onDelete} title="删除" danger>
+          <IconTrash size={13} />
+        </ActionButton>
+      </div>
+    </div>
+  );
+}
+
+function ActionButton({
+  children,
+  onClick,
+  title,
+  danger,
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+  title: string;
+  danger?: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '3px 6px',
+        border: '1px solid var(--mantine-color-gray-3)',
+        borderRadius: 'var(--mantine-radius-sm)',
+        background: 'transparent',
+        color: danger ? 'var(--mantine-color-red-5)' : 'var(--mantine-color-gray-5)',
+        cursor: 'pointer',
+        fontSize: 11,
+        gap: 3,
+        fontFamily: 'inherit',
+        transition: 'background 0.12s, color 0.12s',
+      }}
+      onMouseEnter={(e) => {
+        (e.currentTarget as HTMLButtonElement).style.background = danger
+          ? 'var(--mantine-color-red-0)'
+          : 'var(--mantine-color-gray-1)';
+        (e.currentTarget as HTMLButtonElement).style.color = danger
+          ? 'var(--mantine-color-red-7)'
+          : 'var(--mantine-color-gray-8)';
+      }}
+      onMouseLeave={(e) => {
+        (e.currentTarget as HTMLButtonElement).style.background = 'transparent';
+        (e.currentTarget as HTMLButtonElement).style.color = danger
+          ? 'var(--mantine-color-red-5)'
+          : 'var(--mantine-color-gray-5)';
+      }}
+    >
+      {children}
+      {title && <span>{title}</span>}
+    </button>
+  );
+}
 
 export function ChatArea() {
   const {
@@ -26,6 +151,8 @@ export function ChatArea() {
     setIsLoading,
     setIsStreaming,
     channels,
+    updateConversation,
+    deleteMessage,
   } = useChatStore();
   
   const [input, setInput] = useState('');
@@ -110,6 +237,15 @@ export function ChatArea() {
           },
           onDone: async () => {
             await loadMessages(conversationId);
+            // Auto-rename if still using the default title.
+            const conv = useChatStore.getState().currentConversation;
+            if (conv && /^新对话 \d{2}-\d{2} \d{2}:\d{2}$/.test(conv.title)) {
+              void api.conversations.autoTitle(conversationId, effectiveContent).then((res) => {
+                if (res.success && res.title) {
+                  updateConversation(conversationId, { title: res.title });
+                }
+              }).catch(() => {});
+            }
           },
           onError: (message) => {
             useChatStore.getState().updateMessage(assistantMessageId, `Error: ${message}`);
@@ -127,6 +263,41 @@ export function ChatArea() {
       setIsLoading(false);
       setIsStreaming(false);
       queueMicrotask(() => inputRef.current?.focus());
+    }
+  };
+
+  const handleRetry = async (msgIndex: number) => {
+    if (!currentConversation) return;
+    const assistantMsg = messages[msgIndex];
+    if (!assistantMsg || assistantMsg.role !== 'assistant') return;
+    if (assistantMsg.id.startsWith('temp-')) return;
+
+    useChatStore.getState().updateMessage(assistantMsg.id, '');
+    setIsLoading(true);
+    setIsStreaming(true);
+
+    try {
+      const response = await api.messages.regenerate(assistantMsg.id);
+      if (!response.ok) throw new Error(await response.text().catch(() => 'Failed'));
+
+      await streamChatMessage(
+        { conversationId: currentConversation.id, content: '' },
+        {
+          onDelta: (chunk) => {
+            if (!chunk) return;
+            const current = useChatStore.getState().messages.find((m) => m.id === assistantMsg.id);
+            useChatStore.getState().updateMessage(assistantMsg.id, (current?.content || '') + chunk);
+          },
+          onDone: async () => { await loadMessages(currentConversation.id); },
+          onError: (message) => {
+            useChatStore.getState().updateMessage(assistantMsg.id, `Error: ${message}`);
+          },
+        },
+        response
+      );
+    } finally {
+      setIsLoading(false);
+      setIsStreaming(false);
     }
   };
 
@@ -189,28 +360,16 @@ export function ChatArea() {
       >
         <div style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
           <Stack gap="xs" pb="sm" style={{ marginTop: 'auto' }}>
-          {messages.map((msg) => (
-            <Paper
+          {messages.map((msg, idx) => (
+            <MessageBubble
               key={msg.id}
-              p="xs"
-              radius="lg"
-              bg={msg.role === 'user' ? 'blue.0' : 'gray.0'}
-              style={{
-                alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
-                width: msg.role === 'assistant' ? ASSISTANT_BUBBLE_WIDTH : undefined,
-                maxWidth: msg.role === 'assistant' ? ASSISTANT_BUBBLE_WIDTH : USER_BUBBLE_MAX_WIDTH,
-              }}
-            >
-              {msg.role === 'assistant' ? (
-                <div style={WRAP_TEXT}>
-                  <MarkdownMessage content={msg.content} />
-                </div>
-              ) : (
-                <Text size="sm" style={WRAP_TEXT}>
-                  {msg.content}
-                </Text>
-              )}
-            </Paper>
+              msg={msg}
+              isStreaming={isLoading && idx === messages.length - 1}
+              onRetry={() => handleRetry(idx)}
+              onDelete={() => deleteMessage(msg.id)}
+              assistantWidth={ASSISTANT_BUBBLE_WIDTH}
+              userMaxWidth={USER_BUBBLE_MAX_WIDTH}
+            />
           ))}
 
           {messages.length === 0 && (

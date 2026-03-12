@@ -2,12 +2,44 @@
 
 import { useState } from 'react';
 import { Badge, Button, Collapse, Group, Paper, Text } from '@mantine/core';
+import { IconCopy, IconCheck, IconTrash, IconRefresh } from '@tabler/icons-react';
 import type { AgentEvent } from '@/stores/agentStore';
 import { WRAP_TEXT } from '@/components/ui/wrapText';
 import { MarkdownMessage } from '@/components/ui/MarkdownMessage';
 
-export function AgentEventCard({ event }: { event: AgentEvent }) {
+function CopyAction({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+  return (
+    <button
+      onClick={handleCopy}
+      title={copied ? '已复制' : '复制'}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 3,
+        padding: '3px 6px',
+        border: '1px solid var(--mantine-color-gray-3)',
+        borderRadius: 'var(--mantine-radius-sm)',
+        background: 'transparent',
+        color: 'var(--mantine-color-gray-5)',
+        cursor: 'pointer', fontSize: 11, fontFamily: 'inherit',
+        transition: 'background 0.12s, color 0.12s',
+      }}
+      onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--mantine-color-gray-1)'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--mantine-color-gray-8)'; }}
+      onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--mantine-color-gray-5)'; }}
+    >
+      {copied ? <IconCheck size={13} /> : <IconCopy size={13} />}
+      <span>{copied ? '已复制' : '复制'}</span>
+    </button>
+  );
+}
+
+export function AgentEventCard({ event, isNewTurn = false, onDelete, onRetry }: { event: AgentEvent; isNewTurn?: boolean; onDelete?: () => void; onRetry?: () => void }) {
   const [open, setOpen] = useState(false);
+  const [hovered, setHovered] = useState(false);
 
   if (event.type === 'meta') {
     return null;
@@ -15,18 +47,17 @@ export function AgentEventCard({ event }: { event: AgentEvent }) {
 
   if (event.type === 'user') {
     return (
-      <div style={{ display: 'flex', justifyContent: 'flex-end', width: '100%' }}>
-        <Paper
-          p="sm"
-          radius="md"
-          bg="blue.0"
-          withBorder
-          style={{ maxWidth: '72%' }}
-        >
-          <Text size="sm" style={WRAP_TEXT}>
-            {event.content || ''}
-          </Text>
+      <div
+        style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', width: '100%', marginTop: isNewTurn ? 'var(--mantine-spacing-xl)' : undefined }}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+      >
+        <Paper px="md" py="sm" radius="md" bg="blue.0" withBorder style={{ maxWidth: '72%' }}>
+          <Text size="sm" style={WRAP_TEXT}>{event.content || ''}</Text>
         </Paper>
+        <div style={{ marginTop: 2, opacity: hovered ? 1 : 0, transition: 'opacity 0.15s', pointerEvents: hovered ? 'auto' : 'none' }}>
+          <CopyAction text={event.content || ''} />
+        </div>
       </div>
     );
   }
@@ -42,11 +73,61 @@ export function AgentEventCard({ event }: { event: AgentEvent }) {
 
   if (event.type === 'text') {
     return (
-      <Paper p="sm" radius="md" bg={background} style={{ maxWidth: '100%', width: '100%' }}>
-        <div style={WRAP_TEXT}>
-          <MarkdownMessage content={event.content || ''} />
+      <div
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+      >
+        <Paper px="md" py="sm" radius="md" bg={background} style={{ maxWidth: '100%', width: '100%' }}>
+          <div style={WRAP_TEXT}>
+            <MarkdownMessage content={event.content || ''} />
+          </div>
+        </Paper>
+        <div style={{ display: 'flex', gap: 2, marginTop: 2, opacity: hovered ? 1 : 0, transition: 'opacity 0.15s', pointerEvents: hovered ? 'auto' : 'none' }}>
+          <CopyAction text={event.content || ''} />
+          {onRetry && (
+            <button
+              onClick={onRetry}
+              title="重新生成"
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 3,
+                padding: '3px 6px',
+                border: '1px solid var(--mantine-color-gray-3)',
+                borderRadius: 'var(--mantine-radius-sm)',
+                background: 'transparent',
+                color: 'var(--mantine-color-gray-5)',
+                cursor: 'pointer', fontSize: 11, fontFamily: 'inherit',
+                transition: 'background 0.12s, color 0.12s',
+              }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--mantine-color-gray-1)'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--mantine-color-gray-8)'; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--mantine-color-gray-5)'; }}
+            >
+              <IconRefresh size={13} />
+              <span>重试</span>
+            </button>
+          )}
+          {onDelete && event.id && (
+            <button
+              onClick={onDelete}
+              title="删除"
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 3,
+                padding: '3px 6px',
+                border: '1px solid var(--mantine-color-gray-3)',
+                borderRadius: 'var(--mantine-radius-sm)',
+                background: 'transparent',
+                color: 'var(--mantine-color-red-5)',
+                cursor: 'pointer', fontSize: 11, fontFamily: 'inherit',
+                transition: 'background 0.12s, color 0.12s',
+              }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--mantine-color-red-0)'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--mantine-color-red-7)'; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--mantine-color-red-5)'; }}
+            >
+              <IconTrash size={13} />
+              <span>删除</span>
+            </button>
+          )}
         </div>
-      </Paper>
+      </div>
     );
   }
 
@@ -131,9 +212,5 @@ export function AgentEventCard({ event }: { event: AgentEvent }) {
     );
   }
 
-  return (
-    <Paper p="sm" radius="md" bg={background} style={{ maxWidth: '100%', width: '100%' }}>
-      <Badge color="green">完成</Badge>
-    </Paper>
-  );
+  return null;
 }
