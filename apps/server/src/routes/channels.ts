@@ -125,7 +125,9 @@ channels.post('/:id/fetch-models', async (c) => {
 
   const channelId = c.req.param('id');
   const result = await fetchChannelModels(user.id, channelId);
-  return c.json(result, result.success ? 200 : 400);
+  // Treat "sync models" as an operation result, not an exception.
+  // Always return 200 so the UI can render inline diagnostics from { success, error }.
+  return c.json(result);
 });
 
 channels.get('/:id/models', async (c) => {

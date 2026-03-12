@@ -43,6 +43,7 @@ export interface CreateChannelInput {
 
 export interface UpdateChannelInput {
   name?: string;
+  provider?: string;
   apiKey?: string;
   baseUrl?: string;
   enabled?: boolean;
@@ -489,9 +490,24 @@ export async function updateChannel(userId: string, channelId: string, input: Up
     updates.name = input.name.trim();
   }
 
+  let nextProvider = current.provider;
+  if (input.provider !== undefined) {
+    const trimmed = input.provider.trim();
+    if (!trimmed) {
+      throw new Error('provider is required');
+    }
+    nextProvider = trimmed;
+    updates.provider = trimmed;
+  }
+
   if (input.baseUrl !== undefined) {
     const trimmed = input.baseUrl.trim();
-    updates.baseUrl = trimmed ? normalizeChannelBaseUrl(current.provider, trimmed) : null;
+    updates.baseUrl = trimmed ? normalizeChannelBaseUrl(nextProvider, trimmed) : null;
+  } else if (nextProvider !== current.provider) {
+    // Provider changed but baseUrl not explicitly provided: keep existing baseUrl if present,
+    // otherwise fill with the new provider default.
+    const preserved = current.baseUrl || getDefaultBaseUrl(nextProvider);
+    updates.baseUrl = preserved ? normalizeChannelBaseUrl(nextProvider, preserved) : null;
   }
 
   if (input.enabled !== undefined) {
@@ -512,6 +528,14 @@ export async function updateChannel(userId: string, channelId: string, input: Up
   await db.update(channels)
     .set(updates)
     .where(and(eq(channels.id, channelId), eq(channels.userId, userId)));
+
+  if (nextProvider !== current.provider) {
+    // Provider change invalidates the cached model list and legacy model field.
+    await db.delete(channelModels).where(eq(channelModels.channelId, channelId));
+    await db.update(channels)
+      .set({ model: null, updatedAt: new Date() })
+      .where(and(eq(channels.id, channelId), eq(channels.userId, userId)));
+  }
 
   if (input.isDefault === false) {
     await db.update(channels)

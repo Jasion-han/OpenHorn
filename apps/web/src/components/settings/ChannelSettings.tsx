@@ -67,6 +67,7 @@ export function ChannelSettings() {
   const [expandedChannelId, setExpandedChannelId] = useState<string | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const didApplyFocusRef = useRef(false);
+  const [channelNotice, setChannelNotice] = useState<Record<string, { kind: 'error' | 'warn'; message: string; action?: 'switch_openai' }>>({});
 
   const [name, setName] = useState('');
   const [provider, setProvider] = useState<ProviderKey>(() => {
@@ -153,14 +154,23 @@ export function ChannelSettings() {
       try {
         const synced = await api.channels.fetchModels(channel.id);
         if (!synced.success) {
-          notifyError('模型同步失败', synced.error || '无法获取模型列表');
+          setChannelNotice((prev) => {
+            const msg = synced.error || '无法获取模型列表';
+            const action = msg.includes('Provider') || msg.includes('OpenAI 兼容') ? 'switch_openai' : undefined;
+            return { ...prev, [channel.id]: { kind: 'error', message: msg, action } };
+          });
+        }
+        if (synced.success && synced.error) {
+          setChannelNotice((prev) => ({ ...prev, [channel.id]: { kind: 'warn', message: synced.error || '' } }));
         }
       } catch (error) {
-        notifyError('模型同步失败', error instanceof Error ? error.message : '无法获取模型列表');
+        const msg = error instanceof Error ? error.message : '无法获取模型列表';
+        setChannelNotice((prev) => ({ ...prev, [channel.id]: { kind: 'error', message: msg } }));
       }
       setModalOpen(false);
       resetForm();
       await loadChannels();
+      setExpandedChannelId(channel.id);
       notifySuccess('已创建渠道', '渠道已保存');
     } catch (error) {
       console.error('Failed to create channel:', error);
@@ -183,14 +193,19 @@ export function ChannelSettings() {
   };
 
   const handleDelete = async (channelId: string) => {
-    await runChannelAction(`delete:${channelId}`, async () => {
-      await api.channels.delete(channelId);
-      if (expandedChannelId === channelId) {
-        setExpandedChannelId(null);
-      }
-      await loadChannels();
-    });
-  };
+      await runChannelAction(`delete:${channelId}`, async () => {
+        await api.channels.delete(channelId);
+        if (expandedChannelId === channelId) {
+          setExpandedChannelId(null);
+        }
+        setChannelNotice((prev) => {
+          if (!prev[channelId]) return prev;
+          const { [channelId]: _, ...rest } = prev;
+          return rest;
+        });
+        await loadChannels();
+      });
+    };
 
   const handleTest = async (channelId: string) => {
     await runChannelAction(`test:${channelId}`, async () => {
@@ -211,16 +226,25 @@ export function ChannelSettings() {
       setExpandedChannelId(channelId);
 
       if (!result.success) {
-        notifyError('同步失败', result.error || '无法获取模型列表');
+        const msg = result.error || '无法获取模型列表';
+        setChannelNotice((prev) => {
+          const action = msg.includes('Provider') || msg.includes('OpenAI 兼容') ? 'switch_openai' : undefined;
+          return { ...prev, [channelId]: { kind: 'error', message: msg, action } };
+        });
         return;
       }
 
       // success=true but error means "synced, but needs attention" (e.g. default model missing)
       if (result.error) {
-        notifyError('需要配置默认模型', result.error);
+        setChannelNotice((prev) => ({ ...prev, [channelId]: { kind: 'warn', message: result.error || '' } }));
         return;
       }
 
+      setChannelNotice((prev) => {
+        if (!prev[channelId]) return prev;
+        const { [channelId]: _, ...rest } = prev;
+        return rest;
+      });
       notifySuccess('同步完成', '已更新模型列表');
     });
   };
@@ -327,6 +351,7 @@ export function ChannelSettings() {
       {channels.map((channel) => {
         const isExpanded = expandedChannelId === channel.id;
         const needsDefaultModel = Boolean(channel.isDefault && channel.enabled && !channel.defaultModelId);
+        const notice = channelNotice[channel.id] || null;
         return (
           <Card key={channel.id} withBorder id={`channel-${channel.id}`}>
             <Stack gap="sm">
@@ -390,6 +415,52 @@ export function ChannelSettings() {
                   </ActionIcon>
                 </Group>
               </Group>
+
+              {notice && (
+                <Card withBorder padding="sm" bg={notice.kind === 'error' ? 'red.0' : 'orange.0'}>
+                  <Group justify="space-between" wrap="nowrap" align="flex-start">
+                    <div style={{ minWidth: 0 }}>
+                      <Text size="sm" fw={600}>
+                        {notice.kind === 'error' ? '同步失败' : '需要处理'}
+                      </Text>
+                      <Text size="sm" c="dimmed" style={{ whiteSpace: 'pre-wrap' }}>
+                        {notice.message}
+                      </Text>
+                    </div>
+                    <Group gap="xs" wrap="nowrap">
+                      {notice.action === 'switch_openai' && (
+                        <Button
+                          size="xs"
+                          variant="light"
+                          onClick={() => {
+                            void runChannelAction(`fix-provider:${channel.id}`, async () => {
+                              await api.channels.update(channel.id, { provider: 'openai' });
+                              await loadChannels();
+                              setChannelNotice((prev) => {
+                                const { [channel.id]: _, ...rest } = prev;
+                                return rest;
+                              });
+                              notifySuccess('已更新', '已切换为 OpenAI 兼容 Provider，请重新同步模型。');
+                            });
+                          }}
+                        >
+                          切换为 OpenAI 兼容
+                        </Button>
+                      )}
+                      <Button
+                        size="xs"
+                        variant="subtle"
+                        onClick={() => setChannelNotice((prev) => {
+                          const { [channel.id]: _, ...rest } = prev;
+                          return rest;
+                        })}
+                      >
+                        关闭
+                      </Button>
+                    </Group>
+                  </Group>
+                </Card>
+              )}
 
               <Collapse in={isExpanded}>
                 <Stack gap="xs" mt="sm">

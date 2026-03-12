@@ -157,6 +157,7 @@ export const api = {
     
     update: (id: string, data: {
       name?: string;
+      provider?: string;
       apiKey?: string;
       baseUrl?: string;
       enabled?: boolean;
