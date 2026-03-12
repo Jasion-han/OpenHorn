@@ -6,6 +6,7 @@ import { Center, Loader, Stack, Text } from '@mantine/core';
 import { api } from '../../lib/api';
 import { useAuthStore } from '../../stores/authStore';
 import { useChatStore } from '../../stores/chatStore';
+import { BACKEND_UP_EVENT } from '../../stores/backendStatusStore';
 
 export function AuthBootstrap({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -44,8 +45,13 @@ export function AuthBootstrap({ children }: { children: React.ReactNode }) {
     }
 
     void run();
+    const onBackendUp = () => {
+      void run();
+    };
+    window.addEventListener(BACKEND_UP_EVENT, onBackendUp);
     return () => {
       cancelled = true;
+      window.removeEventListener(BACKEND_UP_EVENT, onBackendUp);
     };
   }, [logout, pathname, router, setChannels, setUser]);
 

@@ -21,6 +21,7 @@ import { useAgentStore } from '../../stores/agentStore';
 import { getGlobalDefaultChannel } from '../../lib/default-channel';
 import { notifyError, notifySuccess } from '../../lib/notify';
 import { DEFAULT_WORKSPACE_SETTING_KEY, pickDefaultWorkspaceId } from '../../lib/agent-default-workspace';
+import { BACKEND_UP_EVENT } from '../../stores/backendStatusStore';
 
 type MCPServer = {
   id: string;
@@ -61,6 +62,16 @@ export function AgentSettings() {
 
   useEffect(() => {
     void loadAll();
+  }, []);
+
+  useEffect(() => {
+    const onUp = () => {
+      void loadAll();
+    };
+    window.addEventListener(BACKEND_UP_EVENT, onUp);
+    return () => {
+      window.removeEventListener(BACKEND_UP_EVENT, onUp);
+    };
   }, []);
 
   const loadAll = async () => {

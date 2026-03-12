@@ -18,6 +18,7 @@ import { IconChevronDown, IconChevronRight, IconDots, IconMessage, IconPlus, Ico
 import { useChatStore, type Conversation } from '../../stores/chatStore';
 import { notifyError, notifySuccess } from '@/lib/notify';
 import { api } from '@/lib/api';
+import { BACKEND_UP_EVENT } from '@/stores/backendStatusStore';
 
 type DateGroup = '今天' | '昨天' | '更早';
 
@@ -71,6 +72,16 @@ export function ChatAside() {
 
   useEffect(() => {
     void loadConversations();
+  }, [loadConversations]);
+
+  useEffect(() => {
+    const onUp = () => {
+      void loadConversations();
+    };
+    window.addEventListener(BACKEND_UP_EVENT, onUp);
+    return () => {
+      window.removeEventListener(BACKEND_UP_EVENT, onUp);
+    };
   }, [loadConversations]);
 
   const filtered = useMemo(() => {

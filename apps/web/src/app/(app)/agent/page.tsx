@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useCallback, useState, useEffect, useRef } from 'react';
 import { Paper, TextInput, Button, Stack, Text, Group, ScrollArea, Badge, FileButton, ActionIcon, Menu, Alert, Textarea } from '@mantine/core';
 import { modals } from '@mantine/modals';
 import Link from 'next/link';
@@ -14,6 +14,7 @@ import { AppShellSlot } from '@/components/app/AppShellSlot';
 import { notifyError, notifySuccess } from '@/lib/notify';
 import { DEFAULT_WORKSPACE_SETTING_KEY, pickDefaultWorkspaceId } from '@/lib/agent-default-workspace';
 import { AgentEventCard } from '@/components/agent/AgentEventCard';
+import { BACKEND_UP_EVENT } from '@/stores/backendStatusStore';
 
 const PAGE_PAD = 'var(--mantine-spacing-md)';
 const COMPOSER_PAD_BOTTOM = 'env(safe-area-inset-bottom, 0px)';
@@ -54,19 +55,7 @@ export default function AgentPage() {
   const viewportRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  useEffect(() => {
-    if (user) {
-      void bootstrap();
-    }
-  }, [user]);
-
-  useEffect(() => {
-    if (viewportRef.current) {
-      viewportRef.current.scrollTo({ top: viewportRef.current.scrollHeight });
-    }
-  }, [events]);
-
-  const bootstrap = async () => {
+  const bootstrap = useCallback(async () => {
     setBootstrapping(true);
     try {
       const [{ sessions }, { workspaces: workspacesResp }, { settings }] = await Promise.all([
@@ -94,7 +83,30 @@ export default function AgentPage() {
     } finally {
       setBootstrapping(false);
     }
-  };
+  }, [setSelectedWorkspaceId, setSessions, setWorkspaces]);
+
+  useEffect(() => {
+    if (user) {
+      void bootstrap();
+    }
+  }, [bootstrap, user]);
+
+  useEffect(() => {
+    if (!user) return;
+    const onUp = () => {
+      void bootstrap();
+    };
+    window.addEventListener(BACKEND_UP_EVENT, onUp);
+    return () => {
+      window.removeEventListener(BACKEND_UP_EVENT, onUp);
+    };
+  }, [bootstrap, user]);
+
+  useEffect(() => {
+    if (viewportRef.current) {
+      viewportRef.current.scrollTo({ top: viewportRef.current.scrollHeight });
+    }
+  }, [events]);
 
   const loadSessions = async () => {
     try {

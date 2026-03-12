@@ -21,6 +21,7 @@ import { IconCheck, IconChevronDown, IconChevronUp, IconPlus, IconRefresh, IconS
 import { useChatStore } from '../../stores/chatStore';
 import { api, type ApiChannel, type ApiChannelModel } from '../../lib/api';
 import { notifyError, notifySuccess } from '../../lib/notify';
+import { BACKEND_UP_EVENT } from '../../stores/backendStatusStore';
 
 const PROVIDERS = {
   openai: {
@@ -62,6 +63,16 @@ export function ChannelSettings() {
 
   useEffect(() => {
     void loadChannels();
+  }, []);
+
+  useEffect(() => {
+    const onUp = () => {
+      void loadChannels();
+    };
+    window.addEventListener(BACKEND_UP_EVENT, onUp);
+    return () => {
+      window.removeEventListener(BACKEND_UP_EVENT, onUp);
+    };
   }, []);
 
   const loadChannels = async () => {
