@@ -70,11 +70,17 @@ workspace.put('/:id', async (c) => {
     return c.json({ error: 'Unauthorized' }, 401);
   }
   
-  const workspaceId = c.req.param('id');
-  const body = await c.req.json();
-  
-  await updateWorkspace(user.id, workspaceId, body);
-  return c.json({ success: true });
+  try {
+    const workspaceId = c.req.param('id');
+    const body = await c.req.json();
+    
+    await updateWorkspace(user.id, workspaceId, body);
+    return c.json({ success: true });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to update workspace';
+    const status = message === 'Workspace not found' ? 404 : 400;
+    return c.json({ error: message }, status);
+  }
 });
 
 workspace.delete('/:id', async (c) => {
@@ -83,9 +89,15 @@ workspace.delete('/:id', async (c) => {
     return c.json({ error: 'Unauthorized' }, 401);
   }
   
-  const workspaceId = c.req.param('id');
-  await deleteWorkspace(user.id, workspaceId);
-  return c.json({ success: true });
+  try {
+    const workspaceId = c.req.param('id');
+    await deleteWorkspace(user.id, workspaceId);
+    return c.json({ success: true });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to delete workspace';
+    const status = message === 'Workspace not found' ? 404 : 400;
+    return c.json({ error: message }, status);
+  }
 });
 
 export default workspace;

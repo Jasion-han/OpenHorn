@@ -1,7 +1,34 @@
 import { db } from '../db';
-import { workspaces } from 'db';
+import { agentSessions, mcpServers, workspaces } from 'db';
 import { eq, and } from 'drizzle-orm';
 import { generateId } from '../utils';
+import { deleteSettingValue, getSettingValues } from './settingsService';
+
+const DEFAULT_WORKSPACE_SETTING_KEY = 'agent.defaultWorkspaceId';
+
+function normalizeSlug(input: string): string {
+  const raw = (input || '').trim().toLowerCase();
+  if (!raw) return '';
+  // Keep ASCII slugs predictable across devices.
+  return raw
+    .replace(/\s+/g, '-')
+    .replace(/[^a-z0-9-_]+/g, '-') // replace non-safe chars
+    .replace(/-+/g, '-')
+    .replace(/^[-_]+|[-_]+$/g, '');
+}
+
+async function ensureUniqueWorkspaceSlug(base: string, fallback: string): Promise<string> {
+  const root = base || fallback;
+  const maxAttempts = 50;
+  for (let i = 0; i < maxAttempts; i++) {
+    const candidate = i === 0 ? root : `${root}-${i + 1}`;
+    const existing = await db.select({ id: workspaces.id }).from(workspaces)
+      .where(eq(workspaces.slug, candidate))
+      .limit(1);
+    if (existing.length === 0) return candidate;
+  }
+  throw new Error('Slug 已被占用，请换一个。');
+}
 
 export interface CreateWorkspaceInput {
   name: string;
@@ -35,12 +62,19 @@ export async function getWorkspaceById(userId: string, workspaceId: string) {
 export async function createWorkspace(userId: string, input: CreateWorkspaceInput) {
   const id = generateId();
   const now = new Date();
-  const slug = input.slug || input.name.toLowerCase().replace(/\s+/g, '-');
+  const name = (input.name || '').trim();
+  if (!name) {
+    throw new Error('Name is required');
+  }
+
+  const baseSlug = normalizeSlug(input.slug || '') || normalizeSlug(name);
+  const fallbackSlug = `workspace-${id.slice(0, 8)}`;
+  const slug = await ensureUniqueWorkspaceSlug(baseSlug, fallbackSlug);
   
   await db.insert(workspaces).values({
     id,
     userId,
-    name: input.name,
+    name,
     slug,
     description: input.description || null,
     cwd: input.cwd || null,
@@ -51,7 +85,7 @@ export async function createWorkspace(userId: string, input: CreateWorkspaceInpu
   return {
     id,
     userId,
-    name: input.name,
+    name,
     slug,
     description: input.description,
     cwd: input.cwd,
@@ -94,11 +128,25 @@ export async function updateWorkspace(
 }
 
 export async function deleteWorkspace(userId: string, workspaceId: string) {
+  const existing = await getWorkspaceById(userId, workspaceId);
+  if (!existing) {
+    throw new Error('Workspace not found');
+  }
+
+  // Avoid FK constraint failures: remove dependent rows first.
+  await db.delete(agentSessions)
+    .where(and(eq(agentSessions.userId, userId), eq(agentSessions.workspaceId, workspaceId)));
+  await db.delete(mcpServers)
+    .where(eq(mcpServers.workspaceId, workspaceId));
+
+  // If the deleted workspace was set as default, clear the setting.
+  const values = await getSettingValues(userId, [DEFAULT_WORKSPACE_SETTING_KEY]);
+  if (values[DEFAULT_WORKSPACE_SETTING_KEY] === workspaceId) {
+    await deleteSettingValue(userId, DEFAULT_WORKSPACE_SETTING_KEY);
+  }
+
   await db.delete(workspaces)
-    .where(and(
-      eq(workspaces.id, workspaceId),
-      eq(workspaces.userId, userId)
-    ));
+    .where(and(eq(workspaces.id, workspaceId), eq(workspaces.userId, userId)));
   
   return { success: true };
 }
