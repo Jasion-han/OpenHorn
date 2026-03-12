@@ -135,7 +135,8 @@ export async function* runAgent(
   userId: string,
   sessionId: string,
   prompt: string,
-  attachmentIds: string[] = []
+  attachmentIds: string[] = [],
+  abortController?: AbortController
 ): AsyncGenerator<AgentEvent> {
   const session = await getAgentSessionById(userId, sessionId);
   if (!session) {
@@ -197,6 +198,7 @@ export async function* runAgent(
       cwd,
       baseUrl: resolvedChannel.channel.baseUrl || undefined,
       mcpServers,
+      abortController,
     })) {
       yield event;
     }

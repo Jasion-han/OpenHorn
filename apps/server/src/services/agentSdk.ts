@@ -12,6 +12,7 @@ type SdkOptions = {
   cwd?: string;
   mcpServers?: Record<string, Record<string, unknown>>;
   baseUrl?: string;
+  abortController?: AbortController;
 };
 
 export async function* runClaudeAgentSdk(options: SdkOptions): AsyncGenerator<AgentEvent> {
@@ -30,6 +31,7 @@ export async function* runClaudeAgentSdk(options: SdkOptions): AsyncGenerator<Ag
   const query = sdk.query({
     prompt: options.prompt,
     options: {
+      abortController: options.abortController,
       model: options.model,
       apiKey: options.apiKey,
       cwd: options.cwd,

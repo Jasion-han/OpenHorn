@@ -313,10 +313,11 @@ export const api = {
         body: JSON.stringify({ title }),
       }),
     
-    runSession: (sessionId: string, prompt: string, attachments?: string[]) => {
+    runSession: (sessionId: string, prompt: string, attachments?: string[], options?: { signal?: AbortSignal }) => {
       return fetch(`${API_BASE}/agent/sessions/${sessionId}/run`, {
         method: 'POST',
         credentials: 'include',
+        signal: options?.signal,
         headers: {
           'Content-Type': 'application/json',
         },

@@ -83,12 +83,14 @@ agent.post('/sessions/:id/run', async (c) => {
     return c.json({ error: 'prompt or attachments are required' }, 400);
   }
   
-  const stream = createSseStream(async (send) => {
+  const stream = createSseStream(async (send, ctx) => {
+    send({ type: 'text', content: '已连接 Agent 服务，开始执行...' });
     for await (const event of runAgent(
       user.id,
       sessionId,
       typeof prompt === 'string' ? prompt : '',
-      Array.isArray(attachments) ? attachments : []
+      Array.isArray(attachments) ? attachments : [],
+      ctx.abortController
     )) {
       send(event);
     }

@@ -4,7 +4,7 @@ import { useCallback, useState, useEffect, useRef, useMemo } from 'react';
 import { Paper, TextInput, Button, Stack, Text, Group, ScrollArea, Badge, FileButton, ActionIcon, Menu, Alert, Textarea } from '@mantine/core';
 import { modals } from '@mantine/modals';
 import Link from 'next/link';
-import { IconCheck, IconDots, IconPencil, IconSend, IconPlus, IconRobot, IconTrash, IconSettings, IconBriefcase } from '@tabler/icons-react';
+import { IconCheck, IconDots, IconPencil, IconSend, IconPlus, IconRobot, IconTrash, IconSettings, IconBriefcase, IconPlayerStop } from '@tabler/icons-react';
 import { useAgentStore, type AgentEvent } from '@/stores/agentStore';
 import { useAuthStore } from '@/stores/authStore';
 import { api, type ApiChannel } from '@/lib/api';
@@ -57,6 +57,8 @@ export default function AgentPage() {
   const [channels, setChannels] = useState<ApiChannel[]>([]);
   const viewportRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const runAbortRef = useRef<AbortController | null>(null);
+  const didCancelRef = useRef(false);
 
   const bootstrap = useCallback(async () => {
     setBootstrapping(true);
@@ -239,6 +241,16 @@ export default function AgentPage() {
       notifyError('无法运行', '请先选择默认 Workspace');
       return;
     }
+
+    // Abort any previous run request (best-effort).
+    try {
+      runAbortRef.current?.abort();
+    } catch {
+      // ignore
+    }
+    const abortController = new AbortController();
+    runAbortRef.current = abortController;
+    didCancelRef.current = false;
     
     setIsRunning(true);
     clearEvents();
@@ -258,7 +270,7 @@ export default function AgentPage() {
     const prompt = taskInput.trim();
     setTaskInput('');
     queueMicrotask(() => inputRef.current?.focus());
-      const response = await api.agent.runSession(currentSession.id, prompt, attachmentIds);
+      const response = await api.agent.runSession(currentSession.id, prompt, attachmentIds, { signal: abortController.signal });
       
       if (!response.ok) {
         const errorText = await response.text().catch(() => '');
@@ -269,14 +281,37 @@ export default function AgentPage() {
         addEvent(event as AgentEvent);
       });
     } catch (error) {
+      // User-initiated cancel: do not show as error.
+      if (abortController.signal.aborted || (error instanceof DOMException && error.name === 'AbortError')) {
+        if (!didCancelRef.current) {
+          addEvent({ type: 'text', content: '已停止运行。' });
+        }
+        return;
+      }
       addEvent({ 
         type: 'error', 
         content: error instanceof Error ? error.message : 'Error running agent' 
       });
     } finally {
       setIsRunning(false);
+      if (runAbortRef.current === abortController) {
+        runAbortRef.current = null;
+      }
       queueMicrotask(() => inputRef.current?.focus());
     }
+  };
+
+  const handleCancel = () => {
+    didCancelRef.current = true;
+    try {
+      runAbortRef.current?.abort();
+    } catch {
+      // ignore
+    }
+    runAbortRef.current = null;
+    setIsRunning(false);
+    addEvent({ type: 'text', content: '已停止运行。' });
+    queueMicrotask(() => inputRef.current?.focus());
   };
 
   const selectedWorkspace = selectedWorkspaceId
@@ -607,14 +642,25 @@ export default function AgentPage() {
                     </Button>
                   )}
                 </FileButton>
-                <Button
-                  onClick={handleRun}
-                  loading={isRunning}
-                  disabled={!currentSession || (!taskInput.trim() && files.length === 0) || workspaces.length === 0 || !hasEffectiveWorkspace}
-                  aria-label="运行"
-                >
-                  <IconSend size={18} />
-                </Button>
+                {isRunning ? (
+                  <Button
+                    onClick={handleCancel}
+                    color="red"
+                    variant="light"
+                    aria-label="停止"
+                    leftSection={<IconPlayerStop size={16} />}
+                  >
+                    停止
+                  </Button>
+                ) : (
+                  <Button
+                    onClick={handleRun}
+                    disabled={!currentSession || (!taskInput.trim() && files.length === 0) || workspaces.length === 0 || !hasEffectiveWorkspace}
+                    aria-label="运行"
+                  >
+                    <IconSend size={18} />
+                  </Button>
+                )}
               </Group>
             </Stack>
           </Paper>
