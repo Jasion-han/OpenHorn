@@ -208,6 +208,12 @@ export const api = {
       fetchApi<{ success: boolean }>(`/channels/${id}/models/${encodeURIComponent(modelId)}/set-default`, {
         method: 'POST',
       }),
+
+    agentCheck: (id: string, data: { modelId: string }) =>
+      fetchApi<{ success: boolean; error?: string }>(`/channels/${id}/agent-check`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
   },
   
   conversations: {
