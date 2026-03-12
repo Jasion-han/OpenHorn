@@ -136,7 +136,9 @@ export async function deleteWorkspace(userId: string, workspaceId: string) {
   // Avoid FK constraint failures: remove dependent rows first.
   await db.delete(agentSessions)
     .where(and(eq(agentSessions.userId, userId), eq(agentSessions.workspaceId, workspaceId)));
-  await db.delete(mcpServers)
+  // MCP servers are account-level. Keep them, but detach from this workspace.
+  await db.update(mcpServers)
+    .set({ workspaceId: null, updatedAt: new Date() })
     .where(eq(mcpServers.workspaceId, workspaceId));
 
   // If the deleted workspace was set as default, clear the setting.
