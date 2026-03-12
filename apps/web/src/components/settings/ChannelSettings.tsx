@@ -155,11 +155,22 @@ export function ChannelSettings() {
   const handleFetchModels = async (channelId: string) => {
     await runChannelAction(`fetch:${channelId}`, async () => {
       const result = await api.channels.fetchModels(channelId);
-      if (!result.success) {
-        throw new Error(result.error || 'Failed to fetch models');
-      }
+      // Always refresh so UI reflects the latest state, even when sync fails.
       await loadChannels();
       setExpandedChannelId(channelId);
+
+      if (!result.success) {
+        notifyError('同步失败', result.error || '无法获取模型列表');
+        return;
+      }
+
+      // success=true but error means "synced, but needs attention" (e.g. default model missing)
+      if (result.error) {
+        notifyError('需要配置默认模型', result.error);
+        return;
+      }
+
+      notifySuccess('同步完成', '已更新模型列表');
     });
   };
 

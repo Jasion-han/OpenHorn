@@ -83,13 +83,6 @@ const PROVIDER_DEFAULT_BASE_URLS: Record<string, string> = {
   google: 'https://generativelanguage.googleapis.com',
 };
 
-const PROVIDER_DEFAULT_MODELS: Record<string, string> = {
-  anthropic: 'claude-3-5-sonnet-20241022',
-  openai: 'gpt-4o',
-  deepseek: 'deepseek-chat',
-  google: 'gemini-1.5-pro',
-};
-
 function getDefaultBaseUrl(provider: string): string | null {
   return PROVIDER_DEFAULT_BASE_URLS[provider] || null;
 }
@@ -232,7 +225,7 @@ async function buildChannelItems(channelRows: ChannelRow[]) {
 
   return channelRows.map((row) => {
     const models = modelsByChannel.get(row.id) || [];
-    const defaultModel = models.find((model) => model.isDefault) || models[0] || null;
+    const defaultModel = models.find((model) => model.isDefault && model.enabled) || null;
 
     return {
       id: row.id,
@@ -245,7 +238,8 @@ async function buildChannelItems(channelRows: ChannelRow[]) {
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
       models,
-      defaultModelId: defaultModel?.modelId || row.model || null,
+      // Strict: do not pretend a default exists (no "models[0]" fallback).
+      defaultModelId: defaultModel?.modelId || null,
       legacyModel: row.model || null,
       hasApiKey: Boolean(row.apiKey),
     } satisfies ChannelItem;
@@ -477,24 +471,6 @@ export async function createChannel(userId: string, input: CreateChannelInput) {
     updatedAt: now,
   });
 
-  const defaultModelId = PROVIDER_DEFAULT_MODELS[input.provider];
-  if (defaultModelId) {
-    await db.insert(channelModels).values({
-      id: generateId(),
-      channelId: id,
-      modelId: defaultModelId,
-      displayName: defaultModelId,
-      enabled: true,
-      isDefault: true,
-      createdAt: now,
-      updatedAt: now,
-    });
-
-    await db.update(channels)
-      .set({ model: defaultModelId, updatedAt: now })
-      .where(eq(channels.id, id));
-  }
-
   return getOwnedChannelItem(userId, id);
 }
 
@@ -689,7 +665,15 @@ export async function fetchChannelModels(userId: string, channelId: string): Pro
     const models = await fetchProviderModels(channel.provider, baseUrl, apiKey);
     const existingModels = await listChannelModels(userId, channelId);
     const existingByModelId = new Map(existingModels.map((model) => [model.modelId, model]));
+    const nextModelIds = new Set(models.map((m) => m.modelId));
     const now = new Date();
+
+    // Remove models that no longer exist in provider list (authoritative sync).
+    for (const model of existingModels) {
+      if (!nextModelIds.has(model.modelId)) {
+        await db.delete(channelModels).where(eq(channelModels.id, model.id));
+      }
+    }
 
     for (const model of models) {
       const existing = existingByModelId.get(model.modelId);
@@ -709,23 +693,26 @@ export async function fetchChannelModels(userId: string, channelId: string): Pro
         modelId: model.modelId,
         displayName: model.displayName,
         enabled: true,
-        isDefault: existingModels.length === 0 && models[0]?.modelId === model.modelId,
+        isDefault: false,
         createdAt: now,
         updatedAt: now,
       });
     }
 
     const updatedModels = await listChannelModels(userId, channelId);
-    if (updatedModels.length > 0 && !updatedModels.some((model) => model.isDefault)) {
-      await setDefaultModelInternal(channelId, updatedModels[0].modelId);
-      await db.update(channels)
-        .set({ model: updatedModels[0].modelId, updatedAt: new Date() })
-        .where(eq(channels.id, channelId));
-    }
+    const enabledModels = updatedModels.filter((m) => m.enabled);
+    const defaultModel = updatedModels.find((m) => m.isDefault && m.enabled) || null;
+    await db.update(channels)
+      .set({ model: defaultModel?.modelId || null, updatedAt: new Date() })
+      .where(eq(channels.id, channelId));
 
     return {
       success: true,
-      models: await listChannelModels(userId, channelId),
+      // If user has enabled models but hasn't picked a default, warn (no auto fallback).
+      error: enabledModels.length > 0 && !defaultModel
+        ? '已同步模型列表，但未设置默认模型。请在该渠道下选择一个启用的默认模型（用于 Chat/Agent）。'
+        : undefined,
+      models: updatedModels,
     };
   } catch (error) {
     // Common pitfall: many "Claude relay" services expose an OpenAI-compatible API.
