@@ -113,8 +113,17 @@ function normalizeAnthropicApiBaseUrl(baseUrl: string): string {
 
 function normalizeAnthropicRuntimeBaseUrl(baseUrl: string): string {
   let url = normalizeBaseUrl(baseUrl);
-  url = url.replace(/\/messages$/, '');
-  return url.replace(/\/v\d+$/, '');
+  // Relays sometimes mix Anthropic/OpenAI-style paths; be tolerant.
+  // Keep stripping until stable for common suffix combos like:
+  // - /v1
+  // - /messages
+  // - /v1/messages
+  // - /v1/messages/v1 (when an OpenAI normalizer appended /v1)
+  for (let i = 0; i < 3; i++) {
+    url = url.replace(/\/v\d+$/, '');
+    url = url.replace(/\/messages$/, '');
+  }
+  return url;
 }
 
 function normalizeChannelBaseUrl(provider: string, baseUrl: string): string {
@@ -880,16 +889,28 @@ export async function getResolvedChannelById(userId: string, channelId: string) 
   return getResolvedChannelForUser(userId, channelId);
 }
 
-export async function getChannelRuntimeCredentialsById(userId: string, channelId: string): Promise<{
+export async function getChannelRuntimeCredentialsById(
+  userId: string,
+  channelId: string,
+  options?: { runtime?: 'channel' | 'anthropic' }
+): Promise<{
   channel: ChannelItem;
   apiKey: string;
 }> {
   const channel = await getOwnedChannelItem(userId, channelId);
   const row = await getOwnedChannelRow(userId, channelId);
 
+  const storedOrDefaultBaseUrl =
+    row.baseUrl || channel.baseUrl || getDefaultBaseUrl(channel.provider) || '';
+
+  const runtimeBaseUrl =
+    options?.runtime === 'anthropic'
+      ? normalizeAnthropicRuntimeBaseUrl(storedOrDefaultBaseUrl)
+      : getRuntimeBaseUrl(channel.provider, storedOrDefaultBaseUrl);
+
   const channelWithRuntimeBaseUrl: ChannelItem = {
     ...channel,
-    baseUrl: getRuntimeBaseUrl(channel.provider, row.baseUrl || channel.baseUrl),
+    baseUrl: runtimeBaseUrl,
   };
 
   return {
