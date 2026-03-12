@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActionIcon,
   Badge,
@@ -22,6 +22,7 @@ import { useChatStore } from '../../stores/chatStore';
 import { api, type ApiChannel, type ApiChannelModel } from '../../lib/api';
 import { notifyError, notifySuccess } from '../../lib/notify';
 import { BACKEND_UP_EVENT } from '../../stores/backendStatusStore';
+import { useRouter, useSearchParams } from 'next/navigation';
 
 const PROVIDERS = {
   openai: {
@@ -44,17 +45,40 @@ const PROVIDERS = {
 
 type ProviderKey = keyof typeof PROVIDERS;
 
+const LAST_PROVIDER_KEY = 'channels.lastProvider';
+const LAST_BASEURL_KEY = 'channels.lastBaseUrl';
+
+function getPreferredChannelToFix(channels: ApiChannel[]): ApiChannel | null {
+  const enabled = channels.filter((c) => c.enabled);
+  const def = enabled.find((c) => c.isDefault);
+  if (def) return def;
+  if (enabled.length === 0) return null;
+  return enabled
+    .slice()
+    .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())[0] || null;
+}
+
 export function ChannelSettings() {
   const { channels, setChannels } = useChatStore();
+  const router = useRouter();
+  const search = useSearchParams();
   const [modalOpen, setModalOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [expandedChannelId, setExpandedChannelId] = useState<string | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
+  const didApplyFocusRef = useRef(false);
 
   const [name, setName] = useState('');
-  const [provider, setProvider] = useState<ProviderKey>('openai');
+  const [provider, setProvider] = useState<ProviderKey>(() => {
+    if (typeof window === 'undefined') return 'openai';
+    const raw = window.localStorage.getItem(LAST_PROVIDER_KEY);
+    return (raw && raw in PROVIDERS ? (raw as ProviderKey) : 'openai');
+  });
   const [apiKey, setApiKey] = useState('');
-  const [baseUrl, setBaseUrl] = useState(PROVIDERS.openai.defaultBaseUrl);
+  const [baseUrl, setBaseUrl] = useState(() => {
+    if (typeof window === 'undefined') return PROVIDERS.openai.defaultBaseUrl;
+    return window.localStorage.getItem(LAST_BASEURL_KEY) || PROVIDERS.openai.defaultBaseUrl;
+  });
 
   const providerOptions = useMemo(
     () => Object.entries(PROVIDERS).map(([value, item]) => ({ value, label: item.name })),
@@ -86,16 +110,32 @@ export function ChannelSettings() {
 
   const resetForm = () => {
     setName('');
-    setProvider('openai');
     setApiKey('');
-    setBaseUrl(PROVIDERS.openai.defaultBaseUrl);
+    // Keep last provider/baseUrl preference; only clear per-channel fields.
   };
 
   const handleProviderChange = (value: string | null) => {
     const nextProvider = (value || 'openai') as ProviderKey;
     setProvider(nextProvider);
-    setBaseUrl(PROVIDERS[nextProvider].defaultBaseUrl);
+    const nextBaseUrl = PROVIDERS[nextProvider].defaultBaseUrl;
+    setBaseUrl(nextBaseUrl);
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(LAST_PROVIDER_KEY, nextProvider);
+      window.localStorage.setItem(LAST_BASEURL_KEY, nextBaseUrl);
+    }
   };
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(LAST_PROVIDER_KEY, provider);
+  }, [provider]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (baseUrl.trim()) {
+      window.localStorage.setItem(LAST_BASEURL_KEY, baseUrl.trim());
+    }
+  }, [baseUrl]);
 
   const handleCreate = async () => {
     if (!name.trim() || !apiKey.trim()) return;
@@ -226,6 +266,50 @@ export function ChannelSettings() {
     setExpandedChannelId((current) => current === channelId ? null : channelId);
   };
 
+  useEffect(() => {
+    if (didApplyFocusRef.current) return;
+    const focus = search.get('focus');
+    if (!focus) return;
+    if (focus !== 'default' && focus.trim().length === 0) return;
+
+    // If we haven't loaded channels yet, wait.
+    // Channels live in a global store; "channels.length===0" could mean "not loaded" or "none".
+    // We'll apply focus as soon as the store updates at least once after mount.
+    didApplyFocusRef.current = true;
+
+    const apply = () => {
+      let target: ApiChannel | null = null;
+      if (focus !== 'default') {
+        target = channels.find((c) => c.id === focus) || null;
+      }
+      if (!target) {
+        target = getPreferredChannelToFix(channels);
+      }
+
+      if (!target) {
+        setModalOpen(true);
+      } else {
+        setExpandedChannelId(target.id);
+        queueMicrotask(() => {
+          const el = document.getElementById(`channel-${target.id}`);
+          el?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+        });
+      }
+
+      // Clear focus params so refresh doesn't re-run the guide.
+      const params = new URLSearchParams(search.toString());
+      params.delete('focus');
+      params.delete('action');
+      const next = params.toString();
+      router.replace(next ? `/settings?${next}` : '/settings?tab=channels');
+    };
+
+    // If channels are empty, still apply (might open modal).
+    // Defer to ensure the UI is mounted.
+    queueMicrotask(apply);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [channels, router, search]);
+
   return (
     <Stack gap="md">
       <Group justify="space-between">
@@ -242,14 +326,16 @@ export function ChannelSettings() {
 
       {channels.map((channel) => {
         const isExpanded = expandedChannelId === channel.id;
+        const needsDefaultModel = Boolean(channel.isDefault && channel.enabled && !channel.defaultModelId);
         return (
-          <Card key={channel.id} withBorder>
+          <Card key={channel.id} withBorder id={`channel-${channel.id}`}>
             <Stack gap="sm">
               <Group justify="space-between" align="flex-start">
                 <div>
                   <Group gap="xs" mb={4}>
                     <Text fw={600}>{channel.name}</Text>
                     {channel.isDefault && <Badge color="blue">默认</Badge>}
+                    {needsDefaultModel && <Badge color="orange">缺少默认模型</Badge>}
                     {!channel.enabled && <Badge color="gray">已禁用</Badge>}
                   </Group>
                   <Group gap="xs">
