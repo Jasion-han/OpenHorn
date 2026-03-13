@@ -396,7 +396,11 @@ export default function AgentPage() {
   const handleRetry = (eventIndex: number) => {
     // Find the nearest user event before this index
     const userEvent = events.slice(0, eventIndex).reverse().find((e) => e.type === 'user');
-    if (!userEvent?.content || isRunning) return;
+    if (!userEvent?.content) return;
+    if (isRunning) {
+      notifyError('无法重试', '任务运行中，请先停止或等待结束。');
+      return;
+    }
     setTaskInput(userEvent.content);
     queueMicrotask(() => void handleRun());
   };
@@ -658,7 +662,7 @@ export default function AgentPage() {
                     setEditAnchor({ eventId: event.id, index });
                     queueMicrotask(() => inputRef.current?.focus());
                   } : undefined}
-                  onRetry={event.type === 'text' && !isRunning ? () => handleRetry(index) : undefined}
+                  onRetry={event.type === 'text' ? () => handleRetry(index) : undefined}
                   onDelete={(event.type === 'user' || event.type === 'text') ? () => {
                     if (!event.id) return;
                     void api.agent.deleteEvent(event.id).then(() => removeEvent(event.id!)).catch(() => {});
