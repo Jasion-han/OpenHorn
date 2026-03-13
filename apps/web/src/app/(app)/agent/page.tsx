@@ -360,6 +360,14 @@ export default function AgentPage() {
           // ignore
         }
       }
+
+      // Refresh persisted events so each bubble has a stable server id (enables delete without manual refresh).
+      try {
+        const { events: latest } = await api.agent.listEvents(sessionId);
+        setEvents(latest as any);
+      } catch {
+        // Best-effort; keep the current in-memory timeline.
+      }
     } catch (error) {
       // User-initiated cancel: do not show as error.
       if (abortController.signal.aborted || (error instanceof DOMException && error.name === 'AbortError')) {
@@ -651,8 +659,9 @@ export default function AgentPage() {
                     queueMicrotask(() => inputRef.current?.focus());
                   } : undefined}
                   onRetry={event.type === 'text' && !isRunning ? () => handleRetry(index) : undefined}
-                  onDelete={event.id ? () => {
-                    void api.agent.deleteEvent(event.id!).then(() => removeEvent(event.id!)).catch(() => {});
+                  onDelete={(event.type === 'user' || event.type === 'text') ? () => {
+                    if (!event.id) return;
+                    void api.agent.deleteEvent(event.id).then(() => removeEvent(event.id!)).catch(() => {});
                   } : undefined}
                 />
               ))}

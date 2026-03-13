@@ -60,8 +60,8 @@ export function AgentEventCard({
               </IconActionButton>
             )}
             <CopyAction text={event.content || ''} />
-            {onDelete && event.id && (
-              <IconActionButton onClick={onDelete} title="删除" danger>
+            {onDelete && (
+              <IconActionButton onClick={onDelete} title="删除" danger disabled={!event.id}>
                 <IconTrash size={13} />
               </IconActionButton>
             )}
@@ -99,8 +99,8 @@ export function AgentEventCard({
               <IconRefresh size={13} />
             </IconActionButton>
           )}
-          {onDelete && event.id && (
-            <IconActionButton onClick={onDelete} title="删除" danger>
+          {onDelete && (
+            <IconActionButton onClick={onDelete} title="删除" danger disabled={!event.id}>
               <IconTrash size={13} />
             </IconActionButton>
           )}
