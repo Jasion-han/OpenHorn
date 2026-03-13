@@ -94,11 +94,9 @@ export function AgentEventCard({
         </Paper>
         <div style={{ display: 'flex', gap: 2, marginTop: 2, opacity: hovered ? 1 : 0, transition: 'opacity 0.15s', pointerEvents: hovered ? 'auto' : 'none' }}>
           <CopyAction text={event.content || ''} />
-          {onRetry && (
-            <IconActionButton onClick={onRetry} title="重试">
-              <IconRefresh size={13} />
-            </IconActionButton>
-          )}
+          <IconActionButton onClick={onRetry || (() => {})} title="重试" disabled={!onRetry}>
+            <IconRefresh size={13} />
+          </IconActionButton>
           {onDelete && (
             <IconActionButton onClick={onDelete} title="删除" danger disabled={!event.id}>
               <IconTrash size={13} />
