@@ -59,6 +59,7 @@ export default function AgentPage() {
   const [bootstrapping, setBootstrapping] = useState(false);
   const [channels, setChannels] = useState<ApiChannel[]>([]);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  const [editAnchor, setEditAnchor] = useState<{ eventId?: string; index: number } | null>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const runAbortRef = useRef<AbortController | null>(null);
@@ -252,7 +253,38 @@ export default function AgentPage() {
     const abortController = new AbortController();
     runAbortRef.current = abortController;
     didCancelRef.current = false;
-    
+
+    // If user edits a previous "user" message, re-run in-place:
+    // delete that message and everything after it (both UI + server), then append the new run output.
+    if (editAnchor) {
+      const startIndex = (() => {
+        if (editAnchor.eventId) {
+          const idx = events.findIndex((e) => e.id === editAnchor.eventId);
+          if (idx >= 0) return idx;
+        }
+        return Math.max(0, Math.min(editAnchor.index, events.length));
+      })();
+
+      const tail = events.slice(startIndex);
+      // Best-effort delete on server for persisted events, so refresh doesn't resurrect them.
+      const deletes = tail
+        .map((e) => e.id)
+        .filter(Boolean)
+        .map((id) => api.agent.deleteEvent(id as string));
+      const results = await Promise.allSettled(deletes);
+      const failed = results.some((r) => r.status === 'rejected');
+      if (failed) {
+        notifyError('覆盖失败', '删除旧记录失败，请稍后重试。');
+        runAbortRef.current = null;
+        return;
+      }
+
+      setEvents(events.slice(0, startIndex) as any);
+      setEditAnchor(null);
+      // Drop attachments when overwriting history to avoid confusing carry-over.
+      setFiles([]);
+    }
+
     setIsRunning(true);
     // Show what the user asked, so the timeline is never "blank".
     const userText = hasInput
@@ -615,6 +647,7 @@ export default function AgentPage() {
                   isNewTurn={event.type === 'user' && index > 0}
                   onEdit={event.type === 'user' ? () => {
                     setTaskInput(event.content || '');
+                    setEditAnchor({ eventId: event.id, index });
                     queueMicrotask(() => inputRef.current?.focus());
                   } : undefined}
                   onRetry={event.type === 'text' && !isRunning ? () => handleRetry(index) : undefined}
