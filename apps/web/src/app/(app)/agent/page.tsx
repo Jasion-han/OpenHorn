@@ -226,10 +226,22 @@ export default function AgentPage() {
     });
   };
 
-  const handleRun = async () => {
-    const hasInput = taskInput.trim().length > 0;
-    const hasFiles = files.length > 0;
-    if ((!hasInput && !hasFiles) || !currentSession || isRunning) return;
+  const findNearestUserEvent = (fromIndex: number) => {
+    for (let i = Math.min(fromIndex, events.length - 1); i >= 0; i--) {
+      const e = events[i];
+      if ((e as any)?.type === 'user') {
+        return { event: e, index: i };
+      }
+    }
+    return null;
+  };
+
+  const runAgentPrompt = async (input: { prompt: string; files?: File[]; overwriteFrom?: { eventId?: string; index: number } | null }) => {
+    const prompt = input.prompt || '';
+    const runFiles = input.files || [];
+    const hasPrompt = prompt.trim().length > 0;
+    const hasFiles = runFiles.length > 0;
+    if ((!hasPrompt && !hasFiles) || !currentSession || isRunning) return;
 
     const sessionId = currentSession.id;
 
@@ -254,19 +266,17 @@ export default function AgentPage() {
     runAbortRef.current = abortController;
     didCancelRef.current = false;
 
-    // If user edits a previous "user" message, re-run in-place:
-    // delete that message and everything after it (both UI + server), then append the new run output.
-    if (editAnchor) {
+    // Overwrite: delete tail (UI + server persisted ids) before re-running.
+    if (input.overwriteFrom) {
       const startIndex = (() => {
-        if (editAnchor.eventId) {
-          const idx = events.findIndex((e) => e.id === editAnchor.eventId);
+        if (input.overwriteFrom?.eventId) {
+          const idx = events.findIndex((e) => e.id === input.overwriteFrom!.eventId);
           if (idx >= 0) return idx;
         }
-        return Math.max(0, Math.min(editAnchor.index, events.length));
+        return Math.max(0, Math.min(input.overwriteFrom.index, events.length));
       })();
 
       const tail = events.slice(startIndex);
-      // Best-effort delete on server for persisted events, so refresh doesn't resurrect them.
       const deletes = tail
         .map((e) => e.id)
         .filter(Boolean)
@@ -281,43 +291,38 @@ export default function AgentPage() {
 
       setEvents(events.slice(0, startIndex) as any);
       setEditAnchor(null);
-      // Drop attachments when overwriting history to avoid confusing carry-over.
       setFiles([]);
     }
 
     setIsRunning(true);
+
     // Show what the user asked, so the timeline is never "blank".
-    const userText = hasInput
-      ? taskInput.trim()
-      : files.length > 0
-        ? `附件：${files.map((f) => f.name).join(', ')}`
+    const userText = hasPrompt
+      ? prompt.trim()
+      : hasFiles
+        ? `附件：${runFiles.map((f) => f.name).join(', ')}`
         : '';
     if (userText) {
       addEvent({ type: 'user', content: userText });
     }
-    
+
     try {
       let attachmentIds: string[] = [];
-      if (files.length > 0) {
+      if (hasFiles) {
         const upload = await uploadAttachments({
           sessionId: currentSession.id,
-          files,
+          files: runFiles,
         });
         attachmentIds = upload.attachments.map((attachment) => attachment.id);
         setFiles([]);
       }
 
-      const prompt = taskInput.trim();
-      setTaskInput('');
-      queueMicrotask(() => inputRef.current?.focus());
-      const response = await api.agent.runSession(sessionId, prompt, attachmentIds, { signal: abortController.signal });
-      
+      const response = await api.agent.runSession(sessionId, prompt.trim(), attachmentIds, { signal: abortController.signal });
       if (!response.ok) {
         const errorText = await response.text().catch(() => '');
         throw new Error(errorText || 'Failed to run agent');
       }
-      
-      // Best-effort: mark as active when starting a new run.
+
       patchSessionStatus(sessionId, 'active');
 
       // Auto-rename if still using the default title.
@@ -332,17 +337,11 @@ export default function AgentPage() {
 
       let sawError = false;
       await readSseStream(response, (event) => {
-        if ((event as any)?.type === 'error') {
-          sawError = true;
-        }
-        // Ignore meta/keepalive events in the UI, but they still help the server avoid false timeouts.
-        if ((event as any)?.type === 'meta') {
-          return;
-        }
+        if ((event as any)?.type === 'error') sawError = true;
+        if ((event as any)?.type === 'meta') return;
         addEvent(event as AgentEvent);
       });
 
-      // Mark completed when the stream ends without an error event.
       if (!sawError) {
         try {
           await api.agent.updateStatus(sessionId, 'completed');
@@ -361,21 +360,19 @@ export default function AgentPage() {
         }
       }
 
-      // Refresh persisted events so each bubble has a stable server id (enables delete without manual refresh).
       try {
         const { events: latest } = await api.agent.listEvents(sessionId);
         setEvents(latest as any);
       } catch {
-        // Best-effort; keep the current in-memory timeline.
+        // ignore
       }
     } catch (error) {
-      // User-initiated cancel: do not show as error.
       if (abortController.signal.aborted || (error instanceof DOMException && error.name === 'AbortError')) {
         return;
       }
-      addEvent({ 
-        type: 'error', 
-        content: error instanceof Error ? error.message : 'Error running agent' 
+      addEvent({
+        type: 'error',
+        content: error instanceof Error ? error.message : 'Error running agent',
       });
       try {
         await api.agent.updateStatus(sessionId, 'cancelled');
@@ -393,16 +390,23 @@ export default function AgentPage() {
     }
   };
 
+  const handleRun = async () => {
+    const prompt = taskInput.trim();
+    const runFiles = files.slice();
+    setTaskInput('');
+    queueMicrotask(() => inputRef.current?.focus());
+    await runAgentPrompt({ prompt, files: runFiles, overwriteFrom: editAnchor });
+  };
+
   const handleRetry = (eventIndex: number) => {
-    // Find the nearest user event before this index
-    const userEvent = events.slice(0, eventIndex).reverse().find((e) => e.type === 'user');
+    const hit = findNearestUserEvent(eventIndex);
+    const userEvent = hit?.event;
     if (!userEvent?.content) return;
-    if (isRunning) {
-      notifyError('无法重试', '任务运行中，请先停止或等待结束。');
-      return;
-    }
-    setTaskInput(userEvent.content);
-    queueMicrotask(() => void handleRun());
+    void runAgentPrompt({
+      prompt: userEvent.content,
+      files: [],
+      overwriteFrom: { eventId: userEvent.id, index: hit!.index },
+    });
   };
 
   const handleCancel = () => {
