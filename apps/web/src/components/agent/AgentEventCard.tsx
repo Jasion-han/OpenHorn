@@ -28,12 +28,14 @@ export function AgentEventCard({
   onDelete,
   onRetry,
   onEdit,
+  isStreaming = false,
 }: {
   event: AgentEvent;
   isNewTurn?: boolean;
   onDelete?: () => void;
   onRetry?: () => void;
   onEdit?: () => void;
+  isStreaming?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [hovered, setHovered] = useState(false);
@@ -92,17 +94,28 @@ export function AgentEventCard({
             <MarkdownMessage content={event.content || ''} />
           </div>
         </Paper>
-        <div style={{ display: 'flex', gap: 2, marginTop: 2, opacity: hovered ? 1 : 0, transition: 'opacity 0.15s', pointerEvents: hovered ? 'auto' : 'none' }}>
-          <CopyAction text={event.content || ''} />
-          <IconActionButton onClick={onRetry || (() => {})} title="重试" disabled={!onRetry}>
-            <IconRefresh size={13} />
-          </IconActionButton>
-          {onDelete && (
-            <IconActionButton onClick={onDelete} title="删除" danger disabled={!event.id}>
-              <IconTrash size={13} />
+        {!isStreaming && (
+          <div
+            style={{
+              display: 'flex',
+              gap: 2,
+              marginTop: 2,
+              opacity: hovered ? 1 : 0,
+              transition: 'opacity 0.15s',
+              pointerEvents: hovered ? 'auto' : 'none',
+            }}
+          >
+            <CopyAction text={event.content || ''} />
+            <IconActionButton onClick={onRetry || (() => {})} title="重试" disabled={!onRetry}>
+              <IconRefresh size={13} />
             </IconActionButton>
-          )}
-        </div>
+            {onDelete && (
+              <IconActionButton onClick={onDelete} title="删除" danger disabled={!event.id}>
+                <IconTrash size={13} />
+              </IconActionButton>
+            )}
+          </div>
+        )}
       </div>
     );
   }

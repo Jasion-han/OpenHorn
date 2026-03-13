@@ -667,6 +667,7 @@ export default function AgentPage() {
                     if (!event.id) return;
                     void api.agent.deleteEvent(event.id).then(() => removeEvent(event.id!)).catch(() => {});
                   } : undefined}
+                  isStreaming={Boolean(isRunning && event.type === 'text' && index === events.length - 1)}
                 />
               ))}
 
