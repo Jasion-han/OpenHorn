@@ -6,10 +6,14 @@ import {
   getAgentSessionById,
   createAgentSession,
   updateAgentSessionStatus,
+  updateAgentSessionChannel,
   renameAgentSession,
   deleteAgentSession,
   runAgent,
+  getAgentEvents,
+  deleteAgentEvent,
 } from '../services/agentService';
+import { generateAutoTitle } from '../services/autoTitleService';
 import { createSseStream } from '../utils/sse';
 
 const agent = new Hono();
@@ -32,6 +36,28 @@ agent.get('/sessions', async (c) => {
   
   const sessions = await getAgentSessions(user.id);
   return c.json({ sessions });
+});
+
+agent.get('/sessions/:id/events', async (c) => {
+  const user = await getUser(c);
+  if (!user) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+
+  const sessionId = c.req.param('id');
+  const events = await getAgentEvents(user.id, sessionId);
+  return c.json({ events });
+});
+
+agent.delete('/events/:eventId', async (c) => {
+  const user = await getUser(c);
+  if (!user) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+  const eventId = c.req.param('eventId');
+  const ok = await deleteAgentEvent(user.id, eventId);
+  if (!ok) return c.json({ error: 'Not found' }, 404);
+  return c.json({ success: true });
 });
 
 agent.get('/sessions/:id', async (c) => {
@@ -74,7 +100,12 @@ agent.post('/sessions/:id/run', async (c) => {
   }
   
   const sessionId = c.req.param('id');
-  const body = await c.req.json();
+  let body: any;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: 'Invalid JSON body' }, 400);
+  }
   const { prompt, attachments } = body;
 
   const hasPrompt = typeof prompt === 'string' && prompt.trim().length > 0;
@@ -145,6 +176,23 @@ agent.post('/sessions/:id/run', async (c) => {
   });
 });
 
+agent.put('/sessions/:id/channel', async (c) => {
+  const user = await getUser(c);
+  if (!user) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+
+  const sessionId = c.req.param('id');
+  const body = await c.req.json();
+  const { channelId, modelId } = body;
+  if (!channelId || !modelId) {
+    return c.json({ error: 'channelId and modelId are required' }, 400);
+  }
+
+  await updateAgentSessionChannel(user.id, sessionId, channelId, modelId);
+  return c.json({ success: true });
+});
+
 agent.put('/sessions/:id/status', async (c) => {
   const user = await getUser(c);
   if (!user) {
@@ -191,9 +239,44 @@ agent.delete('/sessions/:id', async (c) => {
     return c.json({ error: 'Unauthorized' }, 401);
   }
   
-  const sessionId = c.req.param('id');
-  await deleteAgentSession(user.id, sessionId);
-  return c.json({ success: true });
+  try {
+    const sessionId = c.req.param('id');
+    await deleteAgentSession(user.id, sessionId);
+    return c.json({ success: true });
+  } catch (error) {
+    if (error instanceof Error && error.message === 'Session not found') {
+      return c.json({ error: 'Session not found' }, 404);
+    }
+    return c.json({ error: error instanceof Error ? error.message : 'Failed to delete session' }, 400);
+  }
+});
+
+agent.post('/sessions/:id/auto-title', async (c) => {
+  const user = await getUser(c);
+  if (!user) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+
+  try {
+    const sessionId = c.req.param('id');
+    const session = await getAgentSessionById(user.id, sessionId);
+    if (!session) {
+      return c.json({ error: 'Session not found' }, 404);
+    }
+    const body = await c.req.json().catch(() => ({}));
+    const prompt = typeof body.prompt === 'string' ? body.prompt : '';
+    if (!prompt.trim()) {
+      return c.json({ error: 'prompt is required' }, 400);
+    }
+    const title = await generateAutoTitle(user.id, prompt, (session as any).channelId || null);
+    if (!title) {
+      return c.json({ success: false, error: 'Failed to generate title' });
+    }
+    await renameAgentSession(user.id, sessionId, title);
+    return c.json({ success: true, title });
+  } catch (error) {
+    return c.json({ success: false, error: error instanceof Error ? error.message : 'Failed' });
+  }
 });
 
 export default agent;

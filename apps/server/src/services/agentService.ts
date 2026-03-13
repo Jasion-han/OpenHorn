@@ -1,12 +1,56 @@
 import { db } from '../db';
-import { agentSessions, workspaces } from 'db';
-import { eq, and } from 'drizzle-orm';
+import { agentSessions, workspaces, agentEvents } from 'db';
+import { eq, and, desc } from 'drizzle-orm';
 import { generateId } from '../utils';
 import { getResolvedChannelForUser } from './channelService';
 import { runClaudeAgentSdk } from './agentSdk';
 import { loadEnabledMcpServersForUser } from './mcpLoader';
 import { buildAttachmentContextFromIds } from './attachmentService';
 import { getSettingValues } from './settingsService';
+
+async function saveAgentEvent(sessionId: string, event: AgentEvent): Promise<void> {
+  if (event.type === 'meta' || event.type === 'done') return;
+  try {
+    await db.insert(agentEvents).values({
+      id: generateId(),
+      sessionId,
+      type: event.type,
+      content: event.content ?? null,
+      toolName: event.toolName ?? null,
+      toolInput: event.toolInput !== undefined ? JSON.stringify(event.toolInput) : null,
+      createdAt: new Date(),
+    });
+  } catch (e) {
+    console.error('[saveAgentEvent] failed:', e);
+    // Best-effort; do not break the stream if persistence fails.
+  }
+}
+
+export async function getAgentEvents(userId: string, sessionId: string): Promise<AgentEvent[]> {
+  const session = await getAgentSessionById(userId, sessionId);
+  if (!session) return [];
+  const rows = await db.select().from(agentEvents)
+    .where(eq(agentEvents.sessionId, sessionId))
+    .orderBy(agentEvents.createdAt);
+  return rows.map((row) => ({
+    id: row.id,
+    type: row.type as AgentEvent['type'],
+    content: row.content ?? undefined,
+    toolName: row.toolName ?? undefined,
+    toolInput: row.toolInput ? (() => { try { return JSON.parse(row.toolInput!); } catch { return row.toolInput; } })() : undefined,
+  }));
+}
+
+export async function deleteAgentEvent(userId: string, eventId: string): Promise<boolean> {
+  // Verify ownership via session join
+  const rows = await db.select({ id: agentEvents.id })
+    .from(agentEvents)
+    .innerJoin(agentSessions, eq(agentEvents.sessionId, agentSessions.id))
+    .where(and(eq(agentEvents.id, eventId), eq(agentSessions.userId, userId)));
+  if (rows.length === 0) return false;
+  await db.delete(agentEvents).where(eq(agentEvents.id, eventId));
+  return true;
+}
 
 const DEFAULT_WORKSPACE_SETTING_KEY = 'agent.defaultWorkspaceId';
 
@@ -27,7 +71,7 @@ export interface AgentEvent {
 export async function getAgentSessions(userId: string) {
   const result = await db.select().from(agentSessions)
     .where(eq(agentSessions.userId, userId))
-    .orderBy(agentSessions.updatedAt);
+    .orderBy(desc(agentSessions.updatedAt));
   return result;
 }
 
@@ -122,13 +166,29 @@ export async function renameAgentSession(
   return { success: true };
 }
 
+export async function updateAgentSessionChannel(
+  userId: string,
+  sessionId: string,
+  channelId: string,
+  modelId: string
+) {
+  await db.update(agentSessions)
+    .set({ channelId, modelId, updatedAt: new Date() } as any)
+    .where(and(eq(agentSessions.id, sessionId), eq(agentSessions.userId, userId)));
+  return { success: true };
+}
+
 export async function deleteAgentSession(userId: string, sessionId: string) {
-  await db.delete(agentSessions)
-    .where(and(
-      eq(agentSessions.id, sessionId),
-      eq(agentSessions.userId, userId)
-    ));
-  
+  // Delete order matters: agent_events has a FK to agent_sessions without ON DELETE CASCADE
+  // in existing databases, so we must delete events first.
+  const session = await getAgentSessionById(userId, sessionId);
+  if (!session) {
+    throw new Error('Session not found');
+  }
+
+  await db.delete(agentEvents).where(eq(agentEvents.sessionId, sessionId));
+  await db.delete(agentSessions).where(and(eq(agentSessions.id, sessionId), eq(agentSessions.userId, userId)));
+
   return { success: true };
 }
 
@@ -154,15 +214,22 @@ export async function* runAgent(
       .where(and(eq(agentSessions.id, sessionId), eq(agentSessions.userId, userId)));
   }
   
-  const resolvedChannel = await getResolvedChannelForUser(userId, null);
+  const resolvedChannel = await getResolvedChannelForUser(userId, (session as any).channelId || null);
 
   if (!resolvedChannel) {
     yield { type: 'error', content: '未配置可用的默认渠道/默认模型。请先在设置中完成配置。' };
     return;
   }
 
-  const values = await getSettingValues(userId, [DEFAULT_WORKSPACE_SETTING_KEY]);
+  // If session has a specific modelId override, use it (falls back to channel default).
+  const sessionModelId = (session as any).modelId as string | null | undefined;
+  if (sessionModelId) {
+    resolvedChannel.modelId = sessionModelId;
+  }
+
+  const values = await getSettingValues(userId, [DEFAULT_WORKSPACE_SETTING_KEY, 'chat.systemPrompt']);
   const defaultWorkspaceId = values[DEFAULT_WORKSPACE_SETTING_KEY] || null;
+  const globalSystemPrompt = values['chat.systemPrompt'] || undefined;
   const effectiveWorkspaceId = defaultWorkspaceId || session.workspaceId || null;
   if (!effectiveWorkspaceId) {
     yield { type: 'error', content: 'Workspace not selected' };
@@ -186,7 +253,12 @@ export async function* runAgent(
   }
 
   const cwd = workspace[0].cwd || undefined;
-  
+
+  // Persist the user's prompt as the first event in this turn.
+  if (prompt.trim()) {
+    await saveAgentEvent(sessionId, { type: 'user' as any, content: prompt.trim() });
+  }
+
   try {
     try {
       const attachmentContext = await buildAttachmentContextFromIds(attachmentIds);
@@ -199,11 +271,13 @@ export async function* runAgent(
         apiKey: resolvedChannel.apiKey,
         model: resolvedChannel.modelId,
         prompt: finalPrompt,
+        systemPrompt: globalSystemPrompt,
         cwd,
         baseUrl: resolvedChannel.channel.baseUrl || undefined,
         mcpServers,
         abortController: controller,
       })) {
+        void saveAgentEvent(sessionId, event);
         yield event;
       }
     } finally {

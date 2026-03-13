@@ -125,6 +125,17 @@ const SCHEMA_DDL: string[] = [
     updated_at INTEGER NOT NULL,
     FOREIGN KEY (user_id) REFERENCES users(id)
   );`,
+
+  `CREATE TABLE IF NOT EXISTS agent_events (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    type TEXT NOT NULL,
+    content TEXT,
+    tool_name TEXT,
+    tool_input TEXT,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY (session_id) REFERENCES agent_sessions(id) ON DELETE CASCADE
+  );`,
 ];
 
 async function ensureConversationModelIdColumn(): Promise<void> {
@@ -165,6 +176,32 @@ async function ensureMcpServerUserIdColumn(): Promise<void> {
   }
 }
 
+async function ensureAgentSessionModelIdColumn(): Promise<void> {
+  const result = await client.execute(`PRAGMA table_info('agent_sessions');`);
+  const rows = (result as any).rows as Array<Record<string, unknown>> | undefined;
+  const hasColumn = (rows || []).some((row) => row.name === 'model_id');
+  if (!hasColumn) {
+    await client.execute(`ALTER TABLE agent_sessions ADD COLUMN model_id TEXT;`);
+  }
+}
+
+async function ensureAgentEventsTable(): Promise<void> {
+  const result = await client.execute(`PRAGMA table_info('agent_events');`);
+  const rows = (result as any).rows as Array<Record<string, unknown>> | undefined;
+  if (!rows || rows.length === 0) {
+    await client.execute(`CREATE TABLE IF NOT EXISTS agent_events (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      type TEXT NOT NULL,
+      content TEXT,
+      tool_name TEXT,
+      tool_input TEXT,
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (session_id) REFERENCES agent_sessions(id)
+    );`);
+  }
+}
+
 export async function bootstrapDatabase(): Promise<void> {
   await client.execute('PRAGMA foreign_keys=ON;');
 
@@ -175,4 +212,6 @@ export async function bootstrapDatabase(): Promise<void> {
   // Backward compatible alter for databases created before model_id existed.
   await ensureConversationModelIdColumn();
   await ensureMcpServerUserIdColumn();
+  await ensureAgentEventsTable();
+  await ensureAgentSessionModelIdColumn();
 }
