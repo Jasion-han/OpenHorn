@@ -65,6 +65,7 @@ const SCHEMA_DDL: string[] = [
     mode TEXT DEFAULT 'chat',
     attachments TEXT,
     agent_run TEXT,
+    live_metadata TEXT,
     created_at INTEGER NOT NULL,
     FOREIGN KEY (conversation_id) REFERENCES conversations(id)
   );`,
@@ -189,6 +190,15 @@ async function ensureMessageAgentRunColumn(): Promise<void> {
   }
 }
 
+async function ensureMessageLiveMetadataColumn(): Promise<void> {
+  const result = await client.execute(`PRAGMA table_info('messages');`);
+  const rows = (result as any).rows as Array<Record<string, unknown>> | undefined;
+  const hasColumn = (rows || []).some((row) => row.name === 'live_metadata' || row['name'] === 'live_metadata');
+  if (!hasColumn) {
+    await client.execute(`ALTER TABLE messages ADD COLUMN live_metadata TEXT;`);
+  }
+}
+
 async function ensureMcpServerUserIdColumn(): Promise<void> {
   const result = await client.execute(`PRAGMA table_info('mcp_servers');`);
   const rows = (result as any).rows as Array<Record<string, unknown>> | undefined;
@@ -266,6 +276,7 @@ export async function bootstrapDatabase(): Promise<void> {
   await ensureConversationRunStatusColumn();
   await ensureMessageModeColumn();
   await ensureMessageAgentRunColumn();
+  await ensureMessageLiveMetadataColumn();
   await ensureMcpServerUserIdColumn();
   await ensureAgentEventsTable();
   await ensureAgentSessionModelIdColumn();

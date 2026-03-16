@@ -69,6 +69,7 @@ export interface AgentRuntimeConfig {
   channelId?: string | null;
   modelId?: string | null;
   globalSystemPrompt?: string;
+  liveSystemContext?: string;
   abortController?: AbortController;
   onEvent?: (event: AgentEvent) => Promise<void> | void;
 }
@@ -194,6 +195,11 @@ export async function* runAgentWithConfig(config: AgentRuntimeConfig): AsyncGene
   };
 
   try {
+    const combinedSystemPrompt = [config.globalSystemPrompt, config.liveSystemContext]
+      .map((value) => value?.trim())
+      .filter((value): value is string => Boolean(value))
+      .join('\n\n') || undefined;
+
     const attachmentPayload = await buildAttachmentPayloadFromIds(config.attachmentIds || []);
     const attachmentContext = attachmentPayload.textContext;
     const parts: string[] = [];
@@ -244,7 +250,7 @@ export async function* runAgentWithConfig(config: AgentRuntimeConfig): AsyncGene
       apiKey: resolvedChannel.apiKey,
       model: resolvedChannel.modelId,
       prompt: promptForSdk as any,
-      systemPrompt: config.globalSystemPrompt,
+      systemPrompt: combinedSystemPrompt,
       baseUrl: resolvedChannel.channel.baseUrl || undefined,
       mcpServers,
       abortController: controller,

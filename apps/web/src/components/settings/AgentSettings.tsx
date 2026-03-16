@@ -128,25 +128,38 @@ export function AgentSettings() {
   return (
     <div className="flex flex-col gap-8">
       <SettingsSection
-        title="默认渠道"
-        description="Agent 使用「渠道」中配置的全局默认渠道与模型。"
+        title="默认联网能力"
+        description="普通聊天默认使用产品内置的实时能力；Agent 在此基础上叠加更多工具。默认渠道决定模型供应商，但不是实时能力的开关。"
       >
         <SettingsCard divided={false} className="p-4">
-          <div className="flex items-center justify-between">
-            {defaultChannel ? (
-              <Badge variant="secondary">{defaultChannel.label}</Badge>
-            ) : (
-              <p className="text-sm text-muted-foreground">
-                未设置默认渠道，请在左侧切换到「渠道」进行配置。
-              </p>
-            )}
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium">内置实时能力</p>
+                <p className="text-xs text-muted-foreground">支持本地时间解析、结构化天气查询，以及无 provider 时的离线降级提示。</p>
+              </div>
+              <Badge variant="secondary">Product-owned</Badge>
+            </div>
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-border/50 bg-background/60 p-3">
+              <div>
+                <p className="text-sm font-medium">默认模型渠道</p>
+                <p className="text-xs text-muted-foreground">用于 Chat/Agent 的基础模型调用；实时能力会在服务端先行路由，再进入模型。</p>
+              </div>
+              {defaultChannel ? (
+                <Badge variant="secondary">{defaultChannel.label}</Badge>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  未设置默认渠道，请在左侧切换到「渠道」进行配置。
+                </p>
+              )}
+            </div>
           </div>
         </SettingsCard>
       </SettingsSection>
 
       <SettingsSection
-        title="MCP 服务"
-        description="Agent 工具使用的全局 MCP Server 配置。"
+        title="高级工具（MCP）"
+        description="MCP 是 Agent 的附加工具层，用于私有数据源、执行器和自定义工作流，不是默认联网能力的前提。"
         action={(
           <Button size="sm" onClick={() => setMcpModalOpen(true)}>
             <Plus size={16} /> 添加 MCP

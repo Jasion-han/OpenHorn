@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { Bot, Check, Copy, MessageSquare, Pencil, RefreshCw, Trash2 } from 'lucide-react';
-import { api, type ApiAgentRun } from '../lib/api';
+import { api, type ApiAgentRun, type ApiLiveRoute, type ApiLiveStatus } from '../lib/api';
 import { uploadAttachments } from '../lib/attachments';
 import { streamChatMessage } from '../lib/chat-stream';
 import { useChatStore } from '../stores/chatStore';
@@ -66,6 +66,47 @@ function AgentRunPanel({ run }: { run?: ApiAgentRun }) {
   );
 }
 
+function LiveStatusBadge({
+  status,
+  route,
+  label,
+}: {
+  status?: ApiLiveStatus;
+  route?: ApiLiveRoute;
+  label?: string;
+}) {
+  if (!label) return null;
+
+  const routeLabel = (() => {
+    switch (route) {
+      case 'local':
+        return '本地';
+      case 'structured_live':
+        return '天气';
+      case 'web_search':
+        return '搜索';
+      case 'research':
+        return '调研';
+      default:
+        return '直答';
+    }
+  })();
+
+  return (
+    <div
+      className={cn(
+        'mb-2 inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[11px] font-medium',
+        status === 'live'
+          ? 'border-emerald-300/60 bg-emerald-50 text-emerald-700 dark:border-emerald-700/70 dark:bg-emerald-950/50 dark:text-emerald-300'
+          : 'border-amber-300/60 bg-amber-50 text-amber-700 dark:border-amber-700/70 dark:bg-amber-950/50 dark:text-amber-300'
+      )}
+    >
+      <span className="rounded-full bg-black/5 px-1.5 py-0.5 text-[10px] uppercase tracking-wide dark:bg-white/10">{routeLabel}</span>
+      <span>{label}</span>
+    </div>
+  );
+}
+
 function MessageBubble({
   msg,
   isStreaming,
@@ -84,6 +125,9 @@ function MessageBubble({
     content: string;
     mode: 'chat' | 'agent';
     agentRun?: ApiAgentRun;
+    liveStatus?: ApiLiveStatus;
+    liveRoute?: ApiLiveRoute;
+    liveLabel?: string;
     streamTail?: string;
     streamPulseKey?: number;
   };
@@ -139,6 +183,11 @@ function MessageBubble({
 
         {isAssistant ? (
           <div style={WRAP_TEXT}>
+            <LiveStatusBadge
+              status={msg.liveStatus}
+              route={msg.liveRoute}
+              label={msg.liveLabel}
+            />
             {hasAssistantText ? (
               isStreaming ? (
                 <StreamingMarkdownMessage
@@ -382,6 +431,14 @@ export function ChatArea() {
       await streamChatMessage(
         payload,
         {
+          onLiveStatus: (event) => {
+            useChatStore.getState().updateMessage(assistantMessageId, assistantContent, {
+              liveStatus: event.status,
+              liveRoute: event.route,
+              liveLabel: event.label,
+              agentRun: agentRunBuffer,
+            });
+          },
           onDelta: (chunk) => {
             if (!chunk) return;
             smoother.push(chunk);
@@ -522,6 +579,9 @@ export function ChatArea() {
       {
         streamTail: undefined,
         streamPulseKey: 0,
+        liveStatus: undefined,
+        liveRoute: undefined,
+        liveLabel: undefined,
         agentRun: agentRunBuffer,
       }
     );
@@ -552,6 +612,18 @@ export function ChatArea() {
       await streamChatMessage(
         { conversationId: currentConversation.id, content: '' },
         {
+          onLiveStatus: (event) => {
+            useChatStore.getState().updateMessage(
+              assistantMsg.id,
+              useChatStore.getState().messages.find((m) => m.id === assistantMsg.id)?.content || '',
+              {
+                liveStatus: event.status,
+                liveRoute: event.route,
+                liveLabel: event.label,
+                agentRun: agentRunBuffer,
+              }
+            );
+          },
           onDelta: (chunk) => {
             if (!chunk) return;
             smoother.push(chunk);
@@ -676,6 +748,9 @@ export function ChatArea() {
     useChatStore.getState().updateMessage(assistantMsg.id, '', {
       streamTail: undefined,
       streamPulseKey: 0,
+      liveStatus: undefined,
+      liveRoute: undefined,
+      liveLabel: undefined,
     });
     setIsLoading(true);
     setIsStreaming(true);
@@ -704,6 +779,13 @@ export function ChatArea() {
       await streamChatMessage(
         { conversationId: currentConversation.id, content: '' },
         {
+          onLiveStatus: (event) => {
+            useChatStore.getState().updateMessage(assistantMsg.id, '', {
+              liveStatus: event.status,
+              liveRoute: event.route,
+              liveLabel: event.label,
+            });
+          },
           onDelta: (chunk) => {
             if (!chunk) return;
             smoother.push(chunk);
@@ -789,6 +871,9 @@ export function ChatArea() {
                     content: msg.content,
                     mode: msg.mode,
                     agentRun: msg.agentRun,
+                    liveStatus: msg.liveStatus,
+                    liveRoute: msg.liveRoute,
+                    liveLabel: msg.liveLabel,
                     streamTail: msg.streamTail,
                     streamPulseKey: msg.streamPulseKey,
                   }}

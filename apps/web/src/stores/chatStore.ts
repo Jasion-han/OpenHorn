@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { api, type ApiAgentRun, type ApiChannel, type ApiConversation, type ApiMessage } from '../lib/api';
+import { api, type ApiAgentRun, type ApiChannel, type ApiConversation, type ApiLiveMetadata, type ApiLiveRoute, type ApiLiveStatus, type ApiMessage } from '../lib/api';
 
 export type Channel = ApiChannel;
 
@@ -34,6 +34,9 @@ export interface Message {
     fileSize?: number;
     previewUrl?: string;
   }>;
+  liveStatus?: ApiLiveStatus;
+  liveRoute?: ApiLiveRoute;
+  liveLabel?: string;
   streamTail?: string;
   streamPulseKey?: number;
   createdAt: Date;
@@ -73,6 +76,15 @@ function parseMessage(msg: ApiMessage): Message {
     }
   }
 
+  let liveMetadata: ApiLiveMetadata | undefined;
+  if (msg.liveMetadata) {
+    try {
+      liveMetadata = JSON.parse(msg.liveMetadata) as ApiLiveMetadata;
+    } catch {
+      liveMetadata = undefined;
+    }
+  }
+
   return {
     id: msg.id,
     conversationId: msg.conversationId,
@@ -90,6 +102,9 @@ function parseMessage(msg: ApiMessage): Message {
       }
     })(),
     attachmentsMeta: (msg.attachmentsMeta || undefined) as any,
+    liveStatus: liveMetadata?.status,
+    liveRoute: liveMetadata?.route,
+    liveLabel: liveMetadata?.label,
     createdAt: new Date(msg.createdAt),
   };
 }

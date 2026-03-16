@@ -8,6 +8,7 @@ import { createSseStream } from '../utils/sse';
 import { buildAttachmentPayloadFromIds, linkAttachmentsToMessage } from './attachmentService';
 import { runAgentWithConfig, type AgentEvent } from './agentService';
 import { getSettingValues } from './settingsService';
+import { buildLiveContext, toStoredLiveMetadata, type LiveContextResult } from './liveCapabilities';
 
 const GLOBAL_SYSTEM_PROMPT_KEY = 'chat.systemPrompt';
 
@@ -37,6 +38,13 @@ type AgentRunData = {
   summary: string;
   error?: string;
   steps: AgentRunStep[];
+};
+
+type LiveStatusPayload = {
+  type: 'live_status';
+  status: 'live' | 'offline';
+  route: 'local' | 'structured_live' | 'web_search' | 'research' | 'direct_model';
+  label: string;
 };
 
 function parseJsonArray(value: string | null | undefined): string[] {
@@ -117,6 +125,29 @@ function buildAgentRunSummary(steps: AgentRunStep[], error?: string) {
   return toolCount > 0
     ? `Agent 已调用 ${toolCount} 个工具`
     : 'Agent 已完成本轮执行';
+}
+
+function buildEffectiveSystemPrompt(
+  systemPrompt: string | null | undefined,
+  liveContext: LiveContextResult
+) {
+  return [systemPrompt, liveContext.systemContext]
+    .map((value) => value?.trim())
+    .filter((value): value is string => Boolean(value))
+    .join('\n\n') || null;
+}
+
+function buildLiveStatusPayload(liveContext: LiveContextResult): LiveStatusPayload {
+  return {
+    type: 'live_status',
+    status: liveContext.status,
+    route: liveContext.route,
+    label: liveContext.userLabel,
+  };
+}
+
+function serializeLiveMetadata(liveContext: LiveContextResult) {
+  return JSON.stringify(toStoredLiveMetadata(liveContext));
 }
 
 async function buildUserContentWithAttachments(content: string, attachmentIds?: string[]) {
@@ -278,7 +309,11 @@ export async function sendMessage(userId: string, input: SendMessageInput) {
     .where(eq(conversations.id, input.conversationId));
   
   const conversationMessages = await getMessages(input.conversationId);
-  const chatMessages = await buildChatMessages(conversationMessages, conversation.systemPrompt);
+  const liveContext = await buildLiveContext({ prompt: input.content });
+  const chatMessages = await buildChatMessages(
+    conversationMessages,
+    buildEffectiveSystemPrompt(conversation.systemPrompt, liveContext)
+  );
   
   let responseContent = '';
   let responseModel: string | null = null;
@@ -321,6 +356,7 @@ export async function sendMessage(userId: string, input: SendMessageInput) {
     model: responseModel,
     mode: input.mode || 'chat',
     agentRun: null,
+    liveMetadata: serializeLiveMetadata(liveContext),
     createdAt: new Date(),
   });
   
@@ -394,7 +430,10 @@ export async function streamMessage(userId: string, input: StreamMessageInput): 
       .where(eq(conversations.id, input.conversationId));
 
     const settings = await getSettingValues(userId, [GLOBAL_SYSTEM_PROMPT_KEY]);
-    const effectiveSystemPrompt = conversation.systemPrompt || settings[GLOBAL_SYSTEM_PROMPT_KEY] || null;
+    const baseSystemPrompt = conversation.systemPrompt || settings[GLOBAL_SYSTEM_PROMPT_KEY] || null;
+    const liveContext = await buildLiveContext({ prompt: input.content });
+    const effectiveSystemPrompt = buildEffectiveSystemPrompt(baseSystemPrompt, liveContext);
+    send(buildLiveStatusPayload(liveContext));
     if (mode === 'agent') {
       let assistantContent = '';
       let agentError: string | undefined;
@@ -406,7 +445,8 @@ export async function streamMessage(userId: string, input: StreamMessageInput): 
         attachmentIds: input.attachments || [],
         channelId: conversation.channelId || null,
         modelId: conversation.modelId || null,
-        globalSystemPrompt: effectiveSystemPrompt || undefined,
+        globalSystemPrompt: baseSystemPrompt || undefined,
+        liveSystemContext: liveContext.systemContext,
         abortController: _ctx.abortController,
       })) {
         if (event.type === 'text') {
@@ -452,6 +492,7 @@ export async function streamMessage(userId: string, input: StreamMessageInput): 
         mode: 'agent',
         attachments: null,
         agentRun: JSON.stringify(agentRun),
+        liveMetadata: serializeLiveMetadata(liveContext),
         createdAt: new Date(),
       });
 
@@ -518,6 +559,7 @@ export async function streamMessage(userId: string, input: StreamMessageInput): 
       mode: 'chat',
       attachments: null,
       agentRun: null,
+      liveMetadata: serializeLiveMetadata(liveContext),
       createdAt: new Date(),
     });
 
@@ -568,7 +610,10 @@ export async function editUserMessage(userId: string, userMessageId: string, new
       m.id === userMessageId ? { ...m, content: newContent.trim() } : m
     );
     const settings = await getSettingValues(userId, [GLOBAL_SYSTEM_PROMPT_KEY]);
-    const effectiveSystemPrompt = conversation.systemPrompt || settings[GLOBAL_SYSTEM_PROMPT_KEY] || null;
+    const baseSystemPrompt = conversation.systemPrompt || settings[GLOBAL_SYSTEM_PROMPT_KEY] || null;
+    const liveContext = await buildLiveContext({ prompt: newContent.trim() });
+    const effectiveSystemPrompt = buildEffectiveSystemPrompt(baseSystemPrompt, liveContext);
+    send(buildLiveStatusPayload(liveContext));
     const chatMessages = await buildChatMessages(contextMsgs, effectiveSystemPrompt);
 
     const resolvedChannel = await getResolvedChannelForConversation(userId, conversation);
@@ -597,7 +642,11 @@ export async function editUserMessage(userId: string, userMessageId: string, new
     }
 
     await db.update(messages)
-      .set({ content: responseContent, model: resolvedChannel.modelId })
+      .set({
+        content: responseContent,
+        model: resolvedChannel.modelId,
+        liveMetadata: serializeLiveMetadata(liveContext),
+      })
       .where(eq(messages.id, assistantMessageId));
 
     send({ type: 'done', userMessageId, assistantMessageId, model: resolvedChannel.modelId });
@@ -638,7 +687,9 @@ export async function regenerateMessage(userId: string, assistantMessageId: stri
       }
 
       const settings = await getSettingValues(userId, [GLOBAL_SYSTEM_PROMPT_KEY]);
-      const effectiveSystemPrompt = conversation.systemPrompt || settings[GLOBAL_SYSTEM_PROMPT_KEY] || null;
+      const baseSystemPrompt = conversation.systemPrompt || settings[GLOBAL_SYSTEM_PROMPT_KEY] || null;
+      const liveContext = await buildLiveContext({ prompt: userMsg.content });
+      send(buildLiveStatusPayload(liveContext));
       const attachmentIds = parseJsonArray(userMsg.attachments);
       const contextPaths = parseJsonArray(userMsg.contextPaths);
       const workspaceId = assistantMsg.workspaceId || userMsg.workspaceId || (conversation as any).workspaceId || null;
@@ -663,7 +714,8 @@ export async function regenerateMessage(userId: string, assistantMessageId: stri
         workspaceId,
         channelId: conversation.channelId || null,
         modelId: conversation.modelId || null,
-        globalSystemPrompt: effectiveSystemPrompt || undefined,
+        globalSystemPrompt: baseSystemPrompt || undefined,
+        liveSystemContext: liveContext.systemContext,
         abortController: _ctx.abortController,
         contextPaths,
       })) {
@@ -708,6 +760,7 @@ export async function regenerateMessage(userId: string, assistantMessageId: stri
           workspaceId,
           contextPaths: contextPaths.length > 0 ? JSON.stringify(contextPaths) : null,
           agentRun: JSON.stringify(agentRun),
+          liveMetadata: serializeLiveMetadata(liveContext),
         } as any)
         .where(eq(messages.id, assistantMessageId));
 
@@ -733,7 +786,11 @@ export async function regenerateMessage(userId: string, assistantMessageId: stri
     const idx = allMsgs.findIndex((m) => m.id === assistantMessageId);
     const contextMsgs = idx > 0 ? allMsgs.slice(0, idx) : allMsgs;
     const settings = await getSettingValues(userId, [GLOBAL_SYSTEM_PROMPT_KEY]);
-    const effectiveSystemPrompt = conversation.systemPrompt || settings[GLOBAL_SYSTEM_PROMPT_KEY] || null;
+    const baseSystemPrompt = conversation.systemPrompt || settings[GLOBAL_SYSTEM_PROMPT_KEY] || null;
+    const lastUserMessage = [...contextMsgs].reverse().find((message) => message.role === 'user');
+    const liveContext = await buildLiveContext({ prompt: lastUserMessage?.content || '' });
+    const effectiveSystemPrompt = buildEffectiveSystemPrompt(baseSystemPrompt, liveContext);
+    send(buildLiveStatusPayload(liveContext));
     const chatMessages = await buildChatMessages(contextMsgs, effectiveSystemPrompt);
 
     const resolvedChannel = await getResolvedChannelForConversation(userId, conversation);
@@ -762,7 +819,11 @@ export async function regenerateMessage(userId: string, assistantMessageId: stri
     }
 
     await db.update(messages)
-      .set({ content: responseContent, model: resolvedChannel.modelId })
+      .set({
+        content: responseContent,
+        model: resolvedChannel.modelId,
+        liveMetadata: serializeLiveMetadata(liveContext),
+      })
       .where(eq(messages.id, assistantMessageId));
 
     send({ type: 'done', messageId: assistantMessageId, model: resolvedChannel.modelId });

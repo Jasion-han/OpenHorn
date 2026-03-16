@@ -71,6 +71,16 @@ export interface ApiAgentRun {
   legacySessionId?: string;
 }
 
+export type ApiLiveStatus = 'live' | 'offline';
+export type ApiLiveRoute = 'local' | 'structured_live' | 'web_search' | 'research' | 'direct_model';
+
+export interface ApiLiveMetadata {
+  status: ApiLiveStatus;
+  route: ApiLiveRoute;
+  label: string;
+  sourceType: 'local' | 'weather' | 'web_search' | 'none';
+}
+
 export interface ApiMessage {
   id: string;
   conversationId: string;
@@ -80,6 +90,7 @@ export interface ApiMessage {
   mode: 'chat' | 'agent' | null;
   attachments: string | null;
   agentRun: string | null;
+  liveMetadata: string | null;
   attachmentsMeta?: Array<{
     id: string;
     fileName: string;

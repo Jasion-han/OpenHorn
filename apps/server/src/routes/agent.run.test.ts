@@ -26,6 +26,7 @@ test('POST /sessions/:id/run returns compatibility error before starting SSE run
     deleteAgentSession: async () => ({ success: true }),
     getAgentEvents: async () => ({ events: [] }),
     deleteAgentEvent: async () => true,
+    runAgentWithConfig: async function* () {},
     runAgent: async function* () {
       runAgentCalled = true;
       yield { type: 'text', content: 'should not run' };

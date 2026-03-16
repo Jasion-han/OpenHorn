@@ -59,6 +59,7 @@ export const messages = sqliteTable('messages', {
   mode: text('mode').default('chat'),
   attachments: text('attachments'),
   agentRun: text('agent_run'),
+  liveMetadata: text('live_metadata'),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
 });
 
