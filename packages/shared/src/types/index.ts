@@ -46,21 +46,9 @@ export interface Attachment {
   createdAt: Date;
 }
 
-export interface Workspace {
-  id: string;
-  userId: string;
-  name: string;
-  slug: string;
-  description?: string;
-  cwd?: string;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
 export interface AgentSession {
   id: string;
   userId: string;
-  workspaceId?: string;
   channelId?: string;
   title: string;
   status: 'active' | 'completed' | 'cancelled';
@@ -70,7 +58,6 @@ export interface AgentSession {
 
 export interface MCPServer {
   id: string;
-  workspaceId?: string;
   name: string;
   type: string;
   config: Record<string, unknown>;
