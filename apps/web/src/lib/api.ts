@@ -91,7 +91,7 @@ export interface ApiCitation {
 
 export interface ApiSearchStatus {
   configured: boolean;
-  source: 'user' | 'server' | 'none';
+  source: 'user' | 'server' | 'none' | 'disabled';
 }
 
 export interface ApiMessage {

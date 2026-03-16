@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { Bot, Check, Copy, MessageSquare, Pencil, RefreshCw, Trash2 } from 'lucide-react';
+import { Bot, Check, ChevronDown, Copy, MessageSquare, Pencil, RefreshCw, Trash2 } from 'lucide-react';
 import { api, type ApiAgentRun, type ApiCitation, type ApiLiveRoute, type ApiLiveStatus } from '../lib/api';
 import { uploadAttachments } from '../lib/attachments';
 import { streamChatMessage } from '../lib/chat-stream';
@@ -112,9 +112,18 @@ function CitationList({ citations }: { citations?: ApiCitation[] }) {
   if (!citations || citations.length === 0) return null;
 
   return (
-    <div className="mb-2 flex flex-col gap-1.5 rounded-xl border border-border/50 bg-muted/20 p-2.5">
-      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Sources</p>
-      <div className="flex flex-col gap-1.5">
+    <details className="group mb-2 rounded-xl border border-border/50 bg-muted/20 px-3 py-2 text-sm">
+      <summary className="cursor-pointer list-none select-none [&::-webkit-details-marker]:hidden">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Sources</span>
+            <span className="text-[11px] text-muted-foreground/80">· {citations.length}</span>
+          </div>
+          <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform duration-150 group-open:rotate-180" />
+        </div>
+      </summary>
+
+      <div className="mt-2 flex flex-col gap-1.5">
         {citations.map((citation, index) => (
           <a
             key={`${citation.url}-${index}`}
@@ -123,7 +132,10 @@ function CitationList({ citations }: { citations?: ApiCitation[] }) {
             rel="noreferrer"
             className="rounded-md border border-border/40 bg-background/70 px-2 py-1.5 text-xs transition-colors hover:bg-background"
           >
-            <div className="font-medium text-foreground">{citation.title}</div>
+            <div className="flex items-baseline gap-2">
+              <span className="text-[10px] font-medium text-muted-foreground">[{index + 1}]</span>
+              <div className="min-w-0 flex-1 font-medium text-foreground">{citation.title}</div>
+            </div>
             <div className="truncate text-muted-foreground">{citation.url}</div>
             {citation.snippet && (
               <div className="mt-0.5 line-clamp-2 text-muted-foreground">{citation.snippet}</div>
@@ -131,7 +143,7 @@ function CitationList({ citations }: { citations?: ApiCitation[] }) {
           </a>
         ))}
       </div>
-    </div>
+    </details>
   );
 }
 
@@ -346,6 +358,8 @@ export function ChatArea() {
         const status = await api.settings.searchStatus();
         if (!status.configured || status.source === 'none') {
           notifyWarning('未配置实时搜索', '未检测到 Tavily Key，联网搜索可能无法使用。请在设置中填写或配置服务端 TAVILY_API_KEY。');
+        } else if (status.source === 'disabled') {
+          notifyWarning('实时搜索已关闭', '在设置中启用 Tavily 搜索后才能联网。');
         }
       } catch {
         // ignore

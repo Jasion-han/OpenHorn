@@ -24,6 +24,7 @@ type MCPServer = {
 };
 
 const TAVILY_API_KEY_SETTING = 'liveSearch.tavilyApiKey';
+const TAVILY_ENABLED_SETTING = 'liveSearch.tavilyEnabled';
 
 export function AgentSettings() {
   const [channels, setChannels] = useState<ApiChannel[]>([]);
@@ -32,6 +33,8 @@ export function AgentSettings() {
   const [tavilyApiKey, setTavilyApiKey] = useState('');
   const [savedTavilyApiKey, setSavedTavilyApiKey] = useState('');
   const [savingTavilyApiKey, setSavingTavilyApiKey] = useState(false);
+  const [tavilyEnabled, setTavilyEnabled] = useState(true);
+  const [savingTavilyEnabled, setSavingTavilyEnabled] = useState(false);
 
   const [mcpModalOpen, setMcpModalOpen] = useState(false);
   const [mcpName, setMcpName] = useState('');
@@ -61,13 +64,15 @@ export function AgentSettings() {
       const [{ channels }, { servers }, { settings }] = await Promise.all([
         api.channels.list(),
         api.mcp.listServers(),
-        api.settings.get([TAVILY_API_KEY_SETTING]),
+        api.settings.get([TAVILY_API_KEY_SETTING, TAVILY_ENABLED_SETTING]),
       ]);
       setChannels(channels);
       setMcpServers(servers as MCPServer[]);
       const currentKey = settings[TAVILY_API_KEY_SETTING] || '';
+      const enabledRaw = settings[TAVILY_ENABLED_SETTING];
       setTavilyApiKey(currentKey);
       setSavedTavilyApiKey(currentKey);
+      setTavilyEnabled(enabledRaw == null ? true : String(enabledRaw).trim().toLowerCase() !== 'false');
     } catch (error) {
       console.error('Failed to load agent settings:', error);
       notifyError('加载失败', error instanceof Error ? error.message : '无法加载 Agent 设置');
@@ -86,6 +91,21 @@ export function AgentSettings() {
       notifyError('保存失败', error instanceof Error ? error.message : '无法保存 Tavily Key');
     } finally {
       setSavingTavilyApiKey(false);
+    }
+  };
+
+  const handleToggleTavilyEnabled = async () => {
+    const next = !tavilyEnabled;
+    setTavilyEnabled(next);
+    setSavingTavilyEnabled(true);
+    try {
+      await api.settings.set(TAVILY_ENABLED_SETTING, next ? 'true' : 'false');
+      notifySuccess('已更新', next ? 'Tavily 搜索已启用。' : 'Tavily 搜索已关闭。');
+    } catch (error) {
+      setTavilyEnabled(!next);
+      notifyError('更新失败', error instanceof Error ? error.message : '无法更新 Tavily 状态');
+    } finally {
+      setSavingTavilyEnabled(false);
     }
   };
 
@@ -195,6 +215,17 @@ export function AgentSettings() {
               ) : (
                 <Badge variant="outline">使用服务端默认</Badge>
               )}
+            </div>
+            <div className="flex items-center justify-between rounded-xl border border-border/50 bg-background/60 p-3">
+              <div>
+                <p className="text-sm font-medium">启用 Tavily 搜索</p>
+                <p className="text-xs text-muted-foreground">关闭后将不会进行实时搜索，即使存在 API Key。</p>
+              </div>
+              <Switch
+                checked={tavilyEnabled}
+                onCheckedChange={() => void handleToggleTavilyEnabled()}
+                disabled={savingTavilyEnabled}
+              />
             </div>
             <div className="flex flex-col gap-1.5">
               <Label>Tavily API Key</Label>

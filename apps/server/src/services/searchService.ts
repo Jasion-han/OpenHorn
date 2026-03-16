@@ -1,6 +1,7 @@
 import type { LiveRouteType } from './liveCapabilities';
 
 export const TAVILY_API_KEY_SETTING = 'liveSearch.tavilyApiKey';
+export const TAVILY_ENABLED_SETTING = 'liveSearch.tavilyEnabled';
 
 export type SearchCitation = {
   title: string;
@@ -34,7 +35,16 @@ type TavilyResult = {
 
 const DEFAULT_FETCH: typeof fetch = (...args) => fetch(...args);
 
+function isTavilyEnabled(input: BuildSearchContextInput) {
+  const raw = input.userSettings?.[TAVILY_ENABLED_SETTING];
+  if (raw == null) return true;
+  return String(raw).trim().toLowerCase() !== 'false';
+}
+
 function pickApiKey(input: BuildSearchContextInput) {
+  if (!isTavilyEnabled(input)) {
+    return null;
+  }
   const userKey = input.userSettings?.[TAVILY_API_KEY_SETTING]?.trim();
   if (userKey) return userKey;
   const envKey = input.envKey?.trim();
@@ -95,6 +105,13 @@ function buildOfflineResult(label: string, systemContext: string): SearchContext
 }
 
 export async function buildSearchContext(input: BuildSearchContextInput): Promise<SearchContextResult> {
+  if (!isTavilyEnabled(input)) {
+    return buildOfflineResult(
+      '实时搜索已关闭，本轮为离线回答',
+      'Live search is disabled for this user. Do not claim you searched the web or cite sources. State that the answer may be outdated.'
+    );
+  }
+
   const apiKey = pickApiKey(input);
   if (!apiKey) {
     return buildOfflineResult(
