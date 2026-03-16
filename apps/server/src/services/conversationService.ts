@@ -9,6 +9,7 @@ export interface CreateConversationInput {
   modelId?: string | null;
   systemPrompt?: string;
   contextLength?: number;
+  defaultMode?: 'chat' | 'agent' | null;
 }
 
 export interface UpdateConversationInput {
@@ -17,7 +18,10 @@ export interface UpdateConversationInput {
   modelId?: string | null;
   systemPrompt?: string;
   contextLength?: number;
+  defaultMode?: 'chat' | 'agent' | null;
+  lastMode?: 'chat' | 'agent' | null;
   isPinned?: boolean;
+  runStatus?: string | null;
 }
 
 export function normalizeConversationModelInput(input: {
@@ -57,6 +61,7 @@ export async function createConversation(userId: string, input: CreateConversati
   const id = generateId();
   const now = new Date();
   const model = normalizeConversationModelInput(input);
+  const defaultMode = input.defaultMode === 'chat' ? 'chat' : 'agent';
   
   await db.insert(conversations).values({
     id,
@@ -66,7 +71,10 @@ export async function createConversation(userId: string, input: CreateConversati
     title: input.title,
     systemPrompt: input.systemPrompt || null,
     contextLength: input.contextLength || 4096,
+    defaultMode,
+    lastMode: defaultMode,
     isPinned: false,
+    runStatus: null,
     createdAt: now,
     updatedAt: now,
   });
@@ -79,7 +87,10 @@ export async function createConversation(userId: string, input: CreateConversati
     title: input.title,
     systemPrompt: input.systemPrompt,
     contextLength: input.contextLength || 4096,
+    defaultMode,
+    lastMode: defaultMode,
     isPinned: false,
+    runStatus: null,
     createdAt: now,
     updatedAt: now,
   };
@@ -112,8 +123,11 @@ export async function updateConversation(
     updates.modelId = model.modelId;
   }
   if (input.systemPrompt !== undefined) updates.systemPrompt = input.systemPrompt;
-  if (input.contextLength) updates.contextLength = input.contextLength;
+  if (input.contextLength !== undefined) updates.contextLength = input.contextLength;
+  if (input.defaultMode !== undefined) updates.defaultMode = input.defaultMode;
+  if (input.lastMode !== undefined) updates.lastMode = input.lastMode;
   if (input.isPinned !== undefined) updates.isPinned = input.isPinned;
+  if (input.runStatus !== undefined) updates.runStatus = input.runStatus;
   
   await db.update(conversations).set(updates)
     .where(and(

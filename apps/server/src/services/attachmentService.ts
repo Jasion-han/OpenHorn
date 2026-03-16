@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { inArray } from 'drizzle-orm';
 import { db } from '../db';
@@ -111,6 +111,7 @@ export async function storeAttachment(params: {
   await db.insert(attachments).values({
     id,
     conversationId: params.conversationId || null,
+    sessionId: params.sessionId || null,
     messageId: null,
     fileName: params.file.name,
     filePath,
@@ -143,13 +144,49 @@ export async function getAttachmentsByIds(attachmentIds: string[]) {
     .where(inArray(attachments.id, attachmentIds));
 }
 
-export async function buildAttachmentContextFromIds(attachmentIds: string[]) {
-  if (attachmentIds.length === 0) return '';
+export type ImageAttachmentPayload = {
+  id: string;
+  fileName: string;
+  fileType: string;
+  fileSize: number;
+  dataBase64: string;
+};
+
+export async function buildAttachmentPayloadFromIds(attachmentIds: string[]) {
+  if (attachmentIds.length === 0) {
+    return { textContext: '', images: [] as ImageAttachmentPayload[], files: [] as Array<{ id: string; fileName: string; fileType: string; fileSize: number }> };
+  }
 
   const records = await getAttachmentsByIds(attachmentIds);
   const parsed: Array<{ fileName: string; text: string }> = [];
+  const images: ImageAttachmentPayload[] = [];
+  const files: Array<{ id: string; fileName: string; fileType: string; fileSize: number }> = [];
 
   for (const record of records) {
+    files.push({
+      id: record.id,
+      fileName: record.fileName,
+      fileType: record.fileType,
+      fileSize: record.fileSize,
+    });
+
+    // Images are sent as native vision blocks; do not include placeholder text.
+    if (record.fileType?.startsWith('image/')) {
+      try {
+        const buffer = await readFile(record.filePath);
+        images.push({
+          id: record.id,
+          fileName: record.fileName,
+          fileType: record.fileType,
+          fileSize: record.fileSize,
+          dataBase64: buffer.toString('base64'),
+        });
+      } catch {
+        // ignore: leave image out (fallback will be text-only).
+      }
+      continue;
+    }
+
     try {
       const text = await parseAttachmentContent({
         fileName: record.fileName,
@@ -162,5 +199,15 @@ export async function buildAttachmentContextFromIds(attachmentIds: string[]) {
     }
   }
 
-  return formatAttachmentContext(parsed);
+  return {
+    textContext: formatAttachmentContext(parsed),
+    images,
+    files,
+  };
+}
+
+export async function buildAttachmentContextFromIds(attachmentIds: string[]) {
+  const payload = await buildAttachmentPayloadFromIds(attachmentIds);
+  // Back-compat: include only text context (images are represented as blocks elsewhere).
+  return payload.textContext;
 }

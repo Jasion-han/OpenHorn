@@ -6,7 +6,6 @@ import { generateId } from '../utils';
 export interface MCPServerItem {
   id: string;
   userId: string;
-  workspaceId: string | null;
   name: string;
   type: string;
   config: Record<string, unknown>;
@@ -16,7 +15,6 @@ export interface MCPServerItem {
 }
 
 export interface CreateMCPServerInput {
-  workspaceId?: string;
   name: string;
   type: string;
   config: Record<string, unknown>;
@@ -44,7 +42,6 @@ function toItem(row: any): MCPServerItem {
   return {
     id: row.id,
     userId: row.userId,
-    workspaceId: row.workspaceId ?? null,
     name: row.name,
     type: row.type,
     config: parseConfig(row.config),
@@ -54,12 +51,7 @@ function toItem(row: any): MCPServerItem {
   };
 }
 
-export async function getMCPServers(userId: string, workspaceId?: string): Promise<MCPServerItem[]> {
-  if (workspaceId) {
-    const rows = await db.select().from(mcpServers)
-      .where(and(eq(mcpServers.userId, userId), eq(mcpServers.workspaceId, workspaceId)));
-    return rows.map(toItem);
-  }
+export async function getMCPServers(userId: string): Promise<MCPServerItem[]> {
   const rows = await db.select().from(mcpServers).where(eq(mcpServers.userId, userId));
   return rows.map(toItem);
 }
@@ -78,7 +70,6 @@ export async function createMCPServer(userId: string, input: CreateMCPServerInpu
   await db.insert(mcpServers).values({
     id,
     userId,
-    workspaceId: input.workspaceId || null,
     name: input.name,
     type: input.type,
     config: JSON.stringify(input.config),
@@ -90,7 +81,6 @@ export async function createMCPServer(userId: string, input: CreateMCPServerInpu
   return {
     id,
     userId,
-    workspaceId: input.workspaceId || null,
     name: input.name,
     type: input.type,
     config: input.config,

@@ -13,6 +13,8 @@ import {
   getAgentEvents,
   deleteAgentEvent,
 } from '../services/agentService';
+import { getResolvedChannelForConversation } from '../services/channelService';
+import { checkChannelAgentCompatibility } from '../services/channelAgentCheckService';
 import { generateAutoTitle } from '../services/autoTitleService';
 import { createSseStream } from '../utils/sse';
 
@@ -100,6 +102,11 @@ agent.post('/sessions/:id/run', async (c) => {
   }
   
   const sessionId = c.req.param('id');
+  const session = await getAgentSessionById(user.id, sessionId);
+  if (!session) {
+    return c.text('Session not found', 404);
+  }
+
   let body: any;
   try {
     body = await c.req.json();
@@ -112,6 +119,32 @@ agent.post('/sessions/:id/run', async (c) => {
   const hasAttachments = Array.isArray(attachments) && attachments.length > 0;
   if (!hasPrompt && !hasAttachments) {
     return c.json({ error: 'prompt or attachments are required' }, 400);
+  }
+
+  // Agent runtime is Anthropic-only (Claude Agent SDK). Fail fast for other providers
+  // so users don't get stuck with a long "Running..." and no output.
+  const resolvedChannel = await getResolvedChannelForConversation(user.id, {
+    channelId: (session as any).channelId || null,
+    modelId: (session as any).modelId || null,
+  });
+  const provider = resolvedChannel?.channel?.provider;
+  if (!provider) {
+    return c.text('未配置可用的默认渠道/默认模型。请先在设置中完成配置。', 400);
+  }
+  if (provider !== 'anthropic') {
+    return c.text(
+      `Agent 模式目前仅支持 Anthropic(Claude Agent SDK)。当前 Provider: ${provider}。请切换到 Anthropic 渠道后重试。`,
+      400
+    );
+  }
+
+  const compatibility = await checkChannelAgentCompatibility(
+    user.id,
+    resolvedChannel.channel.id,
+    resolvedChannel.modelId
+  );
+  if (!compatibility.success) {
+    return c.text(compatibility.error, 400);
   }
   
   const stream = createSseStream(async (send, ctx) => {
@@ -151,12 +184,13 @@ agent.post('/sessions/:id/run', async (c) => {
       Array.isArray(attachments) ? attachments : [],
       ctx.abortController
     )) {
-        if (!sawAny) {
+        const isVisibleEvent = (event as any)?.type !== 'meta';
+        if (isVisibleEvent && !sawAny) {
           sawAny = true;
           clearTimeout(firstOutputTimer);
         }
         // Don't treat meta/keepalive as activity for the idle timer.
-        if ((event as any)?.type !== 'meta') {
+        if (isVisibleEvent) {
           armIdle();
         }
         send(event);

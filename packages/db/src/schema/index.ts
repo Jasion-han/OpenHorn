@@ -42,7 +42,10 @@ export const conversations = sqliteTable('conversations', {
   title: text('title').notNull(),
   systemPrompt: text('system_prompt'),
   contextLength: integer('context_length').default(4096),
+  defaultMode: text('default_mode').default('agent'),
+  lastMode: text('last_mode').default('agent'),
   isPinned: integer('is_pinned', { mode: 'boolean' }).default(false),
+  runStatus: text('run_status'),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
 });
@@ -53,26 +56,18 @@ export const messages = sqliteTable('messages', {
   role: text('role').notNull(),
   content: text('content').notNull(),
   model: text('model'),
+  mode: text('mode').default('chat'),
   attachments: text('attachments'),
+  agentRun: text('agent_run'),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
-});
-
-export const workspaces = sqliteTable('workspaces', {
-  id: text('id').primaryKey(),
-  userId: text('user_id').notNull().references(() => users.id),
-  name: text('name').notNull(),
-  slug: text('slug').notNull().unique(),
-  description: text('description'),
-  cwd: text('cwd'),
-  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
-  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
 });
 
 export const agentSessions = sqliteTable('agent_sessions', {
   id: text('id').primaryKey(),
   userId: text('user_id').notNull().references(() => users.id),
-  workspaceId: text('workspace_id').references(() => workspaces.id),
+  conversationId: text('conversation_id').references(() => conversations.id),
   channelId: text('channel_id').references(() => channels.id),
+  modelId: text('model_id'),
   title: text('title').notNull(),
   status: text('status').default('active'),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
@@ -82,7 +77,6 @@ export const agentSessions = sqliteTable('agent_sessions', {
 export const mcpServers = sqliteTable('mcp_servers', {
   id: text('id').primaryKey(),
   userId: text('user_id').notNull().references(() => users.id),
-  workspaceId: text('workspace_id').references(() => workspaces.id),
   name: text('name').notNull(),
   type: text('type').notNull(),
   config: text('config').notNull(),
@@ -94,11 +88,22 @@ export const mcpServers = sqliteTable('mcp_servers', {
 export const attachments = sqliteTable('attachments', {
   id: text('id').primaryKey(),
   conversationId: text('conversation_id').references(() => conversations.id),
+  sessionId: text('session_id').references(() => agentSessions.id),
   messageId: text('message_id').references(() => messages.id),
   fileName: text('file_name').notNull(),
   filePath: text('file_path').notNull(),
   fileType: text('file_type').notNull(),
   fileSize: integer('file_size').notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+});
+
+export const agentEvents = sqliteTable('agent_events', {
+  id: text('id').primaryKey(),
+  sessionId: text('session_id').notNull().references(() => agentSessions.id),
+  type: text('type').notNull(),
+  content: text('content'),
+  toolName: text('tool_name'),
+  toolInput: text('tool_input'),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
 });
 

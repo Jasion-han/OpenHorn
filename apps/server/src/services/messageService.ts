@@ -1,44 +1,155 @@
 import { db } from '../db';
-import { messages, conversations } from 'db';
-import { eq, and, asc } from 'drizzle-orm';
+import { messages, conversations, attachments } from 'db';
+import { eq, and, asc, inArray } from 'drizzle-orm';
 import { generateId } from '../utils';
-import { createAdapter } from '../agent-adapters';
+import { createAdapter, type ChatMessage, type ChatContentPart } from '../agent-adapters';
 import { getResolvedChannelForConversation } from './channelService';
 import { createSseStream } from '../utils/sse';
-import { buildAttachmentContextFromIds, linkAttachmentsToMessage } from './attachmentService';
+import { buildAttachmentPayloadFromIds, linkAttachmentsToMessage } from './attachmentService';
+import { runAgentWithConfig, type AgentEvent } from './agentService';
+import { getSettingValues } from './settingsService';
+
+const GLOBAL_SYSTEM_PROMPT_KEY = 'chat.systemPrompt';
 
 export interface SendMessageInput {
   conversationId: string;
   content: string;
   attachments?: string[];
+  mode?: 'chat' | 'agent';
 }
 
 export interface StreamMessageInput {
   conversationId: string;
   content: string;
   attachments?: string[];
+  mode?: 'chat' | 'agent';
 }
 
-type ChatMessage = {
-  role: 'user' | 'assistant' | 'system';
-  content: string;
+type AgentRunStep = {
+  type: 'tool_start' | 'tool_result' | 'error';
+  toolName?: string;
+  content?: string;
+  toolInput?: unknown;
 };
 
-async function buildContentWithAttachments(content: string, attachmentIds?: string[]) {
+type AgentRunData = {
+  status: 'completed' | 'failed' | 'cancelled' | 'partial';
+  summary: string;
+  error?: string;
+  steps: AgentRunStep[];
+};
+
+function parseJsonArray(value: string | null | undefined): string[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+function normalizeChatContent(
+  content: string | ChatContentPart[]
+): string | ChatContentPart[] | null {
+  if (typeof content === 'string') {
+    const text = content.trim();
+    return text ? text : null;
+  }
+
+  const parts = content.filter((part) => {
+    if (part.type === 'image') return true;
+    return Boolean(part.text?.trim());
+  }).map((part) => {
+    if (part.type === 'image') return part;
+    return { ...part, text: part.text.trim() };
+  });
+
+  return parts.length > 0 ? parts : null;
+}
+
+function mergeChatContent(
+  left: string | ChatContentPart[],
+  right: string | ChatContentPart[]
+): string | ChatContentPart[] {
+  if (typeof left === 'string' && typeof right === 'string') {
+    return `${left}\n\n${right}`;
+  }
+
+  const asParts = (value: string | ChatContentPart[]): ChatContentPart[] => {
+    if (typeof value === 'string') {
+      return [{ type: 'text', text: value }];
+    }
+    return value;
+  };
+
+  return [
+    ...asParts(left),
+    { type: 'text', text: '\n\n' },
+    ...asParts(right),
+  ];
+}
+
+function appendChatMessage(
+  chatMessages: ChatMessage[],
+  role: ChatMessage['role'],
+  content: string | ChatContentPart[]
+) {
+  const normalized = normalizeChatContent(content);
+  if (!normalized) return;
+
+  const last = chatMessages[chatMessages.length - 1];
+  if (last && last.role === role) {
+    last.content = mergeChatContent(last.content, normalized);
+    return;
+  }
+
+  chatMessages.push({ role, content: normalized });
+}
+
+function buildAgentRunSummary(steps: AgentRunStep[], error?: string) {
+  const toolCount = steps.filter((step) => step.type === 'tool_start').length;
+  if (error) {
+    return toolCount > 0
+      ? `Agent 运行失败，已调用 ${toolCount} 个工具`
+      : 'Agent 运行失败';
+  }
+  return toolCount > 0
+    ? `Agent 已调用 ${toolCount} 个工具`
+    : 'Agent 已完成本轮执行';
+}
+
+async function buildUserContentWithAttachments(content: string, attachmentIds?: string[]) {
   if (!attachmentIds || attachmentIds.length === 0) {
     return content;
   }
 
-  const context = await buildAttachmentContextFromIds(attachmentIds);
-  if (!context) {
-    return content;
+  const payload = await buildAttachmentPayloadFromIds(attachmentIds);
+  const images = payload.images || [];
+  const ctx = payload.textContext || '';
+
+  let text = content || '';
+  if (ctx) {
+    text = text.trim() ? `${text}\n\n${ctx}` : ctx;
+  }
+  if (!text.trim() && images.length > 0) {
+    text = 'Please analyze the attached image(s).';
   }
 
-  if (!content.trim()) {
-    return context;
+  if (images.length === 0) {
+    return text;
   }
 
-  return `${content}\n\n${context}`;
+  const parts: ChatContentPart[] = [{ type: 'text', text }];
+  for (const img of images) {
+    parts.push({
+      type: 'image',
+      mediaType: img.fileType,
+      dataBase64: img.dataBase64,
+      fileName: img.fileName,
+    });
+  }
+  return parts;
 }
 
 async function buildChatMessages(
@@ -48,10 +159,7 @@ async function buildChatMessages(
   const chatMessages: ChatMessage[] = [];
 
   if (systemPrompt) {
-    chatMessages.push({
-      role: 'system',
-      content: systemPrompt,
-    });
+    appendChatMessage(chatMessages, 'system', systemPrompt);
   }
 
   for (const message of conversationMessages) {
@@ -63,18 +171,16 @@ async function buildChatMessages(
         attachmentIds = [];
       }
 
-      const content = await buildContentWithAttachments(message.content, attachmentIds);
-      chatMessages.push({
-        role: 'user',
-        content,
-      });
+      const content = await buildUserContentWithAttachments(message.content, attachmentIds);
+      appendChatMessage(chatMessages, 'user', content);
       continue;
     }
 
-    chatMessages.push({
-      role: message.role as ChatMessage['role'],
-      content: message.content,
-    });
+    appendChatMessage(
+      chatMessages,
+      message.role as ChatMessage['role'],
+      message.content
+    );
   }
 
   return chatMessages;
@@ -109,6 +215,43 @@ export async function getMessagesForUser(userId: string, conversationId: string)
   return getMessages(conversationId);
 }
 
+export async function getMessagesForUserWithAttachments(userId: string, conversationId: string) {
+  // Ownership guard
+  await getConversationForUser(userId, conversationId);
+  const result = await getMessages(conversationId);
+
+  const messageIds = result.map((m) => m.id).filter(Boolean);
+  if (messageIds.length === 0) return result;
+
+  const rows = await db.select({
+    id: attachments.id,
+    messageId: attachments.messageId,
+    fileName: attachments.fileName,
+    fileType: attachments.fileType,
+    fileSize: attachments.fileSize,
+  }).from(attachments)
+    .where(inArray(attachments.messageId, messageIds as any));
+
+  const byMessage = new Map<string, Array<{ id: string; fileName: string; fileType: string; fileSize: number }>>();
+  for (const row of rows as any[]) {
+    const mid = row.messageId as string | null;
+    if (!mid) continue;
+    const list = byMessage.get(mid) || [];
+    list.push({
+      id: row.id,
+      fileName: row.fileName,
+      fileType: row.fileType,
+      fileSize: row.fileSize,
+    });
+    byMessage.set(mid, list);
+  }
+
+  return result.map((m) => ({
+    ...m,
+    attachmentsMeta: byMessage.get(m.id) || [],
+  })) as any;
+}
+
 export async function sendMessage(userId: string, input: SendMessageInput) {
   const conversation = await getConversationForUser(userId, input.conversationId);
   
@@ -120,7 +263,9 @@ export async function sendMessage(userId: string, input: SendMessageInput) {
     conversationId: input.conversationId,
     role: 'user',
     content: input.content,
+    mode: input.mode || 'chat',
     attachments: input.attachments ? JSON.stringify(input.attachments) : null,
+    agentRun: null,
     createdAt: now,
   });
 
@@ -174,6 +319,8 @@ export async function sendMessage(userId: string, input: SendMessageInput) {
     role: 'assistant',
     content: responseContent,
     model: responseModel,
+    mode: input.mode || 'chat',
+    agentRun: null,
     createdAt: new Date(),
   });
   
@@ -219,16 +366,18 @@ export async function deleteMessage(userId: string, messageId: string) {
 export async function streamMessage(userId: string, input: StreamMessageInput): Promise<ReadableStream> {
   return createSseStream(async (send, _ctx) => {
     const conversation = await getConversationForUser(userId, input.conversationId);
+    const mode = input.mode === 'chat' ? 'chat' : 'agent';
 
     const userMessageId = generateId();
     const now = new Date();
-
     await db.insert(messages).values({
       id: userMessageId,
       conversationId: input.conversationId,
       role: 'user',
       content: input.content,
+      mode,
       attachments: input.attachments ? JSON.stringify(input.attachments) : null,
+      agentRun: null,
       createdAt: now,
     });
 
@@ -237,11 +386,94 @@ export async function streamMessage(userId: string, input: StreamMessageInput): 
     }
 
     await db.update(conversations)
-      .set({ updatedAt: now })
+      .set({
+        updatedAt: now,
+        lastMode: mode,
+        runStatus: mode === 'agent' ? 'running' : null,
+      } as any)
       .where(eq(conversations.id, input.conversationId));
 
+    const settings = await getSettingValues(userId, [GLOBAL_SYSTEM_PROMPT_KEY]);
+    const effectiveSystemPrompt = conversation.systemPrompt || settings[GLOBAL_SYSTEM_PROMPT_KEY] || null;
+    if (mode === 'agent') {
+      let assistantContent = '';
+      let agentError: string | undefined;
+      const steps: AgentRunStep[] = [];
+
+      for await (const event of runAgentWithConfig({
+        userId,
+        prompt: input.content,
+        attachmentIds: input.attachments || [],
+        channelId: conversation.channelId || null,
+        modelId: conversation.modelId || null,
+        globalSystemPrompt: effectiveSystemPrompt || undefined,
+        abortController: _ctx.abortController,
+      })) {
+        if (event.type === 'text') {
+          const chunk = event.content || '';
+          if (!chunk) continue;
+          assistantContent += chunk;
+          send({ type: 'delta', content: chunk });
+          continue;
+        }
+
+        if (event.type === 'tool_start' || event.type === 'tool_result') {
+          steps.push({
+            type: event.type,
+            toolName: event.toolName,
+            content: event.content,
+            toolInput: event.toolInput,
+          });
+          send({ type: 'agent_event', event });
+          continue;
+        }
+
+        if (event.type === 'error') {
+          agentError = event.content || 'Agent error';
+          steps.push({ type: 'error', content: agentError });
+          send({ type: 'agent_event', event });
+        }
+      }
+
+      const assistantMessageId = generateId();
+      const agentRun: AgentRunData = {
+        status: agentError ? 'failed' : 'completed',
+        summary: buildAgentRunSummary(steps, agentError),
+        error: agentError,
+        steps,
+      };
+
+      await db.insert(messages).values({
+        id: assistantMessageId,
+        conversationId: input.conversationId,
+        role: 'assistant',
+        content: assistantContent || agentError || '',
+        model: conversation.modelId || null,
+        mode: 'agent',
+        attachments: null,
+        agentRun: JSON.stringify(agentRun),
+        createdAt: new Date(),
+      });
+
+      await db.update(conversations)
+        .set({
+          updatedAt: new Date(),
+          lastMode: 'agent',
+          runStatus: agentRun.status,
+        } as any)
+        .where(eq(conversations.id, input.conversationId));
+
+      send({
+        type: 'done',
+        messageId: assistantMessageId,
+        model: conversation.modelId || undefined,
+        agentRun,
+      });
+      return;
+    }
+
     const conversationMessages = await getMessages(input.conversationId);
-    const chatMessages = await buildChatMessages(conversationMessages, conversation.systemPrompt);
+    const chatMessages = await buildChatMessages(conversationMessages, effectiveSystemPrompt);
 
     const resolvedChannel = await getResolvedChannelForConversation(userId, conversation);
     if (!resolvedChannel) {
@@ -269,7 +501,6 @@ export async function streamMessage(userId: string, input: StreamMessageInput): 
     });
 
     for await (const chunk of stream) {
-      // Some adapters may yield undefined/empty chunks; never leak "undefined" into the UI.
       if (typeof chunk !== 'string' || chunk.length === 0) {
         continue;
       }
@@ -284,13 +515,256 @@ export async function streamMessage(userId: string, input: StreamMessageInput): 
       role: 'assistant',
       content: responseContent,
       model: resolvedChannel.modelId,
+      mode: 'chat',
+      attachments: null,
+      agentRun: null,
       createdAt: new Date(),
     });
+
+    await db.update(conversations)
+      .set({
+        updatedAt: new Date(),
+        lastMode: 'chat',
+        runStatus: null,
+      } as any)
+      .where(eq(conversations.id, input.conversationId));
 
     send({
       type: 'done',
       messageId: assistantMessageId,
       model: resolvedChannel.modelId,
     });
+  });
+}
+
+export async function editUserMessage(userId: string, userMessageId: string, newContent: string): Promise<ReadableStream> {
+  return createSseStream(async (send, _ctx) => {
+    const [userMsg] = await db.select().from(messages)
+      .where(eq(messages.id, userMessageId));
+    if (!userMsg || userMsg.role !== 'user') {
+      send({ type: 'error', message: 'Message not found' });
+      return;
+    }
+
+    const conversation = await getConversationForUser(userId, userMsg.conversationId);
+
+    // Find the assistant message immediately following this user message
+    const allMsgs = await getMessages(userMsg.conversationId);
+    const idx = allMsgs.findIndex((m) => m.id === userMessageId);
+    const nextMsg = idx >= 0 ? allMsgs[idx + 1] : null;
+    if (!nextMsg || nextMsg.role !== 'assistant') {
+      send({ type: 'error', message: '找不到对应的 AI 回复消息' });
+      return;
+    }
+    const assistantMessageId = nextMsg.id;
+
+    // Update the user message content
+    await db.update(messages)
+      .set({ content: newContent.trim() })
+      .where(eq(messages.id, userMessageId));
+
+    // Build context up to (not including) the assistant message, with updated user content
+    const contextMsgs = allMsgs.slice(0, idx + 1).map((m) =>
+      m.id === userMessageId ? { ...m, content: newContent.trim() } : m
+    );
+    const settings = await getSettingValues(userId, [GLOBAL_SYSTEM_PROMPT_KEY]);
+    const effectiveSystemPrompt = conversation.systemPrompt || settings[GLOBAL_SYSTEM_PROMPT_KEY] || null;
+    const chatMessages = await buildChatMessages(contextMsgs, effectiveSystemPrompt);
+
+    const resolvedChannel = await getResolvedChannelForConversation(userId, conversation);
+    if (!resolvedChannel) {
+      send({ type: 'error', message: '未配置可用的默认渠道/默认模型。' });
+      return;
+    }
+
+    const adapter = createAdapter(
+      resolvedChannel.channel.provider,
+      resolvedChannel.apiKey,
+      resolvedChannel.channel.baseUrl || undefined
+    );
+
+    let responseContent = '';
+    const stream = await adapter.chatStream({
+      model: resolvedChannel.modelId,
+      messages: chatMessages,
+      maxTokens: 4096,
+    });
+
+    for await (const chunk of stream) {
+      if (typeof chunk !== 'string' || chunk.length === 0) continue;
+      responseContent += chunk;
+      send({ type: 'delta', content: chunk });
+    }
+
+    await db.update(messages)
+      .set({ content: responseContent, model: resolvedChannel.modelId })
+      .where(eq(messages.id, assistantMessageId));
+
+    send({ type: 'done', userMessageId, assistantMessageId, model: resolvedChannel.modelId });
+  });
+}
+
+export async function regenerateMessage(userId: string, assistantMessageId: string): Promise<ReadableStream> {
+  return createSseStream(async (send, _ctx) => {
+    const [assistantMsg] = await db.select().from(messages)
+      .where(eq(messages.id, assistantMessageId));
+    if (!assistantMsg || assistantMsg.role !== 'assistant') {
+      send({ type: 'error', message: 'Message not found' });
+      return;
+    }
+
+    const conversation = await getConversationForUser(userId, assistantMsg.conversationId);
+    const assistantMode = assistantMsg.mode === 'agent' ? 'agent' : 'chat';
+
+    if (assistantMode === 'agent') {
+      const allMsgs = await getMessages(assistantMsg.conversationId);
+      const idx = allMsgs.findIndex((m) => m.id === assistantMessageId);
+      if (idx <= 0) {
+        send({ type: 'error', message: '找不到对应的用户消息' });
+        return;
+      }
+
+      let userMsg: typeof allMsgs[number] | null = null;
+      for (let i = idx - 1; i >= 0; i -= 1) {
+        if (allMsgs[i]?.role === 'user') {
+          userMsg = allMsgs[i];
+          break;
+        }
+      }
+
+      if (!userMsg) {
+        send({ type: 'error', message: '找不到对应的用户消息' });
+        return;
+      }
+
+      const settings = await getSettingValues(userId, [GLOBAL_SYSTEM_PROMPT_KEY]);
+      const effectiveSystemPrompt = conversation.systemPrompt || settings[GLOBAL_SYSTEM_PROMPT_KEY] || null;
+      const attachmentIds = parseJsonArray(userMsg.attachments);
+      const contextPaths = parseJsonArray(userMsg.contextPaths);
+      const workspaceId = assistantMsg.workspaceId || userMsg.workspaceId || (conversation as any).workspaceId || null;
+
+      await db.update(conversations)
+        .set({
+          updatedAt: new Date(),
+          workspaceId,
+          lastMode: 'agent',
+          runStatus: 'running',
+        } as any)
+        .where(eq(conversations.id, assistantMsg.conversationId));
+
+      let responseContent = '';
+      let agentError: string | undefined;
+      const steps: AgentRunStep[] = [];
+
+      for await (const event of runAgentWithConfig({
+        userId,
+        prompt: userMsg.content,
+        attachmentIds,
+        workspaceId,
+        channelId: conversation.channelId || null,
+        modelId: conversation.modelId || null,
+        globalSystemPrompt: effectiveSystemPrompt || undefined,
+        abortController: _ctx.abortController,
+        contextPaths,
+      })) {
+        if (event.type === 'text') {
+          const chunk = event.content || '';
+          if (!chunk) continue;
+          responseContent += chunk;
+          send({ type: 'delta', content: chunk });
+          continue;
+        }
+
+        if (event.type === 'tool_start' || event.type === 'tool_result') {
+          steps.push({
+            type: event.type,
+            toolName: event.toolName,
+            content: event.content,
+            toolInput: event.toolInput,
+          });
+          send({ type: 'agent_event', event });
+          continue;
+        }
+
+        if (event.type === 'error') {
+          agentError = event.content || 'Agent error';
+          steps.push({ type: 'error', content: agentError });
+          send({ type: 'agent_event', event });
+        }
+      }
+
+      const agentRun: AgentRunData = {
+        status: agentError ? 'failed' : 'completed',
+        summary: buildAgentRunSummary(steps, agentError),
+        error: agentError,
+        steps,
+      };
+
+      await db.update(messages)
+        .set({
+          content: responseContent || agentError || '',
+          model: conversation.modelId || null,
+          mode: 'agent',
+          workspaceId,
+          contextPaths: contextPaths.length > 0 ? JSON.stringify(contextPaths) : null,
+          agentRun: JSON.stringify(agentRun),
+        } as any)
+        .where(eq(messages.id, assistantMessageId));
+
+      await db.update(conversations)
+        .set({
+          updatedAt: new Date(),
+          workspaceId,
+          lastMode: 'agent',
+          runStatus: agentRun.status,
+        } as any)
+        .where(eq(conversations.id, assistantMsg.conversationId));
+
+      send({
+        type: 'done',
+        messageId: assistantMessageId,
+        model: conversation.modelId || undefined,
+        agentRun,
+      });
+      return;
+    }
+
+    const allMsgs = await getMessages(assistantMsg.conversationId);
+    const idx = allMsgs.findIndex((m) => m.id === assistantMessageId);
+    const contextMsgs = idx > 0 ? allMsgs.slice(0, idx) : allMsgs;
+    const settings = await getSettingValues(userId, [GLOBAL_SYSTEM_PROMPT_KEY]);
+    const effectiveSystemPrompt = conversation.systemPrompt || settings[GLOBAL_SYSTEM_PROMPT_KEY] || null;
+    const chatMessages = await buildChatMessages(contextMsgs, effectiveSystemPrompt);
+
+    const resolvedChannel = await getResolvedChannelForConversation(userId, conversation);
+    if (!resolvedChannel) {
+      send({ type: 'error', message: '未配置可用的默认渠道/默认模型。' });
+      return;
+    }
+
+    const adapter = createAdapter(
+      resolvedChannel.channel.provider,
+      resolvedChannel.apiKey,
+      resolvedChannel.channel.baseUrl || undefined
+    );
+
+    let responseContent = '';
+    const stream = await adapter.chatStream({
+      model: resolvedChannel.modelId,
+      messages: chatMessages,
+      maxTokens: 4096,
+    });
+
+    for await (const chunk of stream) {
+      if (typeof chunk !== 'string' || chunk.length === 0) continue;
+      responseContent += chunk;
+      send({ type: 'delta', content: chunk });
+    }
+
+    await db.update(messages)
+      .set({ content: responseContent, model: resolvedChannel.modelId })
+      .where(eq(messages.id, assistantMessageId));
+
+    send({ type: 'done', messageId: assistantMessageId, model: resolvedChannel.modelId });
   });
 }

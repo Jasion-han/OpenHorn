@@ -6,7 +6,7 @@ import { eq } from 'drizzle-orm';
 
 test('settings: set/get/delete value by key', async () => {
   const userId = crypto.randomUUID();
-  const key = 'agent.defaultWorkspaceId';
+  const key = 'chat.systemPrompt';
 
   await db.insert(users).values({
     id: userId,
@@ -18,8 +18,8 @@ test('settings: set/get/delete value by key', async () => {
   });
 
   try {
-    await setSettingValue(userId, key, 'ws1');
-    expect(await getSettingValues(userId, [key])).toEqual({ [key]: 'ws1' });
+    await setSettingValue(userId, key, 'hello');
+    expect(await getSettingValues(userId, [key])).toEqual({ [key]: 'hello' });
 
     await deleteSettingValue(userId, key);
     expect(await getSettingValues(userId, [key])).toEqual({});
@@ -29,7 +29,7 @@ test('settings: set/get/delete value by key', async () => {
 });
 
 test('settings: user isolation', async () => {
-  const key = 'agent.defaultWorkspaceId';
+  const key = 'chat.systemPrompt';
   const u1 = crypto.randomUUID();
   const u2 = crypto.randomUUID();
 
@@ -53,11 +53,11 @@ test('settings: user isolation', async () => {
   ]);
 
   try {
-    await setSettingValue(u1, key, 'ws_u1');
-    await setSettingValue(u2, key, 'ws_u2');
+    await setSettingValue(u1, key, 'u1');
+    await setSettingValue(u2, key, 'u2');
 
-    expect(await getSettingValues(u1, [key])).toEqual({ [key]: 'ws_u1' });
-    expect(await getSettingValues(u2, [key])).toEqual({ [key]: 'ws_u2' });
+    expect(await getSettingValues(u1, [key])).toEqual({ [key]: 'u1' });
+    expect(await getSettingValues(u2, [key])).toEqual({ [key]: 'u2' });
   } finally {
     await deleteSettingValue(u1, key);
     await deleteSettingValue(u2, key);

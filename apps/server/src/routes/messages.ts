@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { getCookie } from 'hono/cookie';
 import { verifyToken, getUserById } from '../services/authService';
-import { getMessagesForUser, sendMessage, deleteMessage, streamMessage } from '../services/messageService';
+import { getMessagesForUserWithAttachments, sendMessage, deleteMessage, streamMessage, regenerateMessage, editUserMessage } from '../services/messageService';
 
 const messages = new Hono();
 
@@ -23,7 +23,7 @@ messages.get('/:conversationId', async (c) => {
   
   try {
     const conversationId = c.req.param('conversationId');
-    const result = await getMessagesForUser(user.id, conversationId);
+    const result = await getMessagesForUserWithAttachments(user.id, conversationId);
     return c.json({ messages: result });
   } catch (error) {
     // Avoid leaking which conversation ids exist to other users.
@@ -97,10 +97,55 @@ messages.delete('/:id', async (c) => {
   if (!user) {
     return c.json({ error: 'Unauthorized' }, 401);
   }
-  
+
   const messageId = c.req.param('id');
   await deleteMessage(user.id, messageId);
   return c.json({ success: true });
+});
+
+messages.post('/:id/regenerate', async (c) => {
+  const user = await getUser(c);
+  if (!user) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+  const messageId = c.req.param('id');
+  try {
+    const stream = await regenerateMessage(user.id, messageId);
+    return new Response(stream, {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+      },
+    });
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : 'Failed' }, 400);
+  }
+});
+
+messages.post('/:id/edit', async (c) => {
+  const user = await getUser(c);
+  if (!user) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+  const messageId = c.req.param('id');
+  try {
+    const body = await c.req.json();
+    const content = typeof body?.content === 'string' ? body.content.trim() : '';
+    if (!content) {
+      return c.json({ error: 'content is required' }, 400);
+    }
+    const stream = await editUserMessage(user.id, messageId, content);
+    return new Response(stream, {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+      },
+    });
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : 'Failed' }, 400);
+  }
 });
 
 export default messages;

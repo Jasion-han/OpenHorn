@@ -2,12 +2,12 @@ import { Hono } from 'hono';
 import { getCookie } from 'hono/cookie';
 import { verifyToken, getUserById } from '../services/authService';
 import {
-  getConversations,
-  getConversationById,
   createConversation,
   updateConversation,
   deleteConversation,
 } from '../services/conversationService';
+import { generateAutoTitle } from '../services/autoTitleService';
+import { getUnifiedConversation, listUnifiedConversations } from '../services/unifiedConversationService';
 
 const conversations = new Hono();
 
@@ -27,7 +27,7 @@ conversations.get('/', async (c) => {
     return c.json({ error: 'Unauthorized' }, 401);
   }
   
-  const result = await getConversations(user.id);
+  const result = await listUnifiedConversations(user.id);
   return c.json({ conversations: result });
 });
 
@@ -38,7 +38,7 @@ conversations.get('/:id', async (c) => {
   }
   
   const conversationId = c.req.param('id');
-  const conversation = await getConversationById(user.id, conversationId);
+  const conversation = await getUnifiedConversation(user.id, conversationId);
   
   if (!conversation) {
     return c.json({ error: 'Conversation not found' }, 404);
@@ -91,6 +91,34 @@ conversations.delete('/:id', async (c) => {
   const conversationId = c.req.param('id');
   await deleteConversation(user.id, conversationId);
   return c.json({ success: true });
+});
+
+conversations.post('/:id/auto-title', async (c) => {
+  const user = await getUser(c);
+  if (!user) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+
+  try {
+    const conversationId = c.req.param('id');
+    const conversation = await getUnifiedConversation(user.id, conversationId);
+    if (!conversation) {
+      return c.json({ error: 'Conversation not found' }, 404);
+    }
+    const body = await c.req.json().catch(() => ({}));
+    const prompt = typeof body.prompt === 'string' ? body.prompt : '';
+    if (!prompt.trim()) {
+      return c.json({ error: 'prompt is required' }, 400);
+    }
+    const title = await generateAutoTitle(user.id, prompt, (conversation as any).channelId || null);
+    if (!title) {
+      return c.json({ success: false, error: 'Failed to generate title' });
+    }
+    await updateConversation(user.id, conversationId, { title });
+    return c.json({ success: true, title });
+  } catch (error) {
+    return c.json({ success: false, error: error instanceof Error ? error.message : 'Failed' });
+  }
 });
 
 export default conversations;

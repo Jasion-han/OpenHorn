@@ -889,6 +889,50 @@ export async function getResolvedChannelById(userId: string, channelId: string) 
   return getResolvedChannelForUser(userId, channelId);
 }
 
+function scoreVisionModelId(modelId: string) {
+  const id = (modelId || '').toLowerCase();
+  // Heuristic: prefer known vision-capable families.
+  if (id.includes('gpt-4o')) return 100;
+  if (id.includes('gpt-4.1')) return 95;
+  if (id.includes('gpt-4')) return 90;
+  if (id.includes('vision')) return 85;
+  if (id.includes('claude-3')) return 80;
+  if (id.includes('claude')) return 70;
+  return 10;
+}
+
+export async function getResolvedVisionChannelForUser(userId: string): Promise<ResolvedChannel | null> {
+  // Deprecated: Vision Extractor removed. Keep a best-effort heuristic resolver for any
+  // future callers, but do not rely on settings.
+  const items = await getChannels(userId);
+  const enabled = items
+    .filter((c) => c.enabled && c.hasApiKey)
+    .map((c) => {
+      const modelId = resolveModelIdFromChannelItem(c, null);
+      return { channelId: c.id, provider: c.provider, baseUrl: c.baseUrl || '', modelId };
+    })
+    .filter((c) => Boolean(c.modelId)) as Array<{ channelId: string; provider: string; baseUrl: string; modelId: string }>;
+
+  if (enabled.length === 0) return null;
+
+  const ranked = enabled
+    .map((c) => ({
+      ...c,
+      score:
+        (c.provider === 'openai' ? 1000 : 0)
+        + (c.provider === 'anthropic' && c.baseUrl.includes('api.anthropic.com') ? 200 : 0)
+        + scoreVisionModelId(c.modelId),
+    }))
+    .sort((a, b) => b.score - a.score);
+
+  for (const candidate of ranked) {
+    const resolved = await getResolvedChannelForUser(userId, candidate.channelId);
+    if (resolved) return resolved;
+  }
+
+  return null;
+}
+
 export async function getChannelRuntimeCredentialsById(
   userId: string,
   channelId: string,

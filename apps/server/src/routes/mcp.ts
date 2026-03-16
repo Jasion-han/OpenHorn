@@ -28,8 +28,7 @@ mcp.get('/servers', async (c) => {
     return c.json({ error: 'Unauthorized' }, 401);
   }
   
-  const workspaceId = c.req.query('workspaceId');
-  const servers = await getMCPServers(user.id, workspaceId || undefined);
+  const servers = await getMCPServers(user.id);
   return c.json({ servers });
 });
 
