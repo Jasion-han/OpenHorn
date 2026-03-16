@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { getCookie } from 'hono/cookie';
 import { verifyToken, getUserById } from '../services/authService';
 import { deleteSettingValue, getSettingValues, setSettingValue } from '../services/settingsService';
+import { TAVILY_API_KEY_SETTING } from '../services/searchService';
 
 const settings = new Hono();
 
@@ -32,6 +33,26 @@ settings.get('/', async (c) => {
   const keys = parseKeysQuery(c.req.query('keys'));
   const values = await getSettingValues(user.id, keys);
   return c.json({ settings: values });
+});
+
+settings.get('/search-status', async (c) => {
+  const user = await getUser(c);
+  if (!user) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+
+  const values = await getSettingValues(user.id, [TAVILY_API_KEY_SETTING]);
+  const userKey = values[TAVILY_API_KEY_SETTING];
+  if (typeof userKey === 'string' && userKey.trim()) {
+    return c.json({ configured: true, source: 'user' });
+  }
+
+  const envKey = process.env.TAVILY_API_KEY;
+  if (typeof envKey === 'string' && envKey.trim()) {
+    return c.json({ configured: true, source: 'server' });
+  }
+
+  return c.json({ configured: false, source: 'none' });
 });
 
 settings.put('/:key', async (c) => {
@@ -67,4 +88,3 @@ settings.put('/:key', async (c) => {
 });
 
 export default settings;
-

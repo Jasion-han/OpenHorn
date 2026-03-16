@@ -89,6 +89,11 @@ export interface ApiCitation {
   publishedDate?: string;
 }
 
+export interface ApiSearchStatus {
+  configured: boolean;
+  source: 'user' | 'server' | 'none';
+}
+
 export interface ApiMessage {
   id: string;
   conversationId: string;
@@ -460,5 +465,8 @@ export const api = {
         method: 'PUT',
         body: JSON.stringify({ value }),
       }),
+
+    searchStatus: () =>
+      fetchApi<ApiSearchStatus>('/settings/search-status'),
   },
 };

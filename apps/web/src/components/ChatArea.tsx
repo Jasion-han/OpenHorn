@@ -6,6 +6,7 @@ import { api, type ApiAgentRun, type ApiCitation, type ApiLiveRoute, type ApiLiv
 import { uploadAttachments } from '../lib/attachments';
 import { streamChatMessage } from '../lib/chat-stream';
 import { useChatStore } from '../stores/chatStore';
+import { notifyWarning } from '../lib/notify';
 import { getEffectiveModelForConversation } from '@/lib/effective-model';
 import { PromaComposer } from '@/components/composer/PromaComposer';
 import { ModelPickerModal } from '@/components/chat/ModelPickerModal';
@@ -340,6 +341,16 @@ export function ChatArea() {
     if (!currentConversation) return;
     const next = !forceWebSearch;
     updateConversation(currentConversation.id, { forceWebSearch: next });
+    if (next) {
+      try {
+        const status = await api.settings.searchStatus();
+        if (!status.configured || status.source === 'none') {
+          notifyWarning('未配置实时搜索', '未检测到 Tavily Key，联网搜索可能无法使用。请在设置中填写或配置服务端 TAVILY_API_KEY。');
+        }
+      } catch {
+        // ignore
+      }
+    }
     try {
       await api.conversations.update(currentConversation.id, { forceWebSearch: next });
     } catch {
