@@ -1,0 +1,52 @@
+import { useEffect, useMemo, useState } from 'react'
+import { SettingsCard, SettingsRow, SettingsSection, SettingsSegmentedControl } from 'ui'
+
+import type { ThemeMode } from '../../lib/theme'
+import { readThemeMode, setThemeMode, THEME_MODE_CHANGE_EVENT } from '../../lib/theme'
+
+const THEME_OPTIONS: { value: ThemeMode; label: string }[] = [
+  { value: 'light', label: '浅色' },
+  { value: 'dark', label: '深色' },
+  { value: 'system', label: '跟随系统' },
+]
+
+function getZoomHint() {
+  const isMac = typeof navigator !== 'undefined' && navigator.userAgent.includes('Mac')
+  return isMac
+    ? '使用 ⌘+ 放大、⌘- 缩小、⌘0 恢复默认大小'
+    : '使用 Ctrl++ 放大、Ctrl+- 缩小、Ctrl+0 恢复默认大小'
+}
+
+export function AppearanceSettings() {
+  const [themeMode, setMode] = useState<ThemeMode>('light')
+  const zoomHint = useMemo(() => getZoomHint(), [])
+
+  useEffect(() => {
+    const apply = () => setMode(readThemeMode())
+    apply()
+    window.addEventListener(THEME_MODE_CHANGE_EVENT, apply)
+    return () => window.removeEventListener(THEME_MODE_CHANGE_EVENT, apply)
+  }, [])
+
+  const handleThemeChange = (value: string) => {
+    const next = value as ThemeMode
+    setMode(next)
+    setThemeMode(next)
+  }
+
+  return (
+    <SettingsSection title="外观设置" description="自定义应用的视觉风格">
+      <SettingsCard>
+        <SettingsSegmentedControl
+          label="主题模式"
+          description="选择应用的配色方案"
+          value={themeMode}
+          onValueChange={handleThemeChange}
+          options={THEME_OPTIONS}
+        />
+        <SettingsRow label="界面缩放" description={zoomHint} />
+      </SettingsCard>
+    </SettingsSection>
+  )
+}
+
