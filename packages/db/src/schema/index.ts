@@ -45,7 +45,7 @@ export const conversations = sqliteTable('conversations', {
   defaultMode: text('default_mode').default('agent'),
   lastMode: text('last_mode').default('agent'),
   isPinned: integer('is_pinned', { mode: 'boolean' }).default(false),
-  forceWebSearch: integer('force_web_search', { mode: 'boolean' }).default(false),
+  forceWebSearch: integer('force_web_search', { mode: 'boolean' }).default(true),
   runStatus: text('run_status'),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),

@@ -327,7 +327,7 @@ export function ChatArea() {
   const effective = getEffectiveModelForConversation(channels, currentConversation);
   const hasInput = Boolean(input.trim());
   const hasFiles = files.length > 0;
-  const forceWebSearch = Boolean(currentConversation?.forceWebSearch);
+  const forceWebSearch = currentConversation?.forceWebSearch ?? true;
   const canSend =
     effective.ok &&
     Boolean(currentConversation) &&

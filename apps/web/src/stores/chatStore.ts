@@ -62,7 +62,7 @@ function parseConversation(conv: ApiConversation): Conversation {
     defaultMode: conv.defaultMode === 'chat' ? 'chat' : 'agent',
     lastMode: conv.lastMode === 'chat' ? 'chat' : 'agent',
     isPinned: Boolean(conv.isPinned),
-    forceWebSearch: Boolean(conv.forceWebSearch),
+    forceWebSearch: conv.forceWebSearch == null ? true : Boolean(conv.forceWebSearch),
     runStatus: conv.runStatus ?? null,
     createdAt: new Date(conv.createdAt),
     updatedAt: new Date(conv.updatedAt),

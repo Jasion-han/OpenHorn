@@ -64,6 +64,7 @@ export async function createConversation(userId: string, input: CreateConversati
   const now = new Date();
   const model = normalizeConversationModelInput(input);
   const defaultMode = input.defaultMode === 'chat' ? 'chat' : 'agent';
+  const forceWebSearch = input.forceWebSearch === undefined ? true : Boolean(input.forceWebSearch);
   
   await db.insert(conversations).values({
     id,
@@ -76,7 +77,7 @@ export async function createConversation(userId: string, input: CreateConversati
     defaultMode,
     lastMode: defaultMode,
     isPinned: false,
-    forceWebSearch: Boolean(input.forceWebSearch),
+    forceWebSearch,
     runStatus: null,
     createdAt: now,
     updatedAt: now,
@@ -93,7 +94,7 @@ export async function createConversation(userId: string, input: CreateConversati
     defaultMode,
     lastMode: defaultMode,
     isPinned: false,
-    forceWebSearch: Boolean(input.forceWebSearch),
+    forceWebSearch,
     runStatus: null,
     createdAt: now,
     updatedAt: now,

@@ -49,7 +49,7 @@ const SCHEMA_DDL: string[] = [
     default_mode TEXT DEFAULT 'agent',
     last_mode TEXT DEFAULT 'agent',
     is_pinned INTEGER DEFAULT 0,
-    force_web_search INTEGER DEFAULT 0,
+    force_web_search INTEGER DEFAULT 1,
     run_status TEXT,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
@@ -178,8 +178,8 @@ async function ensureConversationForceWebSearchColumn(): Promise<void> {
   const rows = (result as any).rows as Array<Record<string, unknown>> | undefined;
   const hasColumn = (rows || []).some((row) => row.name === 'force_web_search' || row['name'] === 'force_web_search');
   if (!hasColumn) {
-    await client.execute(`ALTER TABLE conversations ADD COLUMN force_web_search INTEGER DEFAULT 0;`);
-    await client.execute(`UPDATE conversations SET force_web_search = 0 WHERE force_web_search IS NULL;`);
+    await client.execute(`ALTER TABLE conversations ADD COLUMN force_web_search INTEGER DEFAULT 1;`);
+    await client.execute(`UPDATE conversations SET force_web_search = 1 WHERE force_web_search IS NULL;`);
   }
 }
 
