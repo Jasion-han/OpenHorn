@@ -56,6 +56,26 @@ export const FsWriteParamsSchema = z.object({
   content: z.string(),
 });
 
+export const ApprovalsRespondParamsSchema = z.object({
+  toolUseId: z.string().min(1),
+  allow: z.boolean(),
+});
+
+export const AgentRunParamsSchema = z.object({
+  prompt: z.string().min(1),
+  apiKey: z.string().min(1),
+  model: z.string().min(1),
+  baseUrl: z.string().optional(),
+});
+
+export const AgentCancelParamsSchema = z.object({
+  runId: z.string().min(1),
+});
+
+export const CheckpointRollbackParamsSchema = z.object({
+  runId: z.string().min(1),
+});
+
 export function parseIncomingJsonMessage(raw: string): IncomingMessage {
   const parsed = JSON.parse(raw);
   return IncomingMessageSchema.parse(parsed);
@@ -73,6 +93,14 @@ export function validateMethodParams(method: string, params: unknown): unknown {
       return FsReadParamsSchema.parse(params);
     case 'fs.write':
       return FsWriteParamsSchema.parse(params);
+    case 'approvals.respond':
+      return ApprovalsRespondParamsSchema.parse(params);
+    case 'agent.run':
+      return AgentRunParamsSchema.parse(params);
+    case 'agent.cancel':
+      return AgentCancelParamsSchema.parse(params);
+    case 'checkpoint.rollback':
+      return CheckpointRollbackParamsSchema.parse(params);
     default:
       throw new Error(`Unknown method: ${method}`);
   }
@@ -89,4 +117,3 @@ export function buildErrorResponse(requestId: string, error: string): WsResponse
 export function buildEvent(event: string, data?: unknown): WsEvent {
   return { type: 'event', event, data };
 }
-

@@ -8,10 +8,14 @@ import {
 } from './protocol';
 import { canonicalizeWorkspaceRoot } from './workspace';
 import { fsList, fsReadText, fsWriteText } from './fs';
+import { createCheckpointSession, rollbackCheckpoint } from './checkpoints';
+import { runClaudeAgent } from './agent/claude';
 
 type ConnectionState = {
   authed: boolean;
   workspaceRoot: string | null;
+  pendingApprovals: Map<string, (allow: boolean) => void>;
+  agentRuns: Map<string, { abortController: AbortController }>;
 };
 
 function getEnv(name: string): string | null {
@@ -43,7 +47,12 @@ const server = Bun.serve({
   },
   websocket: {
     open(ws) {
-      (ws as any).state = { authed: false, workspaceRoot: null } satisfies ConnectionState;
+      (ws as any).state = {
+        authed: false,
+        workspaceRoot: null,
+        pendingApprovals: new Map(),
+        agentRuns: new Map(),
+      } satisfies ConnectionState;
       ws.send(JSON.stringify(buildEvent('server.ready')));
     },
     message(ws, message) {
@@ -116,6 +125,74 @@ async function onRequest(ws: import('bun').ServerWebSocket<unknown>, request: Ws
         ws.send(JSON.stringify(buildOkResponse(request.requestId, result)));
         return;
       }
+      case 'approvals.respond': {
+        const { toolUseId, allow } = params as { toolUseId: string; allow: boolean };
+        const resolver = state.pendingApprovals.get(toolUseId);
+        if (!resolver) {
+          ws.send(JSON.stringify(buildErrorResponse(request.requestId, 'Approval not found')));
+          return;
+        }
+        state.pendingApprovals.delete(toolUseId);
+        resolver(Boolean(allow));
+        ws.send(JSON.stringify(buildOkResponse(request.requestId, { ok: true })));
+        return;
+      }
+      case 'agent.run': {
+        if (!state.workspaceRoot) throw new Error('Workspace not set');
+        const { prompt, apiKey, model, baseUrl } = params as { prompt: string; apiKey: string; model: string; baseUrl?: string };
+
+        const abortController = new AbortController();
+        const checkpoint = await createCheckpointSession(state.workspaceRoot);
+        const runId = checkpoint.runId;
+        state.agentRuns.set(runId, { abortController });
+
+        ws.send(JSON.stringify(buildOkResponse(request.requestId, { runId })));
+
+        void runClaudeAgent({
+          apiKey,
+          baseUrl,
+          model,
+          prompt,
+          cwd: state.workspaceRoot,
+          abortController,
+          checkpoint,
+          requestApproval: async (input) => {
+            ws.send(JSON.stringify(buildEvent('approval.request', { runId, ...input })));
+            const decision = await new Promise<boolean>((resolve) => {
+              state.pendingApprovals.set(input.toolUseId, resolve);
+            });
+            return decision;
+          },
+          onEvent: (event) => {
+            ws.send(JSON.stringify(buildEvent('agent.event', { runId, event })));
+          },
+          onCheckpointReady: (readyRunId) => {
+            ws.send(JSON.stringify(buildEvent('checkpoint.ready', { runId: readyRunId })));
+          },
+        }).finally(() => {
+          state.agentRuns.delete(runId);
+        });
+
+        return;
+      }
+      case 'agent.cancel': {
+        const { runId } = params as { runId: string };
+        const run = state.agentRuns.get(runId);
+        if (!run) {
+          ws.send(JSON.stringify(buildErrorResponse(request.requestId, 'Run not found')));
+          return;
+        }
+        run.abortController.abort();
+        ws.send(JSON.stringify(buildOkResponse(request.requestId, { ok: true })));
+        return;
+      }
+      case 'checkpoint.rollback': {
+        if (!state.workspaceRoot) throw new Error('Workspace not set');
+        const { runId } = params as { runId: string };
+        const result = await rollbackCheckpoint(state.workspaceRoot, runId);
+        ws.send(JSON.stringify(buildOkResponse(request.requestId, result)));
+        return;
+      }
       default:
         ws.send(JSON.stringify(buildErrorResponse(request.requestId, `Unknown method: ${request.method}`)));
     }
@@ -132,4 +209,3 @@ console.log(JSON.stringify({
   host: HOST,
   port: server.port,
 }));
-
