@@ -1,24 +1,24 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import {
-  Paper,
-  TextInput,
-  Stack,
-  Group,
-  Text,
-  ActionIcon,
-  ScrollArea,
-  Menu,
-  Button,
-  Collapse,
-} from '@mantine/core';
-import { modals } from '@mantine/modals';
-import { IconChevronDown, IconChevronRight, IconDots, IconMessage, IconPlus, IconTrash, IconPin, IconPencil } from '@tabler/icons-react';
+import { usePathname, useRouter } from 'next/navigation';
+import { Plus, MoreHorizontal, Trash2, Pin, Pencil, ChevronDown, ChevronRight } from 'lucide-react';
 import { useChatStore, type Conversation } from '../../stores/chatStore';
 import { notifyError, notifySuccess } from '@/lib/notify';
 import { api } from '@/lib/api';
 import { BACKEND_UP_EVENT } from '@/stores/backendStatusStore';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { cn } from '@/lib/utils';
+import { useConfirm } from '@/components/dialogs/ConfirmDialogProvider';
 
 type DateGroup = '今天' | '昨天' | '更早';
 
@@ -51,10 +51,83 @@ function formatNewConversationTitle() {
   const dd = String(d.getDate()).padStart(2, '0');
   const hh = String(d.getHours()).padStart(2, '0');
   const min = String(d.getMinutes()).padStart(2, '0');
-  return `新对话 ${mm}-${dd} ${hh}:${min}`;
+  return `新会话 ${mm}-${dd} ${hh}:${min}`;
+}
+
+function ConvItem({
+  conv,
+  isActive,
+  onSelect,
+  onRename,
+  onTogglePin,
+  onDelete,
+  pinLabel,
+}: {
+  conv: Conversation;
+  isActive: boolean;
+  onSelect: () => void;
+  onRename: () => void;
+  onTogglePin: () => void;
+  onDelete: () => void;
+  pinLabel: string;
+}) {
+  return (
+    <div
+      onClick={onSelect}
+      className={cn(
+        'group flex cursor-pointer items-center justify-between rounded-[10px] px-3 py-[7px] text-sm transition-colors duration-100 titlebar-no-drag text-left border border-transparent',
+        isActive
+          ? 'bg-foreground/[0.08] text-foreground shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]'
+          : 'hover:bg-foreground/[0.04] text-foreground/70 hover:text-foreground'
+      )}
+    >
+      <div className="flex min-w-0 flex-1 items-center">
+        <span className="truncate">{conv.title}</span>
+      </div>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
+          <Button variant="ghost" size="icon-sm" className="opacity-0 group-hover:opacity-100 h-6 w-6 shrink-0">
+            <MoreHorizontal size={13} />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-36">
+          <DropdownMenuItem
+            onClick={(e) => {
+              e.stopPropagation();
+              onRename();
+            }}
+          >
+            <Pencil size={14} /> 重命名
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onClick={(e) => {
+              e.stopPropagation();
+              onTogglePin();
+            }}
+          >
+            <Pin size={14} /> {pinLabel}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            className="text-destructive focus:text-destructive"
+            onClick={(e) => {
+              e.stopPropagation();
+              // Let the menu close/unmount before opening the confirm dialog,
+              // otherwise it can feel like overlays are "stacked".
+              window.setTimeout(() => onDelete(), 0);
+            }}
+          >
+            <Trash2 size={14} /> 删除
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  );
 }
 
 export function ChatAside() {
+  const router = useRouter();
+  const pathname = usePathname();
   const {
     conversations,
     currentConversation,
@@ -69,19 +142,16 @@ export function ChatAside() {
   const [query, setQuery] = useState('');
   const [creating, setCreating] = useState(false);
   const [pinnedOpen, setPinnedOpen] = useState(true);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const confirm = useConfirm();
+
+  useEffect(() => { void loadConversations(); }, [loadConversations]);
 
   useEffect(() => {
-    void loadConversations();
-  }, [loadConversations]);
-
-  useEffect(() => {
-    const onUp = () => {
-      void loadConversations();
-    };
+    const onUp = () => void loadConversations();
     window.addEventListener(BACKEND_UP_EVENT, onUp);
-    return () => {
-      window.removeEventListener(BACKEND_UP_EVENT, onUp);
-    };
+    return () => window.removeEventListener(BACKEND_UP_EVENT, onUp);
   }, [loadConversations]);
 
   const filtered = useMemo(() => {
@@ -95,10 +165,13 @@ export function ChatAside() {
     try {
       const conversation = await createConversation(formatNewConversationTitle());
       setCurrentConversation(conversation);
+      if (pathname !== '/chat') {
+        router.push('/chat');
+      }
       await loadMessages(conversation.id);
-      notifySuccess('已创建', '新对话已创建');
+      notifySuccess('已创建', '新会话已创建');
     } catch (error) {
-      notifyError('创建失败', error instanceof Error ? error.message : '无法创建对话');
+      notifyError('创建失败', error instanceof Error ? error.message : '无法创建会话');
     } finally {
       setCreating(false);
     }
@@ -106,6 +179,9 @@ export function ChatAside() {
 
   const handleSelectConversation = async (conversation: Conversation) => {
     setCurrentConversation(conversation);
+    if (pathname !== '/chat') {
+      router.push('/chat');
+    }
     try {
       await loadMessages(conversation.id);
     } catch (error) {
@@ -114,22 +190,20 @@ export function ChatAside() {
   };
 
   const handleDelete = async (id: string) => {
-    modals.openConfirmModal({
-      title: '删除对话',
-      children: <Text size="sm">确定删除该对话？此操作不可恢复。</Text>,
-      labels: { confirm: '删除', cancel: '取消' },
-      confirmProps: { color: 'red' },
-      onConfirm: () => {
-        void (async () => {
-          try {
-            await deleteConversation(id);
-            notifySuccess('已删除', '对话已删除');
-          } catch (error) {
-            notifyError('删除失败', error instanceof Error ? error.message : '无法删除对话');
-          }
-        })();
-      },
+    const ok = await confirm({
+      title: '删除对话？',
+      description: '确定删除该会话？此操作不可恢复。',
+      confirmText: '删除',
+      cancelText: '取消',
+      destructive: true,
     });
+    if (!ok) return;
+    try {
+      await deleteConversation(id);
+      notifySuccess('已删除', '会话已删除');
+    } catch (error) {
+      notifyError('删除失败', error instanceof Error ? error.message : '无法删除会话');
+    }
   };
 
   const handleTogglePin = async (conv: Conversation) => {
@@ -143,35 +217,23 @@ export function ChatAside() {
     }
   };
 
-  const handleRename = (conv: Conversation) => {
-    let value = conv.title;
-    modals.openConfirmModal({
-      title: '重命名对话',
-      children: (
-        <TextInput
-          label="标题"
-          defaultValue={conv.title}
-          onChange={(e) => {
-            value = e.target.value;
-          }}
-        />
-      ),
-      labels: { confirm: '保存', cancel: '取消' },
-      onConfirm: () => {
-        const nextTitle = value.trim();
-        if (!nextTitle) return;
-        void (async () => {
-          updateConversation(conv.id, { title: nextTitle });
-          try {
-            await api.conversations.update(conv.id, { title: nextTitle });
-            notifySuccess('已保存', '标题已更新');
-          } catch (error) {
-            notifyError('保存失败', error instanceof Error ? error.message : '无法更新标题');
-            void loadConversations();
-          }
-        })();
-      },
-    });
+  const startRename = (conv: Conversation) => {
+    setRenamingId(conv.id);
+    setRenameValue(conv.title);
+  };
+
+  const submitRename = async (conv: Conversation) => {
+    const nextTitle = renameValue.trim();
+    if (!nextTitle) { setRenamingId(null); return; }
+    setRenamingId(null);
+    updateConversation(conv.id, { title: nextTitle });
+    try {
+      await api.conversations.update(conv.id, { title: nextTitle });
+      notifySuccess('已保存', '标题已更新');
+    } catch (error) {
+      notifyError('保存失败', error instanceof Error ? error.message : '无法更新标题');
+      void loadConversations();
+    }
   };
 
   const pinned = filtered.filter((c) => c.isPinned);
@@ -179,184 +241,95 @@ export function ChatAside() {
   const groups = groupByUpdatedAt(rest);
 
   return (
-    <Paper
-      style={{
-        height: '100%',
-        border: '1px solid var(--mantine-color-gray-3)',
-        borderRadius: 'var(--mantine-radius-md)',
-      }}
-      p="sm"
-    >
-      <Stack h="100%" gap="sm">
-        <Button
-          leftSection={<IconPlus size={16} />}
-          onClick={() => void handleNewConversation()}
-          loading={creating}
-        >
-          新对话
-        </Button>
+    <div className="flex h-full flex-col gap-2 p-2">
+      <Button className="w-full" onClick={() => void handleNewConversation()} disabled={creating}>
+        <Plus size={16} /> 新会话
+      </Button>
 
-        <TextInput
-          placeholder="搜索对话..."
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
+      <Input
+        placeholder="搜索会话..."
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+      />
 
-        <ScrollArea flex={1} scrollbarSize={8}>
-          <Stack gap="xs">
-            {pinned.length > 0 && (
-              <>
-                <Group justify="space-between" mt="xs">
-                  <Text size="xs" c="dimmed" fw={600}>置顶</Text>
-                  <ActionIcon variant="subtle" size="sm" onClick={() => setPinnedOpen((v) => !v)}>
-                    {pinnedOpen ? <IconChevronDown size={14} /> : <IconChevronRight size={14} />}
-                  </ActionIcon>
-                </Group>
-                <Collapse in={pinnedOpen}>
-                  <Stack gap="xs">
-                    {pinned.map((conv) => (
-                      <Paper
-                        key={`pinned-${conv.id}`}
-                        p="sm"
-                        radius="md"
-                        withBorder
-                        style={{
-                          cursor: 'pointer',
-                          backgroundColor: currentConversation?.id === conv.id
-                            ? 'var(--mantine-color-blue-0)'
-                            : undefined,
-                        }}
-                        onClick={() => void handleSelectConversation(conv)}
-                      >
-                        <Group justify="space-between" wrap="nowrap">
-                          <Group gap="xs" wrap="nowrap" style={{ flex: 1, minWidth: 0 }}>
-                            <IconPin size={16} />
-                            <Text size="sm" truncate style={{ flex: 1 }}>
-                              {conv.title}
-                            </Text>
-                          </Group>
-                          <Menu shadow="md" width={160} position="bottom-end">
-                            <Menu.Target>
-                              <ActionIcon variant="subtle" size="sm" onClick={(e) => e.stopPropagation()}>
-                                <IconDots size={14} />
-                              </ActionIcon>
-                            </Menu.Target>
-                            <Menu.Dropdown>
-                              <Menu.Item
-                                leftSection={<IconPencil size={14} />}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleRename(conv);
-                                }}
-                              >
-                                重命名
-                              </Menu.Item>
-                              <Menu.Item
-                                leftSection={<IconPin size={14} />}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  void handleTogglePin(conv);
-                                }}
-                              >
-                                取消置顶
-                              </Menu.Item>
-                              <Menu.Item
-                                leftSection={<IconTrash size={14} />}
-                                color="red"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  void handleDelete(conv.id);
-                                }}
-                              >
-                                删除
-                              </Menu.Item>
-                            </Menu.Dropdown>
-                          </Menu>
-                        </Group>
-                      </Paper>
-                    ))}
-                  </Stack>
-                </Collapse>
-              </>
-            )}
-
-            {groups.map((group) => (
-              <div key={group.label}>
-                <Text size="xs" c="dimmed" fw={600} mt="xs" mb={6}>{group.label}</Text>
-                <Stack gap="xs">
-                  {group.items.map((conv) => (
-                    <Paper
-                      key={conv.id}
-                      p="sm"
-                      radius="md"
-                      withBorder
-                      style={{
-                        cursor: 'pointer',
-                        backgroundColor: currentConversation?.id === conv.id
-                          ? 'var(--mantine-color-blue-0)'
-                          : undefined,
-                      }}
-                      onClick={() => void handleSelectConversation(conv)}
-                    >
-                      <Group justify="space-between" wrap="nowrap">
-                        <Group gap="xs" wrap="nowrap" style={{ flex: 1, minWidth: 0 }}>
-                          <IconMessage size={16} />
-                          <Text size="sm" truncate style={{ flex: 1 }}>
-                            {conv.title}
-                          </Text>
-                        </Group>
-                        <Menu shadow="md" width={160} position="bottom-end">
-                          <Menu.Target>
-                            <ActionIcon variant="subtle" size="sm" onClick={(e) => e.stopPropagation()}>
-                              <IconDots size={14} />
-                            </ActionIcon>
-                          </Menu.Target>
-                          <Menu.Dropdown>
-                            <Menu.Item
-                              leftSection={<IconPencil size={14} />}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleRename(conv);
-                              }}
-                            >
-                              重命名
-                            </Menu.Item>
-                            <Menu.Item
-                              leftSection={<IconPin size={14} />}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                void handleTogglePin(conv);
-                              }}
-                            >
-                              置顶
-                            </Menu.Item>
-                            <Menu.Item
-                              leftSection={<IconTrash size={14} />}
-                              color="red"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                void handleDelete(conv.id);
-                              }}
-                            >
-                              删除
-                            </Menu.Item>
-                          </Menu.Dropdown>
-                        </Menu>
-                      </Group>
-                    </Paper>
-                  ))}
-                </Stack>
+      <ScrollArea className="flex-1">
+        <div className="flex flex-col gap-1 py-1">
+          {pinned.length > 0 && (
+            <div>
+              <div className="flex items-center justify-between px-2 py-1">
+                <span className="text-xs font-semibold text-muted-foreground">置顶</span>
+                <Button variant="ghost" size="icon-sm" className="h-5 w-5" onClick={() => setPinnedOpen((v) => !v)}>
+                  {pinnedOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                </Button>
               </div>
-            ))}
+              {pinnedOpen && pinned.map((conv) => (
+                renamingId === conv.id ? (
+                  <div key={conv.id} className="px-2 py-1">
+                    <Input
+                      autoFocus
+                      value={renameValue}
+                      onChange={(e) => setRenameValue(e.target.value)}
+                      onBlur={() => void submitRename(conv)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') void submitRename(conv);
+                        if (e.key === 'Escape') setRenamingId(null);
+                      }}
+                    />
+                  </div>
+                ) : (
+                  <ConvItem
+                    key={`pinned-${conv.id}`}
+                    conv={conv}
+                    isActive={currentConversation?.id === conv.id}
+                    onSelect={() => void handleSelectConversation(conv)}
+                    onRename={() => startRename(conv)}
+                    onTogglePin={() => void handleTogglePin(conv)}
+                    onDelete={() => void handleDelete(conv.id)}
+                    pinLabel="取消置顶"
+                  />
+                )
+              ))}
+            </div>
+          )}
 
-            {filtered.length === 0 && (
-              <Text size="sm" c="dimmed" ta="center" py="xl">
-                No conversations
-              </Text>
-            )}
-          </Stack>
-        </ScrollArea>
-      </Stack>
-    </Paper>
+          {groups.map((group) => (
+            <div key={group.label}>
+              <p className="px-2 py-1 text-xs font-semibold text-muted-foreground">{group.label}</p>
+              {group.items.map((conv) => (
+                renamingId === conv.id ? (
+                  <div key={conv.id} className="px-2 py-1">
+                    <Input
+                      autoFocus
+                      value={renameValue}
+                      onChange={(e) => setRenameValue(e.target.value)}
+                      onBlur={() => void submitRename(conv)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') void submitRename(conv);
+                        if (e.key === 'Escape') setRenamingId(null);
+                      }}
+                    />
+                  </div>
+                ) : (
+                  <ConvItem
+                    key={conv.id}
+                    conv={conv}
+                    isActive={currentConversation?.id === conv.id}
+                    onSelect={() => void handleSelectConversation(conv)}
+                    onRename={() => startRename(conv)}
+                    onTogglePin={() => void handleTogglePin(conv)}
+                    onDelete={() => void handleDelete(conv.id)}
+                    pinLabel="置顶"
+                  />
+                )
+              ))}
+            </div>
+          ))}
+
+          {filtered.length === 0 && (
+            <p className="py-8 text-center text-xs text-muted-foreground">暂无会话</p>
+          )}
+        </div>
+      </ScrollArea>
+    </div>
   );
 }

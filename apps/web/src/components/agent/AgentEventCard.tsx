@@ -1,12 +1,17 @@
 'use client';
 
 import { useState } from 'react';
-import { Badge, Button, Collapse, Group, Paper, Text } from '@mantine/core';
-import { IconCopy, IconCheck, IconTrash, IconRefresh, IconPencil } from '@tabler/icons-react';
+import { Copy, Check, Trash2, RefreshCw, Pencil } from 'lucide-react';
 import type { AgentEvent } from '@/stores/agentStore';
 import { WRAP_TEXT } from '@/components/ui/wrapText';
 import { MarkdownMessage } from '@/components/ui/MarkdownMessage';
+import { StreamingMarkdownMessage } from '@/components/ui/StreamingMarkdownMessage';
 import { IconActionButton } from '@/components/ui/IconActionButton';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { cn } from '@/lib/utils';
+import { MessageAttachments, type MessageAttachmentItem } from '@/components/attachments/MessageAttachments';
+import { TypingIndicator } from '@/components/ui/TypingIndicator';
 
 function CopyAction({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
@@ -17,7 +22,7 @@ function CopyAction({ text }: { text: string }) {
   };
   return (
     <IconActionButton onClick={handleCopy} title={copied ? '已复制' : '复制'}>
-      {copied ? <IconCheck size={13} /> : <IconCopy size={13} />}
+      {copied ? <Check size={13} /> : <Copy size={13} />}
     </IconActionButton>
   );
 }
@@ -40,78 +45,94 @@ export function AgentEventCard({
   const [open, setOpen] = useState(false);
   const [hovered, setHovered] = useState(false);
 
-  if (event.type === 'meta') {
-    return null;
-  }
+  if (event.type === 'meta') return null;
 
   if (event.type === 'user') {
+    const attachments = (() => {
+      const input = event.toolInput as any;
+      const list = input?.attachments;
+      if (!Array.isArray(list)) return [];
+      return list
+        .filter(Boolean)
+        .map((it: any) => ({
+          id: typeof it.id === 'string' ? it.id : undefined,
+          fileName: String(it.fileName || it.file_name || ''),
+          fileType: typeof it.fileType === 'string' ? it.fileType : undefined,
+          fileSize: typeof it.fileSize === 'number' ? it.fileSize : undefined,
+          previewUrl: typeof it.previewUrl === 'string' ? it.previewUrl : undefined,
+        }))
+        .filter((it: MessageAttachmentItem) => Boolean(it.fileName));
+    })();
+
     return (
       <div
-        style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', width: '100%', marginTop: isNewTurn ? 'var(--mantine-spacing-xl)' : undefined }}
+        className={cn('flex w-full flex-col items-end', isNewTurn && 'mt-6')}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
       >
-        <Paper px="md" py="sm" radius="md" bg="blue.0" withBorder style={{ maxWidth: '72%', display: 'inline-block' }}>
-          <Text size="sm" style={WRAP_TEXT}>{event.content || ''}</Text>
-        </Paper>
-        <div style={{ marginTop: 2, opacity: hovered ? 1 : 0, transition: 'opacity 0.15s', pointerEvents: hovered ? 'auto' : 'none' }}>
-          <Group gap={2}>
-            {onEdit && (
-              <IconActionButton onClick={onEdit} title="编辑">
-                <IconPencil size={13} />
-              </IconActionButton>
-            )}
-            <CopyAction text={event.content || ''} />
-            {onDelete && (
-              <IconActionButton onClick={onDelete} title="删除" danger disabled={!event.id}>
-                <IconTrash size={13} />
-              </IconActionButton>
-            )}
-          </Group>
+        <div className="inline-block max-w-[72%] rounded-xl border border-border/50 bg-foreground/[0.06] px-4 py-2">
+          {attachments.length > 0 && (
+            <MessageAttachments attachments={attachments} />
+          )}
+          {(event.content || '').trim() ? (
+            <p className="text-sm" style={WRAP_TEXT}>{event.content || ''}</p>
+          ) : null}
+        </div>
+        <div className={cn('mt-0.5 flex gap-0.5 transition-opacity duration-150', hovered ? 'opacity-100' : 'opacity-0 pointer-events-none')}>
+          {onEdit && (
+            <IconActionButton onClick={onEdit} title="编辑">
+              <Pencil size={13} />
+            </IconActionButton>
+          )}
+          <CopyAction text={event.content || ''} />
+          {onDelete && (
+            <IconActionButton onClick={onDelete} title="删除" danger disabled={!event.id}>
+              <Trash2 size={13} />
+            </IconActionButton>
+          )}
         </div>
       </div>
     );
   }
 
-  const background =
-    event.type === 'error'
-      ? 'red.0'
-      : event.type === 'tool_start'
-        ? 'blue.0'
-        : event.type === 'tool_result'
-          ? 'green.0'
-          : 'gray.0';
-
   if (event.type === 'text') {
+    const hasText = Boolean((event.content || '').trim());
+    const tailLength = isStreaming && hasText ? (event.streamTail || '').length : 0;
+
     return (
       <div
-        style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', maxWidth: '92%' }}
+        className="flex max-w-[92%] flex-col items-start"
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
       >
-        <Paper px="md" py="sm" radius="md" bg={background} style={{ display: 'inline-block', maxWidth: '100%' }}>
-          <div style={WRAP_TEXT}>
-            <MarkdownMessage content={event.content || ''} />
+        {isStreaming && !hasText ? (
+          <div className="mt-1 inline-flex items-center">
+            <TypingIndicator />
           </div>
-        </Paper>
+        ) : (
+          <div className="inline-block max-w-full rounded-xl border border-border/50 bg-background/60 px-4 py-2">
+            {isStreaming ? (
+              <StreamingMarkdownMessage
+                content={event.content || ''}
+                tailLength={tailLength}
+                pulseKey={event.streamPulseKey ?? 0}
+              />
+            ) : (
+              <div style={WRAP_TEXT}>
+                <MarkdownMessage content={event.content || ''} />
+              </div>
+            )}
+          </div>
+        )}
         {!isStreaming && (
-          <div
-            style={{
-              display: 'flex',
-              gap: 2,
-              marginTop: 2,
-              opacity: hovered ? 1 : 0,
-              transition: 'opacity 0.15s',
-              pointerEvents: hovered ? 'auto' : 'none',
-            }}
-          >
+          <div className={cn('mt-0.5 flex gap-0.5 transition-opacity duration-150', hovered ? 'opacity-100' : 'opacity-0 pointer-events-none')}>
             <CopyAction text={event.content || ''} />
             <IconActionButton onClick={onRetry || (() => {})} title="重试" disabled={!onRetry}>
-              <IconRefresh size={13} />
+              <RefreshCw size={13} />
             </IconActionButton>
             {onDelete && (
               <IconActionButton onClick={onDelete} title="删除" danger disabled={!event.id}>
-                <IconTrash size={13} />
+                <Trash2 size={13} />
               </IconActionButton>
             )}
           </div>
@@ -122,82 +143,56 @@ export function AgentEventCard({
 
   if (event.type === 'tool_start') {
     return (
-      <Paper p="sm" radius="md" bg={background} style={{ maxWidth: '100%', width: '100%' }}>
-        <Group justify="space-between" align="center" wrap="nowrap">
-          <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
-            <Badge size="sm" color="blue">
-              工具
-            </Badge>
-            <Text size="sm" truncate style={{ flex: 1, minWidth: 0 }}>
-              {event.toolName || '未知工具'}
-            </Text>
-          </Group>
-          <Button size="xs" variant="subtle" onClick={() => setOpen((value) => !value)}>
-            {open ? '收起' : '展开输入'}
+      <div className="w-full rounded-xl border border-border/50 bg-background/60 p-3">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-2">
+            <Badge variant="secondary">Tool</Badge>
+            <span className="truncate text-sm">{event.toolName || 'Unknown tool'}</span>
+          </div>
+          <Button size="sm" variant="ghost" onClick={() => setOpen((v) => !v)}>
+            {open ? 'Collapse' : 'Show input'}
           </Button>
-        </Group>
-        <Collapse in={open}>
-          <Paper withBorder p="xs" mt="xs" style={{ maxWidth: '100%' }}>
-            <Text size="xs" c="dimmed">
-              输入
-            </Text>
-            <pre
-              style={{
-                margin: 0,
-                fontSize: 'var(--mantine-font-size-xs)',
-                fontFamily: 'var(--mantine-font-family-monospace)',
-                ...WRAP_TEXT,
-              }}
-            >
+        </div>
+        {open && (
+          <div className="mt-2 rounded-md border border-border/50 bg-muted/20 p-2">
+            <p className="text-xs text-muted-foreground mb-1">Input</p>
+            <pre className="text-xs font-mono whitespace-pre-wrap break-words" style={WRAP_TEXT}>
               {JSON.stringify(event.toolInput ?? {}, null, 2)}
             </pre>
-          </Paper>
-        </Collapse>
-      </Paper>
+          </div>
+        )}
+      </div>
     );
   }
 
   if (event.type === 'tool_result') {
     return (
-      <Paper p="sm" radius="md" bg={background} style={{ maxWidth: '100%', width: '100%' }}>
-        <Group justify="space-between" align="center" wrap="nowrap">
-          <Badge size="sm" color="green">
-            结果
-          </Badge>
-          <Button size="xs" variant="subtle" onClick={() => setOpen((value) => !value)}>
-            {open ? '收起' : '展开输出'}
+      <div className="w-full rounded-xl border border-border/50 bg-background/60 p-3">
+        <div className="flex items-center justify-between gap-2">
+          <Badge variant="secondary">Result</Badge>
+          <Button size="sm" variant="ghost" onClick={() => setOpen((v) => !v)}>
+            {open ? 'Collapse' : 'Show output'}
           </Button>
-        </Group>
-        <Collapse in={open}>
-          <Paper withBorder p="xs" mt="xs" style={{ maxWidth: '100%' }}>
-            <Text size="xs" c="dimmed">
-              输出
-            </Text>
-            <pre
-              style={{
-                margin: 0,
-                fontSize: 'var(--mantine-font-size-xs)',
-                fontFamily: 'var(--mantine-font-family-monospace)',
-                ...WRAP_TEXT,
-              }}
-            >
+        </div>
+        {open && (
+          <div className="mt-2 rounded-md border border-border/50 bg-muted/20 p-2">
+            <p className="text-xs text-muted-foreground mb-1">Output</p>
+            <pre className="text-xs font-mono whitespace-pre-wrap break-words" style={WRAP_TEXT}>
               {typeof event.content === 'string'
                 ? event.content
                 : JSON.stringify(event.content ?? {}, null, 2)}
             </pre>
-          </Paper>
-        </Collapse>
-      </Paper>
+          </div>
+        )}
+      </div>
     );
   }
 
   if (event.type === 'error') {
     return (
-      <Paper p="sm" radius="md" bg={background} style={{ maxWidth: '100%', width: '100%' }}>
-        <Text size="sm" c="red" style={WRAP_TEXT}>
-          {event.content}
-        </Text>
-      </Paper>
+      <div className="w-full rounded-xl border border-destructive/20 bg-destructive/5 p-3">
+        <p className="text-sm text-destructive" style={WRAP_TEXT}>{event.content}</p>
+      </div>
     );
   }
 

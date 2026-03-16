@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { api, type ApiChannel, type ApiConversation, type ApiMessage } from '../lib/api';
+import { api, type ApiAgentRun, type ApiChannel, type ApiConversation, type ApiMessage } from '../lib/api';
 
 export type Channel = ApiChannel;
 
@@ -10,7 +10,10 @@ export interface Conversation {
   modelId?: string;
   systemPrompt?: string;
   contextLength: number;
+  defaultMode: 'chat' | 'agent';
+  lastMode: 'chat' | 'agent';
   isPinned: boolean;
+  runStatus?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -21,7 +24,26 @@ export interface Message {
   role: 'user' | 'assistant';
   content: string;
   model?: string;
+  mode: 'chat' | 'agent';
+  attachments?: string[];
+  agentRun?: ApiAgentRun;
+  attachmentsMeta?: Array<{
+    id?: string;
+    fileName: string;
+    fileType?: string;
+    fileSize?: number;
+    previewUrl?: string;
+  }>;
+  streamTail?: string;
+  streamPulseKey?: number;
   createdAt: Date;
+}
+
+const STREAM_TAIL_WINDOW = 18;
+
+function getRollingTail(text: string, size = STREAM_TAIL_WINDOW) {
+  const chars = Array.from(text);
+  return chars.slice(Math.max(0, chars.length - size)).join('');
 }
 
 function parseConversation(conv: ApiConversation): Conversation {
@@ -32,19 +54,42 @@ function parseConversation(conv: ApiConversation): Conversation {
     modelId: conv.modelId || undefined,
     systemPrompt: conv.systemPrompt || undefined,
     contextLength: conv.contextLength ?? 4096,
+    defaultMode: conv.defaultMode === 'chat' ? 'chat' : 'agent',
+    lastMode: conv.lastMode === 'chat' ? 'chat' : 'agent',
     isPinned: Boolean(conv.isPinned),
+    runStatus: conv.runStatus ?? null,
     createdAt: new Date(conv.createdAt),
     updatedAt: new Date(conv.updatedAt),
   };
 }
 
 function parseMessage(msg: ApiMessage): Message {
+  let attachmentIds: string[] | undefined;
+  if (msg.attachments) {
+    try {
+      attachmentIds = JSON.parse(msg.attachments) as string[];
+    } catch {
+      attachmentIds = undefined;
+    }
+  }
+
   return {
     id: msg.id,
     conversationId: msg.conversationId,
     role: msg.role,
     content: msg.content,
     model: msg.model || undefined,
+    mode: msg.mode === 'chat' ? 'chat' : 'agent',
+    attachments: attachmentIds,
+    agentRun: (() => {
+      if (!msg.agentRun) return undefined;
+      try {
+        return JSON.parse(msg.agentRun) as ApiAgentRun;
+      } catch {
+        return undefined;
+      }
+    })(),
+    attachmentsMeta: (msg.attachmentsMeta || undefined) as any,
     createdAt: new Date(msg.createdAt),
   };
 }
@@ -54,6 +99,7 @@ interface ChatState {
   conversations: Conversation[];
   currentConversation: Conversation | null;
   messages: Message[];
+  composerMode: 'chat' | 'agent';
   selectedChannelId: string | null;
   isLoading: boolean;
   isStreaming: boolean;
@@ -75,8 +121,11 @@ interface ChatState {
   
   setMessages: (messages: Message[]) => void;
   addMessage: (message: Message) => void;
-  updateMessage: (id: string, content: string) => void;
+  updateMessage: (id: string, content: string, updates?: Partial<Message>) => void;
+  appendMessageDelta: (id: string, delta: string, updates?: Partial<Message>) => void;
+  deleteMessage: (id: string) => Promise<void>;
   
+  setComposerMode: (mode: 'chat' | 'agent') => void;
   setSelectedChannelId: (id: string | null) => void;
   setIsLoading: (loading: boolean) => void;
   setIsStreaming: (streaming: boolean) => void;
@@ -87,6 +136,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   conversations: [],
   currentConversation: null,
   messages: [],
+  composerMode: 'agent',
   selectedChannelId: null,
   isLoading: false,
   isStreaming: false,
@@ -188,15 +238,33 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
   
   setMessages: (messages) => set({ messages }),
-  addMessage: (message) => set((state) => ({ 
-    messages: [...state.messages, message] 
+  addMessage: (message) => set((state) => ({
+    messages: [...state.messages, message]
   })),
-  updateMessage: (id, content) => set((state) => ({
+  appendMessageDelta: (id, delta, updates) => set((state) => ({
+    messages: state.messages.map((message) =>
+      message.id === id
+        ? {
+            ...message,
+            content: `${message.content || ''}${delta}`,
+            streamTail: getRollingTail(`${message.content || ''}${delta}`),
+            streamPulseKey: (message.streamPulseKey ?? 0) + 1,
+            ...updates,
+          }
+        : message
+    ),
+  })),
+  deleteMessage: async (id: string) => {
+    await api.messages.delete(id);
+    set((state) => ({ messages: state.messages.filter((m) => m.id !== id) }));
+  },
+  updateMessage: (id, content, updates) => set((state) => ({
     messages: state.messages.map((m) => 
-      m.id === id ? { ...m, content } : m
+      m.id === id ? { ...m, content, ...updates } : m
     ),
   })),
   
+  setComposerMode: (mode) => set({ composerMode: mode }),
   setSelectedChannelId: (id) => set({ selectedChannelId: id }),
   setIsLoading: (loading) => set({ isLoading: loading }),
   setIsStreaming: (streaming) => set({ isStreaming: streaming }),

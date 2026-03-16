@@ -1,23 +1,16 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import {
-  Modal,
-  TextInput,
-  ScrollArea,
-  Stack,
-  Group,
-  Text,
-  Badge,
-  Paper,
-  Button,
-} from '@mantine/core';
-import { IconRefresh, IconSearch } from '@tabler/icons-react';
+import { Search, RefreshCw, ChevronDown, ChevronRight } from 'lucide-react';
 import { api, type ApiChannel } from '@/lib/api';
 import { notifyError, notifySuccess, notifyWarning } from '@/lib/notify';
 import { useChatStore } from '@/stores/chatStore';
-import Link from 'next/link';
-import { buildSettingsLink } from '@/lib/settings-link';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { cn } from '@/lib/utils';
 
 type ModelGroup = {
   channel: ApiChannel;
@@ -55,16 +48,30 @@ export function ModelPickerModal(props: {
   conversationId: string;
   current?: { channelId: string; modelId: string } | null;
   conversationFixReason?: string | null;
+  beforeSelect?: (channelId: string, modelId: string) => Promise<void>;
+  onSelect?: (channelId: string, modelId: string) => Promise<void>;
 }) {
-  const { opened, onClose, conversationId, current, conversationFixReason } = props;
+  const { opened, onClose, conversationId, current, conversationFixReason, beforeSelect, onSelect } = props;
   const { channels, setChannels, setConversationModel } = useChatStore();
 
   const [query, setQuery] = useState('');
   const [busy, setBusy] = useState(false);
+  const [expanded, setExpanded] = useState<Set<string>>(() =>
+    current?.channelId ? new Set([current.channelId]) : new Set()
+  );
+
+  const toggleExpanded = (channelId: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(channelId)) next.delete(channelId);
+      else next.add(channelId);
+      return next;
+    });
 
   useEffect(() => {
     if (!opened) return;
     setQuery('');
+    setExpanded(current?.channelId ? new Set([current.channelId]) : new Set());
     void (async () => {
       try {
         const { channels } = await api.channels.list();
@@ -146,7 +153,14 @@ export function ModelPickerModal(props: {
   const handleSelect = async (channelId: string, modelId: string) => {
     setBusy(true);
     try {
-      await setConversationModel(conversationId, channelId, modelId);
+      if (beforeSelect) {
+        await beforeSelect(channelId, modelId);
+      }
+      if (onSelect) {
+        await onSelect(channelId, modelId);
+      } else {
+        await setConversationModel(conversationId, channelId, modelId);
+      }
       notifySuccess('模型已更新', '已保存到当前对话');
       onClose();
     } catch (error) {
@@ -157,121 +171,121 @@ export function ModelPickerModal(props: {
   };
 
   return (
-    <Modal opened={opened} onClose={onClose} title="选择模型" size="lg" centered>
-      <Stack gap="sm">
-        {conversationFixReason && (
-          <Paper withBorder p="sm" radius="md" bg="orange.0">
-            <Group justify="space-between" align="flex-start" wrap="nowrap">
-              <div style={{ minWidth: 0 }}>
-                <Text fw={600} size="sm">当前对话模型不可用</Text>
-                <Text size="sm" style={{ wordBreak: 'break-word' }}>
-                  {conversationFixReason}
-                </Text>
-              </div>
-              <Button
-                component={Link}
-                href={buildSettingsLink({ tab: 'channels', focus: 'default' })}
-                size="xs"
-                variant="light"
-              >
-                去设置
-              </Button>
-            </Group>
-          </Paper>
-        )}
+    <Dialog open={opened} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>选择模型</DialogTitle>
+        </DialogHeader>
+        <div className="flex flex-col gap-3">
+	          {conversationFixReason && (
+	            <div className="rounded-xl border border-orange-200 bg-orange-50 p-3 shadow-minimal dark:border-orange-800 dark:bg-orange-950">
+	              <div className="flex items-start justify-between gap-3">
+	                <div className="min-w-0">
+	                  <p className="text-sm font-semibold text-orange-800 dark:text-orange-200">当前对话模型不可用</p>
+	                  <p className="text-sm text-orange-700 dark:text-orange-300 break-words">{conversationFixReason}</p>
+	                </div>
+	                <p className="shrink-0 text-xs text-muted-foreground">
+	                  Set a default model in Settings (gear) → Channels
+	                </p>
+	              </div>
+	            </div>
+	          )}
 
-        <Group gap="sm" wrap="nowrap" align="flex-start">
-          <TextInput
-            style={{ flex: 1 }}
-            placeholder="搜索渠道或模型..."
-            leftSection={<IconSearch size={16} />}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-          <Button
-            variant="light"
-            leftSection={<IconRefresh size={16} />}
-            onClick={() => void handleSyncModels()}
-            loading={busy}
-          >
-            同步
-          </Button>
-        </Group>
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder="搜索渠道或模型..."
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                className="pl-9"
+              />
+            </div>
+            <Button variant="outline" onClick={() => void handleSyncModels()} disabled={busy}>
+              <RefreshCw size={16} className={busy ? 'animate-spin' : ''} />
+              同步
+            </Button>
+          </div>
 
-        <ScrollArea h={420} type="auto">
-          <Stack gap="md" pr="sm">
-            {filtered.map(({ channel, models, isChannelDisabled, needsDefaultModel }) => (
-              <div key={channel.id}>
-                <Group justify="space-between" mb={6}>
-                  <Group gap="xs">
-                    <Text fw={600} size="sm">{channel.name}</Text>
-                    <Badge variant="light" color="gray">{channel.provider}</Badge>
-                  </Group>
-                  <Group gap="xs">
-                    {channel.isDefault && <Badge color="blue">默认</Badge>}
-                    {needsDefaultModel && <Badge color="orange">缺少默认模型</Badge>}
-                    {isChannelDisabled && <Badge color="gray">已禁用</Badge>}
-                  </Group>
-                </Group>
+          <ScrollArea className="h-[420px]">
+            <div className="flex flex-col gap-3 pr-3">
+              {filtered.map(({ channel, models, isChannelDisabled, needsDefaultModel }) => {
+                const isExpanded = query.trim() ? true : expanded.has(channel.id);
+                const hasSelected = models.some(
+                  (m) => current?.channelId === channel.id && current?.modelId === m.modelId
+                );
+                return (
+                  <div key={channel.id}>
+                    <div
+                      className="flex cursor-pointer select-none items-center justify-between rounded-md border px-3 py-2 hover:bg-accent transition-colors"
+                      onClick={() => toggleExpanded(channel.id)}
+                    >
+                      <div className="flex items-center gap-2">
+                        {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                        <span className="text-sm font-semibold">{channel.name}</span>
+                        <Badge variant="secondary">{channel.provider}</Badge>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        {hasSelected && <Badge>已选</Badge>}
+                        {channel.isDefault && <Badge variant="outline">默认</Badge>}
+                        {needsDefaultModel && <Badge variant="outline" className="border-orange-400 text-orange-600">缺少默认模型</Badge>}
+                        {isChannelDisabled && <Badge variant="secondary">已禁用</Badge>}
+                        <span className="text-xs text-muted-foreground">{models.length} 个模型</span>
+                      </div>
+                    </div>
 
-                <Stack gap={6}>
-                  {models.length === 0 && (
-                    <Text size="sm" c="dimmed">
-                      暂无模型，请先点击上方「同步」获取模型列表。
-                    </Text>
-                  )}
+                    {isExpanded && (
+                      <div className="mt-1.5 flex flex-col gap-1.5 pl-4">
+                        {models.length === 0 && (
+                          <p className="text-sm text-muted-foreground px-1">暂无模型，请先点击上方「同步」获取模型列表。</p>
+                        )}
+                        {models.map((model) => {
+                          const selected = current?.channelId === channel.id && current?.modelId === model.modelId;
+                          const isModelDisabled = !model.enabled;
+                          const disabled = busy || isChannelDisabled || isModelDisabled;
+                          return (
+                            <div
+                              key={`${channel.id}:${model.modelId}`}
+                              className={cn(
+                                'rounded-md border px-3 py-2 transition-colors',
+                                disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:bg-accent',
+                                selected && 'bg-accent border-primary'
+                              )}
+                              onClick={() => {
+                                if (disabled) return;
+                                void handleSelect(channel.id, model.modelId);
+                              }}
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="min-w-0">
+                                  <p className="text-sm font-medium truncate">{model.displayName || model.modelId}</p>
+                                  <p className="text-xs text-muted-foreground truncate">{model.modelId}</p>
+                                </div>
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  {model.isDefault && <Badge variant="secondary">默认</Badge>}
+                                  {isModelDisabled && <Badge variant="secondary">已禁用</Badge>}
+                                  {selected && <Badge>已选</Badge>}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
 
-                  {models.map((model) => {
-                    const selected = current?.channelId === channel.id && current?.modelId === model.modelId;
-                    const isModelDisabled = !model.enabled;
-                    const disabled = busy || isChannelDisabled || isModelDisabled;
-                    return (
-                      <Paper
-                        key={`${channel.id}:${model.modelId}`}
-                        withBorder
-                        p="sm"
-                        radius="md"
-                        style={{
-                          cursor: disabled ? 'not-allowed' : 'pointer',
-                          opacity: disabled ? 0.6 : 1,
-                          background: selected ? 'var(--mantine-color-blue-0)' : undefined,
-                        }}
-                        onClick={() => {
-                          if (disabled) return;
-                          void handleSelect(channel.id, model.modelId);
-                        }}
-                      >
-                        <Group justify="space-between" wrap="nowrap">
-                          <div style={{ minWidth: 0 }}>
-                            <Text size="sm" fw={500} truncate>
-                              {model.displayName || model.modelId}
-                            </Text>
-                            <Text size="xs" c="dimmed" truncate>
-                              {model.modelId}
-                            </Text>
-                          </div>
-                          <Group gap="xs" wrap="nowrap">
-                            {model.isDefault && <Badge variant="light">默认</Badge>}
-                            {isModelDisabled && <Badge color="gray" variant="light">已禁用</Badge>}
-                            {selected && <Badge color="blue">已选</Badge>}
-                          </Group>
-                        </Group>
-                      </Paper>
-                    );
-                  })}
-                </Stack>
-              </div>
-            ))}
-
-            {filtered.length === 0 && (
-              <Stack align="center" py="xl" gap="xs">
-                <Text c="dimmed" size="sm">没有匹配的模型</Text>
-                <Button variant="light" onClick={() => setQuery('')}>清空搜索</Button>
-              </Stack>
-            )}
-          </Stack>
-        </ScrollArea>
-      </Stack>
-    </Modal>
+              {filtered.length === 0 && (
+                <div className="flex flex-col items-center gap-2 py-8">
+                  <p className="text-sm text-muted-foreground">没有匹配的模型</p>
+                  <Button variant="outline" onClick={() => setQuery('')}>清空搜索</Button>
+                </div>
+              )}
+            </div>
+          </ScrollArea>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }

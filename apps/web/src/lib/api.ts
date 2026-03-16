@@ -48,9 +48,27 @@ export interface ApiConversation {
   modelId: string | null;
   systemPrompt: string | null;
   contextLength: number;
+  defaultMode: 'chat' | 'agent' | null;
+  lastMode: 'chat' | 'agent' | null;
   isPinned: boolean;
+  runStatus: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ApiAgentRunStep {
+  type: 'tool_start' | 'tool_result' | 'error';
+  toolName?: string;
+  content?: string;
+  toolInput?: unknown;
+}
+
+export interface ApiAgentRun {
+  status: 'completed' | 'failed' | 'cancelled' | 'partial';
+  summary: string;
+  error?: string;
+  steps: ApiAgentRunStep[];
+  legacySessionId?: string;
 }
 
 export interface ApiMessage {
@@ -59,7 +77,15 @@ export interface ApiMessage {
   role: 'user' | 'assistant';
   content: string;
   model: string | null;
+  mode: 'chat' | 'agent' | null;
   attachments: string | null;
+  agentRun: string | null;
+  attachmentsMeta?: Array<{
+    id: string;
+    fileName: string;
+    fileType: string;
+    fileSize: number;
+  }>;
   createdAt: string;
 }
 
@@ -83,7 +109,7 @@ async function fetchApi<T>(
     const message = error instanceof Error ? error.message : 'Failed to fetch';
     // Backend is likely down/unreachable. Mark global status + dedupe the toast.
     useBackendStatusStore.getState().markDown(message);
-    notifyErrorOnce('backend_down', '后端不可用', '无法连接到后端服务（http://localhost:3000）。请启动 server 后点击 Retry。');
+    notifyErrorOnce('backend_down', '后端不可用', '无法连接到后端服务（http://localhost:3000）。请启动 server 后点击「重试」。');
     throw error;
   }
 
@@ -246,6 +272,12 @@ export const api = {
       fetchApi<{ success: boolean }>(`/conversations/${id}`, {
         method: 'DELETE',
       }),
+
+    autoTitle: (id: string, prompt: string) =>
+      fetchApi<{ success: boolean; title?: string }>(`/conversations/${id}/auto-title`, {
+        method: 'POST',
+        body: JSON.stringify({ prompt }),
+      }),
   },
   
   messages: {
@@ -258,10 +290,19 @@ export const api = {
         body: JSON.stringify(data),
       }),
 
-    stream: (data: { conversationId: string; content: string; attachments?: string[] }) => {
+    stream: (
+      data: {
+        conversationId: string;
+        content: string;
+        attachments?: string[];
+        mode?: 'chat' | 'agent';
+      },
+      options?: { signal?: AbortSignal }
+    ) => {
       return fetch(`${API_BASE}/messages/stream`, {
         method: 'POST',
         credentials: 'include',
+        signal: options?.signal,
         headers: {
           'Content-Type': 'application/json',
         },
@@ -273,31 +314,25 @@ export const api = {
       fetchApi<{ success: boolean }>(`/messages/${id}`, {
         method: 'DELETE',
       }),
-  },
 
-  workspaces: {
-    list: () =>
-      fetchApi<{ workspaces: unknown[] }>('/workspaces'),
-    
-    get: (id: string) =>
-      fetchApi<{ workspace: unknown }>(`/workspaces/${id}`),
-    
-    create: (data: { name: string; slug?: string; description?: string; cwd?: string }) =>
-      fetchApi<{ workspace: unknown }>('/workspaces', {
+    regenerate: (id: string, options?: { signal?: AbortSignal }) => {
+      return fetch(`${API_BASE}/messages/${id}/regenerate`, {
         method: 'POST',
-        body: JSON.stringify(data),
-      }),
-    
-    update: (id: string, data: { name?: string; description?: string; cwd?: string }) =>
-      fetchApi<{ success: boolean }>(`/workspaces/${id}`, {
-        method: 'PUT',
-        body: JSON.stringify(data),
-      }),
-    
-    delete: (id: string) =>
-      fetchApi<{ success: boolean }>(`/workspaces/${id}`, {
-        method: 'DELETE',
-      }),
+        credentials: 'include',
+        signal: options?.signal,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    },
+
+    edit: (id: string, content: string, options?: { signal?: AbortSignal }) => {
+      return fetch(`${API_BASE}/messages/${id}/edit`, {
+        method: 'POST',
+        credentials: 'include',
+        signal: options?.signal,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content }),
+      });
+    },
   },
 
   agent: {
@@ -307,7 +342,7 @@ export const api = {
     getSession: (id: string) =>
       fetchApi<{ session: unknown }>(`/agent/sessions/${id}`),
     
-    createSession: (data: { title: string; workspaceId?: string; channelId?: string }) =>
+    createSession: (data: { title: string; channelId?: string }) =>
       fetchApi<{ session: unknown }>('/agent/sessions', {
         method: 'POST',
         body: JSON.stringify(data),
@@ -318,8 +353,19 @@ export const api = {
         method: 'PUT',
         body: JSON.stringify({ title }),
       }),
+
+    autoTitle: (id: string, prompt: string) =>
+      fetchApi<{ success: boolean; title?: string }>(`/agent/sessions/${id}/auto-title`, {
+        method: 'POST',
+        body: JSON.stringify({ prompt }),
+      }),
     
-    runSession: (sessionId: string, prompt: string, attachments?: string[], options?: { signal?: AbortSignal }) => {
+    runSession: (
+      sessionId: string,
+      prompt: string,
+      attachments?: string[],
+      options?: { signal?: AbortSignal }
+    ) => {
       return fetch(`${API_BASE}/agent/sessions/${sessionId}/run`, {
         method: 'POST',
         credentials: 'include',
@@ -341,15 +387,25 @@ export const api = {
       fetchApi<{ success: boolean }>(`/agent/sessions/${id}`, {
         method: 'DELETE',
       }),
+
+    listEvents: (sessionId: string) =>
+      fetchApi<{ events: Array<{ id?: string; type: string; content?: string; toolName?: string; toolInput?: unknown }> }>(`/agent/sessions/${sessionId}/events`),
+
+    deleteEvent: (eventId: string) =>
+      fetchApi<{ success: boolean }>(`/agent/events/${eventId}`, { method: 'DELETE' }),
+
+    updateChannel: (sessionId: string, channelId: string, modelId: string) =>
+      fetchApi<{ success: boolean }>(`/agent/sessions/${sessionId}/channel`, {
+        method: 'PUT',
+        body: JSON.stringify({ channelId, modelId }),
+      }),
   },
 
   mcp: {
-    listServers: (workspaceId?: string) => {
-      const url = workspaceId ? `/mcp/servers?workspaceId=${workspaceId}` : '/mcp/servers';
-      return fetchApi<{ servers: unknown[] }>(url);
-    },
+    listServers: () =>
+      fetchApi<{ servers: unknown[] }>('/mcp/servers'),
     
-    createServer: (data: { name: string; type: string; config: Record<string, unknown>; workspaceId?: string }) =>
+    createServer: (data: { name: string; type: string; config: Record<string, unknown> }) =>
       fetchApi<{ server: unknown }>('/mcp/servers', {
         method: 'POST',
         body: JSON.stringify(data),

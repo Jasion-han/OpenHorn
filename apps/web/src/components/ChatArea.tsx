@@ -1,37 +1,99 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
-import { Paper, Textarea, Button, Group, Stack, Text, Alert, Badge, FileButton } from '@mantine/core';
-import { useChatStore } from '../stores/chatStore';
-import { streamChatMessage } from '../lib/chat-stream';
+import React, { useEffect, useRef, useState } from 'react';
+import { Bot, Check, Copy, MessageSquare, Pencil, RefreshCw, Trash2 } from 'lucide-react';
+import { api, type ApiAgentRun } from '../lib/api';
 import { uploadAttachments } from '../lib/attachments';
-import { api } from '../lib/api';
+import { streamChatMessage } from '../lib/chat-stream';
+import { useChatStore } from '../stores/chatStore';
 import { getEffectiveModelForConversation } from '@/lib/effective-model';
-import { IconSend, IconCopy, IconRefresh, IconTrash, IconCheck, IconPencil } from '@tabler/icons-react';
+import { PromaComposer } from '@/components/composer/PromaComposer';
+import { ModelPickerModal } from '@/components/chat/ModelPickerModal';
 import { ChatHeader } from '@/components/chat/ChatHeader';
-import { WRAP_TEXT } from '@/components/ui/wrapText';
-import { MarkdownMessage } from '@/components/ui/MarkdownMessage';
-import { buildSettingsLink } from '@/lib/settings-link';
+import { MessageAttachments, type MessageAttachmentItem } from '@/components/attachments/MessageAttachments';
+import { Button } from '@/components/ui/button';
 import { IconActionButton } from '@/components/ui/IconActionButton';
+import { MarkdownMessage } from '@/components/ui/MarkdownMessage';
+import { StreamingMarkdownMessage } from '@/components/ui/StreamingMarkdownMessage';
+import { Textarea } from '@/components/ui/textarea';
+import { TypingIndicator } from '@/components/ui/TypingIndicator';
+import { WRAP_TEXT } from '@/components/ui/wrapText';
+import { createTextStreamSmoother, type TextStreamSmoother } from '@/lib/textStreamSmoother';
+import { cn } from '@/lib/utils';
 
-const PAGE_PAD = 'var(--mantine-spacing-md)';
-// Keep bottom safe area, but avoid adding extra desktop gap.
+const PAGE_PAD = '16px';
 const COMPOSER_PAD_BOTTOM = 'env(safe-area-inset-bottom, 0px)';
+
+function AgentRunPanel({ run }: { run?: ApiAgentRun }) {
+  if (!run) return null;
+
+  return (
+    <details className="mt-2 rounded-xl border border-border/50 bg-muted/20 px-3 py-2 text-sm">
+      <summary className="cursor-pointer list-none">
+        <div className="flex items-center justify-between gap-3">
+          <span className="font-medium">{run.summary || 'Agent 执行记录'}</span>
+          <span className="text-xs text-muted-foreground">{run.status}</span>
+        </div>
+      </summary>
+      <div className="mt-2 flex flex-col gap-2">
+        {run.error && (
+          <div className="rounded-md border border-orange-200 bg-orange-50 px-2 py-1.5 text-xs text-orange-700 dark:border-orange-800 dark:bg-orange-950 dark:text-orange-300">
+            {run.error}
+          </div>
+        )}
+        {run.steps.length === 0 ? (
+          <p className="text-xs text-muted-foreground">无额外执行步骤。</p>
+        ) : (
+          run.steps.map((step, index) => (
+            <div key={`${step.type}-${index}`} className="rounded-md border border-border/50 bg-background/60 px-2 py-2">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{step.type}</p>
+                {step.toolName && <p className="text-xs text-muted-foreground">{step.toolName}</p>}
+              </div>
+              {step.content && (
+                <p className="mt-1 text-sm" style={WRAP_TEXT}>{step.content}</p>
+              )}
+              {step.toolInput !== undefined && (
+                <pre className="mt-2 whitespace-pre-wrap break-words rounded-md bg-muted/40 p-2 text-xs" style={WRAP_TEXT}>
+                  {JSON.stringify(step.toolInput, null, 2)}
+                </pre>
+              )}
+            </div>
+          ))
+        )}
+      </div>
+    </details>
+  );
+}
 
 function MessageBubble({
   msg,
   isStreaming,
+  canEdit,
+  canRetry,
   onEdit,
   onRetry,
   onDelete,
+  attachments,
   assistantWidth,
   userMaxWidth,
 }: {
-  msg: { id: string; role: 'user' | 'assistant'; content: string };
+  msg: {
+    id: string;
+    role: 'user' | 'assistant';
+    content: string;
+    mode: 'chat' | 'agent';
+    agentRun?: ApiAgentRun;
+    streamTail?: string;
+    streamPulseKey?: number;
+  };
   isStreaming: boolean;
+  canEdit: boolean;
+  canRetry: boolean;
   onEdit: () => void;
   onRetry: () => void;
   onDelete: () => void;
+  attachments?: MessageAttachmentItem[];
   assistantWidth: string;
   userMaxWidth: string;
 }) {
@@ -45,87 +107,117 @@ function MessageBubble({
   };
 
   const isAssistant = msg.role === 'assistant';
+  const hasAssistantText = isAssistant && Boolean((msg.content || '').trim());
+  const isAssistantPlaceholder = isAssistant && isStreaming && !hasAssistantText;
+  const isAgent = msg.mode === 'agent';
+  const streamTailLength = isAssistant && isStreaming && hasAssistantText ? (msg.streamTail || '').length : 0;
 
   return (
     <div
-      style={{
-        alignSelf: isAssistant ? 'flex-start' : 'flex-end',
-        maxWidth: isAssistant ? assistantWidth : userMaxWidth,
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: isAssistant ? 'flex-start' : 'flex-end',
-      }}
+      className={cn('flex flex-col', isAssistant ? 'items-start self-start' : 'items-end self-end')}
+      style={{ maxWidth: isAssistant ? assistantWidth : userMaxWidth }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
-      <Paper
-        px="md"
-        py="xs"
-        radius="lg"
-        bg={isAssistant ? 'gray.0' : 'blue.0'}
-        style={{ display: 'inline-block', maxWidth: '100%' }}
+      <div
+        className={cn(
+          'inline-block max-w-full',
+          isAssistantPlaceholder ? 'border-0 bg-transparent px-0 py-0' : 'rounded-2xl px-4 py-2',
+          isAssistant
+            ? (isAssistantPlaceholder ? '' : 'border border-border/50 bg-background/60')
+            : 'border border-border/50 bg-foreground/[0.06]'
+        )}
       >
+        <div className={cn('mb-1 inline-flex items-center gap-1 text-[11px] font-medium', isAssistant ? 'text-muted-foreground' : 'text-foreground/60')}>
+          {isAgent ? <Bot size={12} /> : <MessageSquare size={12} />}
+          <span>{isAgent ? 'Agent' : 'Chat'}</span>
+        </div>
+
+        {!isAssistant && attachments && attachments.length > 0 && (
+          <MessageAttachments attachments={attachments} />
+        )}
+
         {isAssistant ? (
           <div style={WRAP_TEXT}>
-            <MarkdownMessage content={msg.content} />
+            {hasAssistantText ? (
+              isStreaming ? (
+                <StreamingMarkdownMessage
+                  content={msg.content}
+                  tailLength={streamTailLength}
+                  pulseKey={msg.streamPulseKey ?? 0}
+                />
+              ) : (
+                <MarkdownMessage content={msg.content} />
+              )
+            ) : isStreaming ? (
+              <TypingIndicator className="ml-1" />
+            ) : null}
           </div>
         ) : (
-          <Text size="sm" style={WRAP_TEXT}>{msg.content}</Text>
+          msg.content?.trim() ? <p className="text-sm" style={WRAP_TEXT}>{msg.content}</p> : null
         )}
-      </Paper>
+
+        {isAssistant && <AgentRunPanel run={msg.agentRun} />}
+      </div>
       <div
-        style={{
-          display: 'flex',
-          gap: 2,
-          marginTop: 2,
-          justifyContent: isAssistant ? 'flex-start' : 'flex-end',
-          opacity: hovered && !isStreaming ? 1 : 0,
-          transition: 'opacity 0.15s',
-          pointerEvents: hovered && !isStreaming ? 'auto' : 'none',
-        }}
+        className={cn(
+          'mt-0.5 flex gap-0.5 transition-opacity duration-150',
+          isAssistant ? 'justify-start' : 'justify-end',
+          hovered && !isStreaming ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
+        )}
       >
-        {!isAssistant && (
+        {!isAssistant && canEdit && (
           <IconActionButton onClick={onEdit} title="编辑">
-            <IconPencil size={13} />
+            <Pencil size={13} />
           </IconActionButton>
         )}
         <IconActionButton onClick={handleCopy} title={copied ? '已复制' : '复制'}>
-          {copied ? <IconCheck size={13} /> : <IconCopy size={13} />}
+          {copied ? <Check size={13} /> : <Copy size={13} />}
         </IconActionButton>
         {isAssistant && (
-          <IconActionButton onClick={onRetry} title="重新生成">
-            <IconRefresh size={13} />
+          <IconActionButton onClick={onRetry} title="重新生成" disabled={!canRetry}>
+            <RefreshCw size={13} />
           </IconActionButton>
         )}
         <IconActionButton onClick={onDelete} title="删除" danger>
-          <IconTrash size={13} />
+          <Trash2 size={13} />
         </IconActionButton>
       </div>
     </div>
   );
 }
 
-// Icon-only actions are shared via IconActionButton; no local ActionButton needed.
-
 export function ChatArea() {
   const {
     currentConversation,
     messages,
     isLoading,
+    isStreaming,
     addMessage,
+    appendMessageDelta,
     loadMessages,
     setIsLoading,
     setIsStreaming,
     channels,
     updateConversation,
     deleteMessage,
+    composerMode,
+    setComposerMode,
   } = useChatStore();
-  
+
   const [input, setInput] = useState('');
   const [files, setFiles] = useState<File[]>([]);
   const [isUploading, setIsUploading] = useState(false);
+  const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
+  const [editingContent, setEditingContent] = useState('');
+  const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const viewportRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const streamAbortRef = useRef<AbortController | null>(null);
+  const textSmootherRef = useRef<TextStreamSmoother | null>(null);
+  const pendingPreviewUrlsRef = useRef<Map<string, string[]>>(new Map());
+  const [streamingAssistantId, setStreamingAssistantId] = useState<string | null>(null);
+
   const ASSISTANT_BUBBLE_WIDTH = '92%';
   const USER_BUBBLE_MAX_WIDTH = '72%';
 
@@ -135,99 +227,281 @@ export function ChatArea() {
     }
   }, [messages]);
 
+  useEffect(() => {
+    setStreamingAssistantId(null);
+  }, [currentConversation?.id]);
+
+  useEffect(() => {
+    return () => {
+      for (const urls of pendingPreviewUrlsRef.current.values()) {
+        for (const url of urls) {
+          try {
+            URL.revokeObjectURL(url);
+          } catch {
+            // ignore
+          }
+        }
+      }
+      pendingPreviewUrlsRef.current.clear();
+    };
+  }, [currentConversation?.id]);
+
   const effective = getEffectiveModelForConversation(channels, currentConversation);
   const hasInput = Boolean(input.trim());
   const hasFiles = files.length > 0;
   const canSend =
-    effective.ok
-    && Boolean(currentConversation)
-    && !isLoading
-    && !isUploading
-    && (hasInput || hasFiles);
+    effective.ok &&
+    Boolean(currentConversation) &&
+    !isLoading &&
+    !isStreaming &&
+    !isUploading &&
+    (hasInput || hasFiles);
+
+  const handleStop = async () => {
+    try {
+      streamAbortRef.current?.abort();
+    } catch {
+      // ignore
+    }
+    streamAbortRef.current = null;
+    textSmootherRef.current?.cancel({ flush: true });
+    textSmootherRef.current = null;
+    setIsLoading(false);
+    setIsStreaming(false);
+    setStreamingAssistantId(null);
+    if (currentConversation) {
+      try {
+        await loadMessages(currentConversation.id);
+      } catch {
+        // ignore
+      }
+    }
+    queueMicrotask(() => inputRef.current?.focus());
+  };
 
   const handleSend = async () => {
     if (!canSend || !currentConversation) return;
 
     const conversationId = currentConversation.id;
-    const effectiveContent = input.trim().length > 0
-      ? input
+    const mode = composerMode;
+
+    const trimmed = input.trim();
+    const effectiveContent = trimmed.length > 0 ? trimmed : '';
+    const autoTitleSeed = trimmed.length > 0
+      ? trimmed
       : files.length > 0
         ? `Attachments: ${files.map((file) => file.name).join(', ')}`
-        : input;
+        : '';
 
-    const userMessage = {
-      id: `temp-${Date.now()}`,
+    const previewUrls: string[] = [];
+    const localAttachmentMeta: MessageAttachmentItem[] = files.map((file) => {
+      const previewUrl = file.type?.startsWith('image/') ? URL.createObjectURL(file) : undefined;
+      if (previewUrl) previewUrls.push(previewUrl);
+      return {
+        fileName: file.name,
+        fileType: file.type || undefined,
+        fileSize: file.size,
+        previewUrl,
+      };
+    });
+
+    const userMessageId = `temp-${Date.now()}`;
+    if (previewUrls.length > 0) {
+      pendingPreviewUrlsRef.current.set(userMessageId, previewUrls);
+    }
+
+    addMessage({
+      id: userMessageId,
       conversationId,
-      role: 'user' as const,
+      role: 'user',
       content: effectiveContent,
+      mode,
+      attachmentsMeta: localAttachmentMeta.length > 0 ? localAttachmentMeta : undefined,
       createdAt: new Date(),
-    };
+    });
 
-    addMessage(userMessage);
     const assistantMessageId = `temp-assistant-${Date.now()}`;
+    let agentRunBuffer: ApiAgentRun | undefined = mode === 'agent'
+      ? { status: 'partial', summary: 'Agent 正在执行', steps: [] }
+      : undefined;
+
     addMessage({
       id: assistantMessageId,
       conversationId,
-      role: 'assistant' as const,
+      role: 'assistant',
       content: '',
+      mode,
+      agentRun: agentRunBuffer,
       createdAt: new Date(),
     });
 
     setInput('');
-    // Keep the cursor in the input so users can continue typing while streaming.
     queueMicrotask(() => inputRef.current?.focus());
     setIsLoading(true);
     setIsStreaming(true);
+    setStreamingAssistantId(assistantMessageId);
 
     try {
-      let assistantContent = '';
-      let attachmentIds: string[] = [];
+      try {
+        streamAbortRef.current?.abort();
+      } catch {
+        // ignore
+      }
+      const abortController = new AbortController();
+      streamAbortRef.current = abortController;
 
+      let assistantContent = '';
+      const smoother = createTextStreamSmoother({
+        emit: (delta) => {
+          assistantContent += delta;
+          appendMessageDelta(assistantMessageId, delta, {
+            agentRun: agentRunBuffer,
+          });
+        },
+      });
+      textSmootherRef.current = smoother;
+      let postStream: Promise<void> | null = null;
+
+      let attachmentIds: string[] = [];
       if (files.length > 0) {
         setIsUploading(true);
-        const upload = await uploadAttachments({
-          conversationId,
-          files,
-        });
+        const upload = await uploadAttachments({ conversationId, files });
         attachmentIds = upload.attachments.map((attachment) => attachment.id);
         setFiles([]);
       }
 
+      const payload = {
+        conversationId,
+        content: effectiveContent,
+        attachments: attachmentIds,
+        mode,
+      };
+
+      const response = await api.messages.stream(payload, { signal: abortController.signal });
+
       await streamChatMessage(
-        { conversationId, content: effectiveContent, attachments: attachmentIds },
+        payload,
         {
           onDelta: (chunk) => {
             if (!chunk) return;
-            assistantContent += chunk;
-            useChatStore.getState().updateMessage(assistantMessageId, assistantContent);
+            smoother.push(chunk);
           },
-          onDone: async () => {
-            await loadMessages(conversationId);
-            // Auto-rename if still using the default title.
-            const conv = useChatStore.getState().currentConversation;
-            if (conv && /^新对话 \d{2}-\d{2} \d{2}:\d{2}$/.test(conv.title)) {
-              void api.conversations.autoTitle(conversationId, effectiveContent).then((res) => {
-                if (res.success && res.title) {
-                  updateConversation(conversationId, { title: res.title });
-                }
-              }).catch(() => {});
+          onAgentEvent: (event) => {
+            if (mode !== 'agent') return;
+            if (!agentRunBuffer) {
+              agentRunBuffer = { status: 'partial', summary: 'Agent 正在执行', steps: [] };
             }
+            if (event.type === 'tool_start' || event.type === 'tool_result') {
+              agentRunBuffer = {
+                ...agentRunBuffer,
+                summary: 'Agent 正在执行',
+                steps: [
+                  ...agentRunBuffer.steps,
+                  {
+                    type: event.type,
+                    toolName: event.toolName,
+                    content: event.content,
+                    toolInput: event.toolInput,
+                  },
+                ],
+              };
+            }
+            if (event.type === 'error') {
+              agentRunBuffer = {
+                ...agentRunBuffer,
+                status: 'failed',
+                summary: 'Agent 执行失败',
+                error: event.content || 'Agent error',
+                steps: [
+                  ...agentRunBuffer.steps,
+                  { type: 'error', content: event.content || 'Agent error' },
+                ],
+              };
+            }
+            useChatStore.getState().updateMessage(assistantMessageId, assistantContent, { agentRun: agentRunBuffer });
+          },
+          onDone: async (event) => {
+            postStream = (async () => {
+              if (mode === 'agent' && event.agentRun) {
+                agentRunBuffer = event.agentRun;
+                useChatStore.getState().updateMessage(assistantMessageId, assistantContent, { agentRun: agentRunBuffer });
+              }
+              await smoother.finish();
+              await loadMessages(conversationId);
+              const urls = pendingPreviewUrlsRef.current.get(userMessageId);
+              if (urls) {
+                for (const url of urls) {
+                  try {
+                    URL.revokeObjectURL(url);
+                  } catch {
+                    // ignore
+                  }
+                }
+                pendingPreviewUrlsRef.current.delete(userMessageId);
+              }
+              const conv = useChatStore.getState().currentConversation;
+              if (conv && /^新会话 \d{2}-\d{2} \d{2}:\d{2}$/.test(conv.title)) {
+                if (!autoTitleSeed) return;
+                void api.conversations.autoTitle(conversationId, autoTitleSeed).then((result) => {
+                  if (result.success && result.title) {
+                    updateConversation(conversationId, { title: result.title });
+                  }
+                }).catch(() => {});
+              }
+            })();
           },
           onError: (message) => {
-            useChatStore.getState().updateMessage(assistantMessageId, `Error: ${message}`);
+            postStream = (async () => {
+              smoother.cancel({ flush: true });
+              if (mode === 'agent') {
+                agentRunBuffer = {
+                  status: 'failed',
+                  summary: 'Agent 执行失败',
+                  error: message,
+                  steps: agentRunBuffer?.steps || [],
+                };
+              }
+              useChatStore.getState().updateMessage(assistantMessageId, `Error: ${message}`, {
+                agentRun: agentRunBuffer,
+              });
+            })();
           },
-        }
+        },
+        response
       );
+
+      if (postStream) {
+        await postStream;
+      } else {
+        await smoother.finish();
+        await loadMessages(conversationId);
+      }
     } catch (error) {
-      console.error('Failed to send message:', error);
+      if ((streamAbortRef.current as any)?.signal?.aborted || (error instanceof DOMException && error.name === 'AbortError')) {
+        return;
+      }
       useChatStore.getState().updateMessage(
         assistantMessageId,
-        `Error: ${error instanceof Error ? error.message : 'Failed to send message'}`
+        `Error: ${error instanceof Error ? error.message : 'Failed to send message'}`,
+        mode === 'agent'
+          ? {
+              agentRun: {
+                status: 'failed',
+                summary: 'Agent 执行失败',
+                error: error instanceof Error ? error.message : 'Failed to send message',
+                steps: agentRunBuffer?.steps || [],
+              },
+            }
+          : undefined
       );
     } finally {
       setIsUploading(false);
       setIsLoading(false);
       setIsStreaming(false);
+      setStreamingAssistantId(null);
+      textSmootherRef.current?.cancel({ flush: true });
+      textSmootherRef.current = null;
+      streamAbortRef.current = null;
       queueMicrotask(() => inputRef.current?.focus());
     }
   };
@@ -238,12 +512,41 @@ export function ChatArea() {
     if (!assistantMsg || assistantMsg.role !== 'assistant') return;
     if (assistantMsg.id.startsWith('temp-')) return;
 
-    useChatStore.getState().updateMessage(assistantMsg.id, '');
+    let agentRunBuffer: ApiAgentRun | undefined = assistantMsg.mode === 'agent'
+      ? { status: 'partial', summary: 'Agent 正在执行', steps: [] }
+      : undefined;
+
+    useChatStore.getState().updateMessage(
+      assistantMsg.id,
+      '',
+      {
+        streamTail: undefined,
+        streamPulseKey: 0,
+        agentRun: agentRunBuffer,
+      }
+    );
     setIsLoading(true);
     setIsStreaming(true);
+    setStreamingAssistantId(assistantMsg.id);
 
     try {
-      const response = await api.messages.regenerate(assistantMsg.id);
+      try {
+        streamAbortRef.current?.abort();
+      } catch {
+        // ignore
+      }
+      const abortController = new AbortController();
+      streamAbortRef.current = abortController;
+
+      const smoother = createTextStreamSmoother({
+        emit: (delta) => {
+          appendMessageDelta(assistantMsg.id, delta);
+        },
+      });
+      textSmootherRef.current = smoother;
+      let postStream: Promise<void> | null = null;
+
+      const response = await api.messages.regenerate(assistantMsg.id, { signal: abortController.signal });
       if (!response.ok) throw new Error(await response.text().catch(() => 'Failed'));
 
       await streamChatMessage(
@@ -251,197 +554,345 @@ export function ChatArea() {
         {
           onDelta: (chunk) => {
             if (!chunk) return;
-            const current = useChatStore.getState().messages.find((m) => m.id === assistantMsg.id);
-            useChatStore.getState().updateMessage(assistantMsg.id, (current?.content || '') + chunk);
+            smoother.push(chunk);
           },
-          onDone: async () => { await loadMessages(currentConversation.id); },
+          onAgentEvent: (event) => {
+            if (assistantMsg.mode !== 'agent') return;
+            if (!agentRunBuffer) {
+              agentRunBuffer = { status: 'partial', summary: 'Agent 正在执行', steps: [] };
+            }
+            if (event.type === 'tool_start' || event.type === 'tool_result') {
+              agentRunBuffer = {
+                ...agentRunBuffer,
+                summary: 'Agent 正在执行',
+                steps: [
+                  ...agentRunBuffer.steps,
+                  {
+                    type: event.type,
+                    toolName: event.toolName,
+                    content: event.content,
+                    toolInput: event.toolInput,
+                  },
+                ],
+              };
+            }
+            if (event.type === 'error') {
+              agentRunBuffer = {
+                ...agentRunBuffer,
+                status: 'failed',
+                summary: 'Agent 执行失败',
+                error: event.content || 'Agent error',
+                steps: [
+                  ...agentRunBuffer.steps,
+                  { type: 'error', content: event.content || 'Agent error' },
+                ],
+              };
+            }
+            useChatStore.getState().updateMessage(assistantMsg.id, useChatStore.getState().messages.find((m) => m.id === assistantMsg.id)?.content || '', {
+              agentRun: agentRunBuffer,
+            });
+          },
+          onDone: async (event) => {
+            postStream = (async () => {
+              if (assistantMsg.mode === 'agent' && event.agentRun) {
+                agentRunBuffer = event.agentRun;
+                useChatStore.getState().updateMessage(
+                  assistantMsg.id,
+                  useChatStore.getState().messages.find((m) => m.id === assistantMsg.id)?.content || '',
+                  { agentRun: agentRunBuffer }
+                );
+              }
+              await smoother.finish();
+              await loadMessages(currentConversation.id);
+            })();
+          },
           onError: (message) => {
-            useChatStore.getState().updateMessage(assistantMsg.id, `Error: ${message}`);
+            postStream = (async () => {
+              smoother.cancel({ flush: true });
+              useChatStore.getState().updateMessage(
+                assistantMsg.id,
+                `Error: ${message}`,
+                assistantMsg.mode === 'agent'
+                  ? {
+                      agentRun: {
+                        status: 'failed',
+                        summary: 'Agent 执行失败',
+                        error: message,
+                        steps: agentRunBuffer?.steps || [],
+                      },
+                    }
+                  : undefined
+              );
+            })();
           },
         },
         response
       );
+
+      if (postStream) {
+        await postStream;
+      } else {
+        await smoother.finish();
+        await loadMessages(currentConversation.id);
+      }
+    } catch (error) {
+      if ((streamAbortRef.current as any)?.signal?.aborted || (error instanceof DOMException && error.name === 'AbortError')) {
+        return;
+      }
+      useChatStore.getState().updateMessage(
+        assistantMsg.id,
+        `Error: ${error instanceof Error ? error.message : 'Failed to regenerate'}`,
+        assistantMsg.mode === 'agent'
+          ? {
+              agentRun: {
+                status: 'failed',
+                summary: 'Agent 执行失败',
+                error: error instanceof Error ? error.message : 'Failed to regenerate',
+                steps: agentRunBuffer?.steps || [],
+              },
+            }
+          : undefined
+      );
     } finally {
       setIsLoading(false);
       setIsStreaming(false);
+      setStreamingAssistantId(null);
+      textSmootherRef.current?.cancel({ flush: true });
+      textSmootherRef.current = null;
+      streamAbortRef.current = null;
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      const ne = e.nativeEvent as any;
-      // When using IME (e.g. Chinese input method), Enter confirms composition.
-      // Don't treat it as "send".
-      if (ne?.isComposing || ne?.keyCode === 229) {
+  const handleEditSubmit = async (msgId: string, newContent: string) => {
+    if (!currentConversation || !newContent.trim()) return;
+    const msgIndex = messages.findIndex((message) => message.id === msgId);
+    if (msgIndex < 0) return;
+    if (messages[msgIndex]?.mode === 'agent') return;
+    const assistantMsg = messages[msgIndex + 1];
+    if (!assistantMsg || assistantMsg.role !== 'assistant' || assistantMsg.mode === 'agent') return;
+
+    setEditingMsgId(null);
+    useChatStore.getState().updateMessage(msgId, newContent.trim());
+    useChatStore.getState().updateMessage(assistantMsg.id, '', {
+      streamTail: undefined,
+      streamPulseKey: 0,
+    });
+    setIsLoading(true);
+    setIsStreaming(true);
+    setStreamingAssistantId(assistantMsg.id);
+
+    try {
+      try {
+        streamAbortRef.current?.abort();
+      } catch {
+        // ignore
+      }
+      const abortController = new AbortController();
+      streamAbortRef.current = abortController;
+
+      const smoother = createTextStreamSmoother({
+        emit: (delta) => {
+          appendMessageDelta(assistantMsg.id, delta);
+        },
+      });
+      textSmootherRef.current = smoother;
+      let postStream: Promise<void> | null = null;
+
+      const response = await api.messages.edit(msgId, newContent.trim(), { signal: abortController.signal });
+      if (!response.ok) throw new Error(await response.text().catch(() => 'Failed'));
+
+      await streamChatMessage(
+        { conversationId: currentConversation.id, content: '' },
+        {
+          onDelta: (chunk) => {
+            if (!chunk) return;
+            smoother.push(chunk);
+          },
+          onDone: async () => {
+            postStream = (async () => {
+              await smoother.finish();
+              await loadMessages(currentConversation.id);
+            })();
+          },
+          onError: (message) => {
+            postStream = (async () => {
+              smoother.cancel({ flush: true });
+              useChatStore.getState().updateMessage(assistantMsg.id, `Error: ${message}`);
+            })();
+          },
+        },
+        response
+      );
+
+      if (postStream) {
+        await postStream;
+      } else {
+        await smoother.finish();
+        await loadMessages(currentConversation.id);
+      }
+    } catch (error) {
+      if ((streamAbortRef.current as any)?.signal?.aborted || (error instanceof DOMException && error.name === 'AbortError')) {
         return;
       }
-      e.preventDefault();
-      handleSend();
+      useChatStore.getState().updateMessage(
+        assistantMsg.id,
+        `Error: ${error instanceof Error ? error.message : 'Failed to edit message'}`
+      );
+    } finally {
+      setIsLoading(false);
+      setIsStreaming(false);
+      setStreamingAssistantId(null);
+      textSmootherRef.current?.cancel({ flush: true });
+      textSmootherRef.current = null;
+      streamAbortRef.current = null;
+    }
+  };
+
+  const handleKeyDown = (event: React.KeyboardEvent) => {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      const nativeEvent = event.nativeEvent as any;
+      if (nativeEvent?.isComposing || nativeEvent?.keyCode === 229) {
+        return;
+      }
+      event.preventDefault();
+      void handleSend();
     }
   };
 
   if (!currentConversation) {
     return (
-      <Paper
-        style={{
-          flex: 1,
-          minHeight: 0,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          width: '100%',
-        }}
-      >
-        <Text c="dimmed">在右侧选择一个对话，或创建新对话开始聊天</Text>
-      </Paper>
+      <div className="flex flex-1 items-center justify-center">
+        <p className="text-sm text-muted-foreground">在左侧选择一个会话，或创建新会话开始交流</p>
+      </div>
     );
   }
 
   return (
-    <Paper
-      style={{
-        flex: 1,
-        minHeight: 0,
-        display: 'flex',
-        flexDirection: 'column',
-      }}
-      p={0}
-    >
-      <div style={{ padding: PAGE_PAD, paddingBottom: 'var(--mantine-spacing-xs)' }}>
+    <div className="flex flex-1 min-h-0 flex-col">
+      <div style={{ padding: PAGE_PAD, paddingBottom: '8px' }}>
         <ChatHeader />
       </div>
 
-      {/* Custom scroll container so we can reliably pin short conversations to bottom. */}
       <div
         ref={viewportRef}
-        style={{
-          flex: 1,
-          minHeight: 0,
-          overflowY: 'auto',
-          display: 'flex',
-          flexDirection: 'column',
-          paddingLeft: PAGE_PAD,
-          paddingRight: PAGE_PAD,
-        }}
+        className="flex min-h-0 flex-1 flex-col overflow-y-auto scrollbar-thin"
+        style={{ paddingLeft: PAGE_PAD, paddingRight: PAGE_PAD }}
       >
-        <div style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
-          <Stack gap="xs" pb="sm" style={{ marginTop: 'auto' }}>
-          {messages.map((msg, idx) => (
-            <MessageBubble
-              key={msg.id}
-              msg={msg}
-              isStreaming={isLoading && idx === messages.length - 1}
-              onEdit={() => {
-                if (msg.role !== 'user') return;
-                setInput(msg.content || '');
-                queueMicrotask(() => inputRef.current?.focus());
-              }}
-              onRetry={() => handleRetry(idx)}
-              onDelete={() => deleteMessage(msg.id)}
-              assistantWidth={ASSISTANT_BUBBLE_WIDTH}
-              userMaxWidth={USER_BUBBLE_MAX_WIDTH}
-            />
-          ))}
+        <div className="flex w-full flex-col">
+          <div className="mt-auto flex flex-col gap-2 pb-2">
+            {messages.map((msg, index) => (
+              <React.Fragment key={msg.id}>
+                <MessageBubble
+                  msg={{
+                    id: msg.id,
+                    role: msg.role,
+                    content: msg.content,
+                    mode: msg.mode,
+                    agentRun: msg.agentRun,
+                    streamTail: msg.streamTail,
+                    streamPulseKey: msg.streamPulseKey,
+                  }}
+                  isStreaming={Boolean(isStreaming && streamingAssistantId && msg.id === streamingAssistantId)}
+                  canEdit={msg.role === 'user' && msg.mode !== 'agent'}
+                  canRetry={msg.role === 'assistant'}
+                  attachments={msg.role === 'user' ? (((msg as any).attachmentsMeta as MessageAttachmentItem[] | undefined) || undefined) : undefined}
+                  onEdit={() => {
+                    if (msg.role !== 'user' || msg.mode === 'agent') return;
+                    setEditingMsgId(msg.id);
+                    setEditingContent(msg.content || '');
+                  }}
+                  onRetry={() => void handleRetry(index)}
+                  onDelete={() => void deleteMessage(msg.id)}
+                  assistantWidth={ASSISTANT_BUBBLE_WIDTH}
+                  userMaxWidth={USER_BUBBLE_MAX_WIDTH}
+                />
 
-          {messages.length === 0 && (
-            <Text c="dimmed" ta="center" py="xl">
-              Start the conversation...
-            </Text>
-          )}
-          </Stack>
+                {editingMsgId === msg.id && (
+                  <div className="flex w-full max-w-[72%] self-end flex-col items-end gap-1">
+                    <Textarea
+                      value={editingContent}
+                      onChange={(event) => setEditingContent(event.currentTarget.value)}
+                      className="w-full"
+                      rows={3}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' && !event.shiftKey) {
+                          event.preventDefault();
+                          void handleEditSubmit(msg.id, editingContent);
+                        }
+                        if (event.key === 'Escape') setEditingMsgId(null);
+                      }}
+                    />
+                    <div className="flex gap-2">
+                      <Button size="sm" variant="ghost" onClick={() => setEditingMsgId(null)}>取消</Button>
+                      <Button size="sm" onClick={() => void handleEditSubmit(msg.id, editingContent)} disabled={!editingContent.trim()}>确认</Button>
+                    </div>
+                  </div>
+                )}
+              </React.Fragment>
+            ))}
+
+            {messages.length === 0 && (
+              <p className="py-8 text-center text-sm text-muted-foreground">开始新一轮消息...</p>
+            )}
+          </div>
         </div>
       </div>
 
       {!effective.ok && (
         <div style={{ paddingLeft: PAGE_PAD, paddingRight: PAGE_PAD }}>
           {effective.scope === 'conversation' ? (
-            <Alert color="orange" mb="sm" title="当前对话模型不可用">
-              {effective.reason}
-              <Text size="xs" c="dimmed" mt={6}>
-                点击顶部右侧的「修复模型」即可重新选择。
-              </Text>
-            </Alert>
+            <div className="mb-2 rounded-xl border border-orange-200 bg-orange-50 p-3 text-sm shadow-minimal dark:border-orange-800 dark:bg-orange-950">
+              <p className="font-medium text-orange-800 dark:text-orange-200">当前会话模型不可用</p>
+              <p className="text-orange-700 dark:text-orange-300">{effective.reason}</p>
+              <p className="mt-1 text-xs text-muted-foreground">在下方输入框的 Model 里修复即可。</p>
+            </div>
           ) : (
-            <Alert color="orange" mb="sm" title="需要先完成设置">
-              {effective.reason}
-              <Button component="a" href={buildSettingsLink({ tab: 'channels', focus: 'default' })} size="xs" variant="light" ml="sm">
-                去设置
-              </Button>
-            </Alert>
+            <div className="mb-2 flex items-center gap-3 rounded-xl border border-orange-200 bg-orange-50 p-3 text-sm shadow-minimal dark:border-orange-800 dark:bg-orange-950">
+              <p className="flex-1 text-orange-700 dark:text-orange-300">{effective.reason}</p>
+              <p className="text-xs text-muted-foreground">Set a default model in Settings (gear) → Channels</p>
+            </div>
           )}
         </div>
       )}
 
       <div style={{ paddingLeft: PAGE_PAD, paddingRight: PAGE_PAD, paddingBottom: COMPOSER_PAD_BOTTOM }}>
-        <Paper
-          p="sm"
-          radius="lg"
-          withBorder
-          style={{ backgroundColor: 'var(--mantine-color-gray-0)' }}
-        >
-          <Stack gap="xs">
-            {files.length > 0 && (
-              <Stack gap={4}>
-                {files.map((file) => (
-                  <Group key={`${file.name}-${file.size}`} gap="xs">
-                    <Text size="xs" c="dimmed">{file.name}</Text>
-                    <Button
-                      size="xs"
-                      variant="subtle"
-                      color="red"
-                      onClick={() => setFiles((prev) => prev.filter((f) => f !== file))}
-                    >
-                      Remove
-                    </Button>
-                  </Group>
-                ))}
-              </Stack>
-            )}
-            <Group gap="sm">
-              <Textarea
-                placeholder="Type your message..."
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                style={{ flex: 1 }}
-                autosize
-                minRows={1}
-                maxRows={6}
-                // Allow typing while streaming; only sending is blocked via canSend.
-                disabled={!effective.ok || isUploading}
-                ref={inputRef}
-              />
-              <FileButton
-                onChange={(selected) => {
-                  if (!selected) return;
-                  const list = Array.isArray(selected) ? selected : [selected];
-                  setFiles((prev) => [...prev, ...list]);
-                }}
-                accept="image/png,image/jpeg,image/webp,application/pdf,text/plain,text/markdown"
-                multiple
-              >
-                {(props) => (
-                  <Button variant="light" {...props} disabled={!effective.ok || isUploading}>
-                    Attach
-                  </Button>
-                )}
-              </FileButton>
-              {effective.ok && (
-                <Badge variant="light" color="gray">
-                  {effective.label}
-                </Badge>
-              )}
-              <Button
-                onClick={handleSend}
-                loading={isLoading || isUploading}
-                disabled={!canSend}
-              >
-                <IconSend size={18} />
-              </Button>
-            </Group>
-          </Stack>
-        </Paper>
+        <PromaComposer
+          value={input}
+          onChange={setInput}
+          onKeyDown={handleKeyDown}
+          placeholder={composerMode === 'agent' ? 'Describe a task…' : 'Type a message… (Enter to send, Shift+Enter for newline)'}
+          disabled={isUploading}
+          attachments={files}
+          onAddAttachments={(list) => setFiles((prev) => [...prev, ...list])}
+          onRemoveAttachment={(file) => setFiles((prev) => prev.filter((item) => item !== file))}
+          mode={composerMode}
+          onModeChange={setComposerMode}
+          modelLabel={effective.ok ? effective.label : effective.scope === 'conversation' ? 'Fix model' : 'Select model'}
+          modelTone={effective.ok ? 'normal' : 'warning'}
+          onOpenModelPicker={() => setModelPickerOpen(true)}
+          streaming={isStreaming}
+          canSubmit={canSend}
+          onSubmit={() => void handleSend()}
+          onStop={() => void handleStop()}
+          inputRef={inputRef}
+        />
       </div>
-    </Paper>
+
+      {currentConversation && modelPickerOpen && (
+        <ModelPickerModal
+          opened={modelPickerOpen}
+          onClose={() => setModelPickerOpen(false)}
+          conversationId={currentConversation.id}
+          conversationFixReason={!effective.ok && effective.scope === 'conversation' ? effective.reason : null}
+          current={
+            currentConversation.channelId && currentConversation.modelId
+              ? { channelId: currentConversation.channelId, modelId: currentConversation.modelId }
+              : effective.ok
+                ? { channelId: effective.channelId, modelId: effective.modelId }
+                : null
+          }
+        />
+      )}
+    </div>
   );
 }

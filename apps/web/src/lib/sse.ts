@@ -49,4 +49,12 @@ export async function readSseStream(
       onEvent(event);
     }
   }
+
+  buffer += decoder.decode();
+  if (buffer.trim()) {
+    const { events } = parseSseLines(`${buffer}\n`);
+    for (const event of events) {
+      onEvent(event);
+    }
+  }
 }
