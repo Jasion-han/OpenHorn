@@ -327,6 +327,7 @@ export function ChatArea() {
   const effective = getEffectiveModelForConversation(channels, currentConversation);
   const hasInput = Boolean(input.trim());
   const hasFiles = files.length > 0;
+  const forceWebSearch = Boolean(currentConversation?.forceWebSearch);
   const canSend =
     effective.ok &&
     Boolean(currentConversation) &&
@@ -334,6 +335,17 @@ export function ChatArea() {
     !isStreaming &&
     !isUploading &&
     (hasInput || hasFiles);
+
+  const handleToggleWebSearch = async () => {
+    if (!currentConversation) return;
+    const next = !forceWebSearch;
+    updateConversation(currentConversation.id, { forceWebSearch: next });
+    try {
+      await api.conversations.update(currentConversation.id, { forceWebSearch: next });
+    } catch {
+      updateConversation(currentConversation.id, { forceWebSearch });
+    }
+  };
 
   const handleStop = async () => {
     try {
@@ -1008,6 +1020,8 @@ export function ChatArea() {
           modelLabel={effective.ok ? effective.label : effective.scope === 'conversation' ? 'Fix model' : 'Select model'}
           modelTone={effective.ok ? 'normal' : 'warning'}
           onOpenModelPicker={() => setModelPickerOpen(true)}
+          forceWebSearch={forceWebSearch}
+          onToggleWebSearch={() => void handleToggleWebSearch()}
           streaming={isStreaming}
           canSubmit={canSend}
           onSubmit={() => void handleSend()}

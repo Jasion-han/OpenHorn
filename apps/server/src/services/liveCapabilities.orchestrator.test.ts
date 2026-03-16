@@ -92,3 +92,26 @@ test('buildLiveContext uses tavily for web search when a key is available', asyn
   expect(result.citations).toHaveLength(1);
   expect(result.systemContext).toContain('AI Roundup');
 });
+
+test('buildLiveContext can use semantic classifier when keyword routing is direct_model', async () => {
+  const result = await buildLiveContext({
+    prompt: '请帮我查一下最近 OpenAI 的动态',
+    tavilyEnvKey: 'env-key',
+    classifier: async () => 'web_search',
+    fetchImpl: async () =>
+      new Response(JSON.stringify({
+        results: [
+          {
+            title: 'OpenAI Update',
+            url: 'https://example.com/openai-update',
+            content: 'Product announcements this week.',
+          },
+        ],
+      })),
+  });
+
+  expect(result.status).toBe('live');
+  expect(result.route).toBe('web_search');
+  expect(result.citations).toHaveLength(1);
+  expect(result.systemContext).toContain('OpenAI Update');
+});

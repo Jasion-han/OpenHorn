@@ -4,6 +4,7 @@ import * as React from 'react';
 import {
   ChevronDown,
   CornerDownLeft,
+  Globe,
   Paperclip,
   Square,
 } from 'lucide-react';
@@ -57,6 +58,9 @@ export function PromaComposer(props: {
   modelTone?: 'normal' | 'warning';
   onOpenModelPicker?: () => void;
 
+  forceWebSearch: boolean;
+  onToggleWebSearch: () => void;
+
   streaming: boolean;
   canSubmit: boolean;
   onSubmit: () => void;
@@ -78,6 +82,8 @@ export function PromaComposer(props: {
     modelLabel,
     modelTone = 'normal',
     onOpenModelPicker,
+    forceWebSearch,
+    onToggleWebSearch,
     streaming,
     canSubmit,
     onSubmit,
@@ -342,6 +348,31 @@ export function PromaComposer(props: {
               </span>
               <ChevronDown className="size-3" />
             </button>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={onToggleWebSearch}
+                  disabled={disabled || streaming}
+                  className={cn(
+                    'flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors',
+                    forceWebSearch
+                      ? 'text-emerald-700 bg-emerald-500/10 hover:bg-emerald-500/20'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-accent',
+                    (disabled || streaming) && 'opacity-60 pointer-events-none'
+                  )}
+                  aria-label="Web search toggle"
+                  title="Web search toggle"
+                >
+                  <Globe className="size-3.5" />
+                  <span>联网</span>
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="top">
+                <p>{forceWebSearch ? '联网搜索：已开启' : '联网搜索：已关闭'}</p>
+              </TooltipContent>
+            </Tooltip>
           </div>
 
           <div className="flex items-center gap-1.5">

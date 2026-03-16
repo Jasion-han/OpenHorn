@@ -10,6 +10,7 @@ import { runAgentWithConfig, type AgentEvent } from './agentService';
 import { getSettingValues } from './settingsService';
 import { buildLiveContext, toStoredLiveMetadata, type LiveContextResult } from './liveCapabilities';
 import { TAVILY_API_KEY_SETTING, type SearchCitation } from './searchService';
+import { classifyLiveRouteWithModel } from './liveRouteClassifier';
 
 const GLOBAL_SYSTEM_PROMPT_KEY = 'chat.systemPrompt';
 
@@ -168,6 +169,7 @@ function buildCitationsPayload(citations?: SearchCitation[]): CitationsPayload |
   };
 }
 
+
 async function buildUserContentWithAttachments(content: string, attachmentIds?: string[]) {
   if (!attachmentIds || attachmentIds.length === 0) {
     return content;
@@ -325,13 +327,26 @@ export async function sendMessage(userId: string, input: SendMessageInput) {
   await db.update(conversations)
     .set({ updatedAt: now })
     .where(eq(conversations.id, input.conversationId));
-  
+
+  const resolvedChannel = await getResolvedChannelForConversation(userId, conversation);
   const settings = await getSettingValues(userId, [TAVILY_API_KEY_SETTING]);
+  const classifier = resolvedChannel
+    ? (prompt: string) => classifyLiveRouteWithModel({
+        provider: resolvedChannel.channel.provider,
+        apiKey: resolvedChannel.apiKey,
+        baseUrl: resolvedChannel.channel.baseUrl,
+        modelId: resolvedChannel.modelId,
+        prompt,
+      })
+    : undefined;
+
   const conversationMessages = await getMessages(input.conversationId);
   const liveContext = await buildLiveContext({
     prompt: input.content,
     userSettings: settings,
     tavilyEnvKey: process.env.TAVILY_API_KEY ?? null,
+    forceWebSearch: Boolean(conversation.forceWebSearch),
+    classifier,
   });
   const chatMessages = await buildChatMessages(
     conversationMessages,
@@ -341,8 +356,6 @@ export async function sendMessage(userId: string, input: SendMessageInput) {
   let responseContent = '';
   let responseModel: string | null = null;
   
-  const resolvedChannel = await getResolvedChannelForConversation(userId, conversation);
-
   if (resolvedChannel) {
     const adapter = createAdapter(
       resolvedChannel.channel.provider,
@@ -453,12 +466,24 @@ export async function streamMessage(userId: string, input: StreamMessageInput): 
       } as any)
       .where(eq(conversations.id, input.conversationId));
 
+    const resolvedChannel = await getResolvedChannelForConversation(userId, conversation);
     const settings = await getSettingValues(userId, [GLOBAL_SYSTEM_PROMPT_KEY, TAVILY_API_KEY_SETTING]);
     const baseSystemPrompt = conversation.systemPrompt || settings[GLOBAL_SYSTEM_PROMPT_KEY] || null;
+    const classifier = resolvedChannel
+      ? (prompt: string) => classifyLiveRouteWithModel({
+          provider: resolvedChannel.channel.provider,
+          apiKey: resolvedChannel.apiKey,
+          baseUrl: resolvedChannel.channel.baseUrl,
+          modelId: resolvedChannel.modelId,
+          prompt,
+        })
+      : undefined;
     const liveContext = await buildLiveContext({
       prompt: input.content,
       userSettings: settings,
       tavilyEnvKey: process.env.TAVILY_API_KEY ?? null,
+      forceWebSearch: Boolean(conversation.forceWebSearch),
+      classifier,
     });
     const effectiveSystemPrompt = buildEffectiveSystemPrompt(baseSystemPrompt, liveContext);
     send(buildLiveStatusPayload(liveContext));
@@ -549,7 +574,6 @@ export async function streamMessage(userId: string, input: StreamMessageInput): 
     const conversationMessages = await getMessages(input.conversationId);
     const chatMessages = await buildChatMessages(conversationMessages, effectiveSystemPrompt);
 
-    const resolvedChannel = await getResolvedChannelForConversation(userId, conversation);
     if (!resolvedChannel) {
       send({
         type: 'error',
@@ -643,12 +667,24 @@ export async function editUserMessage(userId: string, userMessageId: string, new
     const contextMsgs = allMsgs.slice(0, idx + 1).map((m) =>
       m.id === userMessageId ? { ...m, content: newContent.trim() } : m
     );
+    const resolvedChannel = await getResolvedChannelForConversation(userId, conversation);
     const settings = await getSettingValues(userId, [GLOBAL_SYSTEM_PROMPT_KEY, TAVILY_API_KEY_SETTING]);
     const baseSystemPrompt = conversation.systemPrompt || settings[GLOBAL_SYSTEM_PROMPT_KEY] || null;
+    const classifier = resolvedChannel
+      ? (prompt: string) => classifyLiveRouteWithModel({
+          provider: resolvedChannel.channel.provider,
+          apiKey: resolvedChannel.apiKey,
+          baseUrl: resolvedChannel.channel.baseUrl,
+          modelId: resolvedChannel.modelId,
+          prompt,
+        })
+      : undefined;
     const liveContext = await buildLiveContext({
       prompt: newContent.trim(),
       userSettings: settings,
       tavilyEnvKey: process.env.TAVILY_API_KEY ?? null,
+      forceWebSearch: Boolean(conversation.forceWebSearch),
+      classifier,
     });
     const effectiveSystemPrompt = buildEffectiveSystemPrompt(baseSystemPrompt, liveContext);
     send(buildLiveStatusPayload(liveContext));
@@ -658,7 +694,6 @@ export async function editUserMessage(userId: string, userMessageId: string, new
     }
     const chatMessages = await buildChatMessages(contextMsgs, effectiveSystemPrompt);
 
-    const resolvedChannel = await getResolvedChannelForConversation(userId, conversation);
     if (!resolvedChannel) {
       send({ type: 'error', message: '未配置可用的默认渠道/默认模型。' });
       return;
@@ -729,12 +764,24 @@ export async function regenerateMessage(userId: string, assistantMessageId: stri
         return;
       }
 
+      const resolvedChannel = await getResolvedChannelForConversation(userId, conversation);
       const settings = await getSettingValues(userId, [GLOBAL_SYSTEM_PROMPT_KEY, TAVILY_API_KEY_SETTING]);
       const baseSystemPrompt = conversation.systemPrompt || settings[GLOBAL_SYSTEM_PROMPT_KEY] || null;
+      const classifier = resolvedChannel
+        ? (prompt: string) => classifyLiveRouteWithModel({
+            provider: resolvedChannel.channel.provider,
+            apiKey: resolvedChannel.apiKey,
+            baseUrl: resolvedChannel.channel.baseUrl,
+            modelId: resolvedChannel.modelId,
+            prompt,
+          })
+        : undefined;
       const liveContext = await buildLiveContext({
         prompt: userMsg.content,
         userSettings: settings,
         tavilyEnvKey: process.env.TAVILY_API_KEY ?? null,
+        forceWebSearch: Boolean(conversation.forceWebSearch),
+        classifier,
       });
       send(buildLiveStatusPayload(liveContext));
       const citationsPayload = buildCitationsPayload(liveContext.citations);
@@ -837,13 +884,25 @@ export async function regenerateMessage(userId: string, assistantMessageId: stri
     const allMsgs = await getMessages(assistantMsg.conversationId);
     const idx = allMsgs.findIndex((m) => m.id === assistantMessageId);
     const contextMsgs = idx > 0 ? allMsgs.slice(0, idx) : allMsgs;
+    const resolvedChannel = await getResolvedChannelForConversation(userId, conversation);
     const settings = await getSettingValues(userId, [GLOBAL_SYSTEM_PROMPT_KEY, TAVILY_API_KEY_SETTING]);
     const baseSystemPrompt = conversation.systemPrompt || settings[GLOBAL_SYSTEM_PROMPT_KEY] || null;
     const lastUserMessage = [...contextMsgs].reverse().find((message) => message.role === 'user');
+    const classifier = resolvedChannel
+      ? (prompt: string) => classifyLiveRouteWithModel({
+          provider: resolvedChannel.channel.provider,
+          apiKey: resolvedChannel.apiKey,
+          baseUrl: resolvedChannel.channel.baseUrl,
+          modelId: resolvedChannel.modelId,
+          prompt,
+        })
+      : undefined;
     const liveContext = await buildLiveContext({
       prompt: lastUserMessage?.content || '',
       userSettings: settings,
       tavilyEnvKey: process.env.TAVILY_API_KEY ?? null,
+      forceWebSearch: Boolean(conversation.forceWebSearch),
+      classifier,
     });
     const effectiveSystemPrompt = buildEffectiveSystemPrompt(baseSystemPrompt, liveContext);
     send(buildLiveStatusPayload(liveContext));
@@ -853,7 +912,6 @@ export async function regenerateMessage(userId: string, assistantMessageId: stri
     }
     const chatMessages = await buildChatMessages(contextMsgs, effectiveSystemPrompt);
 
-    const resolvedChannel = await getResolvedChannelForConversation(userId, conversation);
     if (!resolvedChannel) {
       send({ type: 'error', message: '未配置可用的默认渠道/默认模型。' });
       return;

@@ -10,6 +10,7 @@ export interface CreateConversationInput {
   systemPrompt?: string;
   contextLength?: number;
   defaultMode?: 'chat' | 'agent' | null;
+  forceWebSearch?: boolean;
 }
 
 export interface UpdateConversationInput {
@@ -21,6 +22,7 @@ export interface UpdateConversationInput {
   defaultMode?: 'chat' | 'agent' | null;
   lastMode?: 'chat' | 'agent' | null;
   isPinned?: boolean;
+  forceWebSearch?: boolean;
   runStatus?: string | null;
 }
 
@@ -74,6 +76,7 @@ export async function createConversation(userId: string, input: CreateConversati
     defaultMode,
     lastMode: defaultMode,
     isPinned: false,
+    forceWebSearch: Boolean(input.forceWebSearch),
     runStatus: null,
     createdAt: now,
     updatedAt: now,
@@ -90,6 +93,7 @@ export async function createConversation(userId: string, input: CreateConversati
     defaultMode,
     lastMode: defaultMode,
     isPinned: false,
+    forceWebSearch: Boolean(input.forceWebSearch),
     runStatus: null,
     createdAt: now,
     updatedAt: now,
@@ -127,6 +131,7 @@ export async function updateConversation(
   if (input.defaultMode !== undefined) updates.defaultMode = input.defaultMode;
   if (input.lastMode !== undefined) updates.lastMode = input.lastMode;
   if (input.isPinned !== undefined) updates.isPinned = input.isPinned;
+  if (input.forceWebSearch !== undefined) updates.forceWebSearch = input.forceWebSearch;
   if (input.runStatus !== undefined) updates.runStatus = input.runStatus;
   
   await db.update(conversations).set(updates)

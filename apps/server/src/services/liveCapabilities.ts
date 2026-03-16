@@ -42,6 +42,8 @@ export type BuildLiveContextInput = {
   fetchImpl?: typeof fetch;
   userSettings?: Record<string, string>;
   tavilyEnvKey?: string | null;
+  forceWebSearch?: boolean;
+  classifier?: (prompt: string) => Promise<LiveRouteType | null>;
 };
 
 type WeatherLocation = {
@@ -317,9 +319,27 @@ export function routeLiveQuery(prompt: string): LiveRoute {
   return { type: 'direct_model', needsCitation: false };
 }
 
+function routeFromType(type: LiveRouteType): LiveRoute {
+  return {
+    type,
+    needsCitation: type === 'web_search' || type === 'research',
+  };
+}
+
 export async function buildLiveContext(input: BuildLiveContextInput): Promise<LiveContextResult> {
-  const route = routeLiveQuery(input.prompt);
+  let route = routeLiveQuery(input.prompt);
   const timezone = inferTimezone(input.timezone);
+
+  if (route.type === 'direct_model' && input.classifier) {
+    const classified = await input.classifier(input.prompt);
+    if (classified) {
+      route = routeFromType(classified);
+    }
+  }
+
+  if (route.type === 'direct_model' && input.forceWebSearch) {
+    route = routeFromType('web_search');
+  }
 
   if (route.type === 'local') {
     const now = input.now ?? new Date();

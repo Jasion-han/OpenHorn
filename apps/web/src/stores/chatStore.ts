@@ -13,6 +13,7 @@ export interface Conversation {
   defaultMode: 'chat' | 'agent';
   lastMode: 'chat' | 'agent';
   isPinned: boolean;
+  forceWebSearch?: boolean;
   runStatus?: string | null;
   createdAt: Date;
   updatedAt: Date;
@@ -61,6 +62,7 @@ function parseConversation(conv: ApiConversation): Conversation {
     defaultMode: conv.defaultMode === 'chat' ? 'chat' : 'agent',
     lastMode: conv.lastMode === 'chat' ? 'chat' : 'agent',
     isPinned: Boolean(conv.isPinned),
+    forceWebSearch: Boolean(conv.forceWebSearch),
     runStatus: conv.runStatus ?? null,
     createdAt: new Date(conv.createdAt),
     updatedAt: new Date(conv.updatedAt),

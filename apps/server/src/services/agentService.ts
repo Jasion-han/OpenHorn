@@ -2,13 +2,14 @@ import { db } from '../db';
 import { agentSessions, agentEvents } from 'db';
 import { eq, and, desc } from 'drizzle-orm';
 import { generateId } from '../utils';
-import { getResolvedChannelForUser } from './channelService';
+import { getResolvedChannelForConversation, getResolvedChannelForUser } from './channelService';
 import { runClaudeAgentSdk } from './agentSdk';
 import { loadEnabledMcpServersForUser } from './mcpLoader';
 import { buildAttachmentPayloadFromIds } from './attachmentService';
 import { getSettingValues } from './settingsService';
 import { buildLiveContext } from './liveCapabilities';
 import { TAVILY_API_KEY_SETTING } from './searchService';
+import { classifyLiveRouteWithModel } from './liveRouteClassifier';
 
 async function saveAgentEvent(sessionId: string, event: AgentEvent): Promise<void> {
   if (event.type === 'meta' || event.type === 'done') return;
@@ -306,10 +307,24 @@ export async function* runAgent(
 
   const values = await getSettingValues(userId, ['chat.systemPrompt', TAVILY_API_KEY_SETTING]);
   const globalSystemPrompt = values['chat.systemPrompt'] || undefined;
+  const resolvedChannel = await getResolvedChannelForConversation(userId, {
+    channelId: (session as any).channelId || null,
+    modelId: (session as any).modelId || null,
+  });
+  const classifier = resolvedChannel
+    ? (inputPrompt: string) => classifyLiveRouteWithModel({
+        provider: resolvedChannel.channel.provider,
+        apiKey: resolvedChannel.apiKey,
+        baseUrl: resolvedChannel.channel.baseUrl,
+        modelId: resolvedChannel.modelId,
+        prompt: inputPrompt,
+      })
+    : undefined;
   const liveContext = await buildLiveContext({
     prompt,
     userSettings: values,
     tavilyEnvKey: process.env.TAVILY_API_KEY ?? null,
+    classifier,
   });
 
   for await (const event of runAgentWithConfig({

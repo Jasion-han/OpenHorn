@@ -51,6 +51,7 @@ export interface ApiConversation {
   defaultMode: 'chat' | 'agent' | null;
   lastMode: 'chat' | 'agent' | null;
   isPinned: boolean;
+  forceWebSearch?: boolean | null;
   runStatus: string | null;
   createdAt: string;
   updatedAt: string;
@@ -281,6 +282,7 @@ export const api = {
       systemPrompt?: string;
       contextLength?: number;
       isPinned?: boolean;
+      forceWebSearch?: boolean;
     }) =>
       fetchApi<{ success: boolean }>(`/conversations/${id}`, {
         method: 'PUT',

@@ -49,6 +49,7 @@ const SCHEMA_DDL: string[] = [
     default_mode TEXT DEFAULT 'agent',
     last_mode TEXT DEFAULT 'agent',
     is_pinned INTEGER DEFAULT 0,
+    force_web_search INTEGER DEFAULT 0,
     run_status TEXT,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
@@ -172,6 +173,16 @@ async function ensureConversationRunStatusColumn(): Promise<void> {
   }
 }
 
+async function ensureConversationForceWebSearchColumn(): Promise<void> {
+  const result = await client.execute(`PRAGMA table_info('conversations');`);
+  const rows = (result as any).rows as Array<Record<string, unknown>> | undefined;
+  const hasColumn = (rows || []).some((row) => row.name === 'force_web_search' || row['name'] === 'force_web_search');
+  if (!hasColumn) {
+    await client.execute(`ALTER TABLE conversations ADD COLUMN force_web_search INTEGER DEFAULT 0;`);
+    await client.execute(`UPDATE conversations SET force_web_search = 0 WHERE force_web_search IS NULL;`);
+  }
+}
+
 async function ensureMessageModeColumn(): Promise<void> {
   const result = await client.execute(`PRAGMA table_info('messages');`);
   const rows = (result as any).rows as Array<Record<string, unknown>> | undefined;
@@ -283,6 +294,7 @@ export async function bootstrapDatabase(): Promise<void> {
   await ensureConversationModelIdColumn();
   await ensureConversationDefaultModeColumn();
   await ensureConversationLastModeColumn();
+  await ensureConversationForceWebSearchColumn();
   await ensureConversationRunStatusColumn();
   await ensureMessageModeColumn();
   await ensureMessageAgentRunColumn();
