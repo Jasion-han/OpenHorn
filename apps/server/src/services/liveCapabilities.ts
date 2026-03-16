@@ -6,6 +6,8 @@ export type LiveRouteType =
   | 'direct_model';
 
 export type LiveStatus = 'live' | 'offline';
+import { buildSearchContext, type SearchCitation, TAVILY_API_KEY_SETTING } from './searchService';
+
 export type LiveSourceType = 'local' | 'weather' | 'web_search' | 'none';
 
 export type LiveRoute = {
@@ -30,6 +32,7 @@ export type LiveContextResult = {
     city?: string;
   };
   systemContext?: string;
+  citations?: SearchCitation[];
 };
 
 export type BuildLiveContextInput = {
@@ -37,6 +40,8 @@ export type BuildLiveContextInput = {
   timezone?: string;
   now?: Date;
   fetchImpl?: typeof fetch;
+  userSettings?: Record<string, string>;
+  tavilyEnvKey?: string | null;
 };
 
 type WeatherLocation = {
@@ -343,11 +348,25 @@ export async function buildLiveContext(input: BuildLiveContextInput): Promise<Li
   }
 
   if (route.type === 'web_search' || route.type === 'research') {
-    return buildOfflineResult(
-      route.type,
-      '实时服务暂不可用，本轮为离线回答',
-      'Live web retrieval is unavailable. Do not claim you checked the web, saw recent news, or have citations. Say the answer may be outdated.'
-    );
+    const searchContext = await buildSearchContext({
+      route: route.type,
+      prompt: input.prompt,
+      userSettings: input.userSettings,
+      envKey: input.tavilyEnvKey,
+      fetchImpl: input.fetchImpl,
+    });
+
+    return {
+      status: searchContext.status,
+      route: route.type,
+      userLabel: searchContext.label,
+      source: {
+        type: searchContext.status === 'live' ? 'web_search' : 'none',
+        provider: searchContext.provider === 'tavily' ? 'tavily' : undefined,
+      },
+      systemContext: searchContext.systemContext,
+      citations: searchContext.citations,
+    };
   }
 
   return {

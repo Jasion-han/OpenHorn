@@ -23,10 +23,15 @@ type MCPServer = {
   isEnabled: boolean;
 };
 
+const TAVILY_API_KEY_SETTING = 'liveSearch.tavilyApiKey';
+
 export function AgentSettings() {
   const [channels, setChannels] = useState<ApiChannel[]>([]);
   const [mcpServers, setMcpServers] = useState<MCPServer[]>([]);
   const [loading, setLoading] = useState(false);
+  const [tavilyApiKey, setTavilyApiKey] = useState('');
+  const [savedTavilyApiKey, setSavedTavilyApiKey] = useState('');
+  const [savingTavilyApiKey, setSavingTavilyApiKey] = useState(false);
 
   const [mcpModalOpen, setMcpModalOpen] = useState(false);
   const [mcpName, setMcpName] = useState('');
@@ -53,17 +58,34 @@ export function AgentSettings() {
   const loadAll = async () => {
     setLoading(true);
     try {
-      const [{ channels }, { servers }] = await Promise.all([
+      const [{ channels }, { servers }, { settings }] = await Promise.all([
         api.channels.list(),
         api.mcp.listServers(),
+        api.settings.get([TAVILY_API_KEY_SETTING]),
       ]);
       setChannels(channels);
       setMcpServers(servers as MCPServer[]);
+      const currentKey = settings[TAVILY_API_KEY_SETTING] || '';
+      setTavilyApiKey(currentKey);
+      setSavedTavilyApiKey(currentKey);
     } catch (error) {
       console.error('Failed to load agent settings:', error);
       notifyError('加载失败', error instanceof Error ? error.message : '无法加载 Agent 设置');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSaveTavilyApiKey = async () => {
+    setSavingTavilyApiKey(true);
+    try {
+      await api.settings.set(TAVILY_API_KEY_SETTING, tavilyApiKey.trim() || null);
+      setSavedTavilyApiKey(tavilyApiKey.trim());
+      notifySuccess('已保存', tavilyApiKey.trim() ? 'Tavily API Key 已更新，将优先覆盖服务端默认 Key。' : '已恢复使用服务端默认 Tavily Key。');
+    } catch (error) {
+      notifyError('保存失败', error instanceof Error ? error.message : '无法保存 Tavily Key');
+    } finally {
+      setSavingTavilyApiKey(false);
     }
   };
 
@@ -152,6 +174,49 @@ export function AgentSettings() {
                   未设置默认渠道，请在左侧切换到「渠道」进行配置。
                 </p>
               )}
+            </div>
+          </div>
+        </SettingsCard>
+      </SettingsSection>
+
+      <SettingsSection
+        title="默认联网搜索（Tavily）"
+        description="用于 web_search / research 路由。用户填写的 Tavily Key 优先级高于服务端全局 TAVILY_API_KEY。"
+      >
+        <SettingsCard divided={false} className="p-4">
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium">用户级 Tavily API Key</p>
+                <p className="text-xs text-muted-foreground">留空则回落到部署默认 Key；填写后仅当前账号生效。</p>
+              </div>
+              {savedTavilyApiKey ? (
+                <Badge variant="secondary">用户覆盖中</Badge>
+              ) : (
+                <Badge variant="outline">使用服务端默认</Badge>
+              )}
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>Tavily API Key</Label>
+              <Input
+                type="password"
+                value={tavilyApiKey}
+                onChange={(e) => setTavilyApiKey(e.target.value)}
+                placeholder="tvly-..."
+                autoComplete="off"
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="ghost"
+                onClick={() => setTavilyApiKey(savedTavilyApiKey)}
+                disabled={savingTavilyApiKey}
+              >
+                取消
+              </Button>
+              <Button onClick={() => void handleSaveTavilyApiKey()} disabled={savingTavilyApiKey || tavilyApiKey === savedTavilyApiKey}>
+                {savingTavilyApiKey ? '保存中...' : '保存'}
+              </Button>
             </div>
           </div>
         </SettingsCard>

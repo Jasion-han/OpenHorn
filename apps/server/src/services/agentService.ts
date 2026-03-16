@@ -7,6 +7,8 @@ import { runClaudeAgentSdk } from './agentSdk';
 import { loadEnabledMcpServersForUser } from './mcpLoader';
 import { buildAttachmentPayloadFromIds } from './attachmentService';
 import { getSettingValues } from './settingsService';
+import { buildLiveContext } from './liveCapabilities';
+import { TAVILY_API_KEY_SETTING } from './searchService';
 
 async function saveAgentEvent(sessionId: string, event: AgentEvent): Promise<void> {
   if (event.type === 'meta' || event.type === 'done') return;
@@ -302,8 +304,13 @@ export async function* runAgent(
       .where(and(eq(agentSessions.id, sessionId), eq(agentSessions.userId, userId)));
   }
 
-  const values = await getSettingValues(userId, ['chat.systemPrompt']);
+  const values = await getSettingValues(userId, ['chat.systemPrompt', TAVILY_API_KEY_SETTING]);
   const globalSystemPrompt = values['chat.systemPrompt'] || undefined;
+  const liveContext = await buildLiveContext({
+    prompt,
+    userSettings: values,
+    tavilyEnvKey: process.env.TAVILY_API_KEY ?? null,
+  });
 
   for await (const event of runAgentWithConfig({
     userId,
@@ -312,6 +319,7 @@ export async function* runAgent(
     channelId: (session as any).channelId || null,
     modelId: (session as any).modelId || null,
     globalSystemPrompt,
+    liveSystemContext: liveContext.systemContext,
     abortController,
     onEvent: (event) => saveAgentEvent(sessionId, event),
   })) {

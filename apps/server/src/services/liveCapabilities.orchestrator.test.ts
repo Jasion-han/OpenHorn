@@ -57,10 +57,38 @@ test('buildLiveContext does not guess weather location from timezone or defaults
 test('buildLiveContext marks web-search routes as degraded when no provider exists', async () => {
   const result = await buildLiveContext({
     prompt: '最近 AI 圈有什么新闻',
+    tavilyEnvKey: null,
   });
 
   expect(result.status).toBe('offline');
   expect(result.route).toBe('web_search');
-  expect(result.userLabel).toContain('实时服务暂不可用');
-  expect(result.systemContext).toContain('Do not claim you checked the web');
+  expect(result.userLabel).toContain('实时搜索未配置');
+  expect(result.systemContext).toContain('Live search is not configured');
+});
+
+test('buildLiveContext uses tavily for web search when a key is available', async () => {
+  const result = await buildLiveContext({
+    prompt: '最近 AI 圈有什么新闻',
+    tavilyEnvKey: 'env-key',
+    fetchImpl: async (_input, init) => {
+      expect((init?.headers as Record<string, string>)?.Authorization).toBe('Bearer env-key');
+      return new Response(JSON.stringify({
+        results: [
+          {
+            title: 'AI Roundup',
+            url: 'https://example.com/ai-roundup',
+            content: 'New AI launches this week.',
+            published_date: '2026-03-15',
+          },
+        ],
+      }));
+    },
+  });
+
+  expect(result.status).toBe('live');
+  expect(result.route).toBe('web_search');
+  expect(result.userLabel).toContain('实时搜索');
+  expect(result.source.type).toBe('web_search');
+  expect(result.citations).toHaveLength(1);
+  expect(result.systemContext).toContain('AI Roundup');
 });

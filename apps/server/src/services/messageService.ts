@@ -9,6 +9,7 @@ import { buildAttachmentPayloadFromIds, linkAttachmentsToMessage } from './attac
 import { runAgentWithConfig, type AgentEvent } from './agentService';
 import { getSettingValues } from './settingsService';
 import { buildLiveContext, toStoredLiveMetadata, type LiveContextResult } from './liveCapabilities';
+import { TAVILY_API_KEY_SETTING, type SearchCitation } from './searchService';
 
 const GLOBAL_SYSTEM_PROMPT_KEY = 'chat.systemPrompt';
 
@@ -45,6 +46,11 @@ type LiveStatusPayload = {
   status: 'live' | 'offline';
   route: 'local' | 'structured_live' | 'web_search' | 'research' | 'direct_model';
   label: string;
+};
+
+type CitationsPayload = {
+  type: 'citations';
+  citations: SearchCitation[];
 };
 
 function parseJsonArray(value: string | null | undefined): string[] {
@@ -148,6 +154,18 @@ function buildLiveStatusPayload(liveContext: LiveContextResult): LiveStatusPaylo
 
 function serializeLiveMetadata(liveContext: LiveContextResult) {
   return JSON.stringify(toStoredLiveMetadata(liveContext));
+}
+
+function serializeCitations(citations?: SearchCitation[]) {
+  return citations && citations.length > 0 ? JSON.stringify(citations) : null;
+}
+
+function buildCitationsPayload(citations?: SearchCitation[]): CitationsPayload | null {
+  if (!citations || citations.length === 0) return null;
+  return {
+    type: 'citations',
+    citations,
+  };
 }
 
 async function buildUserContentWithAttachments(content: string, attachmentIds?: string[]) {
@@ -308,8 +326,13 @@ export async function sendMessage(userId: string, input: SendMessageInput) {
     .set({ updatedAt: now })
     .where(eq(conversations.id, input.conversationId));
   
+  const settings = await getSettingValues(userId, [TAVILY_API_KEY_SETTING]);
   const conversationMessages = await getMessages(input.conversationId);
-  const liveContext = await buildLiveContext({ prompt: input.content });
+  const liveContext = await buildLiveContext({
+    prompt: input.content,
+    userSettings: settings,
+    tavilyEnvKey: process.env.TAVILY_API_KEY ?? null,
+  });
   const chatMessages = await buildChatMessages(
     conversationMessages,
     buildEffectiveSystemPrompt(conversation.systemPrompt, liveContext)
@@ -357,6 +380,7 @@ export async function sendMessage(userId: string, input: SendMessageInput) {
     mode: input.mode || 'chat',
     agentRun: null,
     liveMetadata: serializeLiveMetadata(liveContext),
+    citations: serializeCitations(liveContext.citations),
     createdAt: new Date(),
   });
   
@@ -429,11 +453,19 @@ export async function streamMessage(userId: string, input: StreamMessageInput): 
       } as any)
       .where(eq(conversations.id, input.conversationId));
 
-    const settings = await getSettingValues(userId, [GLOBAL_SYSTEM_PROMPT_KEY]);
+    const settings = await getSettingValues(userId, [GLOBAL_SYSTEM_PROMPT_KEY, TAVILY_API_KEY_SETTING]);
     const baseSystemPrompt = conversation.systemPrompt || settings[GLOBAL_SYSTEM_PROMPT_KEY] || null;
-    const liveContext = await buildLiveContext({ prompt: input.content });
+    const liveContext = await buildLiveContext({
+      prompt: input.content,
+      userSettings: settings,
+      tavilyEnvKey: process.env.TAVILY_API_KEY ?? null,
+    });
     const effectiveSystemPrompt = buildEffectiveSystemPrompt(baseSystemPrompt, liveContext);
     send(buildLiveStatusPayload(liveContext));
+    const citationsPayload = buildCitationsPayload(liveContext.citations);
+    if (citationsPayload) {
+      send(citationsPayload);
+    }
     if (mode === 'agent') {
       let assistantContent = '';
       let agentError: string | undefined;
@@ -493,6 +525,7 @@ export async function streamMessage(userId: string, input: StreamMessageInput): 
         attachments: null,
         agentRun: JSON.stringify(agentRun),
         liveMetadata: serializeLiveMetadata(liveContext),
+        citations: serializeCitations(liveContext.citations),
         createdAt: new Date(),
       });
 
@@ -560,6 +593,7 @@ export async function streamMessage(userId: string, input: StreamMessageInput): 
       attachments: null,
       agentRun: null,
       liveMetadata: serializeLiveMetadata(liveContext),
+      citations: serializeCitations(liveContext.citations),
       createdAt: new Date(),
     });
 
@@ -609,11 +643,19 @@ export async function editUserMessage(userId: string, userMessageId: string, new
     const contextMsgs = allMsgs.slice(0, idx + 1).map((m) =>
       m.id === userMessageId ? { ...m, content: newContent.trim() } : m
     );
-    const settings = await getSettingValues(userId, [GLOBAL_SYSTEM_PROMPT_KEY]);
+    const settings = await getSettingValues(userId, [GLOBAL_SYSTEM_PROMPT_KEY, TAVILY_API_KEY_SETTING]);
     const baseSystemPrompt = conversation.systemPrompt || settings[GLOBAL_SYSTEM_PROMPT_KEY] || null;
-    const liveContext = await buildLiveContext({ prompt: newContent.trim() });
+    const liveContext = await buildLiveContext({
+      prompt: newContent.trim(),
+      userSettings: settings,
+      tavilyEnvKey: process.env.TAVILY_API_KEY ?? null,
+    });
     const effectiveSystemPrompt = buildEffectiveSystemPrompt(baseSystemPrompt, liveContext);
     send(buildLiveStatusPayload(liveContext));
+    const citationsPayload = buildCitationsPayload(liveContext.citations);
+    if (citationsPayload) {
+      send(citationsPayload);
+    }
     const chatMessages = await buildChatMessages(contextMsgs, effectiveSystemPrompt);
 
     const resolvedChannel = await getResolvedChannelForConversation(userId, conversation);
@@ -646,6 +688,7 @@ export async function editUserMessage(userId: string, userMessageId: string, new
         content: responseContent,
         model: resolvedChannel.modelId,
         liveMetadata: serializeLiveMetadata(liveContext),
+        citations: serializeCitations(liveContext.citations),
       })
       .where(eq(messages.id, assistantMessageId));
 
@@ -686,10 +729,18 @@ export async function regenerateMessage(userId: string, assistantMessageId: stri
         return;
       }
 
-      const settings = await getSettingValues(userId, [GLOBAL_SYSTEM_PROMPT_KEY]);
+      const settings = await getSettingValues(userId, [GLOBAL_SYSTEM_PROMPT_KEY, TAVILY_API_KEY_SETTING]);
       const baseSystemPrompt = conversation.systemPrompt || settings[GLOBAL_SYSTEM_PROMPT_KEY] || null;
-      const liveContext = await buildLiveContext({ prompt: userMsg.content });
+      const liveContext = await buildLiveContext({
+        prompt: userMsg.content,
+        userSettings: settings,
+        tavilyEnvKey: process.env.TAVILY_API_KEY ?? null,
+      });
       send(buildLiveStatusPayload(liveContext));
+      const citationsPayload = buildCitationsPayload(liveContext.citations);
+      if (citationsPayload) {
+        send(citationsPayload);
+      }
       const attachmentIds = parseJsonArray(userMsg.attachments);
       const contextPaths = parseJsonArray(userMsg.contextPaths);
       const workspaceId = assistantMsg.workspaceId || userMsg.workspaceId || (conversation as any).workspaceId || null;
@@ -761,6 +812,7 @@ export async function regenerateMessage(userId: string, assistantMessageId: stri
           contextPaths: contextPaths.length > 0 ? JSON.stringify(contextPaths) : null,
           agentRun: JSON.stringify(agentRun),
           liveMetadata: serializeLiveMetadata(liveContext),
+          citations: serializeCitations(liveContext.citations),
         } as any)
         .where(eq(messages.id, assistantMessageId));
 
@@ -785,12 +837,20 @@ export async function regenerateMessage(userId: string, assistantMessageId: stri
     const allMsgs = await getMessages(assistantMsg.conversationId);
     const idx = allMsgs.findIndex((m) => m.id === assistantMessageId);
     const contextMsgs = idx > 0 ? allMsgs.slice(0, idx) : allMsgs;
-    const settings = await getSettingValues(userId, [GLOBAL_SYSTEM_PROMPT_KEY]);
+    const settings = await getSettingValues(userId, [GLOBAL_SYSTEM_PROMPT_KEY, TAVILY_API_KEY_SETTING]);
     const baseSystemPrompt = conversation.systemPrompt || settings[GLOBAL_SYSTEM_PROMPT_KEY] || null;
     const lastUserMessage = [...contextMsgs].reverse().find((message) => message.role === 'user');
-    const liveContext = await buildLiveContext({ prompt: lastUserMessage?.content || '' });
+    const liveContext = await buildLiveContext({
+      prompt: lastUserMessage?.content || '',
+      userSettings: settings,
+      tavilyEnvKey: process.env.TAVILY_API_KEY ?? null,
+    });
     const effectiveSystemPrompt = buildEffectiveSystemPrompt(baseSystemPrompt, liveContext);
     send(buildLiveStatusPayload(liveContext));
+    const citationsPayload = buildCitationsPayload(liveContext.citations);
+    if (citationsPayload) {
+      send(citationsPayload);
+    }
     const chatMessages = await buildChatMessages(contextMsgs, effectiveSystemPrompt);
 
     const resolvedChannel = await getResolvedChannelForConversation(userId, conversation);
@@ -823,6 +883,7 @@ export async function regenerateMessage(userId: string, assistantMessageId: stri
         content: responseContent,
         model: resolvedChannel.modelId,
         liveMetadata: serializeLiveMetadata(liveContext),
+        citations: serializeCitations(liveContext.citations),
       })
       .where(eq(messages.id, assistantMessageId));
 

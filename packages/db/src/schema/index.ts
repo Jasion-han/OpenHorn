@@ -60,6 +60,7 @@ export const messages = sqliteTable('messages', {
   attachments: text('attachments'),
   agentRun: text('agent_run'),
   liveMetadata: text('live_metadata'),
+  citations: text('citations'),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
 });
 

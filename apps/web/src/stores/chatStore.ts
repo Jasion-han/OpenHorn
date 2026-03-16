@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { api, type ApiAgentRun, type ApiChannel, type ApiConversation, type ApiLiveMetadata, type ApiLiveRoute, type ApiLiveStatus, type ApiMessage } from '../lib/api';
+import { api, type ApiAgentRun, type ApiChannel, type ApiCitation, type ApiConversation, type ApiLiveMetadata, type ApiLiveRoute, type ApiLiveStatus, type ApiMessage } from '../lib/api';
 
 export type Channel = ApiChannel;
 
@@ -37,6 +37,7 @@ export interface Message {
   liveStatus?: ApiLiveStatus;
   liveRoute?: ApiLiveRoute;
   liveLabel?: string;
+  citations?: ApiCitation[];
   streamTail?: string;
   streamPulseKey?: number;
   createdAt: Date;
@@ -85,6 +86,15 @@ function parseMessage(msg: ApiMessage): Message {
     }
   }
 
+  let citations: ApiCitation[] | undefined;
+  if (msg.citations) {
+    try {
+      citations = JSON.parse(msg.citations) as ApiCitation[];
+    } catch {
+      citations = undefined;
+    }
+  }
+
   return {
     id: msg.id,
     conversationId: msg.conversationId,
@@ -105,6 +115,7 @@ function parseMessage(msg: ApiMessage): Message {
     liveStatus: liveMetadata?.status,
     liveRoute: liveMetadata?.route,
     liveLabel: liveMetadata?.label,
+    citations,
     createdAt: new Date(msg.createdAt),
   };
 }

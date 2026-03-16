@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { Bot, Check, Copy, MessageSquare, Pencil, RefreshCw, Trash2 } from 'lucide-react';
-import { api, type ApiAgentRun, type ApiLiveRoute, type ApiLiveStatus } from '../lib/api';
+import { api, type ApiAgentRun, type ApiCitation, type ApiLiveRoute, type ApiLiveStatus } from '../lib/api';
 import { uploadAttachments } from '../lib/attachments';
 import { streamChatMessage } from '../lib/chat-stream';
 import { useChatStore } from '../stores/chatStore';
@@ -107,6 +107,33 @@ function LiveStatusBadge({
   );
 }
 
+function CitationList({ citations }: { citations?: ApiCitation[] }) {
+  if (!citations || citations.length === 0) return null;
+
+  return (
+    <div className="mb-2 flex flex-col gap-1.5 rounded-xl border border-border/50 bg-muted/20 p-2.5">
+      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Sources</p>
+      <div className="flex flex-col gap-1.5">
+        {citations.map((citation, index) => (
+          <a
+            key={`${citation.url}-${index}`}
+            href={citation.url}
+            target="_blank"
+            rel="noreferrer"
+            className="rounded-md border border-border/40 bg-background/70 px-2 py-1.5 text-xs transition-colors hover:bg-background"
+          >
+            <div className="font-medium text-foreground">{citation.title}</div>
+            <div className="truncate text-muted-foreground">{citation.url}</div>
+            {citation.snippet && (
+              <div className="mt-0.5 line-clamp-2 text-muted-foreground">{citation.snippet}</div>
+            )}
+          </a>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function MessageBubble({
   msg,
   isStreaming,
@@ -128,6 +155,7 @@ function MessageBubble({
     liveStatus?: ApiLiveStatus;
     liveRoute?: ApiLiveRoute;
     liveLabel?: string;
+    citations?: ApiCitation[];
     streamTail?: string;
     streamPulseKey?: number;
   };
@@ -188,6 +216,7 @@ function MessageBubble({
               route={msg.liveRoute}
               label={msg.liveLabel}
             />
+            <CitationList citations={msg.citations} />
             {hasAssistantText ? (
               isStreaming ? (
                 <StreamingMarkdownMessage
@@ -439,6 +468,12 @@ export function ChatArea() {
               agentRun: agentRunBuffer,
             });
           },
+          onCitations: (event) => {
+            useChatStore.getState().updateMessage(assistantMessageId, assistantContent, {
+              citations: event.citations,
+              agentRun: agentRunBuffer,
+            });
+          },
           onDelta: (chunk) => {
             if (!chunk) return;
             smoother.push(chunk);
@@ -582,6 +617,7 @@ export function ChatArea() {
         liveStatus: undefined,
         liveRoute: undefined,
         liveLabel: undefined,
+        citations: undefined,
         agentRun: agentRunBuffer,
       }
     );
@@ -620,6 +656,16 @@ export function ChatArea() {
                 liveStatus: event.status,
                 liveRoute: event.route,
                 liveLabel: event.label,
+                agentRun: agentRunBuffer,
+              }
+            );
+          },
+          onCitations: (event) => {
+            useChatStore.getState().updateMessage(
+              assistantMsg.id,
+              useChatStore.getState().messages.find((m) => m.id === assistantMsg.id)?.content || '',
+              {
+                citations: event.citations,
                 agentRun: agentRunBuffer,
               }
             );
@@ -751,6 +797,7 @@ export function ChatArea() {
       liveStatus: undefined,
       liveRoute: undefined,
       liveLabel: undefined,
+      citations: undefined,
     });
     setIsLoading(true);
     setIsStreaming(true);
@@ -784,6 +831,11 @@ export function ChatArea() {
               liveStatus: event.status,
               liveRoute: event.route,
               liveLabel: event.label,
+            });
+          },
+          onCitations: (event) => {
+            useChatStore.getState().updateMessage(assistantMsg.id, '', {
+              citations: event.citations,
             });
           },
           onDelta: (chunk) => {
@@ -874,6 +926,7 @@ export function ChatArea() {
                     liveStatus: msg.liveStatus,
                     liveRoute: msg.liveRoute,
                     liveLabel: msg.liveLabel,
+                    citations: msg.citations,
                     streamTail: msg.streamTail,
                     streamPulseKey: msg.streamPulseKey,
                   }}

@@ -81,6 +81,13 @@ export interface ApiLiveMetadata {
   sourceType: 'local' | 'weather' | 'web_search' | 'none';
 }
 
+export interface ApiCitation {
+  title: string;
+  url: string;
+  snippet?: string;
+  publishedDate?: string;
+}
+
 export interface ApiMessage {
   id: string;
   conversationId: string;
@@ -91,6 +98,7 @@ export interface ApiMessage {
   attachments: string | null;
   agentRun: string | null;
   liveMetadata: string | null;
+  citations: string | null;
   attachmentsMeta?: Array<{
     id: string;
     fileName: string;
