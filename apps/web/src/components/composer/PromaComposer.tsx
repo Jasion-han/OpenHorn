@@ -358,7 +358,7 @@ export function PromaComposer(props: {
                   className={cn(
                     'flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors',
                     forceWebSearch
-                      ? 'text-emerald-700 bg-emerald-500/10 hover:bg-emerald-500/20'
+                      ? 'text-emerald-500 bg-emerald-400/20 hover:bg-emerald-400/30'
                       : 'text-muted-foreground hover:text-foreground hover:bg-accent',
                     (disabled || streaming) && 'opacity-60 pointer-events-none'
                   )}
