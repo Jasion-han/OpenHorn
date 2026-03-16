@@ -61,6 +61,8 @@ export function PromaComposer(props: {
   forceWebSearch: boolean;
   onToggleWebSearch: () => void;
 
+  onInputFocus?: () => void;
+
   streaming: boolean;
   canSubmit: boolean;
   onSubmit: () => void;
@@ -84,6 +86,7 @@ export function PromaComposer(props: {
     onOpenModelPicker,
     forceWebSearch,
     onToggleWebSearch,
+    onInputFocus,
     streaming,
     canSubmit,
     onSubmit,
@@ -248,6 +251,7 @@ export function PromaComposer(props: {
             value={value}
             onChange={(e) => onChange(e.currentTarget.value)}
             onKeyDown={onKeyDown}
+            onFocus={() => onInputFocus?.()}
             onPaste={(e) => {
               if (disabled) return;
               const files = extractFilesFromClipboard(e);

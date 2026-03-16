@@ -24,6 +24,52 @@ import { cn } from '@/lib/utils';
 
 const PAGE_PAD = '16px';
 const COMPOSER_PAD_BOTTOM = 'env(safe-area-inset-bottom, 0px)';
+const PLACEHOLDERS = [
+  'Start with a spark — I will shape the rest.',
+  'What should we build, refine, or rethink today?',
+  'Drop a thought. I will turn it into something real.',
+  'Give me a direction, I will find the path.',
+  'Ask anything. Then push it one level deeper.',
+  'Sketch the idea. I will fill in the lines.',
+  'Let us turn a question into a plan.',
+  'Pitch the headline. I will write the story.',
+  'Take the blank page. I will bring the motion.',
+  'Name the problem. I will cut through it.',
+  'Start messy. End elegant.',
+  'One prompt away from clarity.',
+  'Tell me the goal, I will map the route.',
+  'What would you love to ship this week?',
+  'Let us turn curiosity into momentum.',
+  'If you can imagine it, we can draft it.',
+  'Give me the vibe. I will deliver the words.',
+  'Turn a rough idea into a sharp answer.',
+  'Ask for bold. I will keep it grounded.',
+  'What do you wish existed right now?',
+  'We can brainstorm or go straight to done.',
+  'Write less. Say more.',
+  'A single line can unlock the whole plan.',
+  'Let us design the next move.',
+  'Bring the question. Leave with the output.',
+  'Make it clear, make it quick, make it real.',
+  'Want a first draft that actually works?',
+  'Turn complexity into clean steps.',
+  'Take a breath — then type the dream.',
+  'If it matters, put it here.',
+];
+
+function pickPlaceholder(avoid?: string) {
+  if (PLACEHOLDERS.length === 0) return '';
+  if (PLACEHOLDERS.length === 1) return PLACEHOLDERS[0]!;
+  let next = PLACEHOLDERS[Math.floor(Math.random() * PLACEHOLDERS.length)]!;
+  if (avoid && PLACEHOLDERS.length > 1) {
+    let tries = 0;
+    while (next === avoid && tries < 4) {
+      next = PLACEHOLDERS[Math.floor(Math.random() * PLACEHOLDERS.length)]!;
+      tries += 1;
+    }
+  }
+  return next;
+}
 
 function AgentRunPanel({ run }: { run?: ApiAgentRun }) {
   if (!run) return null;
@@ -108,8 +154,30 @@ function LiveStatusBadge({
   );
 }
 
-function CitationList({ citations }: { citations?: ApiCitation[] }) {
+function extractUsedCitationIndices(content: string, maxIndex: number) {
+  const used = new Set<number>();
+  const re = /\[(\d+)\]/g;
+  for (const match of content.matchAll(re)) {
+    const n = Number.parseInt(match[1] || '', 10);
+    if (!Number.isFinite(n)) continue;
+    if (n < 1 || n > maxIndex) continue;
+    used.add(n);
+  }
+  return Array.from(used).sort((a, b) => a - b);
+}
+
+function CitationList({ citations, content }: { citations?: ApiCitation[]; content?: string }) {
   if (!citations || citations.length === 0) return null;
+
+  const used = content ? extractUsedCitationIndices(content, citations.length) : [];
+  const [showAll, setShowAll] = useState(false);
+  const effectiveShowAll = used.length === 0 ? true : showAll;
+
+  const displayed = effectiveShowAll
+    ? citations.map((citation, index) => ({ citation, index: index + 1 }))
+    : used.map((index) => ({ citation: citations[index - 1], index }));
+
+  const usedCount = used.length > 0 ? used.length : citations.length;
 
   return (
     <details className="group mb-2 rounded-xl border border-border/50 bg-muted/20 px-3 py-2 text-sm">
@@ -117,14 +185,29 @@ function CitationList({ citations }: { citations?: ApiCitation[] }) {
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Sources</span>
-            <span className="text-[11px] text-muted-foreground/80">· {citations.length}</span>
+            <span className="text-[11px] text-muted-foreground/80">· {usedCount}/{citations.length}</span>
           </div>
           <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform duration-150 group-open:rotate-180" />
         </div>
       </summary>
 
       <div className="mt-2 flex flex-col gap-1.5">
-        {citations.map((citation, index) => (
+        <div className="flex items-center justify-between gap-2 pb-1">
+          <p className="text-[11px] text-muted-foreground">
+            {used.length === 0 ? '本轮未在正文标注引用，展示全部来源。' : (effectiveShowAll ? '展示全部来源。' : '仅展示已引用来源。')}
+          </p>
+          {used.length > 0 && (
+            <button
+              type="button"
+              className="rounded-md border border-border/50 bg-background/50 px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
+              onClick={() => setShowAll((prev) => !prev)}
+            >
+              {effectiveShowAll ? 'Show used only' : 'Show all'}
+            </button>
+          )}
+        </div>
+
+        {displayed.map(({ citation, index }) => (
           <a
             key={`${citation.url}-${index}`}
             href={citation.url}
@@ -133,7 +216,7 @@ function CitationList({ citations }: { citations?: ApiCitation[] }) {
             className="rounded-md border border-border/40 bg-background/70 px-2 py-1.5 text-xs transition-colors hover:bg-background"
           >
             <div className="flex items-baseline gap-2">
-              <span className="text-[10px] font-medium text-muted-foreground">[{index + 1}]</span>
+              <span className="text-[10px] font-medium text-muted-foreground">[{index}]</span>
               <div className="min-w-0 flex-1 font-medium text-foreground">{citation.title}</div>
             </div>
             <div className="truncate text-muted-foreground">{citation.url}</div>
@@ -229,16 +312,17 @@ function MessageBubble({
               route={msg.liveRoute}
               label={msg.liveLabel}
             />
-            <CitationList citations={msg.citations} />
+            <CitationList citations={msg.citations} content={msg.content} />
             {hasAssistantText ? (
               isStreaming ? (
                 <StreamingMarkdownMessage
                   content={msg.content}
                   tailLength={streamTailLength}
                   pulseKey={msg.streamPulseKey ?? 0}
+                  citations={msg.citations}
                 />
               ) : (
-                <MarkdownMessage content={msg.content} />
+                <MarkdownMessage content={msg.content} citations={msg.citations} />
               )
             ) : isStreaming ? (
               <TypingIndicator className="ml-1" />
@@ -302,6 +386,7 @@ export function ChatArea() {
   const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
   const [editingContent, setEditingContent] = useState('');
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  const [placeholder, setPlaceholder] = useState(() => pickPlaceholder());
   const viewportRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const streamAbortRef = useRef<AbortController | null>(null);
@@ -321,6 +406,12 @@ export function ChatArea() {
   useEffect(() => {
     setStreamingAssistantId(null);
   }, [currentConversation?.id]);
+
+  useEffect(() => {
+    if (!input.trim()) {
+      setPlaceholder((prev) => pickPlaceholder(prev));
+    }
+  }, [currentConversation?.id, input]);
 
   useEffect(() => {
     return () => {
@@ -392,6 +483,12 @@ export function ChatArea() {
       }
     }
     queueMicrotask(() => inputRef.current?.focus());
+  };
+
+  const handleInputFocus = () => {
+    if (!input.trim()) {
+      setPlaceholder((prev) => pickPlaceholder(prev));
+    }
   };
 
   const handleSend = async () => {
@@ -1035,7 +1132,7 @@ export function ChatArea() {
           value={input}
           onChange={setInput}
           onKeyDown={handleKeyDown}
-          placeholder={composerMode === 'agent' ? 'Describe a task…' : 'Type a message… (Enter to send, Shift+Enter for newline)'}
+          placeholder={placeholder}
           disabled={isUploading}
           attachments={files}
           onAddAttachments={(list) => setFiles((prev) => [...prev, ...list])}
@@ -1047,6 +1144,7 @@ export function ChatArea() {
           onOpenModelPicker={() => setModelPickerOpen(true)}
           forceWebSearch={forceWebSearch}
           onToggleWebSearch={() => void handleToggleWebSearch()}
+          onInputFocus={handleInputFocus}
           streaming={isStreaming}
           canSubmit={canSend}
           onSubmit={() => void handleSend()}
