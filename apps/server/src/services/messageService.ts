@@ -9,7 +9,7 @@ import { buildAttachmentPayloadFromIds, linkAttachmentsToMessage } from './attac
 import { runAgentWithConfig, type AgentEvent } from './agentService';
 import { getSettingValues } from './settingsService';
 import { buildLiveContext, toStoredLiveMetadata, type LiveContextResult } from './liveCapabilities';
-import { TAVILY_API_KEY_SETTING, type SearchCitation } from './searchService';
+import { TAVILY_API_KEY_SETTING, TAVILY_ENABLED_SETTING, type SearchCitation } from './searchService';
 import { classifyLiveRouteWithModel } from './liveRouteClassifier';
 
 const GLOBAL_SYSTEM_PROMPT_KEY = 'chat.systemPrompt';
@@ -329,7 +329,7 @@ export async function sendMessage(userId: string, input: SendMessageInput) {
     .where(eq(conversations.id, input.conversationId));
 
   const resolvedChannel = await getResolvedChannelForConversation(userId, conversation);
-  const settings = await getSettingValues(userId, [TAVILY_API_KEY_SETTING]);
+  const settings = await getSettingValues(userId, [TAVILY_API_KEY_SETTING, TAVILY_ENABLED_SETTING]);
   const classifier = resolvedChannel
     ? (prompt: string) => classifyLiveRouteWithModel({
         provider: resolvedChannel.channel.provider,
@@ -467,7 +467,7 @@ export async function streamMessage(userId: string, input: StreamMessageInput): 
       .where(eq(conversations.id, input.conversationId));
 
     const resolvedChannel = await getResolvedChannelForConversation(userId, conversation);
-    const settings = await getSettingValues(userId, [GLOBAL_SYSTEM_PROMPT_KEY, TAVILY_API_KEY_SETTING]);
+    const settings = await getSettingValues(userId, [GLOBAL_SYSTEM_PROMPT_KEY, TAVILY_API_KEY_SETTING, TAVILY_ENABLED_SETTING]);
     const baseSystemPrompt = conversation.systemPrompt || settings[GLOBAL_SYSTEM_PROMPT_KEY] || null;
     const classifier = resolvedChannel
       ? (prompt: string) => classifyLiveRouteWithModel({
@@ -668,7 +668,7 @@ export async function editUserMessage(userId: string, userMessageId: string, new
       m.id === userMessageId ? { ...m, content: newContent.trim() } : m
     );
     const resolvedChannel = await getResolvedChannelForConversation(userId, conversation);
-    const settings = await getSettingValues(userId, [GLOBAL_SYSTEM_PROMPT_KEY, TAVILY_API_KEY_SETTING]);
+    const settings = await getSettingValues(userId, [GLOBAL_SYSTEM_PROMPT_KEY, TAVILY_API_KEY_SETTING, TAVILY_ENABLED_SETTING]);
     const baseSystemPrompt = conversation.systemPrompt || settings[GLOBAL_SYSTEM_PROMPT_KEY] || null;
     const classifier = resolvedChannel
       ? (prompt: string) => classifyLiveRouteWithModel({
@@ -765,7 +765,7 @@ export async function regenerateMessage(userId: string, assistantMessageId: stri
       }
 
       const resolvedChannel = await getResolvedChannelForConversation(userId, conversation);
-      const settings = await getSettingValues(userId, [GLOBAL_SYSTEM_PROMPT_KEY, TAVILY_API_KEY_SETTING]);
+      const settings = await getSettingValues(userId, [GLOBAL_SYSTEM_PROMPT_KEY, TAVILY_API_KEY_SETTING, TAVILY_ENABLED_SETTING]);
       const baseSystemPrompt = conversation.systemPrompt || settings[GLOBAL_SYSTEM_PROMPT_KEY] || null;
       const classifier = resolvedChannel
         ? (prompt: string) => classifyLiveRouteWithModel({
@@ -885,7 +885,7 @@ export async function regenerateMessage(userId: string, assistantMessageId: stri
     const idx = allMsgs.findIndex((m) => m.id === assistantMessageId);
     const contextMsgs = idx > 0 ? allMsgs.slice(0, idx) : allMsgs;
     const resolvedChannel = await getResolvedChannelForConversation(userId, conversation);
-    const settings = await getSettingValues(userId, [GLOBAL_SYSTEM_PROMPT_KEY, TAVILY_API_KEY_SETTING]);
+    const settings = await getSettingValues(userId, [GLOBAL_SYSTEM_PROMPT_KEY, TAVILY_API_KEY_SETTING, TAVILY_ENABLED_SETTING]);
     const baseSystemPrompt = conversation.systemPrompt || settings[GLOBAL_SYSTEM_PROMPT_KEY] || null;
     const lastUserMessage = [...contextMsgs].reverse().find((message) => message.role === 'user');
     const classifier = resolvedChannel

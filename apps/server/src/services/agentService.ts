@@ -8,7 +8,7 @@ import { loadEnabledMcpServersForUser } from './mcpLoader';
 import { buildAttachmentPayloadFromIds } from './attachmentService';
 import { getSettingValues } from './settingsService';
 import { buildLiveContext } from './liveCapabilities';
-import { TAVILY_API_KEY_SETTING } from './searchService';
+import { TAVILY_API_KEY_SETTING, TAVILY_ENABLED_SETTING } from './searchService';
 import { classifyLiveRouteWithModel } from './liveRouteClassifier';
 
 async function saveAgentEvent(sessionId: string, event: AgentEvent): Promise<void> {
@@ -305,7 +305,7 @@ export async function* runAgent(
       .where(and(eq(agentSessions.id, sessionId), eq(agentSessions.userId, userId)));
   }
 
-  const values = await getSettingValues(userId, ['chat.systemPrompt', TAVILY_API_KEY_SETTING]);
+  const values = await getSettingValues(userId, ['chat.systemPrompt', TAVILY_API_KEY_SETTING, TAVILY_ENABLED_SETTING]);
   const globalSystemPrompt = values['chat.systemPrompt'] || undefined;
   const resolvedChannel = await getResolvedChannelForConversation(userId, {
     channelId: (session as any).channelId || null,
