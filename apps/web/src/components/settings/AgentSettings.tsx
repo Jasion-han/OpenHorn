@@ -210,7 +210,9 @@ export function AgentSettings() {
                 <p className="text-sm font-medium">用户级 Tavily API Key</p>
                 <p className="text-xs text-muted-foreground">留空则回落到部署默认 Key；填写后仅当前账号生效。</p>
               </div>
-              {savedTavilyApiKey ? (
+              {!tavilyEnabled ? (
+                <Badge variant="outline">已关闭</Badge>
+              ) : savedTavilyApiKey ? (
                 <Badge variant="secondary">用户覆盖中</Badge>
               ) : (
                 <Badge variant="outline">使用服务端默认</Badge>
