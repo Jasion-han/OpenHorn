@@ -11,6 +11,9 @@ dist
 .vercel
 .netlify
 
+# Local design/plan notes (keep out of git)
+docs/plans/
+
 # Runtime data (db, uploads, etc.)
 data/
 apps/server/data/
