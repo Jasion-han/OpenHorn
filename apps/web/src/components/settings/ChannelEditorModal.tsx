@@ -1,11 +1,18 @@
 'use client';
 
-import { ActionIcon, Badge, Button, Checkbox, Group, Modal, Paper, PasswordInput, ScrollArea, Select, SimpleGrid, Stack, Text, TextInput, Tooltip, UnstyledButton } from '@mantine/core';
-import { useMediaQuery } from '@mantine/hooks';
 import { useEffect, useMemo, useState } from 'react';
-import { IconPlus, IconSearch, IconWand } from '@tabler/icons-react';
+import { Plus, Search, Wand2 } from 'lucide-react';
 import { api, type ApiChannel } from '../../lib/api';
 import { notifyError, notifySuccess } from '../../lib/notify';
+import { Button } from '../ui/button';
+import { Input } from '../ui/input';
+import { Label } from '../ui/label';
+import { Badge } from '../ui/badge';
+import { Checkbox } from '../ui/checkbox';
+import { ScrollArea } from '../ui/scroll-area';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog';
+import { cn } from '@/lib/utils';
 
 const API_KEY_MASK = '********';
 const NEW_CHANNEL_KEY = '__new__';
@@ -63,8 +70,6 @@ function readLastBaseUrl(): string {
 
 export function ChannelEditorModal(props: ChannelEditorModalProps) {
   const { opened, channels, onClose, onSaved, applyFetchModelsOutcome } = props;
-
-  const isMobile = useMediaQuery('(max-width: 48em)');
 
   const [query, setQuery] = useState('');
   const [activeKey, setActiveKey] = useState<string>(NEW_CHANNEL_KEY);
@@ -192,9 +197,6 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeKey, opened]);
 
-  const title = '渠道管理';
-  const submitLabel = isCreate ? '创建并同步模型' : '保存并同步模型';
-
   const canSubmitCreate = normalizeCompareText(name) && normalizeCompareText(apiKey) && apiKey.trim() !== API_KEY_MASK;
   const canSubmitEdit = Boolean(activeChannel?.id) && normalizeCompareText(name);
 
@@ -282,260 +284,143 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
   };
 
   return (
-    <Modal
-      opened={opened}
-      onClose={onClose}
-      title={title}
-      size="xl"
-      radius="md"
-      overlayProps={{ blur: 6, opacity: 0.55 }}
-    >
-      <div
-        style={{
-          display: 'flex',
-          flexDirection: isMobile ? 'column' : 'row',
-          gap: 12,
-          height: 'clamp(420px, 72vh, 760px)',
-        }}
-      >
-        {!isMobile && (
-          <Paper
-            withBorder
-            radius="md"
-            p="sm"
-            style={{
-              flex: '0 0 35%',
-              minWidth: 260,
-              display: 'flex',
-              flexDirection: 'column',
-              minHeight: 0,
-            }}
-          >
-            <Group justify="space-between" align="center" wrap="nowrap">
-              <Text fw={600} style={{ whiteSpace: 'nowrap' }}>渠道</Text>
-              <Button
-                size="xs"
-                leftSection={<IconPlus size={14} />}
-                onClick={openCreate}
-                variant="light"
-              >
-                新建
+    <Dialog open={opened} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-4xl h-[min(72vh,760px)] flex flex-col p-0">
+        <DialogHeader className="px-4 pt-4 pb-0">
+          <DialogTitle>渠道管理</DialogTitle>
+        </DialogHeader>
+        <div className="flex flex-1 min-h-0 gap-3 p-4">
+          {/* Left panel: channel list */}
+          <div className="flex w-[35%] min-w-[220px] flex-col gap-2 rounded-lg border p-3">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-semibold">渠道</span>
+              <Button size="sm" variant="outline" onClick={openCreate}>
+                <Plus size={14} /> 新建
               </Button>
-            </Group>
-
-            <TextInput
-              mt="sm"
-              placeholder="搜索渠道..."
-              leftSection={<IconSearch size={16} />}
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-
-            <ScrollArea mt="sm" style={{ flex: 1 }} type="auto">
-              <Stack gap={6} pr="sm">
+            </div>
+            <div className="relative">
+              <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <Input placeholder="搜索渠道..." value={query} onChange={(e) => setQuery(e.target.value)} className="pl-8" />
+            </div>
+            <ScrollArea className="flex-1">
+              <div className="flex flex-col gap-1 pr-2">
                 {filteredChannels.map((c) => {
                   const selected = c.id === activeKey;
                   return (
-                    <UnstyledButton
+                    <button
                       key={c.id}
                       onClick={() => openEdit(c.id)}
-                      style={{
-                        width: '100%',
-                        textAlign: 'left',
-                      }}
+                      className={cn(
+                        'w-full rounded-md border px-3 py-2 text-left transition-colors',
+                        selected ? 'bg-accent border-primary' : 'hover:bg-accent/50',
+                        !c.enabled && 'opacity-70'
+                      )}
                     >
-                      <Paper
-                        withBorder
-                        radius="md"
-                        px="sm"
-                        py={8}
-                        style={{
-                          background: selected ? 'var(--mantine-color-blue-light)' : undefined,
-                          opacity: c.enabled ? 1 : 0.72,
-                          cursor: 'pointer',
-                        }}
-                      >
-                        <Group justify="space-between" wrap="nowrap" gap="xs">
-                          <div style={{ minWidth: 0 }}>
-                            <Text fw={600} size="sm" lineClamp={1}>
-                              {c.name || '未命名渠道'}
-                            </Text>
-                            <Group gap={6} wrap="nowrap" mt={2}>
-                              <Badge size="xs" variant="light" color="gray">
-                                {c.provider}
-                              </Badge>
-                              {c.isDefault && (
-                                <Badge size="xs" variant="outline" color="blue">
-                                  默认
-                                </Badge>
-                              )}
-                              {!c.enabled && (
-                                <Badge size="xs" color="gray">
-                                  已禁用
-                                </Badge>
-                              )}
-                            </Group>
-                          </div>
-                          <Text size="xs" c="dimmed" style={{ whiteSpace: 'nowrap' }}>
-                            {c.models.length} 模型
-                          </Text>
-                        </Group>
-                      </Paper>
-                    </UnstyledButton>
+                      <p className="text-sm font-semibold truncate">{c.name || '未命名渠道'}</p>
+                      <div className="flex items-center gap-1 mt-0.5">
+                        <Badge variant="secondary" className="text-xs px-1 py-0">{c.provider}</Badge>
+                        {c.isDefault && <Badge variant="outline" className="text-xs px-1 py-0">默认</Badge>}
+                        {!c.enabled && <Badge variant="secondary" className="text-xs px-1 py-0">已禁用</Badge>}
+                      </div>
+                    </button>
                   );
                 })}
-
                 {filteredChannels.length === 0 && (
-                  <Text size="sm" c="dimmed" ta="center" py="md">
-                    没有匹配的渠道
-                  </Text>
+                  <p className="text-center text-sm text-muted-foreground py-4">没有匹配的渠道</p>
                 )}
-              </Stack>
+              </div>
             </ScrollArea>
-          </Paper>
-        )}
+          </div>
 
-        <Paper
-          withBorder
-          radius="md"
-          p="sm"
-          style={{
-            flex: 1,
-            minHeight: 0,
-            display: 'flex',
-            flexDirection: 'column',
-          }}
-        >
-          <Stack gap={10} style={{ flex: 1, minHeight: 0 }}>
-            {isMobile && (
-              <Group justify="space-between" wrap="nowrap" gap="sm">
-                <Select
-                  style={{ flex: 1 }}
-                  label="渠道"
-                  value={isCreate ? null : activeKey}
-                  placeholder={isCreate ? '新建草稿' : '选择一个渠道...'}
-                  onChange={(value) => {
-                    if (!value) return;
-                    openEdit(value);
-                  }}
-                  data={sortedChannels.map((c) => ({
-                    value: c.id,
-                    label: `${c.name}${c.isDefault ? ' · 默认' : ''}${c.enabled ? '' : ' · 已禁用'}`,
-                  }))}
-                  searchable
-                  nothingFoundMessage="未找到渠道"
-                />
-                <Button
-                  mt={22}
-                  size="xs"
-                  leftSection={<IconPlus size={14} />}
-                  onClick={openCreate}
-                  variant="light"
-                >
-                  新建
-                </Button>
-              </Group>
-            )}
-
-            <Group justify="space-between" align="flex-start" wrap="nowrap">
-              <div style={{ minWidth: 0 }}>
-                <Text fw={600} lineClamp={1}>
-                  {isCreate ? '新建渠道' : (activeChannel?.name || '编辑渠道')}
-                </Text>
-                <Text size="xs" c="dimmed" style={{ overflowWrap: 'anywhere' }}>
-                  Provider 切换不会自动修改 Base URL。保存后会自动同步模型列表。
-                </Text>
+          {/* Right panel: form */}
+          <div className="flex flex-1 min-w-0 flex-col rounded-lg border p-3">
+            <div className="flex items-start justify-between mb-3">
+              <div className="min-w-0">
+                <p className="font-semibold truncate">{isCreate ? '新建渠道' : (activeChannel?.name || '编辑渠道')}</p>
+                <p className="text-xs text-muted-foreground">Provider 切换不会自动修改 Base URL。保存后会自动同步模型列表。</p>
               </div>
               {!isCreate && (
-                <Group gap={6} wrap="nowrap">
-                  {activeChannel?.isDefault && (
-                    <Badge variant="outline" color="blue">
-                      默认
-                    </Badge>
-                  )}
-                  {activeChannel && !activeChannel.enabled && (
-                    <Badge color="gray">
-                      已禁用
-                    </Badge>
-                  )}
-                </Group>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {activeChannel?.isDefault && <Badge variant="outline">默认</Badge>}
+                  {activeChannel && !activeChannel.enabled && <Badge variant="secondary">已禁用</Badge>}
+                </div>
               )}
-            </Group>
+            </div>
 
-            <ScrollArea style={{ flex: 1 }} type="auto">
-              <Stack gap="sm" pr="sm">
-                <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm">
-                  <TextInput
-                    label="名称"
-                    value={name}
-                    onChange={(event) => setName(event.target.value)}
-                    required
-                    placeholder="例如：我的 Claude 中转"
-                  />
+            <ScrollArea className="flex-1">
+              <div className="flex flex-col gap-3 pr-2">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="flex flex-col gap-1.5">
+                    <Label>名称 *</Label>
+                    <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="例如：我的 Claude 中转" />
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <Label>厂商</Label>
+                    <Select value={provider} onValueChange={(v) => setProviderAndRemember(v as ProviderKey)}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {providerOptions.map((opt) => <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
 
-                  <Select
-                    label="厂商"
-                    value={provider}
-                    onChange={(value) => setProviderAndRemember((value || 'openai') as ProviderKey)}
-                    data={providerOptions}
-                  />
-                </SimpleGrid>
-
-                <Group align="flex-end" wrap="nowrap">
-                  <TextInput
-                    label="Base URL"
-                    value={baseUrl}
-                    onChange={(event) => setBaseUrlAndRemember(event.target.value)}
-                    style={{ flex: 1 }}
-                    placeholder="例如：https://api.anthropic.com"
-                    styles={{
-                      input: { overflowWrap: 'anywhere' as any },
-                    }}
-                  />
-                  <Tooltip label="填入该厂商默认 Base URL" withArrow>
-                    <ActionIcon
-                      variant="light"
-                      size={34}
+                <div className="flex flex-col gap-1.5">
+                  <Label>Base URL</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      value={baseUrl}
+                      onChange={(e) => setBaseUrlAndRemember(e.target.value)}
+                      placeholder="例如：https://api.anthropic.com"
+                      className="flex-1"
+                    />
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      title="填入该厂商默认 Base URL"
                       onClick={() => setBaseUrlAndRemember(PROVIDERS[provider].defaultBaseUrl)}
-                      aria-label="填入默认 Base URL"
                     >
-                      <IconWand size={16} />
-                    </ActionIcon>
-                  </Tooltip>
-                </Group>
+                      <Wand2 size={16} />
+                    </Button>
+                  </div>
+                </div>
 
-                <Checkbox
-                  label="启用该渠道"
-                  checked={enabled}
-                  onChange={(event) => setEnabled(event.currentTarget.checked)}
-                />
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="channel-enabled"
+                    checked={enabled}
+                    onCheckedChange={(checked) => setEnabled(Boolean(checked))}
+                  />
+                  <Label htmlFor="channel-enabled">启用该渠道</Label>
+                </div>
 
-                <PasswordInput
-                  label="API Key"
-                  placeholder={isCreate ? '输入 API Key' : '保持为 ******** 或留空表示不修改'}
-                  value={apiKey}
-                  onChange={(event) => setApiKey(event.target.value)}
-                  required={isCreate}
-                  description={!isCreate ? '出于安全原因，Web 端不会展示已保存的明文 Key。输入新 Key 才会更新。' : undefined}
-                />
-              </Stack>
+                <div className="flex flex-col gap-1.5">
+                  <Label>API Key {isCreate && '*'}</Label>
+                  <Input
+                    type="password"
+                    placeholder={isCreate ? '输入 API Key' : '保持为 ******** 或留空表示不修改'}
+                    value={apiKey}
+                    onChange={(e) => setApiKey(e.target.value)}
+                  />
+                  {!isCreate && (
+                    <p className="text-xs text-muted-foreground">出于安全原因，Web 端不会展示已保存的明文 Key。输入新 Key 才会更新。</p>
+                  )}
+                </div>
+              </div>
             </ScrollArea>
 
-            <Group justify="flex-end" wrap="nowrap">
-              <Button variant="subtle" onClick={onClose}>
-                取消
-              </Button>
+            <div className="flex justify-end gap-2 mt-3">
+              <Button variant="ghost" onClick={onClose}>取消</Button>
               <Button
                 onClick={() => void handleSubmit()}
-                loading={saving}
-                disabled={isCreate ? !canSubmitCreate : !canSubmitEdit}
+                disabled={saving || (isCreate ? !canSubmitCreate : !canSubmitEdit)}
               >
-                {submitLabel}
+                {saving ? '处理中...' : (isCreate ? '创建并同步模型' : '保存并同步模型')}
               </Button>
-            </Group>
-          </Stack>
-        </Paper>
-      </div>
-    </Modal>
+            </div>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }

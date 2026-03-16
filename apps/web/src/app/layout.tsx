@@ -1,16 +1,30 @@
 import type { Metadata } from 'next';
-import { ColorSchemeScript, MantineProvider } from '@mantine/core';
-import '@mantine/core/styles.css';
-import { ModalsProvider } from '@mantine/modals';
-import { Notifications } from '@mantine/notifications';
-import '@mantine/notifications/styles.css';
-
-import { theme } from '../theme';
+import Script from 'next/script';
+import 'ui/styles/tokens.css';
+import './globals.css';
+import { Toaster } from '../components/ui/sonner';
+import { THEME_MODE_STORAGE_KEY } from '@/components/theme/theme';
+import { ThemeListener } from '@/components/theme/ThemeListener';
+import { AppProviders } from '@/components/providers/AppProviders';
 
 export const metadata: Metadata = {
   title: 'OpenHorn',
   description: 'AI Assistant',
 };
+
+const themeScript = `
+(() => {
+  try {
+    const key = ${JSON.stringify(THEME_MODE_STORAGE_KEY)};
+    const mode = localStorage.getItem(key) || 'light';
+    const systemDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const useDark = mode === 'dark' || (mode === 'system' && systemDark);
+    const root = document.documentElement;
+    if (useDark) root.classList.add('dark');
+    else root.classList.remove('dark');
+  } catch {}
+})();
+`;
 
 export default function RootLayout({
   children,
@@ -18,17 +32,16 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
-      <head>
-        <ColorSchemeScript />
-      </head>
-      <body>
-        <MantineProvider theme={theme}>
-          <ModalsProvider>
-            <Notifications position="top-right" />
-            {children}
-          </ModalsProvider>
-        </MantineProvider>
+    <html lang="en" suppressHydrationWarning>
+      <body suppressHydrationWarning>
+        <Script id="theme-init" strategy="beforeInteractive">
+          {themeScript}
+        </Script>
+        <AppProviders>
+          {children}
+          <Toaster />
+          <ThemeListener />
+        </AppProviders>
       </body>
     </html>
   );

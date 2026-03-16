@@ -44,22 +44,21 @@
 }
 
 .root pre {
-  margin: 0.18em 0;
-  padding: 0.5em;
-  border-radius: var(--mantine-radius-md);
-  background: var(--mantine-color-gray-1);
+  margin: 0;
+  padding: 0;
+  background: transparent;
   overflow-x: auto;
 }
 
 .root code {
-  font-family: var(--mantine-font-family-monospace);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 0.95em;
   overflow-wrap: anywhere;
   word-break: break-word;
 }
 
 .root :not(pre) > code {
-  background: var(--mantine-color-gray-1);
+  background: hsl(var(--muted));
   padding: 0.1em 0.25em;
   border-radius: 4px;
 }
@@ -67,12 +66,163 @@
 .root blockquote {
   margin: 0.18em 0;
   padding-left: 0.75em;
-  border-left: 3px solid var(--mantine-color-gray-4);
-  color: var(--mantine-color-gray-7);
+  border-left: 3px solid hsl(var(--border));
+  color: hsl(var(--muted-foreground));
 }
 
 .root hr {
   margin: 0.22em 0;
   border: 0;
-  border-top: 1px solid var(--mantine-color-gray-3);
+  border-top: 1px solid hsl(var(--border));
+}
+
+/* Code block with header bar */
+.codeBlock {
+  margin: 0.4em 0;
+  border-radius: 0.5rem;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--muted));
+  overflow: hidden;
+}
+
+.codeHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.3em 0.75em;
+  background: hsl(var(--muted));
+  border-bottom: 1px solid hsl(var(--border));
+  min-height: 2em;
+}
+
+.codeLang {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.75em;
+  color: hsl(var(--muted-foreground));
+  text-transform: lowercase;
+}
+
+.copyButton {
+  display: flex;
+  align-items: center;
+  gap: 0.25em;
+  padding: 0.15em 0.5em;
+  border: 1px solid hsl(var(--border));
+  border-radius: 0.25rem;
+  background: transparent;
+  color: hsl(var(--muted-foreground));
+  font-size: 0.75em;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  font-family: inherit;
+}
+
+.copyButton:hover {
+  background: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
+}
+
+/* Table */
+.root table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.5em 0;
+  font-size: 0.9em;
+  overflow-x: auto;
+  display: block;
+}
+
+.root thead tr {
+  background: hsl(var(--muted));
+}
+
+.root th,
+.root td {
+  padding: 0.45em 0.75em;
+  border: 1px solid hsl(var(--border));
+  text-align: left;
+  white-space: nowrap;
+}
+
+.root th {
+  font-weight: 600;
+  color: hsl(var(--foreground));
+}
+
+.root tbody tr:nth-child(even) {
+  background: hsl(var(--muted) / 0.5);
+}
+
+.root tbody tr:hover {
+  background: hsl(var(--accent));
+}
+
+.streamTail {
+  position: relative;
+  display: inline;
+  color: inherit;
+  font-weight: inherit;
+  background-image: linear-gradient(
+    102deg,
+    currentColor 0%,
+    currentColor 34%,
+    color-mix(in srgb, currentColor 62%, white 38%) 44%,
+    rgba(255, 255, 255, 0.98) 50%,
+    color-mix(in srgb, currentColor 74%, white 26%) 57%,
+    currentColor 68%,
+    currentColor 100%
+  );
+  background-size: 220% 100%;
+  background-position: 135% 0;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  text-shadow:
+    0 0 0 rgba(255, 255, 255, 0.12),
+    0 0 8px rgba(255, 255, 255, 0.12);
+  animation: oh-stream-tail-glow 860ms linear infinite;
+}
+
+:global(.dark) .streamTail {
+  background-image: linear-gradient(
+    102deg,
+    currentColor 0%,
+    currentColor 34%,
+    rgba(226, 232, 240, 0.82) 44%,
+    rgba(255, 255, 255, 1) 50%,
+    rgba(226, 232, 240, 0.92) 57%,
+    currentColor 68%,
+    currentColor 100%
+  );
+  text-shadow:
+    0 0 0 rgba(255, 255, 255, 0.14),
+    0 0 10px rgba(255, 255, 255, 0.18);
+}
+
+@keyframes oh-stream-tail-glow {
+  0% {
+    background-position: 135% 0;
+    filter: brightness(1.1);
+  }
+
+  55% {
+    background-position: 42% 0;
+    filter: brightness(1.04);
+  }
+
+  100% {
+    background-position: -32% 0;
+    filter: brightness(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .streamTail {
+    animation: none;
+    background-image: none;
+    -webkit-text-fill-color: currentColor;
+    color: inherit;
+    text-shadow: none;
+    filter: none;
+  }
 }

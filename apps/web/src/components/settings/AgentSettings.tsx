@@ -1,28 +1,19 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import {
-  ActionIcon,
-  Button,
-  Card,
-  Group,
-  Modal,
-  Select,
-  Stack,
-  Text,
-  TextInput,
-  Textarea,
-  Badge,
-  Switch,
-} from '@mantine/core';
-import { IconPlus, IconTrash } from '@tabler/icons-react';
+import { Plus, Trash2 } from 'lucide-react';
 import { api, type ApiChannel } from '../../lib/api';
-import { useAgentStore } from '../../stores/agentStore';
 import { getGlobalDefaultChannel } from '../../lib/default-channel';
 import { notifyError, notifySuccess } from '../../lib/notify';
-import { DEFAULT_WORKSPACE_SETTING_KEY, pickDefaultWorkspaceId } from '../../lib/agent-default-workspace';
 import { BACKEND_UP_EVENT } from '../../stores/backendStatusStore';
-import { buildSettingsLink } from '@/lib/settings-link';
+import { Button } from '../ui/button';
+import { Input } from '../ui/input';
+import { Textarea } from '../ui/textarea';
+import { Badge } from '../ui/badge';
+import { Switch } from '../ui/switch';
+import { Label } from '../ui/label';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../ui/dialog';
+import { SettingsCard, SettingsSection } from 'ui';
 
 type MCPServer = {
   id: string;
@@ -32,26 +23,10 @@ type MCPServer = {
   isEnabled: boolean;
 };
 
-type Workspace = {
-  id: string;
-  name: string;
-  slug: string;
-  description?: string;
-  cwd?: string;
-};
-
 export function AgentSettings() {
-  const { selectedWorkspaceId, setSelectedWorkspaceId } = useAgentStore();
   const [channels, setChannels] = useState<ApiChannel[]>([]);
-  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [mcpServers, setMcpServers] = useState<MCPServer[]>([]);
   const [loading, setLoading] = useState(false);
-
-  const [workspaceModalOpen, setWorkspaceModalOpen] = useState(false);
-  const [workspaceName, setWorkspaceName] = useState('');
-  const [workspaceSlug, setWorkspaceSlug] = useState('');
-  const [workspaceDesc, setWorkspaceDesc] = useState('');
-  const [workspaceCwd, setWorkspaceCwd] = useState('');
 
   const [mcpModalOpen, setMcpModalOpen] = useState(false);
   const [mcpName, setMcpName] = useState('');
@@ -78,115 +53,15 @@ export function AgentSettings() {
   const loadAll = async () => {
     setLoading(true);
     try {
-      const [{ channels }, { workspaces }, { servers }, { settings }] = await Promise.all([
+      const [{ channels }, { servers }] = await Promise.all([
         api.channels.list(),
-        api.workspaces.list(),
         api.mcp.listServers(),
-        api.settings.get([DEFAULT_WORKSPACE_SETTING_KEY]),
       ]);
       setChannels(channels);
-      setWorkspaces(workspaces as Workspace[]);
       setMcpServers(servers as MCPServer[]);
-
-      const typedWorkspaces = workspaces as Workspace[];
-      const picked = pickDefaultWorkspaceId(
-        typedWorkspaces as any[],
-        settings?.[DEFAULT_WORKSPACE_SETTING_KEY] || null
-      );
-      if (picked) {
-        setSelectedWorkspaceId(picked);
-        if (picked !== (settings?.[DEFAULT_WORKSPACE_SETTING_KEY] || null)) {
-          try {
-            await api.settings.set(DEFAULT_WORKSPACE_SETTING_KEY, picked);
-          } catch {
-            // ignore
-          }
-        }
-      }
     } catch (error) {
       console.error('Failed to load agent settings:', error);
       notifyError('加载失败', error instanceof Error ? error.message : '无法加载 Agent 设置');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const workspaceOptions = useMemo(
-    () => workspaces.map((ws) => ({ value: ws.id, label: ws.name })),
-    [workspaces]
-  );
-
-  const selectedWorkspace = workspaces.find((ws) => ws.id === selectedWorkspaceId) || null;
-
-  const handleSelectWorkspace = async (value: string | null) => {
-    const nextId = value || null;
-    const prev = selectedWorkspaceId;
-    setSelectedWorkspaceId(nextId);
-    try {
-      await api.settings.set(DEFAULT_WORKSPACE_SETTING_KEY, nextId);
-      notifySuccess('已保存', '默认 Workspace 已更新');
-    } catch (error) {
-      setSelectedWorkspaceId(prev);
-      notifyError('保存失败', error instanceof Error ? error.message : '无法保存默认 Workspace');
-    }
-  };
-
-  const handleCreateWorkspace = async () => {
-    if (!workspaceName.trim()) return;
-    setLoading(true);
-    try {
-      await api.workspaces.create({
-        name: workspaceName.trim(),
-        slug: workspaceSlug.trim() || undefined,
-        description: workspaceDesc.trim() || undefined,
-        cwd: workspaceCwd.trim() || undefined,
-      });
-      setWorkspaceModalOpen(false);
-      setWorkspaceName('');
-      setWorkspaceSlug('');
-      setWorkspaceDesc('');
-      setWorkspaceCwd('');
-      await loadAll();
-    } catch (error) {
-      notifyError('创建失败', error instanceof Error ? error.message : 'Failed to create workspace');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleDeleteWorkspace = async (id: string) => {
-    setLoading(true);
-    try {
-      await api.workspaces.delete(id);
-      if (selectedWorkspaceId === id) {
-        setSelectedWorkspaceId(null);
-        try {
-          await api.settings.set(DEFAULT_WORKSPACE_SETTING_KEY, null);
-        } catch {
-          // ignore
-        }
-      }
-      await loadAll();
-    } catch (error) {
-      notifyError('删除失败', error instanceof Error ? error.message : 'Failed to delete workspace');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleUpdateWorkspace = async () => {
-    if (!selectedWorkspace) return;
-    setLoading(true);
-    try {
-      await api.workspaces.update(selectedWorkspace.id, {
-        name: selectedWorkspace.name,
-        description: selectedWorkspace.description,
-        cwd: selectedWorkspace.cwd,
-      });
-      await loadAll();
-      notifySuccess('已保存', 'Workspace 已更新');
-    } catch (error) {
-      notifyError('保存失败', error instanceof Error ? error.message : 'Failed to update workspace');
     } finally {
       setLoading(false);
     }
@@ -197,7 +72,7 @@ export function AgentSettings() {
     let parsedConfig: Record<string, unknown>;
     try {
       parsedConfig = JSON.parse(mcpConfig);
-    } catch (error) {
+    } catch {
       notifyError('配置错误', 'MCP config 必须是合法 JSON');
       return;
     }
@@ -251,202 +126,90 @@ export function AgentSettings() {
   };
 
   return (
-    <Stack gap="md">
-      <Card withBorder>
-        <Group justify="space-between">
-          <div>
-            <Text fw={600}>Default Agent Channel</Text>
-            <Text size="sm" c="dimmed">
-              Agent uses the global default channel and model configured in Channels.
-            </Text>
-          </div>
-          {defaultChannel ? (
-            <Badge variant="light">{defaultChannel.label}</Badge>
-          ) : (
-            <Button component="a" href={buildSettingsLink({ tab: 'channels', focus: 'default' })} variant="light" size="xs">
-              Go to Channels
-            </Button>
-          )}
-        </Group>
-      </Card>
-
-      <Card withBorder>
-        <Group justify="space-between" mb="sm">
-          <div>
-            <Text fw={600}>Workspaces</Text>
-            <Text size="sm" c="dimmed">Select a workspace to provide Agent cwd.</Text>
-          </div>
-          <Button leftSection={<IconPlus size={16} />} onClick={() => setWorkspaceModalOpen(true)}>
-            New Workspace
-          </Button>
-        </Group>
-
-        {workspaces.length === 0 ? (
-          <Text c="dimmed">No workspaces yet. Create one to run Agent tasks.</Text>
-        ) : (
-          <Stack gap="sm">
-            <Select
-              data={workspaceOptions}
-              value={selectedWorkspaceId}
-              onChange={(value) => void handleSelectWorkspace(value)}
-              placeholder="Select workspace"
-            />
-
-            {selectedWorkspace && (
-              <Card withBorder>
-                <Stack gap="sm">
-                  <TextInput
-                    label="Name"
-                    value={selectedWorkspace.name}
-                    onChange={(event) => {
-                      const value = event.target.value;
-                      setWorkspaces((prev) =>
-                        prev.map((ws) => (ws.id === selectedWorkspace.id ? { ...ws, name: value } : ws))
-                      );
-                    }}
-                  />
-                  <TextInput
-                    label="CWD"
-                    placeholder="/Users/han/Project/OpenHorn"
-                    value={selectedWorkspace.cwd || ''}
-                    onChange={(event) => {
-                      const value = event.target.value;
-                      setWorkspaces((prev) =>
-                        prev.map((ws) => (ws.id === selectedWorkspace.id ? { ...ws, cwd: value } : ws))
-                      );
-                    }}
-                  />
-                  <TextInput
-                    label="Description"
-                    value={selectedWorkspace.description || ''}
-                    onChange={(event) => {
-                      const value = event.target.value;
-                      setWorkspaces((prev) =>
-                        prev.map((ws) => (ws.id === selectedWorkspace.id ? { ...ws, description: value } : ws))
-                      );
-                    }}
-                  />
-                  <Group justify="space-between">
-                    <Button variant="light" onClick={handleUpdateWorkspace} loading={loading}>
-                      Save Workspace
-                    </Button>
-                    <ActionIcon color="red" onClick={() => handleDeleteWorkspace(selectedWorkspace.id)}>
-                      <IconTrash size={18} />
-                    </ActionIcon>
-                  </Group>
-                </Stack>
-              </Card>
+    <div className="flex flex-col gap-8">
+      <SettingsSection
+        title="默认渠道"
+        description="Agent 使用「渠道」中配置的全局默认渠道与模型。"
+      >
+        <SettingsCard divided={false} className="p-4">
+          <div className="flex items-center justify-between">
+            {defaultChannel ? (
+              <Badge variant="secondary">{defaultChannel.label}</Badge>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                未设置默认渠道，请在左侧切换到「渠道」进行配置。
+              </p>
             )}
-          </Stack>
-        )}
-      </Card>
-
-      <Card withBorder>
-        <Group justify="space-between" mb="sm">
-          <div>
-            <Text fw={600}>MCP Servers</Text>
-            <Text size="sm" c="dimmed">Global MCP server configuration for Agent tools.</Text>
           </div>
-          <Button leftSection={<IconPlus size={16} />} onClick={() => setMcpModalOpen(true)}>
-            Add MCP Server
-          </Button>
-        </Group>
+        </SettingsCard>
+      </SettingsSection>
 
-        {mcpServers.length === 0 ? (
-          <Text c="dimmed">No MCP servers configured.</Text>
-        ) : (
-          <Stack gap="sm">
-            {mcpServers.map((server) => (
-              <Card key={server.id} withBorder>
-                <Group justify="space-between">
+      <SettingsSection
+        title="MCP 服务"
+        description="Agent 工具使用的全局 MCP Server 配置。"
+        action={(
+          <Button size="sm" onClick={() => setMcpModalOpen(true)}>
+            <Plus size={16} /> 添加 MCP
+          </Button>
+        )}
+      >
+        <SettingsCard divided={false} className="p-4">
+          {mcpServers.length === 0 ? (
+            <p className="text-sm text-muted-foreground">暂无 MCP Server 配置。</p>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {mcpServers.map((server) => (
+                <div key={server.id} className="flex items-center justify-between rounded-xl border border-border/50 bg-background/60 p-3">
                   <div>
-                    <Text fw={500}>{server.name}</Text>
-                    <Text size="sm" c="dimmed">{server.type}</Text>
+                    <p className="text-sm font-medium">{server.name}</p>
+                    <p className="text-xs text-muted-foreground">{server.type}</p>
                   </div>
-                  <Group gap="xs">
+                  <div className="flex items-center gap-2">
                     <Switch
                       checked={server.isEnabled}
-                      onChange={() => handleToggleMcp(server)}
+                      onCheckedChange={() => void handleToggleMcp(server)}
                       disabled={mcpBusyId === server.id}
                     />
-                    <ActionIcon
-                      color="red"
-                      onClick={() => handleDeleteMcp(server.id)}
-                      loading={mcpBusyId === server.id}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="text-destructive"
+                      onClick={() => void handleDeleteMcp(server.id)}
+                      disabled={mcpBusyId === server.id}
                     >
-                      <IconTrash size={18} />
-                    </ActionIcon>
-                  </Group>
-                </Group>
-              </Card>
-            ))}
-          </Stack>
-        )}
-      </Card>
+                      <Trash2 size={18} />
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </SettingsCard>
+      </SettingsSection>
 
-      <Modal opened={workspaceModalOpen} onClose={() => setWorkspaceModalOpen(false)} title="New Workspace">
-        <Stack gap="md">
-          <TextInput
-            label="Name"
-            value={workspaceName}
-            onChange={(event) => setWorkspaceName(event.target.value)}
-            required
-          />
-          <TextInput
-            label="Slug (optional)"
-            value={workspaceSlug}
-            onChange={(event) => setWorkspaceSlug(event.target.value)}
-          />
-          <TextInput
-            label="CWD"
-            value={workspaceCwd}
-            onChange={(event) => setWorkspaceCwd(event.target.value)}
-          />
-          <Textarea
-            label="Description"
-            value={workspaceDesc}
-            onChange={(event) => setWorkspaceDesc(event.target.value)}
-          />
-          <Group justify="flex-end">
-            <Button variant="subtle" onClick={() => setWorkspaceModalOpen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={handleCreateWorkspace} loading={loading}>
-              Create
-            </Button>
-          </Group>
-        </Stack>
-      </Modal>
-
-      <Modal opened={mcpModalOpen} onClose={() => setMcpModalOpen(false)} title="Add MCP Server">
-        <Stack gap="md">
-          <TextInput
-            label="Name"
-            value={mcpName}
-            onChange={(event) => setMcpName(event.target.value)}
-            required
-          />
-          <TextInput
-            label="Type"
-            value={mcpType}
-            onChange={(event) => setMcpType(event.target.value)}
-          />
-          <Textarea
-            label="Config (JSON)"
-            value={mcpConfig}
-            onChange={(event) => setMcpConfig(event.target.value)}
-            minRows={6}
-          />
-          <Group justify="flex-end">
-            <Button variant="subtle" onClick={() => setMcpModalOpen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={handleCreateMcp} loading={loading}>
-              Create
-            </Button>
-          </Group>
-        </Stack>
-      </Modal>
-    </Stack>
+      <Dialog open={mcpModalOpen} onOpenChange={(open) => !open && setMcpModalOpen(false)}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>添加 MCP Server</DialogTitle></DialogHeader>
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-1.5">
+              <Label>名称 *</Label>
+              <Input value={mcpName} onChange={(e) => setMcpName(e.target.value)} />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>类型</Label>
+              <Input value={mcpType} onChange={(e) => setMcpType(e.target.value)} />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>配置（JSON）</Label>
+              <Textarea value={mcpConfig} onChange={(e) => setMcpConfig(e.target.value)} rows={6} className="font-mono text-sm" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setMcpModalOpen(false)}>取消</Button>
+            <Button onClick={handleCreateMcp} disabled={loading}>创建</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
   );
 }

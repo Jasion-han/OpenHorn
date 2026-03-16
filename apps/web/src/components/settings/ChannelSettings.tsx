@@ -1,28 +1,21 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import {
-  ActionIcon,
-  Badge,
-  Button,
-  Card,
-  Checkbox,
-  Collapse,
-  Group,
-  Loader,
-  Modal,
-  Select,
-  Stack,
-  Text,
-  TextInput,
-} from '@mantine/core';
-import { IconCheck, IconChevronDown, IconChevronUp, IconPlus, IconRefresh, IconRobot, IconStar, IconTrash } from '@tabler/icons-react';
+import { Check, RefreshCw, Star, Trash2, ChevronDown, ChevronUp, Plus, Bot } from 'lucide-react';
 import { useChatStore } from '../../stores/chatStore';
 import { api, type ApiChannel, type ApiChannelModel } from '../../lib/api';
 import { notifyError, notifySuccess } from '../../lib/notify';
 import { BACKEND_UP_EVENT } from '../../stores/backendStatusStore';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { ChannelEditorModal } from './ChannelEditorModal';
+import { Button } from '../ui/button';
+import { Badge } from '../ui/badge';
+import { Checkbox } from '../ui/checkbox';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
+import { Input } from '../ui/input';
+import { cn } from '@/lib/utils';
+import { SettingsSection } from 'ui';
 
 function getPreferredChannelToFix(channels: ApiChannel[]): ApiChannel | null {
   const enabled = channels.filter((c) => c.enabled);
@@ -239,6 +232,7 @@ export function ChannelSettings() {
 
   useEffect(() => {
     if (didApplyFocusRef.current) return;
+    if (!search) return;
     const focus = search.get('focus');
     if (!focus) return;
     if (focus !== 'default' && focus.trim().length === 0) return;
@@ -282,276 +276,201 @@ export function ChannelSettings() {
   }, [channels, router, search]);
 
   return (
-    <Stack gap="md">
-      <Group justify="space-between">
-        <div>
-          <Text fw={600}>渠道配置</Text>
-          <Text size="sm" c="dimmed">
-            全局用户级配置，Chat 与 Agent 共用。
-          </Text>
-        </div>
-        <Button leftSection={<IconPlus size={16} />} onClick={openEditor}>
-          渠道编辑器
+    <SettingsSection
+      title="渠道配置"
+      description="全局用户级配置，对话与 Agent 共用。"
+      action={(
+        <Button onClick={openEditor}>
+          <Plus size={16} /> 渠道管理
         </Button>
-      </Group>
-
-      {channels.map((channel) => {
-        const isExpanded = expandedChannelId === channel.id;
-        const needsDefaultModel = Boolean(channel.isDefault && channel.enabled && !channel.defaultModelId);
-        const notice = channelNotice[channel.id] || null;
-        const agentCheckKey = `agent-check:${channel.id}`;
-        return (
-          <Card key={channel.id} withBorder id={`channel-${channel.id}`}>
-            <Stack gap="sm">
-              <Group justify="space-between" align="flex-start">
+      )}
+    >
+      <div className="flex flex-col gap-3">
+        {channels.map((channel) => {
+          const isExpanded = expandedChannelId === channel.id;
+          const needsDefaultModel = Boolean(channel.isDefault && channel.enabled && !channel.defaultModelId);
+          const notice = channelNotice[channel.id] || null;
+          const agentCheckKey = `agent-check:${channel.id}`;
+          return (
+            <div
+              key={channel.id}
+              className="rounded-xl border border-border/50 bg-card shadow-minimal p-4"
+              id={`channel-${channel.id}`}
+            >
+              <div className="flex flex-col gap-3">
+              <div className="flex items-start justify-between gap-2">
                 <div>
-                  <Group gap="xs" mb={4}>
-                    <Text fw={600}>{channel.name}</Text>
-                    {channel.isDefault && <Badge color="blue">默认</Badge>}
-                    {needsDefaultModel && <Badge color="orange">缺少默认模型</Badge>}
-                    {!channel.enabled && <Badge color="gray">已禁用</Badge>}
-                  </Group>
-                  <Group gap="xs">
-                    <Badge variant="light">{channel.provider}</Badge>
-                    {channel.defaultModelId && (
-                      <Badge variant="outline">{channel.defaultModelId}</Badge>
-                    )}
-                    <Text size="sm" c="dimmed">
-                      {channel.baseUrl || '未设置 Base URL'}
-                    </Text>
-                  </Group>
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <p className="font-semibold">{channel.name}</p>
+                    {channel.isDefault && <Badge>默认</Badge>}
+                    {needsDefaultModel && <Badge variant="outline" className="border-orange-400 text-orange-600">缺少默认模型</Badge>}
+                    {!channel.enabled && <Badge variant="secondary">已禁用</Badge>}
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <Badge variant="secondary">{channel.provider}</Badge>
+                    {channel.defaultModelId && <Badge variant="outline">{channel.defaultModelId}</Badge>}
+                    <span className="text-sm text-muted-foreground">{channel.baseUrl || '未设置 Base URL'}</span>
+                  </div>
                 </div>
 
-                <Group gap="xs">
-                  <ActionIcon
-                    variant="subtle"
-                    color="grape"
-                    onClick={() => openAgentCheck(channel)}
-                    disabled={busyKey === agentCheckKey}
-                  >
-                    <IconRobot size={18} />
-                  </ActionIcon>
-                  <ActionIcon
-                    variant="subtle"
-                    color="blue"
-                    onClick={() => void handleTest(channel.id)}
-                    loading={busyKey === `test:${channel.id}`}
-                  >
-                    <IconCheck size={18} />
-                  </ActionIcon>
-                  <ActionIcon
-                    variant="subtle"
-                    color="teal"
-                    onClick={() => void handleFetchModels(channel.id)}
-                    loading={busyKey === `fetch:${channel.id}`}
-                  >
-                    <IconRefresh size={18} />
-                  </ActionIcon>
-                  <ActionIcon
-                    variant="subtle"
-                    color={channel.isDefault ? 'yellow' : 'gray'}
-                    onClick={() => void handleSetDefaultChannel(channel.id)}
-                    loading={busyKey === `default-channel:${channel.id}`}
-                  >
-                    <IconStar size={18} />
-                  </ActionIcon>
-                  <ActionIcon
-                    variant="subtle"
-                    onClick={() => toggleExpanded(channel.id)}
-                  >
-                    {isExpanded ? <IconChevronUp size={18} /> : <IconChevronDown size={18} />}
-                  </ActionIcon>
-                  <ActionIcon
-                    variant="subtle"
-                    color="red"
-                    onClick={() => void handleDelete(channel.id)}
-                    loading={busyKey === `delete:${channel.id}`}
-                  >
-                    <IconTrash size={18} />
-                  </ActionIcon>
-                </Group>
-              </Group>
+                <div className="flex items-center gap-1 shrink-0">
+                  <Button variant="ghost" size="icon-sm" onClick={() => openAgentCheck(channel)} disabled={busyKey === agentCheckKey}>
+                    <Bot size={16} />
+                  </Button>
+                  <Button variant="ghost" size="icon-sm" onClick={() => void handleTest(channel.id)} disabled={busyKey === `test:${channel.id}`}>
+                    <Check size={16} />
+                  </Button>
+                  <Button variant="ghost" size="icon-sm" onClick={() => void handleFetchModels(channel.id)} disabled={busyKey === `fetch:${channel.id}`}>
+                    <RefreshCw size={16} className={busyKey === `fetch:${channel.id}` ? 'animate-spin' : ''} />
+                  </Button>
+                  <Button variant="ghost" size="icon-sm" className={channel.isDefault ? 'text-yellow-500' : ''} onClick={() => void handleSetDefaultChannel(channel.id)} disabled={!!busyKey}>
+                    <Star size={16} />
+                  </Button>
+                  <Button variant="ghost" size="icon-sm" onClick={() => toggleExpanded(channel.id)}>
+                    {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                  </Button>
+                  <Button variant="ghost" size="icon-sm" className="text-destructive" onClick={() => void handleDelete(channel.id)} disabled={busyKey === `delete:${channel.id}`}>
+                    <Trash2 size={16} />
+                  </Button>
+                </div>
+              </div>
 
-              {notice && (
-                <Card withBorder padding="sm" bg={notice.kind === 'error' ? 'red.0' : 'orange.0'}>
-                  <Group justify="space-between" wrap="nowrap" align="flex-start">
-                    <div style={{ minWidth: 0 }}>
-                      <Text size="sm" fw={600}>
-                        {notice.title || (notice.kind === 'error' ? '同步失败' : '需要处理')}
-                      </Text>
-                      <Text size="sm" c="dimmed" style={{ whiteSpace: 'pre-wrap' }}>
-                        {notice.message}
-                      </Text>
-                    </div>
-                    <Group gap="xs" wrap="nowrap">
+	              {notice && (
+	                <div className={cn('rounded-xl border p-3 shadow-minimal', notice.kind === 'error' ? 'border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-950' : 'border-orange-200 bg-orange-50 dark:border-orange-800 dark:bg-orange-950')}>
+	                  <div className="flex items-start justify-between gap-2">
+	                    <div className="min-w-0">
+	                      <p className="text-sm font-semibold">{notice.title || (notice.kind === 'error' ? '同步失败' : '需要处理')}</p>
+	                      <p className="text-sm text-muted-foreground whitespace-pre-wrap">{notice.message}</p>
+	                    </div>
+	                    <div className="flex items-center gap-1.5 shrink-0">
                       {notice.action === 'switch_openai' && (
-                        <Button
-                          size="xs"
-                          variant="light"
-                          onClick={() => {
-                            void runChannelAction(`fix-provider:${channel.id}`, async () => {
-                              await api.channels.update(channel.id, { provider: 'openai' });
-                              await loadChannels();
-                              setChannelNotice((prev) => {
-                                const { [channel.id]: _, ...rest } = prev;
-                                return rest;
-                              });
-                              notifySuccess('已更新', '已切换为 OpenAI 兼容 Provider，请重新同步模型。');
-                            });
-                          }}
-                        >
+                        <Button size="sm" variant="outline" onClick={() => {
+                          void runChannelAction(`fix-provider:${channel.id}`, async () => {
+                            await api.channels.update(channel.id, { provider: 'openai' });
+                            await loadChannels();
+                            setChannelNotice((prev) => { const { [channel.id]: _, ...rest } = prev; return rest; });
+                            notifySuccess('已更新', '已切换为 OpenAI 兼容 Provider，请重新同步模型。');
+                          });
+                        }}>
                           切换为 OpenAI 兼容
                         </Button>
                       )}
-                      <Button
-                        size="xs"
-                        variant="subtle"
-                        onClick={() => setChannelNotice((prev) => {
-                          const { [channel.id]: _, ...rest } = prev;
-                          return rest;
-                        })}
-                      >
-                        关闭
-                      </Button>
-                    </Group>
-                  </Group>
-                </Card>
+                      <Button size="sm" variant="ghost" onClick={() => setChannelNotice((prev) => { const { [channel.id]: _, ...rest } = prev; return rest; })}>关闭</Button>
+                    </div>
+                  </div>
+                </div>
               )}
 
-              <Collapse in={isExpanded}>
-                <Stack gap="xs" mt="sm">
-                  <Group justify="space-between">
-                    <Text size="sm" fw={500}>模型</Text>
-                    <Text size="xs" c="dimmed">
-                      已同步 {channel.models.length} 个
-                    </Text>
-                  </Group>
+              {isExpanded && (
+                <div className="flex flex-col gap-2 mt-1">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-medium">模型</p>
+                    <p className="text-xs text-muted-foreground">已同步 {channel.models.length} 个</p>
+                  </div>
 
                   {channel.models.length === 0 ? (
-                    <Text size="sm" c="dimmed">
-                      暂无模型。点击上方同步按钮拉取模型列表。
-                    </Text>
+                    <p className="text-sm text-muted-foreground">暂无模型。点击上方同步按钮拉取模型列表。</p>
                   ) : (
                     channel.models.map((model) => (
-                      <Card key={model.id} withBorder padding="sm">
-                        <Group justify="space-between" wrap="nowrap">
-                          <Group gap="sm" wrap="nowrap">
-                            <Checkbox
-                              checked={model.enabled}
-                              onChange={() => void handleToggleModelEnabled(channel, model.modelId)}
-                              disabled={busyKey === `toggle-model:${channel.id}:${model.modelId}`}
-                            />
-                            <div>
-                              <Text size="sm" fw={500}>{model.displayName}</Text>
-                              <Text size="xs" c="dimmed">{model.modelId}</Text>
-                            </div>
-                          </Group>
-                          <Button
-                            size="xs"
-                            variant={model.isDefault ? 'filled' : 'light'}
-                            onClick={() => void handleSetDefaultModel(channel, model.modelId)}
-                            loading={busyKey === `default-model:${channel.id}:${model.modelId}`}
-                          >
-                            {model.isDefault ? '默认' : '设为默认'}
-                          </Button>
-                        </Group>
-                      </Card>
+                      <div key={model.id} className="flex items-center justify-between rounded-md border px-3 py-2">
+                        <div className="flex items-center gap-3">
+                          <Checkbox
+                            checked={model.enabled}
+                            onCheckedChange={() => void handleToggleModelEnabled(channel, model.modelId)}
+                            disabled={busyKey === `toggle-model:${channel.id}:${model.modelId}`}
+                          />
+                          <div>
+                            <p className="text-sm font-medium">{model.displayName}</p>
+                            <p className="text-xs text-muted-foreground">{model.modelId}</p>
+                          </div>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant={model.isDefault ? 'default' : 'outline'}
+                          onClick={() => void handleSetDefaultModel(channel, model.modelId)}
+                          disabled={busyKey === `default-model:${channel.id}:${model.modelId}`}
+                        >
+                          {model.isDefault ? '默认' : '设为默认'}
+                        </Button>
+                      </div>
                     ))
                   )}
-                </Stack>
-              </Collapse>
-            </Stack>
-          </Card>
-        );
-      })}
+                </div>
+              )}
+            </div>
+            </div>
+          );
+        })}
 
-      {channels.length === 0 && (
-        <Card withBorder>
-          <Text c="dimmed" ta="center" py="xl">
-            还没有渠道。添加一个渠道来连接你的模型。
-          </Text>
-        </Card>
-      )}
+        {channels.length === 0 && (
+          <div className="rounded-xl border border-border/50 bg-card shadow-minimal p-8 text-center">
+            <p className="text-sm text-muted-foreground">还没有渠道。添加一个渠道来连接你的模型。</p>
+          </div>
+        )}
 
-      <ChannelEditorModal
-        opened={editorOpen}
-        channels={channels}
-        onClose={closeEditor}
-        onSaved={async (channelId) => {
-          await loadChannels();
-          setExpandedChannelId(channelId);
-        }}
-        applyFetchModelsOutcome={applyFetchModelsOutcome}
-      />
+        <ChannelEditorModal
+          opened={editorOpen}
+          channels={channels}
+          onClose={closeEditor}
+          onSaved={async (channelId) => {
+            await loadChannels();
+            setExpandedChannelId(channelId);
+          }}
+          applyFetchModelsOutcome={applyFetchModelsOutcome}
+        />
 
-      <Modal
-        opened={agentCheckOpen}
-        onClose={closeAgentCheck}
-        title="Agent 兼容性检查"
-      >
-        <Stack gap="md">
-          {(() => {
-            const channel = channels.find((c) => c.id === agentCheckChannelId) || null;
-            const items = (channel?.models || []).map((m) => ({
-              value: m.modelId,
-              label: m.enabled ? m.displayName : `${m.displayName}（已禁用）`,
-            }));
+        <Dialog open={agentCheckOpen} onOpenChange={(o) => !o && closeAgentCheck()}>
+          <DialogContent>
+            <DialogHeader><DialogTitle>Agent 兼容性检查</DialogTitle></DialogHeader>
+            <div className="flex flex-col gap-4">
+              {(() => {
+                const channel = channels.find((c) => c.id === agentCheckChannelId) || null;
+                const items = (channel?.models || []).map((m) => ({
+                  value: m.modelId,
+                  label: m.enabled ? m.displayName : `${m.displayName}（已禁用）`,
+                }));
 
-            if (!channel) {
-              return (
-                <Text size="sm" c="dimmed">
-                  请选择一个渠道。
-                </Text>
-              );
-            }
+                if (!channel) return <p className="text-sm text-muted-foreground">请选择一个渠道。</p>;
 
-            if (items.length === 0) {
-              return (
-                <TextInput
-                  label="modelId"
-                  placeholder="例如：claude-4.5-sonnet"
-                  value={agentCheckModelId}
-                  onChange={(e) => setAgentCheckModelId(e.target.value)}
-                  required
-                />
-              );
-            }
+                if (items.length === 0) return (
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-sm font-medium">modelId</label>
+                    <Input placeholder="例如：claude-4.5-sonnet" value={agentCheckModelId} onChange={(e) => setAgentCheckModelId(e.target.value)} />
+                  </div>
+                );
 
-            return (
-              <Select
-                label="选择 modelId"
-                value={agentCheckModelId}
-                onChange={(v) => setAgentCheckModelId(v || '')}
-                data={items}
-                searchable
-                nothingFoundMessage="未找到模型"
-              />
-            );
-          })()}
+                return (
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-sm font-medium">选择 modelId</label>
+                    <Select value={agentCheckModelId} onValueChange={(v) => setAgentCheckModelId(v)}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {items.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                );
+              })()}
+            </div>
+            <DialogFooter>
+              <Button variant="ghost" onClick={closeAgentCheck}>取消</Button>
+              <Button
+                onClick={() => { if (!agentCheckChannelId) return; void handleAgentCheck(agentCheckChannelId, agentCheckModelId); }}
+                disabled={agentCheckChannelId ? busyKey === `agent-check:${agentCheckChannelId}` : false}
+              >
+                开始检查
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
-          <Group justify="flex-end">
-            <Button variant="subtle" onClick={closeAgentCheck}>
-              取消
-            </Button>
-            <Button
-              onClick={() => {
-                if (!agentCheckChannelId) return;
-                void handleAgentCheck(agentCheckChannelId, agentCheckModelId);
-              }}
-              loading={agentCheckChannelId ? busyKey === `agent-check:${agentCheckChannelId}` : false}
-            >
-              开始检查
-            </Button>
-          </Group>
-        </Stack>
-      </Modal>
-
-      {busyKey && (
-        <Group gap="xs">
-          <Loader size="sm" />
-          <Text size="sm" c="dimmed">正在应用配置...</Text>
-        </Group>
-      )}
-    </Stack>
+        {busyKey && (
+          <div className="flex items-center gap-2">
+            <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+            <p className="text-sm text-muted-foreground">正在应用配置...</p>
+          </div>
+        )}
+      </div>
+    </SettingsSection>
   );
 }

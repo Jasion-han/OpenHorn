@@ -1,69 +1,35 @@
-import { Container, Title, Text, Button, Group, Stack, Card, SimpleGrid } from '@mantine/core';
-import { IconMessage, IconRobot, IconSettings } from '@tabler/icons-react';
+import { MessageSquare } from 'lucide-react';
 import Link from 'next/link';
+import { Button } from '@/components/ui/button';
 
 export default function Home() {
   return (
-    <Container size="sm" py={100}>
-      <Stack align="center" gap="xl">
-        <Title order={1}>Welcome to OpenHorn</Title>
-        <Text c="dimmed" size="lg" ta="center">
-          Your AI Assistant with Agent capabilities
-        </Text>
-        
-        <Group>
-          <Button 
-            variant="filled" 
-            size="lg" 
-            component={Link}
-            href="/chat"
-            leftSection={<IconMessage size={20} />}
-          >
-            Chat
-          </Button>
-          <Button 
-            variant="filled" 
-            size="lg" 
-            component={Link}
-            href="/agent"
-            leftSection={<IconRobot size={20} />}
-          >
-            Agent
-          </Button>
-          <Button 
-            variant="outline" 
-            size="lg" 
-            component={Link}
-            href="/settings"
-            leftSection={<IconSettings size={20} />}
-          >
-            Settings
-          </Button>
-        </Group>
+    <div className="flex min-h-dvh items-center justify-center bg-background">
+      <div className="w-full max-w-2xl px-6 py-16 text-center">
+        <h1 className="text-3xl font-bold mb-2">欢迎使用 OpenHorn</h1>
+        <p className="text-muted-foreground text-lg mb-8">统一会话里的 Chat 与 Agent AI 助手</p>
 
-        <SimpleGrid cols={{ base: 1, sm: 3 }} w="100%" mt="xl">
-          <Card withBorder padding="lg" radius="md">
-            <Title order={3} mb="sm">Chat</Title>
-            <Text size="sm" c="dimmed">
-              Multi-model AI chat with streaming responses. Supports OpenAI, Anthropic, DeepSeek, and Google.
-            </Text>
-          </Card>
-          
-          <Card withBorder padding="lg" radius="md">
-            <Title order={3} mb="sm">Agent</Title>
-            <Text size="sm" c="dimmed">
-              AI-powered automation with tool execution. Build workflows and automate tasks.
-            </Text>
-          </Card>
-          
-          <Card withBorder padding="lg" radius="md">
-            <Title order={3} mb="sm">Workspaces</Title>
-            <Text size="sm" c="dimmed">
-              Manage multiple workspaces with MCP integrations. Keep your projects organized.
-            </Text>
-          </Card>
-        </SimpleGrid>
-      </Stack>
-    </Container>
+        <div className="flex justify-center gap-3 mb-12">
+          <Button asChild size="lg">
+            <Link href="/chat"><MessageSquare size={20} />进入会话</Link>
+          </Button>
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <div className="rounded-lg border p-5 text-left">
+            <h3 className="font-semibold mb-1">统一会话</h3>
+            <p className="text-sm text-muted-foreground">同一个会话里连续切换 Chat 与 Agent，不再拆成两套侧栏和两套中部页面。</p>
+          </div>
+          <div className="rounded-lg border p-5 text-left">
+            <h3 className="font-semibold mb-1">Agent</h3>
+            <p className="text-sm text-muted-foreground">Agent 执行过程折叠在消息下方，默认展示最终回答，需要时再展开细节。</p>
+          </div>
+          <div className="rounded-lg border p-5 text-left">
+            <h3 className="font-semibold mb-1">渠道与工具</h3>
+            <p className="text-sm text-muted-foreground">在设置里统一管理模型渠道与 MCP 工具能力，保持使用路径简单。</p>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }

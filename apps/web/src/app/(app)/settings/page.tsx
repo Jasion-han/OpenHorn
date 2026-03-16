@@ -1,54 +1,79 @@
 'use client';
 
-import { Container, Title, Tabs } from '@mantine/core';
+import { useEffect, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Settings, Radio, Bot, Palette } from 'lucide-react';
 import { ChannelSettings } from '@/components/settings/ChannelSettings';
 import { GeneralSettings } from '@/components/settings/GeneralSettings';
 import { AgentSettings } from '@/components/settings/AgentSettings';
-import { AppShellSlot } from '@/components/app/AppShellSlot';
-import { useEffect, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { cn } from '@/lib/utils';
+import { AppearanceSettings } from '@/components/settings/AppearanceSettings';
+
+const TABS = [
+  { value: 'general', label: '通用', icon: <Settings size={16} /> },
+  { value: 'channels', label: '渠道', icon: <Radio size={16} /> },
+  { value: 'agent', label: 'Agent', icon: <Bot size={16} /> },
+  { value: 'appearance', label: '外观', icon: <Palette size={16} /> },
+] as const;
+
+type TabValue = typeof TABS[number]['value'];
 
 export default function SettingsPage() {
+  const router = useRouter();
   const search = useSearchParams();
-  const [tab, setTab] = useState<'general' | 'channels' | 'agent'>('channels');
+  const [tab, setTab] = useState<TabValue>('channels');
 
   useEffect(() => {
+    if (!search) return;
     const raw = search.get('tab');
-    if (raw === 'general' || raw === 'channels' || raw === 'agent') {
-      setTab(raw);
+    if (raw === 'general' || raw === 'channels' || raw === 'agent' || raw === 'appearance') {
+      setTab(raw as TabValue);
       return;
     }
-    if (raw) {
-      setTab('channels');
-    }
+    if (raw) setTab('channels');
   }, [search]);
 
+  const selectTab = (value: TabValue) => {
+    setTab(value);
+    router.replace(`/settings?tab=${value}`);
+  };
+
   return (
-    <>
-      <AppShellSlot title="Settings" />
-      <Container size="md" py="xl">
-      <Title order={1} mb="xl">Settings</Title>
-      
-      <Tabs value={tab} onChange={(value) => setTab((value as typeof tab) || 'channels')}>
-        <Tabs.List>
-          <Tabs.Tab value="general">General</Tabs.Tab>
-          <Tabs.Tab value="channels">Channels</Tabs.Tab>
-          <Tabs.Tab value="agent">Agent</Tabs.Tab>
-        </Tabs.List>
+    <div className="h-full min-h-0">
+      <div className="flex h-full min-h-0 w-full">
+          <div className="w-[180px] shrink-0 border-r border-border/50 pt-8 px-2">
+            <h2 className="text-xs font-medium text-muted-foreground px-3 mb-2 uppercase tracking-wider">
+              设置
+            </h2>
+            <nav className="flex flex-col gap-1">
+              {TABS.map((t) => (
+                <button
+                  key={t.value}
+                  onClick={() => selectTab(t.value)}
+                  className={cn(
+                    'flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors',
+                    tab === t.value
+                      ? 'bg-muted text-foreground font-medium'
+                      : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'
+                  )}
+                >
+                  {t.icon}
+                  <span>{t.label}</span>
+                </button>
+              ))}
+            </nav>
+          </div>
 
-        <Tabs.Panel value="general" pt="md">
-          <GeneralSettings />
-        </Tabs.Panel>
-
-        <Tabs.Panel value="channels" pt="md">
-          <ChannelSettings />
-        </Tabs.Panel>
-
-        <Tabs.Panel value="agent" pt="md">
-          <AgentSettings />
-        </Tabs.Panel>
-      </Tabs>
-      </Container>
-    </>
+          <ScrollArea className="flex-1 min-h-0 pt-8">
+            <div className="px-6 pb-8">
+              {tab === 'general' && <GeneralSettings />}
+              {tab === 'channels' && <ChannelSettings />}
+              {tab === 'agent' && <AgentSettings />}
+              {tab === 'appearance' && <AppearanceSettings />}
+            </div>
+          </ScrollArea>
+        </div>
+      </div>
   );
 }

@@ -1,13 +1,9 @@
-import { notifications } from '@mantine/notifications';
+import { toast } from 'sonner';
 
 const lastShownAt = new Map<string, number>();
 
-export function hideNotification(id: string) {
-  try {
-    notifications.hide(id);
-  } catch {
-    // Best-effort; ignore if notifications provider isn't ready.
-  }
+export function hideNotification(_id: string) {
+  // sonner handles its own dismissal
 }
 
 export function notifyErrorOnce(key: string, title: string, message: string, ttlMs = 10_000) {
@@ -15,39 +11,21 @@ export function notifyErrorOnce(key: string, title: string, message: string, ttl
   const prev = lastShownAt.get(key) ?? 0;
   if (now - prev < ttlMs) return;
   lastShownAt.set(key, now);
-  notifications.show({
-    id: key,
-    color: 'red',
-    title,
-    message,
-  });
+  toast.error(title, { description: message, id: key });
 }
 
 export function notifyError(title: string, message: string) {
-  // Common browser error for network failures / backend down.
   if (typeof message === 'string' && message.toLowerCase().includes('failed to fetch')) {
-    notifyErrorOnce('backend_down', '后端不可用', '无法连接到后端服务（http://localhost:3000）。请启动 server 后点击 Retry。');
+    notifyErrorOnce('backend_down', '后端不可用', '无法连接到后端服务（http://localhost:3000）。请启动 server 后点击「重试」。');
     return;
   }
-  notifications.show({
-    color: 'red',
-    title,
-    message,
-  });
+  toast.error(title, { description: message });
 }
 
 export function notifySuccess(title: string, message: string) {
-  notifications.show({
-    color: 'teal',
-    title,
-    message,
-  });
+  toast.success(title, { description: message });
 }
 
 export function notifyWarning(title: string, message: string) {
-  notifications.show({
-    color: 'orange',
-    title,
-    message,
-  });
+  toast.warning(title, { description: message });
 }
