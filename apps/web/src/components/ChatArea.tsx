@@ -1275,7 +1275,10 @@ export function ChatArea() {
         }
         messageAnchorRefs.current.delete(msg.id);
       }}
-      className="min-w-0"
+      className={cn(
+        "flex min-w-0 flex-col",
+        msg.role === "assistant" ? "items-start" : "items-end",
+      )}
     >
       <MessageBubble
         msg={{
