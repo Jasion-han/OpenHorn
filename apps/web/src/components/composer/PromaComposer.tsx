@@ -43,6 +43,8 @@ export function PromaComposer(props: {
 
   mode: "chat" | "agent";
   onModeChange: (mode: "chat" | "agent") => void;
+  agentModeAvailable?: boolean;
+  agentModeDisabledReason?: string | null;
 
   modelProvider?: string | null;
   modelLabel: string | null;
@@ -72,6 +74,8 @@ export function PromaComposer(props: {
     onRemoveAttachment,
     mode,
     onModeChange,
+    agentModeAvailable = true,
+    agentModeDisabledReason,
     modelProvider,
     modelLabel,
     modelTone = "normal",
@@ -174,6 +178,7 @@ export function PromaComposer(props: {
 
   const modeDisabled = Boolean(disabled || streaming);
   const alternateMode = mode === "chat" ? "agent" : "chat";
+  const alternateModeDisabled = alternateMode === "agent" && !agentModeAvailable;
 
   React.useEffect(() => {
     if (!modeMenuOpen) return;
@@ -296,14 +301,20 @@ export function PromaComposer(props: {
                   <button
                     type="button"
                     onClick={() => {
+                      if (alternateModeDisabled) return;
                       onModeChange(alternateMode);
                       setModeMenuOpen(false);
                     }}
+                    disabled={alternateModeDisabled}
                     className={cn(
                       "pointer-events-auto flex w-full items-center justify-center gap-1.5 rounded-[10px] px-2.5 py-1 text-xs",
-                      "bg-accent/88 text-foreground shadow-[0_10px_24px_rgba(15,23,42,0.12)] ring-1 ring-border/25 backdrop-blur-md",
-                      "transition-colors hover:bg-accent hover:text-foreground",
+                      alternateModeDisabled
+                        ? "bg-muted/80 text-muted-foreground ring-1 ring-border/25 opacity-70 cursor-not-allowed"
+                        : "bg-accent/88 text-foreground shadow-[0_10px_24px_rgba(15,23,42,0.12)] ring-1 ring-border/25 backdrop-blur-md transition-colors hover:bg-accent hover:text-foreground",
                     )}
+                    title={
+                      alternateModeDisabled ? (agentModeDisabledReason ?? "当前不可用") : undefined
+                    }
                   >
                     <span>{alternateMode === "chat" ? "Chat" : "Agent"}</span>
                     <ChevronDown className="size-3 shrink-0 opacity-0" aria-hidden="true" />

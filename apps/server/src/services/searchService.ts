@@ -94,8 +94,8 @@ function buildSystemContext(
 
   const instruction =
     route === "research"
-      ? "Synthesize across sources, mention uncertainty when sources disagree, and cite the sources you used."
-      : "Answer using only these search results, stay concise, and cite the sources you used.";
+      ? "Synthesize across sources, mention uncertainty when sources disagree, and cite sources inline with [n] only. Do not append a final References, Sources, or 引用 section."
+      : "Answer using only these search results, stay concise, and cite sources inline with [n] only. Do not append a final References, Sources, or 引用 section.";
 
   return [header, `Query: ${prompt}`, ...lines, instruction].join("\n");
 }

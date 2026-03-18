@@ -329,6 +329,30 @@ function CitationList({ citations, content }: { citations?: ApiCitation[]; conte
   );
 }
 
+function stripTrailingCitationAppendix(content: string, citations?: ApiCitation[]) {
+  const normalized = (content || "").replace(/\r\n/g, "\n");
+  if (!normalized.trim() || !citations || citations.length === 0) return normalized;
+
+  const appendixMatch = normalized.match(
+    /(?:^|\n)(?:引用|参考资料|参考来源|参考文献|References?|Sources?)[:：]?\s*\n[\s\S]*$/i,
+  );
+  if (!appendixMatch || appendixMatch.index == null) return normalized;
+
+  const appendix = appendixMatch[0];
+  const refMatches = appendix.match(/\[\d+\]/g) || [];
+  if (refMatches.length === 0) return normalized;
+
+  const sourceHits = citations.filter((citation) => {
+    const title = citation.title?.trim();
+    const url = citation.url?.trim();
+    return (title && appendix.includes(title)) || (url && appendix.includes(url));
+  }).length;
+
+  if (sourceHits === 0) return normalized;
+
+  return normalized.slice(0, appendixMatch.index).replace(/\s+$/, "");
+}
+
 function MessageBubble({
   msg,
   isStreaming,
@@ -365,15 +389,19 @@ function MessageBubble({
   userMaxWidth: string;
 }) {
   const [copied, setCopied] = useState(false);
+  const displayContent =
+    msg.role === "assistant"
+      ? stripTrailingCitationAppendix(msg.content, msg.citations)
+      : msg.content;
 
   const handleCopy = async () => {
-    await navigator.clipboard.writeText(msg.content);
+    await navigator.clipboard.writeText(displayContent);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
   const isAssistant = msg.role === "assistant";
-  const hasAssistantText = isAssistant && Boolean((msg.content || "").trim());
+  const hasAssistantText = isAssistant && Boolean((displayContent || "").trim());
   const isAssistantPlaceholder = isAssistant && isStreaming && !hasAssistantText;
   const isAgent = msg.mode === "agent";
   const streamTailLength =
@@ -416,17 +444,17 @@ function MessageBubble({
         {isAssistant ? (
           <div className="min-w-0 max-w-full" style={WRAP_TEXT}>
             <LiveStatusBadge status={msg.liveStatus} route={msg.liveRoute} label={msg.liveLabel} />
-            <CitationList citations={msg.citations} content={msg.content} />
+            <CitationList citations={msg.citations} content={displayContent} />
             {hasAssistantText ? (
               isStreaming ? (
                 <StreamingMarkdownMessage
-                  content={msg.content}
+                  content={displayContent}
                   tailLength={streamTailLength}
                   pulseKey={msg.streamPulseKey ?? 0}
                   citations={msg.citations}
                 />
               ) : (
-                <MarkdownMessage content={msg.content} citations={msg.citations} />
+                <MarkdownMessage content={displayContent} citations={msg.citations} />
               )
             ) : isStreaming ? (
               <TypingIndicator className="ml-1" />
@@ -582,6 +610,19 @@ export function ChatArea() {
     return error instanceof Error ? error.message : fallback;
   };
 
+  const canEditUserMessageAt = (index: number) => {
+    const userMsg = messages[index];
+    if (!userMsg || userMsg.role !== "user") return false;
+    if (userMsg.id.startsWith("temp-")) return false;
+
+    const assistantMsg = messages[index + 1];
+    if (!assistantMsg || assistantMsg.role !== "assistant") return false;
+    if (assistantMsg.mode !== userMsg.mode) return false;
+    if (assistantMsg.id.startsWith("temp-")) return false;
+
+    return true;
+  };
+
   const streamAssistantResponse = async ({
     input,
     response,
@@ -678,6 +719,10 @@ export function ChatArea() {
   };
 
   const effective = getEffectiveModelForConversation(channels, currentConversation);
+  const agentModeSupported = effective.ok && effective.provider === "anthropic";
+  const agentModeDisabledReason = effective.ok
+    ? "Agent 模式目前仅支持 Anthropic 渠道，请先切换到 Anthropic 模型。"
+    : "请先配置可用模型后再使用 Agent 模式。";
   const hasInput = Boolean(input.trim());
   const hasFiles = files.length > 0;
   const forceWebSearch = currentConversation?.forceWebSearch ?? true;
@@ -743,6 +788,11 @@ export function ChatArea() {
 
   const handleSend = async () => {
     if (!canSend || !currentConversation) return;
+
+    if (composerMode === "agent" && !agentModeSupported) {
+      notifyWarning("Agent 当前不可用", agentModeDisabledReason);
+      return;
+    }
 
     const conversationId = currentConversation.id;
     const mode = composerMode;
@@ -1005,13 +1055,16 @@ export function ChatArea() {
     if (!currentConversation || !newContent.trim()) return;
     const msgIndex = messages.findIndex((message) => message.id === msgId);
     if (msgIndex < 0) return;
+    if (!canEditUserMessageAt(msgIndex)) {
+      notifyWarning("当前消息不可编辑", "这条用户消息后面没有对应的助手回复，无法重新编辑并生成。");
+      setEditingMsgId(null);
+      return;
+    }
+
     const userMsg = messages[msgIndex];
     if (!userMsg || userMsg.role !== "user") return;
-    if (userMsg.id.startsWith("temp-")) return;
     const assistantMsg = messages[msgIndex + 1];
     if (!assistantMsg || assistantMsg.role !== "assistant") return;
-    if (assistantMsg.mode !== userMsg.mode) return;
-    if (assistantMsg.id.startsWith("temp-")) return;
 
     const conversationId = currentConversation.id;
     const isAgent = userMsg.mode === "agent";
@@ -1128,7 +1181,7 @@ export function ChatArea() {
                   isStreaming={Boolean(
                     isStreaming && streamingAssistantId && msg.id === streamingAssistantId,
                   )}
-                  canEdit={msg.role === "user"}
+                  canEdit={canEditUserMessageAt(index)}
                   canRetry={msg.role === "assistant" && !isLoading && !isStreaming && !isUploading}
                   attachments={
                     msg.role === "user" && msg.attachmentsMeta
@@ -1143,6 +1196,13 @@ export function ChatArea() {
                   }
                   onEdit={() => {
                     if (msg.role !== "user") return;
+                    if (!canEditUserMessageAt(index)) {
+                      notifyWarning(
+                        "当前消息不可编辑",
+                        "这条用户消息后面没有对应的助手回复，无法重新编辑并生成。",
+                      );
+                      return;
+                    }
                     setEditingMsgId(msg.id);
                     setEditingContent(msg.content || "");
                   }}
@@ -1229,7 +1289,15 @@ export function ChatArea() {
           onAddAttachments={(list) => setFiles((prev) => [...prev, ...list])}
           onRemoveAttachment={(file) => setFiles((prev) => prev.filter((item) => item !== file))}
           mode={composerMode}
-          onModeChange={setComposerMode}
+          onModeChange={(nextMode) => {
+            if (nextMode === "agent" && !agentModeSupported) {
+              notifyWarning("Agent 当前不可用", agentModeDisabledReason);
+              return;
+            }
+            setComposerMode(nextMode);
+          }}
+          agentModeAvailable={agentModeSupported}
+          agentModeDisabledReason={agentModeDisabledReason}
           modelProvider={effective.ok ? effective.provider : null}
           modelLabel={
             effective.ok
