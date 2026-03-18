@@ -1,3 +1,2 @@
-export { Button, buttonVariants } from 'ui'
-export type { ButtonProps } from 'ui'
-
+export type { ButtonProps } from "ui";
+export { Button, buttonVariants } from "ui";

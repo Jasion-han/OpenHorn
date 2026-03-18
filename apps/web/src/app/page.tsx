@@ -1,6 +1,6 @@
-import { MessageSquare } from 'lucide-react';
-import Link from 'next/link';
-import { Button } from '@/components/ui/button';
+import { MessageSquare } from "lucide-react";
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
 
 export default function Home() {
   return (
@@ -11,22 +11,31 @@ export default function Home() {
 
         <div className="flex justify-center gap-3 mb-12">
           <Button asChild size="lg">
-            <Link href="/chat"><MessageSquare size={20} />进入会话</Link>
+            <Link href="/chat">
+              <MessageSquare size={20} />
+              进入会话
+            </Link>
           </Button>
         </div>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <div className="rounded-lg border p-5 text-left">
             <h3 className="font-semibold mb-1">统一会话</h3>
-            <p className="text-sm text-muted-foreground">同一个会话里连续切换 Chat 与 Agent，不再拆成两套侧栏和两套中部页面。</p>
+            <p className="text-sm text-muted-foreground">
+              同一个会话里连续切换 Chat 与 Agent，不再拆成两套侧栏和两套中部页面。
+            </p>
           </div>
           <div className="rounded-lg border p-5 text-left">
             <h3 className="font-semibold mb-1">Agent</h3>
-            <p className="text-sm text-muted-foreground">Agent 执行过程折叠在消息下方，默认展示最终回答，需要时再展开细节。</p>
+            <p className="text-sm text-muted-foreground">
+              Agent 执行过程折叠在消息下方，默认展示最终回答，需要时再展开细节。
+            </p>
           </div>
           <div className="rounded-lg border p-5 text-left">
             <h3 className="font-semibold mb-1">渠道与工具</h3>
-            <p className="text-sm text-muted-foreground">在设置里统一管理模型渠道与 MCP 工具能力，保持使用路径简单。</p>
+            <p className="text-sm text-muted-foreground">
+              在设置里统一管理模型渠道与 MCP 工具能力，保持使用路径简单。
+            </p>
           </div>
         </div>
       </div>

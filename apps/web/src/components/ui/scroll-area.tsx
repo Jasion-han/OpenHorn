@@ -1,2 +1,1 @@
-export { ScrollArea, ScrollBar } from 'ui'
-
+export { ScrollArea, ScrollBar } from "ui";

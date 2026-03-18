@@ -1,4 +1,4 @@
-import type { ApiChannel } from './api';
+import type { ApiChannel } from "./api";
 
 export interface DefaultChannelInfo {
   channelId: string;

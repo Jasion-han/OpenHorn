@@ -1,5 +1,5 @@
-import { AuthBootstrap } from '../../components/auth/AuthBootstrap';
-import { AppShellLayout } from '../../components/app/AppShellLayout';
+import { AppShellLayout } from "../../components/app/AppShellLayout";
+import { AuthBootstrap } from "../../components/auth/AuthBootstrap";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -8,4 +8,3 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     </AuthBootstrap>
   );
 }
-

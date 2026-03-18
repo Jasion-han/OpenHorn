@@ -1,13 +1,13 @@
-'use client';
+"use client";
 
-import { useEffect, useState } from 'react';
-import { useRouter, usePathname } from 'next/navigation';
-import { api } from '../../lib/api';
-import { useAuthStore } from '../../stores/authStore';
-import { useChatStore } from '../../stores/chatStore';
-import { BACKEND_UP_EVENT } from '../../stores/backendStatusStore';
+import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+import { api } from "../../lib/api";
+import { useAuthStore } from "../../stores/authStore";
+import { BACKEND_UP_EVENT } from "../../stores/backendStatusStore";
+import { useChatStore } from "../../stores/chatStore";
 
-const UNAUTHORIZED_EVENT = 'openhorn:unauthorized';
+const UNAUTHORIZED_EVENT = "openhorn:unauthorized";
 
 export function AuthBootstrap({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -24,7 +24,7 @@ export function AuthBootstrap({ children }: { children: React.ReactNode }) {
         const { user } = await api.auth.me();
         if (!user) {
           logout();
-          if (!cancelled && pathname !== '/login') router.replace('/login');
+          if (!cancelled && pathname !== "/login") router.replace("/login");
           return;
         }
         setUser(user);
@@ -44,7 +44,7 @@ export function AuthBootstrap({ children }: { children: React.ReactNode }) {
     const onUnauthorized = () => {
       logout();
       setChannels([]);
-      if (!cancelled && pathname !== '/login') router.replace('/login');
+      if (!cancelled && pathname !== "/login") router.replace("/login");
     };
     window.addEventListener(BACKEND_UP_EVENT, onBackendUp);
     window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized);

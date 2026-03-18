@@ -1,4 +1,3 @@
-"use client"
+"use client";
 
-export { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from 'ui'
-
+export { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "ui";

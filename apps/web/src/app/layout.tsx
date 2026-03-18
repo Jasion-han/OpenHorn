@@ -1,15 +1,15 @@
-import type { Metadata } from 'next';
-import Script from 'next/script';
-import 'ui/styles/tokens.css';
-import './globals.css';
-import { Toaster } from '../components/ui/sonner';
-import { THEME_MODE_STORAGE_KEY } from '@/components/theme/theme';
-import { ThemeListener } from '@/components/theme/ThemeListener';
-import { AppProviders } from '@/components/providers/AppProviders';
+import type { Metadata } from "next";
+import Script from "next/script";
+import "ui/styles/tokens.css";
+import "./globals.css";
+import { AppProviders } from "@/components/providers/AppProviders";
+import { ThemeListener } from "@/components/theme/ThemeListener";
+import { THEME_MODE_STORAGE_KEY } from "@/components/theme/theme";
+import { Toaster } from "../components/ui/sonner";
 
 export const metadata: Metadata = {
-  title: 'OpenHorn',
-  description: 'AI Assistant',
+  title: "OpenHorn",
+  description: "AI Assistant",
 };
 
 const themeScript = `
@@ -26,11 +26,7 @@ const themeScript = `
 })();
 `;
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning>
       <body suppressHydrationWarning>

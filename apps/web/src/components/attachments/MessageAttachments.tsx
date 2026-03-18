@@ -1,10 +1,10 @@
-'use client';
+"use client";
 
-import * as React from 'react';
-import { ChevronLeft, ChevronRight, Paperclip, X } from 'lucide-react';
-import { cn } from '@/lib/utils';
-import { getAttachmentUrl } from '@/lib/attachment-url';
-import { Dialog, DialogContent, DialogClose } from '@/components/ui/dialog';
+import { ChevronLeft, ChevronRight, Paperclip, X } from "lucide-react";
+import * as React from "react";
+import { Dialog, DialogClose, DialogContent } from "@/components/ui/dialog";
+import { getAttachmentUrl } from "@/lib/attachment-url";
+import { cn } from "@/lib/utils";
 
 export type MessageAttachmentItem = {
   id?: string;
@@ -15,7 +15,7 @@ export type MessageAttachmentItem = {
 };
 
 function isImageType(fileType?: string) {
-  return Boolean(fileType && fileType.startsWith('image/'));
+  return Boolean(fileType?.startsWith("image/"));
 }
 
 function truncateName(name: string, max = 20): string {
@@ -65,7 +65,7 @@ export function MessageAttachments({
   if (!attachments || attachments.length === 0) return null;
 
   return (
-    <div className={cn('flex flex-col gap-2 mb-2', className)}>
+    <div className={cn("flex flex-col gap-2 mb-2", className)}>
       {imagesForPreview.length > 0 && (
         <div className="flex flex-wrap gap-2.5">
           {imagesForPreview.map(({ att, src }, idx) => (
@@ -73,19 +73,20 @@ export function MessageAttachments({
               key={att.id || `${att.fileName}-${idx}`}
               type="button"
               className={cn(
-                'group/image relative shrink-0 rounded-lg overflow-hidden',
-                isSingleImage ? 'w-[280px] h-[200px]' : 'size-[280px]'
+                "group/image relative shrink-0 rounded-lg overflow-hidden",
+                isSingleImage ? "w-[280px] h-[200px]" : "size-[280px]",
               )}
               onClick={() => openAt(idx)}
               title={att.fileName}
               aria-label="Preview image"
             >
+              {/* biome-ignore lint/performance/noImgElement: src can be blob/object URL or protected attachment URL */}
               <img
                 src={src}
                 alt={att.fileName}
                 className={cn(
-                  'size-full',
-                  isSingleImage ? 'object-contain bg-muted/10' : 'object-cover'
+                  "size-full",
+                  isSingleImage ? "object-contain bg-muted/10" : "object-cover",
                 )}
               />
             </button>
@@ -133,6 +134,7 @@ export function MessageAttachments({
 
             {imagesForPreview[activeIndex] && (
               <div className="flex items-center justify-center p-4">
+                {/* biome-ignore lint/performance/noImgElement: lightbox preview supports blob/object URLs */}
                 <img
                   src={imagesForPreview[activeIndex].src}
                   alt={imagesForPreview[activeIndex].att.fileName}
@@ -148,9 +150,9 @@ export function MessageAttachments({
                   onClick={onPrev}
                   disabled={!canPrev}
                   className={cn(
-                    'absolute left-3 top-1/2 -translate-y-1/2 z-10',
-                    'rounded-full bg-background/80 p-2 text-foreground/70 shadow-sm backdrop-blur',
-                    'hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed'
+                    "absolute left-3 top-1/2 -translate-y-1/2 z-10",
+                    "rounded-full bg-background/80 p-2 text-foreground/70 shadow-sm backdrop-blur",
+                    "hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed",
                   )}
                   aria-label="Previous image"
                 >
@@ -161,9 +163,9 @@ export function MessageAttachments({
                   onClick={onNext}
                   disabled={!canNext}
                   className={cn(
-                    'absolute right-3 top-1/2 -translate-y-1/2 z-10',
-                    'rounded-full bg-background/80 p-2 text-foreground/70 shadow-sm backdrop-blur',
-                    'hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed'
+                    "absolute right-3 top-1/2 -translate-y-1/2 z-10",
+                    "rounded-full bg-background/80 p-2 text-foreground/70 shadow-sm backdrop-blur",
+                    "hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed",
                   )}
                   aria-label="Next image"
                 >
@@ -180,4 +182,3 @@ export function MessageAttachments({
     </div>
   );
 }
-

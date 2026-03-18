@@ -1,15 +1,10 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { ChevronDown, LogOut } from 'lucide-react';
-import { useAuthStore } from '@/stores/authStore';
-import { useChatStore } from '@/stores/chatStore';
-import { api } from '@/lib/api';
-import { useBackendStatusStore } from '@/stores/backendStatusStore';
-import { hideNotification, notifyErrorOnce, notifySuccess } from '@/lib/notify';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
+import { ChevronDown, LogOut } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -17,7 +12,12 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+} from "@/components/ui/dropdown-menu";
+import { api } from "@/lib/api";
+import { hideNotification, notifyErrorOnce, notifySuccess } from "@/lib/notify";
+import { useAuthStore } from "@/stores/authStore";
+import { useBackendStatusStore } from "@/stores/backendStatusStore";
+import { useChatStore } from "@/stores/chatStore";
 
 export function SidebarHeader() {
   const router = useRouter();
@@ -34,7 +34,7 @@ export function SidebarHeader() {
     } finally {
       logout();
       setChannels([]);
-      router.replace('/login');
+      router.replace("/login");
     }
   };
 
@@ -44,10 +44,16 @@ export function SidebarHeader() {
     try {
       const ok = await backend.retry();
       if (ok) {
-        hideNotification('backend_down');
-        notifySuccess('连接已恢复', '已重新连接后端');
+        hideNotification("backend_down");
+        notifySuccess("连接已恢复", "已重新连接后端");
       } else {
-        notifyErrorOnce('backend_down', '后端不可用', '仍然无法连接到后端服务（http://localhost:3000）。');
+        const hint =
+          backend.lastError === "Blocked by browser (CORS?)"
+            ? "仍然无法访问后端（可能被浏览器跨域/CORS 拦截）。请检查后端 CORS 是否允许当前页面 Origin，并查看 DevTools Console/Network。"
+            : backend.lastError === "Blocked by browser (mixed content)"
+              ? "仍然无法访问后端（可能被浏览器 Mixed Content 拦截：HTTPS 页面访问 HTTP 后端）。"
+              : `仍然无法连接到后端服务（http://localhost:3000）。`;
+        notifyErrorOnce("backend_down", "后端不可用", hint);
       }
     } finally {
       setRetrying(false);
@@ -60,10 +66,16 @@ export function SidebarHeader() {
         <div className="font-semibold text-sm leading-5 truncate">OpenHorn</div>
         <div className="flex items-center gap-2">
           <span className="text-[11px] text-muted-foreground">Local</span>
-          {backend.status === 'down' && <Badge variant="destructive">offline</Badge>}
-          {backend.status === 'down' && (
-            <Button size="sm" variant="outline" className="h-6 px-2 text-xs" onClick={() => void handleRetry()} disabled={retrying}>
-              {retrying ? 'Retrying…' : 'Retry'}
+          {backend.status === "down" && <Badge variant="destructive">offline</Badge>}
+          {backend.status === "down" && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-6 px-2 text-xs"
+              onClick={() => void handleRetry()}
+              disabled={retrying}
+            >
+              {retrying ? "Retrying…" : "Retry"}
             </Button>
           )}
         </div>
@@ -71,15 +83,19 @@ export function SidebarHeader() {
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="icon-sm" className="flex items-center gap-1 w-auto px-2 titlebar-no-drag">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="flex items-center gap-1 w-auto px-2 titlebar-no-drag"
+          >
             <div className="flex h-7 w-7 items-center justify-center rounded-full bg-muted text-xs font-semibold">
-              {user?.username?.slice(0, 1)?.toUpperCase() || 'U'}
+              {user?.username?.slice(0, 1)?.toUpperCase() || "U"}
             </div>
             <ChevronDown size={14} />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-44">
-          <DropdownMenuLabel>{user?.username || 'User'}</DropdownMenuLabel>
+          <DropdownMenuLabel>{user?.username || "User"}</DropdownMenuLabel>
           <DropdownMenuSeparator />
           <DropdownMenuItem className="text-destructive" onClick={() => void handleLogout()}>
             <LogOut size={16} />
@@ -90,4 +106,3 @@ export function SidebarHeader() {
     </div>
   );
 }
-

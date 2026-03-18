@@ -1,7 +1,7 @@
-'use client';
+"use client";
 
-import * as React from 'react';
-import { Button } from '@/components/ui/button';
+import * as React from "react";
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -9,7 +9,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
+} from "@/components/ui/dialog";
 
 export type ConfirmOptions = {
   title?: string;
@@ -26,7 +26,7 @@ const ConfirmDialogContext = React.createContext<ConfirmFn | null>(null);
 export function useConfirm(): ConfirmFn {
   const ctx = React.useContext(ConfirmDialogContext);
   if (!ctx) {
-    throw new Error('useConfirm must be used within ConfirmDialogProvider');
+    throw new Error("useConfirm must be used within ConfirmDialogProvider");
   }
   return ctx;
 }
@@ -81,7 +81,7 @@ export function ConfirmDialogProvider(props: { children: React.ReactNode }) {
       >
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>{options?.title || '确认操作'}</DialogTitle>
+            <DialogTitle>{options?.title || "确认操作"}</DialogTitle>
             {options?.description ? (
               <DialogDescription className="whitespace-pre-line">
                 {options.description}
@@ -89,19 +89,15 @@ export function ConfirmDialogProvider(props: { children: React.ReactNode }) {
             ) : null}
           </DialogHeader>
           <DialogFooter>
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={() => finish(false)}
-            >
-              {options?.cancelText || '取消'}
+            <Button type="button" variant="ghost" onClick={() => finish(false)}>
+              {options?.cancelText || "取消"}
             </Button>
             <Button
               type="button"
-              variant={options?.destructive ? 'destructive' : 'default'}
+              variant={options?.destructive ? "destructive" : "default"}
               onClick={() => finish(true)}
             >
-              {options?.confirmText || '确定'}
+              {options?.confirmText || "确定"}
             </Button>
           </DialogFooter>
         </DialogContent>

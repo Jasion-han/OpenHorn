@@ -1,2 +1,1 @@
-export { Switch } from 'ui'
-
+export { Switch } from "ui";

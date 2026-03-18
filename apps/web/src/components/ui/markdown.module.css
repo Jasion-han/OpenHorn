@@ -113,7 +113,9 @@
   color: hsl(var(--muted-foreground));
   font-size: 0.75em;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s;
   font-family: inherit;
 }
 
@@ -183,6 +185,7 @@
   animation: oh-stream-tail-glow 860ms linear infinite;
 }
 
+/* biome-ignore lint/correctness/noUnknownPseudoClass: CSS Modules :global() */
 :global(.dark) .streamTail {
   background-image: linear-gradient(
     102deg,

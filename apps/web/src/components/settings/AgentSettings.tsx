@@ -1,19 +1,20 @@
-'use client';
+"use client";
 
-import { useEffect, useMemo, useState } from 'react';
-import { Plus, Trash2 } from 'lucide-react';
-import { api, type ApiChannel } from '../../lib/api';
-import { getGlobalDefaultChannel } from '../../lib/default-channel';
-import { notifyError, notifySuccess } from '../../lib/notify';
-import { BACKEND_UP_EVENT } from '../../stores/backendStatusStore';
-import { Button } from '../ui/button';
-import { Input } from '../ui/input';
-import { Textarea } from '../ui/textarea';
-import { Badge } from '../ui/badge';
-import { Switch } from '../ui/switch';
-import { Label } from '../ui/label';
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../ui/dialog';
-import { SettingsCard, SettingsSection } from 'ui';
+import { Plus, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { SettingsCard, SettingsSection } from "ui";
+import { ProviderLogo } from "@/components/providers/ProviderLogo";
+import { type ApiChannel, api } from "../../lib/api";
+import { getGlobalDefaultChannel } from "../../lib/default-channel";
+import { notifyError, notifySuccess } from "../../lib/notify";
+import { BACKEND_UP_EVENT } from "../../stores/backendStatusStore";
+import { Badge } from "../ui/badge";
+import { Button } from "../ui/button";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "../ui/dialog";
+import { Input } from "../ui/input";
+import { Label } from "../ui/label";
+import { Switch } from "../ui/switch";
+import { Textarea } from "../ui/textarea";
 
 type MCPServer = {
   id: string;
@@ -23,23 +24,23 @@ type MCPServer = {
   isEnabled: boolean;
 };
 
-const TAVILY_API_KEY_SETTING = 'liveSearch.tavilyApiKey';
-const TAVILY_ENABLED_SETTING = 'liveSearch.tavilyEnabled';
+const TAVILY_API_KEY_SETTING = "liveSearch.tavilyApiKey";
+const TAVILY_ENABLED_SETTING = "liveSearch.tavilyEnabled";
 
 export function AgentSettings() {
   const [channels, setChannels] = useState<ApiChannel[]>([]);
   const [mcpServers, setMcpServers] = useState<MCPServer[]>([]);
   const [loading, setLoading] = useState(false);
-  const [tavilyApiKey, setTavilyApiKey] = useState('');
-  const [savedTavilyApiKey, setSavedTavilyApiKey] = useState('');
+  const [tavilyApiKey, setTavilyApiKey] = useState("");
+  const [savedTavilyApiKey, setSavedTavilyApiKey] = useState("");
   const [savingTavilyApiKey, setSavingTavilyApiKey] = useState(false);
   const [tavilyEnabled, setTavilyEnabled] = useState(true);
   const [savingTavilyEnabled, setSavingTavilyEnabled] = useState(false);
 
   const [mcpModalOpen, setMcpModalOpen] = useState(false);
-  const [mcpName, setMcpName] = useState('');
-  const [mcpType, setMcpType] = useState('stdio');
-  const [mcpConfig, setMcpConfig] = useState('{\n  \n}');
+  const [mcpName, setMcpName] = useState("");
+  const [mcpType, setMcpType] = useState("stdio");
+  const [mcpConfig, setMcpConfig] = useState("{\n  \n}");
   const [mcpBusyId, setMcpBusyId] = useState<string | null>(null);
 
   const defaultChannel = useMemo(() => getGlobalDefaultChannel(channels), [channels]);
@@ -68,14 +69,16 @@ export function AgentSettings() {
       ]);
       setChannels(channels);
       setMcpServers(servers as MCPServer[]);
-      const currentKey = settings[TAVILY_API_KEY_SETTING] || '';
+      const currentKey = settings[TAVILY_API_KEY_SETTING] || "";
       const enabledRaw = settings[TAVILY_ENABLED_SETTING];
       setTavilyApiKey(currentKey);
       setSavedTavilyApiKey(currentKey);
-      setTavilyEnabled(enabledRaw == null ? true : String(enabledRaw).trim().toLowerCase() !== 'false');
+      setTavilyEnabled(
+        enabledRaw == null ? true : String(enabledRaw).trim().toLowerCase() !== "false",
+      );
     } catch (error) {
-      console.error('Failed to load agent settings:', error);
-      notifyError('加载失败', error instanceof Error ? error.message : '无法加载 Agent 设置');
+      console.error("Failed to load agent settings:", error);
+      notifyError("加载失败", error instanceof Error ? error.message : "无法加载 Agent 设置");
     } finally {
       setLoading(false);
     }
@@ -86,9 +89,14 @@ export function AgentSettings() {
     try {
       await api.settings.set(TAVILY_API_KEY_SETTING, tavilyApiKey.trim() || null);
       setSavedTavilyApiKey(tavilyApiKey.trim());
-      notifySuccess('已保存', tavilyApiKey.trim() ? 'Tavily API Key 已更新，将优先覆盖服务端默认 Key。' : '已恢复使用服务端默认 Tavily Key。');
+      notifySuccess(
+        "已保存",
+        tavilyApiKey.trim()
+          ? "Tavily API Key 已更新，将优先覆盖服务端默认 Key。"
+          : "已恢复使用服务端默认 Tavily Key。",
+      );
     } catch (error) {
-      notifyError('保存失败', error instanceof Error ? error.message : '无法保存 Tavily Key');
+      notifyError("保存失败", error instanceof Error ? error.message : "无法保存 Tavily Key");
     } finally {
       setSavingTavilyApiKey(false);
     }
@@ -99,11 +107,11 @@ export function AgentSettings() {
     setTavilyEnabled(next);
     setSavingTavilyEnabled(true);
     try {
-      await api.settings.set(TAVILY_ENABLED_SETTING, next ? 'true' : 'false');
-      notifySuccess('已更新', next ? 'Tavily 搜索已启用。' : 'Tavily 搜索已关闭。');
+      await api.settings.set(TAVILY_ENABLED_SETTING, next ? "true" : "false");
+      notifySuccess("已更新", next ? "Tavily 搜索已启用。" : "Tavily 搜索已关闭。");
     } catch (error) {
       setTavilyEnabled(!next);
-      notifyError('更新失败', error instanceof Error ? error.message : '无法更新 Tavily 状态');
+      notifyError("更新失败", error instanceof Error ? error.message : "无法更新 Tavily 状态");
     } finally {
       setSavingTavilyEnabled(false);
     }
@@ -115,7 +123,7 @@ export function AgentSettings() {
     try {
       parsedConfig = JSON.parse(mcpConfig);
     } catch {
-      notifyError('配置错误', 'MCP config 必须是合法 JSON');
+      notifyError("配置错误", "MCP config 必须是合法 JSON");
       return;
     }
 
@@ -127,13 +135,16 @@ export function AgentSettings() {
         config: parsedConfig,
       });
       setMcpModalOpen(false);
-      setMcpName('');
-      setMcpType('stdio');
-      setMcpConfig('{\n  \n}');
+      setMcpName("");
+      setMcpType("stdio");
+      setMcpConfig("{\n  \n}");
       await loadAll();
-      notifySuccess('已创建', 'MCP Server 已添加');
+      notifySuccess("已创建", "MCP Server 已添加");
     } catch (error) {
-      notifyError('创建失败', error instanceof Error ? error.message : 'Failed to create MCP server');
+      notifyError(
+        "创建失败",
+        error instanceof Error ? error.message : "Failed to create MCP server",
+      );
     } finally {
       setLoading(false);
     }
@@ -144,9 +155,12 @@ export function AgentSettings() {
     try {
       await api.mcp.deleteServer(id);
       await loadAll();
-      notifySuccess('已删除', 'MCP Server 已删除');
+      notifySuccess("已删除", "MCP Server 已删除");
     } catch (error) {
-      notifyError('删除失败', error instanceof Error ? error.message : 'Failed to delete MCP server');
+      notifyError(
+        "删除失败",
+        error instanceof Error ? error.message : "Failed to delete MCP server",
+      );
     } finally {
       setMcpBusyId(null);
     }
@@ -159,9 +173,12 @@ export function AgentSettings() {
         isEnabled: !server.isEnabled,
       });
       await loadAll();
-      notifySuccess('已更新', 'MCP Server 状态已更新');
+      notifySuccess("已更新", "MCP Server 状态已更新");
     } catch (error) {
-      notifyError('更新失败', error instanceof Error ? error.message : 'Failed to update MCP server');
+      notifyError(
+        "更新失败",
+        error instanceof Error ? error.message : "Failed to update MCP server",
+      );
     } finally {
       setMcpBusyId(null);
     }
@@ -178,17 +195,25 @@ export function AgentSettings() {
             <div className="flex items-center justify-between gap-3">
               <div>
                 <p className="text-sm font-medium">内置实时能力</p>
-                <p className="text-xs text-muted-foreground">支持本地时间解析、结构化天气查询，以及无 provider 时的离线降级提示。</p>
+                <p className="text-xs text-muted-foreground">
+                  支持本地时间解析、结构化天气查询，以及无 provider 时的离线降级提示。
+                </p>
               </div>
               <Badge variant="secondary">Product-owned</Badge>
             </div>
             <div className="flex items-center justify-between gap-3 rounded-xl border border-border/50 bg-background/60 p-3">
               <div>
                 <p className="text-sm font-medium">默认模型渠道</p>
-                <p className="text-xs text-muted-foreground">用于 Chat/Agent 的基础模型调用；实时能力会在服务端先行路由，再进入模型。</p>
+                <p className="text-xs text-muted-foreground">
+                  用于 Chat/Agent 的基础模型调用；实时能力会在服务端先行路由，再进入模型。
+                </p>
               </div>
               {defaultChannel ? (
-                <Badge variant="secondary">{defaultChannel.label}</Badge>
+                <Badge variant="secondary" className="gap-1" title={defaultChannel.provider}>
+                  <ProviderLogo provider={defaultChannel.provider} className="size-4" />
+                  <span className="sr-only">{defaultChannel.provider}</span>
+                  <span>{defaultChannel.modelId}</span>
+                </Badge>
               ) : (
                 <p className="text-sm text-muted-foreground">
                   未设置默认渠道，请在左侧切换到「渠道」进行配置。
@@ -208,7 +233,9 @@ export function AgentSettings() {
             <div className="flex items-center justify-between gap-3">
               <div>
                 <p className="text-sm font-medium">用户级 Tavily API Key</p>
-                <p className="text-xs text-muted-foreground">留空则回落到部署默认 Key；填写后仅当前账号生效。</p>
+                <p className="text-xs text-muted-foreground">
+                  留空则回落到部署默认 Key；填写后仅当前账号生效。
+                </p>
               </div>
               {!tavilyEnabled ? (
                 <Badge variant="outline">已关闭</Badge>
@@ -221,7 +248,9 @@ export function AgentSettings() {
             <div className="flex items-center justify-between rounded-xl border border-border/50 bg-background/60 p-3">
               <div>
                 <p className="text-sm font-medium">启用 Tavily 搜索</p>
-                <p className="text-xs text-muted-foreground">关闭后将不会进行实时搜索，即使存在 API Key。</p>
+                <p className="text-xs text-muted-foreground">
+                  关闭后将不会进行实时搜索，即使存在 API Key。
+                </p>
               </div>
               <Switch
                 checked={tavilyEnabled}
@@ -247,8 +276,11 @@ export function AgentSettings() {
               >
                 取消
               </Button>
-              <Button onClick={() => void handleSaveTavilyApiKey()} disabled={savingTavilyApiKey || tavilyApiKey === savedTavilyApiKey}>
-                {savingTavilyApiKey ? '保存中...' : '保存'}
+              <Button
+                onClick={() => void handleSaveTavilyApiKey()}
+                disabled={savingTavilyApiKey || tavilyApiKey === savedTavilyApiKey}
+              >
+                {savingTavilyApiKey ? "保存中..." : "保存"}
               </Button>
             </div>
           </div>
@@ -258,11 +290,11 @@ export function AgentSettings() {
       <SettingsSection
         title="高级工具（MCP）"
         description="MCP 是 Agent 的附加工具层，用于私有数据源、执行器和自定义工作流，不是默认联网能力的前提。"
-        action={(
+        action={
           <Button size="sm" onClick={() => setMcpModalOpen(true)}>
             <Plus size={16} /> 添加 MCP
           </Button>
-        )}
+        }
       >
         <SettingsCard divided={false} className="p-4">
           {mcpServers.length === 0 ? (
@@ -270,7 +302,10 @@ export function AgentSettings() {
           ) : (
             <div className="flex flex-col gap-2">
               {mcpServers.map((server) => (
-                <div key={server.id} className="flex items-center justify-between rounded-xl border border-border/50 bg-background/60 p-3">
+                <div
+                  key={server.id}
+                  className="flex items-center justify-between rounded-xl border border-border/50 bg-background/60 p-3"
+                >
                   <div>
                     <p className="text-sm font-medium">{server.name}</p>
                     <p className="text-xs text-muted-foreground">{server.type}</p>
@@ -300,7 +335,9 @@ export function AgentSettings() {
 
       <Dialog open={mcpModalOpen} onOpenChange={(open) => !open && setMcpModalOpen(false)}>
         <DialogContent>
-          <DialogHeader><DialogTitle>添加 MCP Server</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>添加 MCP Server</DialogTitle>
+          </DialogHeader>
           <div className="flex flex-col gap-3">
             <div className="flex flex-col gap-1.5">
               <Label>名称 *</Label>
@@ -312,12 +349,21 @@ export function AgentSettings() {
             </div>
             <div className="flex flex-col gap-1.5">
               <Label>配置（JSON）</Label>
-              <Textarea value={mcpConfig} onChange={(e) => setMcpConfig(e.target.value)} rows={6} className="font-mono text-sm" />
+              <Textarea
+                value={mcpConfig}
+                onChange={(e) => setMcpConfig(e.target.value)}
+                rows={6}
+                className="font-mono text-sm"
+              />
             </div>
           </div>
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setMcpModalOpen(false)}>取消</Button>
-            <Button onClick={handleCreateMcp} disabled={loading}>创建</Button>
+            <Button variant="ghost" onClick={() => setMcpModalOpen(false)}>
+              取消
+            </Button>
+            <Button onClick={handleCreateMcp} disabled={loading}>
+              创建
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

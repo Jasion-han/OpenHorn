@@ -1,8 +1,8 @@
-'use client';
+"use client";
 
-import type React from 'react';
-import { Button } from './button';
-import { cn } from '@/lib/utils';
+import type React from "react";
+import { cn } from "@/lib/utils";
+import { Button } from "./button";
 
 export function IconActionButton({
   children,
@@ -27,10 +27,10 @@ export function IconActionButton({
       variant="ghost"
       size="icon-sm"
       className={cn(
-        'h-6 w-6 rounded-md border border-border/60 bg-transparent',
+        "h-6 w-6 rounded-md border border-border/60 bg-transparent",
         danger
-          ? 'text-destructive hover:bg-destructive/10 hover:text-destructive'
-          : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+          ? "text-destructive hover:bg-destructive/10 hover:text-destructive"
+          : "text-muted-foreground hover:bg-accent hover:text-foreground",
       )}
     >
       {children}

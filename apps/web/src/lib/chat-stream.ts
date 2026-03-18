@@ -1,17 +1,20 @@
-import type { ApiAgentRun, ApiCitation, ApiLiveRoute, ApiLiveStatus } from './api';
-import { api } from './api';
-import { readSseStream, type SseEvent } from './sse';
+import type { ApiAgentRun, ApiCitation, ApiLiveRoute, ApiLiveStatus } from "./api";
+import { api } from "./api";
+import { readSseStream, type SseEvent } from "./sse";
 
 type ChatStreamEvent =
-  | { type: 'live_status'; status: ApiLiveStatus; route: ApiLiveRoute; label: string }
-  | { type: 'citations'; citations: ApiCitation[] }
-  | { type: 'delta'; content: string }
-  | { type: 'done'; messageId?: string; model?: string; agentRun?: ApiAgentRun }
-  | { type: 'agent_event'; event: { type: string; content?: string; toolName?: string; toolInput?: unknown } }
-  | { type: 'error'; message: string };
+  | { type: "live_status"; status: ApiLiveStatus; route: ApiLiveRoute; label: string }
+  | { type: "citations"; citations: ApiCitation[] }
+  | { type: "delta"; content: string }
+  | { type: "done"; messageId?: string; model?: string; agentRun?: ApiAgentRun }
+  | {
+      type: "agent_event";
+      event: { type: string; content?: string; toolName?: string; toolInput?: unknown };
+    }
+  | { type: "error"; message: string };
 
 function isChatStreamEvent(event: SseEvent): event is ChatStreamEvent {
-  return typeof event?.type === 'string';
+  return typeof event?.type === "string";
 }
 
 export async function streamChatMessage(
@@ -19,23 +22,28 @@ export async function streamChatMessage(
     conversationId: string;
     content: string;
     attachments?: string[];
-    mode?: 'chat' | 'agent';
+    mode?: "chat" | "agent";
   },
   handlers: {
     onLiveStatus?: (event: { status: ApiLiveStatus; route: ApiLiveRoute; label: string }) => void;
     onCitations?: (event: { citations: ApiCitation[] }) => void;
     onDelta: (content: string) => void;
     onDone: (event: { messageId?: string; model?: string; agentRun?: ApiAgentRun }) => void;
-    onAgentEvent?: (event: { type: string; content?: string; toolName?: string; toolInput?: unknown }) => void;
+    onAgentEvent?: (event: {
+      type: string;
+      content?: string;
+      toolName?: string;
+      toolInput?: unknown;
+    }) => void;
     onError: (message: string) => void;
   },
-  existingResponse?: Response
+  existingResponse?: Response,
 ) {
-  const response = existingResponse ?? await api.messages.stream(input);
+  const response = existingResponse ?? (await api.messages.stream(input));
 
   if (!response.ok) {
-    const errorText = await response.text().catch(() => '');
-    throw new Error(errorText || 'Failed to stream message');
+    const errorText = await response.text().catch(() => "");
+    throw new Error(errorText || "Failed to stream message");
   }
 
   await readSseStream(response, (rawEvent) => {
@@ -43,7 +51,7 @@ export async function streamChatMessage(
       return;
     }
 
-    if (rawEvent.type === 'live_status') {
+    if (rawEvent.type === "live_status") {
       handlers.onLiveStatus?.({
         status: rawEvent.status,
         route: rawEvent.route,
@@ -52,19 +60,19 @@ export async function streamChatMessage(
       return;
     }
 
-    if (rawEvent.type === 'citations') {
+    if (rawEvent.type === "citations") {
       handlers.onCitations?.({
         citations: rawEvent.citations || [],
       });
       return;
     }
 
-    if (rawEvent.type === 'delta') {
-      handlers.onDelta(rawEvent.content || '');
+    if (rawEvent.type === "delta") {
+      handlers.onDelta(rawEvent.content || "");
       return;
     }
 
-    if (rawEvent.type === 'done') {
+    if (rawEvent.type === "done") {
       handlers.onDone({
         messageId: rawEvent.messageId,
         model: rawEvent.model,
@@ -73,13 +81,13 @@ export async function streamChatMessage(
       return;
     }
 
-    if (rawEvent.type === 'agent_event') {
-      handlers.onAgentEvent?.(rawEvent.event || { type: 'meta' });
+    if (rawEvent.type === "agent_event") {
+      handlers.onAgentEvent?.(rawEvent.event || { type: "meta" });
       return;
     }
 
-    if (rawEvent.type === 'error') {
-      handlers.onError(rawEvent.message || 'Stream error');
+    if (rawEvent.type === "error") {
+      handlers.onError(rawEvent.message || "Stream error");
       return;
     }
   });

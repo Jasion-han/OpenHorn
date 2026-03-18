@@ -1,31 +1,21 @@
-'use client';
+"use client";
 
-import * as React from 'react';
-import {
-  ChevronDown,
-  CornerDownLeft,
-  Globe,
-  Paperclip,
-  Square,
-} from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from '@/components/ui/tooltip';
-import { cn } from '@/lib/utils';
-import { AttachmentPreviewItem } from '@/components/attachments/AttachmentPreviewItem';
+import { ChevronDown, CornerDownLeft, Globe, Paperclip, Square } from "lucide-react";
+import * as React from "react";
+import { AttachmentPreviewItem } from "@/components/attachments/AttachmentPreviewItem";
+import { ProviderLogo } from "@/components/providers/ProviderLogo";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 
-const ACCEPT_FILES =
-  'image/png,image/jpeg,image/webp,application/pdf,text/plain,text/markdown';
+const ACCEPT_FILES = "image/png,image/jpeg,image/webp,application/pdf,text/plain,text/markdown";
 
 function extractFilesFromClipboard(e: React.ClipboardEvent): File[] {
   const items = Array.from(e.clipboardData?.items || []);
   const files: File[] = [];
   for (const item of items) {
-    if (item.kind !== 'file') continue;
+    if (item.kind !== "file") continue;
     const file = item.getAsFile();
     if (file) files.push(file);
   }
@@ -51,11 +41,12 @@ export function PromaComposer(props: {
   onAddAttachments: (files: File[]) => void;
   onRemoveAttachment: (file: File) => void;
 
-  mode: 'chat' | 'agent';
-  onModeChange: (mode: 'chat' | 'agent') => void;
+  mode: "chat" | "agent";
+  onModeChange: (mode: "chat" | "agent") => void;
 
+  modelProvider?: string | null;
   modelLabel: string | null;
-  modelTone?: 'normal' | 'warning';
+  modelTone?: "normal" | "warning";
   onOpenModelPicker?: () => void;
 
   forceWebSearch: boolean;
@@ -81,8 +72,9 @@ export function PromaComposer(props: {
     onRemoveAttachment,
     mode,
     onModeChange,
+    modelProvider,
     modelLabel,
-    modelTone = 'normal',
+    modelTone = "normal",
     onOpenModelPicker,
     forceWebSearch,
     onToggleWebSearch,
@@ -107,7 +99,7 @@ export function PromaComposer(props: {
       if (list.length === 0) return;
       onAddAttachments(list);
     },
-    [onAddAttachments]
+    [onAddAttachments],
   );
 
   React.useEffect(() => {
@@ -115,7 +107,7 @@ export function PromaComposer(props: {
     const next = new Map<string, string>();
 
     for (const file of attachments) {
-      if (!file.type?.startsWith('image/')) continue;
+      if (!file.type?.startsWith("image/")) continue;
       const key = fileKey(file);
       const existing = prev.get(key);
       next.set(key, existing || URL.createObjectURL(file));
@@ -152,12 +144,15 @@ export function PromaComposer(props: {
     fileInputRef.current?.click();
   }, []);
 
-  const handleDragOver = React.useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (disabled) return;
-    setIsDragOver(true);
-  }, [disabled]);
+  const handleDragOver = React.useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (disabled) return;
+      setIsDragOver(true);
+    },
+    [disabled],
+  );
 
   const handleDragLeave = React.useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -165,17 +160,20 @@ export function PromaComposer(props: {
     setIsDragOver(false);
   }, []);
 
-  const handleDrop = React.useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragOver(false);
-    if (disabled) return;
-    const files = extractFilesFromDragEvent(e);
-    if (files.length > 0) addFiles(files);
-  }, [addFiles, disabled]);
+  const handleDrop = React.useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setIsDragOver(false);
+      if (disabled) return;
+      const files = extractFilesFromDragEvent(e);
+      if (files.length > 0) addFiles(files);
+    },
+    [addFiles, disabled],
+  );
 
   const modeDisabled = Boolean(disabled || streaming);
-  const alternateMode = mode === 'chat' ? 'agent' : 'chat';
+  const alternateMode = mode === "chat" ? "agent" : "chat";
 
   React.useEffect(() => {
     if (!modeMenuOpen) return;
@@ -187,26 +185,27 @@ export function PromaComposer(props: {
     };
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
+      if (event.key === "Escape") {
         setModeMenuOpen(false);
       }
     };
 
-    document.addEventListener('mousedown', handlePointerDown);
-    document.addEventListener('keydown', handleKeyDown);
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
     return () => {
-      document.removeEventListener('mousedown', handlePointerDown);
-      document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
     };
   }, [modeMenuOpen]);
 
   return (
     <div className="pt-2">
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: drag-and-drop container is mouse-only, inner controls are accessible */}
       <div
         className={cn(
-          'rounded-[17px] border-[0.5px] border-border bg-background/70 backdrop-blur-sm pt-2 transition-all duration-200 titlebar-no-drag shadow-minimal',
-          'focus-within:border-foreground/20',
-          isDragOver && 'border-[2px] border-dashed border-[#2ecc71] bg-[#2ecc71]/[0.03]'
+          "rounded-[17px] border-[0.5px] border-border bg-background/70 backdrop-blur-sm pt-2 transition-all duration-200 titlebar-no-drag shadow-minimal",
+          "focus-within:border-foreground/20",
+          isDragOver && "border-[2px] border-dashed border-[#2ecc71] bg-[#2ecc71]/[0.03]",
         )}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
@@ -222,7 +221,7 @@ export function PromaComposer(props: {
           onChange={(e) => {
             const list = e.currentTarget.files ? Array.from(e.currentTarget.files) : [];
             if (list.length > 0) addFiles(list);
-            e.currentTarget.value = '';
+            e.currentTarget.value = "";
           }}
         />
 
@@ -235,10 +234,10 @@ export function PromaComposer(props: {
                 <AttachmentPreviewItem
                   key={key}
                   filename={file.name}
-                  mediaType={file.type || 'application/octet-stream'}
+                  mediaType={file.type || "application/octet-stream"}
                   previewUrl={previewUrl}
                   onRemove={() => onRemoveAttachment(file)}
-                  className={disabled ? 'opacity-70 pointer-events-none' : undefined}
+                  className={disabled ? "opacity-70 pointer-events-none" : undefined}
                 />
               );
             })}
@@ -263,8 +262,9 @@ export function PromaComposer(props: {
             disabled={disabled}
             rows={1}
             className={cn(
-              'min-h-[36px] max-h-[160px] resize-none',
-              'border-0 bg-transparent p-0 shadow-none focus-visible:ring-0'
+              "min-h-[36px] max-h-[160px] resize-none",
+              "border-0 bg-transparent p-0 shadow-none focus-visible:ring-0",
+              "placeholder:text-muted-foreground/70",
             )}
           />
         </div>
@@ -300,12 +300,12 @@ export function PromaComposer(props: {
                       setModeMenuOpen(false);
                     }}
                     className={cn(
-                      'pointer-events-auto flex w-full items-center justify-center gap-1.5 rounded-[10px] px-2.5 py-1 text-xs',
-                      'bg-accent/88 text-foreground shadow-[0_10px_24px_rgba(15,23,42,0.12)] ring-1 ring-border/25 backdrop-blur-md',
-                      'transition-colors hover:bg-accent hover:text-foreground'
+                      "pointer-events-auto flex w-full items-center justify-center gap-1.5 rounded-[10px] px-2.5 py-1 text-xs",
+                      "bg-accent/88 text-foreground shadow-[0_10px_24px_rgba(15,23,42,0.12)] ring-1 ring-border/25 backdrop-blur-md",
+                      "transition-colors hover:bg-accent hover:text-foreground",
                     )}
                   >
-                    <span>{alternateMode === 'chat' ? 'Chat' : 'Agent'}</span>
+                    <span>{alternateMode === "chat" ? "Chat" : "Agent"}</span>
                     <ChevronDown className="size-3 shrink-0 opacity-0" aria-hidden="true" />
                   </button>
                 </div>
@@ -319,17 +319,19 @@ export function PromaComposer(props: {
                   setModeMenuOpen((open) => !open);
                 }}
                 className={cn(
-                  'flex min-w-[68px] items-center justify-center gap-1.5 rounded-[10px] px-2.5 py-1 text-xs transition-colors',
+                  "flex min-w-[68px] items-center justify-center gap-1.5 rounded-[10px] px-2.5 py-1 text-xs transition-colors",
                   modeMenuOpen
-                    ? 'bg-accent/80 text-foreground'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-accent',
-                  modeDisabled && 'opacity-60 pointer-events-none'
+                    ? "bg-accent/80 text-foreground"
+                    : "text-muted-foreground hover:text-foreground hover:bg-accent",
+                  modeDisabled && "opacity-60 pointer-events-none",
                 )}
                 aria-label="Mode"
                 title="Mode"
               >
-                <span className="truncate">{mode === 'chat' ? 'Chat' : 'Agent'}</span>
-                <ChevronDown className={cn('size-3 transition-transform', modeMenuOpen && 'rotate-180')} />
+                <span className="truncate">{mode === "chat" ? "Chat" : "Agent"}</span>
+                <ChevronDown
+                  className={cn("size-3 transition-transform", modeMenuOpen && "rotate-180")}
+                />
               </button>
             </div>
 
@@ -338,18 +340,17 @@ export function PromaComposer(props: {
               onClick={onOpenModelPicker}
               disabled={!onOpenModelPicker || disabled}
               className={cn(
-                'flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors',
-                modelTone === 'warning'
-                  ? 'text-orange-600 hover:text-orange-700 hover:bg-orange-500/10'
-                  : 'text-muted-foreground hover:text-foreground hover:bg-accent',
-                (!onOpenModelPicker || disabled) && 'opacity-60 pointer-events-none'
+                "flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors",
+                modelTone === "warning"
+                  ? "text-orange-600 hover:text-orange-700 hover:bg-orange-500/10"
+                  : "text-muted-foreground hover:text-foreground hover:bg-accent",
+                (!onOpenModelPicker || disabled) && "opacity-60 pointer-events-none",
               )}
               aria-label="Model"
               title="Model"
             >
-              <span className="max-w-[220px] truncate">
-                {modelLabel || 'Select model'}
-              </span>
+              {modelProvider ? <ProviderLogo provider={modelProvider} className="size-4" /> : null}
+              <span className="max-w-[220px] truncate">{modelLabel || "Select model"}</span>
               <ChevronDown className="size-3" />
             </button>
 
@@ -360,11 +361,11 @@ export function PromaComposer(props: {
                   onClick={onToggleWebSearch}
                   disabled={disabled || streaming}
                   className={cn(
-                    'flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors',
+                    "flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors",
                     forceWebSearch
-                      ? 'text-emerald-500 bg-emerald-400/20 hover:bg-emerald-400/30'
-                      : 'text-muted-foreground hover:text-foreground hover:bg-accent',
-                    (disabled || streaming) && 'opacity-60 pointer-events-none'
+                      ? "text-emerald-500 bg-emerald-400/20 hover:bg-emerald-400/30"
+                      : "text-muted-foreground hover:text-foreground hover:bg-accent",
+                    (disabled || streaming) && "opacity-60 pointer-events-none",
                   )}
                   aria-label="Web search toggle"
                   title="Web search toggle"
@@ -374,7 +375,7 @@ export function PromaComposer(props: {
                 </button>
               </TooltipTrigger>
               <TooltipContent side="top">
-                <p>{forceWebSearch ? '联网搜索：已开启' : '联网搜索：已关闭'}</p>
+                <p>{forceWebSearch ? "联网搜索：已开启" : "联网搜索：已关闭"}</p>
               </TooltipContent>
             </Tooltip>
           </div>
@@ -398,10 +399,10 @@ export function PromaComposer(props: {
                 variant="ghost"
                 size="icon-sm"
                 className={cn(
-                  'size-[30px] rounded-full',
+                  "size-[30px] rounded-full",
                   canSubmit
-                    ? 'text-primary hover:bg-primary/10'
-                    : 'text-foreground/30 cursor-not-allowed'
+                    ? "text-primary hover:bg-primary/10"
+                    : "text-foreground/30 cursor-not-allowed",
                 )}
                 onClick={onSubmit}
                 disabled={!canSubmit}

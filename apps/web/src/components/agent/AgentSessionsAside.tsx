@@ -1,23 +1,9 @@
-'use client';
+"use client";
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Bot, Check, MoreHorizontal, Pencil, Plus, Trash2 } from 'lucide-react';
-import { useAgentStore } from '@/stores/agentStore';
-import { useAuthStore } from '@/stores/authStore';
-import { api } from '@/lib/api';
-import { notifyError, notifySuccess } from '@/lib/notify';
-import { BACKEND_UP_EVENT } from '@/stores/backendStatusStore';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Badge } from '@/components/ui/badge';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+import { Bot, Check, MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -25,40 +11,126 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
-import { cn } from '@/lib/utils';
+} from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { api } from "@/lib/api";
+import { notifyError, notifySuccess } from "@/lib/notify";
+import { cn } from "@/lib/utils";
+import { useAgentStore } from "@/stores/agentStore";
+import { useAuthStore } from "@/stores/authStore";
+import { BACKEND_UP_EVENT } from "@/stores/backendStatusStore";
 
-type DateGroup = '今天' | '昨天' | '更早';
+type DateGroup = "今天" | "昨天" | "更早";
 
-function groupByUpdatedAt(items: any[]): Array<{ label: DateGroup; items: any[] }> {
+type AgentSessionItem = {
+  id: string;
+  title: string;
+  channelId?: string;
+  status: "active" | "completed" | "cancelled";
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+type AgentEventItem = {
+  id?: string;
+  type: "user" | "meta" | "text" | "tool_start" | "tool_result" | "done" | "error";
+  content?: string;
+  toolName?: string;
+  toolInput?: unknown;
+};
+
+function parseAgentSession(raw: unknown): AgentSessionItem | null {
+  if (!raw || typeof raw !== "object") return null;
+  const obj = raw as Record<string, unknown>;
+  const id = typeof obj.id === "string" ? obj.id : null;
+  if (!id) return null;
+  const title = typeof obj.title === "string" ? obj.title : "";
+  const statusRaw = typeof obj.status === "string" ? obj.status : "active";
+  const status: AgentSessionItem["status"] =
+    statusRaw === "completed" || statusRaw === "cancelled" || statusRaw === "active"
+      ? statusRaw
+      : "active";
+  const createdAt = new Date(typeof obj.createdAt === "string" ? obj.createdAt : Date.now());
+  const updatedAt = new Date(typeof obj.updatedAt === "string" ? obj.updatedAt : createdAt);
+  return {
+    id,
+    title,
+    channelId: typeof obj.channelId === "string" ? obj.channelId : undefined,
+    status,
+    createdAt,
+    updatedAt,
+  };
+}
+
+function parseAgentEvents(raw: unknown): AgentEventItem[] {
+  if (!Array.isArray(raw)) return [];
+  const out: AgentEventItem[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const obj = item as Record<string, unknown>;
+    const typeRaw = typeof obj.type === "string" ? obj.type : "";
+    if (!typeRaw) continue;
+    const type =
+      typeRaw === "user" ||
+      typeRaw === "meta" ||
+      typeRaw === "text" ||
+      typeRaw === "tool_start" ||
+      typeRaw === "tool_result" ||
+      typeRaw === "done" ||
+      typeRaw === "error"
+        ? typeRaw
+        : null;
+    if (!type) continue;
+    out.push({
+      id: typeof obj.id === "string" ? obj.id : undefined,
+      type,
+      content: typeof obj.content === "string" ? obj.content : undefined,
+      toolName: typeof obj.toolName === "string" ? obj.toolName : undefined,
+      toolInput: obj.toolInput,
+    });
+  }
+  return out;
+}
+
+function groupByUpdatedAt<T extends { updatedAt?: Date; createdAt?: Date }>(
+  items: T[],
+): Array<{ label: DateGroup; items: T[] }> {
   const now = new Date();
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   const yesterdayStart = todayStart - 86_400_000;
 
-  const today: any[] = [];
-  const yesterday: any[] = [];
-  const earlier: any[] = [];
+  const today: T[] = [];
+  const yesterday: T[] = [];
+  const earlier: T[] = [];
 
   for (const item of items) {
-    const ts = new Date(item.updatedAt || item.createdAt || 0).getTime();
+    const ts = (item.updatedAt || item.createdAt || new Date(0)).getTime();
     if (ts >= todayStart) today.push(item);
     else if (ts >= yesterdayStart) yesterday.push(item);
     else earlier.push(item);
   }
 
-  const groups: Array<{ label: DateGroup; items: any[] }> = [];
-  if (today.length) groups.push({ label: '今天', items: today });
-  if (yesterday.length) groups.push({ label: '昨天', items: yesterday });
-  if (earlier.length) groups.push({ label: '更早', items: earlier });
+  const groups: Array<{ label: DateGroup; items: T[] }> = [];
+  if (today.length) groups.push({ label: "今天", items: today });
+  if (yesterday.length) groups.push({ label: "昨天", items: yesterday });
+  if (earlier.length) groups.push({ label: "更早", items: earlier });
   return groups;
 }
 
 function formatNewAgentSessionTitle() {
   const d = new Date();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  const hh = String(d.getHours()).padStart(2, '0');
-  const min = String(d.getMinutes()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  const hh = String(d.getHours()).padStart(2, "0");
+  const min = String(d.getMinutes()).padStart(2, "0");
   return `任务 ${mm}-${dd} ${hh}:${min}`;
 }
 
@@ -70,27 +142,31 @@ export function AgentSessionsAside() {
     addSession,
     setSessions,
     setCurrentSession,
+    patchCurrentSession,
     setEvents,
   } = useAgentStore();
 
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState("");
   const [creating, setCreating] = useState(false);
   const [bootstrapping, setBootstrapping] = useState(false);
 
   const [renameOpen, setRenameOpen] = useState(false);
-  const [renameSession, setRenameSession] = useState<any | null>(null);
-  const [renameValue, setRenameValue] = useState('');
+  const [renameSession, setRenameSession] = useState<AgentSessionItem | null>(null);
+  const [renameValue, setRenameValue] = useState("");
 
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const [deleteSession, setDeleteSession] = useState<any | null>(null);
+  const [deleteSession, setDeleteSession] = useState<AgentSessionItem | null>(null);
 
   const bootstrap = useCallback(async () => {
     setBootstrapping(true);
     try {
       const { sessions: sessionsResp } = await api.agent.listSessions();
-      setSessions(sessionsResp as never[]);
+      const parsed = sessionsResp
+        .map(parseAgentSession)
+        .filter((s): s is AgentSessionItem => Boolean(s));
+      setSessions(parsed);
     } catch (error) {
-      notifyError('加载失败', error instanceof Error ? error.message : '无法加载 Agent 数据');
+      notifyError("加载失败", error instanceof Error ? error.message : "无法加载 Agent 数据");
     } finally {
       setBootstrapping(false);
     }
@@ -110,21 +186,21 @@ export function AgentSessionsAside() {
   const filteredSessions = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return sessions;
-    return sessions.filter((s: any) => (s.title || '').toLowerCase().includes(q));
+    return sessions.filter((s) => (s.title || "").toLowerCase().includes(q));
   }, [query, sessions]);
 
   const loadSessionEvents = async (sessionId: string) => {
     try {
       const { events } = await api.agent.listEvents(sessionId);
-      setEvents(events as any);
+      setEvents(parseAgentEvents(events));
     } catch {
       // Best-effort
       setEvents([]);
     }
   };
 
-  const handleSelectSession = (session: any) => {
-    setCurrentSession(session as never);
+  const handleSelectSession = (session: AgentSessionItem) => {
+    setCurrentSession(session);
     void loadSessionEvents(session.id);
   };
 
@@ -134,19 +210,21 @@ export function AgentSessionsAside() {
       const { session } = await api.agent.createSession({
         title: formatNewAgentSessionTitle(),
       });
-      addSession(session as never);
-      handleSelectSession(session);
-      notifySuccess('已创建', '新会话已创建');
+      const parsed = parseAgentSession(session);
+      if (!parsed) throw new Error("Invalid session");
+      addSession(parsed);
+      handleSelectSession(parsed);
+      notifySuccess("已创建", "新会话已创建");
     } catch (error) {
-      notifyError('创建失败', error instanceof Error ? error.message : '无法创建会话');
+      notifyError("创建失败", error instanceof Error ? error.message : "无法创建会话");
     } finally {
       setCreating(false);
     }
   };
 
-  const openRenameDialog = (session: any) => {
+  const openRenameDialog = (session: AgentSessionItem) => {
     setRenameSession(session);
-    setRenameValue(session?.title || '');
+    setRenameValue(session?.title || "");
     setRenameOpen(true);
   };
 
@@ -158,38 +236,36 @@ export function AgentSessionsAside() {
     try {
       await api.agent.renameSession(renameSession.id, nextTitle);
       setSessions(
-        sessions.map((s) => (s.id === renameSession.id ? { ...s, title: nextTitle } : s)) as never[]
+        sessions.map((s) => (s.id === renameSession.id ? { ...s, title: nextTitle } : s)),
       );
       if (currentSession?.id === renameSession.id) {
-        setCurrentSession({ ...(currentSession as any), title: nextTitle } as never);
+        patchCurrentSession({ title: nextTitle });
       }
-      notifySuccess('已保存', '会话已重命名');
+      notifySuccess("已保存", "会话已重命名");
       setRenameOpen(false);
       setRenameSession(null);
     } catch (error) {
-      notifyError('保存失败', error instanceof Error ? error.message : '无法重命名会话');
+      notifyError("保存失败", error instanceof Error ? error.message : "无法重命名会话");
       void bootstrap();
     }
   };
 
-  const handleToggleCompleted = async (session: any) => {
-    const next = session.status === 'completed' ? 'active' : 'completed';
+  const handleToggleCompleted = async (session: AgentSessionItem) => {
+    const next = session.status === "completed" ? "active" : "completed";
     try {
       await api.agent.updateStatus(session.id, next);
-      setSessions(
-        sessions.map((s) => (s.id === session.id ? { ...s, status: next } : s)) as never[]
-      );
+      setSessions(sessions.map((s) => (s.id === session.id ? { ...s, status: next } : s)));
       if (currentSession?.id === session.id) {
-        setCurrentSession({ ...(currentSession as any), status: next } as never);
+        patchCurrentSession({ status: next });
       }
-      notifySuccess('已更新', next === 'completed' ? '已标记完成' : '已恢复为进行中');
+      notifySuccess("已更新", next === "completed" ? "已标记完成" : "已恢复为进行中");
     } catch (error) {
-      notifyError('更新失败', error instanceof Error ? error.message : '无法更新状态');
+      notifyError("更新失败", error instanceof Error ? error.message : "无法更新状态");
       void bootstrap();
     }
   };
 
-  const openDeleteDialog = (session: any) => {
+  const openDeleteDialog = (session: AgentSessionItem) => {
     setDeleteSession(session);
     setDeleteOpen(true);
   };
@@ -198,16 +274,16 @@ export function AgentSessionsAside() {
     if (!deleteSession) return;
     try {
       await api.agent.deleteSession(deleteSession.id);
-      setSessions(sessions.filter((s) => s.id !== deleteSession.id) as never[]);
+      setSessions(sessions.filter((s) => s.id !== deleteSession.id));
       if (currentSession?.id === deleteSession.id) {
         setCurrentSession(null);
         setEvents([]);
       }
-      notifySuccess('已删除', '会话已删除');
+      notifySuccess("已删除", "会话已删除");
       setDeleteOpen(false);
       setDeleteSession(null);
     } catch (error) {
-      notifyError('删除失败', error instanceof Error ? error.message : '无法删除会话');
+      notifyError("删除失败", error instanceof Error ? error.message : "无法删除会话");
       void bootstrap();
     }
   };
@@ -220,37 +296,40 @@ export function AgentSessionsAside() {
         <Plus size={16} /> 新会话
       </Button>
 
-      <Input
-        placeholder="搜索会话..."
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-      />
+      <Input placeholder="搜索会话..." value={query} onChange={(e) => setQuery(e.target.value)} />
 
       <ScrollArea className="flex-1">
         <div className="flex flex-col gap-1 pr-3">
           {groups.map((group) => (
             <div key={group.label}>
               <p className="px-2 py-1 text-xs font-semibold text-muted-foreground">{group.label}</p>
-              {group.items.map((session: any) => {
+              {group.items.map((session) => {
                 const active = currentSession?.id === session.id;
                 const statusVariant =
-                  session.status === 'completed'
-                    ? 'secondary'
-                    : session.status === 'cancelled'
-                      ? 'destructive'
-                      : 'outline';
+                  session.status === "completed"
+                    ? "secondary"
+                    : session.status === "cancelled"
+                      ? "destructive"
+                      : "outline";
 
                 return (
+                  // biome-ignore lint/a11y/useSemanticElements: cannot use <button> due to nested interactive menu controls
                   <div
                     key={session.id}
                     role="button"
                     tabIndex={0}
                     onClick={() => handleSelectSession(session)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        handleSelectSession(session);
+                      }
+                    }}
                     className={cn(
-                      'group w-full flex flex-col gap-1.5 px-3 py-[7px] rounded-[10px] transition-colors duration-100 titlebar-no-drag text-left border border-transparent',
+                      "group w-full flex flex-col gap-1.5 px-3 py-[7px] rounded-[10px] transition-colors duration-100 titlebar-no-drag text-left border border-transparent",
                       active
-                        ? 'bg-foreground/[0.08] text-foreground shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]'
-                        : 'hover:bg-foreground/[0.04] text-foreground/70'
+                        ? "bg-foreground/[0.08] text-foreground shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]"
+                        : "hover:bg-foreground/[0.04] text-foreground/70",
                     )}
                   >
                     <div className="flex items-center justify-between gap-2">
@@ -271,14 +350,31 @@ export function AgentSessionsAside() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-40">
-                          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); openRenameDialog(session); }}>
+                          <DropdownMenuItem
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openRenameDialog(session);
+                            }}
+                          >
                             <Pencil size={14} /> 重命名
                           </DropdownMenuItem>
-                          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); void handleToggleCompleted(session); }}>
-                            <Check size={14} /> {session.status === 'completed' ? '恢复进行中' : '标记完成'}
+                          <DropdownMenuItem
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void handleToggleCompleted(session);
+                            }}
+                          >
+                            <Check size={14} />{" "}
+                            {session.status === "completed" ? "恢复进行中" : "标记完成"}
                           </DropdownMenuItem>
                           <DropdownMenuSeparator />
-                          <DropdownMenuItem className="text-destructive" onClick={(e) => { e.stopPropagation(); openDeleteDialog(session); }}>
+                          <DropdownMenuItem
+                            className="text-destructive"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openDeleteDialog(session);
+                            }}
+                          >
                             <Trash2 size={14} /> 删除
                           </DropdownMenuItem>
                         </DropdownMenuContent>
@@ -287,7 +383,7 @@ export function AgentSessionsAside() {
 
                     <div className="flex items-center gap-2">
                       <Badge variant={statusVariant} className="h-5 px-1.5 text-[11px]">
-                        {session.status === 'active' ? 'active' : session.status}
+                        {session.status === "active" ? "active" : session.status}
                       </Badge>
                     </div>
                   </div>
@@ -298,7 +394,7 @@ export function AgentSessionsAside() {
 
           {filteredSessions.length === 0 && (
             <p className="py-10 text-center text-xs text-muted-foreground">
-              {bootstrapping ? '加载中...' : '暂无会话'}
+              {bootstrapping ? "加载中..." : "暂无会话"}
             </p>
           )}
         </div>
@@ -312,8 +408,12 @@ export function AgentSessionsAside() {
           </DialogHeader>
           <Input value={renameValue} onChange={(e) => setRenameValue(e.target.value)} />
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setRenameOpen(false)}>取消</Button>
-            <Button onClick={() => void submitRename()} disabled={!renameValue.trim()}>保存</Button>
+            <Button variant="ghost" onClick={() => setRenameOpen(false)}>
+              取消
+            </Button>
+            <Button onClick={() => void submitRename()} disabled={!renameValue.trim()}>
+              保存
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -325,8 +425,12 @@ export function AgentSessionsAside() {
             <DialogDescription>确定删除该会话？此操作不可恢复。</DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setDeleteOpen(false)}>取消</Button>
-            <Button variant="destructive" onClick={() => void submitDelete()}>删除</Button>
+            <Button variant="ghost" onClick={() => setDeleteOpen(false)}>
+              取消
+            </Button>
+            <Button variant="destructive" onClick={() => void submitDelete()}>
+              删除
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

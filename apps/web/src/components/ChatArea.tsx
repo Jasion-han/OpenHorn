@@ -1,70 +1,147 @@
-'use client';
+"use client";
 
-import React, { useEffect, useRef, useState } from 'react';
-import { Bot, Check, ChevronDown, Copy, MessageSquare, Pencil, RefreshCw, Trash2 } from 'lucide-react';
-import { api, type ApiAgentRun, type ApiCitation, type ApiLiveRoute, type ApiLiveStatus } from '../lib/api';
-import { uploadAttachments } from '../lib/attachments';
-import { streamChatMessage } from '../lib/chat-stream';
-import { useChatStore } from '../stores/chatStore';
-import { notifyWarning } from '../lib/notify';
-import { getEffectiveModelForConversation } from '@/lib/effective-model';
-import { PromaComposer } from '@/components/composer/PromaComposer';
-import { ModelPickerModal } from '@/components/chat/ModelPickerModal';
-import { ChatHeader } from '@/components/chat/ChatHeader';
-import { MessageAttachments, type MessageAttachmentItem } from '@/components/attachments/MessageAttachments';
-import { Button } from '@/components/ui/button';
-import { IconActionButton } from '@/components/ui/IconActionButton';
-import { MarkdownMessage } from '@/components/ui/MarkdownMessage';
-import { StreamingMarkdownMessage } from '@/components/ui/StreamingMarkdownMessage';
-import { Textarea } from '@/components/ui/textarea';
-import { TypingIndicator } from '@/components/ui/TypingIndicator';
-import { WRAP_TEXT } from '@/components/ui/wrapText';
-import { createTextStreamSmoother, type TextStreamSmoother } from '@/lib/textStreamSmoother';
-import { cn } from '@/lib/utils';
+import {
+  Bot,
+  Check,
+  ChevronDown,
+  Copy,
+  MessageSquare,
+  Pencil,
+  RefreshCw,
+  Trash2,
+} from "lucide-react";
+import React, { useEffect, useRef, useState } from "react";
+import {
+  type MessageAttachmentItem,
+  MessageAttachments,
+} from "@/components/attachments/MessageAttachments";
+import { ChatHeader } from "@/components/chat/ChatHeader";
+import { ModelPickerModal } from "@/components/chat/ModelPickerModal";
+import { PromaComposer } from "@/components/composer/PromaComposer";
+import { Button } from "@/components/ui/button";
+import { CitationBadge } from "@/components/ui/CitationReference";
+import { IconActionButton } from "@/components/ui/IconActionButton";
+import { MarkdownMessage } from "@/components/ui/MarkdownMessage";
+import { StreamingMarkdownMessage } from "@/components/ui/StreamingMarkdownMessage";
+import { TypingIndicator } from "@/components/ui/TypingIndicator";
+import { Textarea } from "@/components/ui/textarea";
+import { WRAP_TEXT } from "@/components/ui/wrapText";
+import { getEffectiveModelForConversation } from "@/lib/effective-model";
+import { normalizeExternalUrl } from "@/lib/normalizeExternalUrl";
+import { createTextStreamSmoother, type TextStreamSmoother } from "@/lib/textStreamSmoother";
+import { cn } from "@/lib/utils";
+import {
+  type ApiAgentRun,
+  type ApiCitation,
+  type ApiLiveRoute,
+  type ApiLiveStatus,
+  api,
+} from "../lib/api";
+import { uploadAttachments } from "../lib/attachments";
+import { streamChatMessage } from "../lib/chat-stream";
+import { notifyWarning } from "../lib/notify";
+import { type Message, useChatStore } from "../stores/chatStore";
 
-const PAGE_PAD = '16px';
-const COMPOSER_PAD_BOTTOM = 'env(safe-area-inset-bottom, 0px)';
+const PAGE_PAD = "16px";
+const COMPOSER_PAD_BOTTOM = "env(safe-area-inset-bottom, 0px)";
 const PLACEHOLDERS = [
-  'Start with a spark — I will shape the rest.',
-  'What should we build, refine, or rethink today?',
-  'Drop a thought. I will turn it into something real.',
-  'Give me a direction, I will find the path.',
-  'Ask anything. Then push it one level deeper.',
-  'Sketch the idea. I will fill in the lines.',
-  'Let us turn a question into a plan.',
-  'Pitch the headline. I will write the story.',
-  'Take the blank page. I will bring the motion.',
-  'Name the problem. I will cut through it.',
-  'Start messy. End elegant.',
-  'One prompt away from clarity.',
-  'Tell me the goal, I will map the route.',
-  'What would you love to ship this week?',
-  'Let us turn curiosity into momentum.',
-  'If you can imagine it, we can draft it.',
-  'Give me the vibe. I will deliver the words.',
-  'Turn a rough idea into a sharp answer.',
-  'Ask for bold. I will keep it grounded.',
-  'What do you wish existed right now?',
-  'We can brainstorm or go straight to done.',
-  'Write less. Say more.',
-  'A single line can unlock the whole plan.',
-  'Let us design the next move.',
-  'Bring the question. Leave with the output.',
-  'Make it clear, make it quick, make it real.',
-  'Want a first draft that actually works?',
-  'Turn complexity into clean steps.',
-  'Take a breath — then type the dream.',
-  'If it matters, put it here.',
+  "Start with a spark — I will shape the rest.",
+  "What should we build, refine, or rethink today?",
+  "Drop a thought. I will turn it into something real.",
+  "Give me a direction, I will find the path.",
+  "Ask anything. Then push it one level deeper.",
+  "Sketch the idea. I will fill in the lines.",
+  "Let us turn a question into a plan.",
+  "Pitch the headline. I will write the story.",
+  "Take the blank page. I will bring the motion.",
+  "Name the problem. I will cut through it.",
+  "Start messy. End elegant.",
+  "One prompt away from clarity.",
+  "Tell me the goal, I will map the route.",
+  "What would you love to ship this week?",
+  "Let us turn curiosity into momentum.",
+  "If you can imagine it, we can draft it.",
+  "Give me the vibe. I will deliver the words.",
+  "Turn a rough idea into a sharp answer.",
+  "Ask for bold. I will keep it grounded.",
+  "What do you wish existed right now?",
+  "We can brainstorm or go straight to done.",
+  "Write less. Say more.",
+  "A single line can unlock the whole plan.",
+  "Let us design the next move.",
+  "Bring the question. Leave with the output.",
+  "Make it clear, make it quick, make it real.",
+  "Want a first draft that actually works?",
+  "Turn complexity into clean steps.",
+  "Take a breath — then type the dream.",
+  "If it matters, put it here.",
 ];
 
+type AgentStreamEvent = {
+  type: string;
+  content?: string;
+  toolName?: string;
+  toolInput?: unknown;
+};
+
+function createPartialAgentRun(): ApiAgentRun {
+  return { status: "partial", summary: "Agent 正在执行", steps: [] };
+}
+
+function applyAgentEventToRun(run: ApiAgentRun | undefined, event: AgentStreamEvent): ApiAgentRun {
+  const base = run || createPartialAgentRun();
+
+  if (event.type === "tool_start" || event.type === "tool_result") {
+    return {
+      ...base,
+      summary: "Agent 正在执行",
+      steps: [
+        ...base.steps,
+        {
+          type: event.type,
+          toolName: event.toolName,
+          content: event.content,
+          toolInput: event.toolInput,
+        },
+      ],
+    };
+  }
+
+  if (event.type === "error") {
+    const message = event.content || "Agent error";
+    return {
+      ...base,
+      status: "failed",
+      summary: "Agent 执行失败",
+      error: message,
+      steps: [...base.steps, { type: "error", content: message }],
+    };
+  }
+
+  return base;
+}
+
+function createFailedAgentRun(existing: ApiAgentRun | undefined, error: string): ApiAgentRun {
+  return {
+    status: "failed",
+    summary: "Agent 执行失败",
+    error,
+    steps: existing?.steps || [],
+  };
+}
+
+function isAbortError(error: unknown) {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
 function pickPlaceholder(avoid?: string) {
-  if (PLACEHOLDERS.length === 0) return '';
-  if (PLACEHOLDERS.length === 1) return PLACEHOLDERS[0]!;
-  let next = PLACEHOLDERS[Math.floor(Math.random() * PLACEHOLDERS.length)]!;
+  if (PLACEHOLDERS.length === 0) return "";
+  if (PLACEHOLDERS.length === 1) return PLACEHOLDERS[0] ?? "";
+  let next = PLACEHOLDERS[Math.floor(Math.random() * PLACEHOLDERS.length)] ?? "";
   if (avoid && PLACEHOLDERS.length > 1) {
     let tries = 0;
     while (next === avoid && tries < 4) {
-      next = PLACEHOLDERS[Math.floor(Math.random() * PLACEHOLDERS.length)]!;
+      next = PLACEHOLDERS[Math.floor(Math.random() * PLACEHOLDERS.length)] ?? next;
       tries += 1;
     }
   }
@@ -78,7 +155,7 @@ function AgentRunPanel({ run }: { run?: ApiAgentRun }) {
     <details className="mt-2 rounded-xl border border-border/50 bg-muted/20 px-3 py-2 text-sm">
       <summary className="cursor-pointer list-none">
         <div className="flex items-center justify-between gap-3">
-          <span className="font-medium">{run.summary || 'Agent 执行记录'}</span>
+          <span className="font-medium">{run.summary || "Agent 执行记录"}</span>
           <span className="text-xs text-muted-foreground">{run.status}</span>
         </div>
       </summary>
@@ -91,17 +168,27 @@ function AgentRunPanel({ run }: { run?: ApiAgentRun }) {
         {run.steps.length === 0 ? (
           <p className="text-xs text-muted-foreground">无额外执行步骤。</p>
         ) : (
-          run.steps.map((step, index) => (
-            <div key={`${step.type}-${index}`} className="rounded-md border border-border/50 bg-background/60 px-2 py-2">
+          run.steps.map((step) => (
+            <div
+              key={`${step.type}-${step.toolName || ""}-${step.content || ""}`}
+              className="rounded-md border border-border/50 bg-background/60 px-2 py-2"
+            >
               <div className="flex items-center justify-between gap-2">
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{step.type}</p>
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  {step.type}
+                </p>
                 {step.toolName && <p className="text-xs text-muted-foreground">{step.toolName}</p>}
               </div>
               {step.content && (
-                <p className="mt-1 text-sm" style={WRAP_TEXT}>{step.content}</p>
+                <p className="mt-1 text-sm" style={WRAP_TEXT}>
+                  {step.content}
+                </p>
               )}
               {step.toolInput !== undefined && (
-                <pre className="mt-2 whitespace-pre-wrap break-words rounded-md bg-muted/40 p-2 text-xs" style={WRAP_TEXT}>
+                <pre
+                  className="mt-2 whitespace-pre-wrap break-words rounded-md bg-muted/40 p-2 text-xs"
+                  style={WRAP_TEXT}
+                >
                   {JSON.stringify(step.toolInput, null, 2)}
                 </pre>
               )}
@@ -126,29 +213,31 @@ function LiveStatusBadge({
 
   const routeLabel = (() => {
     switch (route) {
-      case 'local':
-        return '本地';
-      case 'structured_live':
-        return '天气';
-      case 'web_search':
-        return '搜索';
-      case 'research':
-        return '调研';
+      case "local":
+        return "本地";
+      case "structured_live":
+        return "天气";
+      case "web_search":
+        return "搜索";
+      case "research":
+        return "调研";
       default:
-        return '直答';
+        return "直答";
     }
   })();
 
   return (
     <div
       className={cn(
-        'mb-2 inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[11px] font-medium',
-        status === 'live'
-          ? 'border-emerald-300/60 bg-emerald-50 text-emerald-700 dark:border-emerald-700/70 dark:bg-emerald-950/50 dark:text-emerald-300'
-          : 'border-amber-300/60 bg-amber-50 text-amber-700 dark:border-amber-700/70 dark:bg-amber-950/50 dark:text-amber-300'
+        "mb-2 inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[11px] font-medium",
+        status === "live"
+          ? "border-emerald-300/60 bg-emerald-50 text-emerald-700 dark:border-emerald-700/70 dark:bg-emerald-950/50 dark:text-emerald-300"
+          : "border-amber-300/60 bg-amber-50 text-amber-700 dark:border-amber-700/70 dark:bg-amber-950/50 dark:text-amber-300",
       )}
     >
-      <span className="rounded-full bg-black/5 px-1.5 py-0.5 text-[10px] uppercase tracking-wide dark:bg-white/10">{routeLabel}</span>
+      <span className="rounded-full bg-black/5 px-1.5 py-0.5 text-[10px] uppercase tracking-wide dark:bg-white/10">
+        {routeLabel}
+      </span>
       <span>{label}</span>
     </div>
   );
@@ -158,7 +247,7 @@ function extractUsedCitationIndices(content: string, maxIndex: number) {
   const used = new Set<number>();
   const re = /\[(\d+)\]/g;
   for (const match of content.matchAll(re)) {
-    const n = Number.parseInt(match[1] || '', 10);
+    const n = Number.parseInt(match[1] || "", 10);
     if (!Number.isFinite(n)) continue;
     if (n < 1 || n > maxIndex) continue;
     used.add(n);
@@ -167,10 +256,10 @@ function extractUsedCitationIndices(content: string, maxIndex: number) {
 }
 
 function CitationList({ citations, content }: { citations?: ApiCitation[]; content?: string }) {
+  const [showAll, setShowAll] = useState(false);
   if (!citations || citations.length === 0) return null;
 
   const used = content ? extractUsedCitationIndices(content, citations.length) : [];
-  const [showAll, setShowAll] = useState(false);
   const effectiveShowAll = used.length === 0 ? true : showAll;
 
   const displayed = effectiveShowAll
@@ -180,29 +269,37 @@ function CitationList({ citations, content }: { citations?: ApiCitation[]; conte
   const usedCount = used.length > 0 ? used.length : citations.length;
 
   return (
-    <details className="group mb-2 rounded-xl border border-border/50 bg-muted/20 px-3 py-2 text-sm">
-      <summary className="cursor-pointer list-none select-none [&::-webkit-details-marker]:hidden">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Sources</span>
-            <span className="text-[11px] text-muted-foreground/80">· {usedCount}/{citations.length}</span>
+    <details className="group mb-2 w-full min-w-0 max-w-full rounded-xl border border-border/50 bg-muted/20 px-3 py-2 text-sm">
+      <summary className="block w-full cursor-pointer list-none select-none [&::-webkit-details-marker]:hidden">
+        <div className="flex min-w-0 items-center justify-between gap-3">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+            <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+              Sources
+            </span>
+            <span className="shrink-0 text-[11px] text-muted-foreground/80">
+              · {usedCount}/{citations.length}
+            </span>
           </div>
-          <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform duration-150 group-open:rotate-180" />
+          <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-150 group-open:rotate-180" />
         </div>
       </summary>
 
       <div className="mt-2 flex flex-col gap-1.5">
-        <div className="flex items-center justify-between gap-2 pb-1">
-          <p className="text-[11px] text-muted-foreground">
-            {used.length === 0 ? '本轮未在正文标注引用，展示全部来源。' : (effectiveShowAll ? '展示全部来源。' : '仅展示已引用来源。')}
+        <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1 pb-1">
+          <p className="min-w-0 text-[11px] text-muted-foreground">
+            {used.length === 0
+              ? "本轮未在正文标注引用，展示全部来源。"
+              : effectiveShowAll
+                ? "展示全部来源。"
+                : "仅展示已引用来源。"}
           </p>
           {used.length > 0 && (
             <button
               type="button"
-              className="rounded-md border border-border/50 bg-background/50 px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
+              className="justify-self-end whitespace-nowrap rounded-md border border-border/50 bg-background/50 px-2 py-1 text-left text-[11px] text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
               onClick={() => setShowAll((prev) => !prev)}
             >
-              {effectiveShowAll ? 'Show used only' : 'Show all'}
+              {effectiveShowAll ? "Show used only" : "Show all"}
             </button>
           )}
         </div>
@@ -210,14 +307,16 @@ function CitationList({ citations, content }: { citations?: ApiCitation[]; conte
         {displayed.map(({ citation, index }) => (
           <a
             key={`${citation.url}-${index}`}
-            href={citation.url}
+            href={normalizeExternalUrl(citation.url)}
             target="_blank"
             rel="noreferrer"
-            className="rounded-md border border-border/40 bg-background/70 px-2 py-1.5 text-xs transition-colors hover:bg-background"
+            className="block w-full min-w-0 max-w-full overflow-hidden rounded-md border border-border/40 bg-background/70 px-2 py-1.5 text-xs transition-colors hover:bg-background"
           >
-            <div className="flex items-baseline gap-2">
-              <span className="text-[10px] font-medium text-muted-foreground">[{index}]</span>
-              <div className="min-w-0 flex-1 font-medium text-foreground">{citation.title}</div>
+            <div className="flex min-w-0 items-baseline gap-2">
+              <CitationBadge index={index} className="shrink-0" />
+              <div className="min-w-0 flex-1 break-words font-medium text-foreground">
+                {citation.title}
+              </div>
             </div>
             <div className="truncate text-muted-foreground">{citation.url}</div>
             {citation.snippet && (
@@ -244,9 +343,9 @@ function MessageBubble({
 }: {
   msg: {
     id: string;
-    role: 'user' | 'assistant';
+    role: "user" | "assistant";
     content: string;
-    mode: 'chat' | 'agent';
+    mode: "chat" | "agent";
     agentRun?: ApiAgentRun;
     liveStatus?: ApiLiveStatus;
     liveRoute?: ApiLiveRoute;
@@ -265,7 +364,6 @@ function MessageBubble({
   assistantWidth: string;
   userMaxWidth: string;
 }) {
-  const [hovered, setHovered] = useState(false);
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
@@ -274,31 +372,41 @@ function MessageBubble({
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const isAssistant = msg.role === 'assistant';
-  const hasAssistantText = isAssistant && Boolean((msg.content || '').trim());
+  const isAssistant = msg.role === "assistant";
+  const hasAssistantText = isAssistant && Boolean((msg.content || "").trim());
   const isAssistantPlaceholder = isAssistant && isStreaming && !hasAssistantText;
-  const isAgent = msg.mode === 'agent';
-  const streamTailLength = isAssistant && isStreaming && hasAssistantText ? (msg.streamTail || '').length : 0;
+  const isAgent = msg.mode === "agent";
+  const streamTailLength =
+    isAssistant && isStreaming && hasAssistantText ? (msg.streamTail || "").length : 0;
 
   return (
     <div
-      className={cn('flex flex-col', isAssistant ? 'items-start self-start' : 'items-end self-end')}
+      className={cn(
+        "group flex min-w-0 flex-col",
+        isAssistant && "w-full",
+        isAssistant ? "items-start self-start" : "items-end self-end",
+      )}
       style={{ maxWidth: isAssistant ? assistantWidth : userMaxWidth }}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
     >
       <div
         className={cn(
-          'inline-block max-w-full',
-          isAssistantPlaceholder ? 'border-0 bg-transparent px-0 py-0' : 'rounded-2xl px-4 py-2',
+          isAssistant ? "block w-full min-w-0 max-w-full" : "inline-block min-w-0 max-w-full",
+          isAssistantPlaceholder ? "border-0 bg-transparent px-0 py-0" : "rounded-2xl px-4 py-2",
           isAssistant
-            ? (isAssistantPlaceholder ? '' : 'border border-border/50 bg-background/60')
-            : 'border border-border/50 bg-foreground/[0.06]'
+            ? isAssistantPlaceholder
+              ? ""
+              : "border border-border/50 bg-background/60"
+            : "border border-border/50 bg-foreground/[0.06]",
         )}
       >
-        <div className={cn('mb-1 inline-flex items-center gap-1 text-[11px] font-medium', isAssistant ? 'text-muted-foreground' : 'text-foreground/60')}>
+        <div
+          className={cn(
+            "mb-1 inline-flex items-center gap-1 text-[11px] font-medium",
+            isAssistant ? "text-muted-foreground" : "text-foreground/60",
+          )}
+        >
           {isAgent ? <Bot size={12} /> : <MessageSquare size={12} />}
-          <span>{isAgent ? 'Agent' : 'Chat'}</span>
+          <span>{isAgent ? "Agent" : "Chat"}</span>
         </div>
 
         {!isAssistant && attachments && attachments.length > 0 && (
@@ -306,12 +414,8 @@ function MessageBubble({
         )}
 
         {isAssistant ? (
-          <div style={WRAP_TEXT}>
-            <LiveStatusBadge
-              status={msg.liveStatus}
-              route={msg.liveRoute}
-              label={msg.liveLabel}
-            />
+          <div className="min-w-0 max-w-full" style={WRAP_TEXT}>
+            <LiveStatusBadge status={msg.liveStatus} route={msg.liveRoute} label={msg.liveLabel} />
             <CitationList citations={msg.citations} content={msg.content} />
             {hasAssistantText ? (
               isStreaming ? (
@@ -328,17 +432,21 @@ function MessageBubble({
               <TypingIndicator className="ml-1" />
             ) : null}
           </div>
-        ) : (
-          msg.content?.trim() ? <p className="text-sm" style={WRAP_TEXT}>{msg.content}</p> : null
-        )}
+        ) : msg.content?.trim() ? (
+          <p className="text-sm" style={WRAP_TEXT}>
+            {msg.content}
+          </p>
+        ) : null}
 
         {isAssistant && <AgentRunPanel run={msg.agentRun} />}
       </div>
       <div
         className={cn(
-          'mt-0.5 flex gap-0.5 transition-opacity duration-150',
-          isAssistant ? 'justify-start' : 'justify-end',
-          hovered && !isStreaming ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
+          "mt-0.5 flex gap-0.5 transition-opacity duration-150",
+          isAssistant ? "justify-start" : "justify-end",
+          !isStreaming
+            ? "opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto"
+            : "opacity-0 pointer-events-none",
         )}
       >
         {!isAssistant && canEdit && (
@@ -346,7 +454,7 @@ function MessageBubble({
             <Pencil size={13} />
           </IconActionButton>
         )}
-        <IconActionButton onClick={handleCopy} title={copied ? '已复制' : '复制'}>
+        <IconActionButton onClick={handleCopy} title={copied ? "已复制" : "复制"}>
           {copied ? <Check size={13} /> : <Copy size={13} />}
         </IconActionButton>
         {isAssistant && (
@@ -380,11 +488,11 @@ export function ChatArea() {
     setComposerMode,
   } = useChatStore();
 
-  const [input, setInput] = useState('');
+  const [input, setInput] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
-  const [editingContent, setEditingContent] = useState('');
+  const [editingContent, setEditingContent] = useState("");
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [placeholder, setPlaceholder] = useState(() => pickPlaceholder());
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -394,8 +502,8 @@ export function ChatArea() {
   const pendingPreviewUrlsRef = useRef<Map<string, string[]>>(new Map());
   const [streamingAssistantId, setStreamingAssistantId] = useState<string | null>(null);
 
-  const ASSISTANT_BUBBLE_WIDTH = '92%';
-  const USER_BUBBLE_MAX_WIDTH = '72%';
+  const ASSISTANT_BUBBLE_WIDTH = "92%";
+  const USER_BUBBLE_MAX_WIDTH = "72%";
 
   useEffect(() => {
     if (viewportRef.current) {
@@ -428,6 +536,147 @@ export function ChatArea() {
     };
   }, [currentConversation?.id]);
 
+  const getMessageContent = (id: string) => {
+    return useChatStore.getState().messages.find((m) => m.id === id)?.content || "";
+  };
+
+  const updateMessageKeepContent = (id: string, updates: Partial<Message>) => {
+    useChatStore.getState().updateMessage(id, getMessageContent(id), updates);
+  };
+
+  const createAbortController = () => {
+    try {
+      streamAbortRef.current?.abort();
+    } catch {
+      // ignore
+    }
+    const abortController = new AbortController();
+    streamAbortRef.current = abortController;
+    return abortController;
+  };
+
+  const clearStreamInternals = () => {
+    textSmootherRef.current?.cancel({ flush: true });
+    textSmootherRef.current = null;
+    streamAbortRef.current = null;
+  };
+
+  const resetAssistantMessageForStream = (assistantMessageId: string, agentRun?: ApiAgentRun) => {
+    useChatStore.getState().updateMessage(assistantMessageId, "", {
+      streamTail: undefined,
+      streamPulseKey: 0,
+      liveStatus: undefined,
+      liveRoute: undefined,
+      liveLabel: undefined,
+      citations: undefined,
+      ...(agentRun ? { agentRun } : {}),
+    });
+  };
+
+  const didAbortStream = (error?: unknown) => {
+    if (streamAbortRef.current?.signal?.aborted) return true;
+    return error ? isAbortError(error) : false;
+  };
+
+  const toErrorMessage = (error: unknown, fallback: string) => {
+    return error instanceof Error ? error.message : fallback;
+  };
+
+  const streamAssistantResponse = async ({
+    input,
+    response,
+    assistantMessageId,
+    isAgent,
+    agentRunRef,
+    smoother,
+    onAfterDone,
+  }: {
+    input: {
+      conversationId: string;
+      content: string;
+      attachments?: string[];
+      mode?: "chat" | "agent";
+    };
+    response: Response;
+    assistantMessageId: string;
+    isAgent: boolean;
+    agentRunRef: { current: ApiAgentRun | undefined };
+    smoother: TextStreamSmoother;
+    onAfterDone?: () => void | Promise<void>;
+  }) => {
+    let postStream: Promise<void> | null = null;
+
+    const patch = (updates: Partial<Message>) => {
+      updateMessageKeepContent(
+        assistantMessageId,
+        isAgent ? { ...updates, agentRun: agentRunRef.current } : updates,
+      );
+    };
+
+    await streamChatMessage(
+      input,
+      {
+        onLiveStatus: (event) => {
+          patch({
+            liveStatus: event.status,
+            liveRoute: event.route,
+            liveLabel: event.label,
+          });
+        },
+        onCitations: (event) => {
+          patch({ citations: event.citations });
+        },
+        onDelta: (chunk) => {
+          if (!chunk) return;
+          smoother.push(chunk);
+        },
+        onAgentEvent: (event) => {
+          if (!isAgent) return;
+          agentRunRef.current = applyAgentEventToRun(
+            agentRunRef.current,
+            event as AgentStreamEvent,
+          );
+          patch({ agentRun: agentRunRef.current });
+        },
+        onDone: (event) => {
+          postStream = (async () => {
+            if (isAgent && event.agentRun) {
+              agentRunRef.current = event.agentRun;
+              patch({ agentRun: agentRunRef.current });
+            }
+            await smoother.finish();
+            await loadMessages(input.conversationId);
+            await onAfterDone?.();
+          })();
+        },
+        onError: (message) => {
+          postStream = (async () => {
+            smoother.cancel({ flush: true });
+            const next = isAgent ? createFailedAgentRun(agentRunRef.current, message) : undefined;
+            if (isAgent) agentRunRef.current = next;
+            useChatStore
+              .getState()
+              .updateMessage(
+                assistantMessageId,
+                `Error: ${message}`,
+                isAgent ? { agentRun: next } : undefined,
+              );
+          })();
+        },
+      },
+      response,
+    );
+
+    if (postStream) {
+      await postStream;
+      return;
+    }
+
+    await smoother.finish();
+    await loadMessages(input.conversationId);
+    await onAfterDone?.();
+  };
+
   const effective = getEffectiveModelForConversation(channels, currentConversation);
   const hasInput = Boolean(input.trim());
   const hasFiles = files.length > 0;
@@ -447,10 +696,13 @@ export function ChatArea() {
     if (next) {
       try {
         const status = await api.settings.searchStatus();
-        if (!status.configured || status.source === 'none') {
-          notifyWarning('未配置实时搜索', '未检测到 Tavily Key，联网搜索可能无法使用。请在设置中填写或配置服务端 TAVILY_API_KEY。');
-        } else if (status.source === 'disabled') {
-          notifyWarning('实时搜索已关闭', '在设置中启用 Tavily 搜索后才能联网。');
+        if (!status.configured || status.source === "none") {
+          notifyWarning(
+            "未配置实时搜索",
+            "未检测到 Tavily Key，联网搜索可能无法使用。请在设置中填写或配置服务端 TAVILY_API_KEY。",
+          );
+        } else if (status.source === "disabled") {
+          notifyWarning("实时搜索已关闭", "在设置中启用 Tavily 搜索后才能联网。");
         }
       } catch {
         // ignore
@@ -469,9 +721,7 @@ export function ChatArea() {
     } catch {
       // ignore
     }
-    streamAbortRef.current = null;
-    textSmootherRef.current?.cancel({ flush: true });
-    textSmootherRef.current = null;
+    clearStreamInternals();
     setIsLoading(false);
     setIsStreaming(false);
     setStreamingAssistantId(null);
@@ -498,16 +748,17 @@ export function ChatArea() {
     const mode = composerMode;
 
     const trimmed = input.trim();
-    const effectiveContent = trimmed.length > 0 ? trimmed : '';
-    const autoTitleSeed = trimmed.length > 0
-      ? trimmed
-      : files.length > 0
-        ? `Attachments: ${files.map((file) => file.name).join(', ')}`
-        : '';
+    const effectiveContent = trimmed.length > 0 ? trimmed : "";
+    const autoTitleSeed =
+      trimmed.length > 0
+        ? trimmed
+        : files.length > 0
+          ? `Attachments: ${files.map((file) => file.name).join(", ")}`
+          : "";
 
     const previewUrls: string[] = [];
     const localAttachmentMeta: MessageAttachmentItem[] = files.map((file) => {
-      const previewUrl = file.type?.startsWith('image/') ? URL.createObjectURL(file) : undefined;
+      const previewUrl = file.type?.startsWith("image/") ? URL.createObjectURL(file) : undefined;
       if (previewUrl) previewUrls.push(previewUrl);
       return {
         fileName: file.name,
@@ -525,7 +776,7 @@ export function ChatArea() {
     addMessage({
       id: userMessageId,
       conversationId,
-      role: 'user',
+      role: "user",
       content: effectiveContent,
       mode,
       attachmentsMeta: localAttachmentMeta.length > 0 ? localAttachmentMeta : undefined,
@@ -533,52 +784,56 @@ export function ChatArea() {
     });
 
     const assistantMessageId = `temp-assistant-${Date.now()}`;
-    let agentRunBuffer: ApiAgentRun | undefined = mode === 'agent'
-      ? { status: 'partial', summary: 'Agent 正在执行', steps: [] }
-      : undefined;
+    const isAgent = mode === "agent";
+    const agentRunRef = { current: isAgent ? createPartialAgentRun() : undefined };
 
     addMessage({
       id: assistantMessageId,
       conversationId,
-      role: 'assistant',
-      content: '',
+      role: "assistant",
+      content: "",
       mode,
-      agentRun: agentRunBuffer,
+      agentRun: agentRunRef.current,
       createdAt: new Date(),
     });
 
-    setInput('');
+    setInput("");
     queueMicrotask(() => inputRef.current?.focus());
     setIsLoading(true);
     setIsStreaming(true);
     setStreamingAssistantId(assistantMessageId);
 
     try {
-      try {
-        streamAbortRef.current?.abort();
-      } catch {
-        // ignore
-      }
-      const abortController = new AbortController();
-      streamAbortRef.current = abortController;
-
-      let assistantContent = '';
+      const abortController = createAbortController();
       const smoother = createTextStreamSmoother({
         emit: (delta) => {
-          assistantContent += delta;
-          appendMessageDelta(assistantMessageId, delta, {
-            agentRun: agentRunBuffer,
-          });
+          appendMessageDelta(
+            assistantMessageId,
+            delta,
+            isAgent ? { agentRun: agentRunRef.current } : undefined,
+          );
         },
       });
       textSmootherRef.current = smoother;
-      let postStream: Promise<void> | null = null;
 
       let attachmentIds: string[] = [];
       if (files.length > 0) {
         setIsUploading(true);
         const upload = await uploadAttachments({ conversationId, files });
         attachmentIds = upload.attachments.map((attachment) => attachment.id);
+        updateMessageKeepContent(userMessageId, {
+          attachments: attachmentIds,
+          attachmentsMeta: localAttachmentMeta.map((local, idx) => {
+            const server = upload.attachments[idx];
+            return {
+              ...local,
+              id: server?.id ?? local.id,
+              fileName: server?.fileName ?? local.fileName,
+              fileType: server?.fileType ?? local.fileType,
+              fileSize: server?.fileSize ?? local.fileSize,
+            };
+          }),
+        });
         setFiles([]);
       }
 
@@ -591,143 +846,61 @@ export function ChatArea() {
 
       const response = await api.messages.stream(payload, { signal: abortController.signal });
 
-      await streamChatMessage(
-        payload,
-        {
-          onLiveStatus: (event) => {
-            useChatStore.getState().updateMessage(assistantMessageId, assistantContent, {
-              liveStatus: event.status,
-              liveRoute: event.route,
-              liveLabel: event.label,
-              agentRun: agentRunBuffer,
-            });
-          },
-          onCitations: (event) => {
-            useChatStore.getState().updateMessage(assistantMessageId, assistantContent, {
-              citations: event.citations,
-              agentRun: agentRunBuffer,
-            });
-          },
-          onDelta: (chunk) => {
-            if (!chunk) return;
-            smoother.push(chunk);
-          },
-          onAgentEvent: (event) => {
-            if (mode !== 'agent') return;
-            if (!agentRunBuffer) {
-              agentRunBuffer = { status: 'partial', summary: 'Agent 正在执行', steps: [] };
-            }
-            if (event.type === 'tool_start' || event.type === 'tool_result') {
-              agentRunBuffer = {
-                ...agentRunBuffer,
-                summary: 'Agent 正在执行',
-                steps: [
-                  ...agentRunBuffer.steps,
-                  {
-                    type: event.type,
-                    toolName: event.toolName,
-                    content: event.content,
-                    toolInput: event.toolInput,
-                  },
-                ],
-              };
-            }
-            if (event.type === 'error') {
-              agentRunBuffer = {
-                ...agentRunBuffer,
-                status: 'failed',
-                summary: 'Agent 执行失败',
-                error: event.content || 'Agent error',
-                steps: [
-                  ...agentRunBuffer.steps,
-                  { type: 'error', content: event.content || 'Agent error' },
-                ],
-              };
-            }
-            useChatStore.getState().updateMessage(assistantMessageId, assistantContent, { agentRun: agentRunBuffer });
-          },
-          onDone: async (event) => {
-            postStream = (async () => {
-              if (mode === 'agent' && event.agentRun) {
-                agentRunBuffer = event.agentRun;
-                useChatStore.getState().updateMessage(assistantMessageId, assistantContent, { agentRun: agentRunBuffer });
+      await streamAssistantResponse({
+        input: payload,
+        response,
+        assistantMessageId,
+        isAgent,
+        agentRunRef,
+        smoother,
+        onAfterDone: () => {
+          const urls = pendingPreviewUrlsRef.current.get(userMessageId);
+          if (urls) {
+            for (const url of urls) {
+              try {
+                URL.revokeObjectURL(url);
+              } catch {
+                // ignore
               }
-              await smoother.finish();
-              await loadMessages(conversationId);
-              const urls = pendingPreviewUrlsRef.current.get(userMessageId);
-              if (urls) {
-                for (const url of urls) {
-                  try {
-                    URL.revokeObjectURL(url);
-                  } catch {
-                    // ignore
-                  }
+            }
+            pendingPreviewUrlsRef.current.delete(userMessageId);
+          }
+          const conv = useChatStore.getState().currentConversation;
+          if (conv && /^新会话 \d{2}-\d{2} \d{2}:\d{2}$/.test(conv.title)) {
+            if (!autoTitleSeed) return;
+            void api.conversations
+              .autoTitle(conversationId, autoTitleSeed)
+              .then((result) => {
+                if (result.success && result.title) {
+                  updateConversation(conversationId, { title: result.title });
                 }
-                pendingPreviewUrlsRef.current.delete(userMessageId);
-              }
-              const conv = useChatStore.getState().currentConversation;
-              if (conv && /^新会话 \d{2}-\d{2} \d{2}:\d{2}$/.test(conv.title)) {
-                if (!autoTitleSeed) return;
-                void api.conversations.autoTitle(conversationId, autoTitleSeed).then((result) => {
-                  if (result.success && result.title) {
-                    updateConversation(conversationId, { title: result.title });
-                  }
-                }).catch(() => {});
-              }
-            })();
-          },
-          onError: (message) => {
-            postStream = (async () => {
-              smoother.cancel({ flush: true });
-              if (mode === 'agent') {
-                agentRunBuffer = {
-                  status: 'failed',
-                  summary: 'Agent 执行失败',
-                  error: message,
-                  steps: agentRunBuffer?.steps || [],
-                };
-              }
-              useChatStore.getState().updateMessage(assistantMessageId, `Error: ${message}`, {
-                agentRun: agentRunBuffer,
-              });
-            })();
-          },
+              })
+              .catch(() => {});
+          }
         },
-        response
-      );
-
-      if (postStream) {
-        await postStream;
-      } else {
-        await smoother.finish();
-        await loadMessages(conversationId);
-      }
+      });
     } catch (error) {
-      if ((streamAbortRef.current as any)?.signal?.aborted || (error instanceof DOMException && error.name === 'AbortError')) {
+      if (didAbortStream(error)) {
         return;
       }
       useChatStore.getState().updateMessage(
         assistantMessageId,
-        `Error: ${error instanceof Error ? error.message : 'Failed to send message'}`,
-        mode === 'agent'
+        `Error: ${toErrorMessage(error, "Failed to send message")}`,
+        isAgent
           ? {
-              agentRun: {
-                status: 'failed',
-                summary: 'Agent 执行失败',
-                error: error instanceof Error ? error.message : 'Failed to send message',
-                steps: agentRunBuffer?.steps || [],
-              },
+              agentRun: createFailedAgentRun(
+                agentRunRef.current,
+                toErrorMessage(error, "Failed to send message"),
+              ),
             }
-          : undefined
+          : undefined,
       );
     } finally {
       setIsUploading(false);
       setIsLoading(false);
       setIsStreaming(false);
       setStreamingAssistantId(null);
-      textSmootherRef.current?.cancel({ flush: true });
-      textSmootherRef.current = null;
-      streamAbortRef.current = null;
+      clearStreamInternals();
       queueMicrotask(() => inputRef.current?.focus());
     }
   };
@@ -735,183 +908,96 @@ export function ChatArea() {
   const handleRetry = async (msgIndex: number) => {
     if (!currentConversation) return;
     const assistantMsg = messages[msgIndex];
-    if (!assistantMsg || assistantMsg.role !== 'assistant') return;
-    if (assistantMsg.id.startsWith('temp-')) return;
+    if (!assistantMsg || assistantMsg.role !== "assistant") return;
 
-    let agentRunBuffer: ApiAgentRun | undefined = assistantMsg.mode === 'agent'
-      ? { status: 'partial', summary: 'Agent 正在执行', steps: [] }
-      : undefined;
-
-    useChatStore.getState().updateMessage(
-      assistantMsg.id,
-      '',
-      {
-        streamTail: undefined,
-        streamPulseKey: 0,
-        liveStatus: undefined,
-        liveRoute: undefined,
-        liveLabel: undefined,
-        citations: undefined,
-        agentRun: agentRunBuffer,
-      }
-    );
+    const isAgent = assistantMsg.mode === "agent";
+    const agentRunRef = { current: isAgent ? createPartialAgentRun() : undefined };
+    resetAssistantMessageForStream(assistantMsg.id, agentRunRef.current);
     setIsLoading(true);
     setIsStreaming(true);
     setStreamingAssistantId(assistantMsg.id);
 
     try {
-      try {
-        streamAbortRef.current?.abort();
-      } catch {
-        // ignore
-      }
-      const abortController = new AbortController();
-      streamAbortRef.current = abortController;
-
+      const abortController = createAbortController();
       const smoother = createTextStreamSmoother({
         emit: (delta) => {
-          appendMessageDelta(assistantMsg.id, delta);
+          appendMessageDelta(
+            assistantMsg.id,
+            delta,
+            isAgent ? { agentRun: agentRunRef.current } : undefined,
+          );
         },
       });
       textSmootherRef.current = smoother;
-      let postStream: Promise<void> | null = null;
 
-      const response = await api.messages.regenerate(assistantMsg.id, { signal: abortController.signal });
-      if (!response.ok) throw new Error(await response.text().catch(() => 'Failed'));
+      if (assistantMsg.id.startsWith("temp-")) {
+        const userMsg = (() => {
+          for (let i = msgIndex - 1; i >= 0; i -= 1) {
+            const m = messages[i];
+            if (m?.role === "user") return m;
+          }
+          return null;
+        })();
+        if (!userMsg) return;
 
-      await streamChatMessage(
-        { conversationId: currentConversation.id, content: '' },
-        {
-          onLiveStatus: (event) => {
-            useChatStore.getState().updateMessage(
-              assistantMsg.id,
-              useChatStore.getState().messages.find((m) => m.id === assistantMsg.id)?.content || '',
-              {
-                liveStatus: event.status,
-                liveRoute: event.route,
-                liveLabel: event.label,
-                agentRun: agentRunBuffer,
-              }
-            );
-          },
-          onCitations: (event) => {
-            useChatStore.getState().updateMessage(
-              assistantMsg.id,
-              useChatStore.getState().messages.find((m) => m.id === assistantMsg.id)?.content || '',
-              {
-                citations: event.citations,
-                agentRun: agentRunBuffer,
-              }
-            );
-          },
-          onDelta: (chunk) => {
-            if (!chunk) return;
-            smoother.push(chunk);
-          },
-          onAgentEvent: (event) => {
-            if (assistantMsg.mode !== 'agent') return;
-            if (!agentRunBuffer) {
-              agentRunBuffer = { status: 'partial', summary: 'Agent 正在执行', steps: [] };
-            }
-            if (event.type === 'tool_start' || event.type === 'tool_result') {
-              agentRunBuffer = {
-                ...agentRunBuffer,
-                summary: 'Agent 正在执行',
-                steps: [
-                  ...agentRunBuffer.steps,
-                  {
-                    type: event.type,
-                    toolName: event.toolName,
-                    content: event.content,
-                    toolInput: event.toolInput,
-                  },
-                ],
-              };
-            }
-            if (event.type === 'error') {
-              agentRunBuffer = {
-                ...agentRunBuffer,
-                status: 'failed',
-                summary: 'Agent 执行失败',
-                error: event.content || 'Agent error',
-                steps: [
-                  ...agentRunBuffer.steps,
-                  { type: 'error', content: event.content || 'Agent error' },
-                ],
-              };
-            }
-            useChatStore.getState().updateMessage(assistantMsg.id, useChatStore.getState().messages.find((m) => m.id === assistantMsg.id)?.content || '', {
-              agentRun: agentRunBuffer,
-            });
-          },
-          onDone: async (event) => {
-            postStream = (async () => {
-              if (assistantMsg.mode === 'agent' && event.agentRun) {
-                agentRunBuffer = event.agentRun;
-                useChatStore.getState().updateMessage(
-                  assistantMsg.id,
-                  useChatStore.getState().messages.find((m) => m.id === assistantMsg.id)?.content || '',
-                  { agentRun: agentRunBuffer }
-                );
-              }
-              await smoother.finish();
-              await loadMessages(currentConversation.id);
-            })();
-          },
-          onError: (message) => {
-            postStream = (async () => {
-              smoother.cancel({ flush: true });
-              useChatStore.getState().updateMessage(
-                assistantMsg.id,
-                `Error: ${message}`,
-                assistantMsg.mode === 'agent'
-                  ? {
-                      agentRun: {
-                        status: 'failed',
-                        summary: 'Agent 执行失败',
-                        error: message,
-                        steps: agentRunBuffer?.steps || [],
-                      },
-                    }
-                  : undefined
-              );
-            })();
-          },
-        },
-        response
-      );
+        const attachmentIds = Array.isArray(userMsg.attachments)
+          ? userMsg.attachments.filter((id) => typeof id === "string" && id.trim().length > 0)
+          : (userMsg.attachmentsMeta || [])
+              .map((att) => (typeof att.id === "string" ? att.id : ""))
+              .filter((id) => id.trim().length > 0);
 
-      if (postStream) {
-        await postStream;
+        const payload = {
+          conversationId: currentConversation.id,
+          content: typeof userMsg.content === "string" ? userMsg.content : "",
+          attachments: attachmentIds.length > 0 ? attachmentIds : undefined,
+          mode: assistantMsg.mode,
+        } as const;
+
+        const response = await api.messages.stream(payload, { signal: abortController.signal });
+        await streamAssistantResponse({
+          input: payload,
+          response,
+          assistantMessageId: assistantMsg.id,
+          isAgent,
+          agentRunRef,
+          smoother,
+        });
       } else {
-        await smoother.finish();
-        await loadMessages(currentConversation.id);
+        const response = await api.messages.regenerate(assistantMsg.id, {
+          signal: abortController.signal,
+        });
+        if (!response.ok) throw new Error(await response.text().catch(() => "Failed"));
+
+        await streamAssistantResponse({
+          input: { conversationId: currentConversation.id, content: "", mode: assistantMsg.mode },
+          response,
+          assistantMessageId: assistantMsg.id,
+          isAgent,
+          agentRunRef,
+          smoother,
+        });
       }
     } catch (error) {
-      if ((streamAbortRef.current as any)?.signal?.aborted || (error instanceof DOMException && error.name === 'AbortError')) {
+      if (didAbortStream(error)) {
         return;
       }
       useChatStore.getState().updateMessage(
         assistantMsg.id,
-        `Error: ${error instanceof Error ? error.message : 'Failed to regenerate'}`,
-        assistantMsg.mode === 'agent'
+        `Error: ${toErrorMessage(error, "Failed to regenerate")}`,
+        isAgent
           ? {
-              agentRun: {
-                status: 'failed',
-                summary: 'Agent 执行失败',
-                error: error instanceof Error ? error.message : 'Failed to regenerate',
-                steps: agentRunBuffer?.steps || [],
-              },
+              agentRun: createFailedAgentRun(
+                agentRunRef.current,
+                toErrorMessage(error, "Failed to regenerate"),
+              ),
             }
-          : undefined
+          : undefined,
       );
     } finally {
       setIsLoading(false);
       setIsStreaming(false);
       setStreamingAssistantId(null);
-      textSmootherRef.current?.cancel({ flush: true });
-      textSmootherRef.current = null;
-      streamAbortRef.current = null;
+      clearStreamInternals();
     }
   };
 
@@ -919,107 +1005,77 @@ export function ChatArea() {
     if (!currentConversation || !newContent.trim()) return;
     const msgIndex = messages.findIndex((message) => message.id === msgId);
     if (msgIndex < 0) return;
-    if (messages[msgIndex]?.mode === 'agent') return;
+    const userMsg = messages[msgIndex];
+    if (!userMsg || userMsg.role !== "user") return;
+    if (userMsg.id.startsWith("temp-")) return;
     const assistantMsg = messages[msgIndex + 1];
-    if (!assistantMsg || assistantMsg.role !== 'assistant' || assistantMsg.mode === 'agent') return;
+    if (!assistantMsg || assistantMsg.role !== "assistant") return;
+    if (assistantMsg.mode !== userMsg.mode) return;
+    if (assistantMsg.id.startsWith("temp-")) return;
+
+    const conversationId = currentConversation.id;
+    const isAgent = userMsg.mode === "agent";
+    const agentRunRef = { current: isAgent ? createPartialAgentRun() : undefined };
 
     setEditingMsgId(null);
     useChatStore.getState().updateMessage(msgId, newContent.trim());
-    useChatStore.getState().updateMessage(assistantMsg.id, '', {
-      streamTail: undefined,
-      streamPulseKey: 0,
-      liveStatus: undefined,
-      liveRoute: undefined,
-      liveLabel: undefined,
-      citations: undefined,
-    });
+    resetAssistantMessageForStream(assistantMsg.id, agentRunRef.current);
     setIsLoading(true);
     setIsStreaming(true);
     setStreamingAssistantId(assistantMsg.id);
 
     try {
-      try {
-        streamAbortRef.current?.abort();
-      } catch {
-        // ignore
-      }
-      const abortController = new AbortController();
-      streamAbortRef.current = abortController;
-
+      const abortController = createAbortController();
       const smoother = createTextStreamSmoother({
         emit: (delta) => {
-          appendMessageDelta(assistantMsg.id, delta);
+          appendMessageDelta(
+            assistantMsg.id,
+            delta,
+            isAgent ? { agentRun: agentRunRef.current } : undefined,
+          );
         },
       });
       textSmootherRef.current = smoother;
-      let postStream: Promise<void> | null = null;
 
-      const response = await api.messages.edit(msgId, newContent.trim(), { signal: abortController.signal });
-      if (!response.ok) throw new Error(await response.text().catch(() => 'Failed'));
+      const response = await api.messages.edit(msgId, newContent.trim(), {
+        signal: abortController.signal,
+      });
+      if (!response.ok) throw new Error(await response.text().catch(() => "Failed"));
 
-      await streamChatMessage(
-        { conversationId: currentConversation.id, content: '' },
-        {
-          onLiveStatus: (event) => {
-            useChatStore.getState().updateMessage(assistantMsg.id, '', {
-              liveStatus: event.status,
-              liveRoute: event.route,
-              liveLabel: event.label,
-            });
-          },
-          onCitations: (event) => {
-            useChatStore.getState().updateMessage(assistantMsg.id, '', {
-              citations: event.citations,
-            });
-          },
-          onDelta: (chunk) => {
-            if (!chunk) return;
-            smoother.push(chunk);
-          },
-          onDone: async () => {
-            postStream = (async () => {
-              await smoother.finish();
-              await loadMessages(currentConversation.id);
-            })();
-          },
-          onError: (message) => {
-            postStream = (async () => {
-              smoother.cancel({ flush: true });
-              useChatStore.getState().updateMessage(assistantMsg.id, `Error: ${message}`);
-            })();
-          },
-        },
-        response
-      );
-
-      if (postStream) {
-        await postStream;
-      } else {
-        await smoother.finish();
-        await loadMessages(currentConversation.id);
-      }
+      await streamAssistantResponse({
+        input: { conversationId, content: "" },
+        response,
+        assistantMessageId: assistantMsg.id,
+        isAgent,
+        agentRunRef,
+        smoother,
+      });
     } catch (error) {
-      if ((streamAbortRef.current as any)?.signal?.aborted || (error instanceof DOMException && error.name === 'AbortError')) {
+      if (didAbortStream(error)) {
         return;
       }
-      useChatStore.getState().updateMessage(
-        assistantMsg.id,
-        `Error: ${error instanceof Error ? error.message : 'Failed to edit message'}`
-      );
+      const message = toErrorMessage(error, "Failed to edit message");
+      useChatStore
+        .getState()
+        .updateMessage(
+          assistantMsg.id,
+          `Error: ${message}`,
+          isAgent ? { agentRun: createFailedAgentRun(agentRunRef.current, message) } : undefined,
+        );
     } finally {
       setIsLoading(false);
       setIsStreaming(false);
       setStreamingAssistantId(null);
-      textSmootherRef.current?.cancel({ flush: true });
-      textSmootherRef.current = null;
-      streamAbortRef.current = null;
+      clearStreamInternals();
     }
   };
 
   const handleKeyDown = (event: React.KeyboardEvent) => {
-    if (event.key === 'Enter' && !event.shiftKey) {
-      const nativeEvent = event.nativeEvent as any;
-      if (nativeEvent?.isComposing || nativeEvent?.keyCode === 229) {
+    if (event.key === "Enter" && !event.shiftKey) {
+      const nativeEvent = event.nativeEvent;
+      const keyCode =
+        "keyCode" in nativeEvent ? (nativeEvent.keyCode as number | undefined) : undefined;
+      if (nativeEvent.isComposing || keyCode === 229) {
         return;
       }
       event.preventDefault();
@@ -1029,25 +1085,30 @@ export function ChatArea() {
 
   if (!currentConversation) {
     return (
-      <div className="flex flex-1 items-center justify-center">
-        <p className="text-sm text-muted-foreground">在左侧选择一个会话，或创建新会话开始交流</p>
+      <div className="flex flex-1 flex-col">
+        <div style={{ padding: PAGE_PAD, paddingBottom: "8px" }}>
+          <ChatHeader />
+        </div>
+        <div className="flex flex-1 items-center justify-center">
+          <p className="text-sm text-muted-foreground">在左侧选择一个会话，或创建新会话开始交流</p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="flex flex-1 min-h-0 flex-col">
-      <div style={{ padding: PAGE_PAD, paddingBottom: '8px' }}>
+    <div className="flex min-h-0 min-w-0 w-full flex-1 flex-col overflow-x-hidden">
+      <div style={{ padding: PAGE_PAD, paddingBottom: "8px" }}>
         <ChatHeader />
       </div>
 
       <div
         ref={viewportRef}
-        className="flex min-h-0 flex-1 flex-col overflow-y-auto scrollbar-thin"
+        className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto scrollbar-thin"
         style={{ paddingLeft: PAGE_PAD, paddingRight: PAGE_PAD }}
       >
-        <div className="flex w-full flex-col">
-          <div className="mt-auto flex flex-col gap-2 pb-2">
+        <div className="flex min-w-0 w-full flex-col">
+          <div className="mt-auto flex min-w-0 flex-col gap-2 pb-2">
             {messages.map((msg, index) => (
               <React.Fragment key={msg.id}>
                 <MessageBubble
@@ -1064,14 +1125,26 @@ export function ChatArea() {
                     streamTail: msg.streamTail,
                     streamPulseKey: msg.streamPulseKey,
                   }}
-                  isStreaming={Boolean(isStreaming && streamingAssistantId && msg.id === streamingAssistantId)}
-                  canEdit={msg.role === 'user' && msg.mode !== 'agent'}
-                  canRetry={msg.role === 'assistant'}
-                  attachments={msg.role === 'user' ? (((msg as any).attachmentsMeta as MessageAttachmentItem[] | undefined) || undefined) : undefined}
+                  isStreaming={Boolean(
+                    isStreaming && streamingAssistantId && msg.id === streamingAssistantId,
+                  )}
+                  canEdit={msg.role === "user"}
+                  canRetry={msg.role === "assistant" && !isLoading && !isStreaming && !isUploading}
+                  attachments={
+                    msg.role === "user" && msg.attachmentsMeta
+                      ? msg.attachmentsMeta.map((att) => ({
+                          id: att.id,
+                          fileName: att.fileName,
+                          fileType: att.fileType,
+                          fileSize: att.fileSize,
+                          previewUrl: att.previewUrl,
+                        }))
+                      : undefined
+                  }
                   onEdit={() => {
-                    if (msg.role !== 'user' || msg.mode === 'agent') return;
+                    if (msg.role !== "user") return;
                     setEditingMsgId(msg.id);
-                    setEditingContent(msg.content || '');
+                    setEditingContent(msg.content || "");
                   }}
                   onRetry={() => void handleRetry(index)}
                   onDelete={() => void deleteMessage(msg.id)}
@@ -1087,16 +1160,24 @@ export function ChatArea() {
                       className="w-full"
                       rows={3}
                       onKeyDown={(event) => {
-                        if (event.key === 'Enter' && !event.shiftKey) {
+                        if (event.key === "Enter" && !event.shiftKey) {
                           event.preventDefault();
                           void handleEditSubmit(msg.id, editingContent);
                         }
-                        if (event.key === 'Escape') setEditingMsgId(null);
+                        if (event.key === "Escape") setEditingMsgId(null);
                       }}
                     />
                     <div className="flex gap-2">
-                      <Button size="sm" variant="ghost" onClick={() => setEditingMsgId(null)}>取消</Button>
-                      <Button size="sm" onClick={() => void handleEditSubmit(msg.id, editingContent)} disabled={!editingContent.trim()}>确认</Button>
+                      <Button size="sm" variant="ghost" onClick={() => setEditingMsgId(null)}>
+                        取消
+                      </Button>
+                      <Button
+                        size="sm"
+                        onClick={() => void handleEditSubmit(msg.id, editingContent)}
+                        disabled={!editingContent.trim()}
+                      >
+                        确认
+                      </Button>
                     </div>
                   </div>
                 )}
@@ -1112,22 +1193,32 @@ export function ChatArea() {
 
       {!effective.ok && (
         <div style={{ paddingLeft: PAGE_PAD, paddingRight: PAGE_PAD }}>
-          {effective.scope === 'conversation' ? (
+          {effective.scope === "conversation" ? (
             <div className="mb-2 rounded-xl border border-orange-200 bg-orange-50 p-3 text-sm shadow-minimal dark:border-orange-800 dark:bg-orange-950">
               <p className="font-medium text-orange-800 dark:text-orange-200">当前会话模型不可用</p>
               <p className="text-orange-700 dark:text-orange-300">{effective.reason}</p>
-              <p className="mt-1 text-xs text-muted-foreground">在下方输入框的 Model 里修复即可。</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                在下方输入框的 Model 里修复即可。
+              </p>
             </div>
           ) : (
             <div className="mb-2 flex items-center gap-3 rounded-xl border border-orange-200 bg-orange-50 p-3 text-sm shadow-minimal dark:border-orange-800 dark:bg-orange-950">
               <p className="flex-1 text-orange-700 dark:text-orange-300">{effective.reason}</p>
-              <p className="text-xs text-muted-foreground">Set a default model in Settings (gear) → Channels</p>
+              <p className="text-xs text-muted-foreground">
+                Set a default model in Settings (gear) → Channels
+              </p>
             </div>
           )}
         </div>
       )}
 
-      <div style={{ paddingLeft: PAGE_PAD, paddingRight: PAGE_PAD, paddingBottom: COMPOSER_PAD_BOTTOM }}>
+      <div
+        style={{
+          paddingLeft: PAGE_PAD,
+          paddingRight: PAGE_PAD,
+          paddingBottom: COMPOSER_PAD_BOTTOM,
+        }}
+      >
         <PromaComposer
           value={input}
           onChange={setInput}
@@ -1139,8 +1230,15 @@ export function ChatArea() {
           onRemoveAttachment={(file) => setFiles((prev) => prev.filter((item) => item !== file))}
           mode={composerMode}
           onModeChange={setComposerMode}
-          modelLabel={effective.ok ? effective.label : effective.scope === 'conversation' ? 'Fix model' : 'Select model'}
-          modelTone={effective.ok ? 'normal' : 'warning'}
+          modelProvider={effective.ok ? effective.provider : null}
+          modelLabel={
+            effective.ok
+              ? effective.modelDisplayName
+              : effective.scope === "conversation"
+                ? "Fix model"
+                : "Select model"
+          }
+          modelTone={effective.ok ? "normal" : "warning"}
           onOpenModelPicker={() => setModelPickerOpen(true)}
           forceWebSearch={forceWebSearch}
           onToggleWebSearch={() => void handleToggleWebSearch()}
@@ -1158,7 +1256,9 @@ export function ChatArea() {
           opened={modelPickerOpen}
           onClose={() => setModelPickerOpen(false)}
           conversationId={currentConversation.id}
-          conversationFixReason={!effective.ok && effective.scope === 'conversation' ? effective.reason : null}
+          conversationFixReason={
+            !effective.ok && effective.scope === "conversation" ? effective.reason : null
+          }
           current={
             currentConversation.channelId && currentConversation.modelId
               ? { channelId: currentConversation.channelId, modelId: currentConversation.modelId }

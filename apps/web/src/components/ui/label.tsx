@@ -1,2 +1,1 @@
-export { Label } from 'ui'
-
+export { Label } from "ui";

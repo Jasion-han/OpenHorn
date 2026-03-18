@@ -1,89 +1,94 @@
-'use client';
+"use client";
 
-import { useEffect, useMemo, useState } from 'react';
-import { Plus, Search, Wand2 } from 'lucide-react';
-import { api, type ApiChannel } from '../../lib/api';
-import { notifyError, notifySuccess } from '../../lib/notify';
-import { Button } from '../ui/button';
-import { Input } from '../ui/input';
-import { Label } from '../ui/label';
-import { Badge } from '../ui/badge';
-import { Checkbox } from '../ui/checkbox';
-import { ScrollArea } from '../ui/scroll-area';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog';
-import { cn } from '@/lib/utils';
+import { Plus, Search, Wand2 } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { ProviderLogo } from "@/components/providers/ProviderLogo";
+import { cn } from "@/lib/utils";
+import { type ApiChannel, api } from "../../lib/api";
+import { notifyError, notifySuccess } from "../../lib/notify";
+import { Badge } from "../ui/badge";
+import { Button } from "../ui/button";
+import { Checkbox } from "../ui/checkbox";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../ui/dialog";
+import { Input } from "../ui/input";
+import { Label } from "../ui/label";
+import { ScrollArea } from "../ui/scroll-area";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 
-const API_KEY_MASK = '********';
-const NEW_CHANNEL_KEY = '__new__';
+const API_KEY_MASK = "********";
+const NEW_CHANNEL_KEY = "__new__";
 
 const PROVIDERS = {
   openai: {
-    name: 'OpenAI',
-    defaultBaseUrl: 'https://api.openai.com/v1',
+    name: "OpenAI",
+    defaultBaseUrl: "https://api.openai.com/v1",
   },
   anthropic: {
-    name: 'Anthropic',
-    defaultBaseUrl: 'https://api.anthropic.com',
+    name: "Anthropic",
+    defaultBaseUrl: "https://api.anthropic.com",
   },
   deepseek: {
-    name: 'DeepSeek',
-    defaultBaseUrl: 'https://api.deepseek.com/v1',
+    name: "DeepSeek",
+    defaultBaseUrl: "https://api.deepseek.com/v1",
   },
   google: {
-    name: 'Google',
-    defaultBaseUrl: 'https://generativelanguage.googleapis.com',
+    name: "Google",
+    defaultBaseUrl: "https://generativelanguage.googleapis.com",
   },
 };
 
 type ProviderKey = keyof typeof PROVIDERS;
 
-const LAST_PROVIDER_KEY = 'channels.lastProvider';
-const LAST_BASEURL_KEY = 'channels.lastBaseUrl';
+const LAST_PROVIDER_KEY = "channels.lastProvider";
+const LAST_BASEURL_KEY = "channels.lastBaseUrl";
 
 export type ChannelEditorModalProps = {
   opened: boolean;
   channels: ApiChannel[];
+  initialChannelId?: string | null;
   onClose: () => void;
   onSaved: (channelId: string) => void | Promise<void>;
-  applyFetchModelsOutcome: (channelId: string, result: { success: boolean; error?: string }) => void;
+  applyFetchModelsOutcome: (
+    channelId: string,
+    result: { success: boolean; error?: string },
+  ) => void;
 };
 
 function normalizeCompareText(value: string | null | undefined) {
-  return (value || '').trim();
+  return (value || "").trim();
 }
 
 function normalizeCompareBaseUrl(value: string | null | undefined) {
-  return normalizeCompareText(value).replace(/\/+$/, '');
+  return normalizeCompareText(value).replace(/\/+$/, "");
 }
 
 function readLastProvider(): ProviderKey {
-  if (typeof window === 'undefined') return 'openai';
+  if (typeof window === "undefined") return "openai";
   const raw = window.localStorage.getItem(LAST_PROVIDER_KEY);
-  return (raw && raw in PROVIDERS ? (raw as ProviderKey) : 'openai');
+  return raw && raw in PROVIDERS ? (raw as ProviderKey) : "openai";
 }
 
 function readLastBaseUrl(): string {
-  if (typeof window === 'undefined') return PROVIDERS.openai.defaultBaseUrl;
+  if (typeof window === "undefined") return PROVIDERS.openai.defaultBaseUrl;
   return window.localStorage.getItem(LAST_BASEURL_KEY) || PROVIDERS.openai.defaultBaseUrl;
 }
 
 export function ChannelEditorModal(props: ChannelEditorModalProps) {
-  const { opened, channels, onClose, onSaved, applyFetchModelsOutcome } = props;
+  const { opened, channels, initialChannelId, onClose, onSaved, applyFetchModelsOutcome } = props;
 
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState("");
   const [activeKey, setActiveKey] = useState<string>(NEW_CHANNEL_KEY);
 
-  const [name, setName] = useState('');
-  const [provider, setProvider] = useState<ProviderKey>('openai');
-  const [baseUrl, setBaseUrl] = useState('');
+  const [name, setName] = useState("");
+  const [provider, setProvider] = useState<ProviderKey>("openai");
+  const [baseUrl, setBaseUrl] = useState("");
   const [enabled, setEnabled] = useState(true);
-  const [apiKey, setApiKey] = useState('');
+  const [apiKey, setApiKey] = useState("");
   const [saving, setSaving] = useState(false);
 
   const providerOptions = useMemo(
     () => Object.entries(PROVIDERS).map(([value, item]) => ({ value, label: item.name })),
-    []
+    [],
   );
 
   const sortedChannels = useMemo(() => {
@@ -91,7 +96,7 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
     next.sort((a, b) => {
       if (a.isDefault !== b.isDefault) return a.isDefault ? -1 : 1;
       if (Boolean(a.enabled) !== Boolean(b.enabled)) return a.enabled ? -1 : 1;
-      return (a.name || '').localeCompare(b.name || '');
+      return (a.name || "").localeCompare(b.name || "");
     });
     return next;
   }, [channels]);
@@ -100,9 +105,11 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
     const q = query.trim().toLowerCase();
     if (!q) return sortedChannels;
     return sortedChannels.filter((c) => {
-      return (c.name || '').toLowerCase().includes(q)
-        || (c.provider || '').toLowerCase().includes(q)
-        || (c.baseUrl || '').toLowerCase().includes(q);
+      return (
+        (c.name || "").toLowerCase().includes(q) ||
+        (c.provider || "").toLowerCase().includes(q) ||
+        (c.baseUrl || "").toLowerCase().includes(q)
+      );
     });
   }, [query, sortedChannels]);
 
@@ -114,34 +121,34 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
 
   const setProviderAndRemember = (next: ProviderKey) => {
     setProvider(next);
-    if (typeof window !== 'undefined') {
+    if (typeof window !== "undefined") {
       window.localStorage.setItem(LAST_PROVIDER_KEY, next);
     }
   };
 
   const setBaseUrlAndRemember = (next: string) => {
     setBaseUrl(next);
-    if (typeof window !== 'undefined' && next.trim()) {
+    if (typeof window !== "undefined" && next.trim()) {
       window.localStorage.setItem(LAST_BASEURL_KEY, next.trim());
     }
   };
 
   const prefillCreateDefaults = () => {
     const lastProvider = readLastProvider();
-    setName('');
+    setName("");
     setProvider(lastProvider);
     setBaseUrl(readLastBaseUrl());
     setEnabled(true);
-    setApiKey('');
+    setApiKey("");
   };
 
   const prefillFromChannel = (c: ApiChannel) => {
-    const p = c.provider in PROVIDERS ? (c.provider as ProviderKey) : 'openai';
-    setName(c.name || '');
+    const p = c.provider in PROVIDERS ? (c.provider as ProviderKey) : "openai";
+    setName(c.name || "");
     setProvider(p);
-    setBaseUrl(c.baseUrl || '');
+    setBaseUrl(c.baseUrl || "");
     setEnabled(Boolean(c.enabled ?? true));
-    setApiKey(c.hasApiKey ? API_KEY_MASK : '');
+    setApiKey(c.hasApiKey ? API_KEY_MASK : "");
   };
 
   const pickDefaultChannelId = () => {
@@ -151,14 +158,28 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
     const anyDefault = channels.find((c) => c.isDefault);
     if (anyDefault) return anyDefault.id;
     if (channels.length === 0) return null;
-    return channels
-      .slice()
-      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())[0]?.id || null;
+    return (
+      channels
+        .slice()
+        .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())[0]?.id ||
+      null
+    );
   };
 
   useEffect(() => {
     if (!opened) return;
-    setQuery('');
+    setQuery("");
+
+    const targetedChannel =
+      initialChannelId && initialChannelId !== NEW_CHANNEL_KEY
+        ? channels.find((channel) => channel.id === initialChannelId) || null
+        : null;
+
+    if (targetedChannel) {
+      setActiveKey(targetedChannel.id);
+      prefillFromChannel(targetedChannel);
+      return;
+    }
 
     if (channels.length === 0) {
       setActiveKey(NEW_CHANNEL_KEY);
@@ -177,7 +198,7 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
     setActiveKey(NEW_CHANNEL_KEY);
     prefillCreateDefaults();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [opened]);
+  }, [channels, initialChannelId, opened]);
 
   useEffect(() => {
     if (!opened) return;
@@ -197,7 +218,8 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeKey, opened]);
 
-  const canSubmitCreate = normalizeCompareText(name) && normalizeCompareText(apiKey) && apiKey.trim() !== API_KEY_MASK;
+  const canSubmitCreate =
+    normalizeCompareText(name) && normalizeCompareText(apiKey) && apiKey.trim() !== API_KEY_MASK;
   const canSubmitEdit = Boolean(activeChannel?.id) && normalizeCompareText(name);
 
   const handleSubmit = async () => {
@@ -206,7 +228,7 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
     try {
       if (isCreate) {
         if (!canSubmitCreate) {
-          notifyError('创建失败', '请填写名称与 API Key');
+          notifyError("创建失败", "请填写名称与 API Key");
           return;
         }
 
@@ -221,7 +243,7 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
         const sync = await api.channels.fetchModels(created.id);
         applyFetchModelsOutcome(created.id, sync);
 
-        notifySuccess('已创建', sync.success ? '已同步模型列表' : '模型同步结果请看该渠道的提示');
+        notifySuccess("已创建", sync.success ? "已同步模型列表" : "模型同步结果请看该渠道的提示");
         await onSaved(created.id);
         onClose();
         return;
@@ -229,12 +251,12 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
 
       // edit
       if (!activeChannel?.id) {
-        notifyError('保存失败', 'Channel not found');
+        notifyError("保存失败", "Channel not found");
         return;
       }
       const channel = activeChannel;
 
-      const payload: Record<string, unknown> = {};
+      const payload: Parameters<typeof api.channels.update>[1] = {};
 
       if (normalizeCompareText(name) !== normalizeCompareText(channel.name)) {
         payload.name = name.trim();
@@ -256,17 +278,17 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
       }
 
       if (Object.keys(payload).length > 0) {
-        await api.channels.update(channel.id, payload as any);
+        await api.channels.update(channel.id, payload);
       }
 
       const sync = await api.channels.fetchModels(channel.id);
       applyFetchModelsOutcome(channel.id, sync);
 
-      notifySuccess('已保存', sync.success ? '已同步模型列表' : '模型同步结果请看该渠道的提示');
+      notifySuccess("已保存", sync.success ? "已同步模型列表" : "模型同步结果请看该渠道的提示");
       await onSaved(channel.id);
       onClose();
     } catch (error) {
-      notifyError('操作失败', error instanceof Error ? error.message : 'Operation failed');
+      notifyError("操作失败", error instanceof Error ? error.message : "Operation failed");
     } finally {
       setSaving(false);
     }
@@ -299,8 +321,16 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
               </Button>
             </div>
             <div className="relative">
-              <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-              <Input placeholder="搜索渠道..." value={query} onChange={(e) => setQuery(e.target.value)} className="pl-8" />
+              <Search
+                size={14}
+                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+              />
+              <Input
+                placeholder="搜索渠道..."
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                className="pl-8"
+              />
             </div>
             <ScrollArea className="flex-1">
               <div className="flex flex-col gap-1 pr-2">
@@ -309,18 +339,34 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
                   return (
                     <button
                       key={c.id}
+                      type="button"
                       onClick={() => openEdit(c.id)}
                       className={cn(
-                        'w-full rounded-md border px-3 py-2 text-left transition-colors',
-                        selected ? 'bg-accent border-primary' : 'hover:bg-accent/50',
-                        !c.enabled && 'opacity-70'
+                        "w-full rounded-md border px-3 py-2 text-left transition-colors",
+                        selected ? "bg-accent border-primary" : "hover:bg-accent/50",
+                        !c.enabled && "opacity-70",
                       )}
                     >
-                      <p className="text-sm font-semibold truncate">{c.name || '未命名渠道'}</p>
+                      <p className="text-sm font-semibold truncate">{c.name || "未命名渠道"}</p>
                       <div className="flex items-center gap-1 mt-0.5">
-                        <Badge variant="secondary" className="text-xs px-1 py-0">{c.provider}</Badge>
-                        {c.isDefault && <Badge variant="outline" className="text-xs px-1 py-0">默认</Badge>}
-                        {!c.enabled && <Badge variant="secondary" className="text-xs px-1 py-0">已禁用</Badge>}
+                        <Badge
+                          variant="secondary"
+                          className="gap-1 text-xs px-1 py-0"
+                          title={c.provider}
+                        >
+                          <ProviderLogo provider={c.provider} className="size-4" />
+                          <span className="sr-only">{c.provider}</span>
+                        </Badge>
+                        {c.isDefault && (
+                          <Badge variant="outline" className="text-xs px-1 py-0">
+                            默认
+                          </Badge>
+                        )}
+                        {!c.enabled && (
+                          <Badge variant="secondary" className="text-xs px-1 py-0">
+                            已禁用
+                          </Badge>
+                        )}
                       </div>
                     </button>
                   );
@@ -336,13 +382,19 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
           <div className="flex flex-1 min-w-0 flex-col rounded-lg border p-3">
             <div className="flex items-start justify-between mb-3">
               <div className="min-w-0">
-                <p className="font-semibold truncate">{isCreate ? '新建渠道' : (activeChannel?.name || '编辑渠道')}</p>
-                <p className="text-xs text-muted-foreground">Provider 切换不会自动修改 Base URL。保存后会自动同步模型列表。</p>
+                <p className="font-semibold truncate">
+                  {isCreate ? "新建渠道" : activeChannel?.name || "编辑渠道"}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Provider 切换不会自动修改 Base URL。保存后会自动同步模型列表。
+                </p>
               </div>
               {!isCreate && (
                 <div className="flex items-center gap-1.5 shrink-0">
                   {activeChannel?.isDefault && <Badge variant="outline">默认</Badge>}
-                  {activeChannel && !activeChannel.enabled && <Badge variant="secondary">已禁用</Badge>}
+                  {activeChannel && !activeChannel.enabled && (
+                    <Badge variant="secondary">已禁用</Badge>
+                  )}
                 </div>
               )}
             </div>
@@ -352,14 +404,30 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
                 <div className="grid grid-cols-2 gap-3">
                   <div className="flex flex-col gap-1.5">
                     <Label>名称 *</Label>
-                    <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="例如：我的 Claude 中转" />
+                    <Input
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      placeholder="例如：我的 Claude 中转"
+                    />
                   </div>
                   <div className="flex flex-col gap-1.5">
                     <Label>厂商</Label>
-                    <Select value={provider} onValueChange={(v) => setProviderAndRemember(v as ProviderKey)}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
+                    <Select
+                      value={provider}
+                      onValueChange={(v) => setProviderAndRemember(v as ProviderKey)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
                       <SelectContent>
-                        {providerOptions.map((opt) => <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>)}
+                        {providerOptions.map((opt) => (
+                          <SelectItem key={opt.value} value={opt.value}>
+                            <div className="flex items-center gap-2">
+                              <ProviderLogo provider={opt.value} className="size-4" />
+                              <span>{opt.label}</span>
+                            </div>
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </div>
@@ -395,27 +463,31 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
                 </div>
 
                 <div className="flex flex-col gap-1.5">
-                  <Label>API Key {isCreate && '*'}</Label>
+                  <Label>API Key {isCreate && "*"}</Label>
                   <Input
                     type="password"
-                    placeholder={isCreate ? '输入 API Key' : '保持为 ******** 或留空表示不修改'}
+                    placeholder={isCreate ? "输入 API Key" : "保持为 ******** 或留空表示不修改"}
                     value={apiKey}
                     onChange={(e) => setApiKey(e.target.value)}
                   />
                   {!isCreate && (
-                    <p className="text-xs text-muted-foreground">出于安全原因，Web 端不会展示已保存的明文 Key。输入新 Key 才会更新。</p>
+                    <p className="text-xs text-muted-foreground">
+                      出于安全原因，Web 端不会展示已保存的明文 Key。输入新 Key 才会更新。
+                    </p>
                   )}
                 </div>
               </div>
             </ScrollArea>
 
             <div className="flex justify-end gap-2 mt-3">
-              <Button variant="ghost" onClick={onClose}>取消</Button>
+              <Button variant="ghost" onClick={onClose}>
+                取消
+              </Button>
               <Button
                 onClick={() => void handleSubmit()}
                 disabled={saving || (isCreate ? !canSubmitCreate : !canSubmitEdit)}
               >
-                {saving ? '处理中...' : (isCreate ? '创建并同步模型' : '保存并同步模型')}
+                {saving ? "处理中..." : isCreate ? "创建并同步模型" : "保存并同步模型"}
               </Button>
             </div>
           </div>

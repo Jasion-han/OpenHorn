@@ -1,4 +1,3 @@
-"use client"
+"use client";
 
-export { Separator } from 'ui'
-
+export { Separator } from "ui";

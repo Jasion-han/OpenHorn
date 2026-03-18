@@ -1,36 +1,39 @@
-'use client';
+"use client";
 
-import { useState, useEffect } from 'react';
-import { AlignLeft, Pencil } from 'lucide-react';
-import { useAuthStore } from '../../stores/authStore';
-import { api } from '../../lib/api';
-import { notifySuccess, notifyError } from '../../lib/notify';
-import { Input } from '../ui/input';
-import { Button } from '../ui/button';
-import { Textarea } from '../ui/textarea';
-import { Badge } from '../ui/badge';
-import { Label } from '../ui/label';
-import { cn } from '@/lib/utils';
-import { SettingsCard, SettingsSection } from 'ui';
+import { AlignLeft, Pencil } from "lucide-react";
+import { useEffect, useState } from "react";
+import { SettingsCard, SettingsSection } from "ui";
+import { cn } from "@/lib/utils";
+import { api } from "../../lib/api";
+import { notifyError, notifySuccess } from "../../lib/notify";
+import { useAuthStore } from "../../stores/authStore";
+import { Badge } from "../ui/badge";
+import { Button } from "../ui/button";
+import { Input } from "../ui/input";
+import { Label } from "../ui/label";
+import { Textarea } from "../ui/textarea";
 
-const SYSTEM_PROMPT_KEY = 'chat.systemPrompt';
+const SYSTEM_PROMPT_KEY = "chat.systemPrompt";
 
 export function GeneralSettings() {
   const { user } = useAuthStore();
-  const [username, setUsername] = useState(user?.username || '');
-  const [email] = useState(user?.email || '');
-  const [systemPrompt, setSystemPrompt] = useState('');
-  const [savedPrompt, setSavedPrompt] = useState('');
+  const [username, setUsername] = useState(user?.username || "");
+  const [email] = useState(user?.email || "");
+  const [systemPrompt, setSystemPrompt] = useState("");
+  const [savedPrompt, setSavedPrompt] = useState("");
   const [editing, setEditing] = useState(false);
   const [savingPrompt, setSavingPrompt] = useState(false);
 
   useEffect(() => {
-    api.settings.get([SYSTEM_PROMPT_KEY]).then(({ settings }) => {
-      const val = settings[SYSTEM_PROMPT_KEY] || '';
-      setSystemPrompt(val);
-      setSavedPrompt(val);
-      setEditing(!val);
-    }).catch(() => {});
+    api.settings
+      .get([SYSTEM_PROMPT_KEY])
+      .then(({ settings }) => {
+        const val = settings[SYSTEM_PROMPT_KEY] || "";
+        setSystemPrompt(val);
+        setSavedPrompt(val);
+        setEditing(!val);
+      })
+      .catch(() => {});
   }, []);
 
   const handleSavePrompt = async () => {
@@ -39,9 +42,9 @@ export function GeneralSettings() {
       await api.settings.set(SYSTEM_PROMPT_KEY, systemPrompt || null);
       setSavedPrompt(systemPrompt);
       setEditing(false);
-      notifySuccess('已保存', '系统提示词已更新');
+      notifySuccess("已保存", "系统提示词已更新");
     } catch {
-      notifyError('保存失败', '无法保存系统提示词');
+      notifyError("保存失败", "无法保存系统提示词");
     } finally {
       setSavingPrompt(false);
     }
@@ -58,10 +61,10 @@ export function GeneralSettings() {
         <SettingsCard divided={false} className="p-4">
           <div className="flex items-center gap-3 mb-4">
             <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground font-bold text-xl">
-              {username?.charAt(0).toUpperCase() || 'U'}
+              {username?.charAt(0).toUpperCase() || "U"}
             </div>
             <div>
-              <p className="font-bold text-base leading-tight">{username || '未设置用户名'}</p>
+              <p className="font-bold text-base leading-tight">{username || "未设置用户名"}</p>
               <p className="text-sm text-muted-foreground">{email}</p>
             </div>
           </div>
@@ -83,7 +86,10 @@ export function GeneralSettings() {
         </SettingsCard>
       </SettingsSection>
 
-      <SettingsSection title="全局系统提示词" description="对所有对话与 Agent 会话生效，优先级低于对话级提示词。">
+      <SettingsSection
+        title="全局系统提示词"
+        description="对所有对话与 Agent 会话生效，优先级低于对话级提示词。"
+      >
         <SettingsCard divided={false} className="p-4">
           <div className="flex items-start justify-between mb-3">
             <div className="flex items-center gap-2">
@@ -112,31 +118,34 @@ export function GeneralSettings() {
 
           <Textarea
             placeholder="例如：你是一个专业的代码助手，请用中文回答所有问题..."
-            value={editing ? systemPrompt : (savedPrompt || '')}
+            value={editing ? systemPrompt : savedPrompt || ""}
             onChange={(e) => setSystemPrompt(e.target.value)}
             readOnly={!editing}
             className={cn(
-              'mt-2 min-h-[320px] h-[min(460px,50vh)] resize-y font-mono text-sm leading-relaxed',
-              !editing && 'cursor-default bg-muted text-muted-foreground'
+              "mt-2 min-h-[320px] h-[min(460px,50vh)] resize-y font-mono text-sm leading-relaxed",
+              !editing && "cursor-default bg-muted text-muted-foreground",
             )}
             rows={14}
           />
 
           {editing ? (
             <div className="flex justify-end gap-2 mt-3">
-              <Button variant="ghost" onClick={handleCancelEdit} disabled={savingPrompt}>取消</Button>
+              <Button variant="ghost" onClick={handleCancelEdit} disabled={savingPrompt}>
+                取消
+              </Button>
               <Button onClick={handleSavePrompt} disabled={savingPrompt}>
-                {savingPrompt ? '保存中...' : '保存'}
+                {savingPrompt ? "保存中..." : "保存"}
               </Button>
             </div>
           ) : (
             !savedPrompt && (
-              <p className="text-sm text-muted-foreground italic mt-2">暂未设置，点击右上角「编辑」添加。</p>
+              <p className="text-sm text-muted-foreground italic mt-2">
+                暂未设置，点击右上角「编辑」添加。
+              </p>
             )
           )}
         </SettingsCard>
       </SettingsSection>
-
     </div>
   );
 }

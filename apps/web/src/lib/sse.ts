@@ -7,13 +7,13 @@ export function parseSseLines(buffer: string): {
   events: SseEvent[];
   rest: string;
 } {
-  const lines = buffer.split('\n');
-  const rest = lines.pop() || '';
+  const lines = buffer.split("\n");
+  const rest = lines.pop() || "";
   const events: SseEvent[] = [];
 
   for (const line of lines) {
-    if (!line.startsWith('data:')) continue;
-    const payload = line.replace(/^data:\s?/, '');
+    if (!line.startsWith("data:")) continue;
+    const payload = line.replace(/^data:\s?/, "");
     if (!payload.trim()) continue;
     try {
       events.push(JSON.parse(payload));
@@ -25,17 +25,14 @@ export function parseSseLines(buffer: string): {
   return { events, rest };
 }
 
-export async function readSseStream(
-  response: Response,
-  onEvent: (event: SseEvent) => void
-) {
+export async function readSseStream(response: Response, onEvent: (event: SseEvent) => void) {
   const reader = response.body?.getReader();
   if (!reader) {
-    throw new Error('No response body');
+    throw new Error("No response body");
   }
 
   const decoder = new TextDecoder();
-  let buffer = '';
+  let buffer = "";
 
   while (true) {
     const { done, value } = await reader.read();

@@ -50,7 +50,7 @@ const DEFAULT_CONFIG: TextStreamSmootherConfig = {
 };
 
 function defaultNow() {
-  if (typeof performance !== 'undefined' && typeof performance.now === 'function') {
+  if (typeof performance !== "undefined" && typeof performance.now === "function") {
     return performance.now();
   }
   return Date.now();
@@ -73,8 +73,8 @@ export function createTextStreamSmoother(opts: {
   // Default to smooth mode so even single-chunk replies render progressively.
   // If upstream is truly token-streaming (many tiny, frequent chunks), we switch
   // to passthrough to avoid artificially delaying.
-  let mode: 'passthrough' | 'smooth' = 'smooth';
-  let buffer = '';
+  let mode: "passthrough" | "smooth" = "smooth";
+  let buffer = "";
   let emittedChars = 0;
 
   let firstPushAt: number | null = null;
@@ -91,19 +91,31 @@ export function createTextStreamSmoother(opts: {
     cancelFrame = null;
   };
 
+  type Segment = { index: number; segment: string };
+  type SegmenterLike = { segment: (input: string) => Iterable<Segment> };
+  type SegmenterCtorLike = new (
+    locales?: string | string[],
+    options?: { granularity?: string },
+  ) => SegmenterLike;
+
   // Avoid referencing Intl.Segmenter types directly (tsconfig may not include es2022.intl lib).
-  const SegmenterCtor = (globalThis as any)?.Intl?.Segmenter as
-    | (new (locales?: string | string[], options?: any) => { segment: (input: string) => Iterable<any> })
-    | undefined;
-  const segmenter: { segment: (input: string) => Iterable<any> } | null =
-    SegmenterCtor ? new SegmenterCtor(undefined, { granularity: 'grapheme' }) : null;
+  const intl = (globalThis as { Intl?: unknown }).Intl;
+  const SegmenterCtor = (() => {
+    if (!intl || typeof intl !== "object") return undefined;
+    const maybe = (intl as { Segmenter?: unknown }).Segmenter;
+    return typeof maybe === "function" ? (maybe as unknown as SegmenterCtorLike) : undefined;
+  })();
+
+  const segmenter: SegmenterLike | null = SegmenterCtor
+    ? new SegmenterCtor(undefined, { granularity: "grapheme" })
+    : null;
 
   const takeGraphemes = (text: string, n: number) => {
-    if (n <= 0 || text.length === 0) return { head: '', rest: text };
+    if (n <= 0 || text.length === 0) return { head: "", rest: text };
     if (!segmenter) {
       const arr = Array.from(text);
-      const head = arr.slice(0, n).join('');
-      const rest = arr.slice(n).join('');
+      const head = arr.slice(0, n).join("");
+      const rest = arr.slice(n).join("");
       return { head, rest };
     }
     let count = 0;
@@ -118,17 +130,17 @@ export function createTextStreamSmoother(opts: {
 
   const isAsciiWordChar = (ch: string) => /[A-Za-z0-9_]/.test(ch);
   const isPunctuation = (ch: string) => /[，。！？、；：,.!?:;…]/.test(ch);
-  const isOpeningPunct = (ch: string) => /[（(\[【“‘]/.test(ch);
+  const isOpeningPunct = (ch: string) => /[（([【“‘]/.test(ch);
 
   const takeNextSlice = (text: string, maxChars: number) => {
-    if (!text) return { out: '', rest: '' };
+    if (!text) return { out: "", rest: "" };
 
-    const first = text[0] || '';
+    const first = text[0] || "";
 
     // Don't split inside ASCII words: emit the whole word.
     if (first && isAsciiWordChar(first)) {
       let i = 0;
-      while (i < text.length && isAsciiWordChar(text[i] || '')) i++;
+      while (i < text.length && isAsciiWordChar(text[i] || "")) i++;
       const cap = Math.max(maxChars, config.maxAsciiWordCharsPerTick);
       const outLen = Math.min(i, cap);
       let out = text.slice(0, outLen);
@@ -149,7 +161,7 @@ export function createTextStreamSmoother(opts: {
     // For the "2-3 chars" mode, prefer "2 + punctuation" (e.g. "你好，") rather than "3 then ，".
     if (max === 3) {
       const two = takeGraphemes(text, 2);
-      const next = two.rest ? takeGraphemes(two.rest, 1).head : '';
+      const next = two.rest ? takeGraphemes(two.rest, 1).head : "";
       if (next && isPunctuation(next)) {
         return { out: two.head + next, rest: two.rest.slice(next.length) };
       }
@@ -168,7 +180,7 @@ export function createTextStreamSmoother(opts: {
 
     // Avoid ending on opening punctuation/quotes like "（" or "“" (looks awkward).
     if (head) {
-      const lastChar = Array.from(head).slice(-1)[0] || '';
+      const lastChar = Array.from(head).slice(-1)[0] || "";
       if (lastChar && isOpeningPunct(lastChar) && rest) {
         const one = takeGraphemes(rest, 1).head;
         if (one) {
@@ -203,8 +215,7 @@ export function createTextStreamSmoother(opts: {
     }
 
     const fast =
-      buffer.length >= config.fastBacklogChars
-      || emittedChars >= config.fastAfterEmittedChars;
+      buffer.length >= config.fastBacklogChars || emittedChars >= config.fastAfterEmittedChars;
     const maxChars = finishing
       ? config.maxCharsPerTickFinish
       : fast
@@ -232,7 +243,7 @@ export function createTextStreamSmoother(opts: {
   };
 
   const maybeSwitchToPassthrough = (chunk: string, ts: number) => {
-    if (mode !== 'smooth') return;
+    if (mode !== "smooth") return;
     if (lastPushAt == null) return;
 
     const dt = ts - lastPushAt;
@@ -243,7 +254,7 @@ export function createTextStreamSmoother(opts: {
     }
     if (streamyScore >= config.streamyChunksToPassthrough) {
       // Upstream is already nicely streaming; stop smoothing.
-      mode = 'passthrough';
+      mode = "passthrough";
       flushNow();
     }
   };
@@ -252,7 +263,7 @@ export function createTextStreamSmoother(opts: {
     stopPump();
     if (!buffer) return;
     const out = buffer;
-    buffer = '';
+    buffer = "";
     emittedChars += out.length;
     emit(out);
   };
@@ -261,7 +272,7 @@ export function createTextStreamSmoother(opts: {
     if (finishPromise) return finishPromise;
 
     // If passthrough, there's no buffer to drain.
-    if (mode !== 'smooth') return;
+    if (mode !== "smooth") return;
 
     finishing = true;
     finishPromise = new Promise<void>((resolve) => {
@@ -272,14 +283,14 @@ export function createTextStreamSmoother(opts: {
   };
 
   const push = (chunk: string) => {
-    if (typeof chunk !== 'string' || chunk.length === 0) return;
+    if (typeof chunk !== "string" || chunk.length === 0) return;
 
     const ts = now();
     if (firstPushAt == null) firstPushAt = ts;
 
     maybeSwitchToPassthrough(chunk, ts);
 
-    if (mode === 'passthrough') {
+    if (mode === "passthrough") {
       emit(chunk);
       lastPushAt = ts;
       return;
@@ -305,7 +316,7 @@ export function createTextStreamSmoother(opts: {
     if (cancelOpts?.flush) {
       flushNow();
     } else {
-      buffer = '';
+      buffer = "";
     }
     finishing = false;
     resolveFinish = null;

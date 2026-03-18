@@ -1,10 +1,10 @@
-'use client';
+"use client";
 
-import { ChatArea } from '@/components/ChatArea';
+import { ChatArea } from "@/components/ChatArea";
 
 export default function ChatPage() {
   return (
-    <div className="flex h-full min-h-0">
+    <div className="flex h-full min-h-0 min-w-0 w-full">
       <ChatArea />
     </div>
   );

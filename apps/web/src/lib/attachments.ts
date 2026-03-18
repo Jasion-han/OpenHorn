@@ -1,4 +1,4 @@
-import { API_BASE } from './api';
+import { API_BASE } from "./api";
 
 export async function uploadAttachments(input: {
   conversationId?: string;
@@ -8,26 +8,26 @@ export async function uploadAttachments(input: {
   const form = new FormData();
 
   if (input.conversationId) {
-    form.append('conversationId', input.conversationId);
+    form.append("conversationId", input.conversationId);
   }
 
   if (input.sessionId) {
-    form.append('sessionId', input.sessionId);
+    form.append("sessionId", input.sessionId);
   }
 
   for (const file of input.files) {
-    form.append('files', file);
+    form.append("files", file);
   }
 
   const res = await fetch(`${API_BASE}/attachments/upload`, {
-    method: 'POST',
-    credentials: 'include',
+    method: "POST",
+    credentials: "include",
     body: form,
   });
 
   if (!res.ok) {
-    const message = await res.text().catch(() => '');
-    throw new Error(message || 'Failed to upload attachments');
+    const message = await res.text().catch(() => "");
+    throw new Error(message || "Failed to upload attachments");
   }
 
   return res.json() as Promise<{
