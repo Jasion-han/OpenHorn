@@ -1,14 +1,14 @@
-import * as React from "react"
+import type * as React from "react";
 
-import { cn } from "../../../lib/cn"
-import { DESCRIPTION_CLASS, LABEL_CLASS, ROW_CLASS } from "./SettingsUIConstants"
+import { cn } from "../../../lib/cn";
+import { DESCRIPTION_CLASS, LABEL_CLASS, ROW_CLASS } from "./SettingsUIConstants";
 
 interface SettingsRowProps {
-  label: string
-  icon?: React.ReactNode
-  description?: string
-  children?: React.ReactNode
-  className?: string
+  label: string;
+  icon?: React.ReactNode;
+  description?: string;
+  children?: React.ReactNode;
+  className?: string;
 }
 
 export function SettingsRow({
@@ -27,6 +27,5 @@ export function SettingsRow({
       </div>
       {children ? <div className="flex-shrink-0">{children}</div> : null}
     </div>
-  )
+  );
 }
-

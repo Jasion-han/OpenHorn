@@ -1,12 +1,12 @@
-import * as React from "react"
+import type * as React from "react";
 
-import { SECTION_DESCRIPTION_CLASS, SECTION_TITLE_CLASS } from "./SettingsUIConstants"
+import { SECTION_DESCRIPTION_CLASS, SECTION_TITLE_CLASS } from "./SettingsUIConstants";
 
 interface SettingsSectionProps {
-  title: string
-  description?: string
-  action?: React.ReactNode
-  children: React.ReactNode
+  title: string;
+  description?: string;
+  action?: React.ReactNode;
+  children: React.ReactNode;
 }
 
 export function SettingsSection({
@@ -26,6 +26,5 @@ export function SettingsSection({
       </div>
       {children}
     </div>
-  )
+  );
 }
-

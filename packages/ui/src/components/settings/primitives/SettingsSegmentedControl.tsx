@@ -1,20 +1,20 @@
-import * as React from "react"
+import type * as React from "react";
 
-import { cn } from "../../../lib/cn"
-import { DESCRIPTION_CLASS, LABEL_CLASS } from "./SettingsUIConstants"
+import { cn } from "../../../lib/cn";
+import { DESCRIPTION_CLASS, LABEL_CLASS } from "./SettingsUIConstants";
 
 interface SegmentOption {
-  value: string
-  label: string
+  value: string;
+  label: string;
 }
 
 interface SettingsSegmentedControlProps {
-  label: string
-  description?: string
-  value: string
-  onValueChange: (value: string) => void
-  options: SegmentOption[]
-  disabled?: boolean
+  label: string;
+  description?: string;
+  value: string;
+  onValueChange: (value: string) => void;
+  options: SegmentOption[];
+  disabled?: boolean;
 }
 
 export function SettingsSegmentedControl({
@@ -43,7 +43,7 @@ export function SettingsSegmentedControl({
               "disabled:cursor-not-allowed disabled:opacity-50",
               value === option.value
                 ? "bg-background text-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground"
+                : "text-muted-foreground hover:text-foreground",
             )}
           >
             {option.label}
@@ -51,6 +51,5 @@ export function SettingsSegmentedControl({
         ))}
       </div>
     </div>
-  )
+  );
 }
-

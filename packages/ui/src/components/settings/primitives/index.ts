@@ -1,5 +1,4 @@
-export * from "./SettingsSection"
-export * from "./SettingsCard"
-export * from "./SettingsRow"
-export * from "./SettingsSegmentedControl"
-
+export * from "./SettingsCard";
+export * from "./SettingsRow";
+export * from "./SettingsSection";
+export * from "./SettingsSegmentedControl";

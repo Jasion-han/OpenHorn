@@ -1,4 +1,4 @@
-export type Provider = 'openai' | 'anthropic' | 'deepseek' | 'google';
+export type Provider = "openai" | "anthropic" | "deepseek" | "google";
 
 export interface Channel {
   id: string;
@@ -28,7 +28,7 @@ export interface Conversation {
 export interface Message {
   id: string;
   conversationId: string;
-  role: 'user' | 'assistant' | 'system';
+  role: "user" | "assistant" | "system";
   content: string;
   model?: string;
   attachments?: Attachment[];
@@ -51,7 +51,7 @@ export interface AgentSession {
   userId: string;
   channelId?: string;
   title: string;
-  status: 'active' | 'completed' | 'cancelled';
+  status: "active" | "completed" | "cancelled";
   createdAt: Date;
   updatedAt: Date;
 }

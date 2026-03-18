@@ -103,13 +103,7 @@
 
 /* 滚动区域上下渐隐遮罩 */
 .mask-fade-y {
-  mask-image: linear-gradient(
-    to bottom,
-    transparent 0%,
-    black 3%,
-    black 97%,
-    transparent 100%
-  );
+  mask-image: linear-gradient(to bottom, transparent 0%, black 3%, black 97%, transparent 100%);
   -webkit-mask-image: linear-gradient(
     to bottom,
     transparent 0%,
@@ -125,7 +119,7 @@
 }
 
 .code-block-wrapper pre.shiki {
-  font-family: 'Fira Code', 'Cascadia Code', 'JetBrains Mono', Consolas, monospace;
+  font-family: "Fira Code", "Cascadia Code", "JetBrains Mono", Consolas, monospace;
 }
 
 .code-block-wrapper pre.shiki code {
@@ -143,7 +137,9 @@
 /* ===== Spinner 动画（SpinKit Grid）===== */
 
 @keyframes spinner {
-  0%, 70%, 100% {
+  0%,
+  70%,
+  100% {
     transform: scale3D(1, 1, 1);
   }
   35% {
@@ -165,13 +161,30 @@
   animation: spinner 1.3s infinite ease-in-out;
 }
 
-.spinner-cube:nth-child(1) { animation-delay: 0.2s; }
-.spinner-cube:nth-child(2) { animation-delay: 0.3s; }
-.spinner-cube:nth-child(3) { animation-delay: 0.4s; }
-.spinner-cube:nth-child(4) { animation-delay: 0.1s; }
-.spinner-cube:nth-child(5) { animation-delay: 0.2s; }
-.spinner-cube:nth-child(6) { animation-delay: 0.3s; }
-.spinner-cube:nth-child(7) { animation-delay: 0s; }
-.spinner-cube:nth-child(8) { animation-delay: 0.1s; }
-.spinner-cube:nth-child(9) { animation-delay: 0.2s; }
-
+.spinner-cube:nth-child(1) {
+  animation-delay: 0.2s;
+}
+.spinner-cube:nth-child(2) {
+  animation-delay: 0.3s;
+}
+.spinner-cube:nth-child(3) {
+  animation-delay: 0.4s;
+}
+.spinner-cube:nth-child(4) {
+  animation-delay: 0.1s;
+}
+.spinner-cube:nth-child(5) {
+  animation-delay: 0.2s;
+}
+.spinner-cube:nth-child(6) {
+  animation-delay: 0.3s;
+}
+.spinner-cube:nth-child(7) {
+  animation-delay: 0s;
+}
+.spinner-cube:nth-child(8) {
+  animation-delay: 0.1s;
+}
+.spinner-cube:nth-child(9) {
+  animation-delay: 0.2s;
+}

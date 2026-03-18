@@ -1,5 +1,5 @@
 export interface ChatMessage {
-  role: 'user' | 'assistant' | 'system';
+  role: "user" | "assistant" | "system";
   content: string;
 }
 
@@ -33,14 +33,14 @@ export class OpenAIAdapter implements ProviderAdapter {
 
   constructor(apiKey: string, baseUrl?: string) {
     this.apiKey = apiKey;
-    this.baseUrl = baseUrl || 'https://api.openai.com/v1';
+    this.baseUrl = baseUrl || "https://api.openai.com/v1";
   }
 
   async chat(options: ChatOptions): Promise<ChatResponse> {
     const response = await fetch(`${this.baseUrl}/chat/completions`, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
         Authorization: `Bearer ${this.apiKey}`,
       },
       body: JSON.stringify({
@@ -66,9 +66,9 @@ export class OpenAIAdapter implements ProviderAdapter {
 
   async *chatStream(options: ChatOptions): AsyncGenerator<string> {
     const response = await fetch(`${this.baseUrl}/chat/completions`, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
         Authorization: `Bearer ${this.apiKey}`,
       },
       body: JSON.stringify({
@@ -86,24 +86,24 @@ export class OpenAIAdapter implements ProviderAdapter {
 
     const reader = response.body?.getReader();
     if (!reader) {
-      throw new Error('No response body');
+      throw new Error("No response body");
     }
 
     const decoder = new TextDecoder();
-    let buffer = '';
+    let buffer = "";
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
 
       buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
 
       for (const line of lines) {
-        if (line.startsWith('data: ')) {
+        if (line.startsWith("data: ")) {
           const data = line.slice(6);
-          if (data === '[DONE]') return;
+          if (data === "[DONE]") return;
           try {
             const parsed = JSON.parse(data);
             const content = parsed.choices[0]?.delta?.content;
@@ -123,16 +123,16 @@ export class AnthropicAdapter implements ProviderAdapter {
 
   constructor(apiKey: string, baseUrl?: string) {
     this.apiKey = apiKey;
-    this.baseUrl = baseUrl || 'https://api.anthropic.com';
+    this.baseUrl = baseUrl || "https://api.anthropic.com";
   }
 
   async chat(options: ChatOptions): Promise<ChatResponse> {
     const response = await fetch(`${this.baseUrl}/v1/messages`, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': this.apiKey,
-        'anthropic-version': '2023-06-01',
+        "Content-Type": "application/json",
+        "x-api-key": this.apiKey,
+        "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
         model: options.model,
@@ -161,11 +161,11 @@ export class AnthropicAdapter implements ProviderAdapter {
 
   async *chatStream(options: ChatOptions): AsyncGenerator<string> {
     const response = await fetch(`${this.baseUrl}/v1/messages`, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': this.apiKey,
-        'anthropic-version': '2023-06-01',
+        "Content-Type": "application/json",
+        "x-api-key": this.apiKey,
+        "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
         model: options.model,
@@ -182,27 +182,27 @@ export class AnthropicAdapter implements ProviderAdapter {
 
     const reader = response.body?.getReader();
     if (!reader) {
-      throw new Error('No response body');
+      throw new Error("No response body");
     }
 
     const decoder = new TextDecoder();
-    let buffer = '';
+    let buffer = "";
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
 
       buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
 
       for (const line of lines) {
-        if (line.startsWith('data: ')) {
+        if (line.startsWith("data: ")) {
           const data = line.slice(6);
-          if (data === '[DONE]') return;
+          if (data === "[DONE]") return;
           try {
             const parsed = JSON.parse(data);
-            if (parsed.type === 'content_block_delta') {
+            if (parsed.type === "content_block_delta") {
               yield parsed.delta.text;
             }
           } catch {
@@ -214,18 +214,14 @@ export class AnthropicAdapter implements ProviderAdapter {
   }
 }
 
-export function createAdapter(
-  provider: string,
-  apiKey: string,
-  baseUrl?: string
-): ProviderAdapter {
-  switch (provider) {
-    case 'openai':
-    case 'deepseek':
-      return new OpenAIAdapter(apiKey, baseUrl);
-    case 'anthropic':
-      return new AnthropicAdapter(apiKey, baseUrl);
-    default:
-      throw new Error(`Unsupported provider: ${provider}`);
+export function createAdapter(provider: string, apiKey: string, baseUrl?: string): ProviderAdapter {
+  const normalized = (provider || "").trim().toLowerCase();
+  if (normalized === "anthropic") {
+    return new AnthropicAdapter(apiKey, baseUrl);
   }
+  if (normalized === "google") {
+    throw new Error("Unsupported provider: google");
+  }
+  // Default to OpenAI-compatible (e.g. openai/deepseek/qwen/doubao/others with OpenAI-compatible baseUrl).
+  return new OpenAIAdapter(apiKey, baseUrl);
 }
