@@ -1,12 +1,14 @@
-import type { HookCallbackMatcher } from '@anthropic-ai/claude-agent-sdk';
-import { classifyBashCommandRisk } from '../shell-risk';
-import { convertSdkEvent, type AgentEvent } from './events';
-import { ensureCheckpointBackup, finalizeCheckpoint, type CheckpointSession } from '../checkpoints';
+import type { CanUseTool, HookCallbackMatcher } from "@anthropic-ai/claude-agent-sdk";
+import { type CheckpointSession, ensureCheckpointBackup, finalizeCheckpoint } from "../checkpoints";
+import { classifyBashCommandRisk } from "../shell-risk";
+import { type AgentEvent, convertSdkEvent } from "./events";
 
 type SdkMessage = {
   type: string;
   [key: string]: unknown;
 };
+
+type CanUseToolOptions = Parameters<CanUseTool>[2];
 
 export type RunClaudeAgentInput = {
   apiKey: string;
@@ -28,17 +30,17 @@ export type RunClaudeAgentInput = {
 };
 
 function extractTargetFilePath(toolName: string, toolInput: unknown): string | null {
-  if (!toolInput || typeof toolInput !== 'object') return null;
+  if (!toolInput || typeof toolInput !== "object") return null;
   const input = toolInput as Record<string, unknown>;
-  if (toolName === 'Write' || toolName === 'Edit') {
+  if (toolName === "Write" || toolName === "Edit") {
     const fp = input.file_path;
-    if (typeof fp === 'string' && fp.trim()) return fp;
+    if (typeof fp === "string" && fp.trim()) return fp;
   }
   return null;
 }
 
 export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> {
-  const sdk = await import('@anthropic-ai/claude-agent-sdk');
+  const sdk = await import("@anthropic-ai/claude-agent-sdk");
 
   const previousBaseUrl = process.env.ANTHROPIC_BASE_URL;
   const previousApiKey = process.env.ANTHROPIC_API_KEY;
@@ -47,22 +49,26 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
   if (input.apiKey) process.env.ANTHROPIC_API_KEY = input.apiKey;
 
   const hooks: Partial<Record<string, HookCallbackMatcher[]>> = {
-    PreToolUse: [{
-      hooks: [async (hookInput) => {
-        if (!hookInput || typeof hookInput !== 'object') return { continue: true };
-        const data = hookInput as any;
-        const toolName = String(data.tool_name || '');
-        const filePath = extractTargetFilePath(toolName, data.tool_input);
-        if (filePath) {
-          try {
-            await ensureCheckpointBackup(input.checkpoint, filePath);
-          } catch {
-            // Best-effort: do not block tool execution on checkpoint failures.
-          }
-        }
-        return { continue: true };
-      }],
-    }],
+    PreToolUse: [
+      {
+        hooks: [
+          async (hookInput) => {
+            if (!hookInput || typeof hookInput !== "object") return { continue: true };
+            const data = hookInput as Record<string, unknown>;
+            const toolName = typeof data.tool_name === "string" ? data.tool_name : "";
+            const filePath = extractTargetFilePath(toolName, data.tool_input);
+            if (filePath) {
+              try {
+                await ensureCheckpointBackup(input.checkpoint, filePath);
+              } catch {
+                // Best-effort: do not block tool execution on checkpoint failures.
+              }
+            }
+            return { continue: true };
+          },
+        ],
+      },
+    ],
   };
 
   const query = sdk.query({
@@ -72,15 +78,19 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
       cwd: input.cwd,
       apiKey: input.apiKey,
       model: input.model,
-      executable: 'bun',
-      tools: ['Read', 'Grep', 'Glob', 'Write', 'Edit', 'Bash'],
-      permissionMode: 'default',
-      canUseTool: async (toolName: string, toolInput: Record<string, unknown>, options: any) => {
-        if (toolName === 'Bash') {
-          const cmd = typeof toolInput.command === 'string' ? toolInput.command : '';
+      executable: "bun",
+      tools: ["Read", "Grep", "Glob", "Write", "Edit", "Bash"],
+      permissionMode: "default",
+      canUseTool: async (
+        toolName: string,
+        toolInput: Record<string, unknown>,
+        options: CanUseToolOptions,
+      ) => {
+        if (toolName === "Bash") {
+          const cmd = typeof toolInput.command === "string" ? toolInput.command : "";
           const risk = classifyBashCommandRisk(cmd);
-          if (risk.level === 'allow') {
-            return { behavior: 'allow' } as const;
+          if (risk.level === "allow") {
+            return { behavior: "allow" } as const;
           }
           const allow = await input.requestApproval({
             toolUseId: options.toolUseID,
@@ -90,15 +100,15 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
             blockedPath: options.blockedPath,
           });
           return allow
-            ? ({ behavior: 'allow' } as const)
-            : ({ behavior: 'deny', message: 'User denied command' } as const);
+            ? ({ behavior: "allow" } as const)
+            : ({ behavior: "deny", message: "User denied command" } as const);
         }
 
         if (options?.blockedPath) {
-          return { behavior: 'deny', message: `Blocked path: ${options.blockedPath}` } as const;
+          return { behavior: "deny", message: `Blocked path: ${options.blockedPath}` } as const;
         }
 
-        return { behavior: 'allow' } as const;
+        return { behavior: "allow" } as const;
       },
       hooks,
     },
@@ -118,5 +128,5 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
 
   await finalizeCheckpoint(input.checkpoint);
   input.onCheckpointReady(input.checkpoint.runId);
-  input.onEvent({ type: 'done' });
+  input.onEvent({ type: "done" });
 }

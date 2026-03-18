@@ -1,7 +1,7 @@
-import { z } from 'zod';
+import { z } from "zod";
 
 export const WsRequestSchema = z.object({
-  type: z.literal('request'),
+  type: z.literal("request"),
   requestId: z.string().min(1),
   method: z.string().min(1),
   params: z.unknown().optional(),
@@ -10,7 +10,7 @@ export const WsRequestSchema = z.object({
 export type WsRequest = z.infer<typeof WsRequestSchema>;
 
 export const WsResponseSchema = z.object({
-  type: z.literal('response'),
+  type: z.literal("response"),
   requestId: z.string().min(1),
   ok: z.boolean(),
   result: z.unknown().optional(),
@@ -20,14 +20,14 @@ export const WsResponseSchema = z.object({
 export type WsResponse = z.infer<typeof WsResponseSchema>;
 
 export const WsEventSchema = z.object({
-  type: z.literal('event'),
+  type: z.literal("event"),
   event: z.string().min(1),
   data: z.unknown().optional(),
 });
 
 export type WsEvent = z.infer<typeof WsEventSchema>;
 
-export const IncomingMessageSchema = z.discriminatedUnion('type', [
+export const IncomingMessageSchema = z.discriminatedUnion("type", [
   WsRequestSchema,
   WsResponseSchema,
   WsEventSchema,
@@ -44,7 +44,7 @@ export const WorkspaceSetCurrentParamsSchema = z.object({
 });
 
 export const FsListParamsSchema = z.object({
-  dir: z.string().default('.'),
+  dir: z.string().default("."),
 });
 
 export const FsReadParamsSchema = z.object({
@@ -83,23 +83,23 @@ export function parseIncomingJsonMessage(raw: string): IncomingMessage {
 
 export function validateMethodParams(method: string, params: unknown): unknown {
   switch (method) {
-    case 'auth.handshake':
+    case "auth.handshake":
       return AuthHandshakeParamsSchema.parse(params);
-    case 'workspace.setCurrent':
+    case "workspace.setCurrent":
       return WorkspaceSetCurrentParamsSchema.parse(params);
-    case 'fs.list':
+    case "fs.list":
       return FsListParamsSchema.parse(params);
-    case 'fs.read':
+    case "fs.read":
       return FsReadParamsSchema.parse(params);
-    case 'fs.write':
+    case "fs.write":
       return FsWriteParamsSchema.parse(params);
-    case 'approvals.respond':
+    case "approvals.respond":
       return ApprovalsRespondParamsSchema.parse(params);
-    case 'agent.run':
+    case "agent.run":
       return AgentRunParamsSchema.parse(params);
-    case 'agent.cancel':
+    case "agent.cancel":
       return AgentCancelParamsSchema.parse(params);
-    case 'checkpoint.rollback':
+    case "checkpoint.rollback":
       return CheckpointRollbackParamsSchema.parse(params);
     default:
       throw new Error(`Unknown method: ${method}`);
@@ -107,13 +107,13 @@ export function validateMethodParams(method: string, params: unknown): unknown {
 }
 
 export function buildOkResponse(requestId: string, result: unknown): WsResponse {
-  return { type: 'response', requestId, ok: true, result };
+  return { type: "response", requestId, ok: true, result };
 }
 
 export function buildErrorResponse(requestId: string, error: string): WsResponse {
-  return { type: 'response', requestId, ok: false, error };
+  return { type: "response", requestId, ok: false, error };
 }
 
 export function buildEvent(event: string, data?: unknown): WsEvent {
-  return { type: 'event', event, data };
+  return { type: "event", event, data };
 }
