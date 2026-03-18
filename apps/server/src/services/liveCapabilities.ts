@@ -16,6 +16,12 @@ export type LiveRoute = {
   needsCitation: boolean;
 };
 
+export type WebSearchPolicy =
+  | "never"
+  | "always_web_search"
+  | "always_research"
+  | "defer_to_router";
+
 export type StoredLiveMetadata = {
   status: LiveStatus;
   route: LiveRouteType;
@@ -218,6 +224,41 @@ function resolveWeatherLocation(prompt: string) {
   );
 }
 
+export function getWebSearchPolicy(prompt: string): WebSearchPolicy {
+  const text = prompt.trim();
+  if (!text) return "never";
+
+  if (
+    /^(hi|hello|hey|你好|您好|嗨|哈喽|早上好|晚上好|谢谢|thanks?)[\s!.?]*$/i.test(text) ||
+    /你是谁|你是誰|你是什么模型|你是啥模型|你是哪个模型|你是哪种模型|who are you|what model are you|which model are you/i.test(
+      text,
+    ) ||
+    /你能做什么|你会做什么|what can you do/i.test(text) ||
+    /翻译|translate|润色|改写|重写|paraphrase|rewrite|总结|摘要|summari[sz]e|解释这段|解释一下这段|解释代码|explain this code/i.test(
+      text,
+    )
+  ) {
+    return "never";
+  }
+
+  if (/比较.*最近|分析.*最近|调研|汇总.*最近|survey|research/i.test(text)) {
+    return "always_research";
+  }
+
+  if (
+    /最新|最近|刚刚|今日|今天.*新闻|发布了什么|发生了什么|现价|股价|比分|战绩|热搜|新闻|news|recent|latest|today/i.test(
+      text,
+    ) ||
+    /帮我查|搜一下|查一下|look up|search for|find online|官网|官方文档|给我链接|给我来源|给出处/i.test(
+      text,
+    )
+  ) {
+    return "always_web_search";
+  }
+
+  return "defer_to_router";
+}
+
 function buildOfflineResult(
   route: LiveRouteType,
   userLabel: string,
@@ -314,6 +355,11 @@ async function resolveWeatherContext(input: BuildLiveContextInput): Promise<Live
 
 export function routeLiveQuery(prompt: string): LiveRoute {
   const text = prompt.trim();
+  const policy = getWebSearchPolicy(text);
+
+  if (policy === "never") {
+    return { type: "direct_model", needsCitation: false };
+  }
 
   if (/周几|星期|几点|几号|日期|时间|时区|timezone|date|time/i.test(text)) {
     return { type: "local", needsCitation: false };
@@ -323,11 +369,14 @@ export function routeLiveQuery(prompt: string): LiveRoute {
     return { type: "structured_live", needsCitation: false };
   }
 
-  if (/比较|分析|调研|汇总|整理.*最近|research|survey/i.test(text)) {
+  if (policy === "always_research" || /比较|分析|调研|汇总|整理.*最近|research|survey/i.test(text)) {
     return { type: "research", needsCitation: true };
   }
 
-  if (/最近|最新|刚刚|今天.*新闻|发布了什么|发生了什么|news|recent|today/i.test(text)) {
+  if (
+    policy === "always_web_search" ||
+    /最近|最新|刚刚|今天.*新闻|发布了什么|发生了什么|news|recent|today/i.test(text)
+  ) {
     return { type: "web_search", needsCitation: true };
   }
 
@@ -344,16 +393,14 @@ function routeFromType(type: LiveRouteType): LiveRoute {
 export async function buildLiveContext(input: BuildLiveContextInput): Promise<LiveContextResult> {
   let route = routeLiveQuery(input.prompt);
   const timezone = inferTimezone(input.timezone);
+  const webSearchPolicy = getWebSearchPolicy(input.prompt);
+  const allowSemanticWebRouting = webSearchPolicy === "defer_to_router";
 
-  if (route.type === "direct_model" && input.classifier) {
+  if (route.type === "direct_model" && allowSemanticWebRouting && input.classifier) {
     const classified = await input.classifier(input.prompt);
     if (classified) {
       route = routeFromType(classified);
     }
-  }
-
-  if (route.type === "direct_model" && input.forceWebSearch) {
-    route = routeFromType("web_search");
   }
 
   if (route.type === "local") {

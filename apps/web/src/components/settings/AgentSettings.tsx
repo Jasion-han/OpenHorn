@@ -187,8 +187,8 @@ export function AgentSettings() {
   return (
     <div className="flex flex-col gap-8">
       <SettingsSection
-        title="默认联网能力"
-        description="普通聊天默认使用产品内置的实时能力；Agent 在此基础上叠加更多工具。默认渠道决定模型供应商，但不是实时能力的开关。"
+        title="默认允许联网能力"
+        description="普通聊天会在需要最新信息时使用产品内置的实时能力；Agent 在此基础上叠加更多工具。默认渠道决定模型供应商，但不是实时能力的开关。"
       >
         <SettingsCard divided={false} className="p-4">
           <div className="flex flex-col gap-3">
@@ -225,8 +225,8 @@ export function AgentSettings() {
       </SettingsSection>
 
       <SettingsSection
-        title="默认联网搜索（Tavily）"
-        description="用于 web_search / research 路由。用户填写的 Tavily Key 优先级高于服务端全局 TAVILY_API_KEY。"
+        title="默认允许联网搜索（Tavily）"
+        description="用于 web_search / research 路由。只有在判断需要最新外部信息时才会触发。用户填写的 Tavily Key 优先级高于服务端全局 TAVILY_API_KEY。"
       >
         <SettingsCard divided={false} className="p-4">
           <div className="flex flex-col gap-3">
@@ -249,7 +249,7 @@ export function AgentSettings() {
               <div>
                 <p className="text-sm font-medium">启用 Tavily 搜索</p>
                 <p className="text-xs text-muted-foreground">
-                  关闭后将不会进行实时搜索，即使存在 API Key。
+                  关闭后将不会进行实时搜索，即使存在 API Key；开启后也只会在需要最新信息时联网。
                 </p>
               </div>
               <Switch

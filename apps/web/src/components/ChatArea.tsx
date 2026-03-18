@@ -751,10 +751,13 @@ export function ChatArea() {
         if (!status.configured || status.source === "none") {
           notifyWarning(
             "未配置实时搜索",
-            "未检测到 Tavily Key，联网搜索可能无法使用。请在设置中填写或配置服务端 TAVILY_API_KEY。",
+            "未检测到 Tavily Key，需要最新信息时的联网搜索可能无法使用。请在设置中填写或配置服务端 TAVILY_API_KEY。",
           );
         } else if (status.source === "disabled") {
-          notifyWarning("实时搜索已关闭", "在设置中启用 Tavily 搜索后才能联网。");
+          notifyWarning(
+            "实时搜索已关闭",
+            "在设置中启用 Tavily 搜索后，系统才会在需要最新信息时联网。",
+          );
         }
       } catch {
         // ignore

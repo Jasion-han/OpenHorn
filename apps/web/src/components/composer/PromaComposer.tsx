@@ -378,15 +378,19 @@ export function PromaComposer(props: {
                       : "text-muted-foreground hover:text-foreground hover:bg-accent",
                     (disabled || streaming) && "opacity-60 pointer-events-none",
                   )}
-                  aria-label="Web search toggle"
-                  title="Web search toggle"
+                  aria-label="Allow web search"
+                  title="Allow web search"
                 >
                   <Globe className="size-3.5" />
-                  <span>联网</span>
+                  <span>允许联网</span>
                 </button>
               </TooltipTrigger>
               <TooltipContent side="top">
-                <p>{forceWebSearch ? "联网搜索：已开启" : "联网搜索：已关闭"}</p>
+                <p>
+                  {forceWebSearch
+                    ? "需要最新信息时允许联网：已开启"
+                    : "需要最新信息时允许联网：已关闭"}
+                </p>
               </TooltipContent>
             </Tooltip>
           </div>

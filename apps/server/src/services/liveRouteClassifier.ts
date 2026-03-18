@@ -21,7 +21,7 @@ export async function classifyLiveRouteWithModel(params: {
         {
           role: "system",
           content:
-            "Classify the user query into one of: local, structured_live, web_search, research, direct_model. Respond with a single label only.",
+            "Classify the user query into one of: local, structured_live, web_search, research, direct_model. Use web_search or research only when the answer depends on current external information, live facts, recent changes, explicit web lookup, or source-backed verification. Identity questions, greetings, translation, rewriting, summarization, coding help, and stable concept explanations should be direct_model. Respond with a single label only.",
         },
         {
           role: "user",

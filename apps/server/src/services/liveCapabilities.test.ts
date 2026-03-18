@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { routeLiveQuery } from "./liveCapabilities";
+import { getWebSearchPolicy, routeLiveQuery } from "./liveCapabilities";
 
 test("routeLiveQuery classifies local time questions", () => {
   expect(routeLiveQuery("今天周几")).toEqual({
@@ -22,4 +22,16 @@ test("routeLiveQuery classifies research-heavy requests separately", () => {
 
 test("routeLiveQuery leaves non-live prompts as direct model", () => {
   expect(routeLiveQuery("把这段话翻译成英文").type).toBe("direct_model");
+});
+
+test("getWebSearchPolicy blocks identity questions from web search", () => {
+  expect(getWebSearchPolicy("你是什么模型？")).toBe("never");
+});
+
+test("getWebSearchPolicy forces web search for explicit lookup prompts", () => {
+  expect(getWebSearchPolicy("帮我查一下 OpenAI 最新动态")).toBe("always_web_search");
+});
+
+test("getWebSearchPolicy forces research for recent comparison prompts", () => {
+  expect(getWebSearchPolicy("帮我调研最近几家 AI 公司的发布和融资")).toBe("always_research");
 });

@@ -121,3 +121,38 @@ test("buildLiveContext can use semantic classifier when keyword routing is direc
   expect(result.citations).toHaveLength(1);
   expect(result.systemContext).toContain("OpenAI Update");
 });
+
+test("buildLiveContext does not force web search for identity questions even when enabled", async () => {
+  let classifierCalled = false;
+
+  const result = await buildLiveContext({
+    prompt: "你是什么模型？",
+    forceWebSearch: true,
+    classifier: async () => {
+      classifierCalled = true;
+      return "web_search";
+    },
+  });
+
+  expect(classifierCalled).toBe(false);
+  expect(result.route).toBe("direct_model");
+  expect(result.status).toBe("offline");
+  expect(result.userLabel).toContain("未联网");
+});
+
+test("buildLiveContext does not force web search for translation prompts even when enabled", async () => {
+  let classifierCalled = false;
+
+  const result = await buildLiveContext({
+    prompt: "把这句话翻译成英文",
+    forceWebSearch: true,
+    classifier: async () => {
+      classifierCalled = true;
+      return "web_search";
+    },
+  });
+
+  expect(classifierCalled).toBe(false);
+  expect(result.route).toBe("direct_model");
+  expect(result.status).toBe("offline");
+});
