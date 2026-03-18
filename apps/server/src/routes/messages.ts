@@ -99,7 +99,13 @@ messages.post("/:id/regenerate", async (c) => {
   const user = c.get("user");
   const messageId = c.req.param("id");
   try {
-    const stream = await regenerateMessage(user.id, messageId);
+    const body = await c.req.json().catch(() => ({}));
+    const stream = await regenerateMessage(user.id, messageId, {
+      fallbackUserMessageId:
+        typeof body?.userMessageId === "string" ? body.userMessageId.trim() : undefined,
+      fallbackUserContent:
+        typeof body?.userContent === "string" ? body.userContent.trim() : undefined,
+    });
     return new Response(stream, {
       headers: {
         "Content-Type": "text/event-stream",

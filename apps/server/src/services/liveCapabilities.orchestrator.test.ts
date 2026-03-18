@@ -156,3 +156,60 @@ test("buildLiveContext does not force web search for translation prompts even wh
   expect(result.route).toBe("direct_model");
   expect(result.status).toBe("offline");
 });
+
+test("buildLiveContext prefers web search for named tool capability lookups when allowed", async () => {
+  let classifierCalled = false;
+
+  const result = await buildLiveContext({
+    prompt: "OpenClaw 有什么能力？",
+    forceWebSearch: true,
+    tavilyEnvKey: null,
+    classifier: async () => {
+      classifierCalled = true;
+      return "direct_model";
+    },
+  });
+
+  expect(classifierCalled).toBe(false);
+  expect(result.route).toBe("web_search");
+  expect(result.status).toBe("offline");
+  expect(result.userLabel).toContain("实时搜索未配置");
+});
+
+test("buildLiveContext prefers research for named tool comparison lookups when allowed", async () => {
+  let classifierCalled = false;
+
+  const result = await buildLiveContext({
+    prompt: "OpenClaw 相较于 AI 编程工具有什么优势？",
+    forceWebSearch: true,
+    tavilyEnvKey: null,
+    classifier: async () => {
+      classifierCalled = true;
+      return "direct_model";
+    },
+  });
+
+  expect(classifierCalled).toBe(false);
+  expect(result.route).toBe("research");
+  expect(result.status).toBe("offline");
+  expect(result.userLabel).toContain("实时搜索未配置");
+});
+
+test("buildLiveContext routes current interview-practice comparisons to research", async () => {
+  let classifierCalled = false;
+
+  const result = await buildLiveContext({
+    prompt: "现在的 AI 面试一般是怎么面的？和传统技术方向面试有什么差异？",
+    forceWebSearch: true,
+    tavilyEnvKey: null,
+    classifier: async () => {
+      classifierCalled = true;
+      return "direct_model";
+    },
+  });
+
+  expect(classifierCalled).toBe(false);
+  expect(result.route).toBe("research");
+  expect(result.status).toBe("offline");
+  expect(result.userLabel).toContain("实时搜索未配置");
+});

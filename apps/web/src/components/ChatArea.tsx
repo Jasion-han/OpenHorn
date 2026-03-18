@@ -969,6 +969,13 @@ export function ChatArea() {
     if (!currentConversation) return;
     const assistantMsg = messages[msgIndex];
     if (!assistantMsg || assistantMsg.role !== "assistant") return;
+    const precedingUserMsg = (() => {
+      for (let i = msgIndex - 1; i >= 0; i -= 1) {
+        const m = messages[i];
+        if (m?.role === "user") return m;
+      }
+      return null;
+    })();
 
     const isAgent = assistantMsg.mode === "agent";
     const agentRunRef = { current: isAgent ? createPartialAgentRun() : undefined };
@@ -991,24 +998,19 @@ export function ChatArea() {
       textSmootherRef.current = smoother;
 
       if (assistantMsg.id.startsWith("temp-")) {
-        const userMsg = (() => {
-          for (let i = msgIndex - 1; i >= 0; i -= 1) {
-            const m = messages[i];
-            if (m?.role === "user") return m;
-          }
-          return null;
-        })();
-        if (!userMsg) return;
+        if (!precedingUserMsg) return;
 
-        const attachmentIds = Array.isArray(userMsg.attachments)
-          ? userMsg.attachments.filter((id) => typeof id === "string" && id.trim().length > 0)
-          : (userMsg.attachmentsMeta || [])
+        const attachmentIds = Array.isArray(precedingUserMsg.attachments)
+          ? precedingUserMsg.attachments.filter(
+              (id) => typeof id === "string" && id.trim().length > 0,
+            )
+          : (precedingUserMsg.attachmentsMeta || [])
               .map((att) => (typeof att.id === "string" ? att.id : ""))
               .filter((id) => id.trim().length > 0);
 
         const payload = {
           conversationId: currentConversation.id,
-          content: typeof userMsg.content === "string" ? userMsg.content : "",
+          content: typeof precedingUserMsg.content === "string" ? precedingUserMsg.content : "",
           attachments: attachmentIds.length > 0 ? attachmentIds : undefined,
           mode: assistantMsg.mode,
         } as const;
@@ -1023,9 +1025,19 @@ export function ChatArea() {
           smoother,
         });
       } else {
-        const response = await api.messages.regenerate(assistantMsg.id, {
-          signal: abortController.signal,
-        });
+        const response = await api.messages.regenerate(
+          assistantMsg.id,
+          precedingUserMsg && !precedingUserMsg.id.startsWith("temp-")
+            ? {
+                userMessageId: precedingUserMsg.id,
+                userContent:
+                  typeof precedingUserMsg.content === "string" ? precedingUserMsg.content : "",
+              }
+            : undefined,
+          {
+            signal: abortController.signal,
+          },
+        );
         if (!response.ok) throw new Error(await response.text().catch(() => "Failed"));
 
         await streamAssistantResponse({

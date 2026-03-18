@@ -224,6 +224,40 @@ function resolveWeatherLocation(prompt: string) {
   );
 }
 
+function looksLikeNamedToolOrProductQuery(prompt: string) {
+  const text = prompt.trim();
+  if (!text) return false;
+
+  const hasAsciiEntityToken =
+    /\b[A-Z][A-Za-z0-9-]{2,}\b/.test(text) ||
+    /\b[a-z]+[A-Z][A-Za-z0-9-]*\b/.test(text) ||
+    /\b[A-Za-z]*\d+[A-Za-z0-9-]*\b/.test(text);
+
+  const hasEntityLookupIntent =
+    /是什么|是啥|介绍|能力|功能|特性|优势|优点|缺点|怎么样|如何|支持什么|适合什么|适用什么|文档|官网|价格|定价|收费|区别|对比|比较|相较于/i.test(
+      text,
+    );
+
+  return hasAsciiEntityToken && hasEntityLookupIntent;
+}
+
+function looksLikeCurrentPracticeOrTrendQuery(prompt: string) {
+  const text = prompt.trim();
+  if (!text) return false;
+
+  const hasCurrentSignal =
+    /现在|当前|目前|现阶段|如今|当下|一般|通常|主流|趋势|现状|怎么面|怎么做|怎么搞|best practice|best practices|current practice|current trend|industry norm/i.test(
+      text,
+    );
+
+  const hasPracticeDomain =
+    /面试|招聘|求职|岗位|流程|行业|市场|技术方向|差异|区别|对比|比较|实践|做法|要求|标准/i.test(
+      text,
+    );
+
+  return hasCurrentSignal && hasPracticeDomain;
+}
+
 export function getWebSearchPolicy(prompt: string): WebSearchPolicy {
   const text = prompt.trim();
   if (!text) return "never";
@@ -243,6 +277,10 @@ export function getWebSearchPolicy(prompt: string): WebSearchPolicy {
 
   if (/比较.*最近|分析.*最近|调研|汇总.*最近|survey|research/i.test(text)) {
     return "always_research";
+  }
+
+  if (looksLikeCurrentPracticeOrTrendQuery(text)) {
+    return /差异|区别|对比|比较/i.test(text) ? "always_research" : "always_web_search";
   }
 
   if (
@@ -395,6 +433,17 @@ export async function buildLiveContext(input: BuildLiveContextInput): Promise<Li
   const timezone = inferTimezone(input.timezone);
   const webSearchPolicy = getWebSearchPolicy(input.prompt);
   const allowSemanticWebRouting = webSearchPolicy === "defer_to_router";
+
+  if (
+    route.type === "direct_model" &&
+    allowSemanticWebRouting &&
+    input.forceWebSearch &&
+    looksLikeNamedToolOrProductQuery(input.prompt)
+  ) {
+    route = routeFromType(
+      /区别|对比|比较|相较于/i.test(input.prompt) ? "research" : "web_search",
+    );
+  }
 
   if (route.type === "direct_model" && allowSemanticWebRouting && input.classifier) {
     const classified = await input.classifier(input.prompt);

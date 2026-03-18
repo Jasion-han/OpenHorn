@@ -50,6 +50,7 @@ test("stream chat emits live status metadata before assistant deltas", async () 
     messages: Array<{ role: string; content: unknown }>;
   }> = [];
   const insertedRows: Array<Record<string, unknown>> = [];
+  const updatedRows: Array<Record<string, unknown>> = [];
 
   mock.module("db", () => ({
     conversations: conversationTable,
@@ -103,8 +104,13 @@ test("stream chat emits live status metadata before assistant deltas", async () 
         },
       }),
       update: () => ({
-        set: () => ({
-          where: async () => ({ rowsAffected: 1 }),
+        set: (value: unknown) => ({
+          where: async () => {
+            if (value && typeof value === "object") {
+              updatedRows.push(value as Record<string, unknown>);
+            }
+            return { rowsAffected: 1 };
+          },
         }),
       }),
     },
@@ -187,11 +193,212 @@ test("stream chat emits live status metadata before assistant deltas", async () 
       content: "今天周几",
     });
 
-    const storedLiveMetadata = JSON.parse(String(insertedRows.at(-1)?.liveMetadata || "{}"));
+    const assistantUpdate = updatedRows.find((row) => typeof row.liveMetadata === "string");
+    const storedLiveMetadata = JSON.parse(String(assistantUpdate?.liveMetadata || "{}"));
     expect(storedLiveMetadata.status).toBe("live");
     expect(storedLiveMetadata.route).toBe("local");
     expect(storedLiveMetadata.label).toBe("已使用本地时间");
     expect(storedLiveMetadata.sourceType).toBe("local");
+  } finally {
+    mock.restore();
+  }
+});
+
+test("regenerate falls back to the previous user message when assistant id is missing", async () => {
+  const conversationTable = {
+    id: "conversation_id",
+    userId: "conversation_user_id",
+    channelId: "conversation_channel_id",
+    modelId: "conversation_model_id",
+    updatedAt: "conversation_updated_at",
+    lastMode: "conversation_last_mode",
+    runStatus: "conversation_run_status",
+  };
+  const messageTable = {
+    id: "message_id",
+    conversationId: "message_conversation_id",
+    createdAt: "message_created_at",
+  };
+  const attachmentTable = {
+    id: "attachment_id",
+    messageId: "attachment_message_id",
+    fileName: "attachment_file_name",
+    fileType: "attachment_file_type",
+    fileSize: "attachment_file_size",
+  };
+
+  const insertedRows: Array<Record<string, unknown>> = [];
+  const updatedRows: Array<Record<string, unknown>> = [];
+  const chatStreamCalls: Array<{
+    model: string;
+    messages: Array<{ role: string; content: unknown }>;
+  }> = [];
+  let messageSelectCount = 0;
+
+  const userMsg = {
+    id: "user-msg-1",
+    conversationId: "conv-1",
+    role: "user",
+    content: "OpenClaw 有什么能力？",
+    attachments: null,
+    mode: "chat",
+    workspaceId: null,
+    contextPaths: null,
+    createdAt: new Date("2026-03-18T10:00:00.000Z"),
+  };
+
+  mock.module("db", () => ({
+    conversations: conversationTable,
+    messages: messageTable,
+    attachments: attachmentTable,
+  }));
+
+  mock.module("../db", () => ({
+    db: {
+      select: () => ({
+        from: (table: unknown) => {
+          if (table === messageTable) {
+            messageSelectCount += 1;
+            if (messageSelectCount === 1) {
+              return { where: async () => [] };
+            }
+            if (messageSelectCount === 2) {
+              return {
+                where: async () => [userMsg],
+              };
+            }
+            return {
+              where: () =>
+                Object.assign(Promise.resolve([userMsg]), {
+                  orderBy: async () => [userMsg],
+                }),
+            };
+          }
+
+          if (table === conversationTable) {
+            return {
+              where: () => ({
+                limit: async () => [
+                  {
+                    id: "conv-1",
+                    userId: "user-1",
+                    channelId: "channel-1",
+                    modelId: "claude-3-7-sonnet",
+                    systemPrompt: "Base system prompt",
+                    forceWebSearch: false,
+                    workspaceId: null,
+                  },
+                ],
+              }),
+            };
+          }
+
+          if (table === attachmentTable) {
+            return {
+              where: async () => [],
+            };
+          }
+
+          throw new Error("Unexpected table in select");
+        },
+      }),
+      insert: () => ({
+        values: async (value: unknown) => {
+          if (value && typeof value === "object") {
+            insertedRows.push(value as Record<string, unknown>);
+          }
+        },
+      }),
+      update: (_table: unknown) => ({
+        set: (value: unknown) => ({
+          where: async () => {
+            if (value && typeof value === "object") {
+              updatedRows.push(value as Record<string, unknown>);
+            }
+            return { rowsAffected: 1 };
+          },
+        }),
+      }),
+    },
+  }));
+
+  mock.module("../utils", () => ({
+    generateId: (() => {
+      const ids = ["assistant-msg-fallback"];
+      return () => ids.shift() || `generated-${Date.now()}`;
+    })(),
+  }));
+
+  mock.module("../agent-adapters", () => ({
+    createAdapter: () => ({
+      chatStream: async function* (input: {
+        model: string;
+        messages: Array<{ role: string; content: unknown }>;
+      }) {
+        chatStreamCalls.push(input);
+        yield "回退后的回答";
+      },
+    }),
+  }));
+
+  mock.module("./channelService", () => ({
+    getResolvedChannelForConversation: async () => ({
+      channel: {
+        provider: "anthropic",
+        baseUrl: "https://example.com",
+      },
+      apiKey: "test-key",
+      modelId: "claude-3-7-sonnet",
+    }),
+  }));
+
+  mock.module("./attachmentService", () => ({
+    buildAttachmentPayloadFromIds: async () => ({ images: [], textContext: "" }),
+    linkAttachmentsToMessage: async () => {},
+  }));
+
+  mock.module("./settingsService", () => ({
+    getSettingValues: async () => ({ "chat.systemPrompt": "Global prompt" }),
+  }));
+
+  mock.module("./agentService", () => ({
+    runAgentWithConfig: async function* () {},
+  }));
+
+  try {
+    const { regenerateMessage } = await import("./messageService");
+    const stream = await regenerateMessage("user-1", "missing-assistant-id", {
+      fallbackUserMessageId: "user-msg-1",
+      fallbackUserContent: "OpenClaw 有什么能力？",
+    });
+    const payloads = parseSsePayloads(await readStreamText(stream));
+
+    expect(payloads[0]).toEqual({
+      type: "live_status",
+      status: "offline",
+      route: "direct_model",
+      label: "未联网，直接回答",
+    });
+    expect(payloads[1]).toEqual({
+      type: "delta",
+      content: "回退后的回答",
+    });
+    expect(payloads.at(-1)).toMatchObject({
+      type: "done",
+      messageId: "assistant-msg-fallback",
+      model: "claude-3-7-sonnet",
+    });
+
+    expect(updatedRows[0]).toMatchObject({ content: "OpenClaw 有什么能力？" });
+    expect(insertedRows[0]).toMatchObject({
+      id: "assistant-msg-fallback",
+      conversationId: "conv-1",
+      role: "assistant",
+      content: "",
+      mode: "chat",
+      model: "claude-3-7-sonnet",
+    });
+    expect(chatStreamCalls).toHaveLength(1);
   } finally {
     mock.restore();
   }

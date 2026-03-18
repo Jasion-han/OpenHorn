@@ -929,12 +929,29 @@ export async function editUserMessage(
 export async function regenerateMessage(
   userId: string,
   assistantMessageId: string,
+  fallback?: {
+    fallbackUserMessageId?: string;
+    fallbackUserContent?: string;
+  },
 ): Promise<ReadableStream> {
+  const [prefetchedAssistantMsg] = await db
+    .select()
+    .from(messages)
+    .where(eq(messages.id, assistantMessageId));
+
+  if (
+    (!prefetchedAssistantMsg || prefetchedAssistantMsg.role !== "assistant") &&
+    fallback?.fallbackUserMessageId &&
+    fallback.fallbackUserContent
+  ) {
+    return editUserMessage(userId, fallback.fallbackUserMessageId, fallback.fallbackUserContent);
+  }
+
   return createSseStream(async (send, _ctx) => {
-    const [assistantMsg] = await db
-      .select()
-      .from(messages)
-      .where(eq(messages.id, assistantMessageId));
+    const assistantMsg =
+      prefetchedAssistantMsg && prefetchedAssistantMsg.role === "assistant"
+        ? prefetchedAssistantMsg
+        : (await db.select().from(messages).where(eq(messages.id, assistantMessageId)))[0];
     if (!assistantMsg || assistantMsg.role !== "assistant") {
       send({ type: "error", message: "Message not found" });
       return;

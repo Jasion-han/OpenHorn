@@ -382,12 +382,17 @@ export const api = {
         method: "DELETE",
       }),
 
-    regenerate: (id: string, options?: { signal?: AbortSignal }) => {
+    regenerate: (
+      id: string,
+      data?: { userMessageId?: string; userContent?: string },
+      options?: { signal?: AbortSignal },
+    ) => {
       return fetch(`${API_BASE}/messages/${id}/regenerate`, {
         method: "POST",
         credentials: "include",
         signal: options?.signal,
         headers: { "Content-Type": "application/json" },
+        body: data ? JSON.stringify(data) : undefined,
       });
     },
 

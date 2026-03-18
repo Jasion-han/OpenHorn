@@ -35,3 +35,9 @@ test("getWebSearchPolicy forces web search for explicit lookup prompts", () => {
 test("getWebSearchPolicy forces research for recent comparison prompts", () => {
   expect(getWebSearchPolicy("帮我调研最近几家 AI 公司的发布和融资")).toBe("always_research");
 });
+
+test("getWebSearchPolicy treats current interview-practice comparisons as research", () => {
+  expect(getWebSearchPolicy("现在的 AI 面试一般是怎么面的？和传统前端面试有什么差异？")).toBe(
+    "always_research",
+  );
+});
