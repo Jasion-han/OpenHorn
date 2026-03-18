@@ -4,7 +4,7 @@ import { type ChatContentPart, type ChatMessage, createAdapter } from "../agent-
 import { db } from "../db";
 import { generateId } from "../utils";
 import { createSseStream } from "../utils/sse";
-import { runAgentWithConfig } from "./agentService";
+import { type AgentRuntimeConfig, runAgentWithConfig } from "./agentService";
 import { buildAttachmentPayloadFromIds, linkAttachmentsToMessage } from "./attachmentService";
 import { getResolvedChannelForConversation } from "./channelService";
 import { buildLiveContext, type LiveContextResult, toStoredLiveMetadata } from "./liveCapabilities";
@@ -17,6 +17,7 @@ import {
 import { getSettingValues } from "./settingsService";
 
 const GLOBAL_SYSTEM_PROMPT_KEY = "chat.systemPrompt";
+const AGENT_RECENT_CONTEXT_LIMIT = 8;
 
 export interface SendMessageInput {
   conversationId: string;
@@ -169,6 +170,33 @@ function buildCitationsPayload(citations?: SearchCitation[]): CitationsPayload |
     type: "citations",
     citations,
   };
+}
+
+function buildRecentAgentConversationHistory(
+  conversationMessages: Array<{ role: string; content: string | null | undefined }>,
+  limit = AGENT_RECENT_CONTEXT_LIMIT,
+): NonNullable<AgentRuntimeConfig["conversationHistory"]> {
+  return conversationMessages
+    .filter(
+      (
+        message,
+      ): message is {
+        role: "user" | "assistant";
+        content: string;
+      } => {
+        if (message.role !== "user" && message.role !== "assistant") return false;
+        if (typeof message.content !== "string") return false;
+        const content = message.content.trim();
+        if (!content) return false;
+        if (message.role === "assistant" && /^Error:\s*/i.test(content)) return false;
+        return true;
+      },
+    )
+    .slice(-limit)
+    .map((message) => ({
+      role: message.role,
+      content: message.content.trim(),
+    }));
 }
 
 async function runAgentAndStream({
@@ -557,6 +585,11 @@ export async function streamMessage(
       send(citationsPayload);
     }
     if (mode === "agent") {
+      const conversationMessages = await getMessages(input.conversationId);
+      const conversationHistory = buildRecentAgentConversationHistory(
+        conversationMessages.filter((message) => message.id !== userMessageId),
+      );
+
       await db.insert(messages).values({
         id: assistantMessageId,
         conversationId: input.conversationId,
@@ -576,6 +609,7 @@ export async function streamMessage(
         config: {
           userId,
           prompt: input.content,
+          conversationHistory,
           attachmentIds: input.attachments || [],
           channelId: conversation.channelId || null,
           modelId: conversation.modelId || null,
@@ -790,6 +824,7 @@ export async function editUserMessage(
     }
 
     if (assistantMode === "agent") {
+      const conversationHistory = buildRecentAgentConversationHistory(contextMsgs.slice(0, -1));
       const attachmentIds = parseJsonArray(userMsg.attachments);
       const contextPaths = parseJsonArray(userMsg.contextPaths);
       const workspaceId =
@@ -828,6 +863,7 @@ export async function editUserMessage(
         config: {
           userId,
           prompt: newContent.trim(),
+          conversationHistory,
           attachmentIds,
           channelId: conversation.channelId || null,
           modelId: conversation.modelId || null,
@@ -981,6 +1017,11 @@ export async function regenerateMessage(
         return;
       }
 
+      const userIndex = allMsgs.findIndex((message) => message.id === userMsg.id);
+      const conversationHistory = buildRecentAgentConversationHistory(
+        userIndex > 0 ? allMsgs.slice(0, userIndex) : [],
+      );
+
       const resolvedChannel = await getResolvedChannelForConversation(userId, conversation);
       const settings = await getSettingValues(userId, [
         GLOBAL_SYSTEM_PROMPT_KEY,
@@ -1031,6 +1072,7 @@ export async function regenerateMessage(
         config: {
           userId,
           prompt: userMsg.content,
+          conversationHistory,
           attachmentIds,
           channelId: conversation.channelId || null,
           modelId: conversation.modelId || null,

@@ -81,6 +81,10 @@ export interface AgentEvent {
 export interface AgentRuntimeConfig {
   userId: string;
   prompt: string;
+  conversationHistory?: Array<{
+    role: "user" | "assistant";
+    content: string;
+  }>;
   attachmentIds?: string[];
   channelId?: string | null;
   modelId?: string | null;
@@ -225,6 +229,16 @@ export async function* runAgentWithConfig(config: AgentRuntimeConfig): AsyncGene
     const attachmentPayload = await buildAttachmentPayloadFromIds(config.attachmentIds || []);
     const attachmentContext = attachmentPayload.textContext;
     const parts: string[] = [];
+    if ((config.conversationHistory || []).length > 0) {
+      parts.push(
+        [
+          "Recent conversation context:",
+          ...(config.conversationHistory || []).map(
+            (message) => `${message.role === "user" ? "User" : "Assistant"}: ${message.content}`,
+          ),
+        ].join("\n"),
+      );
+    }
     if (config.prompt.trim()) parts.push(`Task:\n${config.prompt.trim()}`);
     if (attachmentContext?.trim()) parts.push(attachmentContext.trim());
 

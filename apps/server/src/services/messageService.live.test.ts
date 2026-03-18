@@ -204,6 +204,212 @@ test("stream chat emits live status metadata before assistant deltas", async () 
   }
 });
 
+test("stream agent includes recent conversation context for follow-up turns", async () => {
+  const conversationTable = {
+    id: "conversation_id",
+    userId: "conversation_user_id",
+    channelId: "conversation_channel_id",
+    modelId: "conversation_model_id",
+    updatedAt: "conversation_updated_at",
+    lastMode: "conversation_last_mode",
+    runStatus: "conversation_run_status",
+  };
+  const messageTable = {
+    id: "message_id",
+    conversationId: "message_conversation_id",
+    createdAt: "message_created_at",
+  };
+  const attachmentTable = {
+    id: "attachment_id",
+    messageId: "attachment_message_id",
+    fileName: "attachment_file_name",
+    fileType: "attachment_file_type",
+    fileSize: "attachment_file_size",
+  };
+
+  const insertedRows: Array<Record<string, unknown>> = [];
+  const updatedRows: Array<Record<string, unknown>> = [];
+  const agentConfigs: Array<Record<string, unknown>> = [];
+
+  mock.module("db", () => ({
+    conversations: conversationTable,
+    messages: messageTable,
+    attachments: attachmentTable,
+  }));
+
+  mock.module("../db", () => ({
+    db: {
+      select: () => ({
+        from: (table: unknown) => {
+          if (table === conversationTable) {
+            return {
+              where: () => ({
+                limit: async () => [
+                  {
+                    id: "conv-1",
+                    userId: "user-1",
+                    channelId: "channel-1",
+                    modelId: "claude-3-7-sonnet",
+                    systemPrompt: "Base system prompt",
+                    forceWebSearch: false,
+                    workspaceId: null,
+                  },
+                ],
+              }),
+            };
+          }
+
+          if (table === messageTable) {
+            return {
+              where: () => ({
+                orderBy: async () => [
+                  {
+                    id: "user-msg-1",
+                    conversationId: "conv-1",
+                    role: "user",
+                    content: "什么是 AI？",
+                    attachments: null,
+                    mode: "agent",
+                    workspaceId: null,
+                    contextPaths: null,
+                    createdAt: new Date("2026-03-18T10:00:00.000Z"),
+                  },
+                  {
+                    id: "assistant-msg-1",
+                    conversationId: "conv-1",
+                    role: "assistant",
+                    content: "AI 是让机器模拟人类智能的技术。",
+                    attachments: null,
+                    mode: "agent",
+                    workspaceId: null,
+                    contextPaths: null,
+                    createdAt: new Date("2026-03-18T10:00:01.000Z"),
+                  },
+                  {
+                    id: "user-msg-2",
+                    conversationId: "conv-1",
+                    role: "user",
+                    content: "那他能做什么",
+                    attachments: null,
+                    mode: "agent",
+                    workspaceId: null,
+                    contextPaths: null,
+                    createdAt: new Date("2026-03-18T10:00:02.000Z"),
+                  },
+                ],
+              }),
+            };
+          }
+
+          if (table === attachmentTable) {
+            return {
+              where: async () => [],
+            };
+          }
+
+          throw new Error("Unexpected table in select");
+        },
+      }),
+      insert: () => ({
+        values: async (value: unknown) => {
+          if (value && typeof value === "object") {
+            insertedRows.push(value as Record<string, unknown>);
+          }
+        },
+      }),
+      update: () => ({
+        set: (value: unknown) => ({
+          where: async () => {
+            if (value && typeof value === "object") {
+              updatedRows.push(value as Record<string, unknown>);
+            }
+            return { rowsAffected: 1 };
+          },
+        }),
+      }),
+    },
+  }));
+
+  mock.module("../utils", () => ({
+    generateId: (() => {
+      const ids = ["user-msg-2", "assistant-msg-2"];
+      return () => ids.shift() || `generated-${Date.now()}`;
+    })(),
+  }));
+
+  mock.module("./channelService", () => ({
+    getResolvedChannelForConversation: async () => ({
+      channel: {
+        provider: "anthropic",
+        baseUrl: "https://example.com",
+      },
+      apiKey: "test-key",
+      modelId: "claude-3-7-sonnet",
+    }),
+  }));
+
+  mock.module("./attachmentService", () => ({
+    buildAttachmentPayloadFromIds: async () => ({ images: [], textContext: "", files: [] }),
+    linkAttachmentsToMessage: async () => {},
+  }));
+
+  mock.module("./settingsService", () => ({
+    getSettingValues: async () => ({ "chat.systemPrompt": "Global prompt" }),
+  }));
+
+  mock.module("./agentService", () => ({
+    runAgentWithConfig: async function* (config: Record<string, unknown>) {
+      agentConfigs.push(config);
+      yield { type: "text", content: "它可以读写代码、调用工具并执行任务。" };
+    },
+  }));
+
+  try {
+    const { streamMessage } = await import("./messageService");
+    const stream = await streamMessage("user-1", {
+      conversationId: "conv-1",
+      content: "那他能做什么",
+      mode: "agent",
+    });
+
+    const payloads = parseSsePayloads(await readStreamText(stream));
+
+    expect(payloads[0]).toEqual({
+      type: "live_status",
+      status: "offline",
+      route: "direct_model",
+    });
+    expect(payloads[1]).toEqual({
+      type: "delta",
+      content: "它可以读写代码、调用工具并执行任务。",
+    });
+    expect(payloads.at(-1)).toMatchObject({
+      type: "done",
+      messageId: "assistant-msg-2",
+      model: "claude-3-7-sonnet",
+    });
+
+    expect(agentConfigs).toHaveLength(1);
+    expect(agentConfigs[0]?.prompt).toBe("那他能做什么");
+    expect(agentConfigs[0]?.conversationHistory).toEqual([
+      { role: "user", content: "什么是 AI？" },
+      { role: "assistant", content: "AI 是让机器模拟人类智能的技术。" },
+    ]);
+
+    expect(insertedRows[1]).toMatchObject({
+      id: "assistant-msg-2",
+      conversationId: "conv-1",
+      role: "assistant",
+      mode: "agent",
+    });
+    expect(updatedRows.at(-1)).toMatchObject({
+      runStatus: "completed",
+    });
+  } finally {
+    mock.restore();
+  }
+});
+
 test("regenerate falls back to the previous user message when assistant id is missing", async () => {
   const conversationTable = {
     id: "conversation_id",
