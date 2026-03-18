@@ -151,13 +151,64 @@ function pickPlaceholder(avoid?: string) {
 
 function AgentRunPanel({ run }: { run?: ApiAgentRun }) {
   if (!run) return null;
+  const toolCount = run.steps.filter((step) => step.type === "tool_start").length;
+  const shouldRender = Boolean(run.error) || toolCount > 0;
+  if (!shouldRender) return null;
+
+  const statusLabel = (() => {
+    switch (run.status) {
+      case "completed":
+        return "已完成";
+      case "failed":
+        return "失败";
+      case "cancelled":
+        return "已取消";
+      default:
+        return "进行中";
+    }
+  })();
+
+  const statusClassName = (() => {
+    switch (run.status) {
+      case "completed":
+        return "border-emerald-300/60 bg-emerald-50 text-emerald-700 dark:border-emerald-700/70 dark:bg-emerald-950/50 dark:text-emerald-300";
+      case "failed":
+        return "border-orange-300/60 bg-orange-50 text-orange-700 dark:border-orange-700/70 dark:bg-orange-950/50 dark:text-orange-300";
+      case "cancelled":
+        return "border-slate-300/60 bg-slate-50 text-slate-700 dark:border-slate-700/70 dark:bg-slate-950/50 dark:text-slate-300";
+      default:
+        return "border-blue-300/60 bg-blue-50 text-blue-700 dark:border-blue-700/70 dark:bg-blue-950/50 dark:text-blue-300";
+    }
+  })();
+
+  const displayTitle = toolCount > 0 ? `执行记录 · ${toolCount} 个工具` : "执行记录";
+  const stepTypeLabel = (type: ApiAgentRun["steps"][number]["type"]) => {
+    switch (type) {
+      case "tool_start":
+        return "开始";
+      case "tool_result":
+        return "结果";
+      case "error":
+        return "错误";
+    }
+  };
 
   return (
     <details className="mt-2 rounded-xl border border-border/50 bg-muted/20 px-3 py-2 text-sm">
       <summary className="cursor-pointer list-none">
         <div className="flex items-center justify-between gap-3">
-          <span className="font-medium">{run.summary || "Agent 执行记录"}</span>
-          <span className="text-xs text-muted-foreground">{run.status}</span>
+          <div className="flex min-w-0 items-center gap-2">
+            <Bot size={12} className="shrink-0 text-muted-foreground" />
+            <span className="truncate font-medium">{displayTitle}</span>
+          </div>
+          <span
+            className={cn(
+              "shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-medium",
+              statusClassName,
+            )}
+          >
+            {statusLabel}
+          </span>
         </div>
       </summary>
       <div className="mt-2 flex flex-col gap-2">
@@ -166,36 +217,32 @@ function AgentRunPanel({ run }: { run?: ApiAgentRun }) {
             {run.error}
           </div>
         )}
-        {run.steps.length === 0 ? (
-          <p className="text-xs text-muted-foreground">无额外执行步骤。</p>
-        ) : (
-          run.steps.map((step) => (
-            <div
-              key={`${step.type}-${step.toolName || ""}-${step.content || ""}`}
-              className="rounded-md border border-border/50 bg-background/60 px-2 py-2"
-            >
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  {step.type}
-                </p>
-                {step.toolName && <p className="text-xs text-muted-foreground">{step.toolName}</p>}
-              </div>
-              {step.content && (
-                <p className="mt-1 text-sm" style={WRAP_TEXT}>
-                  {step.content}
-                </p>
-              )}
-              {step.toolInput !== undefined && (
-                <pre
-                  className="mt-2 whitespace-pre-wrap break-words rounded-md bg-muted/40 p-2 text-xs"
-                  style={WRAP_TEXT}
-                >
-                  {JSON.stringify(step.toolInput, null, 2)}
-                </pre>
-              )}
+        {run.steps.map((step) => (
+          <div
+            key={`${step.type}-${step.toolName || ""}-${step.content || ""}`}
+            className="rounded-md border border-border/50 bg-background/60 px-2 py-2"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs font-medium text-muted-foreground">
+                {stepTypeLabel(step.type)}
+              </p>
+              {step.toolName && <p className="text-xs text-muted-foreground">{step.toolName}</p>}
             </div>
-          ))
-        )}
+            {step.content && (
+              <p className="mt-1 text-sm" style={WRAP_TEXT}>
+                {step.content}
+              </p>
+            )}
+            {step.toolInput !== undefined && (
+              <pre
+                className="mt-2 whitespace-pre-wrap break-words rounded-md bg-muted/40 p-2 text-xs"
+                style={WRAP_TEXT}
+              >
+                {JSON.stringify(step.toolInput, null, 2)}
+              </pre>
+            )}
+          </div>
+        ))}
       </div>
     </details>
   );
