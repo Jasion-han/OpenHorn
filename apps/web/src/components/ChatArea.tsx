@@ -10,7 +10,8 @@ import {
   RefreshCw,
   Trash2,
 } from "lucide-react";
-import React, { useEffect, useRef, useState } from "react";
+import type React from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   type MessageAttachmentItem,
   MessageAttachments,
@@ -498,6 +499,115 @@ function MessageBubble({
   );
 }
 
+type GroupedMessageEntry = {
+  msg: Message;
+  index: number;
+};
+
+type MessageRoundGroup = {
+  key: string;
+  user?: GroupedMessageEntry;
+  assistant?: GroupedMessageEntry;
+};
+
+function groupMessagesByRound(messages: Message[]): MessageRoundGroup[] {
+  const groups: MessageRoundGroup[] = [];
+
+  for (let index = 0; index < messages.length; index += 1) {
+    const msg = messages[index];
+    if (!msg) continue;
+
+    if (msg.role === "user") {
+      const next = messages[index + 1];
+      if (next?.role === "assistant" && next.mode === msg.mode) {
+        groups.push({
+          key: `${msg.id}:${next.id}`,
+          user: { msg, index },
+          assistant: { msg: next, index: index + 1 },
+        });
+        index += 1;
+        continue;
+      }
+
+      groups.push({
+        key: msg.id,
+        user: { msg, index },
+      });
+      continue;
+    }
+
+    groups.push({
+      key: msg.id,
+      assistant: { msg, index },
+    });
+  }
+
+  return groups;
+}
+
+function MessageRound({
+  viewportRef,
+  shouldStickUser,
+  sizeKey,
+  userNode,
+  assistantNode,
+}: {
+  viewportRef: React.RefObject<HTMLDivElement | null>;
+  shouldStickUser: boolean;
+  sizeKey: string;
+  userNode?: React.ReactNode;
+  assistantNode?: React.ReactNode;
+}) {
+  const roundRef = useRef<HTMLDivElement>(null);
+  const [isStickyEnabled, setIsStickyEnabled] = useState(false);
+
+  useEffect(() => {
+    if (!shouldStickUser) {
+      setIsStickyEnabled(false);
+      return;
+    }
+
+    const roundEl = roundRef.current;
+    const viewportEl = viewportRef.current;
+    if (!roundEl || !viewportEl) return;
+
+    const updateStickyState = () => {
+      setIsStickyEnabled(roundEl.scrollHeight > viewportEl.clientHeight);
+    };
+
+    updateStickyState();
+
+    if (typeof ResizeObserver === "undefined") return;
+
+    const observer = new ResizeObserver(() => {
+      updateStickyState();
+    });
+    observer.observe(roundEl);
+    observer.observe(viewportEl);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [shouldStickUser, sizeKey, viewportRef]);
+
+  return (
+    <div ref={roundRef} className="flex min-w-0 flex-col gap-2">
+      {userNode && (
+        <div
+          className={cn(
+            "min-w-0",
+            isStickyEnabled &&
+              "sticky top-0 z-10 py-1 supports-[backdrop-filter]:bg-background/80 supports-[backdrop-filter]:backdrop-blur-sm",
+          )}
+        >
+          {userNode}
+        </div>
+      )}
+      {assistantNode}
+    </div>
+  );
+}
+
 export function ChatArea() {
   const {
     currentConversation,
@@ -532,6 +642,7 @@ export function ChatArea() {
 
   const ASSISTANT_BUBBLE_WIDTH = "92%";
   const USER_BUBBLE_MAX_WIDTH = "72%";
+  const groupedMessages = groupMessagesByRound(messages);
 
   useEffect(() => {
     if (viewportRef.current) {
@@ -1181,6 +1292,88 @@ export function ChatArea() {
     );
   }
 
+  const renderMessageRow = (msg: Message, index: number) => (
+    <>
+      <MessageBubble
+        msg={{
+          id: msg.id,
+          role: msg.role,
+          content: msg.content,
+          mode: msg.mode,
+          agentRun: msg.agentRun,
+          liveStatus: msg.liveStatus,
+          liveRoute: msg.liveRoute,
+          liveLabel: msg.liveLabel,
+          citations: msg.citations,
+          streamTail: msg.streamTail,
+          streamPulseKey: msg.streamPulseKey,
+        }}
+        isStreaming={Boolean(
+          isStreaming && streamingAssistantId && msg.id === streamingAssistantId,
+        )}
+        canEdit={canEditUserMessageAt(index)}
+        canRetry={msg.role === "assistant" && !isLoading && !isStreaming && !isUploading}
+        attachments={
+          msg.role === "user" && msg.attachmentsMeta
+            ? msg.attachmentsMeta.map((att) => ({
+                id: att.id,
+                fileName: att.fileName,
+                fileType: att.fileType,
+                fileSize: att.fileSize,
+                previewUrl: att.previewUrl,
+              }))
+            : undefined
+        }
+        onEdit={() => {
+          if (msg.role !== "user") return;
+          if (!canEditUserMessageAt(index)) {
+            notifyWarning(
+              "当前消息不可编辑",
+              "这条用户消息后面没有对应的助手回复，无法重新编辑并生成。",
+            );
+            return;
+          }
+          setEditingMsgId(msg.id);
+          setEditingContent(msg.content || "");
+        }}
+        onRetry={() => void handleRetry(index)}
+        onDelete={() => void deleteMessage(msg.id)}
+        assistantWidth={ASSISTANT_BUBBLE_WIDTH}
+        userMaxWidth={USER_BUBBLE_MAX_WIDTH}
+      />
+
+      {editingMsgId === msg.id && (
+        <div className="flex w-full max-w-[72%] self-end flex-col items-end gap-1">
+          <Textarea
+            value={editingContent}
+            onChange={(event) => setEditingContent(event.currentTarget.value)}
+            className="w-full"
+            rows={3}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                void handleEditSubmit(msg.id, editingContent);
+              }
+              if (event.key === "Escape") setEditingMsgId(null);
+            }}
+          />
+          <div className="flex gap-2">
+            <Button size="sm" variant="ghost" onClick={() => setEditingMsgId(null)}>
+              取消
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => void handleEditSubmit(msg.id, editingContent)}
+              disabled={!editingContent.trim()}
+            >
+              确认
+            </Button>
+          </div>
+        </div>
+      )}
+    </>
+  );
+
   return (
     <div className="flex min-h-0 min-w-0 w-full flex-1 flex-col overflow-x-hidden">
       <div style={{ padding: PAGE_PAD, paddingBottom: "8px" }}>
@@ -1194,86 +1387,27 @@ export function ChatArea() {
       >
         <div className="flex min-w-0 w-full flex-col">
           <div className="mt-auto flex min-w-0 flex-col gap-2 pb-2">
-            {messages.map((msg, index) => (
-              <React.Fragment key={msg.id}>
-                <MessageBubble
-                  msg={{
-                    id: msg.id,
-                    role: msg.role,
-                    content: msg.content,
-                    mode: msg.mode,
-                    agentRun: msg.agentRun,
-                    liveStatus: msg.liveStatus,
-                    liveRoute: msg.liveRoute,
-                    liveLabel: msg.liveLabel,
-                    citations: msg.citations,
-                    streamTail: msg.streamTail,
-                    streamPulseKey: msg.streamPulseKey,
-                  }}
-                  isStreaming={Boolean(
-                    isStreaming && streamingAssistantId && msg.id === streamingAssistantId,
-                  )}
-                  canEdit={canEditUserMessageAt(index)}
-                  canRetry={msg.role === "assistant" && !isLoading && !isStreaming && !isUploading}
-                  attachments={
-                    msg.role === "user" && msg.attachmentsMeta
-                      ? msg.attachmentsMeta.map((att) => ({
-                          id: att.id,
-                          fileName: att.fileName,
-                          fileType: att.fileType,
-                          fileSize: att.fileSize,
-                          previewUrl: att.previewUrl,
-                        }))
-                      : undefined
-                  }
-                  onEdit={() => {
-                    if (msg.role !== "user") return;
-                    if (!canEditUserMessageAt(index)) {
-                      notifyWarning(
-                        "当前消息不可编辑",
-                        "这条用户消息后面没有对应的助手回复，无法重新编辑并生成。",
-                      );
-                      return;
-                    }
-                    setEditingMsgId(msg.id);
-                    setEditingContent(msg.content || "");
-                  }}
-                  onRetry={() => void handleRetry(index)}
-                  onDelete={() => void deleteMessage(msg.id)}
-                  assistantWidth={ASSISTANT_BUBBLE_WIDTH}
-                  userMaxWidth={USER_BUBBLE_MAX_WIDTH}
-                />
-
-                {editingMsgId === msg.id && (
-                  <div className="flex w-full max-w-[72%] self-end flex-col items-end gap-1">
-                    <Textarea
-                      value={editingContent}
-                      onChange={(event) => setEditingContent(event.currentTarget.value)}
-                      className="w-full"
-                      rows={3}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter" && !event.shiftKey) {
-                          event.preventDefault();
-                          void handleEditSubmit(msg.id, editingContent);
-                        }
-                        if (event.key === "Escape") setEditingMsgId(null);
-                      }}
-                    />
-                    <div className="flex gap-2">
-                      <Button size="sm" variant="ghost" onClick={() => setEditingMsgId(null)}>
-                        取消
-                      </Button>
-                      <Button
-                        size="sm"
-                        onClick={() => void handleEditSubmit(msg.id, editingContent)}
-                        disabled={!editingContent.trim()}
-                      >
-                        确认
-                      </Button>
-                    </div>
-                  </div>
-                )}
-              </React.Fragment>
+            {groupedMessages.map((group) => (
+              <MessageRound
+                key={group.key}
+                viewportRef={viewportRef}
+                shouldStickUser={Boolean(group.user && group.assistant)}
+                sizeKey={[
+                  group.user?.msg.id,
+                  group.user?.msg.content,
+                  group.assistant?.msg.id,
+                  group.assistant?.msg.content,
+                  editingMsgId === group.user?.msg.id ? "editing" : "",
+                ].join(":")}
+                userNode={
+                  group.user ? renderMessageRow(group.user.msg, group.user.index) : undefined
+                }
+                assistantNode={
+                  group.assistant
+                    ? renderMessageRow(group.assistant.msg, group.assistant.index)
+                    : undefined
+                }
+              />
             ))}
 
             {messages.length === 0 && (
