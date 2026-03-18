@@ -545,69 +545,6 @@ function groupMessagesByRound(messages: Message[]): MessageRoundGroup[] {
   return groups;
 }
 
-function MessageRound({
-  viewportRef,
-  shouldStickUser,
-  sizeKey,
-  userNode,
-  assistantNode,
-}: {
-  viewportRef: React.RefObject<HTMLDivElement | null>;
-  shouldStickUser: boolean;
-  sizeKey: string;
-  userNode?: React.ReactNode;
-  assistantNode?: React.ReactNode;
-}) {
-  const roundRef = useRef<HTMLDivElement>(null);
-  const [isStickyEnabled, setIsStickyEnabled] = useState(false);
-
-  useEffect(() => {
-    if (!shouldStickUser) {
-      setIsStickyEnabled(false);
-      return;
-    }
-
-    const roundEl = roundRef.current;
-    const viewportEl = viewportRef.current;
-    if (!roundEl || !viewportEl) return;
-
-    const updateStickyState = () => {
-      setIsStickyEnabled(roundEl.scrollHeight > viewportEl.clientHeight);
-    };
-
-    updateStickyState();
-
-    if (typeof ResizeObserver === "undefined") return;
-
-    const observer = new ResizeObserver(() => {
-      updateStickyState();
-    });
-    observer.observe(roundEl);
-    observer.observe(viewportEl);
-
-    return () => {
-      observer.disconnect();
-    };
-  }, [shouldStickUser, sizeKey, viewportRef]);
-
-  return (
-    <div ref={roundRef} className="flex min-w-0 flex-col gap-2">
-      {userNode && (
-        <div
-          className={cn(
-            "min-w-0",
-            isStickyEnabled &&
-              "sticky top-0 z-10 py-1 supports-[backdrop-filter]:bg-background/80 supports-[backdrop-filter]:backdrop-blur-sm",
-          )}
-        >
-          {userNode}
-        </div>
-      )}
-      {assistantNode}
-    </div>
-  );
-}
-
 export function ChatArea() {
   const {
     currentConversation,
@@ -638,6 +575,10 @@ export function ChatArea() {
   const streamAbortRef = useRef<AbortController | null>(null);
   const textSmootherRef = useRef<TextStreamSmoother | null>(null);
   const pendingPreviewUrlsRef = useRef<Map<string, string[]>>(new Map());
+  const pendingScrollTargetRef = useRef<
+    { type: "bottom" } | { type: "message"; id: string } | null
+  >(null);
+  const messageAnchorRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const [streamingAssistantId, setStreamingAssistantId] = useState<string | null>(null);
 
   const ASSISTANT_BUBBLE_WIDTH = "92%";
@@ -645,10 +586,37 @@ export function ChatArea() {
   const groupedMessages = groupMessagesByRound(messages);
 
   useEffect(() => {
-    if (viewportRef.current) {
-      viewportRef.current.scrollTo({ top: viewportRef.current.scrollHeight });
-    }
-  }, [messages]);
+    pendingScrollTargetRef.current = { type: "bottom" };
+  }, [currentConversation?.id]);
+
+  useEffect(() => {
+    const viewportEl = viewportRef.current;
+    const pending = pendingScrollTargetRef.current;
+    if (!viewportEl || !pending) return;
+
+    const frame = requestAnimationFrame(() => {
+      const next = pendingScrollTargetRef.current;
+      if (!next || !viewportRef.current) return;
+
+      if (next.type === "bottom") {
+        viewportRef.current.scrollTo({ top: viewportRef.current.scrollHeight });
+        pendingScrollTargetRef.current = null;
+        return;
+      }
+
+      const anchorEl = messageAnchorRefs.current.get(next.id);
+      if (!anchorEl) return;
+
+      const top =
+        anchorEl.getBoundingClientRect().top -
+        viewportRef.current.getBoundingClientRect().top +
+        viewportRef.current.scrollTop;
+      viewportRef.current.scrollTo({ top });
+      pendingScrollTargetRef.current = null;
+    });
+
+    return () => cancelAnimationFrame(frame);
+  }, [messages, currentConversation?.id, editingMsgId]);
 
   useEffect(() => {
     setStreamingAssistantId(null);
@@ -968,6 +936,7 @@ export function ChatArea() {
       createdAt: new Date(),
     });
 
+    pendingScrollTargetRef.current = { type: "message", id: userMessageId };
     setInput("");
     queueMicrotask(() => inputRef.current?.focus());
     setIsLoading(true);
@@ -1090,6 +1059,9 @@ export function ChatArea() {
 
     const isAgent = assistantMsg.mode === "agent";
     const agentRunRef = { current: isAgent ? createPartialAgentRun() : undefined };
+    if (precedingUserMsg) {
+      pendingScrollTargetRef.current = { type: "message", id: precedingUserMsg.id };
+    }
     resetAssistantMessageForStream(assistantMsg.id, agentRunRef.current);
     setIsLoading(true);
     setIsStreaming(true);
@@ -1202,6 +1174,7 @@ export function ChatArea() {
     const assistantMessageId = existingAssistantMsg?.id ?? `temp-assistant-edit-${Date.now()}`;
 
     setEditingMsgId(null);
+    pendingScrollTargetRef.current = { type: "message", id: msgId };
     useChatStore.getState().updateMessage(msgId, newContent.trim());
     if (existingAssistantMsg) {
       resetAssistantMessageForStream(assistantMessageId, agentRunRef.current);
@@ -1293,7 +1266,17 @@ export function ChatArea() {
   }
 
   const renderMessageRow = (msg: Message, index: number) => (
-    <>
+    <div
+      ref={(node) => {
+        if (msg.role !== "user") return;
+        if (node) {
+          messageAnchorRefs.current.set(msg.id, node);
+          return;
+        }
+        messageAnchorRefs.current.delete(msg.id);
+      }}
+      className="min-w-0"
+    >
       <MessageBubble
         msg={{
           id: msg.id,
@@ -1371,7 +1354,7 @@ export function ChatArea() {
           </div>
         </div>
       )}
-    </>
+    </div>
   );
 
   return (
@@ -1388,26 +1371,12 @@ export function ChatArea() {
         <div className="flex min-w-0 w-full flex-col">
           <div className="mt-auto flex min-w-0 flex-col gap-2 pb-2">
             {groupedMessages.map((group) => (
-              <MessageRound
-                key={group.key}
-                viewportRef={viewportRef}
-                shouldStickUser={Boolean(group.user && group.assistant)}
-                sizeKey={[
-                  group.user?.msg.id,
-                  group.user?.msg.content,
-                  group.assistant?.msg.id,
-                  group.assistant?.msg.content,
-                  editingMsgId === group.user?.msg.id ? "editing" : "",
-                ].join(":")}
-                userNode={
-                  group.user ? renderMessageRow(group.user.msg, group.user.index) : undefined
-                }
-                assistantNode={
-                  group.assistant
-                    ? renderMessageRow(group.assistant.msg, group.assistant.index)
-                    : undefined
-                }
-              />
+              <div key={group.key} className="flex min-w-0 flex-col gap-2">
+                {group.user ? renderMessageRow(group.user.msg, group.user.index) : null}
+                {group.assistant
+                  ? renderMessageRow(group.assistant.msg, group.assistant.index)
+                  : null}
+              </div>
             ))}
 
             {messages.length === 0 && (
