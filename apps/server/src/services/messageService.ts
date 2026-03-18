@@ -731,16 +731,21 @@ export async function editUserMessage(
 
     const conversation = await getConversationForUser(userId, userMsg.conversationId);
 
-    // Find the assistant message immediately following this user message
     const allMsgs = await getMessages(userMsg.conversationId);
     const idx = allMsgs.findIndex((m) => m.id === userMessageId);
+    if (idx < 0) {
+      send({ type: "error", message: "Message not found" });
+      return;
+    }
+
     const nextMsg = idx >= 0 ? allMsgs[idx + 1] : null;
-    if (!nextMsg || nextMsg.role !== "assistant") {
+    const shouldCreateAssistantReply = !nextMsg;
+    if (nextMsg && nextMsg.role !== "assistant") {
       send({ type: "error", message: "找不到对应的 AI 回复消息" });
       return;
     }
-    const assistantMessageId = nextMsg.id;
-    const assistantMode = nextMsg.mode === "agent" ? "agent" : "chat";
+    const assistantMessageId = nextMsg?.id ?? generateId();
+    const assistantMode = (nextMsg?.mode ?? userMsg.mode) === "agent" ? "agent" : "chat";
 
     // Update the user message content
     await db
@@ -788,7 +793,25 @@ export async function editUserMessage(
       const attachmentIds = parseJsonArray(userMsg.attachments);
       const contextPaths = parseJsonArray(userMsg.contextPaths);
       const workspaceId =
-        nextMsg.workspaceId || userMsg.workspaceId || conversation.workspaceId || null;
+        nextMsg?.workspaceId || userMsg.workspaceId || conversation.workspaceId || null;
+
+      if (shouldCreateAssistantReply) {
+        await db.insert(messages).values({
+          id: assistantMessageId,
+          conversationId: userMsg.conversationId,
+          role: "assistant",
+          content: "",
+          model: conversation.modelId || null,
+          mode: "agent",
+          attachments: null,
+          agentRun: null,
+          workspaceId,
+          contextPaths: contextPaths.length > 0 ? JSON.stringify(contextPaths) : null,
+          liveMetadata: null,
+          citations: null,
+          createdAt: new Date(),
+        });
+      }
 
       await db
         .update(conversations)
@@ -852,6 +875,22 @@ export async function editUserMessage(
     if (!resolvedChannel) {
       send({ type: "error", message: "未配置可用的默认渠道/默认模型。" });
       return;
+    }
+
+    if (shouldCreateAssistantReply) {
+      await db.insert(messages).values({
+        id: assistantMessageId,
+        conversationId: userMsg.conversationId,
+        role: "assistant",
+        content: "",
+        model: resolvedChannel.modelId,
+        mode: "chat",
+        attachments: null,
+        agentRun: null,
+        liveMetadata: null,
+        citations: null,
+        createdAt: new Date(),
+      });
     }
 
     const adapter = createAdapter(

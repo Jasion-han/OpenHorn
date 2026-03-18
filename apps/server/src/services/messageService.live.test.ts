@@ -196,3 +196,192 @@ test("stream chat emits live status metadata before assistant deltas", async () 
     mock.restore();
   }
 });
+
+test("edit user message creates a new assistant reply when the user message is the conversation tail", async () => {
+  const conversationTable = {
+    id: "conversation_id",
+    userId: "conversation_user_id",
+    channelId: "conversation_channel_id",
+    modelId: "conversation_model_id",
+  };
+  const messageTable = {
+    id: "message_id",
+    conversationId: "message_conversation_id",
+    createdAt: "message_created_at",
+  };
+  const attachmentTable = {
+    id: "attachment_id",
+    messageId: "attachment_message_id",
+    fileName: "attachment_file_name",
+    fileType: "attachment_file_type",
+    fileSize: "attachment_file_size",
+  };
+
+  const insertedRows: Array<Record<string, unknown>> = [];
+  const updatedRows: Array<Record<string, unknown>> = [];
+  const chatStreamCalls: Array<{
+    model: string;
+    messages: Array<{ role: string; content: unknown }>;
+  }> = [];
+
+  mock.module("db", () => ({
+    conversations: conversationTable,
+    messages: messageTable,
+    attachments: attachmentTable,
+  }));
+
+  mock.module("../db", () => ({
+    db: {
+      select: () => ({
+        from: (table: unknown) => {
+          if (table === messageTable) {
+            const userMsg = {
+              id: "user-msg-1",
+              conversationId: "conv-1",
+              role: "user",
+              content: "旧问题",
+              attachments: null,
+              mode: "chat",
+              workspaceId: null,
+              contextPaths: null,
+              createdAt: new Date("2026-03-18T10:00:00.000Z"),
+            };
+            return {
+              where: () =>
+                Object.assign(Promise.resolve([userMsg]), {
+                  orderBy: async () => [userMsg],
+                }),
+            };
+          }
+
+          if (table === conversationTable) {
+            return {
+              where: () => ({
+                limit: async () => [
+                  {
+                    id: "conv-1",
+                    userId: "user-1",
+                    channelId: "channel-1",
+                    modelId: "claude-3-7-sonnet",
+                    systemPrompt: "Base system prompt",
+                    forceWebSearch: false,
+                    workspaceId: null,
+                  },
+                ],
+              }),
+            };
+          }
+
+          if (table === attachmentTable) {
+            return {
+              where: async () => [],
+            };
+          }
+
+          throw new Error("Unexpected table in select");
+        },
+      }),
+      insert: () => ({
+        values: async (value: unknown) => {
+          if (value && typeof value === "object") {
+            insertedRows.push(value as Record<string, unknown>);
+          }
+        },
+      }),
+      update: (_table: unknown) => ({
+        set: (value: unknown) => ({
+          where: async () => {
+            if (value && typeof value === "object") {
+              updatedRows.push(value as Record<string, unknown>);
+            }
+            return { rowsAffected: 1 };
+          },
+        }),
+      }),
+    },
+  }));
+
+  mock.module("../utils", () => ({
+    generateId: (() => {
+      const ids = ["assistant-msg-new"];
+      return () => ids.shift() || `generated-${Date.now()}`;
+    })(),
+  }));
+
+  mock.module("../agent-adapters", () => ({
+    createAdapter: () => ({
+      chatStream: async function* (input: {
+        model: string;
+        messages: Array<{ role: string; content: unknown }>;
+      }) {
+        chatStreamCalls.push(input);
+        yield "新的回答";
+      },
+    }),
+  }));
+
+  mock.module("./channelService", () => ({
+    getResolvedChannelForConversation: async () => ({
+      channel: {
+        provider: "anthropic",
+        baseUrl: "https://example.com",
+      },
+      apiKey: "test-key",
+      modelId: "claude-3-7-sonnet",
+    }),
+  }));
+
+  mock.module("./attachmentService", () => ({
+    buildAttachmentPayloadFromIds: async () => ({ images: [], textContext: "" }),
+    linkAttachmentsToMessage: async () => {},
+  }));
+
+  mock.module("./settingsService", () => ({
+    getSettingValues: async () => ({ "chat.systemPrompt": "Global prompt" }),
+  }));
+
+  mock.module("./agentService", () => ({
+    runAgentWithConfig: async function* () {},
+  }));
+
+  try {
+    const { editUserMessage } = await import("./messageService");
+    const stream = await editUserMessage("user-1", "user-msg-1", "新问题");
+    const payloads = parseSsePayloads(await readStreamText(stream));
+
+    expect(payloads[0]).toEqual({
+      type: "live_status",
+      status: "offline",
+      route: "direct_model",
+      label: "未联网，直接回答",
+    });
+    expect(payloads[1]).toEqual({
+      type: "delta",
+      content: "新的回答",
+    });
+    expect(payloads.at(-1)).toMatchObject({
+      type: "done",
+      messageId: "assistant-msg-new",
+      model: "claude-3-7-sonnet",
+    });
+
+    expect(updatedRows[0]).toMatchObject({ content: "新问题" });
+    expect(insertedRows).toHaveLength(1);
+    expect(insertedRows[0]).toMatchObject({
+      id: "assistant-msg-new",
+      conversationId: "conv-1",
+      role: "assistant",
+      content: "",
+      mode: "chat",
+      model: "claude-3-7-sonnet",
+    });
+
+    expect(chatStreamCalls).toHaveLength(1);
+    expect(chatStreamCalls[0]?.messages.at(-1)).toEqual({
+      role: "user",
+      content: "新问题",
+    });
+  } finally {
+    mock.restore();
+  }
+});

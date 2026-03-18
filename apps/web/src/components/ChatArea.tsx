@@ -610,17 +610,24 @@ export function ChatArea() {
     return error instanceof Error ? error.message : fallback;
   };
 
-  const canEditUserMessageAt = (index: number) => {
+  const getEditableUserMessageAt = (index: number) => {
     const userMsg = messages[index];
-    if (!userMsg || userMsg.role !== "user") return false;
-    if (userMsg.id.startsWith("temp-")) return false;
+    if (!userMsg || userMsg.role !== "user") return null;
+    if (userMsg.id.startsWith("temp-")) return null;
 
     const assistantMsg = messages[index + 1];
-    if (!assistantMsg || assistantMsg.role !== "assistant") return false;
-    if (assistantMsg.mode !== userMsg.mode) return false;
-    if (assistantMsg.id.startsWith("temp-")) return false;
+    if (!assistantMsg) {
+      return { userMsg, assistantMsg: null };
+    }
+    if (assistantMsg.role !== "assistant") return null;
+    if (assistantMsg.mode !== userMsg.mode) return null;
+    if (assistantMsg.id.startsWith("temp-")) return null;
 
-    return true;
+    return { userMsg, assistantMsg };
+  };
+
+  const canEditUserMessageAt = (index: number) => {
+    return Boolean(getEditableUserMessageAt(index));
   };
 
   const streamAssistantResponse = async ({
@@ -1055,34 +1062,44 @@ export function ChatArea() {
     if (!currentConversation || !newContent.trim()) return;
     const msgIndex = messages.findIndex((message) => message.id === msgId);
     if (msgIndex < 0) return;
-    if (!canEditUserMessageAt(msgIndex)) {
+    const editable = getEditableUserMessageAt(msgIndex);
+    if (!editable) {
       notifyWarning("当前消息不可编辑", "这条用户消息后面没有对应的助手回复，无法重新编辑并生成。");
       setEditingMsgId(null);
       return;
     }
 
-    const userMsg = messages[msgIndex];
-    if (!userMsg || userMsg.role !== "user") return;
-    const assistantMsg = messages[msgIndex + 1];
-    if (!assistantMsg || assistantMsg.role !== "assistant") return;
-
+    const { userMsg, assistantMsg: existingAssistantMsg } = editable;
     const conversationId = currentConversation.id;
     const isAgent = userMsg.mode === "agent";
     const agentRunRef = { current: isAgent ? createPartialAgentRun() : undefined };
+    const assistantMessageId = existingAssistantMsg?.id ?? `temp-assistant-edit-${Date.now()}`;
 
     setEditingMsgId(null);
     useChatStore.getState().updateMessage(msgId, newContent.trim());
-    resetAssistantMessageForStream(assistantMsg.id, agentRunRef.current);
+    if (existingAssistantMsg) {
+      resetAssistantMessageForStream(assistantMessageId, agentRunRef.current);
+    } else {
+      addMessage({
+        id: assistantMessageId,
+        conversationId,
+        role: "assistant",
+        content: "",
+        mode: userMsg.mode,
+        agentRun: agentRunRef.current,
+        createdAt: new Date(),
+      });
+    }
     setIsLoading(true);
     setIsStreaming(true);
-    setStreamingAssistantId(assistantMsg.id);
+    setStreamingAssistantId(assistantMessageId);
 
     try {
       const abortController = createAbortController();
       const smoother = createTextStreamSmoother({
         emit: (delta) => {
           appendMessageDelta(
-            assistantMsg.id,
+            assistantMessageId,
             delta,
             isAgent ? { agentRun: agentRunRef.current } : undefined,
           );
@@ -1096,9 +1113,9 @@ export function ChatArea() {
       if (!response.ok) throw new Error(await response.text().catch(() => "Failed"));
 
       await streamAssistantResponse({
-        input: { conversationId, content: "" },
+        input: { conversationId, content: newContent.trim(), mode: userMsg.mode },
         response,
-        assistantMessageId: assistantMsg.id,
+        assistantMessageId,
         isAgent,
         agentRunRef,
         smoother,
@@ -1111,7 +1128,7 @@ export function ChatArea() {
       useChatStore
         .getState()
         .updateMessage(
-          assistantMsg.id,
+          assistantMessageId,
           `Error: ${message}`,
           isAgent ? { agentRun: createFailedAgentRun(agentRunRef.current, message) } : undefined,
         );
