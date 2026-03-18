@@ -594,6 +594,7 @@ export function ChatArea() {
     const pending = pendingScrollTargetRef.current;
     if (!viewportEl || !pending) return;
 
+    let settleFrame: number | null = null;
     const frame = requestAnimationFrame(() => {
       const next = pendingScrollTargetRef.current;
       if (!next || !viewportRef.current) return;
@@ -607,16 +608,36 @@ export function ChatArea() {
       const anchorEl = messageAnchorRefs.current.get(next.id);
       if (!anchorEl) return;
 
-      const top =
+      const desiredTop =
         anchorEl.getBoundingClientRect().top -
         viewportRef.current.getBoundingClientRect().top +
         viewportRef.current.scrollTop;
-      viewportRef.current.scrollTo({ top });
-      pendingScrollTargetRef.current = null;
+
+      viewportRef.current.scrollTo({ top: desiredTop });
+
+      settleFrame = requestAnimationFrame(() => {
+        if (!viewportRef.current) return;
+        const currentAnchor = messageAnchorRefs.current.get(next.id);
+        if (!currentAnchor) return;
+
+        const distanceFromTop =
+          currentAnchor.getBoundingClientRect().top -
+          viewportRef.current.getBoundingClientRect().top;
+
+        const reachedTarget = Math.abs(distanceFromTop) <= 4;
+        if (reachedTarget || !isStreaming) {
+          pendingScrollTargetRef.current = null;
+        }
+      });
     });
 
-    return () => cancelAnimationFrame(frame);
-  }, [messages, currentConversation?.id, editingMsgId]);
+    return () => {
+      cancelAnimationFrame(frame);
+      if (settleFrame != null) {
+        cancelAnimationFrame(settleFrame);
+      }
+    };
+  }, [messages, currentConversation?.id, editingMsgId, isStreaming]);
 
   useEffect(() => {
     setStreamingAssistantId(null);
