@@ -79,7 +79,7 @@ export type ApiLiveRoute = "local" | "structured_live" | "web_search" | "researc
 export interface ApiLiveMetadata {
   status: ApiLiveStatus;
   route: ApiLiveRoute;
-  label: string;
+  label?: string;
   sourceType: "local" | "weather" | "web_search" | "none";
 }
 

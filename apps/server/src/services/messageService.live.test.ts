@@ -377,7 +377,6 @@ test("regenerate falls back to the previous user message when assistant id is mi
       type: "live_status",
       status: "offline",
       route: "direct_model",
-      label: "未联网，直接回答",
     });
     expect(payloads[1]).toEqual({
       type: "delta",
@@ -560,7 +559,6 @@ test("edit user message creates a new assistant reply when the user message is t
       type: "live_status",
       status: "offline",
       route: "direct_model",
-      label: "未联网，直接回答",
     });
     expect(payloads[1]).toEqual({
       type: "delta",

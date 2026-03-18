@@ -3,7 +3,7 @@ import { api } from "./api";
 import { readSseStream, type SseEvent } from "./sse";
 
 type ChatStreamEvent =
-  | { type: "live_status"; status: ApiLiveStatus; route: ApiLiveRoute; label: string }
+  | { type: "live_status"; status: ApiLiveStatus; route: ApiLiveRoute; label?: string }
   | { type: "citations"; citations: ApiCitation[] }
   | { type: "delta"; content: string }
   | { type: "done"; messageId?: string; model?: string; agentRun?: ApiAgentRun }
@@ -25,7 +25,7 @@ export async function streamChatMessage(
     mode?: "chat" | "agent";
   },
   handlers: {
-    onLiveStatus?: (event: { status: ApiLiveStatus; route: ApiLiveRoute; label: string }) => void;
+    onLiveStatus?: (event: { status: ApiLiveStatus; route: ApiLiveRoute; label?: string }) => void;
     onCitations?: (event: { citations: ApiCitation[] }) => void;
     onDelta: (content: string) => void;
     onDone: (event: { messageId?: string; model?: string; agentRun?: ApiAgentRun }) => void;

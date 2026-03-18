@@ -25,14 +25,14 @@ export type WebSearchPolicy =
 export type StoredLiveMetadata = {
   status: LiveStatus;
   route: LiveRouteType;
-  label: string;
+  label?: string;
   sourceType: LiveSourceType;
 };
 
 export type LiveContextResult = {
   status: LiveStatus;
   route: LiveRouteType;
-  userLabel: string;
+  userLabel?: string;
   source: {
     type: LiveSourceType;
     provider?: string;
@@ -503,7 +503,6 @@ export async function buildLiveContext(input: BuildLiveContextInput): Promise<Li
   return {
     status: "offline",
     route: route.type,
-    userLabel: "未联网，直接回答",
     source: { type: "none" },
   };
 }

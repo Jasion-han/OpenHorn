@@ -137,7 +137,7 @@ test("buildLiveContext does not force web search for identity questions even whe
   expect(classifierCalled).toBe(false);
   expect(result.route).toBe("direct_model");
   expect(result.status).toBe("offline");
-  expect(result.userLabel).toContain("未联网");
+  expect(result.userLabel).toBeUndefined();
 });
 
 test("buildLiveContext does not force web search for translation prompts even when enabled", async () => {
@@ -155,6 +155,7 @@ test("buildLiveContext does not force web search for translation prompts even wh
   expect(classifierCalled).toBe(false);
   expect(result.route).toBe("direct_model");
   expect(result.status).toBe("offline");
+  expect(result.userLabel).toBeUndefined();
 });
 
 test("buildLiveContext prefers web search for named tool capability lookups when allowed", async () => {

@@ -50,7 +50,7 @@ type LiveStatusPayload = {
   type: "live_status";
   status: "live" | "offline";
   route: "local" | "structured_live" | "web_search" | "research" | "direct_model";
-  label: string;
+  label?: string;
 };
 
 type CitationsPayload = {
