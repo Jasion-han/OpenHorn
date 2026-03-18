@@ -8,7 +8,7 @@
       (() => {
         try {
           const mode = localStorage.getItem('openhorn.themeMode') || 'light'
-          const systemDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+          const systemDark = Boolean(window.matchMedia?.('(prefers-color-scheme: dark)')?.matches)
           const useDark = mode === 'dark' || (mode === 'system' && systemDark)
           if (useDark) document.documentElement.classList.add('dark')
           else document.documentElement.classList.remove('dark')

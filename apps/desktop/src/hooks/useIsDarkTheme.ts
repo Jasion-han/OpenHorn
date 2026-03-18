@@ -1,26 +1,25 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState } from "react";
 
 function getIsDark(): boolean {
-  if (typeof document === 'undefined') return false
-  return document.documentElement.classList.contains('dark')
+  if (typeof document === "undefined") return false;
+  return document.documentElement.classList.contains("dark");
 }
 
 export function useIsDarkTheme(): boolean {
-  const [isDark, setIsDark] = useState(getIsDark)
+  const [isDark, setIsDark] = useState(getIsDark);
 
   useEffect(() => {
-    const apply = () => setIsDark(getIsDark())
-    apply()
+    const apply = () => setIsDark(getIsDark());
+    apply();
 
-    const observer = new MutationObserver(() => apply())
+    const observer = new MutationObserver(() => apply());
     observer.observe(document.documentElement, {
       attributes: true,
-      attributeFilter: ['class'],
-    })
+      attributeFilter: ["class"],
+    });
 
-    return () => observer.disconnect()
-  }, [])
+    return () => observer.disconnect();
+  }, []);
 
-  return isDark
+  return isDark;
 }
-

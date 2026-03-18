@@ -1,7 +1,10 @@
 @import "ui/styles/tokens.css";
 
+/* biome-ignore lint/suspicious/noUnknownAtRules: Tailwind directive */
 @tailwind base;
+/* biome-ignore lint/suspicious/noUnknownAtRules: Tailwind directive */
 @tailwind components;
+/* biome-ignore lint/suspicious/noUnknownAtRules: Tailwind directive */
 @tailwind utilities;
 
 @layer base {

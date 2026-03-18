@@ -1,37 +1,37 @@
-import { useEffect, useState } from 'react'
-import { SettingsCard, SettingsRow, SettingsSection, Button, Input } from 'ui'
+import { useEffect, useState } from "react";
+import { Button, Input, SettingsCard, SettingsRow, SettingsSection } from "ui";
 
-import { useIdeStore } from '../../stores/ideStore'
+import { useIdeStore } from "../../stores/ideStore";
 
-const WORKSPACE_ROOT_STORAGE_KEY = 'openhorn.desktop.workspaceRoot'
+const WORKSPACE_ROOT_STORAGE_KEY = "openhorn.desktop.workspaceRoot";
 
 export function readSavedWorkspaceRoot(): string {
-  if (typeof window === 'undefined') return ''
+  if (typeof window === "undefined") return "";
   try {
-    return window.localStorage.getItem(WORKSPACE_ROOT_STORAGE_KEY) || ''
+    return window.localStorage.getItem(WORKSPACE_ROOT_STORAGE_KEY) || "";
   } catch {
-    return ''
+    return "";
   }
 }
 
 export function saveWorkspaceRoot(value: string) {
-  if (typeof window === 'undefined') return
+  if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(WORKSPACE_ROOT_STORAGE_KEY, value)
+    window.localStorage.setItem(WORKSPACE_ROOT_STORAGE_KEY, value);
   } catch {
     // ignore
   }
 }
 
 export function DesktopGeneralSettings() {
-  const workspaceRootInput = useIdeStore((s) => s.workspaceRootInput)
-  const setWorkspaceRootInput = useIdeStore((s) => s.setWorkspaceRootInput)
+  const workspaceRootInput = useIdeStore((s) => s.workspaceRootInput);
+  const setWorkspaceRootInput = useIdeStore((s) => s.setWorkspaceRootInput);
 
-  const [draft, setDraft] = useState(workspaceRootInput)
+  const [draft, setDraft] = useState(workspaceRootInput);
 
   useEffect(() => {
-    setDraft(workspaceRootInput)
-  }, [workspaceRootInput])
+    setDraft(workspaceRootInput);
+  }, [workspaceRootInput]);
 
   return (
     <SettingsSection title="通用" description="管理桌面端的基础配置。">
@@ -56,9 +56,9 @@ export function DesktopGeneralSettings() {
             </Button>
             <Button
               onClick={() => {
-                const next = draft.trim()
-                setWorkspaceRootInput(next)
-                saveWorkspaceRoot(next)
+                const next = draft.trim();
+                setWorkspaceRootInput(next);
+                saveWorkspaceRoot(next);
               }}
             >
               保存
@@ -67,6 +67,5 @@ export function DesktopGeneralSettings() {
         </div>
       </SettingsCard>
     </SettingsSection>
-  )
+  );
 }
-

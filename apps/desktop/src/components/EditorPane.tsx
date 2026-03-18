@@ -1,8 +1,8 @@
-import { Save, X } from 'lucide-react';
-import Editor from '@monaco-editor/react';
-import { Button, ScrollArea, cn } from 'ui';
-import { baseName, languageFromPath, useIdeStore } from '../stores/ideStore';
-import { useIsDarkTheme } from '../hooks/useIsDarkTheme';
+import Editor from "@monaco-editor/react";
+import { Save, X } from "lucide-react";
+import { Button, cn, ScrollArea } from "ui";
+import { useIsDarkTheme } from "../hooks/useIsDarkTheme";
+import { baseName, languageFromPath, useIdeStore } from "../stores/ideStore";
 
 function TabButton({
   active,
@@ -22,14 +22,15 @@ function TabButton({
       type="button"
       onClick={onClick}
       className={cn(
-        'group flex items-center gap-2 rounded-[10px] px-3 py-1.5 text-[13px] leading-5 transition-colors whitespace-nowrap titlebar-no-drag',
+        "group flex items-center gap-2 rounded-[10px] px-3 py-1.5 text-[13px] leading-5 transition-colors whitespace-nowrap titlebar-no-drag",
         active
-          ? 'bg-foreground/[0.08] text-foreground shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]'
-          : 'text-foreground/70 hover:bg-foreground/[0.04]'
+          ? "bg-foreground/[0.08] text-foreground shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]"
+          : "text-foreground/70 hover:bg-foreground/[0.04]",
       )}
     >
       <span className="max-w-[180px] truncate">
-        {label}{dirty ? ' *' : ''}
+        {label}
+        {dirty ? " *" : ""}
       </span>
       <Button
         type="button"
@@ -102,14 +103,14 @@ export function EditorPane() {
               height="100%"
               language={languageFromPath(activeTab.path)}
               value={activeTab.content}
-              onChange={(v) => updateActiveContent(v ?? '')}
+              onChange={(v) => updateActiveContent(v ?? "")}
               options={{
                 minimap: { enabled: false },
                 fontSize: 13,
                 tabSize: 2,
                 scrollBeyondLastLine: false,
               }}
-              theme={isDark ? 'vs-dark' : 'vs'}
+              theme={isDark ? "vs-dark" : "vs"}
             />
           ) : null}
         </div>

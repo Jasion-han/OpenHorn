@@ -1,15 +1,15 @@
-import { invoke } from '@tauri-apps/api/core';
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Button, Input, Badge, cn } from 'ui';
-import { AlertTriangle, ArrowLeft, Settings as SettingsIcon } from 'lucide-react';
-import { SidecarClient } from './lib/sidecarClient';
-import { FileTree } from './components/FileTree';
-import { EditorPane } from './components/EditorPane';
-import { AgentPane } from './components/AgentPane';
-import { useIdeStore } from './stores/ideStore';
-import { SettingsView } from './components/settings/SettingsView';
-import { ThemeListener } from './components/theme/ThemeListener';
-import { readSavedWorkspaceRoot } from './components/settings/DesktopGeneralSettings';
+import { invoke } from "@tauri-apps/api/core";
+import { AlertTriangle, ArrowLeft, Settings as SettingsIcon } from "lucide-react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { Badge, Button, cn, Input } from "ui";
+import { AgentPane } from "./components/AgentPane";
+import { EditorPane } from "./components/EditorPane";
+import { FileTree } from "./components/FileTree";
+import { readSavedWorkspaceRoot } from "./components/settings/DesktopGeneralSettings";
+import { SettingsView } from "./components/settings/SettingsView";
+import { ThemeListener } from "./components/theme/ThemeListener";
+import { SidecarClient } from "./lib/sidecarClient";
+import { useIdeStore } from "./stores/ideStore";
 
 function Panel({
   children,
@@ -23,8 +23,8 @@ function Panel({
   return (
     <div
       className={cn(
-        'h-full min-h-0 rounded-2xl border border-border/50 bg-background/70 backdrop-blur-sm shadow-minimal overflow-hidden',
-        className
+        "h-full min-h-0 rounded-2xl border border-border/50 bg-background/70 backdrop-blur-sm shadow-minimal overflow-hidden",
+        className,
       )}
       style={width ? { width, flexShrink: 0 } : undefined}
     >
@@ -34,7 +34,7 @@ function Panel({
 }
 
 export function App() {
-  const [activeView, setActiveView] = useState<'main' | 'settings'>('main');
+  const [activeView, setActiveView] = useState<"main" | "settings">("main");
   const sidecarStatus = useIdeStore((s) => s.sidecarStatus);
   const sidecarError = useIdeStore((s) => s.sidecarError);
   const client = useIdeStore((s) => s.client);
@@ -47,24 +47,24 @@ export function App() {
 
   const connect = useMemo(
     () => async () => {
-      setSidecarStatus('loading');
-      setSidecarError('');
+      setSidecarStatus("loading");
+      setSidecarError("");
 
       try {
-        const info = await invoke<{ ws_url: string; token: string } | null>('get_sidecar_info');
-        if (!info) throw new Error('Sidecar not ready');
+        const info = await invoke<{ ws_url: string; token: string } | null>("get_sidecar_info");
+        if (!info) throw new Error("Sidecar not ready");
 
         const nextClient = new SidecarClient({ wsUrl: info.ws_url, token: info.token });
         await nextClient.connect();
         setClient(nextClient);
-        setSidecarStatus('connected');
+        setSidecarStatus("connected");
       } catch (error) {
         setClient(null);
-        setSidecarStatus('error');
-        setSidecarError(error instanceof Error ? error.message : 'Failed to connect');
+        setSidecarStatus("error");
+        setSidecarError(error instanceof Error ? error.message : "Failed to connect");
       }
     },
-    [setClient, setSidecarError, setSidecarStatus]
+    [setClient, setSidecarError, setSidecarStatus],
   );
 
   useEffect(() => {
@@ -78,14 +78,14 @@ export function App() {
 
   const openWorkspace = async () => {
     if (!client) return;
-    await client.request('workspace.setCurrent', { root: workspaceRootInput });
-    await loadDir('.');
+    await client.request("workspace.setCurrent", { root: workspaceRootInput });
+    await loadDir(".");
   };
 
   const statusBadge = (() => {
-    if (sidecarStatus === 'connected') return <Badge variant="secondary">connected</Badge>;
-    if (sidecarStatus === 'loading') return <Badge variant="outline">loading</Badge>;
-    if (sidecarStatus === 'error') return <Badge variant="destructive">error</Badge>;
+    if (sidecarStatus === "connected") return <Badge variant="secondary">connected</Badge>;
+    if (sidecarStatus === "loading") return <Badge variant="outline">loading</Badge>;
+    if (sidecarStatus === "error") return <Badge variant="destructive">error</Badge>;
     return <Badge variant="outline">{sidecarStatus}</Badge>;
   })();
 
@@ -94,24 +94,24 @@ export function App() {
       <ThemeListener />
       <header className="h-12 shrink-0 flex items-center justify-between px-4">
         <div className="flex items-center gap-3 min-w-0">
-          {activeView === 'settings' && (
+          {activeView === "settings" && (
             <Button
               variant="ghost"
               size="icon-sm"
               className="titlebar-no-drag"
-              onClick={() => setActiveView('main')}
+              onClick={() => setActiveView("main")}
               aria-label="Back"
               title="Back"
             >
               <ArrowLeft size={16} />
             </Button>
           )}
-          <div className="font-semibold">{activeView === 'settings' ? '设置' : 'OpenHorn'}</div>
+          <div className="font-semibold">{activeView === "settings" ? "设置" : "OpenHorn"}</div>
           <div className="flex items-center gap-2">
             <span className="text-xs text-muted-foreground">Sidecar</span>
             {statusBadge}
           </div>
-          {sidecarStatus === 'error' && (
+          {sidecarStatus === "error" && (
             <div className="hidden md:flex items-center gap-2 min-w-0">
               <AlertTriangle size={14} className="text-destructive shrink-0" />
               <span className="text-xs text-destructive truncate">{sidecarError}</span>
@@ -120,7 +120,7 @@ export function App() {
         </div>
 
         <div className="flex items-center gap-2">
-          {activeView === 'main' && (
+          {activeView === "main" && (
             <>
               <Input
                 placeholder="Workspace root (paste path)"
@@ -144,7 +144,7 @@ export function App() {
             variant="ghost"
             size="icon-sm"
             className="titlebar-no-drag"
-            onClick={() => setActiveView((v) => (v === 'settings' ? 'main' : 'settings'))}
+            onClick={() => setActiveView((v) => (v === "settings" ? "main" : "settings"))}
             aria-label="Settings"
             title="Settings"
           >
@@ -153,7 +153,7 @@ export function App() {
         </div>
       </header>
 
-      {activeView === 'settings' ? (
+      {activeView === "settings" ? (
         <div className="h-[calc(100vh-48px)] p-2 min-h-0">
           <div className="h-full rounded-2xl border border-border/50 bg-background/70 backdrop-blur-sm shadow-minimal overflow-hidden">
             <SettingsView />
