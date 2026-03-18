@@ -1,31 +1,31 @@
-import { existsSync } from 'node:fs';
-import { mkdir, writeFile, readFile } from 'node:fs/promises';
-import { join } from 'node:path';
-import { inArray } from 'drizzle-orm';
-import { db } from '../db';
-import { attachments } from 'db';
-import { generateId } from '../utils';
-import { formatAttachmentContext, parseAttachmentContent } from './attachmentParser';
+import { existsSync } from "node:fs";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { attachments } from "db";
+import { inArray } from "drizzle-orm";
+import { db } from "../db";
+import { generateId } from "../utils";
+import { formatAttachmentContext, parseAttachmentContent } from "./attachmentParser";
 
 export const MAX_ATTACHMENT_SIZE = 20 * 1024 * 1024;
 
 const ALLOWED_MIME_TYPES = new Set([
-  'image/png',
-  'image/jpeg',
-  'image/webp',
-  'application/pdf',
-  'text/plain',
-  'text/markdown',
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "application/pdf",
+  "text/plain",
+  "text/markdown",
 ]);
 
 const EXTENSION_MIME_MAP: Record<string, string> = {
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.webp': 'image/webp',
-  '.pdf': 'application/pdf',
-  '.txt': 'text/plain',
-  '.md': 'text/markdown',
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
+  ".pdf": "application/pdf",
+  ".txt": "text/plain",
+  ".md": "text/markdown",
 };
 
 export function isAllowedMimeType(mime: string) {
@@ -38,31 +38,30 @@ function resolveMimeType(file: File) {
   }
 
   const lowerName = file.name.toLowerCase();
-  const extension = Object.keys(EXTENSION_MIME_MAP)
-    .find((ext) => lowerName.endsWith(ext));
+  const extension = Object.keys(EXTENSION_MIME_MAP).find((ext) => lowerName.endsWith(ext));
 
   if (extension) {
     return EXTENSION_MIME_MAP[extension];
   }
 
-  return file.type || '';
+  return file.type || "";
 }
 
 export function buildAttachmentDir(input: { conversationId?: string; sessionId?: string }) {
   const dataDir = resolveDataDir();
   if (input.sessionId) {
-    return join(dataDir, 'attachments', 'agent', input.sessionId);
+    return join(dataDir, "attachments", "agent", input.sessionId);
   }
 
   if (!input.conversationId) {
-    throw new Error('conversationId or sessionId is required');
+    throw new Error("conversationId or sessionId is required");
   }
 
-  return join(dataDir, 'attachments', input.conversationId);
+  return join(dataDir, "attachments", input.conversationId);
 }
 
 function sanitizeFileName(name: string) {
-  return name.replace(/[^a-zA-Z0-9._-]/g, '_');
+  return name.replace(/[^a-zA-Z0-9._-]/g, "_");
 }
 
 function resolveDataDir() {
@@ -70,12 +69,12 @@ function resolveDataDir() {
     return process.env.OPENHORN_DATA_DIR;
   }
 
-  const rootDataDir = join(process.cwd(), '..', '..', 'data');
+  const rootDataDir = join(process.cwd(), "..", "..", "data");
   if (existsSync(rootDataDir)) {
     return rootDataDir;
   }
 
-  const localDataDir = join(process.cwd(), 'data');
+  const localDataDir = join(process.cwd(), "data");
   if (existsSync(localDataDir)) {
     return localDataDir;
   }
@@ -91,11 +90,11 @@ export async function storeAttachment(params: {
   const resolvedType = resolveMimeType(params.file);
 
   if (!isAllowedMimeType(resolvedType)) {
-    throw new Error('Unsupported file type');
+    throw new Error("Unsupported file type");
   }
 
   if (params.file.size > MAX_ATTACHMENT_SIZE) {
-    throw new Error('File too large');
+    throw new Error("File too large");
   }
 
   const id = generateId();
@@ -132,16 +131,13 @@ export async function storeAttachment(params: {
 export async function linkAttachmentsToMessage(attachmentIds: string[], messageId: string) {
   if (attachmentIds.length === 0) return;
 
-  await db.update(attachments)
-    .set({ messageId })
-    .where(inArray(attachments.id, attachmentIds));
+  await db.update(attachments).set({ messageId }).where(inArray(attachments.id, attachmentIds));
 }
 
 export async function getAttachmentsByIds(attachmentIds: string[]) {
   if (attachmentIds.length === 0) return [];
 
-  return db.select().from(attachments)
-    .where(inArray(attachments.id, attachmentIds));
+  return db.select().from(attachments).where(inArray(attachments.id, attachmentIds));
 }
 
 export type ImageAttachmentPayload = {
@@ -154,7 +150,11 @@ export type ImageAttachmentPayload = {
 
 export async function buildAttachmentPayloadFromIds(attachmentIds: string[]) {
   if (attachmentIds.length === 0) {
-    return { textContext: '', images: [] as ImageAttachmentPayload[], files: [] as Array<{ id: string; fileName: string; fileType: string; fileSize: number }> };
+    return {
+      textContext: "",
+      images: [] as ImageAttachmentPayload[],
+      files: [] as Array<{ id: string; fileName: string; fileType: string; fileSize: number }>,
+    };
   }
 
   const records = await getAttachmentsByIds(attachmentIds);
@@ -171,7 +171,7 @@ export async function buildAttachmentPayloadFromIds(attachmentIds: string[]) {
     });
 
     // Images are sent as native vision blocks; do not include placeholder text.
-    if (record.fileType?.startsWith('image/')) {
+    if (record.fileType?.startsWith("image/")) {
       try {
         const buffer = await readFile(record.filePath);
         images.push({
@@ -179,7 +179,7 @@ export async function buildAttachmentPayloadFromIds(attachmentIds: string[]) {
           fileName: record.fileName,
           fileType: record.fileType,
           fileSize: record.fileSize,
-          dataBase64: buffer.toString('base64'),
+          dataBase64: buffer.toString("base64"),
         });
       } catch {
         // ignore: leave image out (fallback will be text-only).
@@ -195,7 +195,7 @@ export async function buildAttachmentPayloadFromIds(attachmentIds: string[]) {
       });
       parsed.push({ fileName: record.fileName, text });
     } catch {
-      parsed.push({ fileName: record.fileName, text: '' });
+      parsed.push({ fileName: record.fileName, text: "" });
     }
   }
 

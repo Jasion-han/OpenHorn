@@ -1,14 +1,15 @@
 export type LiveRouteType =
-  | 'local'
-  | 'structured_live'
-  | 'web_search'
-  | 'research'
-  | 'direct_model';
+  | "local"
+  | "structured_live"
+  | "web_search"
+  | "research"
+  | "direct_model";
 
-export type LiveStatus = 'live' | 'offline';
-import { buildSearchContext, type SearchCitation, TAVILY_API_KEY_SETTING } from './searchService';
+export type LiveStatus = "live" | "offline";
 
-export type LiveSourceType = 'local' | 'weather' | 'web_search' | 'none';
+import { buildSearchContext, type SearchCitation } from "./searchService";
+
+export type LiveSourceType = "local" | "weather" | "web_search" | "none";
 
 export type LiveRoute = {
   type: LiveRouteType;
@@ -39,12 +40,17 @@ export type BuildLiveContextInput = {
   prompt: string;
   timezone?: string;
   now?: Date;
-  fetchImpl?: typeof fetch;
+  fetchImpl?: FetchFn;
   userSettings?: Record<string, string>;
   tavilyEnvKey?: string | null;
   forceWebSearch?: boolean;
   classifier?: (prompt: string) => Promise<LiveRouteType | null>;
 };
+
+type FetchFn = (
+  input: Parameters<typeof fetch>[0],
+  init?: Parameters<typeof fetch>[1],
+) => ReturnType<typeof fetch>;
 
 type WeatherLocation = {
   city: string;
@@ -54,79 +60,79 @@ type WeatherLocation = {
   aliases: string[];
 };
 
-const DEFAULT_TIMEZONE = 'Asia/Shanghai';
-const DEFAULT_FETCH: typeof fetch = (...args) => fetch(...args);
+const DEFAULT_TIMEZONE = "Asia/Shanghai";
+const DEFAULT_FETCH: FetchFn = fetch;
 
 const WEATHER_LOCATIONS: WeatherLocation[] = [
   {
-    city: 'Shanghai',
+    city: "Shanghai",
     latitude: 31.2304,
     longitude: 121.4737,
-    timezone: 'Asia/Shanghai',
-    aliases: ['上海', 'shanghai'],
+    timezone: "Asia/Shanghai",
+    aliases: ["上海", "shanghai"],
   },
   {
-    city: 'Beijing',
+    city: "Beijing",
     latitude: 39.9042,
     longitude: 116.4074,
-    timezone: 'Asia/Shanghai',
-    aliases: ['北京', 'beijing'],
+    timezone: "Asia/Shanghai",
+    aliases: ["北京", "beijing"],
   },
   {
-    city: 'Shenzhen',
+    city: "Shenzhen",
     latitude: 22.5431,
     longitude: 114.0579,
-    timezone: 'Asia/Shanghai',
-    aliases: ['深圳', 'shenzhen'],
+    timezone: "Asia/Shanghai",
+    aliases: ["深圳", "shenzhen"],
   },
   {
-    city: 'Guangzhou',
+    city: "Guangzhou",
     latitude: 23.1291,
     longitude: 113.2644,
-    timezone: 'Asia/Shanghai',
-    aliases: ['广州', 'guangzhou'],
+    timezone: "Asia/Shanghai",
+    aliases: ["广州", "guangzhou"],
   },
   {
-    city: 'Hangzhou',
+    city: "Hangzhou",
     latitude: 30.2741,
     longitude: 120.1551,
-    timezone: 'Asia/Shanghai',
-    aliases: ['杭州', 'hangzhou'],
+    timezone: "Asia/Shanghai",
+    aliases: ["杭州", "hangzhou"],
   },
   {
-    city: 'Chengdu',
+    city: "Chengdu",
     latitude: 30.5728,
     longitude: 104.0668,
-    timezone: 'Asia/Shanghai',
-    aliases: ['成都', 'chengdu'],
+    timezone: "Asia/Shanghai",
+    aliases: ["成都", "chengdu"],
   },
   {
-    city: 'Tokyo',
+    city: "Tokyo",
     latitude: 35.6764,
     longitude: 139.65,
-    timezone: 'Asia/Tokyo',
-    aliases: ['东京', 'tokyo'],
+    timezone: "Asia/Tokyo",
+    aliases: ["东京", "tokyo"],
   },
   {
-    city: 'London',
+    city: "London",
     latitude: 51.5072,
     longitude: -0.1276,
-    timezone: 'Europe/London',
-    aliases: ['伦敦', 'london'],
+    timezone: "Europe/London",
+    aliases: ["伦敦", "london"],
   },
   {
-    city: 'New York',
+    city: "New York",
     latitude: 40.7128,
     longitude: -74.006,
-    timezone: 'America/New_York',
-    aliases: ['纽约', 'new york', 'newyork'],
+    timezone: "America/New_York",
+    aliases: ["纽约", "new york", "newyork"],
   },
   {
-    city: 'San Francisco',
+    city: "San Francisco",
     latitude: 37.7749,
     longitude: -122.4194,
-    timezone: 'America/Los_Angeles',
-    aliases: ['旧金山', 'san francisco', 'sf'],
+    timezone: "America/Los_Angeles",
+    aliases: ["旧金山", "san francisco", "sf"],
   },
 ];
 
@@ -139,85 +145,89 @@ function inferTimezone(input?: string) {
 }
 
 function joinContextLines(lines: Array<string | null | undefined>) {
-  return lines.filter((line): line is string => Boolean(line && line.trim())).join('\n');
+  return lines.filter((line): line is string => Boolean(line?.trim())).join("\n");
 }
 
 function serializeNumber(value: unknown) {
-  return typeof value === 'number' && Number.isFinite(value) ? `${value}` : 'unknown';
+  return typeof value === "number" && Number.isFinite(value) ? `${value}` : "unknown";
 }
 
 function formatIsoLocal(now: Date, timezone: string) {
-  const parts = new Intl.DateTimeFormat('en-CA', {
+  const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: timezone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
     hour12: false,
   }).formatToParts(now);
 
-  const part = (type: string) => parts.find((item) => item.type === type)?.value || '00';
-  return `${part('year')}-${part('month')}-${part('day')} ${part('hour')}:${part('minute')}`;
+  const part = (type: string) => parts.find((item) => item.type === type)?.value || "00";
+  return `${part("year")}-${part("month")}-${part("day")} ${part("hour")}:${part("minute")}`;
 }
 
 function describeWeatherCode(code: unknown) {
   switch (code) {
     case 0:
-      return 'Clear';
+      return "Clear";
     case 1:
     case 2:
     case 3:
-      return 'Partly cloudy';
+      return "Partly cloudy";
     case 45:
     case 48:
-      return 'Fog';
+      return "Fog";
     case 51:
     case 53:
     case 55:
     case 56:
     case 57:
-      return 'Drizzle';
+      return "Drizzle";
     case 61:
     case 63:
     case 65:
     case 66:
     case 67:
-      return 'Rain';
+      return "Rain";
     case 71:
     case 73:
     case 75:
     case 77:
-      return 'Snow';
+      return "Snow";
     case 80:
     case 81:
     case 82:
-      return 'Rain showers';
+      return "Rain showers";
     case 85:
     case 86:
-      return 'Snow showers';
+      return "Snow showers";
     case 95:
     case 96:
     case 99:
-      return 'Thunderstorm';
+      return "Thunderstorm";
     default:
-      return 'Unknown';
+      return "Unknown";
   }
 }
 
 function resolveWeatherLocation(prompt: string) {
   const text = normalizePrompt(prompt);
   return WEATHER_LOCATIONS.find((location) =>
-    location.aliases.some((alias) => text.includes(alias))
+    location.aliases.some((alias) => text.includes(alias)),
   );
 }
 
-function buildOfflineResult(route: LiveRouteType, userLabel: string, systemContext?: string): LiveContextResult {
+function buildOfflineResult(
+  route: LiveRouteType,
+  userLabel: string,
+  systemContext?: string,
+): LiveContextResult {
   return {
-    status: 'offline',
+    status: "offline",
     route,
     userLabel,
-    source: { type: 'none' },
+    source: { type: "none" },
     systemContext,
   };
 }
@@ -226,34 +236,37 @@ async function resolveWeatherContext(input: BuildLiveContextInput): Promise<Live
   const location = resolveWeatherLocation(input.prompt);
   if (!location) {
     return buildOfflineResult(
-      'structured_live',
-      '缺少位置，未查询天气',
-      'Weather lookup requires an explicit city or location from the user. Do not infer the user location. Ask the user to provide a city before answering weather.'
+      "structured_live",
+      "缺少位置，未查询天气",
+      "Weather lookup requires an explicit city or location from the user. Do not infer the user location. Ask the user to provide a city before answering weather.",
     );
   }
 
-  const url = new URL('https://api.open-meteo.com/v1/forecast');
-  url.searchParams.set('latitude', `${location.latitude}`);
-  url.searchParams.set('longitude', `${location.longitude}`);
+  const url = new URL("https://api.open-meteo.com/v1/forecast");
+  url.searchParams.set("latitude", `${location.latitude}`);
+  url.searchParams.set("longitude", `${location.longitude}`);
   url.searchParams.set(
-    'current',
-    'temperature_2m,apparent_temperature,precipitation,rain,showers,snowfall,weather_code,wind_speed_10m'
+    "current",
+    "temperature_2m,apparent_temperature,precipitation,rain,showers,snowfall,weather_code,wind_speed_10m",
   );
-  url.searchParams.set('daily', 'temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code');
-  url.searchParams.set('timezone', location.timezone);
-  url.searchParams.set('forecast_days', '1');
+  url.searchParams.set(
+    "daily",
+    "temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code",
+  );
+  url.searchParams.set("timezone", location.timezone);
+  url.searchParams.set("forecast_days", "1");
 
   try {
     const response = await (input.fetchImpl || DEFAULT_FETCH)(url.toString());
     if (!response.ok) {
       return buildOfflineResult(
-        'structured_live',
-        '实时服务暂不可用，本轮为离线回答',
-        'Live weather lookup failed. Do not claim current weather data. Briefly state that live weather is unavailable.'
+        "structured_live",
+        "实时服务暂不可用，本轮为离线回答",
+        "Live weather lookup failed. Do not claim current weather data. Briefly state that live weather is unavailable.",
       );
     }
 
-    const payload = await response.json() as {
+    const payload = (await response.json()) as {
       current?: Record<string, unknown>;
       daily?: Record<string, unknown[]>;
     };
@@ -265,15 +278,17 @@ async function resolveWeatherContext(input: BuildLiveContextInput): Promise<Live
     const precipitation = Array.isArray(daily.precipitation_probability_max)
       ? daily.precipitation_probability_max[0]
       : undefined;
-    const weatherCode = current.weather_code ?? (Array.isArray(daily.weather_code) ? daily.weather_code[0] : undefined);
+    const weatherCode =
+      current.weather_code ??
+      (Array.isArray(daily.weather_code) ? daily.weather_code[0] : undefined);
 
     return {
-      status: 'live',
-      route: 'structured_live',
+      status: "live",
+      route: "structured_live",
       userLabel: `已使用天气数据 · ${location.city}`,
       source: {
-        type: 'weather',
-        provider: 'open-meteo',
+        type: "weather",
+        provider: "open-meteo",
         city: location.city,
       },
       systemContext: joinContextLines([
@@ -285,14 +300,14 @@ async function resolveWeatherContext(input: BuildLiveContextInput): Promise<Live
         `- today_max_c: ${serializeNumber(high)}`,
         `- today_precipitation_probability_max: ${serializeNumber(precipitation)}`,
         `- wind_speed_10m_kmh: ${serializeNumber(current.wind_speed_10m)}`,
-        'Use only this live weather data. Do not invent unavailable fields.',
+        "Use only this live weather data. Do not invent unavailable fields.",
       ]),
     };
   } catch {
     return buildOfflineResult(
-      'structured_live',
-      '实时服务暂不可用，本轮为离线回答',
-      'Live weather lookup failed. Do not claim current weather data. Briefly state that live weather is unavailable.'
+      "structured_live",
+      "实时服务暂不可用，本轮为离线回答",
+      "Live weather lookup failed. Do not claim current weather data. Briefly state that live weather is unavailable.",
     );
   }
 }
@@ -301,28 +316,28 @@ export function routeLiveQuery(prompt: string): LiveRoute {
   const text = prompt.trim();
 
   if (/周几|星期|几点|几号|日期|时间|时区|timezone|date|time/i.test(text)) {
-    return { type: 'local', needsCitation: false };
+    return { type: "local", needsCitation: false };
   }
 
   if (/天气|下雨|气温|温度|weather|forecast/i.test(text)) {
-    return { type: 'structured_live', needsCitation: false };
+    return { type: "structured_live", needsCitation: false };
   }
 
   if (/比较|分析|调研|汇总|整理.*最近|research|survey/i.test(text)) {
-    return { type: 'research', needsCitation: true };
+    return { type: "research", needsCitation: true };
   }
 
   if (/最近|最新|刚刚|今天.*新闻|发布了什么|发生了什么|news|recent|today/i.test(text)) {
-    return { type: 'web_search', needsCitation: true };
+    return { type: "web_search", needsCitation: true };
   }
 
-  return { type: 'direct_model', needsCitation: false };
+  return { type: "direct_model", needsCitation: false };
 }
 
 function routeFromType(type: LiveRouteType): LiveRoute {
   return {
     type,
-    needsCitation: type === 'web_search' || type === 'research',
+    needsCitation: type === "web_search" || type === "research",
   };
 }
 
@@ -330,44 +345,44 @@ export async function buildLiveContext(input: BuildLiveContextInput): Promise<Li
   let route = routeLiveQuery(input.prompt);
   const timezone = inferTimezone(input.timezone);
 
-  if (route.type === 'direct_model' && input.classifier) {
+  if (route.type === "direct_model" && input.classifier) {
     const classified = await input.classifier(input.prompt);
     if (classified) {
       route = routeFromType(classified);
     }
   }
 
-  if (route.type === 'direct_model' && input.forceWebSearch) {
-    route = routeFromType('web_search');
+  if (route.type === "direct_model" && input.forceWebSearch) {
+    route = routeFromType("web_search");
   }
 
-  if (route.type === 'local') {
+  if (route.type === "local") {
     const now = input.now ?? new Date();
-    const weekday = new Intl.DateTimeFormat('en-US', {
-      weekday: 'long',
+    const weekday = new Intl.DateTimeFormat("en-US", {
+      weekday: "long",
       timeZone: timezone,
     }).format(now);
 
     return {
-      status: 'live',
+      status: "live",
       route: route.type,
-      userLabel: '已使用本地时间',
-      source: { type: 'local' },
+      userLabel: "已使用本地时间",
+      source: { type: "local" },
       systemContext: joinContextLines([
-        'Local time context:',
+        "Local time context:",
         `- timezone: ${timezone}`,
         `- local_datetime: ${formatIsoLocal(now, timezone)}`,
         `- weekday: ${weekday}`,
-        'Answer using this local time context. Do not claim web search.',
+        "Answer using this local time context. Do not claim web search.",
       ]),
     };
   }
 
-  if (route.type === 'structured_live') {
+  if (route.type === "structured_live") {
     return resolveWeatherContext(input);
   }
 
-  if (route.type === 'web_search' || route.type === 'research') {
+  if (route.type === "web_search" || route.type === "research") {
     const searchContext = await buildSearchContext({
       route: route.type,
       prompt: input.prompt,
@@ -381,8 +396,8 @@ export async function buildLiveContext(input: BuildLiveContextInput): Promise<Li
       route: route.type,
       userLabel: searchContext.label,
       source: {
-        type: searchContext.status === 'live' ? 'web_search' : 'none',
-        provider: searchContext.provider === 'tavily' ? 'tavily' : undefined,
+        type: searchContext.status === "live" ? "web_search" : "none",
+        provider: searchContext.provider === "tavily" ? "tavily" : undefined,
       },
       systemContext: searchContext.systemContext,
       citations: searchContext.citations,
@@ -390,10 +405,10 @@ export async function buildLiveContext(input: BuildLiveContextInput): Promise<Li
   }
 
   return {
-    status: 'offline',
+    status: "offline",
     route: route.type,
-    userLabel: '未联网，直接回答',
-    source: { type: 'none' },
+    userLabel: "未联网，直接回答",
+    source: { type: "none" },
   };
 }
 

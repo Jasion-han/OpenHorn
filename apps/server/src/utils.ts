@@ -1,15 +1,14 @@
-import crypto from 'crypto';
+import crypto from "node:crypto";
 
-const ALGORITHM = 'aes-256-gcm';
+const ALGORITHM = "aes-256-gcm";
 const IV_LENGTH = 16;
-const TAG_LENGTH = 16;
 
 function getKey(): Buffer {
   const key = process.env.ENCRYPTION_KEY;
   if (!key) {
-    throw new Error('ENCRYPTION_KEY is not set');
+    throw new Error("ENCRYPTION_KEY is not set");
   }
-  return crypto.createHash('sha256').update(key).digest();
+  return crypto.createHash("sha256").update(key).digest();
 }
 
 export function encrypt(text: string): string {
@@ -17,30 +16,30 @@ export function encrypt(text: string): string {
   const key = getKey();
   const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
 
-  let encrypted = cipher.update(text, 'utf8', 'hex');
-  encrypted += cipher.final('hex');
+  let encrypted = cipher.update(text, "utf8", "hex");
+  encrypted += cipher.final("hex");
 
   const tag = cipher.getAuthTag();
 
-  return iv.toString('hex') + ':' + tag.toString('hex') + ':' + encrypted;
+  return `${iv.toString("hex")}:${tag.toString("hex")}:${encrypted}`;
 }
 
 export function decrypt(encryptedText: string): string {
-  const parts = encryptedText.split(':');
+  const parts = encryptedText.split(":");
   if (parts.length !== 3) {
-    throw new Error('Invalid encrypted text format');
+    throw new Error("Invalid encrypted text format");
   }
 
-  const iv = Buffer.from(parts[0], 'hex');
-  const tag = Buffer.from(parts[1], 'hex');
+  const iv = Buffer.from(parts[0], "hex");
+  const tag = Buffer.from(parts[1], "hex");
   const encrypted = parts[2];
 
   const key = getKey();
   const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
   decipher.setAuthTag(tag);
 
-  let decrypted = decipher.update(encrypted, 'hex', 'utf8');
-  decrypted += decipher.final('utf8');
+  let decrypted = decipher.update(encrypted, "hex", "utf8");
+  decrypted += decipher.final("utf8");
 
   return decrypted;
 }

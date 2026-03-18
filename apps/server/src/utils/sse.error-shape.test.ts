@@ -1,10 +1,10 @@
-import { describe, expect, it } from 'bun:test';
-import { createSseStream } from './sse';
+import { describe, expect, it } from "bun:test";
+import { createSseStream } from "./sse";
 
 async function readStreamText(stream: ReadableStream): Promise<string> {
   const reader = stream.getReader();
   const decoder = new TextDecoder();
-  let out = '';
+  let out = "";
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -14,18 +14,18 @@ async function readStreamText(stream: ReadableStream): Promise<string> {
   return out;
 }
 
-describe('createSseStream', () => {
-  it('emits error events with both message and content for compatibility', async () => {
+describe("createSseStream", () => {
+  it("emits error events with both message and content for compatibility", async () => {
     const stream = createSseStream(async () => {
-      throw new Error('boom');
+      throw new Error("boom");
     });
 
     const text = await readStreamText(stream);
-    const line = text.split('\n').find((l) => l.startsWith('data: ')) || '';
-    const payload = JSON.parse(line.replace(/^data:\s*/, ''));
+    const line = text.split("\n").find((l) => l.startsWith("data: ")) || "";
+    const payload = JSON.parse(line.replace(/^data:\s*/, ""));
 
-    expect(payload.type).toBe('error');
-    expect(payload.message).toBe('boom');
-    expect(payload.content).toBe('boom');
+    expect(payload.type).toBe("error");
+    expect(payload.message).toBe("boom");
+    expect(payload.content).toBe("boom");
   });
 });

@@ -1,7 +1,9 @@
-import { db } from '../db';
-import { mcpServers } from 'db';
-import { and, eq } from 'drizzle-orm';
-import { generateId } from '../utils';
+import { mcpServers } from "db";
+import { and, eq } from "drizzle-orm";
+import { db } from "../db";
+import { generateId } from "../utils";
+
+type McpServerRow = typeof mcpServers.$inferSelect;
 
 export interface MCPServerItem {
   id: string;
@@ -29,7 +31,7 @@ export interface UpdateMCPServerInput {
 function parseConfig(config: string): Record<string, unknown> {
   try {
     const parsed = JSON.parse(config) as unknown;
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
       return parsed as Record<string, unknown>;
     }
     return {};
@@ -38,7 +40,7 @@ function parseConfig(config: string): Record<string, unknown> {
   }
 }
 
-function toItem(row: any): MCPServerItem {
+function toItem(row: McpServerRow): MCPServerItem {
   return {
     id: row.id,
     userId: row.userId,
@@ -56,17 +58,25 @@ export async function getMCPServers(userId: string): Promise<MCPServerItem[]> {
   return rows.map(toItem);
 }
 
-export async function getMCPServerById(userId: string, serverId: string): Promise<MCPServerItem | null> {
-  const result = await db.select().from(mcpServers)
+export async function getMCPServerById(
+  userId: string,
+  serverId: string,
+): Promise<MCPServerItem | null> {
+  const result = await db
+    .select()
+    .from(mcpServers)
     .where(and(eq(mcpServers.id, serverId), eq(mcpServers.userId, userId)))
     .limit(1);
   return result.length > 0 ? toItem(result[0]) : null;
 }
 
-export async function createMCPServer(userId: string, input: CreateMCPServerInput): Promise<MCPServerItem> {
+export async function createMCPServer(
+  userId: string,
+  input: CreateMCPServerInput,
+): Promise<MCPServerItem> {
   const id = generateId();
   const now = new Date();
-  
+
   await db.insert(mcpServers).values({
     id,
     userId,
@@ -77,7 +87,7 @@ export async function createMCPServer(userId: string, input: CreateMCPServerInpu
     createdAt: now,
     updatedAt: now,
   });
-  
+
   return {
     id,
     userId,
@@ -90,55 +100,66 @@ export async function createMCPServer(userId: string, input: CreateMCPServerInpu
   };
 }
 
-export async function updateMCPServer(userId: string, serverId: string, input: UpdateMCPServerInput) {
-  const existing = await db.select().from(mcpServers)
+export async function updateMCPServer(
+  userId: string,
+  serverId: string,
+  input: UpdateMCPServerInput,
+) {
+  const existing = await db
+    .select()
+    .from(mcpServers)
     .where(and(eq(mcpServers.id, serverId), eq(mcpServers.userId, userId)))
     .limit(1);
-  
+
   if (existing.length === 0) {
-    throw new Error('MCP Server not found');
+    throw new Error("MCP Server not found");
   }
-  
+
   const updates: Record<string, unknown> = {
     updatedAt: new Date(),
   };
-  
+
   if (input.name) updates.name = input.name;
   if (input.config) updates.config = JSON.stringify(input.config);
   if (input.isEnabled !== undefined) updates.isEnabled = input.isEnabled;
-  
-  await db.update(mcpServers).set(updates)
+
+  await db
+    .update(mcpServers)
+    .set(updates)
     .where(and(eq(mcpServers.id, serverId), eq(mcpServers.userId, userId)));
-  
+
   return { success: true };
 }
 
 export async function deleteMCPServer(userId: string, serverId: string) {
-  const existing = await db.select({ id: mcpServers.id }).from(mcpServers)
+  const existing = await db
+    .select({ id: mcpServers.id })
+    .from(mcpServers)
     .where(and(eq(mcpServers.id, serverId), eq(mcpServers.userId, userId)))
     .limit(1);
   if (existing.length === 0) {
-    throw new Error('MCP Server not found');
+    throw new Error("MCP Server not found");
   }
 
-  await db.delete(mcpServers)
+  await db
+    .delete(mcpServers)
     .where(and(eq(mcpServers.id, serverId), eq(mcpServers.userId, userId)));
-  
+
   return { success: true };
 }
 
 export async function testMCPServer(userId: string, serverId: string) {
   const server = await getMCPServerById(userId, serverId);
   if (!server) {
-    return { success: false, error: 'Server not found' };
+    return { success: false, error: "Server not found" };
   }
-  
+
   try {
     return { success: true };
   } catch (error) {
-    return { 
-      success: false, 
-      error: error instanceof Error ? error.message : 'Test failed' 
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Test failed",
     };
   }
 }

@@ -1,25 +1,25 @@
-import { readFile } from 'node:fs/promises';
-import pdf from 'pdf-parse';
+import { readFile } from "node:fs/promises";
+import pdf from "pdf-parse";
 
 export async function parseAttachmentContent(input: {
   filePath: string;
   fileType: string;
   fileName: string;
 }) {
-  if (input.fileType === 'application/pdf') {
+  if (input.fileType === "application/pdf") {
     const data = await pdf(await readFile(input.filePath));
-    return data.text || '';
+    return data.text || "";
   }
 
-  if (input.fileType.startsWith('text/')) {
-    return await readFile(input.filePath, 'utf8');
+  if (input.fileType.startsWith("text/")) {
+    return await readFile(input.filePath, "utf8");
   }
 
-  if (input.fileType.startsWith('image/')) {
+  if (input.fileType.startsWith("image/")) {
     return `[Image: ${input.fileName}, type=${input.fileType}]`;
   }
 
-  return '';
+  return "";
 }
 
 export function formatAttachmentContext(items: Array<{ fileName: string; text: string }>) {
@@ -32,8 +32,8 @@ export function formatAttachmentContext(items: Array<{ fileName: string; text: s
     .map((item) => `- ${item.fileName}: ${item.text}`);
 
   if (lines.length === 0) {
-    return '';
+    return "";
   }
 
-  return `Attachments:\n${lines.join('\n')}`;
+  return `Attachments:\n${lines.join("\n")}`;
 }

@@ -1,5 +1,5 @@
-import { createAdapter } from '../agent-adapters';
-import type { LiveRouteType } from './liveCapabilities';
+import { createAdapter } from "../agent-adapters";
+import type { LiveRouteType } from "./liveCapabilities";
 
 export async function classifyLiveRouteWithModel(params: {
   provider: string;
@@ -19,18 +19,25 @@ export async function classifyLiveRouteWithModel(params: {
       maxTokens: 16,
       messages: [
         {
-          role: 'system',
-          content: 'Classify the user query into one of: local, structured_live, web_search, research, direct_model. Respond with a single label only.',
+          role: "system",
+          content:
+            "Classify the user query into one of: local, structured_live, web_search, research, direct_model. Respond with a single label only.",
         },
         {
-          role: 'user',
+          role: "user",
           content: trimmed,
         },
       ],
     });
 
     const text = response.content.toLowerCase();
-    const labels: LiveRouteType[] = ['local', 'structured_live', 'web_search', 'research', 'direct_model'];
+    const labels: LiveRouteType[] = [
+      "local",
+      "structured_live",
+      "web_search",
+      "research",
+      "direct_model",
+    ];
     return labels.find((label) => text.includes(label)) || null;
   } catch {
     return null;

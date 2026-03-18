@@ -1,13 +1,12 @@
-import { and, asc, desc, eq, isNull } from 'drizzle-orm';
-import { agentEvents, agentSessions, conversations, messages } from 'db';
-import { db } from '../db';
-import { generateId } from '../utils';
+import { agentEvents, agentSessions, conversations, messages } from "db";
+import { and, asc, desc, eq, isNull } from "drizzle-orm";
+import { db } from "../db";
+import { generateId } from "../utils";
 
-type LegacyAgentEventRow = typeof agentEvents.$inferSelect;
 type LegacyAgentSessionRow = typeof agentSessions.$inferSelect;
 
 type AgentRunStep = {
-  type: 'tool_start' | 'tool_result' | 'error';
+  type: "tool_start" | "tool_result" | "error";
   toolName?: string;
   content?: string;
   toolInput?: unknown;
@@ -15,7 +14,7 @@ type AgentRunStep = {
 };
 
 type AgentRunData = {
-  status: 'running' | 'completed' | 'cancelled' | 'failed' | 'partial';
+  status: "running" | "completed" | "cancelled" | "failed" | "partial";
   summary: string;
   error?: string;
   steps: AgentRunStep[];
@@ -32,22 +31,18 @@ function parseToolInput(raw: string | null): unknown {
 }
 
 function buildAgentRunSummary(steps: AgentRunStep[], error?: string) {
-  const toolCount = steps.filter((step) => step.type === 'tool_start').length;
+  const toolCount = steps.filter((step) => step.type === "tool_start").length;
   if (error) {
-    return toolCount > 0
-      ? `Agent 运行失败，已调用 ${toolCount} 个工具`
-      : 'Agent 运行失败';
+    return toolCount > 0 ? `Agent 运行失败，已调用 ${toolCount} 个工具` : "Agent 运行失败";
   }
-  return toolCount > 0
-    ? `Agent 已调用 ${toolCount} 个工具`
-    : 'Agent 已完成本轮执行';
+  return toolCount > 0 ? `Agent 已调用 ${toolCount} 个工具` : "Agent 已完成本轮执行";
 }
 
-function mapLegacyStatus(status: string | null | undefined): AgentRunData['status'] {
-  if (status === 'cancelled') return 'cancelled';
-  if (status === 'active') return 'completed';
-  if (status === 'failed') return 'failed';
-  return 'completed';
+function mapLegacyStatus(status: string | null | undefined): AgentRunData["status"] {
+  if (status === "cancelled") return "cancelled";
+  if (status === "active") return "completed";
+  if (status === "failed") return "failed";
+  return "completed";
 }
 
 async function insertMigratedAssistantMessage(params: {
@@ -59,7 +54,7 @@ async function insertMigratedAssistantMessage(params: {
   createdAt: Date;
 }) {
   const runData: AgentRunData = {
-    status: params.error ? 'failed' : mapLegacyStatus(params.session.status),
+    status: params.error ? "failed" : mapLegacyStatus(params.session.status),
     summary: buildAgentRunSummary(params.steps, params.error),
     error: params.error,
     steps: params.steps,
@@ -69,10 +64,10 @@ async function insertMigratedAssistantMessage(params: {
   await db.insert(messages).values({
     id: generateId(),
     conversationId: params.conversationId,
-    role: 'assistant',
-    content: params.content || params.error || '',
+    role: "assistant",
+    content: params.content || params.error || "",
     model: params.session.modelId || null,
-    mode: 'agent',
+    mode: "agent",
     attachments: null,
     agentRun: JSON.stringify(runData),
     createdAt: params.createdAt,
@@ -83,11 +78,13 @@ async function migrateSessionEventsToConversation(
   session: LegacyAgentSessionRow,
   conversationId: string,
 ) {
-  const rows = await db.select().from(agentEvents)
+  const rows = await db
+    .select()
+    .from(agentEvents)
     .where(eq(agentEvents.sessionId, session.id))
     .orderBy(asc(agentEvents.createdAt));
 
-  let assistantText = '';
+  let assistantText = "";
   let steps: AgentRunStep[] = [];
   let errorText: string | undefined;
   let assistantCreatedAt = session.createdAt;
@@ -102,22 +99,22 @@ async function migrateSessionEventsToConversation(
       error: errorText,
       createdAt,
     });
-    assistantText = '';
+    assistantText = "";
     steps = [];
     errorText = undefined;
     assistantCreatedAt = createdAt;
   };
 
   for (const row of rows) {
-    if (row.type === 'user') {
+    if (row.type === "user") {
       await flushAssistant(assistantCreatedAt);
       await db.insert(messages).values({
         id: generateId(),
         conversationId,
-        role: 'user',
-        content: row.content || '',
+        role: "user",
+        content: row.content || "",
         model: null,
-        mode: 'agent',
+        mode: "agent",
         attachments: null,
         agentRun: null,
         createdAt: row.createdAt,
@@ -126,13 +123,13 @@ async function migrateSessionEventsToConversation(
       continue;
     }
 
-    if (row.type === 'text') {
-      assistantText += row.content || '';
+    if (row.type === "text") {
+      assistantText += row.content || "";
       assistantCreatedAt = row.createdAt;
       continue;
     }
 
-    if (row.type === 'tool_start' || row.type === 'tool_result') {
+    if (row.type === "tool_start" || row.type === "tool_result") {
       steps.push({
         type: row.type,
         toolName: row.toolName || undefined,
@@ -144,10 +141,10 @@ async function migrateSessionEventsToConversation(
       continue;
     }
 
-    if (row.type === 'error') {
-      errorText = row.content || 'Agent error';
+    if (row.type === "error") {
+      errorText = row.content || "Agent error";
       steps.push({
-        type: 'error',
+        type: "error",
         content: errorText,
         createdAt: row.createdAt.toISOString(),
       });
@@ -168,8 +165,8 @@ async function migrateLegacySession(userId: string, session: LegacyAgentSessionR
     title: session.title,
     systemPrompt: null,
     contextLength: 4096,
-    defaultMode: 'agent',
-    lastMode: 'agent',
+    defaultMode: "agent",
+    lastMode: "agent",
     isPinned: false,
     runStatus: session.status || null,
     createdAt: session.createdAt,
@@ -178,13 +175,16 @@ async function migrateLegacySession(userId: string, session: LegacyAgentSessionR
 
   await migrateSessionEventsToConversation(session, conversationId);
 
-  await db.update(agentSessions)
-    .set({ conversationId } as any)
+  await db
+    .update(agentSessions)
+    .set({ conversationId })
     .where(and(eq(agentSessions.id, session.id), eq(agentSessions.userId, userId)));
 }
 
 export async function ensureLegacyAgentSessionsMigrated(userId: string) {
-  const sessions = await db.select().from(agentSessions)
+  const sessions = await db
+    .select()
+    .from(agentSessions)
     .where(and(eq(agentSessions.userId, userId), isNull(agentSessions.conversationId)))
     .orderBy(asc(agentSessions.createdAt));
 
@@ -195,14 +195,18 @@ export async function ensureLegacyAgentSessionsMigrated(userId: string) {
 
 export async function listUnifiedConversations(userId: string) {
   await ensureLegacyAgentSessionsMigrated(userId);
-  return db.select().from(conversations)
+  return db
+    .select()
+    .from(conversations)
     .where(eq(conversations.userId, userId))
     .orderBy(desc(conversations.updatedAt));
 }
 
 export async function getUnifiedConversation(userId: string, conversationId: string) {
   await ensureLegacyAgentSessionsMigrated(userId);
-  const rows = await db.select().from(conversations)
+  const rows = await db
+    .select()
+    .from(conversations)
     .where(and(eq(conversations.userId, userId), eq(conversations.id, conversationId)))
     .limit(1);
   return rows[0] || null;

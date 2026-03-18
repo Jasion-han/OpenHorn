@@ -13,7 +13,7 @@ export function formatSseEvent(event: SseEvent): string {
 }
 
 export function createSseStream(
-  handler: (send: (event: SseEvent) => void, ctx: SseContext) => Promise<void>
+  handler: (send: (event: SseEvent) => void, ctx: SseContext) => Promise<void>,
 ): ReadableStream {
   let abortController: AbortController | null = null;
   return new ReadableStream({
@@ -30,7 +30,7 @@ export function createSseStream(
           // If the client disconnects, enqueue may throw. Treat it as closed.
           closed = true;
           try {
-            abortController?.abort('client_disconnect');
+            abortController?.abort("client_disconnect");
           } catch {
             // ignore
           }
@@ -40,9 +40,9 @@ export function createSseStream(
       try {
         await handler(send, ctx);
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Error';
+        const message = error instanceof Error ? error.message : "Error";
         send({
-          type: 'error',
+          type: "error",
           message,
           // Keep compatibility with consumers that expect "content" (Agent UI),
           // while still providing "message" (Chat UI).
@@ -61,7 +61,7 @@ export function createSseStream(
     cancel() {
       // Client disconnected: abort the handler so upstream operations can stop.
       try {
-        abortController?.abort('client_disconnect');
+        abortController?.abort("client_disconnect");
       } catch {
         // ignore
       }

@@ -1,13 +1,11 @@
-import { db } from '../db';
-import { users } from 'db';
-import { eq } from 'drizzle-orm';
-import { generateId } from '../utils';
-import bcrypt from 'bcryptjs';
-import { SignJWT, jwtVerify } from 'jose';
+import bcrypt from "bcryptjs";
+import { users } from "db";
+import { eq } from "drizzle-orm";
+import { jwtVerify, SignJWT } from "jose";
+import { db } from "../db";
+import { generateId } from "../utils";
 
-const JWT_SECRET = new TextEncoder().encode(
-  process.env.JWT_SECRET || 'your-secret-key'
-);
+const JWT_SECRET = new TextEncoder().encode(process.env.JWT_SECRET || "your-secret-key");
 
 export interface RegisterInput {
   email: string;
@@ -21,18 +19,16 @@ export interface LoginInput {
 }
 
 export async function register(input: RegisterInput) {
-  const existing = await db.select().from(users)
-    .where(eq(users.email, input.email))
-    .limit(1);
-  
+  const existing = await db.select().from(users).where(eq(users.email, input.email)).limit(1);
+
   if (existing.length > 0) {
-    throw new Error('Email already registered');
+    throw new Error("Email already registered");
   }
-  
+
   const passwordHash = await bcrypt.hash(input.password, 10);
   const id = generateId();
   const now = new Date();
-  
+
   await db.insert(users).values({
     id,
     email: input.email,
@@ -41,38 +37,36 @@ export async function register(input: RegisterInput) {
     createdAt: now,
     updatedAt: now,
   });
-  
+
   const token = await new SignJWT({ userId: id })
-    .setProtectedHeader({ alg: 'HS256' })
+    .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
-    .setExpirationTime('7d')
+    .setExpirationTime("7d")
     .sign(JWT_SECRET);
-  
+
   return { token, user: { id, email: input.email, username: input.username } };
 }
 
 export async function login(input: LoginInput) {
-  const result = await db.select().from(users)
-    .where(eq(users.email, input.email))
-    .limit(1);
-  
+  const result = await db.select().from(users).where(eq(users.email, input.email)).limit(1);
+
   if (result.length === 0) {
-    throw new Error('Invalid email or password');
+    throw new Error("Invalid email or password");
   }
-  
+
   const user = result[0];
   const valid = await bcrypt.compare(input.password, user.passwordHash);
-  
+
   if (!valid) {
-    throw new Error('Invalid email or password');
+    throw new Error("Invalid email or password");
   }
-  
+
   const token = await new SignJWT({ userId: user.id })
-    .setProtectedHeader({ alg: 'HS256' })
+    .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
-    .setExpirationTime('7d')
+    .setExpirationTime("7d")
     .sign(JWT_SECRET);
-  
+
   return {
     token,
     user: {
@@ -93,12 +87,10 @@ export async function verifyToken(token: string) {
 }
 
 export async function getUserById(userId: string) {
-  const result = await db.select().from(users)
-    .where(eq(users.id, userId))
-    .limit(1);
-  
+  const result = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+
   if (result.length === 0) return null;
-  
+
   const user = result[0];
   return {
     id: user.id,
