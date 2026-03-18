@@ -6,7 +6,9 @@
     "dev": "next dev -p 3001",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "biome lint src",
+    "check": "biome check src",
+    "format": "biome format --write src",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
