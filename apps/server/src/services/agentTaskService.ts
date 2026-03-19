@@ -172,6 +172,13 @@ export interface SetAgentPlanStepsInput {
   }>;
 }
 
+export interface UpdateAgentPlanStepStatusesInput {
+  steps: Array<{
+    id: string;
+    status: AgentPlanStepStatus;
+  }>;
+}
+
 export interface CreateAgentApprovalInput {
   type: AgentApprovalType;
   title: string;
@@ -351,6 +358,16 @@ async function assertRunRow(userId: string, runId: string) {
     throw new Error("Run not found");
   }
   return run;
+}
+
+async function getPlanStepRows(userId: string, stepIds: string[]) {
+  if (stepIds.length === 0) return [];
+  const rows = await db
+    .select({ step: agentPlanSteps })
+    .from(agentPlanSteps)
+    .innerJoin(agentTasks, eq(agentPlanSteps.taskId, agentTasks.id))
+    .where(and(eq(agentTasks.userId, userId), inArray(agentPlanSteps.id, stepIds)));
+  return rows.map((row) => row.step);
 }
 
 async function getApprovalRow(userId: string, approvalId: string) {
@@ -572,6 +589,54 @@ export async function listAgentPlanSteps(userId: string, taskId: string) {
     .where(eq(agentPlanSteps.taskId, taskId))
     .orderBy(desc(agentPlanSteps.createdAt), asc(agentPlanSteps.orderIndex));
   return rows.map(mapPlanStep);
+}
+
+export async function updateAgentPlanStepStatuses(
+  userId: string,
+  input: UpdateAgentPlanStepStatusesInput,
+) {
+  if (input.steps.length === 0) {
+    return [] as AgentPlanStepRecord[];
+  }
+
+  const rows = await getPlanStepRows(
+    userId,
+    input.steps.map((step) => step.id),
+  );
+  if (rows.length !== input.steps.length) {
+    throw new Error("Plan step not found");
+  }
+
+  const updatesById = new Map(input.steps.map((step) => [step.id, step.status] as const));
+  const now = new Date();
+
+  for (const row of rows) {
+    const nextStatus = updatesById.get(row.id);
+    if (!nextStatus || row.status === nextStatus) {
+      continue;
+    }
+    await db
+      .update(agentPlanSteps)
+      .set({
+        status: nextStatus,
+        updatedAt: now,
+      })
+      .where(eq(agentPlanSteps.id, row.id));
+  }
+
+  const affectedTaskIds = [...new Set(rows.map((row) => row.taskId))];
+  for (const taskId of affectedTaskIds) {
+    await db.update(agentTasks).set({ updatedAt: now }).where(eq(agentTasks.id, taskId));
+  }
+
+  const updatedRows = await getPlanStepRows(
+    userId,
+    input.steps.map((step) => step.id),
+  );
+  const byId = new Map(updatedRows.map((row) => [row.id, mapPlanStep(row)] as const));
+  return input.steps
+    .map((step) => byId.get(step.id))
+    .filter((step): step is AgentPlanStepRecord => Boolean(step));
 }
 
 export async function createAgentApprovalRequest(

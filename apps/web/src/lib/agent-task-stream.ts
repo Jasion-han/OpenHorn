@@ -1,11 +1,20 @@
 "use client";
 
-import type { ApiAgentTaskStatus } from "./api";
+import type { ApiAgentPlanStep, ApiAgentTaskStatus } from "./api";
 import { api } from "./api";
 import { readSseStream, type SseEvent } from "./sse";
 
 export type AgentTaskStreamEvent =
   | { type: "task_status"; taskId: string; runId: string; status: ApiAgentTaskStatus }
+  | {
+      type: "plan_step";
+      taskId: string;
+      runId: string;
+      stepId: string;
+      orderIndex: number;
+      title: string;
+      status: ApiAgentPlanStep["status"];
+    }
   | {
       type: "execution_event";
       taskId: string;

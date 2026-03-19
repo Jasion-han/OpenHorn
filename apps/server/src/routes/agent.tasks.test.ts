@@ -202,6 +202,17 @@ test("task routes cover create, list, detail, plan, approval, and execute precon
         .filter((item) => item.taskId === taskId && (!phase || item.phase === phase))
         .slice()
         .reverse()[0] ?? null,
+    updateAgentPlanStepStatuses: async (_userId: string, input: { steps: Array<{ id: string; status: string }> }) => {
+      return input.steps
+        .map((stepUpdate) => {
+          const step = planSteps.find((item) => item.id === stepUpdate.id);
+          if (!step) return null;
+          step.status = stepUpdate.status;
+          step.updatedAt = new Date().toISOString();
+          return step;
+        })
+        .filter((step): step is Record<string, unknown> => Boolean(step));
+    },
     createAgentArtifact: async (
       _userId: string,
       taskId: string,

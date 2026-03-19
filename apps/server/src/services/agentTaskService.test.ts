@@ -21,6 +21,7 @@ import {
   listAgentTasks,
   respondToAgentApproval,
   setAgentPlanSteps,
+  updateAgentPlanStepStatuses,
   updateAgentRunStatus,
   updateAgentTaskStatus,
 } from "./agentTaskService";
@@ -86,6 +87,16 @@ test("agentTaskService persists tasks, plans, approvals, and task detail", async
     expect(planSteps).toHaveLength(2);
     expect(planSteps[1]?.status).toBe("ready");
 
+    const updatedSteps = await updateAgentPlanStepStatuses(userId, {
+      steps: [
+        { id: planSteps[0]!.id, status: "completed" },
+        { id: planSteps[1]!.id, status: "running" },
+      ],
+    });
+
+    expect(updatedSteps[0]?.status).toBe("completed");
+    expect(updatedSteps[1]?.status).toBe("running");
+
     const approval = await createAgentApprovalRequest(userId, task.id, planningRun.id, {
       type: "plan_approval",
       title: "Approve execution",
@@ -110,6 +121,8 @@ test("agentTaskService persists tasks, plans, approvals, and task detail", async
     expect(detail.task.status).toBe("awaiting_approval");
     expect(detail.runs).toHaveLength(1);
     expect(detail.planSteps).toHaveLength(2);
+    expect(detail.planSteps[0]?.status).toBe("completed");
+    expect(detail.planSteps[1]?.status).toBe("running");
     expect(detail.approvals).toHaveLength(1);
     expect(detail.approvals[0]?.response).toEqual({ approvedBy: "test" });
 

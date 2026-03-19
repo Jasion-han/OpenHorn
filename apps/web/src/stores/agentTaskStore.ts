@@ -91,6 +91,18 @@ function upsertArtifact(artifacts: ApiAgentArtifact[], artifact: ApiAgentArtifac
   return [artifact, ...rest].sort((left, right) => right.createdAt.localeCompare(left.createdAt));
 }
 
+function mergeLivePlanStep(
+  detail: ApiAgentTaskDetail,
+  nextStep: Extract<AgentTaskStreamEvent, { type: "plan_step" }>,
+) {
+  return {
+    ...detail,
+    planSteps: detail.planSteps.map((step) =>
+      step.id === nextStep.stepId ? { ...step, status: nextStep.status } : step,
+    ),
+  };
+}
+
 type AgentTaskSetState = (
   partial:
     | Partial<AgentTaskState>
@@ -153,6 +165,17 @@ async function runTaskExecutionStream(params: {
                       ...state.detail,
                       artifacts: upsertArtifact(state.detail.artifacts, artifact),
                     },
+                  }
+                : state,
+            );
+            return;
+          }
+
+          if (event.type === "plan_step") {
+            params.set((state) =>
+              state.detail
+                ? {
+                    detail: mergeLivePlanStep(state.detail, event),
                   }
                 : state,
             );

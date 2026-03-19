@@ -28,6 +28,7 @@ import {
   listAgentTasks,
   respondToAgentApproval,
   setAgentPlanSteps,
+  updateAgentPlanStepStatuses,
   updateAgentTask,
   updateAgentRunStatus,
   updateAgentTaskStatus,
@@ -95,26 +96,173 @@ function summarizeExecution(params: {
 }
 
 function buildExecutionModeContext(
-  mode: "execute" | "retry" | "continue",
-  previousRun?: { summary: string | null; error: string | null } | null,
+  params: {
+    mode: "execute" | "retry" | "continue";
+    previousRun?: { summary: string | null; error: string | null } | null;
+    previousFinalResult?: string | null;
+    resumeStepTitle?: string | null;
+    completedStepTitles?: string[];
+  },
 ) {
-  if (mode === "execute") {
+  if (params.mode === "execute") {
     return null;
   }
 
   const parts: string[] = [];
-  if (mode === "retry") {
+  if (params.mode === "retry") {
     parts.push("Execution mode: retry the task from scratch.");
+    parts.push("Ignore any incomplete prior progress and execute the approved plan again from the beginning.");
   } else {
     parts.push("Execution mode: continue from the previous attempt when useful.");
+    if ((params.completedStepTitles?.length ?? 0) > 0) {
+      parts.push(
+        `Completed plan steps from the previous attempt:\n${params.completedStepTitles!.map((title) => `- ${title}`).join("\n")}`,
+      );
+    }
+    if (params.resumeStepTitle) {
+      parts.push(`Resume focus: continue from the next unfinished plan step.\n${params.resumeStepTitle}`);
+    } else {
+      parts.push("All approved plan steps were previously completed. Continue by refining or extending the latest result when useful.");
+    }
   }
 
-  const previousSummary = previousRun?.summary?.trim() || previousRun?.error?.trim() || "";
+  const previousSummary =
+    params.previousRun?.summary?.trim() || params.previousRun?.error?.trim() || "";
   if (previousSummary) {
     parts.push(`Previous attempt summary:\n${previousSummary}`);
   }
 
+  const previousFinalResult = params.previousFinalResult?.trim() || "";
+  if (previousFinalResult) {
+    parts.push(`Previous final result draft:\n${previousFinalResult.slice(0, 2500)}`);
+  }
+
   return parts.join("\n\n");
+}
+
+type ExecutionPlanStepStatus = "pending" | "ready" | "running" | "completed" | "failed";
+
+type ExecutionPlanStepShape = {
+  id: string;
+  status: ExecutionPlanStepStatus;
+};
+
+function getContinueResumeStepIndex(
+  planSteps: Array<{ status: ExecutionPlanStepStatus }>,
+) {
+  const firstNonCompletedIndex = planSteps.findIndex((step, index) => index > 0 && step.status !== "completed");
+  if (firstNonCompletedIndex >= 0) {
+    return firstNonCompletedIndex;
+  }
+  if (planSteps.length === 0) {
+    return -1;
+  }
+  return planSteps.length > 1 ? planSteps.length - 1 : 0;
+}
+
+function buildExecutionStepStartStatuses(
+  mode: "execute" | "retry" | "continue",
+  planSteps: Array<{ id: string; status: ExecutionPlanStepStatus }>,
+): ExecutionPlanStepShape[] {
+  if (planSteps.length === 0) {
+    return [];
+  }
+
+  const activeIndex =
+    mode === "continue"
+      ? getContinueResumeStepIndex(planSteps)
+      : planSteps.length > 1
+        ? 1
+        : 0;
+
+  return planSteps.map((step, index) => ({
+    id: step.id,
+    status:
+      index < activeIndex
+        ? "completed"
+        : index === activeIndex
+          ? "running"
+          : "pending",
+  }));
+}
+
+function buildExecutionFailureStatuses(
+  planSteps: Array<{ id: string; status: ExecutionPlanStepStatus }>,
+): ExecutionPlanStepShape[] {
+  const activeIndex = planSteps.findIndex((step) => step.status === "running");
+  if (activeIndex < 0) {
+    return [];
+  }
+  return planSteps.map((step, index) => ({
+    id: step.id,
+    status:
+      index < activeIndex
+        ? "completed"
+        : index === activeIndex
+          ? "failed"
+          : "pending",
+  }));
+}
+
+function buildExecutionSuccessStatuses(
+  planSteps: Array<{ id: string }>,
+): ExecutionPlanStepShape[] {
+  return planSteps.map((step) => ({
+    id: step.id,
+    status: "completed" as const,
+  }));
+}
+
+async function syncExecutionPlanSteps(params: {
+  userId: string;
+  taskId: string;
+  executionRunId: string;
+  planSteps: Array<{
+    id: string;
+    orderIndex: number;
+    title: string;
+    status: "pending" | "ready" | "running" | "completed" | "failed";
+  }>;
+  nextStatuses: Array<{
+    id: string;
+    status: "pending" | "ready" | "running" | "completed" | "failed";
+  }>;
+  send: (event: Record<string, unknown>) => void;
+}) {
+  const updates = params.nextStatuses.filter((nextStep) => {
+    const current = params.planSteps.find((step) => step.id === nextStep.id);
+    return current && current.status !== nextStep.status;
+  });
+  if (updates.length === 0) {
+    return;
+  }
+
+  const updatedSteps = await updateAgentPlanStepStatuses(params.userId, { steps: updates });
+  for (const updatedStep of updatedSteps) {
+    const local = params.planSteps.find((step) => step.id === updatedStep.id);
+    if (local) {
+      local.status = updatedStep.status;
+    }
+    await createAgentTaskEvent(params.userId, params.taskId, params.executionRunId, {
+      type: "plan_step",
+      content: updatedStep.title,
+      metadata: {
+        stepId: updatedStep.id,
+        orderIndex: updatedStep.orderIndex,
+        status: updatedStep.status,
+        source: "execution",
+      },
+    });
+    params.send({
+      type: "plan_step",
+      taskId: params.taskId,
+      runId: params.executionRunId,
+      stepId: updatedStep.id,
+      orderIndex: updatedStep.orderIndex,
+      title: updatedStep.title,
+      status: updatedStep.status,
+    });
+  }
 }
 
 async function resolveTaskExecutionContext(
@@ -172,13 +320,37 @@ async function resolveTaskExecutionContext(
   const previousExecutionRun =
     mode === "execute" ? null : await getLatestRunForTask(userId, taskId, "execution");
 
-  const taskModeContext = buildExecutionModeContext(mode, previousExecutionRun);
+  const previousFinalResult =
+    previousExecutionRun
+      ? detail.artifacts.find(
+          (artifact) => artifact.runId === previousExecutionRun.id && artifact.type === "final_result",
+        )?.content ?? null
+      : null;
+  const continueResumeIndex = getContinueResumeStepIndex(approvedPlanSteps);
+  const hasUnfinishedContinueStep =
+    mode === "continue" &&
+    approvedPlanSteps.some((step, index) => index > 0 && step.status !== "completed");
+
+  const taskModeContext = buildExecutionModeContext({
+    mode,
+    previousRun: previousExecutionRun,
+    previousFinalResult,
+    resumeStepTitle:
+      mode === "continue" && hasUnfinishedContinueStep
+        ? approvedPlanSteps[continueResumeIndex]?.title ?? null
+        : null,
+    completedStepTitles:
+      mode === "continue"
+        ? approvedPlanSteps.filter((step) => step.status === "completed").map((step) => step.title)
+        : [],
+  });
   const executionPrompt = [taskModeContext, buildExecutionPrompt(task.goal, approvedPlanSteps)]
     .filter((value): value is string => Boolean(value))
     .join("\n\n");
 
   return {
     task,
+    approvedPlanSteps,
     executionPrompt,
   };
 }
@@ -193,7 +365,7 @@ async function createTaskExecutionResponse(
     return new Response(resolved.error, { status: resolved.status });
   }
 
-  const { task, executionPrompt } = resolved;
+  const { task, approvedPlanSteps, executionPrompt } = resolved;
   const attachmentIds = task.attachments
     .map((attachment) => attachment.id)
     .filter((value): value is string => typeof value === "string" && value.trim().length > 0);
@@ -218,6 +390,14 @@ async function createTaskExecutionResponse(
       metadata: { status: "running", mode },
     });
     send({ type: "task_status", taskId, runId: run.id, status: "running" });
+    await syncExecutionPlanSteps({
+      userId,
+      taskId,
+      executionRunId: run.id,
+      planSteps: approvedPlanSteps,
+      nextStatuses: buildExecutionStepStartStatuses(mode, approvedPlanSteps),
+      send,
+    });
 
     const runtimeContext = await buildAgentRuntimeContext({
       userId,
@@ -359,6 +539,14 @@ async function createTaskExecutionResponse(
       }
 
       if (hadError) {
+        await syncExecutionPlanSteps({
+          userId,
+          taskId,
+          executionRunId: run.id,
+          planSteps: approvedPlanSteps,
+          nextStatuses: buildExecutionFailureStatuses(approvedPlanSteps),
+          send,
+        });
         await updateAgentRunStatus(userId, run.id, "failed", {
           summary: executionSummary,
           error: errorText,
@@ -372,6 +560,14 @@ async function createTaskExecutionResponse(
         });
         send({ type: "task_status", taskId, runId: run.id, status: "failed" });
       } else {
+        await syncExecutionPlanSteps({
+          userId,
+          taskId,
+          executionRunId: run.id,
+          planSteps: approvedPlanSteps,
+          nextStatuses: buildExecutionSuccessStatuses(approvedPlanSteps),
+          send,
+        });
         await updateAgentRunStatus(userId, run.id, "completed", {
           summary: executionSummary,
           completedAt: new Date(),
@@ -388,6 +584,14 @@ async function createTaskExecutionResponse(
       send({ type: "done", taskId, runId: run.id });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Task execution failed";
+      await syncExecutionPlanSteps({
+        userId,
+        taskId,
+        executionRunId: run.id,
+        planSteps: approvedPlanSteps,
+        nextStatuses: buildExecutionFailureStatuses(approvedPlanSteps),
+        send,
+      }).catch(() => undefined);
       await updateAgentRunStatus(userId, run.id, "failed", {
         summary: message,
         error: message,
