@@ -1,4 +1,4 @@
-import type { SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import type { CanUseTool, PermissionMode, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { agentEvents, agentSessions } from "db";
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "../db";
@@ -90,6 +90,8 @@ export interface AgentRuntimeConfig {
   modelId?: string | null;
   globalSystemPrompt?: string;
   liveSystemContext?: string;
+  permissionMode?: PermissionMode;
+  canUseTool?: CanUseTool;
   abortController?: AbortController;
   onEvent?: (event: AgentEvent) => Promise<void> | void;
 }
@@ -339,6 +341,8 @@ export async function* runAgentWithConfig(config: AgentRuntimeConfig): AsyncGene
       systemPrompt: combinedSystemPrompt,
       baseUrl: resolvedChannel.channel.baseUrl || undefined,
       mcpServers,
+      permissionMode: config.permissionMode,
+      canUseTool: config.canUseTool,
       abortController: controller,
     })) {
       yield await emit(event);

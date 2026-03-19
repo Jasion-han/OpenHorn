@@ -20,6 +20,15 @@ test("task routes cover create, list, detail, plan, approval, and execute precon
     };
   };
 
+  async function waitFor(check: () => boolean | Promise<boolean>, timeoutMs = 1500) {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < timeoutMs) {
+      if (await check()) return true;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    return false;
+  }
+
   mock.module("../services/authService", () => ({
     verifyToken: async () => ({ userId: "user-1" }),
     getUserById: async () => ({ id: "user-1" }),
@@ -33,7 +42,31 @@ test("task routes cover create, list, detail, plan, approval, and execute precon
     createAgentSession: async () => ({ id: "session-1" }),
     renameAgentSession: async () => ({ success: true }),
     runAgent: async function* () {},
-    runAgentWithConfig: async function* () {},
+    runAgentWithConfig: async function* (config: Record<string, unknown>) {
+      const prompt = typeof config.prompt === "string" ? config.prompt : "";
+      yield { type: "text", content: "Starting execution." };
+      if (prompt.includes("Trigger tool approval")) {
+        const canUseTool = config.canUseTool as
+          | ((
+              toolName: string,
+              toolInput: Record<string, unknown>,
+              options: Record<string, unknown>,
+            ) => Promise<{ behavior: string }>)
+          | undefined;
+        if (canUseTool) {
+          await canUseTool(
+            "Bash",
+            { command: "rm -rf /tmp/demo" },
+            {
+              signal: new AbortController().signal,
+              toolUseID: "tool-use-1",
+              decisionReason: "rm -rf is high risk",
+            },
+          );
+        }
+        yield { type: "text", content: "Resumed after approval." };
+      }
+    },
     buildAgentRuntimeContext: async () => ({
       channelId: "channel-1",
       modelId: "claude-3-7-sonnet",
@@ -84,7 +117,7 @@ test("task routes cover create, list, detail, plan, approval, and execute precon
       artifacts.filter((item) => item.taskId === taskId),
     createAgentTask: async (_userId: string, input: Record<string, unknown>) => {
       const task = {
-        id: "task-1",
+        id: `task-${tasks.length + 1}`,
         userId: "user-1",
         conversationId: null,
         channelId: null,
@@ -425,6 +458,89 @@ test("task routes cover create, list, detail, plan, approval, and execute precon
     expect(continueResponse.status).toBe(200);
     expect(continueResponse.headers.get("content-type")).toContain("text/event-stream");
     await continueResponse.text();
+
+    const createToolApprovalTask = await agent.request("/tasks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: "token=test-token" },
+      body: JSON.stringify({ title: "Tool approval", goal: "Trigger tool approval for risky bash." }),
+    });
+    const createToolApprovalJson = (await createToolApprovalTask.json()) as { task: { id: string } };
+    expect(createToolApprovalTask.status).toBe(201);
+    expect(createToolApprovalJson.task.id).toBe("task-2");
+
+    const toolPlanResponse = await agent.request("/tasks/task-2/plan", {
+      method: "POST",
+      headers: { Cookie: "token=test-token" },
+    });
+    const toolPlanJson = (await toolPlanResponse.json()) as {
+      approvals: Array<{ id: string }>;
+    };
+    expect(toolPlanResponse.status).toBe(200);
+
+    const toolPlanApprovalResponse = await agent.request(
+      `/approvals/${toolPlanJson.approvals[0]!.id}/respond`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Cookie: "token=test-token" },
+        body: JSON.stringify({ status: "approved", response: { source: "test" } }),
+      },
+    );
+    expect(toolPlanApprovalResponse.status).toBe(200);
+
+    const toolExecuteResponse = await agent.request("/tasks/task-2/execute", {
+      method: "POST",
+      headers: { Cookie: "token=test-token" },
+    });
+    expect(toolExecuteResponse.status).toBe(200);
+
+    const toolApprovalReady = await waitFor(async () => {
+      const detailResponse = await agent.request("/tasks/task-2", {
+        method: "GET",
+        headers: { Cookie: "token=test-token" },
+      });
+      const detailJson = (await detailResponse.json()) as {
+        task: { status: string };
+        approvals: Array<{ id: string; type: string; status: string }>;
+      };
+      return (
+        detailJson.task.status === "awaiting_approval" &&
+        detailJson.approvals[0]?.type === "tool_approval" &&
+        detailJson.approvals[0]?.status === "pending"
+      );
+    });
+    expect(toolApprovalReady).toBe(true);
+
+    const toolDetailResponse = await agent.request("/tasks/task-2", {
+      method: "GET",
+      headers: { Cookie: "token=test-token" },
+    });
+    const toolDetailJson = (await toolDetailResponse.json()) as {
+      approvals: Array<{ id: string; type: string; status: string }>;
+    };
+
+    const toolApprovalResponse = await agent.request(
+      `/approvals/${toolDetailJson.approvals[0]!.id}/respond`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Cookie: "token=test-token" },
+        body: JSON.stringify({ status: "approved", response: { source: "tool-approval-test" } }),
+      },
+    );
+    expect(toolApprovalResponse.status).toBe(200);
+
+    await toolExecuteResponse.text();
+
+    const finalToolDetailResponse = await agent.request("/tasks/task-2", {
+      method: "GET",
+      headers: { Cookie: "token=test-token" },
+    });
+    const finalToolDetailJson = (await finalToolDetailResponse.json()) as {
+      task: { status: string };
+      approvals: Array<{ type: string; status: string }>;
+    };
+    expect(finalToolDetailJson.task.status).toBe("completed");
+    expect(finalToolDetailJson.approvals[0]?.type).toBe("tool_approval");
+    expect(finalToolDetailJson.approvals[0]?.status).toBe("approved");
   } finally {
     mock.restore();
   }

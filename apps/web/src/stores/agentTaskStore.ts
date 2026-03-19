@@ -132,17 +132,24 @@ async function runTaskExecutionStream(params: {
           if (!current || current.task.id !== detail.task.id) return;
 
           if (event.type === "task_status") {
-            params.set((state) => ({
-              detail: state.detail
+            params.set((state) => {
+              const nextDetail = state.detail
                 ? {
                     ...state.detail,
                     task: { ...state.detail.task, status: event.status },
                   }
-                : state.detail,
-              tasks: state.detail
-                ? upsertTask(state.tasks, { ...state.detail.task, status: event.status })
-                : state.tasks,
-            }));
+                : state.detail;
+              return {
+                detail: nextDetail,
+                tasks: state.detail
+                  ? upsertTask(state.tasks, { ...state.detail.task, status: event.status })
+                  : state.tasks,
+                isExecuting: event.status === "running",
+              };
+            });
+            if (event.status === "awaiting_approval" || event.status === "running") {
+              await params.get().refreshTask(detail.task.id, { silent: true });
+            }
             return;
           }
 

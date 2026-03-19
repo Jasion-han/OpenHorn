@@ -20,6 +20,8 @@ export function AgentApprovalBlock({
   onReject: () => void;
 }) {
   const isPending = approval.status === "pending";
+  const approveLabel = approval.type === "tool_approval" ? "批准继续" : "批准执行";
+  const rejectLabel = approval.type === "tool_approval" ? "拒绝本次工具调用" : "拒绝并返回草稿";
 
   return (
     <div className="rounded-2xl border border-border/70 bg-muted/20 p-4">
@@ -45,10 +47,10 @@ export function AgentApprovalBlock({
       {isPending ? (
         <div className="mt-4 flex flex-wrap gap-2">
           <Button size="sm" onClick={onApprove}>
-            批准执行
+            {approveLabel}
           </Button>
           <Button size="sm" variant="outline" onClick={onReject}>
-            拒绝并返回草稿
+            {rejectLabel}
           </Button>
         </div>
       ) : null}

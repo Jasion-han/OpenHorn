@@ -1,3 +1,4 @@
+import type { CanUseTool } from "@anthropic-ai/claude-agent-sdk";
 import { Hono } from "hono";
 import {
   buildAgentRuntimeContext,
@@ -37,6 +38,7 @@ import { generateAutoTitle } from "../services/autoTitleService";
 import { checkChannelAgentCompatibility } from "../services/channelAgentCheckService";
 import { getResolvedChannelForConversation } from "../services/channelService";
 import { requireUser, type UserEnv } from "../utils/requestUser";
+import { classifyBashCommandRisk } from "../utils/shellRisk";
 import { createSseStream } from "../utils/sse";
 import { isRecord } from "../utils/typeGuards";
 
@@ -265,6 +267,27 @@ async function syncExecutionPlanSteps(params: {
   }
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForApprovalResolution(params: {
+  userId: string;
+  taskId: string;
+  approvalId: string;
+  signal: AbortSignal;
+}) {
+  while (!params.signal.aborted) {
+    const detail = await getAgentTaskDetail(params.userId, params.taskId);
+    const approval = detail.approvals.find((item) => item.id === params.approvalId) ?? null;
+    if (approval && approval.status !== "pending") {
+      return approval;
+    }
+    await sleep(600);
+  }
+  throw new Error("Approval wait aborted");
+}
+
 async function resolveTaskExecutionContext(
   userId: string,
   taskId: string,
@@ -399,6 +422,88 @@ async function createTaskExecutionResponse(
       send,
     });
 
+    const canUseTool: CanUseTool = async (toolName, toolInput, options) => {
+      if (options.blockedPath) {
+        return {
+          behavior: "deny",
+          message: `Blocked path: ${options.blockedPath}`,
+          interrupt: true,
+        };
+      }
+
+      if (toolName !== "Bash") {
+        return { behavior: "allow" };
+      }
+
+      const command =
+        typeof toolInput.command === "string"
+          ? toolInput.command
+          : typeof toolInput.cmd === "string"
+            ? toolInput.cmd
+            : "";
+      const risk = classifyBashCommandRisk(command);
+      if (risk.level === "allow") {
+        return { behavior: "allow" };
+      }
+
+      const approval = await createAgentApprovalRequest(userId, taskId, run.id, {
+        type: "tool_approval",
+        title: "Approve Bash command",
+        description: risk.reason ?? options.decisionReason ?? "This command requires explicit approval before it can run.",
+        payload: {
+          toolUseId: options.toolUseID,
+          toolName,
+          toolInput,
+          blockedPath: options.blockedPath ?? null,
+          decisionReason: risk.reason ?? options.decisionReason ?? null,
+        },
+      });
+
+      await updateAgentRunStatus(userId, run.id, "awaiting_approval");
+      await updateAgentTaskStatus(userId, taskId, "awaiting_approval");
+      await createAgentTaskEvent(userId, taskId, run.id, {
+        type: "approval_requested",
+        content: approval.title,
+        metadata: {
+          approvalId: approval.id,
+          approvalType: approval.type,
+          toolName,
+          toolUseId: options.toolUseID,
+        },
+      });
+      await createAgentTaskEvent(userId, taskId, run.id, {
+        type: "task_status",
+        content: "Task is awaiting tool approval.",
+        metadata: { status: "awaiting_approval", approvalId: approval.id, approvalType: approval.type },
+      });
+      send({ type: "task_status", taskId, runId: run.id, status: "awaiting_approval" });
+
+      const resolvedApproval = await waitForApprovalResolution({
+        userId,
+        taskId,
+        approvalId: approval.id,
+        signal: options.signal,
+      });
+
+      if (resolvedApproval.status === "approved") {
+        await updateAgentRunStatus(userId, run.id, "running");
+        await updateAgentTaskStatus(userId, taskId, "running");
+        await createAgentTaskEvent(userId, taskId, run.id, {
+          type: "task_status",
+          content: "Task resumed after tool approval.",
+          metadata: { status: "running", approvalId: approval.id, approvalType: approval.type },
+        });
+        send({ type: "task_status", taskId, runId: run.id, status: "running" });
+        return { behavior: "allow" };
+      }
+
+      return {
+        behavior: "deny",
+        message: "User denied tool approval",
+        interrupt: true,
+      };
+    };
+
     const runtimeContext = await buildAgentRuntimeContext({
       userId,
       prompt: executionPrompt,
@@ -415,6 +520,8 @@ async function createTaskExecutionResponse(
         modelId: runtimeContext.modelId,
         globalSystemPrompt: runtimeContext.globalSystemPrompt,
         liveSystemContext: runtimeContext.liveSystemContext,
+        permissionMode: "default",
+        canUseTool,
         abortController: ctx.abortController,
       })) {
         if (event.type === "meta" || event.type === "done" || event.type === "user") {
@@ -796,8 +903,10 @@ agent.post("/approvals/:id/respond", async (c) => {
     });
 
     const nextStatus =
-      approval.type === "tool_approval" && approval.status === "approved"
-        ? "running"
+      approval.type === "tool_approval"
+        ? approval.status === "approved"
+          ? "running"
+          : "failed"
         : approval.status === "rejected"
           ? "draft"
           : "draft";
@@ -807,6 +916,18 @@ agent.post("/approvals/:id/respond", async (c) => {
       type: "approval_resolved",
       content: `${approval.type} ${approval.status}`,
       metadata: { approvalId: approval.id, status: approval.status },
+    });
+    await createAgentTaskEvent(user.id, approval.taskId, approval.runId, {
+      type: "task_status",
+      content:
+        approval.type === "tool_approval"
+          ? approval.status === "approved"
+            ? "Task resumed after tool approval."
+            : "Task failed because the tool approval was rejected."
+          : approval.status === "approved"
+            ? "Task is ready to execute."
+            : "Task returned to draft after plan rejection.",
+      metadata: { status: nextStatus, approvalId: approval.id, approvalType: approval.type },
     });
 
     const detail = await getAgentTaskDetail(user.id, approval.taskId);

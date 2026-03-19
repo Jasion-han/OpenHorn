@@ -49,7 +49,7 @@ export function AgentWorkbench() {
   }, [loadTasks]);
 
   useEffect(() => {
-    if (detail?.task.status !== "running") return;
+    if (detail?.task.status !== "running" && detail?.task.status !== "awaiting_approval") return;
 
     const intervalId = window.setInterval(() => {
       void refreshTask(detail.task.id, { silent: true });
@@ -71,6 +71,7 @@ export function AgentWorkbench() {
 
   const latestPlanApproval =
     detail?.approvals.find((approval) => approval.type === "plan_approval") ?? null;
+  const latestApproval = detail?.approvals[0] ?? null;
   const hasApprovedPlan = latestPlanApproval?.status === "approved";
   const hasPlan = Boolean(detail?.planSteps.length);
   const canRetry =
@@ -157,7 +158,8 @@ export function AgentWorkbench() {
                       !isPlanning &&
                       !isExecuting &&
                       detail.task.status !== "running" &&
-                      detail.task.status !== "planning"
+                      detail.task.status !== "planning" &&
+                      !(detail.task.status === "awaiting_approval" && latestApproval?.type === "tool_approval")
                     }
                     onSave={saveTaskGoal}
                   />

@@ -1,4 +1,5 @@
 import type {
+  CanUseTool,
   McpServerConfig,
   PermissionMode,
   SDKUserMessage,
@@ -20,6 +21,7 @@ type SdkOptions = {
   baseUrl?: string;
   abortController?: AbortController;
   permissionMode?: PermissionMode;
+  canUseTool?: CanUseTool;
   allowDangerouslySkipPermissions?: boolean;
   maxTurns?: number;
 };
@@ -47,6 +49,7 @@ export async function* runClaudeAgentSdk(options: SdkOptions): AsyncGenerator<Ag
       cwd: options.cwd,
       env,
       permissionMode: options.permissionMode ?? "bypassPermissions",
+      canUseTool: options.canUseTool,
       allowDangerouslySkipPermissions:
         options.permissionMode === "bypassPermissions" || !options.permissionMode
           ? (options.allowDangerouslySkipPermissions ?? true)

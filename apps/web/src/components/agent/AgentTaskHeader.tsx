@@ -92,7 +92,10 @@ export function AgentTaskHeader({
               重试执行
             </Button>
           ) : null}
-          <Button onClick={onExecute} disabled={!hasApprovedPlan || isExecuting || isPlanning}>
+          <Button
+            onClick={onExecute}
+            disabled={!hasApprovedPlan || isExecuting || isPlanning || task.status === "awaiting_approval"}
+          >
             <Play className="mr-2 h-4 w-4" />
             {isExecuting ? "执行中" : "开始执行"}
           </Button>
