@@ -91,6 +91,97 @@ const SCHEMA_DDL: string[] = [
     FOREIGN KEY (channel_id) REFERENCES channels(id)
   );`,
 
+  `CREATE TABLE IF NOT EXISTS agent_tasks (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    conversation_id TEXT,
+    channel_id TEXT,
+    model_id TEXT,
+    title TEXT NOT NULL,
+    goal TEXT NOT NULL,
+    attachments TEXT,
+    status TEXT NOT NULL DEFAULT 'draft',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id),
+    FOREIGN KEY (conversation_id) REFERENCES conversations(id),
+    FOREIGN KEY (channel_id) REFERENCES channels(id)
+  );`,
+
+  `CREATE TABLE IF NOT EXISTS agent_runs (
+    id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL,
+    phase TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    summary TEXT,
+    error TEXT,
+    started_at INTEGER,
+    completed_at INTEGER,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    FOREIGN KEY (task_id) REFERENCES agent_tasks(id) ON DELETE CASCADE
+  );`,
+
+  `CREATE TABLE IF NOT EXISTS agent_plan_steps (
+    id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL,
+    run_id TEXT NOT NULL,
+    order_index INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    FOREIGN KEY (task_id) REFERENCES agent_tasks(id) ON DELETE CASCADE,
+    FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE
+  );`,
+
+  `CREATE TABLE IF NOT EXISTS agent_task_events (
+    id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL,
+    run_id TEXT NOT NULL,
+    type TEXT NOT NULL,
+    content TEXT,
+    tool_name TEXT,
+    tool_input TEXT,
+    metadata TEXT,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY (task_id) REFERENCES agent_tasks(id) ON DELETE CASCADE,
+    FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE
+  );`,
+
+  `CREATE TABLE IF NOT EXISTS agent_approval_requests (
+    id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL,
+    run_id TEXT NOT NULL,
+    type TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    title TEXT NOT NULL,
+    description TEXT,
+    payload TEXT,
+    response TEXT,
+    requested_at INTEGER NOT NULL,
+    responded_at INTEGER,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    FOREIGN KEY (task_id) REFERENCES agent_tasks(id) ON DELETE CASCADE,
+    FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE
+  );`,
+
+  `CREATE TABLE IF NOT EXISTS agent_artifacts (
+    id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL,
+    run_id TEXT NOT NULL,
+    type TEXT NOT NULL,
+    title TEXT NOT NULL,
+    content TEXT NOT NULL,
+    metadata TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    FOREIGN KEY (task_id) REFERENCES agent_tasks(id) ON DELETE CASCADE,
+    FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE
+  );`,
+
   `CREATE TABLE IF NOT EXISTS mcp_servers (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,

@@ -115,6 +115,136 @@ export interface ApiMessage {
   createdAt: string;
 }
 
+export type ApiAgentTaskStatus =
+  | "draft"
+  | "planning"
+  | "awaiting_approval"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export type ApiAgentRunPhase = "planning" | "execution";
+export type ApiAgentRunStatus =
+  | "pending"
+  | "running"
+  | "awaiting_approval"
+  | "completed"
+  | "failed"
+  | "cancelled";
+export type ApiAgentApprovalStatus = "pending" | "approved" | "rejected";
+export type ApiAgentApprovalType = "plan_approval" | "tool_approval";
+export type ApiAgentArtifactType =
+  | "final_result"
+  | "execution_summary"
+  | "structured_result"
+  | "source_bundle";
+export type ApiAgentTaskEventType =
+  | "task_status"
+  | "plan_step"
+  | "execution_event"
+  | "approval_requested"
+  | "approval_resolved"
+  | "artifact_created"
+  | "final_result"
+  | "error"
+  | "done";
+
+export interface ApiAgentTaskAttachment {
+  id?: string;
+  fileName: string;
+  fileType?: string;
+  fileSize?: number;
+}
+
+export interface ApiAgentTask {
+  id: string;
+  userId: string;
+  conversationId: string | null;
+  channelId: string | null;
+  modelId: string | null;
+  title: string;
+  goal: string;
+  attachments: ApiAgentTaskAttachment[];
+  status: ApiAgentTaskStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ApiAgentTaskRun {
+  id: string;
+  taskId: string;
+  phase: ApiAgentRunPhase;
+  status: ApiAgentRunStatus;
+  summary: string | null;
+  error: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ApiAgentPlanStep {
+  id: string;
+  taskId: string;
+  runId: string;
+  orderIndex: number;
+  title: string;
+  description: string | null;
+  status: "pending" | "ready" | "running" | "completed" | "failed";
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ApiAgentApproval {
+  id: string;
+  taskId: string;
+  runId: string;
+  type: ApiAgentApprovalType;
+  status: ApiAgentApprovalStatus;
+  title: string;
+  description: string | null;
+  payload: unknown;
+  response: unknown;
+  requestedAt: string;
+  respondedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ApiAgentArtifact {
+  id: string;
+  taskId: string;
+  runId: string;
+  type: ApiAgentArtifactType;
+  title: string;
+  content: string;
+  metadata: unknown;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ApiAgentTaskEvent {
+  id: string;
+  taskId: string;
+  runId: string;
+  type: ApiAgentTaskEventType;
+  content: string | null;
+  toolName: string | null;
+  toolInput: unknown;
+  metadata: unknown;
+  createdAt: string;
+}
+
+export interface ApiAgentTaskDetail {
+  task: ApiAgentTask;
+  runs: ApiAgentTaskRun[];
+  planSteps: ApiAgentPlanStep[];
+  approvals: ApiAgentApproval[];
+  artifacts: ApiAgentArtifact[];
+  events: ApiAgentTaskEvent[];
+}
+
 export type ApiSettingsMap = Record<string, string>;
 
 async function probeReachableButBlocked(url: string): Promise<boolean> {
@@ -476,6 +606,60 @@ export const api = {
       fetchApi<{ success: boolean }>(`/agent/sessions/${sessionId}/channel`, {
         method: "PUT",
         body: JSON.stringify({ channelId, modelId }),
+      }),
+  },
+
+  agentTasks: {
+    list: () => fetchApi<{ tasks: ApiAgentTask[] }>("/agent/tasks"),
+
+    get: (id: string) => fetchApi<ApiAgentTaskDetail>(`/agent/tasks/${id}`),
+
+    create: (data: {
+      title?: string;
+      goal: string;
+      conversationId?: string | null;
+      channelId?: string | null;
+      modelId?: string | null;
+      attachments?: ApiAgentTaskAttachment[];
+    }) =>
+      fetchApi<{ task: ApiAgentTask }>("/agent/tasks", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+
+    plan: (id: string) =>
+      fetchApi<ApiAgentTaskDetail>(`/agent/tasks/${id}/plan`, {
+        method: "POST",
+      }),
+
+    execute: (id: string, options?: { signal?: AbortSignal }) =>
+      fetch(`${API_BASE}/agent/tasks/${id}/execute`, {
+        method: "POST",
+        credentials: "include",
+        signal: options?.signal,
+      }),
+
+    cancel: (id: string) =>
+      fetchApi<ApiAgentTaskDetail>(`/agent/tasks/${id}/cancel`, {
+        method: "POST",
+      }),
+
+    listEvents: (id: string) =>
+      fetchApi<{ events: ApiAgentTaskEvent[] }>(`/agent/tasks/${id}/events`),
+
+    listArtifacts: (id: string) =>
+      fetchApi<{ artifacts: ApiAgentArtifact[] }>(`/agent/tasks/${id}/artifacts`),
+
+    respondApproval: (
+      id: string,
+      data: {
+        status: Exclude<ApiAgentApprovalStatus, "pending">;
+        response?: unknown;
+      },
+    ) =>
+      fetchApi<ApiAgentTaskDetail>(`/agent/approvals/${id}/respond`, {
+        method: "POST",
+        body: JSON.stringify(data),
       }),
   },
 

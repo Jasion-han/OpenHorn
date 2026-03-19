@@ -94,6 +94,54 @@ export interface AgentRuntimeConfig {
   onEvent?: (event: AgentEvent) => Promise<void> | void;
 }
 
+export interface PreparedAgentRuntimeContext {
+  channelId: string | null;
+  modelId: string | null;
+  globalSystemPrompt?: string;
+  liveSystemContext?: string;
+}
+
+export async function buildAgentRuntimeContext(params: {
+  userId: string;
+  prompt: string;
+  channelId?: string | null;
+  modelId?: string | null;
+}): Promise<PreparedAgentRuntimeContext> {
+  const values = await getSettingValues(params.userId, [
+    "chat.systemPrompt",
+    TAVILY_API_KEY_SETTING,
+    TAVILY_ENABLED_SETTING,
+  ]);
+  const globalSystemPrompt = values["chat.systemPrompt"] || undefined;
+  const resolvedChannel = await getResolvedChannelForConversation(params.userId, {
+    channelId: params.channelId ?? null,
+    modelId: params.modelId ?? null,
+  });
+  const classifier = resolvedChannel
+    ? (inputPrompt: string) =>
+        classifyLiveRouteWithModel({
+          provider: resolvedChannel.channel.provider,
+          apiKey: resolvedChannel.apiKey,
+          baseUrl: resolvedChannel.channel.baseUrl,
+          modelId: resolvedChannel.modelId,
+          prompt: inputPrompt,
+        })
+    : undefined;
+  const liveContext = await buildLiveContext({
+    prompt: params.prompt,
+    userSettings: values,
+    tavilyEnvKey: process.env.TAVILY_API_KEY ?? null,
+    classifier,
+  });
+
+  return {
+    channelId: params.channelId ?? resolvedChannel?.channel.id ?? null,
+    modelId: params.modelId ?? resolvedChannel?.modelId ?? null,
+    globalSystemPrompt,
+    liveSystemContext: liveContext.systemContext,
+  };
+}
+
 export async function getAgentSessions(userId: string) {
   return db
     .select()
@@ -342,41 +390,21 @@ export async function* runAgent(
       .where(and(eq(agentSessions.id, sessionId), eq(agentSessions.userId, userId)));
   }
 
-  const values = await getSettingValues(userId, [
-    "chat.systemPrompt",
-    TAVILY_API_KEY_SETTING,
-    TAVILY_ENABLED_SETTING,
-  ]);
-  const globalSystemPrompt = values["chat.systemPrompt"] || undefined;
-  const resolvedChannel = await getResolvedChannelForConversation(userId, {
+  const runtimeContext = await buildAgentRuntimeContext({
+    userId,
+    prompt,
     channelId: session.channelId || null,
     modelId: session.modelId || null,
-  });
-  const classifier = resolvedChannel
-    ? (inputPrompt: string) =>
-        classifyLiveRouteWithModel({
-          provider: resolvedChannel.channel.provider,
-          apiKey: resolvedChannel.apiKey,
-          baseUrl: resolvedChannel.channel.baseUrl,
-          modelId: resolvedChannel.modelId,
-          prompt: inputPrompt,
-        })
-    : undefined;
-  const liveContext = await buildLiveContext({
-    prompt,
-    userSettings: values,
-    tavilyEnvKey: process.env.TAVILY_API_KEY ?? null,
-    classifier,
   });
 
   for await (const event of runAgentWithConfig({
     userId,
     prompt,
     attachmentIds,
-    channelId: session.channelId || null,
-    modelId: session.modelId || null,
-    globalSystemPrompt,
-    liveSystemContext: liveContext.systemContext,
+    channelId: runtimeContext.channelId,
+    modelId: runtimeContext.modelId,
+    globalSystemPrompt: runtimeContext.globalSystemPrompt,
+    liveSystemContext: runtimeContext.liveSystemContext,
     abortController,
     onEvent: (event) => saveAgentEvent(sessionId, event),
   })) {

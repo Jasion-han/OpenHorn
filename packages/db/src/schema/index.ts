@@ -90,6 +90,105 @@ export const agentSessions = sqliteTable("agent_sessions", {
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
 });
 
+export const agentTasks = sqliteTable("agent_tasks", {
+  id: text("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.id),
+  conversationId: text("conversation_id").references(() => conversations.id),
+  channelId: text("channel_id").references(() => channels.id),
+  modelId: text("model_id"),
+  title: text("title").notNull(),
+  goal: text("goal").notNull(),
+  attachments: text("attachments"),
+  status: text("status").notNull().default("draft"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+});
+
+export const agentRuns = sqliteTable("agent_runs", {
+  id: text("id").primaryKey(),
+  taskId: text("task_id")
+    .notNull()
+    .references(() => agentTasks.id),
+  phase: text("phase").notNull(),
+  status: text("status").notNull().default("pending"),
+  summary: text("summary"),
+  error: text("error"),
+  startedAt: integer("started_at", { mode: "timestamp" }),
+  completedAt: integer("completed_at", { mode: "timestamp" }),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+});
+
+export const agentPlanSteps = sqliteTable("agent_plan_steps", {
+  id: text("id").primaryKey(),
+  taskId: text("task_id")
+    .notNull()
+    .references(() => agentTasks.id),
+  runId: text("run_id")
+    .notNull()
+    .references(() => agentRuns.id),
+  orderIndex: integer("order_index").notNull(),
+  title: text("title").notNull(),
+  description: text("description"),
+  status: text("status").notNull().default("pending"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+});
+
+export const agentTaskEvents = sqliteTable("agent_task_events", {
+  id: text("id").primaryKey(),
+  taskId: text("task_id")
+    .notNull()
+    .references(() => agentTasks.id),
+  runId: text("run_id")
+    .notNull()
+    .references(() => agentRuns.id),
+  type: text("type").notNull(),
+  content: text("content"),
+  toolName: text("tool_name"),
+  toolInput: text("tool_input"),
+  metadata: text("metadata"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+});
+
+export const agentApprovalRequests = sqliteTable("agent_approval_requests", {
+  id: text("id").primaryKey(),
+  taskId: text("task_id")
+    .notNull()
+    .references(() => agentTasks.id),
+  runId: text("run_id")
+    .notNull()
+    .references(() => agentRuns.id),
+  type: text("type").notNull(),
+  status: text("status").notNull().default("pending"),
+  title: text("title").notNull(),
+  description: text("description"),
+  payload: text("payload"),
+  response: text("response"),
+  requestedAt: integer("requested_at", { mode: "timestamp" }).notNull(),
+  respondedAt: integer("responded_at", { mode: "timestamp" }),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+});
+
+export const agentArtifacts = sqliteTable("agent_artifacts", {
+  id: text("id").primaryKey(),
+  taskId: text("task_id")
+    .notNull()
+    .references(() => agentTasks.id),
+  runId: text("run_id")
+    .notNull()
+    .references(() => agentRuns.id),
+  type: text("type").notNull(),
+  title: text("title").notNull(),
+  content: text("content").notNull(),
+  metadata: text("metadata"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+});
+
 export const mcpServers = sqliteTable("mcp_servers", {
   id: text("id").primaryKey(),
   userId: text("user_id")

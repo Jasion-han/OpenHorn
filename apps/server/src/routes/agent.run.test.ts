@@ -26,11 +26,35 @@ test("POST /sessions/:id/run returns compatibility error before starting SSE run
     deleteAgentSession: async () => ({ success: true }),
     getAgentEvents: async () => ({ events: [] }),
     deleteAgentEvent: async () => true,
+    buildAgentRuntimeContext: async () => ({
+      channelId: "channel-1",
+      modelId: "gpt-5.4",
+      globalSystemPrompt: undefined,
+      liveSystemContext: undefined,
+    }),
     runAgentWithConfig: async function* () {},
     runAgent: async function* () {
       runAgentCalled = true;
       yield { type: "text", content: "should not run" };
     },
+  }));
+
+  mock.module("../services/agentTaskService", () => ({
+    listAgentTasks: async () => [],
+    getAgentTaskById: async () => null,
+    getAgentTaskDetail: async () => null,
+    listAgentTaskEvents: async () => [],
+    listAgentArtifacts: async () => [],
+    createAgentTask: async () => ({ id: "task-1" }),
+    createAgentRun: async () => ({ id: "run-1" }),
+    createAgentTaskEvent: async () => ({ id: "event-1" }),
+    setAgentPlanSteps: async () => [],
+    createAgentApprovalRequest: async () => ({ id: "approval-1" }),
+    respondToAgentApproval: async () => ({ id: "approval-1" }),
+    getLatestApprovalForTask: async () => null,
+    createAgentArtifact: async () => ({ id: "artifact-1" }),
+    updateAgentRunStatus: async () => ({ id: "run-1" }),
+    updateAgentTaskStatus: async () => ({ id: "task-1" }),
   }));
 
   mock.module("../services/channelService", () => ({
@@ -53,7 +77,7 @@ test("POST /sessions/:id/run returns compatibility error before starting SSE run
   ) as unknown as typeof fetch;
 
   try {
-    const { default: agent } = await import("./agent");
+    const { default: agent } = await import(`./agent?case=${crypto.randomUUID()}`);
 
     const response = await agent.request("/sessions/session-1/run", {
       method: "POST",

@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import {
+  buildAgentRuntimeContext,
   createAgentSession,
   deleteAgentEvent,
   deleteAgentSession,
@@ -8,9 +9,27 @@ import {
   getAgentSessions,
   renameAgentSession,
   runAgent,
+  runAgentWithConfig,
   updateAgentSessionChannel,
   updateAgentSessionStatus,
 } from "../services/agentService";
+import {
+  createAgentApprovalRequest,
+  createAgentArtifact,
+  createAgentRun,
+  createAgentTask,
+  createAgentTaskEvent,
+  getAgentTaskById,
+  getAgentTaskDetail,
+  getLatestApprovalForTask,
+  listAgentArtifacts,
+  listAgentTaskEvents,
+  listAgentTasks,
+  respondToAgentApproval,
+  setAgentPlanSteps,
+  updateAgentRunStatus,
+  updateAgentTaskStatus,
+} from "../services/agentTaskService";
 import { generateAutoTitle } from "../services/autoTitleService";
 import { checkChannelAgentCompatibility } from "../services/channelAgentCheckService";
 import { getResolvedChannelForConversation } from "../services/channelService";
@@ -21,6 +40,505 @@ import { isRecord } from "../utils/typeGuards";
 const agent = new Hono<UserEnv>();
 
 agent.use("*", requireUser);
+
+function buildPlanFromGoal(goal: string) {
+  const normalized = goal.trim().replace(/\s+/g, " ");
+  const executionTitle =
+    normalized.length > 72 ? `${normalized.slice(0, 69).trim()}...` : normalized;
+
+  return [
+    {
+      title: "Inspect task scope and available context",
+      description: "Review the goal, attachments, and constraints before execution.",
+      status: "ready" as const,
+    },
+    {
+      title: executionTitle || "Execute the requested task",
+      description: "Carry out the task using the approved plan and required tools.",
+      status: "pending" as const,
+    },
+    {
+      title: "Verify outcome and summarize results",
+      description: "Validate the output, note risks, and produce a final result artifact.",
+      status: "pending" as const,
+    },
+  ];
+}
+
+function buildExecutionPrompt(goal: string, planSteps: Array<{ title: string; description?: string | null }>) {
+  const renderedPlan = planSteps
+    .map((step, index) =>
+      [`${index + 1}. ${step.title}`, step.description?.trim()].filter(Boolean).join("\n"),
+    )
+    .join("\n\n");
+
+  return [`Approved task goal:`, goal.trim(), `Approved execution plan:`, renderedPlan]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function summarizeExecution(params: {
+  finalText: string;
+  toolStarts: number;
+  toolResults: number;
+  hadError: boolean;
+}) {
+  const parts = [
+    params.hadError ? "Execution ended with an error." : "Execution completed.",
+    `Tool starts: ${params.toolStarts}.`,
+    `Tool results: ${params.toolResults}.`,
+    `Final text length: ${params.finalText.trim().length}.`,
+  ];
+  return parts.join(" ");
+}
+
+agent.get("/tasks", async (c) => {
+  const user = c.get("user");
+  const tasks = await listAgentTasks(user.id);
+  return c.json({ tasks });
+});
+
+agent.get("/tasks/:id", async (c) => {
+  const user = c.get("user");
+  const taskId = c.req.param("id");
+  const task = await getAgentTaskById(user.id, taskId);
+  if (!task) {
+    return c.json({ error: "Task not found" }, 404);
+  }
+  const detail = await getAgentTaskDetail(user.id, taskId);
+  return c.json(detail);
+});
+
+agent.get("/tasks/:id/events", async (c) => {
+  const user = c.get("user");
+  const taskId = c.req.param("id");
+  const task = await getAgentTaskById(user.id, taskId);
+  if (!task) {
+    return c.json({ error: "Task not found" }, 404);
+  }
+  const events = await listAgentTaskEvents(user.id, taskId);
+  return c.json({ events });
+});
+
+agent.get("/tasks/:id/artifacts", async (c) => {
+  const user = c.get("user");
+  const taskId = c.req.param("id");
+  const task = await getAgentTaskById(user.id, taskId);
+  if (!task) {
+    return c.json({ error: "Task not found" }, 404);
+  }
+  const artifacts = await listAgentArtifacts(user.id, taskId);
+  return c.json({ artifacts });
+});
+
+agent.post("/tasks", async (c) => {
+  const user = c.get("user");
+  const body = (await c.req.json().catch(() => null)) as unknown;
+  if (!isRecord(body) || typeof body.goal !== "string" || !body.goal.trim()) {
+    return c.json({ error: "goal is required" }, 400);
+  }
+
+  const attachments = Array.isArray(body.attachments)
+    ? body.attachments.filter((item): item is Record<string, unknown> => isRecord(item)).map((item) => ({
+        id: typeof item.id === "string" ? item.id : undefined,
+        fileName: typeof item.fileName === "string" ? item.fileName : "attachment",
+        fileType: typeof item.fileType === "string" ? item.fileType : undefined,
+        fileSize: typeof item.fileSize === "number" ? item.fileSize : undefined,
+      }))
+    : [];
+
+  try {
+    const task = await createAgentTask(user.id, {
+      conversationId: typeof body.conversationId === "string" ? body.conversationId : null,
+      channelId: typeof body.channelId === "string" ? body.channelId : null,
+      modelId: typeof body.modelId === "string" ? body.modelId : null,
+      title: typeof body.title === "string" ? body.title : null,
+      goal: body.goal,
+      attachments,
+    });
+    return c.json({ task }, 201);
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : "Failed to create task" }, 400);
+  }
+});
+
+agent.post("/tasks/:id/plan", async (c) => {
+  const user = c.get("user");
+  const taskId = c.req.param("id");
+  const task = await getAgentTaskById(user.id, taskId);
+  if (!task) {
+    return c.json({ error: "Task not found" }, 404);
+  }
+
+  try {
+    await updateAgentTaskStatus(user.id, taskId, "planning");
+    const run = await createAgentRun(user.id, taskId, {
+      phase: "planning",
+      status: "running",
+      startedAt: new Date(),
+    });
+    await createAgentTaskEvent(user.id, taskId, run.id, {
+      type: "task_status",
+      content: "Task entered planning.",
+      metadata: { status: "planning" },
+    });
+
+    const planSteps = await setAgentPlanSteps(user.id, taskId, run.id, {
+      steps: buildPlanFromGoal(task.goal),
+    });
+
+    for (const step of planSteps) {
+      await createAgentTaskEvent(user.id, taskId, run.id, {
+        type: "plan_step",
+        content: step.title,
+        metadata: {
+          orderIndex: step.orderIndex,
+          description: step.description,
+          status: step.status,
+        },
+      });
+    }
+
+    const approval = await createAgentApprovalRequest(user.id, taskId, run.id, {
+      type: "plan_approval",
+      title: "Approve task execution",
+      description: "Review the generated plan before the agent starts executing it.",
+      payload: {
+        planStepIds: planSteps.map((step) => step.id),
+        planStepCount: planSteps.length,
+      },
+    });
+
+    await createAgentTaskEvent(user.id, taskId, run.id, {
+      type: "approval_requested",
+      content: approval.title,
+      metadata: { approvalId: approval.id, approvalType: approval.type },
+    });
+
+    await updateAgentRunStatus(user.id, run.id, "awaiting_approval");
+    await updateAgentTaskStatus(user.id, taskId, "awaiting_approval");
+    await createAgentTaskEvent(user.id, taskId, run.id, {
+      type: "task_status",
+      content: "Task is awaiting approval.",
+      metadata: { status: "awaiting_approval" },
+    });
+
+    const detail = await getAgentTaskDetail(user.id, taskId);
+    return c.json(detail);
+  } catch (error) {
+    await updateAgentTaskStatus(user.id, taskId, "failed").catch(() => undefined);
+    return c.json({ error: error instanceof Error ? error.message : "Failed to create plan" }, 400);
+  }
+});
+
+agent.post("/approvals/:id/respond", async (c) => {
+  const user = c.get("user");
+  const approvalId = c.req.param("id");
+  const body = (await c.req.json().catch(() => null)) as unknown;
+  if (!isRecord(body) || (body.status !== "approved" && body.status !== "rejected")) {
+    return c.json({ error: "status must be approved or rejected" }, 400);
+  }
+
+  try {
+    const approval = await respondToAgentApproval(user.id, approvalId, {
+      status: body.status,
+      response: isRecord(body.response) || Array.isArray(body.response) ? body.response : body.response,
+    });
+
+    const nextStatus =
+      approval.type === "tool_approval" && approval.status === "approved"
+        ? "running"
+        : approval.status === "rejected"
+          ? "draft"
+          : "draft";
+
+    await updateAgentTaskStatus(user.id, approval.taskId, nextStatus);
+    await createAgentTaskEvent(user.id, approval.taskId, approval.runId, {
+      type: "approval_resolved",
+      content: `${approval.type} ${approval.status}`,
+      metadata: { approvalId: approval.id, status: approval.status },
+    });
+
+    const detail = await getAgentTaskDetail(user.id, approval.taskId);
+    return c.json(detail);
+  } catch (error) {
+    const status = error instanceof Error && error.message === "Approval not found" ? 404 : 400;
+    return c.json({ error: error instanceof Error ? error.message : "Failed to respond to approval" }, status);
+  }
+});
+
+agent.post("/tasks/:id/execute", async (c) => {
+  const user = c.get("user");
+  const taskId = c.req.param("id");
+  const task = await getAgentTaskById(user.id, taskId);
+  if (!task) {
+    return c.text("Task not found", 404);
+  }
+
+  const latestApproval = await getLatestApprovalForTask(user.id, taskId, "plan_approval");
+  if (!latestApproval || latestApproval.status !== "approved") {
+    return c.text("Task plan must be approved before execution.", 400);
+  }
+
+  const resolvedChannel = await getResolvedChannelForConversation(user.id, {
+    channelId: task.channelId,
+    modelId: task.modelId,
+  });
+  const provider = resolvedChannel?.channel?.provider;
+  if (!provider) {
+    return c.text("未配置可用的默认渠道/默认模型。请先在设置中完成配置。", 400);
+  }
+  if (provider !== "anthropic") {
+    return c.text(
+      `Agent 模式目前仅支持 Anthropic(Claude Agent SDK)。当前 Provider: ${provider}。请切换到 Anthropic 渠道后重试。`,
+      400,
+    );
+  }
+
+  const compatibility = await checkChannelAgentCompatibility(
+    user.id,
+    resolvedChannel.channel.id,
+    resolvedChannel.modelId,
+  );
+  if (compatibility.success === false) {
+    return c.text(compatibility.error, 400);
+  }
+
+  const detail = await getAgentTaskDetail(user.id, taskId);
+  const approvedPlanSteps = detail.planSteps
+    .filter((step) => step.runId === latestApproval.runId)
+    .sort((left, right) => left.orderIndex - right.orderIndex);
+
+  const attachmentIds = task.attachments
+    .map((attachment) => attachment.id)
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+  const executionPrompt = buildExecutionPrompt(task.goal, approvedPlanSteps);
+
+  const stream = createSseStream(async (send, ctx) => {
+    const run = await createAgentRun(user.id, taskId, {
+      phase: "execution",
+      status: "running",
+      startedAt: new Date(),
+    });
+
+    let finalText = "";
+    let toolStarts = 0;
+    let toolResults = 0;
+    let hadError = false;
+    let errorText: string | null = null;
+
+    await updateAgentTaskStatus(user.id, taskId, "running");
+    await createAgentTaskEvent(user.id, taskId, run.id, {
+      type: "task_status",
+      content: "Task execution started.",
+      metadata: { status: "running" },
+    });
+    send({ type: "task_status", taskId, runId: run.id, status: "running" });
+
+    const runtimeContext = await buildAgentRuntimeContext({
+      userId: user.id,
+      prompt: executionPrompt,
+      channelId: task.channelId,
+      modelId: task.modelId,
+    });
+
+    try {
+      for await (const event of runAgentWithConfig({
+        userId: user.id,
+        prompt: executionPrompt,
+        attachmentIds,
+        channelId: runtimeContext.channelId,
+        modelId: runtimeContext.modelId,
+        globalSystemPrompt: runtimeContext.globalSystemPrompt,
+        liveSystemContext: runtimeContext.liveSystemContext,
+        abortController: ctx.abortController,
+      })) {
+        if (event.type === "meta" || event.type === "done" || event.type === "user") {
+          continue;
+        }
+
+        if (event.type === "text") {
+          finalText += event.content ?? "";
+          await createAgentTaskEvent(user.id, taskId, run.id, {
+            type: "execution_event",
+            content: event.content ?? null,
+            metadata: { eventType: "text" },
+          });
+          send({
+            type: "execution_event",
+            taskId,
+            runId: run.id,
+            eventType: "text",
+            content: event.content ?? "",
+          });
+          continue;
+        }
+
+        if (event.type === "tool_start") {
+          toolStarts += 1;
+          await createAgentTaskEvent(user.id, taskId, run.id, {
+            type: "execution_event",
+            content: event.content ?? null,
+            toolName: event.toolName ?? null,
+            toolInput: event.toolInput,
+            metadata: { eventType: "tool_start" },
+          });
+          send({
+            type: "execution_event",
+            taskId,
+            runId: run.id,
+            eventType: "tool_start",
+            toolName: event.toolName,
+            toolInput: event.toolInput,
+            content: event.content,
+          });
+          continue;
+        }
+
+        if (event.type === "tool_result") {
+          toolResults += 1;
+          await createAgentTaskEvent(user.id, taskId, run.id, {
+            type: "execution_event",
+            content: event.content ?? null,
+            toolName: event.toolName ?? null,
+            metadata: { eventType: "tool_result" },
+          });
+          send({
+            type: "execution_event",
+            taskId,
+            runId: run.id,
+            eventType: "tool_result",
+            toolName: event.toolName,
+            content: event.content,
+          });
+          continue;
+        }
+
+        if (event.type === "error") {
+          hadError = true;
+          errorText = event.content ?? "Agent error";
+          await createAgentTaskEvent(user.id, taskId, run.id, {
+            type: "error",
+            content: errorText,
+          });
+          send({
+            type: "error",
+            taskId,
+            runId: run.id,
+            content: errorText,
+          });
+        }
+      }
+
+      const executionSummary = summarizeExecution({
+        finalText,
+        toolStarts,
+        toolResults,
+        hadError,
+      });
+
+      await createAgentArtifact(user.id, taskId, run.id, {
+        type: "execution_summary",
+        title: "Execution summary",
+        content: executionSummary,
+        metadata: {
+          hadError,
+          toolStarts,
+          toolResults,
+        },
+      });
+      send({
+        type: "artifact_created",
+        taskId,
+        runId: run.id,
+        artifactType: "execution_summary",
+      });
+
+      if (finalText.trim()) {
+        await createAgentArtifact(user.id, taskId, run.id, {
+          type: "final_result",
+          title: "Final result",
+          content: finalText.trim(),
+        });
+        send({
+          type: "artifact_created",
+          taskId,
+          runId: run.id,
+          artifactType: "final_result",
+        });
+        send({
+          type: "final_result",
+          taskId,
+          runId: run.id,
+          content: finalText.trim(),
+        });
+      }
+
+      if (hadError) {
+        await updateAgentRunStatus(user.id, run.id, "failed", {
+          summary: executionSummary,
+          error: errorText,
+          completedAt: new Date(),
+        });
+        await updateAgentTaskStatus(user.id, taskId, "failed");
+        await createAgentTaskEvent(user.id, taskId, run.id, {
+          type: "task_status",
+          content: "Task execution failed.",
+          metadata: { status: "failed" },
+        });
+        send({ type: "task_status", taskId, runId: run.id, status: "failed" });
+      } else {
+        await updateAgentRunStatus(user.id, run.id, "completed", {
+          summary: executionSummary,
+          completedAt: new Date(),
+        });
+        await updateAgentTaskStatus(user.id, taskId, "completed");
+        await createAgentTaskEvent(user.id, taskId, run.id, {
+          type: "task_status",
+          content: "Task execution completed.",
+          metadata: { status: "completed" },
+        });
+        send({ type: "task_status", taskId, runId: run.id, status: "completed" });
+      }
+
+      send({ type: "done", taskId, runId: run.id });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Task execution failed";
+      hadError = true;
+      await updateAgentRunStatus(user.id, run.id, "failed", {
+        summary: message,
+        error: message,
+        completedAt: new Date(),
+      }).catch(() => undefined);
+      await updateAgentTaskStatus(user.id, taskId, "failed").catch(() => undefined);
+      await createAgentTaskEvent(user.id, taskId, run.id, {
+        type: "error",
+        content: message,
+      }).catch(() => undefined);
+      send({ type: "error", taskId, runId: run.id, content: message });
+    }
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    },
+  });
+});
+
+agent.post("/tasks/:id/cancel", async (c) => {
+  const user = c.get("user");
+  const taskId = c.req.param("id");
+  const task = await getAgentTaskById(user.id, taskId);
+  if (!task) {
+    return c.json({ error: "Task not found" }, 404);
+  }
+  await updateAgentTaskStatus(user.id, taskId, "cancelled");
+  const detail = await getAgentTaskDetail(user.id, taskId);
+  return c.json(detail);
+});
 
 agent.get("/sessions", async (c) => {
   const user = c.get("user");
