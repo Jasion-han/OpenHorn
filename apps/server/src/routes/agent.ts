@@ -22,6 +22,7 @@ import {
   getAgentTaskById,
   getAgentTaskDetail,
   getLatestApprovalForTask,
+  getLatestRunForTask,
   listAgentArtifacts,
   listAgentTaskEvents,
   listAgentTasks,
@@ -90,6 +91,323 @@ function summarizeExecution(params: {
     `Final text length: ${params.finalText.trim().length}.`,
   ];
   return parts.join(" ");
+}
+
+function buildExecutionModeContext(
+  mode: "execute" | "retry" | "continue",
+  previousRun?: { summary: string | null; error: string | null } | null,
+) {
+  if (mode === "execute") {
+    return null;
+  }
+
+  const parts: string[] = [];
+  if (mode === "retry") {
+    parts.push("Execution mode: retry the task from scratch.");
+  } else {
+    parts.push("Execution mode: continue from the previous attempt when useful.");
+  }
+
+  const previousSummary = previousRun?.summary?.trim() || previousRun?.error?.trim() || "";
+  if (previousSummary) {
+    parts.push(`Previous attempt summary:\n${previousSummary}`);
+  }
+
+  return parts.join("\n\n");
+}
+
+async function resolveTaskExecutionContext(
+  userId: string,
+  taskId: string,
+  mode: "execute" | "retry" | "continue",
+) {
+  const task = await getAgentTaskById(userId, taskId);
+  if (!task) {
+    return { error: "Task not found", status: 404 as const };
+  }
+
+  const latestApproval = await getLatestApprovalForTask(userId, taskId, "plan_approval");
+  if (!latestApproval || latestApproval.status !== "approved") {
+    return { error: "Task plan must be approved before execution.", status: 400 as const };
+  }
+
+  const resolvedChannel = await getResolvedChannelForConversation(userId, {
+    channelId: task.channelId,
+    modelId: task.modelId,
+  });
+  const provider = resolvedChannel?.channel?.provider;
+  if (!provider) {
+    return { error: "未配置可用的默认渠道/默认模型。请先在设置中完成配置。", status: 400 as const };
+  }
+  if (provider !== "anthropic") {
+    return {
+      error: `Agent 模式目前仅支持 Anthropic(Claude Agent SDK)。当前 Provider: ${provider}。请切换到 Anthropic 渠道后重试。`,
+      status: 400 as const,
+    };
+  }
+
+  const compatibility = await checkChannelAgentCompatibility(
+    userId,
+    resolvedChannel.channel.id,
+    resolvedChannel.modelId,
+  );
+  if (compatibility.success === false) {
+    return { error: compatibility.error, status: 400 as const };
+  }
+
+  const detail = await getAgentTaskDetail(userId, taskId);
+  const approvedPlanSteps = detail.planSteps
+    .filter((step) => step.runId === latestApproval.runId)
+    .sort((left, right) => left.orderIndex - right.orderIndex);
+
+  if (mode === "retry" && !["failed", "cancelled", "completed"].includes(task.status)) {
+    return { error: "Only failed, cancelled, or completed tasks can be retried.", status: 400 as const };
+  }
+
+  if (mode === "continue" && !["failed", "completed"].includes(task.status)) {
+    return { error: "Only failed or completed tasks can be continued.", status: 400 as const };
+  }
+
+  const previousExecutionRun =
+    mode === "execute" ? null : await getLatestRunForTask(userId, taskId, "execution");
+
+  const taskModeContext = buildExecutionModeContext(mode, previousExecutionRun);
+  const executionPrompt = [taskModeContext, buildExecutionPrompt(task.goal, approvedPlanSteps)]
+    .filter((value): value is string => Boolean(value))
+    .join("\n\n");
+
+  return {
+    task,
+    executionPrompt,
+  };
+}
+
+async function createTaskExecutionResponse(
+  userId: string,
+  taskId: string,
+  mode: "execute" | "retry" | "continue",
+) {
+  const resolved = await resolveTaskExecutionContext(userId, taskId, mode);
+  if ("error" in resolved) {
+    return new Response(resolved.error, { status: resolved.status });
+  }
+
+  const { task, executionPrompt } = resolved;
+  const attachmentIds = task.attachments
+    .map((attachment) => attachment.id)
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+
+  const stream = createSseStream(async (send, ctx) => {
+    const run = await createAgentRun(userId, taskId, {
+      phase: "execution",
+      status: "running",
+      startedAt: new Date(),
+    });
+
+    let finalText = "";
+    let toolStarts = 0;
+    let toolResults = 0;
+    let hadError = false;
+    let errorText: string | null = null;
+
+    await updateAgentTaskStatus(userId, taskId, "running");
+    await createAgentTaskEvent(userId, taskId, run.id, {
+      type: "task_status",
+      content: "Task execution started.",
+      metadata: { status: "running", mode },
+    });
+    send({ type: "task_status", taskId, runId: run.id, status: "running" });
+
+    const runtimeContext = await buildAgentRuntimeContext({
+      userId,
+      prompt: executionPrompt,
+      channelId: task.channelId,
+      modelId: task.modelId,
+    });
+
+    try {
+      for await (const event of runAgentWithConfig({
+        userId,
+        prompt: executionPrompt,
+        attachmentIds,
+        channelId: runtimeContext.channelId,
+        modelId: runtimeContext.modelId,
+        globalSystemPrompt: runtimeContext.globalSystemPrompt,
+        liveSystemContext: runtimeContext.liveSystemContext,
+        abortController: ctx.abortController,
+      })) {
+        if (event.type === "meta" || event.type === "done" || event.type === "user") {
+          continue;
+        }
+
+        if (event.type === "text") {
+          finalText += event.content ?? "";
+          await createAgentTaskEvent(userId, taskId, run.id, {
+            type: "execution_event",
+            content: event.content ?? null,
+            metadata: { eventType: "text" },
+          });
+          send({
+            type: "execution_event",
+            taskId,
+            runId: run.id,
+            eventType: "text",
+            content: event.content ?? "",
+          });
+          continue;
+        }
+
+        if (event.type === "tool_start") {
+          toolStarts += 1;
+          await createAgentTaskEvent(userId, taskId, run.id, {
+            type: "execution_event",
+            content: event.content ?? null,
+            toolName: event.toolName ?? null,
+            toolInput: event.toolInput,
+            metadata: { eventType: "tool_start" },
+          });
+          send({
+            type: "execution_event",
+            taskId,
+            runId: run.id,
+            eventType: "tool_start",
+            toolName: event.toolName,
+            toolInput: event.toolInput,
+            content: event.content,
+          });
+          continue;
+        }
+
+        if (event.type === "tool_result") {
+          toolResults += 1;
+          await createAgentTaskEvent(userId, taskId, run.id, {
+            type: "execution_event",
+            content: event.content ?? null,
+            toolName: event.toolName ?? null,
+            metadata: { eventType: "tool_result" },
+          });
+          send({
+            type: "execution_event",
+            taskId,
+            runId: run.id,
+            eventType: "tool_result",
+            toolName: event.toolName,
+            content: event.content,
+          });
+          continue;
+        }
+
+        if (event.type === "error") {
+          hadError = true;
+          errorText = event.content ?? "Agent error";
+          await createAgentTaskEvent(userId, taskId, run.id, {
+            type: "error",
+            content: errorText,
+          });
+          send({
+            type: "error",
+            taskId,
+            runId: run.id,
+            content: errorText,
+          });
+        }
+      }
+
+      const executionSummary = summarizeExecution({
+        finalText,
+        toolStarts,
+        toolResults,
+        hadError,
+      });
+
+      await createAgentArtifact(userId, taskId, run.id, {
+        type: "execution_summary",
+        title: "Execution summary",
+        content: executionSummary,
+        metadata: {
+          hadError,
+          toolStarts,
+          toolResults,
+        },
+      });
+      send({
+        type: "artifact_created",
+        taskId,
+        runId: run.id,
+        artifactType: "execution_summary",
+      });
+
+      if (finalText.trim()) {
+        await createAgentArtifact(userId, taskId, run.id, {
+          type: "final_result",
+          title: "Final result",
+          content: finalText.trim(),
+        });
+        send({
+          type: "artifact_created",
+          taskId,
+          runId: run.id,
+          artifactType: "final_result",
+        });
+        send({
+          type: "final_result",
+          taskId,
+          runId: run.id,
+          content: finalText.trim(),
+        });
+      }
+
+      if (hadError) {
+        await updateAgentRunStatus(userId, run.id, "failed", {
+          summary: executionSummary,
+          error: errorText,
+          completedAt: new Date(),
+        });
+        await updateAgentTaskStatus(userId, taskId, "failed");
+        await createAgentTaskEvent(userId, taskId, run.id, {
+          type: "task_status",
+          content: "Task execution failed.",
+          metadata: { status: "failed" },
+        });
+        send({ type: "task_status", taskId, runId: run.id, status: "failed" });
+      } else {
+        await updateAgentRunStatus(userId, run.id, "completed", {
+          summary: executionSummary,
+          completedAt: new Date(),
+        });
+        await updateAgentTaskStatus(userId, taskId, "completed");
+        await createAgentTaskEvent(userId, taskId, run.id, {
+          type: "task_status",
+          content: "Task execution completed.",
+          metadata: { status: "completed" },
+        });
+        send({ type: "task_status", taskId, runId: run.id, status: "completed" });
+      }
+
+      send({ type: "done", taskId, runId: run.id });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Task execution failed";
+      await updateAgentRunStatus(userId, run.id, "failed", {
+        summary: message,
+        error: message,
+        completedAt: new Date(),
+      }).catch(() => undefined);
+      await updateAgentTaskStatus(userId, taskId, "failed").catch(() => undefined);
+      await createAgentTaskEvent(userId, taskId, run.id, {
+        type: "error",
+        content: message,
+      }).catch(() => undefined);
+      send({ type: "error", taskId, runId: run.id, content: message });
+    }
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    },
+  });
 }
 
 agent.get("/tasks", async (c) => {
@@ -270,262 +588,19 @@ agent.post("/approvals/:id/respond", async (c) => {
 agent.post("/tasks/:id/execute", async (c) => {
   const user = c.get("user");
   const taskId = c.req.param("id");
-  const task = await getAgentTaskById(user.id, taskId);
-  if (!task) {
-    return c.text("Task not found", 404);
-  }
+  return createTaskExecutionResponse(user.id, taskId, "execute");
+});
 
-  const latestApproval = await getLatestApprovalForTask(user.id, taskId, "plan_approval");
-  if (!latestApproval || latestApproval.status !== "approved") {
-    return c.text("Task plan must be approved before execution.", 400);
-  }
+agent.post("/tasks/:id/retry", async (c) => {
+  const user = c.get("user");
+  const taskId = c.req.param("id");
+  return createTaskExecutionResponse(user.id, taskId, "retry");
+});
 
-  const resolvedChannel = await getResolvedChannelForConversation(user.id, {
-    channelId: task.channelId,
-    modelId: task.modelId,
-  });
-  const provider = resolvedChannel?.channel?.provider;
-  if (!provider) {
-    return c.text("未配置可用的默认渠道/默认模型。请先在设置中完成配置。", 400);
-  }
-  if (provider !== "anthropic") {
-    return c.text(
-      `Agent 模式目前仅支持 Anthropic(Claude Agent SDK)。当前 Provider: ${provider}。请切换到 Anthropic 渠道后重试。`,
-      400,
-    );
-  }
-
-  const compatibility = await checkChannelAgentCompatibility(
-    user.id,
-    resolvedChannel.channel.id,
-    resolvedChannel.modelId,
-  );
-  if (compatibility.success === false) {
-    return c.text(compatibility.error, 400);
-  }
-
-  const detail = await getAgentTaskDetail(user.id, taskId);
-  const approvedPlanSteps = detail.planSteps
-    .filter((step) => step.runId === latestApproval.runId)
-    .sort((left, right) => left.orderIndex - right.orderIndex);
-
-  const attachmentIds = task.attachments
-    .map((attachment) => attachment.id)
-    .filter((value): value is string => typeof value === "string" && value.trim().length > 0);
-  const executionPrompt = buildExecutionPrompt(task.goal, approvedPlanSteps);
-
-  const stream = createSseStream(async (send, ctx) => {
-    const run = await createAgentRun(user.id, taskId, {
-      phase: "execution",
-      status: "running",
-      startedAt: new Date(),
-    });
-
-    let finalText = "";
-    let toolStarts = 0;
-    let toolResults = 0;
-    let hadError = false;
-    let errorText: string | null = null;
-
-    await updateAgentTaskStatus(user.id, taskId, "running");
-    await createAgentTaskEvent(user.id, taskId, run.id, {
-      type: "task_status",
-      content: "Task execution started.",
-      metadata: { status: "running" },
-    });
-    send({ type: "task_status", taskId, runId: run.id, status: "running" });
-
-    const runtimeContext = await buildAgentRuntimeContext({
-      userId: user.id,
-      prompt: executionPrompt,
-      channelId: task.channelId,
-      modelId: task.modelId,
-    });
-
-    try {
-      for await (const event of runAgentWithConfig({
-        userId: user.id,
-        prompt: executionPrompt,
-        attachmentIds,
-        channelId: runtimeContext.channelId,
-        modelId: runtimeContext.modelId,
-        globalSystemPrompt: runtimeContext.globalSystemPrompt,
-        liveSystemContext: runtimeContext.liveSystemContext,
-        abortController: ctx.abortController,
-      })) {
-        if (event.type === "meta" || event.type === "done" || event.type === "user") {
-          continue;
-        }
-
-        if (event.type === "text") {
-          finalText += event.content ?? "";
-          await createAgentTaskEvent(user.id, taskId, run.id, {
-            type: "execution_event",
-            content: event.content ?? null,
-            metadata: { eventType: "text" },
-          });
-          send({
-            type: "execution_event",
-            taskId,
-            runId: run.id,
-            eventType: "text",
-            content: event.content ?? "",
-          });
-          continue;
-        }
-
-        if (event.type === "tool_start") {
-          toolStarts += 1;
-          await createAgentTaskEvent(user.id, taskId, run.id, {
-            type: "execution_event",
-            content: event.content ?? null,
-            toolName: event.toolName ?? null,
-            toolInput: event.toolInput,
-            metadata: { eventType: "tool_start" },
-          });
-          send({
-            type: "execution_event",
-            taskId,
-            runId: run.id,
-            eventType: "tool_start",
-            toolName: event.toolName,
-            toolInput: event.toolInput,
-            content: event.content,
-          });
-          continue;
-        }
-
-        if (event.type === "tool_result") {
-          toolResults += 1;
-          await createAgentTaskEvent(user.id, taskId, run.id, {
-            type: "execution_event",
-            content: event.content ?? null,
-            toolName: event.toolName ?? null,
-            metadata: { eventType: "tool_result" },
-          });
-          send({
-            type: "execution_event",
-            taskId,
-            runId: run.id,
-            eventType: "tool_result",
-            toolName: event.toolName,
-            content: event.content,
-          });
-          continue;
-        }
-
-        if (event.type === "error") {
-          hadError = true;
-          errorText = event.content ?? "Agent error";
-          await createAgentTaskEvent(user.id, taskId, run.id, {
-            type: "error",
-            content: errorText,
-          });
-          send({
-            type: "error",
-            taskId,
-            runId: run.id,
-            content: errorText,
-          });
-        }
-      }
-
-      const executionSummary = summarizeExecution({
-        finalText,
-        toolStarts,
-        toolResults,
-        hadError,
-      });
-
-      await createAgentArtifact(user.id, taskId, run.id, {
-        type: "execution_summary",
-        title: "Execution summary",
-        content: executionSummary,
-        metadata: {
-          hadError,
-          toolStarts,
-          toolResults,
-        },
-      });
-      send({
-        type: "artifact_created",
-        taskId,
-        runId: run.id,
-        artifactType: "execution_summary",
-      });
-
-      if (finalText.trim()) {
-        await createAgentArtifact(user.id, taskId, run.id, {
-          type: "final_result",
-          title: "Final result",
-          content: finalText.trim(),
-        });
-        send({
-          type: "artifact_created",
-          taskId,
-          runId: run.id,
-          artifactType: "final_result",
-        });
-        send({
-          type: "final_result",
-          taskId,
-          runId: run.id,
-          content: finalText.trim(),
-        });
-      }
-
-      if (hadError) {
-        await updateAgentRunStatus(user.id, run.id, "failed", {
-          summary: executionSummary,
-          error: errorText,
-          completedAt: new Date(),
-        });
-        await updateAgentTaskStatus(user.id, taskId, "failed");
-        await createAgentTaskEvent(user.id, taskId, run.id, {
-          type: "task_status",
-          content: "Task execution failed.",
-          metadata: { status: "failed" },
-        });
-        send({ type: "task_status", taskId, runId: run.id, status: "failed" });
-      } else {
-        await updateAgentRunStatus(user.id, run.id, "completed", {
-          summary: executionSummary,
-          completedAt: new Date(),
-        });
-        await updateAgentTaskStatus(user.id, taskId, "completed");
-        await createAgentTaskEvent(user.id, taskId, run.id, {
-          type: "task_status",
-          content: "Task execution completed.",
-          metadata: { status: "completed" },
-        });
-        send({ type: "task_status", taskId, runId: run.id, status: "completed" });
-      }
-
-      send({ type: "done", taskId, runId: run.id });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Task execution failed";
-      hadError = true;
-      await updateAgentRunStatus(user.id, run.id, "failed", {
-        summary: message,
-        error: message,
-        completedAt: new Date(),
-      }).catch(() => undefined);
-      await updateAgentTaskStatus(user.id, taskId, "failed").catch(() => undefined);
-      await createAgentTaskEvent(user.id, taskId, run.id, {
-        type: "error",
-        content: message,
-      }).catch(() => undefined);
-      send({ type: "error", taskId, runId: run.id, content: message });
-    }
-  });
-
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      Connection: "keep-alive",
-    },
-  });
+agent.post("/tasks/:id/continue", async (c) => {
+  const user = c.get("user");
+  const taskId = c.req.param("id");
+  return createTaskExecutionResponse(user.id, taskId, "continue");
 });
 
 agent.post("/tasks/:id/cancel", async (c) => {

@@ -52,6 +52,7 @@ test("POST /sessions/:id/run returns compatibility error before starting SSE run
     createAgentApprovalRequest: async () => ({ id: "approval-1" }),
     respondToAgentApproval: async () => ({ id: "approval-1" }),
     getLatestApprovalForTask: async () => null,
+    getLatestRunForTask: async () => null,
     createAgentArtifact: async () => ({ id: "artifact-1" }),
     updateAgentRunStatus: async () => ({ id: "run-1" }),
     updateAgentTaskStatus: async () => ({ id: "task-1" }),

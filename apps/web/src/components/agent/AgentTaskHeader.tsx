@@ -1,6 +1,6 @@
 "use client";
 
-import { Play, RefreshCw, ShieldCheck, Square, Wand2 } from "lucide-react";
+import { Play, RefreshCw, RotateCcw, ShieldCheck, SkipForward, Square, Wand2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { ApiAgentTask } from "@/lib/api";
@@ -18,20 +18,32 @@ const STATUS_LABELS: Record<ApiAgentTask["status"], string> = {
 export function AgentTaskHeader({
   task,
   hasApprovedPlan,
+  hasPlan,
+  canRetry,
+  canContinue,
   isPlanning,
   isExecuting,
   isRefreshingDetail,
   onPlan,
+  onReplan,
+  onRetry,
+  onContinue,
   onExecute,
   onCancel,
   onRefresh,
 }: {
   task: ApiAgentTask;
   hasApprovedPlan: boolean;
+  hasPlan: boolean;
+  canRetry: boolean;
+  canContinue: boolean;
   isPlanning: boolean;
   isExecuting: boolean;
   isRefreshingDetail: boolean;
   onPlan: () => void;
+  onReplan: () => void;
+  onRetry: () => void;
+  onContinue: () => void;
   onExecute: () => void;
   onCancel: () => void;
   onRefresh: () => void;
@@ -57,10 +69,29 @@ export function AgentTaskHeader({
             <RefreshCw className="mr-2 h-4 w-4" />
             {isRefreshingDetail ? "刷新中" : "刷新状态"}
           </Button>
-          <Button variant="outline" onClick={onPlan} disabled={isPlanning || isExecuting}>
-            <Wand2 className="mr-2 h-4 w-4" />
-            {isPlanning ? "生成中" : "生成计划"}
-          </Button>
+          {hasPlan ? (
+            <Button variant="outline" onClick={onReplan} disabled={isPlanning || isExecuting}>
+              <Wand2 className="mr-2 h-4 w-4" />
+              {isPlanning ? "规划中" : "重新规划"}
+            </Button>
+          ) : (
+            <Button variant="outline" onClick={onPlan} disabled={isPlanning || isExecuting}>
+              <Wand2 className="mr-2 h-4 w-4" />
+              {isPlanning ? "生成中" : "生成计划"}
+            </Button>
+          )}
+          {canContinue ? (
+            <Button variant="outline" onClick={onContinue} disabled={isExecuting || isPlanning}>
+              <SkipForward className="mr-2 h-4 w-4" />
+              继续执行
+            </Button>
+          ) : null}
+          {canRetry ? (
+            <Button variant="outline" onClick={onRetry} disabled={isExecuting || isPlanning}>
+              <RotateCcw className="mr-2 h-4 w-4" />
+              重试执行
+            </Button>
+          ) : null}
           <Button onClick={onExecute} disabled={!hasApprovedPlan || isExecuting || isPlanning}>
             <Play className="mr-2 h-4 w-4" />
             {isExecuting ? "执行中" : "开始执行"}

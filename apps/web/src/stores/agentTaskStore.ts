@@ -91,6 +91,110 @@ function upsertArtifact(artifacts: ApiAgentArtifact[], artifact: ApiAgentArtifac
   return [artifact, ...rest].sort((left, right) => right.createdAt.localeCompare(left.createdAt));
 }
 
+type AgentTaskSetState = (
+  partial:
+    | Partial<AgentTaskState>
+    | ((state: AgentTaskState) => Partial<AgentTaskState>),
+) => void;
+
+type AgentTaskGetState = () => AgentTaskState;
+
+async function runTaskExecutionStream(params: {
+  taskId: string;
+  set: AgentTaskSetState;
+  get: AgentTaskGetState;
+  responseFactory: (signal?: AbortSignal) => Promise<Response>;
+  failureTitle: string;
+}) {
+  const detail = params.get().detail;
+  if (!detail || detail.task.id !== params.taskId) return;
+
+  params.set({ isExecuting: true, streamError: null });
+
+  try {
+    await streamAgentTaskExecution(
+      detail.task.id,
+      {
+        onEvent: async (event) => {
+          const current = params.get().detail;
+          if (!current || current.task.id !== detail.task.id) return;
+
+          if (event.type === "task_status") {
+            params.set((state) => ({
+              detail: state.detail
+                ? {
+                    ...state.detail,
+                    task: { ...state.detail.task, status: event.status },
+                  }
+                : state.detail,
+              tasks: state.detail
+                ? upsertTask(state.tasks, { ...state.detail.task, status: event.status })
+                : state.tasks,
+            }));
+            return;
+          }
+
+          if (event.type === "final_result") {
+            const artifact: ApiAgentArtifact = {
+              id: `live-final-${event.runId}`,
+              taskId: detail.task.id,
+              runId: event.runId,
+              type: "final_result",
+              title: "Final result",
+              content: event.content,
+              metadata: { live: true },
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            };
+            params.set((state) =>
+              state.detail
+                ? {
+                    detail: {
+                      ...state.detail,
+                      artifacts: upsertArtifact(state.detail.artifacts, artifact),
+                    },
+                  }
+                : state,
+            );
+            return;
+          }
+
+          const runId = "runId" in event && typeof event.runId === "string" ? event.runId : null;
+          const liveEvent = runId ? toLiveEvent(event, detail.task.id, runId) : null;
+          if (liveEvent) {
+            params.set((state) =>
+              state.detail
+                ? {
+                    detail: mergeLiveEvent(state.detail, liveEvent),
+                  }
+                : state,
+            );
+            return;
+          }
+
+          if (event.type === "done") {
+            await params.get().refreshTask(detail.task.id, { silent: true });
+          }
+        },
+        onError: (message) => {
+          params.set({ streamError: message });
+        },
+      },
+      {
+        response: await params.responseFactory(),
+      },
+    );
+
+    await params.get().refreshTask(detail.task.id, { silent: true });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : params.failureTitle;
+    params.set({ streamError: message });
+    notifyError(params.failureTitle, message);
+  } finally {
+    params.set({ isExecuting: false });
+  }
+}
+
 interface AgentTaskState {
   tasks: ApiAgentTask[];
   selectedTaskId: string | null;
@@ -116,6 +220,9 @@ interface AgentTaskState {
     response?: unknown,
   ) => Promise<void>;
   executeTask: () => Promise<void>;
+  retryTask: () => Promise<void>;
+  continueTask: () => Promise<void>;
+  replanTask: () => Promise<void>;
   cancelTask: () => Promise<void>;
 }
 
@@ -255,81 +362,54 @@ export const useAgentTaskStore = create<AgentTaskState>((set, get) => ({
   executeTask: async () => {
     const detail = get().detail;
     if (!detail) return;
+    await runTaskExecutionStream({
+      taskId: detail.task.id,
+      set,
+      get,
+      responseFactory: (signal) => api.agentTasks.execute(detail.task.id, { signal }),
+      failureTitle: "执行失败",
+    });
+  },
 
-    set({ isExecuting: true, streamError: null });
+  retryTask: async () => {
+    const detail = get().detail;
+    if (!detail) return;
+    await runTaskExecutionStream({
+      taskId: detail.task.id,
+      set,
+      get,
+      responseFactory: (signal) => api.agentTasks.retry(detail.task.id, { signal }),
+      failureTitle: "重试失败",
+    });
+  },
+
+  continueTask: async () => {
+    const detail = get().detail;
+    if (!detail) return;
+    await runTaskExecutionStream({
+      taskId: detail.task.id,
+      set,
+      get,
+      responseFactory: (signal) => api.agentTasks.continue(detail.task.id, { signal }),
+      failureTitle: "继续失败",
+    });
+  },
+
+  replanTask: async () => {
+    const taskId = get().selectedTaskId;
+    if (!taskId) return;
+    set({ isPlanning: true, isExecuting: false, streamError: null });
     try {
-      await streamAgentTaskExecution(detail.task.id, {
-        onEvent: async (event) => {
-          const current = get().detail;
-          if (!current || current.task.id !== detail.task.id) return;
-
-          if (event.type === "task_status") {
-            set((state) => ({
-              detail: state.detail
-                ? {
-                    ...state.detail,
-                    task: { ...state.detail.task, status: event.status },
-                  }
-                : state.detail,
-              tasks: state.detail ? upsertTask(state.tasks, { ...state.detail.task, status: event.status }) : state.tasks,
-            }));
-            return;
-          }
-
-          if (event.type === "final_result") {
-            const artifact: ApiAgentArtifact = {
-              id: `live-final-${event.runId}`,
-              taskId: detail.task.id,
-              runId: event.runId,
-              type: "final_result",
-              title: "Final result",
-              content: event.content,
-              metadata: { live: true },
-              createdAt: new Date().toISOString(),
-              updatedAt: new Date().toISOString(),
-            };
-            set((state) =>
-              state.detail
-                ? {
-                    detail: {
-                      ...state.detail,
-                      artifacts: upsertArtifact(state.detail.artifacts, artifact),
-                    },
-                  }
-                : state,
-            );
-            return;
-          }
-
-          const runId = "runId" in event && typeof event.runId === "string" ? event.runId : null;
-          const liveEvent = runId ? toLiveEvent(event, detail.task.id, runId) : null;
-          if (liveEvent) {
-            set((state) =>
-              state.detail
-                ? {
-                    detail: mergeLiveEvent(state.detail, liveEvent),
-                  }
-                : state,
-            );
-            return;
-          }
-
-          if (event.type === "done") {
-            await get().refreshTask(detail.task.id, { silent: true });
-          }
-        },
-        onError: (message) => {
-          set({ streamError: message });
-        },
-      });
-
-      await get().refreshTask(detail.task.id, { silent: true });
+      const detail = await api.agentTasks.plan(taskId);
+      set((state) => ({
+        detail,
+        tasks: upsertTask(state.tasks, detail.task),
+      }));
+      notifySuccess("已重新规划", "任务计划已根据当前目标重新生成。");
     } catch (error) {
-      const message = error instanceof Error ? error.message : "无法执行任务";
-      set({ streamError: message });
-      notifyError("执行失败", message);
+      notifyError("重新规划失败", error instanceof Error ? error.message : "无法重新生成计划");
     } finally {
-      set({ isExecuting: false });
+      set({ isPlanning: false });
     }
   },
 

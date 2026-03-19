@@ -169,6 +169,11 @@ test("task routes cover create, list, detail, plan, approval, and execute precon
         .filter((item) => item.taskId === taskId)
         .slice()
         .reverse()[0] ?? null,
+    getLatestRunForTask: async (_userId: string, taskId: string, phase?: string) =>
+      runs
+        .filter((item) => item.taskId === taskId && (!phase || item.phase === phase))
+        .slice()
+        .reverse()[0] ?? null,
     createAgentArtifact: async (
       _userId: string,
       taskId: string,
@@ -289,6 +294,46 @@ test("task routes cover create, list, detail, plan, approval, and execute precon
     expect(approvalResponse.status).toBe(200);
     expect(approvalJson.task.status).toBe("draft");
     expect(approvalJson.approvals[0].status).toBe("approved");
+
+    const retryBlocked = await agent.request("/tasks/task-1/retry", {
+      method: "POST",
+      headers: { Cookie: "token=test-token" },
+    });
+    expect(retryBlocked.status).toBe(400);
+    expect(await retryBlocked.text()).toBe("Only failed, cancelled, or completed tasks can be retried.");
+
+    const continueBlocked = await agent.request("/tasks/task-1/continue", {
+      method: "POST",
+      headers: { Cookie: "token=test-token" },
+    });
+    expect(continueBlocked.status).toBe(400);
+    expect(await continueBlocked.text()).toBe("Only failed or completed tasks can be continued.");
+
+    const task = tasks.find((item) => item.id === "task-1");
+    expect(task).toBeTruthy();
+    if (!task) {
+      throw new Error("task-1 missing");
+    }
+
+    task.status = "failed";
+
+    const retryResponse = await agent.request("/tasks/task-1/retry", {
+      method: "POST",
+      headers: { Cookie: "token=test-token" },
+    });
+    expect(retryResponse.status).toBe(200);
+    expect(retryResponse.headers.get("content-type")).toContain("text/event-stream");
+    await retryResponse.text();
+
+    task.status = "completed";
+
+    const continueResponse = await agent.request("/tasks/task-1/continue", {
+      method: "POST",
+      headers: { Cookie: "token=test-token" },
+    });
+    expect(continueResponse.status).toBe(200);
+    expect(continueResponse.headers.get("content-type")).toContain("text/event-stream");
+    await continueResponse.text();
   } finally {
     mock.restore();
   }

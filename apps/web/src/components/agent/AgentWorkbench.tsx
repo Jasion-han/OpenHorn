@@ -36,6 +36,9 @@ export function AgentWorkbench() {
     requestPlan,
     respondApproval,
     executeTask,
+    retryTask,
+    continueTask,
+    replanTask,
     cancelTask,
   } = useAgentTaskStore();
 
@@ -67,6 +70,19 @@ export function AgentWorkbench() {
   const latestPlanApproval =
     detail?.approvals.find((approval) => approval.type === "plan_approval") ?? null;
   const hasApprovedPlan = latestPlanApproval?.status === "approved";
+  const hasPlan = Boolean(detail?.planSteps.length);
+  const canRetry =
+    !!detail &&
+    hasApprovedPlan &&
+    ["failed", "cancelled", "completed"].includes(detail.task.status) &&
+    !isExecuting &&
+    !isPlanning;
+  const canContinue =
+    !!detail &&
+    hasApprovedPlan &&
+    ["failed", "completed"].includes(detail.task.status) &&
+    !isExecuting &&
+    !isPlanning;
 
   return (
     <div className="h-full min-h-0">
@@ -118,10 +134,16 @@ export function AgentWorkbench() {
                   <AgentTaskHeader
                     task={detail.task}
                     hasApprovedPlan={hasApprovedPlan}
+                    hasPlan={hasPlan}
+                    canRetry={canRetry}
+                    canContinue={canContinue}
                     isPlanning={isPlanning}
                     isExecuting={isExecuting}
                     isRefreshingDetail={isRefreshingDetail}
                     onPlan={() => void requestPlan()}
+                    onReplan={() => void replanTask()}
+                    onRetry={() => void retryTask()}
+                    onContinue={() => void continueTask()}
                     onExecute={() => void executeTask()}
                     onCancel={() => void cancelTask()}
                     onRefresh={() => void refreshTask(detail.task.id)}

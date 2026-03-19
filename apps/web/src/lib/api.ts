@@ -639,6 +639,20 @@ export const api = {
         signal: options?.signal,
       }),
 
+    retry: (id: string, options?: { signal?: AbortSignal }) =>
+      fetch(`${API_BASE}/agent/tasks/${id}/retry`, {
+        method: "POST",
+        credentials: "include",
+        signal: options?.signal,
+      }),
+
+    continue: (id: string, options?: { signal?: AbortSignal }) =>
+      fetch(`${API_BASE}/agent/tasks/${id}/continue`, {
+        method: "POST",
+        credentials: "include",
+        signal: options?.signal,
+      }),
+
     cancel: (id: string) =>
       fetchApi<ApiAgentTaskDetail>(`/agent/tasks/${id}/cancel`, {
         method: "POST",
