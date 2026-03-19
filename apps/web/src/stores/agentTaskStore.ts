@@ -96,6 +96,7 @@ interface AgentTaskState {
   selectedTaskId: string | null;
   detail: ApiAgentTaskDetail | null;
   isLoading: boolean;
+  isRefreshingDetail: boolean;
   isCreating: boolean;
   isPlanning: boolean;
   isExecuting: boolean;
@@ -104,7 +105,7 @@ interface AgentTaskState {
   draftGoal: string;
   loadTasks: () => Promise<void>;
   selectTask: (taskId: string | null) => Promise<void>;
-  refreshTask: (taskId?: string | null) => Promise<void>;
+  refreshTask: (taskId?: string | null, options?: { silent?: boolean }) => Promise<void>;
   setDraftTitle: (value: string) => void;
   setDraftGoal: (value: string) => void;
   createTask: () => Promise<void>;
@@ -123,6 +124,7 @@ export const useAgentTaskStore = create<AgentTaskState>((set, get) => ({
   selectedTaskId: null,
   detail: null,
   isLoading: false,
+  isRefreshingDetail: false,
   isCreating: false,
   isPlanning: false,
   isExecuting: false,
@@ -138,9 +140,9 @@ export const useAgentTaskStore = create<AgentTaskState>((set, get) => ({
       const selectedTaskId = get().selectedTaskId ?? sorted[0]?.id ?? null;
       set({ tasks: sorted, selectedTaskId });
       if (selectedTaskId) {
-        await get().refreshTask(selectedTaskId);
+        await get().refreshTask(selectedTaskId, { silent: true });
       } else {
-        set({ detail: null });
+        set({ detail: null, isExecuting: false, streamError: null });
       }
     } catch (error) {
       notifyError("加载失败", error instanceof Error ? error.message : "无法加载任务");
@@ -154,21 +156,32 @@ export const useAgentTaskStore = create<AgentTaskState>((set, get) => ({
     if (taskId) {
       await get().refreshTask(taskId);
     } else {
-      set({ detail: null });
+      set({ detail: null, isExecuting: false, streamError: null });
     }
   },
 
-  refreshTask: async (taskId) => {
+  refreshTask: async (taskId, options) => {
     const nextTaskId = taskId ?? get().selectedTaskId;
     if (!nextTaskId) return;
+    if (!options?.silent) {
+      set({ isRefreshingDetail: true });
+    }
     try {
       const detail = await api.agentTasks.get(nextTaskId);
       set((state) => ({
         detail,
         tasks: upsertTask(state.tasks, detail.task),
+        isExecuting: detail.task.status === "running",
+        streamError: detail.task.status === "running" ? state.streamError : null,
       }));
     } catch (error) {
-      notifyError("加载失败", error instanceof Error ? error.message : "无法加载任务详情");
+      if (!options?.silent) {
+        notifyError("加载失败", error instanceof Error ? error.message : "无法加载任务详情");
+      }
+    } finally {
+      if (!options?.silent) {
+        set({ isRefreshingDetail: false });
+      }
     }
   },
 
@@ -212,6 +225,7 @@ export const useAgentTaskStore = create<AgentTaskState>((set, get) => ({
       set((state) => ({
         detail,
         tasks: upsertTask(state.tasks, detail.task),
+        isExecuting: false,
       }));
       notifySuccess("规划完成", "任务计划已生成。");
     } catch (error) {
@@ -230,6 +244,7 @@ export const useAgentTaskStore = create<AgentTaskState>((set, get) => ({
       set((state) => ({
         detail,
         tasks: upsertTask(state.tasks, detail.task),
+        isExecuting: detail.task.status === "running",
       }));
       notifySuccess(status === "approved" ? "已批准" : "已拒绝", "审批状态已更新。");
     } catch (error) {
@@ -300,7 +315,7 @@ export const useAgentTaskStore = create<AgentTaskState>((set, get) => ({
           }
 
           if (event.type === "done") {
-            await get().refreshTask(detail.task.id);
+            await get().refreshTask(detail.task.id, { silent: true });
           }
         },
         onError: (message) => {
@@ -308,7 +323,7 @@ export const useAgentTaskStore = create<AgentTaskState>((set, get) => ({
         },
       });
 
-      await get().refreshTask(detail.task.id);
+      await get().refreshTask(detail.task.id, { silent: true });
     } catch (error) {
       const message = error instanceof Error ? error.message : "无法执行任务";
       set({ streamError: message });
@@ -326,6 +341,8 @@ export const useAgentTaskStore = create<AgentTaskState>((set, get) => ({
       set((state) => ({
         detail,
         tasks: upsertTask(state.tasks, detail.task),
+        isExecuting: false,
+        streamError: null,
       }));
       notifySuccess("已取消", "任务已标记为取消。");
     } catch (error) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { Play, ShieldCheck, Square, Wand2 } from "lucide-react";
+import { Play, RefreshCw, ShieldCheck, Square, Wand2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { ApiAgentTask } from "@/lib/api";
@@ -20,17 +20,21 @@ export function AgentTaskHeader({
   hasApprovedPlan,
   isPlanning,
   isExecuting,
+  isRefreshingDetail,
   onPlan,
   onExecute,
   onCancel,
+  onRefresh,
 }: {
   task: ApiAgentTask;
   hasApprovedPlan: boolean;
   isPlanning: boolean;
   isExecuting: boolean;
+  isRefreshingDetail: boolean;
   onPlan: () => void;
   onExecute: () => void;
   onCancel: () => void;
+  onRefresh: () => void;
 }) {
   return (
     <div className="rounded-3xl border border-border/70 bg-background/80 p-5">
@@ -44,10 +48,15 @@ export function AgentTaskHeader({
           <div className="mt-2 flex flex-wrap gap-4 text-xs text-muted-foreground">
             <span>创建于 {new Date(task.createdAt).toLocaleString()}</span>
             <span>更新于 {new Date(task.updatedAt).toLocaleString()}</span>
+            {task.status === "running" ? <span>运行中自动刷新日志</span> : null}
           </div>
         </div>
 
         <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={onRefresh} disabled={isRefreshingDetail}>
+            <RefreshCw className="mr-2 h-4 w-4" />
+            {isRefreshingDetail ? "刷新中" : "刷新状态"}
+          </Button>
           <Button variant="outline" onClick={onPlan} disabled={isPlanning || isExecuting}>
             <Wand2 className="mr-2 h-4 w-4" />
             {isPlanning ? "生成中" : "生成计划"}

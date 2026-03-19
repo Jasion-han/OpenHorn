@@ -20,6 +20,7 @@ export function AgentWorkbench() {
     selectedTaskId,
     detail,
     isLoading,
+    isRefreshingDetail,
     isCreating,
     isPlanning,
     isExecuting,
@@ -28,6 +29,7 @@ export function AgentWorkbench() {
     streamError,
     loadTasks,
     selectTask,
+    refreshTask,
     setDraftTitle,
     setDraftGoal,
     createTask,
@@ -40,6 +42,27 @@ export function AgentWorkbench() {
   useEffect(() => {
     void loadTasks();
   }, [loadTasks]);
+
+  useEffect(() => {
+    if (detail?.task.status !== "running") return;
+
+    const intervalId = window.setInterval(() => {
+      void refreshTask(detail.task.id, { silent: true });
+    }, 4000);
+
+    const handleFocusRefresh = () => {
+      void refreshTask(detail.task.id, { silent: true });
+    };
+
+    window.addEventListener("focus", handleFocusRefresh);
+    document.addEventListener("visibilitychange", handleFocusRefresh);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", handleFocusRefresh);
+      document.removeEventListener("visibilitychange", handleFocusRefresh);
+    };
+  }, [detail?.task.id, detail?.task.status, refreshTask]);
 
   const latestPlanApproval =
     detail?.approvals.find((approval) => approval.type === "plan_approval") ?? null;
@@ -97,9 +120,11 @@ export function AgentWorkbench() {
                     hasApprovedPlan={hasApprovedPlan}
                     isPlanning={isPlanning}
                     isExecuting={isExecuting}
+                    isRefreshingDetail={isRefreshingDetail}
                     onPlan={() => void requestPlan()}
                     onExecute={() => void executeTask()}
                     onCancel={() => void cancelTask()}
+                    onRefresh={() => void refreshTask(detail.task.id)}
                   />
                   <AgentGoalPanel task={detail.task} />
                   <AgentPlanPanel
