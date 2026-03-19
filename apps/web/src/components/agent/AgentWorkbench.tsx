@@ -1,20 +1,56 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Bot, ClipboardList, Plus, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
+import type { ApiAgentApproval, ApiAgentTaskDetail, ApiAgentTaskRun } from "@/lib/api";
 import { useAgentTaskStore } from "@/stores/agentTaskStore";
 import { AgentArtifactsPanel } from "./AgentArtifactsPanel";
 import { AgentExecutionPanel } from "./AgentExecutionPanel";
 import { AgentGoalPanel } from "./AgentGoalPanel";
 import { AgentPlanPanel } from "./AgentPlanPanel";
+import { AgentRunSelector } from "./AgentRunSelector";
 import { AgentTaskHeader } from "./AgentTaskHeader";
 import { AgentTaskList } from "./AgentTaskList";
 
+function findPlanningRunForSelection(detail: ApiAgentTaskDetail, selectedRun: ApiAgentTaskRun | null) {
+  if (!selectedRun) return null;
+  if (selectedRun.phase === "planning") return selectedRun;
+
+  const planningRuns = detail.runs.filter((run) => run.phase === "planning");
+  return (
+    planningRuns.find((run) => run.createdAt <= selectedRun.createdAt) ??
+    planningRuns[0] ??
+    null
+  );
+}
+
+function getSelectedApproval(detail: ApiAgentTaskDetail, selectedRun: ApiAgentTaskRun | null) {
+  if (!selectedRun) return null;
+
+  const runApprovals = detail.approvals.filter((approval) => approval.runId === selectedRun.id);
+  if (runApprovals.length > 0) {
+    return runApprovals[0] ?? null;
+  }
+
+  const planningRun = findPlanningRunForSelection(detail, selectedRun);
+  if (!planningRun) return null;
+  const planningApprovals = detail.approvals.filter(
+    (approval) => approval.runId === planningRun.id && approval.type === "plan_approval",
+  );
+  return planningApprovals[0] ?? null;
+}
+
+function getRunLabel(run: ApiAgentTaskRun | null) {
+  if (!run) return null;
+  return `${run.phase === "planning" ? "规划" : "执行"} #${run.id.slice(0, 6)}`;
+}
+
 export function AgentWorkbench() {
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const {
     tasks,
     selectedTaskId,
@@ -69,6 +105,20 @@ export function AgentWorkbench() {
     };
   }, [detail?.task.id, detail?.task.status, refreshTask]);
 
+  useEffect(() => {
+    if (!detail) {
+      setSelectedRunId(null);
+      return;
+    }
+
+    const selectedStillExists = selectedRunId
+      ? detail.runs.some((run) => run.id === selectedRunId)
+      : false;
+    if (!selectedStillExists) {
+      setSelectedRunId(detail.runs[0]?.id ?? null);
+    }
+  }, [detail, selectedRunId]);
+
   const latestPlanApproval =
     detail?.approvals.find((approval) => approval.type === "plan_approval") ?? null;
   const latestApproval = detail?.approvals[0] ?? null;
@@ -86,6 +136,26 @@ export function AgentWorkbench() {
     ["failed", "completed"].includes(detail.task.status) &&
     !isExecuting &&
     !isPlanning;
+  const selectedRun = detail?.runs.find((run) => run.id === selectedRunId) ?? detail?.runs[0] ?? null;
+  const planningRun = detail ? findPlanningRunForSelection(detail, selectedRun) : null;
+  const selectedApproval: ApiAgentApproval | null = detail ? getSelectedApproval(detail, selectedRun) : null;
+  const selectedPlanSteps =
+    detail && planningRun ? detail.planSteps.filter((step) => step.runId === planningRun.id) : [];
+  const selectedEvents =
+    detail && selectedRun?.phase === "execution"
+      ? detail.events.filter((event) => event.runId === selectedRun.id)
+      : [];
+  const selectedArtifacts =
+    detail && selectedRun?.phase === "execution"
+      ? detail.artifacts.filter((artifact) => artifact.runId === selectedRun.id)
+      : [];
+  const selectedStreamError =
+    detail &&
+    selectedRun &&
+    detail.runs[0]?.id === selectedRun.id &&
+    selectedRun.phase === "execution"
+      ? streamError
+      : null;
 
   return (
     <div className="h-full min-h-0">
@@ -151,6 +221,11 @@ export function AgentWorkbench() {
                     onCancel={() => void cancelTask()}
                     onRefresh={() => void refreshTask(detail.task.id)}
                   />
+                  <AgentRunSelector
+                    runs={detail.runs}
+                    selectedRunId={selectedRun?.id ?? null}
+                    onSelect={setSelectedRunId}
+                  />
                   <AgentGoalPanel
                     task={detail.task}
                     isSaving={isSavingGoal}
@@ -164,12 +239,16 @@ export function AgentWorkbench() {
                     onSave={saveTaskGoal}
                   />
                   <AgentPlanPanel
-                    planSteps={detail.planSteps}
-                    approvals={detail.approvals}
+                    planSteps={selectedPlanSteps}
+                    approval={selectedApproval}
                     onApprove={(approvalId) => void respondApproval(approvalId, "approved", { source: "web" })}
                     onReject={(approvalId) => void respondApproval(approvalId, "rejected", { source: "web" })}
                   />
-                  <AgentExecutionPanel events={detail.events} streamError={streamError} />
+                  <AgentExecutionPanel
+                    events={selectedEvents}
+                    streamError={selectedStreamError}
+                    runLabel={getRunLabel(selectedRun)}
+                  />
                 </>
               ) : (
                 <div className="flex min-h-[420px] items-center justify-center rounded-3xl border border-dashed border-border/70 bg-background/70 p-10 text-center">
@@ -191,7 +270,7 @@ export function AgentWorkbench() {
         <section className="min-h-0 rounded-3xl border border-border/70 bg-gradient-to-b from-background via-background to-muted/20">
           <ScrollArea className="h-full">
             <div className="p-4">
-              <AgentArtifactsPanel artifacts={detail?.artifacts ?? []} />
+              <AgentArtifactsPanel artifacts={selectedArtifacts} />
             </div>
           </ScrollArea>
         </section>

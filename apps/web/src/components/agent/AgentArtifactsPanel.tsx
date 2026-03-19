@@ -16,7 +16,7 @@ export function AgentArtifactsPanel({ artifacts }: { artifacts: ApiAgentArtifact
         {finalResult ? (
           <p className="whitespace-pre-wrap text-sm leading-6 text-foreground/90">{finalResult.content}</p>
         ) : (
-          <p className="text-sm text-muted-foreground">执行完成后，最终结果会单独保存在这里。</p>
+          <p className="text-sm text-muted-foreground">当前运行没有单独保存的最终结果。</p>
         )}
       </section>
 
@@ -26,7 +26,7 @@ export function AgentArtifactsPanel({ artifacts }: { artifacts: ApiAgentArtifact
           产物清单
         </div>
         {artifacts.length === 0 ? (
-          <p className="text-sm text-muted-foreground">暂时没有产物。</p>
+          <p className="text-sm text-muted-foreground">当前运行暂时没有产物。</p>
         ) : (
           <div className="space-y-3">
             {artifacts.map((artifact) => (

@@ -13,20 +13,15 @@ function StepIcon({ status }: { status: ApiAgentPlanStep["status"] }) {
 
 export function AgentPlanPanel({
   planSteps,
-  approvals,
+  approval,
   onApprove,
   onReject,
 }: {
   planSteps: ApiAgentPlanStep[];
-  approvals: ApiAgentApproval[];
+  approval: ApiAgentApproval | null;
   onApprove: (approvalId: string) => void;
   onReject: (approvalId: string) => void;
 }) {
-  const latestApproval = approvals[0] ?? null;
-  const activePlanSteps = latestApproval
-    ? planSteps.filter((step) => step.runId === latestApproval.runId)
-    : planSteps;
-
   return (
     <section className="rounded-3xl border border-border/70 bg-background/80 p-5">
       <div className="mb-4 flex items-center justify-between gap-3">
@@ -36,13 +31,13 @@ export function AgentPlanPanel({
         </div>
       </div>
 
-      {activePlanSteps.length === 0 ? (
+      {planSteps.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-border/70 bg-muted/20 p-4 text-sm text-muted-foreground">
-          还没有计划。点击上方“生成计划”。
+          当前运行没有关联的计划步骤。
         </div>
       ) : (
         <div className="space-y-3">
-          {activePlanSteps.map((step) => (
+          {planSteps.map((step) => (
             <div key={step.id} className="rounded-2xl border border-border/60 bg-muted/15 p-4">
               <div className="flex gap-3">
                 <StepIcon status={step.status} />
@@ -60,12 +55,12 @@ export function AgentPlanPanel({
         </div>
       )}
 
-      {latestApproval ? (
+      {approval ? (
         <div className="mt-4">
           <AgentApprovalBlock
-            approval={latestApproval}
-            onApprove={() => onApprove(latestApproval.id)}
-            onReject={() => onReject(latestApproval.id)}
+            approval={approval}
+            onApprove={() => onApprove(approval.id)}
+            onReject={() => onReject(approval.id)}
           />
         </div>
       ) : null}

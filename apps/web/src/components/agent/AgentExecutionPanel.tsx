@@ -17,9 +17,11 @@ function eventLabel(event: ApiAgentTaskEvent) {
 export function AgentExecutionPanel({
   events,
   streamError,
+  runLabel,
 }: {
   events: ApiAgentTaskEvent[];
   streamError: string | null;
+  runLabel?: string | null;
 }) {
   const visibleEvents = events.filter((event) => event.type === "execution_event" || event.type === "error");
 
@@ -27,7 +29,9 @@ export function AgentExecutionPanel({
     <section className="rounded-3xl border border-border/70 bg-background/80 p-5">
       <div className="mb-4">
         <div className="text-sm font-medium">执行过程</div>
-        <p className="mt-1 text-xs text-muted-foreground">工具调用与流式输出会在这里持续累积。</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          {runLabel ? `${runLabel} 的工具调用与流式输出会显示在这里。` : "工具调用与流式输出会在这里持续累积。"}
+        </p>
       </div>
 
       {streamError ? (
@@ -38,7 +42,7 @@ export function AgentExecutionPanel({
 
       {visibleEvents.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-border/70 bg-muted/20 p-4 text-sm text-muted-foreground">
-          还没有执行日志。批准计划后开始执行。
+          当前运行还没有执行日志。
         </div>
       ) : (
         <div className="space-y-3">
