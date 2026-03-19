@@ -28,6 +28,7 @@ import {
   listAgentTasks,
   respondToAgentApproval,
   setAgentPlanSteps,
+  updateAgentTask,
   updateAgentRunStatus,
   updateAgentTaskStatus,
 } from "../services/agentTaskService";
@@ -425,6 +426,33 @@ agent.get("/tasks/:id", async (c) => {
   }
   const detail = await getAgentTaskDetail(user.id, taskId);
   return c.json(detail);
+});
+
+agent.patch("/tasks/:id", async (c) => {
+  const user = c.get("user");
+  const taskId = c.req.param("id");
+  const task = await getAgentTaskById(user.id, taskId);
+  if (!task) {
+    return c.json({ error: "Task not found" }, 404);
+  }
+
+  const body = (await c.req.json().catch(() => null)) as unknown;
+  if (!isRecord(body) || typeof body.goal !== "string" || !body.goal.trim()) {
+    return c.json({ error: "goal is required" }, 400);
+  }
+
+  try {
+    await updateAgentTask(user.id, taskId, {
+      goal: body.goal,
+      title: typeof body.title === "string" ? body.title : undefined,
+    });
+    const detail = await getAgentTaskDetail(user.id, taskId);
+    return c.json(detail);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to update task";
+    const status = message === "Task not found" ? 404 : 400;
+    return c.json({ error: message }, status);
+  }
 });
 
 agent.get("/tasks/:id/events", async (c) => {

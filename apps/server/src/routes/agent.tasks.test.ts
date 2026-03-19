@@ -12,10 +12,10 @@ test("task routes cover create, list, detail, plan, approval, and execute precon
     const task = tasks.find((item) => item.id === taskId) ?? null;
     return {
       task,
-      runs: runs.filter((item) => item.taskId === taskId),
+      runs: runs.filter((item) => item.taskId === taskId).slice().reverse(),
       planSteps: planSteps.filter((item) => item.taskId === taskId),
-      approvals: approvals.filter((item) => item.taskId === taskId),
-      artifacts: artifacts.filter((item) => item.taskId === taskId),
+      approvals: approvals.filter((item) => item.taskId === taskId).slice().reverse(),
+      artifacts: artifacts.filter((item) => item.taskId === taskId).slice().reverse(),
       events: events.filter((item) => item.taskId === taskId),
     };
   };
@@ -50,6 +50,34 @@ test("task routes cover create, list, detail, plan, approval, and execute precon
     getAgentTaskById: async (_userId: string, taskId: string) =>
       tasks.find((item) => item.id === taskId) ?? null,
     getAgentTaskDetail: async (_userId: string, taskId: string) => buildDetail(taskId),
+    updateAgentTask: async (_userId: string, taskId: string, input: Record<string, unknown>) => {
+      const task = tasks.find((item) => item.id === taskId);
+      if (!task) {
+        throw new Error("Task not found");
+      }
+      if (task.status === "running" || task.status === "planning") {
+        throw new Error("Cannot edit a task while it is planning or running");
+      }
+      task.goal = String(input.goal);
+      if (typeof input.title === "string") {
+        task.title = input.title;
+      }
+      task.status = "draft";
+      task.updatedAt = new Date().toISOString();
+      approvals.forEach((approval) => {
+        if (
+          approval.taskId === taskId &&
+          approval.type === "plan_approval" &&
+          (approval.status === "pending" || approval.status === "approved")
+        ) {
+          approval.status = "rejected";
+          approval.response = { source: "task_goal_updated" };
+          approval.respondedAt = new Date().toISOString();
+          approval.updatedAt = new Date().toISOString();
+        }
+      });
+      return task;
+    },
     listAgentTaskEvents: async (_userId: string, taskId: string) =>
       events.filter((item) => item.taskId === taskId),
     listAgentArtifacts: async (_userId: string, taskId: string) =>
@@ -294,6 +322,58 @@ test("task routes cover create, list, detail, plan, approval, and execute precon
     expect(approvalResponse.status).toBe(200);
     expect(approvalJson.task.status).toBe("draft");
     expect(approvalJson.approvals[0].status).toBe("approved");
+
+    const updateMissingGoal = await agent.request("/tasks/task-1", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Cookie: "token=test-token" },
+      body: JSON.stringify({ goal: "" }),
+    });
+    expect(updateMissingGoal.status).toBe(400);
+
+    const updateResponse = await agent.request("/tasks/task-1", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Cookie: "token=test-token" },
+      body: JSON.stringify({ goal: "Ship the edited agent workbench goal." }),
+    });
+    const updateJson = (await updateResponse.json()) as {
+      task: { goal: string; status: string };
+      approvals: Array<{ status: string }>;
+    };
+    expect(updateResponse.status).toBe(200);
+    expect(updateJson.task.goal).toBe("Ship the edited agent workbench goal.");
+    expect(updateJson.task.status).toBe("draft");
+    expect(updateJson.approvals[0].status).toBe("rejected");
+
+    const executeAfterGoalEdit = await agent.request("/tasks/task-1/execute", {
+      method: "POST",
+      headers: { Cookie: "token=test-token" },
+    });
+    expect(executeAfterGoalEdit.status).toBe(400);
+    expect(await executeAfterGoalEdit.text()).toBe("Task plan must be approved before execution.");
+
+    const replanResponse = await agent.request("/tasks/task-1/plan", {
+      method: "POST",
+      headers: { Cookie: "token=test-token" },
+    });
+    const replanJson = (await replanResponse.json()) as {
+      task: { status: string };
+      planSteps: Array<{ title: string }>;
+      approvals: Array<{ id: string; status: string }>;
+    };
+    expect(replanResponse.status).toBe(200);
+    expect(replanJson.task.status).toBe("awaiting_approval");
+    expect(replanJson.planSteps[1]?.title).toContain("Ship the edited agent workbench goal.");
+    expect(replanJson.approvals[0].status).toBe("pending");
+
+    const replanApprovalResponse = await agent.request(
+      `/approvals/${replanJson.approvals[0]!.id}/respond`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Cookie: "token=test-token" },
+        body: JSON.stringify({ status: "approved", response: { source: "replan" } }),
+      },
+    );
+    expect(replanApprovalResponse.status).toBe(200);
 
     const retryBlocked = await agent.request("/tasks/task-1/retry", {
       method: "POST",

@@ -627,6 +627,12 @@ export const api = {
         body: JSON.stringify(data),
       }),
 
+    update: (id: string, data: { title?: string; goal: string }) =>
+      fetchApi<ApiAgentTaskDetail>(`/agent/tasks/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify(data),
+      }),
+
     plan: (id: string) =>
       fetchApi<ApiAgentTaskDetail>(`/agent/tasks/${id}/plan`, {
         method: "POST",

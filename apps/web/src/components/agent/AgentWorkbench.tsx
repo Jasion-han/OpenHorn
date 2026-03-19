@@ -24,6 +24,7 @@ export function AgentWorkbench() {
     isCreating,
     isPlanning,
     isExecuting,
+    isSavingGoal,
     draftTitle,
     draftGoal,
     streamError,
@@ -39,6 +40,7 @@ export function AgentWorkbench() {
     retryTask,
     continueTask,
     replanTask,
+    saveTaskGoal,
     cancelTask,
   } = useAgentTaskStore();
 
@@ -148,7 +150,17 @@ export function AgentWorkbench() {
                     onCancel={() => void cancelTask()}
                     onRefresh={() => void refreshTask(detail.task.id)}
                   />
-                  <AgentGoalPanel task={detail.task} />
+                  <AgentGoalPanel
+                    task={detail.task}
+                    isSaving={isSavingGoal}
+                    canEdit={
+                      !isPlanning &&
+                      !isExecuting &&
+                      detail.task.status !== "running" &&
+                      detail.task.status !== "planning"
+                    }
+                    onSave={saveTaskGoal}
+                  />
                   <AgentPlanPanel
                     planSteps={detail.planSteps}
                     approvals={detail.approvals}

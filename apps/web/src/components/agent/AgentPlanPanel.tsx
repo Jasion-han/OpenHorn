@@ -23,6 +23,9 @@ export function AgentPlanPanel({
   onReject: (approvalId: string) => void;
 }) {
   const latestApproval = approvals[0] ?? null;
+  const activePlanSteps = latestApproval
+    ? planSteps.filter((step) => step.runId === latestApproval.runId)
+    : planSteps;
 
   return (
     <section className="rounded-3xl border border-border/70 bg-background/80 p-5">
@@ -33,13 +36,13 @@ export function AgentPlanPanel({
         </div>
       </div>
 
-      {planSteps.length === 0 ? (
+      {activePlanSteps.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-border/70 bg-muted/20 p-4 text-sm text-muted-foreground">
           还没有计划。点击上方“生成计划”。
         </div>
       ) : (
         <div className="space-y-3">
-          {planSteps.map((step) => (
+          {activePlanSteps.map((step) => (
             <div key={step.id} className="rounded-2xl border border-border/60 bg-muted/15 p-4">
               <div className="flex gap-3">
                 <StepIcon status={step.status} />

@@ -204,6 +204,7 @@ interface AgentTaskState {
   isCreating: boolean;
   isPlanning: boolean;
   isExecuting: boolean;
+  isSavingGoal: boolean;
   streamError: string | null;
   draftTitle: string;
   draftGoal: string;
@@ -223,6 +224,7 @@ interface AgentTaskState {
   retryTask: () => Promise<void>;
   continueTask: () => Promise<void>;
   replanTask: () => Promise<void>;
+  saveTaskGoal: (goal: string) => Promise<boolean>;
   cancelTask: () => Promise<void>;
 }
 
@@ -235,6 +237,7 @@ export const useAgentTaskStore = create<AgentTaskState>((set, get) => ({
   isCreating: false,
   isPlanning: false,
   isExecuting: false,
+  isSavingGoal: false,
   streamError: null,
   draftTitle: "",
   draftGoal: "",
@@ -410,6 +413,32 @@ export const useAgentTaskStore = create<AgentTaskState>((set, get) => ({
       notifyError("重新规划失败", error instanceof Error ? error.message : "无法重新生成计划");
     } finally {
       set({ isPlanning: false });
+    }
+  },
+
+  saveTaskGoal: async (goal) => {
+    const detail = get().detail;
+    if (!detail) return false;
+
+    if (!goal.trim()) {
+      notifyError("目标为空", "请先填写任务目标。");
+      return false;
+    }
+
+    set({ isSavingGoal: true, isExecuting: false, streamError: null });
+    try {
+      const nextDetail = await api.agentTasks.update(detail.task.id, { goal });
+      set((state) => ({
+        detail: nextDetail,
+        tasks: upsertTask(state.tasks, nextDetail.task),
+      }));
+      notifySuccess("已更新目标", "任务目标已保存，旧计划已失效，请重新规划。");
+      return true;
+    } catch (error) {
+      notifyError("保存失败", error instanceof Error ? error.message : "无法更新任务目标");
+      return false;
+    } finally {
+      set({ isSavingGoal: false });
     }
   },
 

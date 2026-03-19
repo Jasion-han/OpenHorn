@@ -6,7 +6,7 @@ import {
   agentTaskEvents,
   agentTasks,
 } from "db";
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { db } from "../db";
 import { generateId } from "../utils";
 
@@ -148,6 +148,11 @@ export interface CreateAgentTaskInput {
   title?: string | null;
   goal: string;
   attachments?: AgentTaskAttachment[];
+}
+
+export interface UpdateAgentTaskInput {
+  title?: string | null;
+  goal?: string;
 }
 
 export interface CreateAgentRunInput {
@@ -395,6 +400,63 @@ export async function listAgentTasks(userId: string) {
 export async function getAgentTaskById(userId: string, taskId: string) {
   const task = await getTaskRow(userId, taskId);
   return task ? mapTask(task) : null;
+}
+
+export async function updateAgentTask(
+  userId: string,
+  taskId: string,
+  input: UpdateAgentTaskInput,
+) {
+  const existing = await assertTaskRow(userId, taskId);
+
+  if (existing.status === "running" || existing.status === "planning") {
+    throw new Error("Cannot edit a task while it is planning or running");
+  }
+
+  const nextGoal = input.goal === undefined ? existing.goal : input.goal.trim();
+  if (!nextGoal) {
+    throw new Error("goal is required");
+  }
+
+  const existingAutoTitle = buildTaskTitle(existing.goal);
+  const nextTitle =
+    input.title !== undefined
+      ? buildTaskTitle(nextGoal, input.title)
+      : existing.title === existingAutoTitle
+        ? buildTaskTitle(nextGoal)
+        : existing.title;
+  const goalChanged = nextGoal !== existing.goal;
+  const now = new Date();
+
+  await db
+    .update(agentTasks)
+    .set({
+      title: nextTitle,
+      goal: nextGoal,
+      status: goalChanged ? "draft" : (existing.status as AgentTaskStatus),
+      updatedAt: now,
+    })
+    .where(and(eq(agentTasks.id, taskId), eq(agentTasks.userId, userId)));
+
+  if (goalChanged) {
+    await db
+      .update(agentApprovalRequests)
+      .set({
+        status: "rejected",
+        response: stringifyJson({ source: "task_goal_updated" }),
+        respondedAt: now,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(agentApprovalRequests.taskId, taskId),
+          eq(agentApprovalRequests.type, "plan_approval"),
+          inArray(agentApprovalRequests.status, ["pending", "approved"]),
+        ),
+      );
+  }
+
+  return mapTask((await assertTaskRow(userId, taskId)) as typeof agentTasks.$inferSelect);
 }
 
 export async function updateAgentTaskStatus(
