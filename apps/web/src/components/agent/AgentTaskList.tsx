@@ -14,7 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
-import type { ApiAgentTask } from "@/lib/api";
+import type { ApiAgentTask, ApiAgentApprovalStatus, ApiAgentApprovalType, ApiAgentRunPhase, ApiAgentRunStatus } from "@/lib/api";
 
 const TASK_LIST_SECTION_STORAGE_KEY = "openhorn.agentTaskList.sections";
 
@@ -109,6 +109,56 @@ function getInsightLabel(task: ApiAgentTask) {
   }
 }
 
+const RUN_PHASE_LABELS = {
+  planning: "规划",
+  execution: "执行",
+} satisfies Record<ApiAgentRunPhase, string>;
+
+const RUN_STATUS_LABELS = {
+  pending: "待开始",
+  running: "进行中",
+  awaiting_approval: "待审批",
+  completed: "已完成",
+  failed: "失败",
+  cancelled: "已取消",
+} satisfies Record<ApiAgentRunStatus, string>;
+
+const APPROVAL_TYPE_LABELS = {
+  plan_approval: "计划审批",
+  tool_approval: "工具审批",
+} satisfies Record<ApiAgentApprovalType, string>;
+
+const APPROVAL_STATUS_LABELS = {
+  pending: "待处理",
+  approved: "已批准",
+  rejected: "已拒绝",
+} satisfies Record<ApiAgentApprovalStatus, string>;
+
+function getTaskMetaLine(task: ApiAgentTask) {
+  const insight = task.insight;
+  if (!insight) return null;
+
+  const segments: string[] = [];
+
+  if (insight.latestRunPhase && insight.latestRunStatus) {
+    segments.push(
+      `最近${RUN_PHASE_LABELS[insight.latestRunPhase]} ${RUN_STATUS_LABELS[insight.latestRunStatus]}`,
+    );
+  }
+
+  if (insight.latestApprovalType && insight.latestApprovalStatus) {
+    segments.push(
+      `${APPROVAL_TYPE_LABELS[insight.latestApprovalType]} ${APPROVAL_STATUS_LABELS[insight.latestApprovalStatus]}`,
+    );
+  }
+
+  if (insight.hasFinalResult) {
+    segments.push("已产出结果");
+  }
+
+  return segments.length > 0 ? segments.join(" · ") : null;
+}
+
 export function AgentTaskList({
   tasks,
   selectedTaskId,
@@ -158,7 +208,8 @@ export function AgentTaskList({
       }
 
       const insightLabel = getInsightLabel(task);
-      return [task.title, task.goal, insightLabel, task.insight?.summary]
+      const metaLine = getTaskMetaLine(task);
+      return [task.title, task.goal, insightLabel, metaLine, task.insight?.summary]
         .filter((value): value is string => Boolean(value))
         .some((value) => value.toLowerCase().includes(normalizedQuery));
     });
@@ -314,6 +365,7 @@ export function AgentTaskList({
             {(showSectionHeaders && !expandedSections.has(section.id) ? [] : section.tasks).map((task) => {
               const quickActions = getTaskQuickActions(task.status);
               const insightLabel = getInsightLabel(task);
+              const metaLine = getTaskMetaLine(task);
               return (
                 <div
                   key={task.id}
@@ -349,6 +401,12 @@ export function AgentTaskList({
                         {insightLabel}
                       </span>
                     </div>
+                  ) : null}
+
+                  {metaLine ? (
+                    <p className="mt-2 line-clamp-1 text-[11px] text-muted-foreground/90">
+                      {metaLine}
+                    </p>
                   ) : null}
 
                   {task.insight?.summary ? (
