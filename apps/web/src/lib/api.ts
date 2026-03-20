@@ -66,11 +66,25 @@ export interface ApiAgentRunStep {
 }
 
 export interface ApiAgentRun {
-  status: "completed" | "failed" | "cancelled" | "partial";
+  status: "running" | "awaiting_approval" | "completed" | "failed" | "cancelled" | "partial";
   summary: string;
   error?: string;
   steps: ApiAgentRunStep[];
   legacySessionId?: string;
+  taskId?: string;
+  taskStatus?:
+    | "draft"
+    | "planning"
+    | "awaiting_approval"
+    | "running"
+    | "completed"
+    | "failed"
+    | "cancelled";
+  latestRunId?: string | null;
+  latestRunPhase?: "planning" | "execution" | null;
+  latestApprovalId?: string | null;
+  latestApprovalType?: "plan_approval" | "tool_approval" | null;
+  latestApprovalStatus?: "pending" | "approved" | "rejected" | null;
 }
 
 export type ApiLiveStatus = "live" | "offline";
@@ -267,6 +281,86 @@ export interface ApiAgentTaskDetail {
 
 export type ApiSettingsMap = Record<string, string>;
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function decodeQuotedJsonString(value: string) {
+  try {
+    return JSON.parse(`"${value}"`);
+  } catch {
+    return value.replace(/\\"/g, '"').replace(/\\\\/g, "\\");
+  }
+}
+
+export function extractErrorMessage(error: unknown, fallback = "Request failed"): string {
+  if (typeof error === "string") {
+    const normalized = error.trim();
+    if (!normalized) return fallback;
+
+    if (
+      (normalized.startsWith('"') && normalized.endsWith('"')) ||
+      (normalized.startsWith("'") && normalized.endsWith("'"))
+    ) {
+      try {
+        return extractErrorMessage(JSON.parse(normalized), fallback);
+      } catch {
+        return extractErrorMessage(normalized.slice(1, -1), fallback);
+      }
+    }
+
+    if (normalized.startsWith("{") || normalized.startsWith("[")) {
+      try {
+        return extractErrorMessage(JSON.parse(normalized), fallback);
+      } catch {
+        const nestedMessageMatch = normalized.match(/"message"\s*:\s*"((?:\\.|[^"])*)"/);
+        if (nestedMessageMatch?.[1]) {
+          return decodeQuotedJsonString(nestedMessageMatch[1]).trim() || fallback;
+        }
+
+        const nestedErrorMatch = normalized.match(/"error"\s*:\s*"((?:\\.|[^"])*)"/);
+        if (nestedErrorMatch?.[1]) {
+          return extractErrorMessage(decodeQuotedJsonString(nestedErrorMatch[1]), fallback);
+        }
+
+        return normalized;
+      }
+    }
+
+    return normalized;
+  }
+
+  if (error instanceof Error) {
+    return extractErrorMessage(error.message, fallback);
+  }
+
+  if (Array.isArray(error)) {
+    const messages = error
+      .map((item) => extractErrorMessage(item, ""))
+      .filter((item) => item.trim().length > 0);
+    return messages[0] || fallback;
+  }
+
+  if (isRecord(error)) {
+    if ("error" in error) {
+      return extractErrorMessage(error.error, fallback);
+    }
+    if ("message" in error) {
+      return extractErrorMessage(error.message, fallback);
+    }
+    if ("detail" in error) {
+      return extractErrorMessage(error.detail, fallback);
+    }
+  }
+
+  return fallback;
+}
+
+export async function readErrorMessage(response: Response, fallback = "Request failed"): Promise<string> {
+  const rawText = await response.text().catch(() => "");
+  return extractErrorMessage(rawText, fallback);
+}
+
 async function probeReachableButBlocked(url: string): Promise<boolean> {
   if (typeof window === "undefined") return false;
 
@@ -338,8 +432,7 @@ async function fetchApi<T>(endpoint: string, options: RequestInit = {}): Promise
   }
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: "Request failed" }));
-    throw new Error(error.error || "Request failed");
+    throw new Error(await readErrorMessage(response, "Request failed"));
   }
 
   return response.json();

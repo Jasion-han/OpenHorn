@@ -1,5 +1,5 @@
 import type { ApiAgentRun, ApiCitation, ApiLiveRoute, ApiLiveStatus } from "./api";
-import { api } from "./api";
+import { api, readErrorMessage } from "./api";
 import { readSseStream, type SseEvent } from "./sse";
 
 type ChatStreamEvent =
@@ -42,8 +42,7 @@ export async function streamChatMessage(
   const response = existingResponse ?? (await api.messages.stream(input));
 
   if (!response.ok) {
-    const errorText = await response.text().catch(() => "");
-    throw new Error(errorText || "Failed to stream message");
+    throw new Error(await readErrorMessage(response, "Failed to stream message"));
   }
 
   await readSseStream(response, (rawEvent) => {

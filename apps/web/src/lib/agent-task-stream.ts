@@ -1,7 +1,7 @@
 "use client";
 
 import type { ApiAgentPlanStep, ApiAgentTaskStatus } from "./api";
-import { api } from "./api";
+import { api, readErrorMessage } from "./api";
 import { readSseStream, type SseEvent } from "./sse";
 
 export type AgentTaskStreamEvent =
@@ -47,8 +47,7 @@ export async function streamAgentTaskExecution(
   const response = options?.response ?? (await api.agentTasks.execute(taskId, { signal: options?.signal }));
 
   if (!response.ok) {
-    const message = await response.text().catch(() => "");
-    throw new Error(message || "Failed to execute task");
+    throw new Error(await readErrorMessage(response, "Failed to execute task"));
   }
 
   await readSseStream(response, (rawEvent) => {

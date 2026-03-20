@@ -17,6 +17,7 @@ import {
   MessageAttachments,
 } from "@/components/attachments/MessageAttachments";
 import { ChatHeader } from "@/components/chat/ChatHeader";
+import { ChatAgentTaskCard } from "@/components/chat/ChatAgentTaskCard";
 import { ModelPickerModal } from "@/components/chat/ModelPickerModal";
 import { PromaComposer } from "@/components/composer/PromaComposer";
 import { Button } from "@/components/ui/button";
@@ -37,6 +38,7 @@ import {
   type ApiLiveRoute,
   type ApiLiveStatus,
   api,
+  readErrorMessage,
 } from "../lib/api";
 import { uploadAttachments } from "../lib/attachments";
 import { streamChatMessage } from "../lib/chat-stream";
@@ -514,7 +516,11 @@ function MessageBubble({
           </p>
         ) : null}
 
-        {isAssistant && <AgentRunPanel run={msg.agentRun} />}
+        {isAssistant && msg.agentRun?.taskId ? (
+          <ChatAgentTaskCard messageId={msg.id} taskId={msg.agentRun.taskId} />
+        ) : isAssistant ? (
+          <AgentRunPanel run={msg.agentRun} />
+        ) : null}
       </div>
       <div
         className={cn(
@@ -1189,7 +1195,7 @@ export function ChatArea() {
             signal: abortController.signal,
           },
         );
-        if (!response.ok) throw new Error(await response.text().catch(() => "Failed"));
+        if (!response.ok) throw new Error(await readErrorMessage(response, "Failed to regenerate"));
 
         await streamAssistantResponse({
           input: { conversationId: currentConversation.id, content: "", mode: assistantMsg.mode },
@@ -1277,7 +1283,7 @@ export function ChatArea() {
       const response = await api.messages.edit(msgId, newContent.trim(), {
         signal: abortController.signal,
       });
-      if (!response.ok) throw new Error(await response.text().catch(() => "Failed"));
+      if (!response.ok) throw new Error(await readErrorMessage(response, "Failed to edit message"));
 
       await streamAssistantResponse({
         input: { conversationId, content: newContent.trim(), mode: userMsg.mode },

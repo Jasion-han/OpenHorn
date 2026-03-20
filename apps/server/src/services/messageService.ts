@@ -5,6 +5,16 @@ import { db } from "../db";
 import { generateId } from "../utils";
 import { createSseStream } from "../utils/sse";
 import { type AgentRuntimeConfig, runAgentWithConfig } from "./agentService";
+import {
+  createAgentApprovalRequest,
+  createAgentRun,
+  createAgentTask,
+  createAgentTaskEvent,
+  getAgentTaskDetail,
+  setAgentPlanSteps,
+  updateAgentRunStatus,
+  updateAgentTaskStatus,
+} from "./agentTaskService";
 import { buildAttachmentPayloadFromIds, linkAttachmentsToMessage } from "./attachmentService";
 import { getResolvedChannelForConversation } from "./channelService";
 import { buildLiveContext, type LiveContextResult, toStoredLiveMetadata } from "./liveCapabilities";
@@ -41,10 +51,17 @@ type AgentRunStep = {
 };
 
 type AgentRunData = {
-  status: "completed" | "failed" | "cancelled" | "partial";
+  status: "running" | "awaiting_approval" | "completed" | "failed" | "cancelled" | "partial";
   summary: string;
   error?: string;
   steps: AgentRunStep[];
+  taskId?: string;
+  taskStatus?: "draft" | "planning" | "awaiting_approval" | "running" | "completed" | "failed" | "cancelled";
+  latestRunId?: string | null;
+  latestRunPhase?: "planning" | "execution" | null;
+  latestApprovalId?: string | null;
+  latestApprovalType?: "plan_approval" | "tool_approval" | null;
+  latestApprovalStatus?: "pending" | "approved" | "rejected" | null;
 };
 
 type LiveStatusPayload = {
@@ -133,6 +150,163 @@ function buildAgentRunSummary(steps: AgentRunStep[], error?: string) {
     return toolCount > 0 ? `Agent 运行失败，已调用 ${toolCount} 个工具` : "Agent 运行失败";
   }
   return toolCount > 0 ? `Agent 已调用 ${toolCount} 个工具` : "Agent 已完成本轮执行";
+}
+
+function buildTaskPlanFromGoal(goal: string) {
+  const normalized = goal.trim().replace(/\s+/g, " ");
+  const executionTitle =
+    normalized.length > 72 ? `${normalized.slice(0, 69).trim()}...` : normalized;
+
+  return [
+    {
+      title: "Inspect task scope and available context",
+      description: "Review the goal, attachments, and constraints before execution.",
+      status: "ready" as const,
+    },
+    {
+      title: executionTitle || "Execute the requested task",
+      description: "Carry out the task using the approved plan and required tools.",
+      status: "pending" as const,
+    },
+    {
+      title: "Verify outcome and summarize results",
+      description: "Validate the output, note risks, and produce a final result artifact.",
+      status: "pending" as const,
+    },
+  ];
+}
+
+function buildTaskBackedAgentSummary(taskStatus: AgentRunData["taskStatus"]) {
+  switch (taskStatus) {
+    case "awaiting_approval":
+      return "已生成任务计划，等待你批准后开始执行。";
+    case "running":
+      return "任务正在执行。";
+    case "completed":
+      return "任务已完成。";
+    case "failed":
+      return "任务执行失败，可继续、重试或重新规划。";
+    case "cancelled":
+      return "任务已取消。";
+    default:
+      return "已创建 Agent 任务。";
+  }
+}
+
+function buildTaskBackedAgentContent(detail: Awaited<ReturnType<typeof getAgentTaskDetail>>) {
+  const summary = buildTaskBackedAgentSummary(detail.task.status);
+  const planSteps = detail.planSteps
+    .slice()
+    .sort((left, right) => left.orderIndex - right.orderIndex)
+    .map((step, index) => `${index + 1}. ${step.title}`);
+
+  const lines = [summary];
+  if (planSteps.length > 0) {
+    lines.push("", "当前计划：", ...planSteps);
+  }
+  lines.push("", "你可以在下方直接审批、执行、继续、重试或重新规划。");
+  return lines.join("\n");
+}
+
+function buildTaskBackedAgentRun(detail: Awaited<ReturnType<typeof getAgentTaskDetail>>): AgentRunData {
+  const latestRun = detail.runs[0] ?? null;
+  const latestApproval = detail.approvals[0] ?? null;
+
+  return {
+    status:
+      detail.task.status === "awaiting_approval"
+        ? "awaiting_approval"
+        : detail.task.status === "running"
+          ? "running"
+          : detail.task.status === "failed"
+            ? "failed"
+            : detail.task.status === "cancelled"
+              ? "cancelled"
+              : "completed",
+    summary: buildTaskBackedAgentSummary(detail.task.status),
+    steps: [],
+    taskId: detail.task.id,
+    taskStatus: detail.task.status,
+    latestRunId: latestRun?.id ?? null,
+    latestRunPhase: latestRun?.phase ?? null,
+    latestApprovalId: latestApproval?.id ?? null,
+    latestApprovalType: latestApproval?.type ?? null,
+    latestApprovalStatus: latestApproval?.status ?? null,
+  };
+}
+
+async function createPlannedAgentTaskForConversation(params: {
+  userId: string;
+  conversationId: string;
+  channelId: string | null;
+  modelId: string | null;
+  goal: string;
+  attachmentIds: string[];
+}) {
+  const task = await createAgentTask(params.userId, {
+    conversationId: params.conversationId,
+    channelId: params.channelId,
+    modelId: params.modelId,
+    goal: params.goal,
+    attachments: params.attachmentIds.map((id) => ({
+      id,
+      fileName: "attachment",
+    })),
+  });
+
+  await updateAgentTaskStatus(params.userId, task.id, "planning");
+  const run = await createAgentRun(params.userId, task.id, {
+    phase: "planning",
+    status: "running",
+    startedAt: new Date(),
+  });
+  await createAgentTaskEvent(params.userId, task.id, run.id, {
+    type: "task_status",
+    content: "Task entered planning.",
+    metadata: { status: "planning", source: "chat" },
+  });
+
+  const planSteps = await setAgentPlanSteps(params.userId, task.id, run.id, {
+    steps: buildTaskPlanFromGoal(params.goal),
+  });
+
+  for (const step of planSteps) {
+    await createAgentTaskEvent(params.userId, task.id, run.id, {
+      type: "plan_step",
+      content: step.title,
+      metadata: {
+        orderIndex: step.orderIndex,
+        description: step.description,
+        status: step.status,
+      },
+    });
+  }
+
+  const approval = await createAgentApprovalRequest(params.userId, task.id, run.id, {
+    type: "plan_approval",
+    title: "Approve task execution",
+    description: "Review the generated plan before the agent starts executing it.",
+    payload: {
+      planStepIds: planSteps.map((step) => step.id),
+      planStepCount: planSteps.length,
+    },
+  });
+
+  await createAgentTaskEvent(params.userId, task.id, run.id, {
+    type: "approval_requested",
+    content: approval.title,
+    metadata: { approvalId: approval.id, approvalType: approval.type, source: "chat" },
+  });
+
+  await updateAgentRunStatus(params.userId, run.id, "awaiting_approval");
+  await updateAgentTaskStatus(params.userId, task.id, "awaiting_approval");
+  await createAgentTaskEvent(params.userId, task.id, run.id, {
+    type: "task_status",
+    content: "Task is awaiting approval.",
+    metadata: { status: "awaiting_approval", source: "chat" },
+  });
+
+  return getAgentTaskDetail(params.userId, task.id);
 }
 
 function buildEffectiveSystemPrompt(
@@ -553,6 +727,63 @@ export async function streamMessage(
       })
       .where(eq(conversations.id, input.conversationId));
 
+    if (mode === "agent") {
+      await db.insert(messages).values({
+        id: assistantMessageId,
+        conversationId: input.conversationId,
+        role: "assistant",
+        content: "",
+        model: conversation.modelId || null,
+        mode: "agent",
+        attachments: null,
+        agentRun: null,
+        liveMetadata: null,
+        citations: null,
+        createdAt: assistantCreatedAt,
+      });
+
+      const detail = await createPlannedAgentTaskForConversation({
+        userId,
+        conversationId: input.conversationId,
+        channelId: conversation.channelId || null,
+        modelId: conversation.modelId || null,
+        goal: input.content,
+        attachmentIds: input.attachments || [],
+      });
+      const assistantContent = buildTaskBackedAgentContent(detail);
+      const agentRun = buildTaskBackedAgentRun(detail);
+      send({ type: "delta", content: assistantContent });
+
+      await db
+        .update(messages)
+        .set({
+          content: assistantContent,
+          model: conversation.modelId || null,
+          mode: "agent",
+          agentRun: JSON.stringify(agentRun),
+          liveMetadata: null,
+          citations: null,
+        })
+        .where(eq(messages.id, assistantMessageId));
+
+      await db
+        .update(conversations)
+        .set({
+          updatedAt: new Date(),
+          lastMode: "agent",
+          runStatus: detail.task.status,
+        })
+        .where(eq(conversations.id, input.conversationId));
+
+      send({
+        type: "done",
+        messageId: assistantMessageId,
+        model: conversation.modelId || undefined,
+        agentRun,
+      });
+      return;
+    }
+
     const resolvedChannel = await getResolvedChannelForConversation(userId, conversation);
     const settings = await getSettingValues(userId, [
       GLOBAL_SYSTEM_PROMPT_KEY,
@@ -583,70 +814,6 @@ export async function streamMessage(
     const citationsPayload = buildCitationsPayload(liveContext.citations);
     if (citationsPayload) {
       send(citationsPayload);
-    }
-    if (mode === "agent") {
-      const conversationMessages = await getMessages(input.conversationId);
-      const conversationHistory = buildRecentAgentConversationHistory(
-        conversationMessages.filter((message) => message.id !== userMessageId),
-      );
-
-      await db.insert(messages).values({
-        id: assistantMessageId,
-        conversationId: input.conversationId,
-        role: "assistant",
-        content: "",
-        model: conversation.modelId || null,
-        mode: "agent",
-        attachments: null,
-        agentRun: null,
-        liveMetadata: null,
-        citations: null,
-        createdAt: assistantCreatedAt,
-      });
-
-      const { responseContent: assistantContent, agentRun } = await runAgentAndStream({
-        send,
-        config: {
-          userId,
-          prompt: input.content,
-          conversationHistory,
-          attachmentIds: input.attachments || [],
-          channelId: conversation.channelId || null,
-          modelId: conversation.modelId || null,
-          globalSystemPrompt: baseSystemPrompt || undefined,
-          liveSystemContext: liveContext.systemContext,
-          abortController: _ctx.abortController,
-        },
-      });
-
-      await db
-        .update(messages)
-        .set({
-          content: assistantContent || agentRun.error || "",
-          model: conversation.modelId || null,
-          mode: "agent",
-          agentRun: JSON.stringify(agentRun),
-          liveMetadata: serializeLiveMetadata(liveContext),
-          citations: serializeCitations(liveContext.citations),
-        })
-        .where(eq(messages.id, assistantMessageId));
-
-      await db
-        .update(conversations)
-        .set({
-          updatedAt: new Date(),
-          lastMode: "agent",
-          runStatus: agentRun.status,
-        })
-        .where(eq(conversations.id, input.conversationId));
-
-      send({
-        type: "done",
-        messageId: assistantMessageId,
-        model: conversation.modelId || undefined,
-        agentRun,
-      });
-      return;
     }
 
     const conversationMessages = await getMessages(input.conversationId);
@@ -791,40 +958,7 @@ export async function editUserMessage(
     const contextMsgs = allMsgs
       .slice(0, idx + 1)
       .map((m) => (m.id === userMessageId ? { ...m, content: newContent.trim() } : m));
-    const resolvedChannel = await getResolvedChannelForConversation(userId, conversation);
-    const settings = await getSettingValues(userId, [
-      GLOBAL_SYSTEM_PROMPT_KEY,
-      TAVILY_API_KEY_SETTING,
-      TAVILY_ENABLED_SETTING,
-    ]);
-    const baseSystemPrompt =
-      conversation.systemPrompt || settings[GLOBAL_SYSTEM_PROMPT_KEY] || null;
-    const classifier = resolvedChannel
-      ? (prompt: string) =>
-          classifyLiveRouteWithModel({
-            provider: resolvedChannel.channel.provider,
-            apiKey: resolvedChannel.apiKey,
-            baseUrl: resolvedChannel.channel.baseUrl,
-            modelId: resolvedChannel.modelId,
-            prompt,
-          })
-      : undefined;
-    const liveContext = await buildLiveContext({
-      prompt: newContent.trim(),
-      userSettings: settings,
-      tavilyEnvKey: process.env.TAVILY_API_KEY ?? null,
-      forceWebSearch: Boolean(conversation.forceWebSearch),
-      classifier,
-    });
-    const effectiveSystemPrompt = buildEffectiveSystemPrompt(baseSystemPrompt, liveContext);
-    send(buildLiveStatusPayload(liveContext));
-    const citationsPayload = buildCitationsPayload(liveContext.citations);
-    if (citationsPayload) {
-      send(citationsPayload);
-    }
-
     if (assistantMode === "agent") {
-      const conversationHistory = buildRecentAgentConversationHistory(contextMsgs.slice(0, -1));
       const attachmentIds = parseJsonArray(userMsg.attachments);
       const contextPaths = parseJsonArray(userMsg.contextPaths);
       const workspaceId =
@@ -858,32 +992,29 @@ export async function editUserMessage(
         })
         .where(eq(conversations.id, userMsg.conversationId));
 
-      const { responseContent, agentRun } = await runAgentAndStream({
-        send,
-        config: {
-          userId,
-          prompt: newContent.trim(),
-          conversationHistory,
-          attachmentIds,
-          channelId: conversation.channelId || null,
-          modelId: conversation.modelId || null,
-          globalSystemPrompt: baseSystemPrompt || undefined,
-          liveSystemContext: liveContext.systemContext,
-          abortController: _ctx.abortController,
-        },
+      const detail = await createPlannedAgentTaskForConversation({
+        userId,
+        conversationId: userMsg.conversationId,
+        channelId: conversation.channelId || null,
+        modelId: conversation.modelId || null,
+        goal: newContent.trim(),
+        attachmentIds,
       });
+      const responseContent = buildTaskBackedAgentContent(detail);
+      const agentRun = buildTaskBackedAgentRun(detail);
+      send({ type: "delta", content: responseContent });
 
       await db
         .update(messages)
         .set({
-          content: responseContent || agentRun.error || "",
+          content: responseContent,
           model: conversation.modelId || null,
           mode: "agent",
           workspaceId,
           contextPaths: contextPaths.length > 0 ? JSON.stringify(contextPaths) : null,
           agentRun: JSON.stringify(agentRun),
-          liveMetadata: serializeLiveMetadata(liveContext),
-          citations: serializeCitations(liveContext.citations),
+          liveMetadata: null,
+          citations: null,
         })
         .where(eq(messages.id, assistantMessageId));
 
@@ -893,7 +1024,7 @@ export async function editUserMessage(
           updatedAt: new Date(),
           workspaceId,
           lastMode: "agent",
-          runStatus: agentRun.status,
+          runStatus: detail.task.status,
         })
         .where(eq(conversations.id, userMsg.conversationId));
 
@@ -904,6 +1035,38 @@ export async function editUserMessage(
         agentRun,
       });
       return;
+    }
+
+    const resolvedChannel = await getResolvedChannelForConversation(userId, conversation);
+    const settings = await getSettingValues(userId, [
+      GLOBAL_SYSTEM_PROMPT_KEY,
+      TAVILY_API_KEY_SETTING,
+      TAVILY_ENABLED_SETTING,
+    ]);
+    const baseSystemPrompt =
+      conversation.systemPrompt || settings[GLOBAL_SYSTEM_PROMPT_KEY] || null;
+    const classifier = resolvedChannel
+      ? (prompt: string) =>
+          classifyLiveRouteWithModel({
+            provider: resolvedChannel.channel.provider,
+            apiKey: resolvedChannel.apiKey,
+            baseUrl: resolvedChannel.channel.baseUrl,
+            modelId: resolvedChannel.modelId,
+            prompt,
+          })
+      : undefined;
+    const liveContext = await buildLiveContext({
+      prompt: newContent.trim(),
+      userSettings: settings,
+      tavilyEnvKey: process.env.TAVILY_API_KEY ?? null,
+      forceWebSearch: Boolean(conversation.forceWebSearch),
+      classifier,
+    });
+    const effectiveSystemPrompt = buildEffectiveSystemPrompt(baseSystemPrompt, liveContext);
+    send(buildLiveStatusPayload(liveContext));
+    const citationsPayload = buildCitationsPayload(liveContext.citations);
+    if (citationsPayload) {
+      send(citationsPayload);
     }
 
     const chatMessages = await buildChatMessages(contextMsgs, effectiveSystemPrompt);
@@ -1017,41 +1180,6 @@ export async function regenerateMessage(
         return;
       }
 
-      const userIndex = allMsgs.findIndex((message) => message.id === userMsg.id);
-      const conversationHistory = buildRecentAgentConversationHistory(
-        userIndex > 0 ? allMsgs.slice(0, userIndex) : [],
-      );
-
-      const resolvedChannel = await getResolvedChannelForConversation(userId, conversation);
-      const settings = await getSettingValues(userId, [
-        GLOBAL_SYSTEM_PROMPT_KEY,
-        TAVILY_API_KEY_SETTING,
-        TAVILY_ENABLED_SETTING,
-      ]);
-      const baseSystemPrompt =
-        conversation.systemPrompt || settings[GLOBAL_SYSTEM_PROMPT_KEY] || null;
-      const classifier = resolvedChannel
-        ? (prompt: string) =>
-            classifyLiveRouteWithModel({
-              provider: resolvedChannel.channel.provider,
-              apiKey: resolvedChannel.apiKey,
-              baseUrl: resolvedChannel.channel.baseUrl,
-              modelId: resolvedChannel.modelId,
-              prompt,
-            })
-        : undefined;
-      const liveContext = await buildLiveContext({
-        prompt: userMsg.content,
-        userSettings: settings,
-        tavilyEnvKey: process.env.TAVILY_API_KEY ?? null,
-        forceWebSearch: Boolean(conversation.forceWebSearch),
-        classifier,
-      });
-      send(buildLiveStatusPayload(liveContext));
-      const citationsPayload = buildCitationsPayload(liveContext.citations);
-      if (citationsPayload) {
-        send(citationsPayload);
-      }
       const attachmentIds = parseJsonArray(userMsg.attachments);
       const contextPaths = parseJsonArray(userMsg.contextPaths);
       const workspaceId =
@@ -1067,32 +1195,29 @@ export async function regenerateMessage(
         })
         .where(eq(conversations.id, assistantMsg.conversationId));
 
-      const { responseContent, agentRun } = await runAgentAndStream({
-        send,
-        config: {
-          userId,
-          prompt: userMsg.content,
-          conversationHistory,
-          attachmentIds,
-          channelId: conversation.channelId || null,
-          modelId: conversation.modelId || null,
-          globalSystemPrompt: baseSystemPrompt || undefined,
-          liveSystemContext: liveContext.systemContext,
-          abortController: _ctx.abortController,
-        },
+      const detail = await createPlannedAgentTaskForConversation({
+        userId,
+        conversationId: assistantMsg.conversationId,
+        channelId: conversation.channelId || null,
+        modelId: conversation.modelId || null,
+        goal: userMsg.content,
+        attachmentIds,
       });
+      const responseContent = buildTaskBackedAgentContent(detail);
+      const agentRun = buildTaskBackedAgentRun(detail);
+      send({ type: "delta", content: responseContent });
 
       await db
         .update(messages)
         .set({
-          content: responseContent || agentRun.error || "",
+          content: responseContent,
           model: conversation.modelId || null,
           mode: "agent",
           workspaceId,
           contextPaths: contextPaths.length > 0 ? JSON.stringify(contextPaths) : null,
           agentRun: JSON.stringify(agentRun),
-          liveMetadata: serializeLiveMetadata(liveContext),
-          citations: serializeCitations(liveContext.citations),
+          liveMetadata: null,
+          citations: null,
         })
         .where(eq(messages.id, assistantMessageId));
 
@@ -1102,7 +1227,7 @@ export async function regenerateMessage(
           updatedAt: new Date(),
           workspaceId,
           lastMode: "agent",
-          runStatus: agentRun.status,
+          runStatus: detail.task.status,
         })
         .where(eq(conversations.id, assistantMsg.conversationId));
 
