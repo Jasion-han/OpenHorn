@@ -200,6 +200,27 @@ function getTaskPreview(task: ApiAgentTask) {
   } as const;
 }
 
+function getSectionMetaLabel(sectionId: TaskSectionId, count: number) {
+  if (sectionId === "attention") {
+    return `${count} 项待处理`;
+  }
+  if (sectionId === "recent") {
+    return `${count} 项活跃`;
+  }
+  return `${count} 项归档`;
+}
+
+function getTaskAccentTone(task: ApiAgentTask) {
+  switch (task.status) {
+    case "awaiting_approval":
+      return "approval";
+    case "failed":
+      return "failed";
+    default:
+      return "default";
+  }
+}
+
 export function AgentTaskList({
   tasks,
   selectedTaskId,
@@ -399,7 +420,7 @@ export function AgentTaskList({
                   <span>{section.label}</span>
                 </span>
                 <span className="rounded-full border border-border/60 bg-background/80 px-2 py-0.5 text-[10px] tracking-normal text-muted-foreground">
-                  {section.tasks.length}
+                  {getSectionMetaLabel(section.id, section.tasks.length)}
                 </span>
               </button>
             ) : null}
@@ -410,6 +431,7 @@ export function AgentTaskList({
               const metaLine = getTaskMetaLine(task);
               const preview = getTaskPreview(task);
               const isTaskBusy = activeQuickAction?.taskId === task.id;
+              const accentTone = getTaskAccentTone(task);
               return (
                 <div
                   key={task.id}
@@ -423,15 +445,29 @@ export function AgentTaskList({
                   role="button"
                   tabIndex={0}
                   className={cn(
-                    "w-full rounded-2xl border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/20",
+                    "relative w-full overflow-hidden rounded-2xl border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/20",
                     isTaskBusy && "border-foreground/20 bg-foreground/[0.04]",
+                    accentTone === "approval" &&
+                      "border-orange-500/20 bg-orange-500/[0.045] hover:bg-orange-500/[0.07]",
+                    accentTone === "failed" &&
+                      "border-destructive/20 bg-destructive/[0.045] hover:bg-destructive/[0.07]",
                     task.id === selectedTaskId
                       ? "border-foreground/20 bg-foreground/[0.05]"
                       : "border-border/60 bg-background/70 hover:bg-muted/30",
                   )}
                 >
+                  {accentTone !== "default" ? (
+                    <div
+                      aria-hidden="true"
+                      className={cn(
+                        "absolute inset-y-3 left-0 w-1 rounded-r-full",
+                        accentTone === "approval" ? "bg-orange-500/80" : "bg-destructive/80",
+                      )}
+                    />
+                  ) : null}
+
                   <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
+                    <div className="min-w-0 pl-1">
                       <div className="truncate text-sm font-medium">{task.title}</div>
                       <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{task.goal}</p>
                     </div>
