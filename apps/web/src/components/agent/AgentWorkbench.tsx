@@ -363,6 +363,7 @@ export function AgentWorkbench() {
                     runs={detail.runs}
                     summaries={runSummaries}
                     selectedRunId={selectedRun?.id ?? null}
+                    defaultRunId={detail.runs[0]?.id ?? null}
                     onSelect={setSelectedRunId}
                   />
                   <AgentGoalPanel
