@@ -84,6 +84,10 @@ function getRunSummaries(detail: ApiAgentTaskDetail): AgentRunSummary[] {
 
 export function AgentWorkbench() {
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [activeQuickAction, setActiveQuickAction] = useState<{
+    taskId: string;
+    action: AgentTaskQuickAction;
+  } | null>(null);
   const {
     tasks,
     selectedTaskId,
@@ -190,24 +194,34 @@ export function AgentWorkbench() {
     selectedRun.phase === "execution"
       ? streamError
       : null;
-  const isMutatingTask = isPlanning || isExecuting || isSavingGoal;
 
   const handleTaskQuickAction = async (taskId: string, action: AgentTaskQuickAction) => {
-    switch (action) {
-      case "plan":
-        await requestPlan(taskId);
-        return;
-      case "retry":
-        await retryTask(taskId);
-        return;
-      case "continue":
-        await continueTask(taskId);
-        return;
-      case "cancel":
-        await cancelTask(taskId);
-        return;
-      default:
-        return;
+    if (activeQuickAction) {
+      return;
+    }
+
+    setActiveQuickAction({ taskId, action });
+    try {
+      switch (action) {
+        case "plan":
+          await requestPlan(taskId);
+          return;
+        case "retry":
+          await retryTask(taskId);
+          return;
+        case "continue":
+          await continueTask(taskId);
+          return;
+        case "cancel":
+          await cancelTask(taskId);
+          return;
+        default:
+          return;
+      }
+    } finally {
+      setActiveQuickAction((current) =>
+        current?.taskId === taskId && current.action === action ? null : current,
+      );
     }
   };
 
@@ -248,7 +262,7 @@ export function AgentWorkbench() {
             <AgentTaskList
               tasks={tasks}
               selectedTaskId={selectedTaskId}
-              isMutating={isMutatingTask}
+              activeQuickAction={activeQuickAction}
               onSelect={(taskId) => void selectTask(taskId)}
               onQuickAction={(taskId, action) => void handleTaskQuickAction(taskId, action)}
             />

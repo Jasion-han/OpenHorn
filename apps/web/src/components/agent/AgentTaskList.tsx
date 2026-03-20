@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   ChevronDown,
   ChevronRight,
+  Loader2,
   RotateCcw,
   Search,
   SkipForward,
@@ -63,6 +64,10 @@ const TASK_SECTIONS = [
 type TaskListFilter = "all" | ApiAgentTask["status"];
 type TaskSectionId = (typeof TASK_SECTIONS)[number]["id"];
 export type AgentTaskQuickAction = "plan" | "retry" | "continue" | "cancel";
+export type AgentTaskQuickActionState = {
+  taskId: string;
+  action: AgentTaskQuickAction;
+};
 
 type TaskQuickActionSpec = {
   key: AgentTaskQuickAction;
@@ -91,6 +96,21 @@ function getTaskQuickActions(status: ApiAgentTask["status"]): TaskQuickActionSpe
       return [{ key: "cancel", label: "取消", icon: Square, tone: "danger" }];
     default:
       return [];
+  }
+}
+
+function getQuickActionBusyLabel(action: AgentTaskQuickAction) {
+  switch (action) {
+    case "plan":
+      return "规划中";
+    case "retry":
+      return "重试中";
+    case "continue":
+      return "继续中";
+    case "cancel":
+      return "取消中";
+    default:
+      return "处理中";
   }
 }
 
@@ -162,13 +182,13 @@ function getTaskMetaLine(task: ApiAgentTask) {
 export function AgentTaskList({
   tasks,
   selectedTaskId,
-  isMutating,
+  activeQuickAction,
   onSelect,
   onQuickAction,
 }: {
   tasks: ApiAgentTask[];
   selectedTaskId: string | null;
-  isMutating: boolean;
+  activeQuickAction: AgentTaskQuickActionState | null;
   onSelect: (taskId: string) => void;
   onQuickAction: (taskId: string, action: AgentTaskQuickAction) => Promise<void> | void;
 }) {
@@ -366,6 +386,7 @@ export function AgentTaskList({
               const quickActions = getTaskQuickActions(task.status);
               const insightLabel = getInsightLabel(task);
               const metaLine = getTaskMetaLine(task);
+              const isTaskBusy = activeQuickAction?.taskId === task.id;
               return (
                 <div
                   key={task.id}
@@ -380,6 +401,7 @@ export function AgentTaskList({
                   tabIndex={0}
                   className={cn(
                     "w-full rounded-2xl border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/20",
+                    isTaskBusy && "border-foreground/20 bg-foreground/[0.04]",
                     task.id === selectedTaskId
                       ? "border-foreground/20 bg-foreground/[0.05]"
                       : "border-border/60 bg-background/70 hover:bg-muted/30",
@@ -419,10 +441,19 @@ export function AgentTaskList({
                     更新于 {new Date(task.updatedAt).toLocaleString()}
                   </div>
 
+                  {isTaskBusy ? (
+                    <div className="mt-3 inline-flex items-center rounded-full border border-foreground/10 bg-foreground/[0.04] px-2.5 py-1 text-[11px] text-foreground/80">
+                      <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                      {getQuickActionBusyLabel(activeQuickAction.action)}
+                    </div>
+                  ) : null}
+
                   {quickActions.length > 0 ? (
                     <div className="mt-3 flex flex-wrap gap-2">
                       {quickActions.map((action) => {
                         const Icon = action.icon;
+                        const isActionBusy =
+                          activeQuickAction?.taskId === task.id && activeQuickAction.action === action.key;
                         return (
                           <button
                             key={action.key}
@@ -433,14 +464,19 @@ export function AgentTaskList({
                             }}
                             className={cn(
                               "inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] transition-colors",
+                              isActionBusy && "border-foreground/15 bg-foreground/[0.06] text-foreground",
                               action.tone === "danger"
                                 ? "border-destructive/20 bg-destructive/5 text-destructive hover:bg-destructive/10"
                                 : "border-border/60 bg-background/80 text-foreground/80 hover:bg-muted/40",
                             )}
-                            disabled={isMutating}
+                            disabled={isTaskBusy}
                           >
-                            <Icon className="mr-1.5 h-3.5 w-3.5" />
-                            {action.label}
+                            {isActionBusy ? (
+                              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <Icon className="mr-1.5 h-3.5 w-3.5" />
+                            )}
+                            {isActionBusy ? getQuickActionBusyLabel(action.key) : action.label}
                           </button>
                         );
                       })}
