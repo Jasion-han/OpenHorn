@@ -88,6 +88,8 @@ export function AgentWorkbench() {
     taskId: string;
     action: AgentTaskQuickAction;
   } | null>(null);
+  const [isAutoSyncRefreshing, setIsAutoSyncRefreshing] = useState(false);
+  const [lastAutoSyncAt, setLastAutoSyncAt] = useState<string | null>(null);
   const {
     tasks,
     selectedTaskId,
@@ -124,23 +126,46 @@ export function AgentWorkbench() {
   useEffect(() => {
     if (detail?.task.status !== "running" && detail?.task.status !== "awaiting_approval") return;
 
+    const runSilentRefresh = async () => {
+      setIsAutoSyncRefreshing(true);
+      try {
+        const nextDetail = await refreshTask(detail.task.id, { silent: true });
+        if (nextDetail) {
+          setLastAutoSyncAt(new Date().toISOString());
+        }
+      } finally {
+        setIsAutoSyncRefreshing(false);
+      }
+    };
+
     const intervalId = window.setInterval(() => {
-      void refreshTask(detail.task.id, { silent: true });
+      void runSilentRefresh();
     }, 4000);
 
     const handleFocusRefresh = () => {
-      void refreshTask(detail.task.id, { silent: true });
+      void runSilentRefresh();
     };
 
     window.addEventListener("focus", handleFocusRefresh);
     document.addEventListener("visibilitychange", handleFocusRefresh);
 
+    setLastAutoSyncAt((current) => current ?? new Date().toISOString());
+
     return () => {
       window.clearInterval(intervalId);
       window.removeEventListener("focus", handleFocusRefresh);
       document.removeEventListener("visibilitychange", handleFocusRefresh);
+      setIsAutoSyncRefreshing(false);
     };
   }, [detail?.task.id, detail?.task.status, refreshTask]);
+
+  useEffect(() => {
+    if (detail?.task.status === "running" || detail?.task.status === "awaiting_approval") {
+      return;
+    }
+    setIsAutoSyncRefreshing(false);
+    setLastAutoSyncAt(null);
+  }, [detail?.task.status]);
 
   useEffect(() => {
     if (!detail) {
@@ -194,6 +219,8 @@ export function AgentWorkbench() {
     selectedRun.phase === "execution"
       ? streamError
       : null;
+  const isAutoSyncActive =
+    detail?.task.status === "running" || detail?.task.status === "awaiting_approval";
 
   const handleTaskQuickAction = async (taskId: string, action: AgentTaskQuickAction) => {
     if (activeQuickAction) {
@@ -283,6 +310,9 @@ export function AgentWorkbench() {
                     isPlanning={isPlanning}
                     isExecuting={isExecuting}
                     isRefreshingDetail={isRefreshingDetail}
+                    isAutoSyncActive={isAutoSyncActive}
+                    isAutoSyncRefreshing={isAutoSyncRefreshing}
+                    lastAutoSyncAt={lastAutoSyncAt}
                     onPlan={() => void requestPlan()}
                     onReplan={() => void replanTask()}
                     onRetry={() => void retryTask()}

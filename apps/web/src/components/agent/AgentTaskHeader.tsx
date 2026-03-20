@@ -1,6 +1,6 @@
 "use client";
 
-import { Play, RefreshCw, RotateCcw, ShieldCheck, SkipForward, Square, Wand2 } from "lucide-react";
+import { Loader2, Play, RefreshCw, RotateCcw, ShieldCheck, SkipForward, Square, Wand2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { ApiAgentTask } from "@/lib/api";
@@ -24,6 +24,9 @@ export function AgentTaskHeader({
   isPlanning,
   isExecuting,
   isRefreshingDetail,
+  isAutoSyncActive,
+  isAutoSyncRefreshing,
+  lastAutoSyncAt,
   onPlan,
   onReplan,
   onRetry,
@@ -40,6 +43,9 @@ export function AgentTaskHeader({
   isPlanning: boolean;
   isExecuting: boolean;
   isRefreshingDetail: boolean;
+  isAutoSyncActive: boolean;
+  isAutoSyncRefreshing: boolean;
+  lastAutoSyncAt: string | null;
   onPlan: () => void;
   onReplan: () => void;
   onRetry: () => void;
@@ -60,7 +66,23 @@ export function AgentTaskHeader({
           <div className="mt-2 flex flex-wrap gap-4 text-xs text-muted-foreground">
             <span>创建于 {new Date(task.createdAt).toLocaleString()}</span>
             <span>更新于 {new Date(task.updatedAt).toLocaleString()}</span>
-            {task.status === "running" ? <span>运行中自动刷新日志</span> : null}
+            {isAutoSyncActive ? (
+              <span className="inline-flex items-center gap-1.5">
+                {isAutoSyncRefreshing ? (
+                  <>
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    自动同步中
+                  </>
+                ) : (
+                  <>
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500/80" />
+                    {lastAutoSyncAt
+                      ? `已自动同步 ${new Date(lastAutoSyncAt).toLocaleTimeString()}`
+                      : "自动同步已开启"}
+                  </>
+                )}
+              </span>
+            ) : null}
           </div>
         </div>
 
