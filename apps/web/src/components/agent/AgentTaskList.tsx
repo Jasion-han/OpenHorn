@@ -198,11 +198,16 @@ function getTaskMetaLine(task: ApiAgentTask) {
 
 function getTaskLandingHint(task: ApiAgentTask) {
   const insight = task.insight;
-  if (!insight?.latestRunPhase || insight.runCount <= 1) {
+  if (!insight || insight.runCount <= 0) {
     return null;
   }
 
-  return `打开默认：最近${RUN_PHASE_LABELS[insight.latestRunPhase]}`;
+  const segments = [`共 ${insight.runCount} 轮`];
+  if (insight.latestRunPhase && insight.runCount > 1) {
+    segments.push(`打开默认：最近${RUN_PHASE_LABELS[insight.latestRunPhase]}`);
+  }
+
+  return segments.join(" · ");
 }
 
 function getTaskPreview(task: ApiAgentTask) {
