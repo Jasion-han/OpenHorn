@@ -52,6 +52,17 @@ function getRunLabel(run: ApiAgentTaskRun | null) {
   return `${run.phase === "planning" ? "规划" : "执行"} #${run.id.slice(0, 6)}`;
 }
 
+function scrollToWorkbenchSection(sectionId: string) {
+  window.requestAnimationFrame(() => {
+    window.setTimeout(() => {
+      document.getElementById(sectionId)?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+    }, 80);
+  });
+}
+
 function getRunSummaries(detail: ApiAgentTaskDetail): AgentRunSummary[] {
   return detail.runs.map((run) => {
     const runEvents = detail.events.filter((event) => event.runId === run.id);
@@ -235,14 +246,7 @@ export function AgentWorkbench() {
           return;
         case "review_approval":
           await selectTask(taskId);
-          window.requestAnimationFrame(() => {
-            window.setTimeout(() => {
-              document.getElementById("agent-approval-block")?.scrollIntoView({
-                behavior: "smooth",
-                block: "center",
-              });
-            }, 80);
-          });
+          scrollToWorkbenchSection("agent-approval-block");
           return;
         case "retry":
           await retryTask(taskId);
@@ -261,6 +265,29 @@ export function AgentWorkbench() {
         current?.taskId === taskId && current.action === action ? null : current,
       );
     }
+  };
+
+  const handleApprovalDecision = async (
+    approvalId: string,
+    status: "approved" | "rejected",
+  ) => {
+    const approvalType = selectedApproval?.type ?? null;
+    const nextDetail = await respondApproval(approvalId, status, { source: "web" });
+    if (!nextDetail) return;
+
+    if (approvalType === "tool_approval") {
+      const executionRun = nextDetail.runs.find((run) => run.phase === "execution") ?? nextDetail.runs[0] ?? null;
+      setSelectedRunId(executionRun?.id ?? null);
+      scrollToWorkbenchSection("agent-execution-panel");
+      return;
+    }
+
+    if (status === "approved") {
+      scrollToWorkbenchSection("agent-task-header");
+      return;
+    }
+
+    scrollToWorkbenchSection("agent-plan-panel");
   };
 
   return (
@@ -353,8 +380,8 @@ export function AgentWorkbench() {
                   <AgentPlanPanel
                     planSteps={selectedPlanSteps}
                     approval={selectedApproval}
-                    onApprove={(approvalId) => void respondApproval(approvalId, "approved", { source: "web" })}
-                    onReject={(approvalId) => void respondApproval(approvalId, "rejected", { source: "web" })}
+                    onApprove={(approvalId) => void handleApprovalDecision(approvalId, "approved")}
+                    onReject={(approvalId) => void handleApprovalDecision(approvalId, "rejected")}
                   />
                   <AgentExecutionPanel
                     events={selectedEvents}

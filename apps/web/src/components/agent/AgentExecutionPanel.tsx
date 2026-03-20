@@ -26,7 +26,7 @@ export function AgentExecutionPanel({
   const visibleEvents = events.filter((event) => event.type === "execution_event" || event.type === "error");
 
   return (
-    <section className="rounded-3xl border border-border/70 bg-background/80 p-5">
+    <section id="agent-execution-panel" className="rounded-3xl border border-border/70 bg-background/80 p-5">
       <div className="mb-4">
         <div className="text-sm font-medium">执行过程</div>
         <p className="mt-1 text-xs text-muted-foreground">

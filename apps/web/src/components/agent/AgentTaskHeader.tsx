@@ -55,7 +55,7 @@ export function AgentTaskHeader({
   onRefresh: () => void;
 }) {
   return (
-    <div className="rounded-3xl border border-border/70 bg-background/80 p-5">
+    <div id="agent-task-header" className="rounded-3xl border border-border/70 bg-background/80 p-5">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">

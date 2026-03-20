@@ -23,7 +23,7 @@ export function AgentPlanPanel({
   onReject: (approvalId: string) => void;
 }) {
   return (
-    <section className="rounded-3xl border border-border/70 bg-background/80 p-5">
+    <section id="agent-plan-panel" className="rounded-3xl border border-border/70 bg-background/80 p-5">
       <div className="mb-4 flex items-center justify-between gap-3">
         <div>
           <div className="text-sm font-medium">执行计划</div>

@@ -309,7 +309,7 @@ interface AgentTaskState {
     approvalId: string,
     status: "approved" | "rejected",
     response?: unknown,
-  ) => Promise<void>;
+  ) => Promise<ApiAgentTaskDetail | null>;
   executeTask: (taskId?: string | null) => Promise<void>;
   retryTask: (taskId?: string | null) => Promise<void>;
   continueTask: (taskId?: string | null) => Promise<void>;
@@ -478,8 +478,10 @@ export const useAgentTaskStore = create<AgentTaskState>((set, get) => {
         isExecuting: detail.task.status === "running",
       }));
       notifySuccess(status === "approved" ? "已批准" : "已拒绝", "审批状态已更新。");
+      return detail;
     } catch (error) {
       notifyError("审批失败", error instanceof Error ? error.message : "无法更新审批状态");
+      return null;
     }
   },
 
