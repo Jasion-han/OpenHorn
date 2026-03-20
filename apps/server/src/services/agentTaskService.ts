@@ -145,6 +145,7 @@ export interface AgentTaskInsightRecord {
   summary: string | null;
   previewKind: AgentTaskInsightPreviewKind | null;
   previewText: string | null;
+  runCount: number;
   latestRunStatus: AgentRunStatus | null;
   latestRunPhase: AgentRunPhase | null;
   latestApprovalType: AgentApprovalType | null;
@@ -426,6 +427,7 @@ function buildTaskInsight(params: {
     summary,
     previewKind,
     previewText,
+    runCount: params.runs.length,
     latestRunStatus: latestRun?.status ?? null,
     latestRunPhase: latestRun?.phase ?? null,
     latestApprovalType: latestApproval?.type ?? null,

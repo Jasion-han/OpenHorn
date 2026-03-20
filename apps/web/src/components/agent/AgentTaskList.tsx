@@ -196,6 +196,15 @@ function getTaskMetaLine(task: ApiAgentTask) {
   return segments.length > 0 ? segments.join(" · ") : null;
 }
 
+function getTaskLandingHint(task: ApiAgentTask) {
+  const insight = task.insight;
+  if (!insight?.latestRunPhase || insight.runCount <= 1) {
+    return null;
+  }
+
+  return `打开默认：最近${RUN_PHASE_LABELS[insight.latestRunPhase]}`;
+}
+
 function getTaskPreview(task: ApiAgentTask) {
   const previewText = task.insight?.previewText ?? task.insight?.summary ?? null;
   if (!previewText) return null;
@@ -283,7 +292,8 @@ export function AgentTaskList({
       const insightLabel = getInsightLabel(task);
       const metaLine = getTaskMetaLine(task);
       const preview = getTaskPreview(task);
-      return [task.title, task.goal, insightLabel, metaLine, preview?.text]
+      const landingHint = getTaskLandingHint(task);
+      return [task.title, task.goal, insightLabel, metaLine, landingHint, preview?.text]
         .filter((value): value is string => Boolean(value))
         .some((value) => value.toLowerCase().includes(normalizedQuery));
     });
@@ -440,6 +450,7 @@ export function AgentTaskList({
               const quickActions = getTaskQuickActions(task);
               const insightLabel = getInsightLabel(task);
               const metaLine = getTaskMetaLine(task);
+              const landingHint = getTaskLandingHint(task);
               const preview = getTaskPreview(task);
               const isTaskBusy = activeQuickAction?.taskId === task.id;
               const accentTone = getTaskAccentTone(task);
@@ -499,6 +510,10 @@ export function AgentTaskList({
                     <p className="mt-2 line-clamp-1 text-[11px] text-muted-foreground/90">
                       {metaLine}
                     </p>
+                  ) : null}
+
+                  {landingHint ? (
+                    <p className="mt-1 text-[11px] text-muted-foreground/75">{landingHint}</p>
                   ) : null}
 
                   {preview ? (

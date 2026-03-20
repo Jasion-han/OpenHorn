@@ -168,6 +168,7 @@ export interface ApiAgentTaskInsight {
   summary: string | null;
   previewKind: ApiAgentTaskInsightPreviewKind | null;
   previewText: string | null;
+  runCount: number;
   latestRunStatus: ApiAgentRunStatus | null;
   latestRunPhase: ApiAgentRunPhase | null;
   latestApprovalType: ApiAgentApprovalType | null;
