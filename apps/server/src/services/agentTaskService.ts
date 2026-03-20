@@ -63,6 +63,7 @@ export interface AgentTaskRecord {
   goal: string;
   attachments: AgentTaskAttachment[];
   status: AgentTaskStatus;
+  insight: AgentTaskInsightRecord | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -130,6 +131,22 @@ export interface AgentTaskEventRecord {
   toolInput: unknown;
   metadata: unknown;
   createdAt: string;
+}
+
+export type AgentTaskInsightHighlight =
+  | "tool_approval"
+  | "plan_approval"
+  | "execution_failed"
+  | "final_result";
+
+export interface AgentTaskInsightRecord {
+  highlight: AgentTaskInsightHighlight | null;
+  summary: string | null;
+  latestRunStatus: AgentRunStatus | null;
+  latestRunPhase: AgentRunPhase | null;
+  latestApprovalType: AgentApprovalType | null;
+  latestApprovalStatus: AgentApprovalStatus | null;
+  hasFinalResult: boolean;
 }
 
 export interface AgentTaskDetail {
@@ -245,6 +262,7 @@ function mapTask(row: typeof agentTasks.$inferSelect): AgentTaskRecord {
     goal: row.goal,
     attachments: parseJson<AgentTaskAttachment[]>(row.attachments) ?? [],
     status: row.status as AgentTaskStatus,
+    insight: null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -322,6 +340,90 @@ function mapTaskEvent(row: typeof agentTaskEvents.$inferSelect): AgentTaskEventR
     toolInput: parseJson(row.toolInput),
     metadata: parseJson(row.metadata),
     createdAt: row.createdAt.toISOString(),
+  };
+}
+
+function clipInsightText(value: string | null | undefined, max = 160) {
+  const normalized = value?.trim();
+  if (!normalized) return null;
+  return normalized.length > max ? `${normalized.slice(0, Math.max(0, max - 1))}…` : normalized;
+}
+
+function buildTaskInsight(params: {
+  taskStatus: AgentTaskStatus;
+  runs: AgentRunRecord[];
+  approvals: AgentApprovalRecord[];
+  artifacts: AgentArtifactRecord[];
+}): AgentTaskInsightRecord | null {
+  const latestRun = params.runs[0] ?? null;
+  const latestExecutionRun = params.runs.find((run) => run.phase === "execution") ?? null;
+  const latestApproval = params.approvals[0] ?? null;
+  const latestFinalResult =
+    (latestExecutionRun
+      ? params.artifacts.find(
+          (artifact) =>
+            artifact.runId === latestExecutionRun.id && artifact.type === "final_result",
+        )
+      : null) ??
+    params.artifacts.find((artifact) => artifact.type === "final_result") ??
+    null;
+
+  const highlight: AgentTaskInsightHighlight | null =
+    params.taskStatus === "awaiting_approval" &&
+    latestApproval?.status === "pending" &&
+    latestApproval.type === "tool_approval"
+      ? "tool_approval"
+      : params.taskStatus === "awaiting_approval"
+        ? "plan_approval"
+        : params.taskStatus === "failed"
+          ? "execution_failed"
+          : latestFinalResult
+            ? "final_result"
+            : null;
+
+  const summary = clipInsightText(
+    latestExecutionRun?.error ??
+      latestExecutionRun?.summary ??
+      latestFinalResult?.content ??
+      latestRun?.summary ??
+      null,
+  );
+
+  if (
+    !highlight &&
+    !summary &&
+    !latestRun &&
+    !latestApproval &&
+    !latestFinalResult
+  ) {
+    return null;
+  }
+
+  return {
+    highlight,
+    summary,
+    latestRunStatus: latestRun?.status ?? null,
+    latestRunPhase: latestRun?.phase ?? null,
+    latestApprovalType: latestApproval?.type ?? null,
+    latestApprovalStatus: latestApproval?.status ?? null,
+    hasFinalResult: Boolean(latestFinalResult),
+  };
+}
+
+function attachTaskInsight(
+  task: AgentTaskRecord,
+  runs: AgentRunRecord[],
+  approvals: AgentApprovalRecord[],
+  artifacts: AgentArtifactRecord[],
+): AgentTaskRecord {
+  return {
+    ...task,
+    insight: buildTaskInsight({
+      taskStatus: task.status,
+      runs,
+      approvals,
+      artifacts,
+    }),
   };
 }
 
@@ -411,7 +513,54 @@ export async function listAgentTasks(userId: string) {
     .from(agentTasks)
     .where(eq(agentTasks.userId, userId))
     .orderBy(desc(agentTasks.updatedAt));
-  return rows.map(mapTask);
+  if (rows.length === 0) {
+    return [] as AgentTaskRecord[];
+  }
+
+  const taskIds = rows.map((row) => row.id);
+  const [runRows, approvalRows, artifactRows] = await Promise.all([
+    db.select().from(agentRuns).where(inArray(agentRuns.taskId, taskIds)).orderBy(desc(agentRuns.createdAt)),
+    db
+      .select()
+      .from(agentApprovalRequests)
+      .where(inArray(agentApprovalRequests.taskId, taskIds))
+      .orderBy(desc(agentApprovalRequests.requestedAt)),
+    db
+      .select()
+      .from(agentArtifacts)
+      .where(inArray(agentArtifacts.taskId, taskIds))
+      .orderBy(desc(agentArtifacts.createdAt)),
+  ]);
+
+  const runsByTaskId = new Map<string, AgentRunRecord[]>();
+  for (const row of runRows) {
+    const list = runsByTaskId.get(row.taskId) ?? [];
+    list.push(mapRun(row));
+    runsByTaskId.set(row.taskId, list);
+  }
+
+  const approvalsByTaskId = new Map<string, AgentApprovalRecord[]>();
+  for (const row of approvalRows) {
+    const list = approvalsByTaskId.get(row.taskId) ?? [];
+    list.push(mapApproval(row));
+    approvalsByTaskId.set(row.taskId, list);
+  }
+
+  const artifactsByTaskId = new Map<string, AgentArtifactRecord[]>();
+  for (const row of artifactRows) {
+    const list = artifactsByTaskId.get(row.taskId) ?? [];
+    list.push(mapArtifact(row));
+    artifactsByTaskId.set(row.taskId, list);
+  }
+
+  return rows.map((row) =>
+    attachTaskInsight(
+      mapTask(row),
+      runsByTaskId.get(row.id) ?? [],
+      approvalsByTaskId.get(row.id) ?? [],
+      artifactsByTaskId.get(row.id) ?? [],
+    ),
+  );
 }
 
 export async function getAgentTaskById(userId: string, taskId: string) {
@@ -838,12 +987,16 @@ export async function getAgentTaskDetail(userId: string, taskId: string): Promis
       .orderBy(asc(agentTaskEvents.createdAt)),
   ]);
 
+  const mappedRuns = runs.map(mapRun);
+  const mappedApprovals = approvals.map(mapApproval);
+  const mappedArtifacts = artifacts.map(mapArtifact);
+
   return {
-    task: mapTask(task),
-    runs: runs.map(mapRun),
+    task: attachTaskInsight(mapTask(task), mappedRuns, mappedApprovals, mappedArtifacts),
+    runs: mappedRuns,
     planSteps: planSteps.map(mapPlanStep),
-    approvals: approvals.map(mapApproval),
-    artifacts: artifacts.map(mapArtifact),
+    approvals: mappedApprovals,
+    artifacts: mappedArtifacts,
     events: events.map(mapTaskEvent),
   };
 }

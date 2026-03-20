@@ -134,6 +134,11 @@ export type ApiAgentRunStatus =
   | "cancelled";
 export type ApiAgentApprovalStatus = "pending" | "approved" | "rejected";
 export type ApiAgentApprovalType = "plan_approval" | "tool_approval";
+export type ApiAgentTaskInsightHighlight =
+  | "tool_approval"
+  | "plan_approval"
+  | "execution_failed"
+  | "final_result";
 export type ApiAgentArtifactType =
   | "final_result"
   | "execution_summary"
@@ -157,6 +162,16 @@ export interface ApiAgentTaskAttachment {
   fileSize?: number;
 }
 
+export interface ApiAgentTaskInsight {
+  highlight: ApiAgentTaskInsightHighlight | null;
+  summary: string | null;
+  latestRunStatus: ApiAgentRunStatus | null;
+  latestRunPhase: ApiAgentRunPhase | null;
+  latestApprovalType: ApiAgentApprovalType | null;
+  latestApprovalStatus: ApiAgentApprovalStatus | null;
+  hasFinalResult: boolean;
+}
+
 export interface ApiAgentTask {
   id: string;
   userId: string;
@@ -167,6 +182,7 @@ export interface ApiAgentTask {
   goal: string;
   attachments: ApiAgentTaskAttachment[];
   status: ApiAgentTaskStatus;
+  insight: ApiAgentTaskInsight | null;
   createdAt: string;
   updatedAt: string;
 }

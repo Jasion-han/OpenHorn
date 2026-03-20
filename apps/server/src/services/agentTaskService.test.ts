@@ -119,6 +119,9 @@ test("agentTaskService persists tasks, plans, approvals, and task detail", async
     const detail = await getAgentTaskDetail(userId, task.id);
 
     expect(detail.task.status).toBe("awaiting_approval");
+    expect(detail.task.insight?.highlight).toBe("plan_approval");
+    expect(detail.task.insight?.latestApprovalType).toBe("plan_approval");
+    expect(detail.task.insight?.latestApprovalStatus).toBe("approved");
     expect(detail.runs).toHaveLength(1);
     expect(detail.planSteps).toHaveLength(2);
     expect(detail.planSteps[0]?.status).toBe("completed");
@@ -128,6 +131,8 @@ test("agentTaskService persists tasks, plans, approvals, and task detail", async
 
     const list = await listAgentTasks(userId);
     expect(list.map((item) => item.id)).toEqual([task.id]);
+    expect(list[0]?.insight?.highlight).toBe("plan_approval");
+    expect(list[0]?.insight?.summary).toBeNull();
   } finally {
     await cleanupTestUser(userId);
   }
@@ -178,6 +183,9 @@ test("agentTaskService persists execution artifacts separately from raw events",
     const detail = await getAgentTaskDetail(userId, task.id);
 
     expect(detail.task.status).toBe("completed");
+    expect(detail.task.insight?.highlight).toBe("final_result");
+    expect(detail.task.insight?.summary).toBe("Task completed successfully.");
+    expect(detail.task.insight?.hasFinalResult).toBe(true);
     expect(detail.events).toHaveLength(1);
     expect(detail.artifacts).toHaveLength(2);
     expect(detail.artifacts.map((item) => item.type)).toEqual([
@@ -185,6 +193,10 @@ test("agentTaskService persists execution artifacts separately from raw events",
       "execution_summary",
     ]);
     expect(detail.events[0]?.content).toBe("Running the approved plan.");
+
+    const list = await listAgentTasks(userId);
+    expect(list[0]?.insight?.highlight).toBe("final_result");
+    expect(list[0]?.insight?.summary).toBe("Task completed successfully.");
   } finally {
     await cleanupTestUser(userId);
   }

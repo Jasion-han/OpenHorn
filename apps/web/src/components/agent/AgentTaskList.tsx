@@ -60,12 +60,6 @@ const TASK_SECTIONS = [
   statuses: ApiAgentTask["status"][];
 }>;
 
-export type AgentTaskListInsight = {
-  taskId: string;
-  highlight: string | null;
-  summary: string | null;
-};
-
 type TaskListFilter = "all" | ApiAgentTask["status"];
 type TaskSectionId = (typeof TASK_SECTIONS)[number]["id"];
 export type AgentTaskQuickAction = "plan" | "retry" | "continue" | "cancel";
@@ -100,16 +94,29 @@ function getTaskQuickActions(status: ApiAgentTask["status"]): TaskQuickActionSpe
   }
 }
 
+function getInsightLabel(task: ApiAgentTask) {
+  switch (task.insight?.highlight) {
+    case "tool_approval":
+      return "待工具审批";
+    case "plan_approval":
+      return "待计划审批";
+    case "execution_failed":
+      return "最近执行失败";
+    case "final_result":
+      return "已有最终结果";
+    default:
+      return null;
+  }
+}
+
 export function AgentTaskList({
   tasks,
-  insights,
   selectedTaskId,
   isMutating,
   onSelect,
   onQuickAction,
 }: {
   tasks: ApiAgentTask[];
-  insights: AgentTaskListInsight[];
   selectedTaskId: string | null;
   isMutating: boolean;
   onSelect: (taskId: string) => void;
@@ -140,11 +147,6 @@ export function AgentTaskList({
     );
   }, [tasks]);
 
-  const insightByTaskId = useMemo(
-    () => new Map(insights.map((item) => [item.taskId, item])),
-    [insights],
-  );
-
   const filteredTasks = useMemo(() => {
     return tasks.filter((task) => {
       if (statusFilter !== "all" && task.status !== statusFilter) {
@@ -155,12 +157,12 @@ export function AgentTaskList({
         return true;
       }
 
-      const insight = insightByTaskId.get(task.id) ?? null;
-      return [task.title, task.goal, insight?.highlight, insight?.summary]
+      const insightLabel = getInsightLabel(task);
+      return [task.title, task.goal, insightLabel, task.insight?.summary]
         .filter((value): value is string => Boolean(value))
         .some((value) => value.toLowerCase().includes(normalizedQuery));
     });
-  }, [insightByTaskId, normalizedQuery, statusFilter, tasks]);
+  }, [normalizedQuery, statusFilter, tasks]);
 
   const taskSections = useMemo(() => {
     return TASK_SECTIONS.map((section) => ({
@@ -310,8 +312,8 @@ export function AgentTaskList({
             ) : null}
 
             {(showSectionHeaders && !expandedSections.has(section.id) ? [] : section.tasks).map((task) => {
-              const insight = insightByTaskId.get(task.id) ?? null;
               const quickActions = getTaskQuickActions(task.status);
+              const insightLabel = getInsightLabel(task);
               return (
                 <div
                   key={task.id}
@@ -341,17 +343,17 @@ export function AgentTaskList({
                     </Badge>
                   </div>
 
-                  {insight?.highlight ? (
+                  {insightLabel ? (
                     <div className="mt-3">
                       <span className="inline-flex rounded-full border border-border/60 bg-muted/20 px-2 py-1 text-[11px] text-foreground/80">
-                        {insight.highlight}
+                        {insightLabel}
                       </span>
                     </div>
                   ) : null}
 
-                  {insight?.summary ? (
+                  {task.insight?.summary ? (
                     <p className="mt-2 line-clamp-2 text-[11px] leading-5 text-muted-foreground">
-                      {insight.summary}
+                      {task.insight.summary}
                     </p>
                   ) : null}
 

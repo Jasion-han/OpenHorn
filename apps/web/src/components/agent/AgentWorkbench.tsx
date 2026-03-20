@@ -16,7 +16,6 @@ import { AgentRunSelector, type AgentRunSummary } from "./AgentRunSelector";
 import { AgentTaskHeader } from "./AgentTaskHeader";
 import {
   AgentTaskList,
-  type AgentTaskListInsight,
   type AgentTaskQuickAction,
 } from "./AgentTaskList";
 
@@ -81,44 +80,6 @@ function getRunSummaries(detail: ApiAgentTaskDetail): AgentRunSummary[] {
       summary: summarySource ? summarySource.slice(0, 160) : null,
     };
   });
-}
-
-function getTaskListInsights(detail: ApiAgentTaskDetail): AgentTaskListInsight[] {
-  const latestRun = detail.runs[0] ?? null;
-  const latestExecutionRun = detail.runs.find((run) => run.phase === "execution") ?? null;
-  const latestApproval = detail.approvals[0] ?? null;
-  const latestFinalResult =
-    latestExecutionRun
-      ? detail.artifacts.find(
-          (artifact) => artifact.runId === latestExecutionRun.id && artifact.type === "final_result",
-        ) ?? null
-      : null;
-
-  let highlight: string | null = null;
-  if (detail.task.status === "awaiting_approval" && latestApproval?.type === "tool_approval") {
-    highlight = "待工具审批";
-  } else if (detail.task.status === "awaiting_approval") {
-    highlight = "待计划审批";
-  } else if (detail.task.status === "failed") {
-    highlight = "最近执行失败";
-  } else if (latestFinalResult) {
-    highlight = "已有最终结果";
-  }
-
-  const summary =
-    latestExecutionRun?.error?.trim() ||
-    latestExecutionRun?.summary?.trim() ||
-    latestFinalResult?.content.trim() ||
-    latestRun?.summary?.trim() ||
-    null;
-
-  return [
-    {
-      taskId: detail.task.id,
-      highlight,
-      summary: summary ? summary.slice(0, 120) : null,
-    },
-  ];
 }
 
 export function AgentWorkbench() {
@@ -212,7 +173,6 @@ export function AgentWorkbench() {
   const planningRun = detail ? findPlanningRunForSelection(detail, selectedRun) : null;
   const selectedApproval: ApiAgentApproval | null = detail ? getSelectedApproval(detail, selectedRun) : null;
   const runSummaries = detail ? getRunSummaries(detail) : [];
-  const taskListInsights = detail ? getTaskListInsights(detail) : [];
   const selectedPlanSteps =
     detail && planningRun ? detail.planSteps.filter((step) => step.runId === planningRun.id) : [];
   const selectedEvents =
@@ -287,7 +247,6 @@ export function AgentWorkbench() {
           <div className="min-h-0 flex-1">
             <AgentTaskList
               tasks={tasks}
-              insights={taskListInsights}
               selectedTaskId={selectedTaskId}
               isMutating={isMutatingTask}
               onSelect={(taskId) => void selectTask(taskId)}
