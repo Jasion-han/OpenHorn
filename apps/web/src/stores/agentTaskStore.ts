@@ -45,7 +45,34 @@ function sortTasks(tasks: ApiAgentTask[]) {
   return [...tasks].sort(compareTasks);
 }
 
-function upsertTask(tasks: ApiAgentTask[], task: ApiAgentTask) {
+function shouldReorderTask(previous: ApiAgentTask | null, next: ApiAgentTask) {
+  if (!previous) {
+    return true;
+  }
+  return TASK_STATUS_PRIORITY[previous.status] !== TASK_STATUS_PRIORITY[next.status];
+}
+
+function replaceTaskInPlace(tasks: ApiAgentTask[], task: ApiAgentTask) {
+  const index = tasks.findIndex((item) => item.id === task.id);
+  if (index < 0) {
+    return sortTasks([task, ...tasks]);
+  }
+
+  const nextTasks = [...tasks];
+  nextTasks[index] = task;
+  return nextTasks;
+}
+
+function upsertTask(
+  tasks: ApiAgentTask[],
+  task: ApiAgentTask,
+  options?: { preserveOrder?: boolean },
+) {
+  const previous = tasks.find((item) => item.id === task.id) ?? null;
+  if (options?.preserveOrder && !shouldReorderTask(previous, task)) {
+    return replaceTaskInPlace(tasks, task);
+  }
+
   const rest = tasks.filter((item) => item.id !== task.id);
   return sortTasks([task, ...rest]);
 }
@@ -370,7 +397,9 @@ export const useAgentTaskStore = create<AgentTaskState>((set, get) => {
       const detail = await api.agentTasks.get(nextTaskId);
       set((state) => ({
         detail,
-        tasks: upsertTask(state.tasks, detail.task),
+        tasks: upsertTask(state.tasks, detail.task, {
+          preserveOrder: Boolean(options?.silent),
+        }),
         isExecuting: detail.task.status === "running",
         streamError: detail.task.status === "running" ? state.streamError : null,
       }));
