@@ -138,10 +138,13 @@ export type AgentTaskInsightHighlight =
   | "plan_approval"
   | "execution_failed"
   | "final_result";
+export type AgentTaskInsightPreviewKind = "error" | "result" | "summary";
 
 export interface AgentTaskInsightRecord {
   highlight: AgentTaskInsightHighlight | null;
   summary: string | null;
+  previewKind: AgentTaskInsightPreviewKind | null;
+  previewText: string | null;
   latestRunStatus: AgentRunStatus | null;
   latestRunPhase: AgentRunPhase | null;
   latestApprovalType: AgentApprovalType | null;
@@ -381,17 +384,36 @@ function buildTaskInsight(params: {
             ? "final_result"
             : null;
 
-  const summary = clipInsightText(
-    latestExecutionRun?.error ??
-      latestExecutionRun?.summary ??
-      latestFinalResult?.content ??
-      latestRun?.summary ??
-      null,
-  );
+  const previewSource =
+    params.taskStatus === "failed" && latestExecutionRun?.error?.trim()
+      ? {
+          kind: "error" as const,
+          text: latestExecutionRun.error,
+        }
+      : latestFinalResult?.content?.trim()
+        ? {
+            kind: "result" as const,
+            text: latestFinalResult.content,
+          }
+        : latestExecutionRun?.summary?.trim()
+          ? {
+              kind: "summary" as const,
+              text: latestExecutionRun.summary,
+            }
+          : latestRun?.summary?.trim()
+            ? {
+                kind: "summary" as const,
+                text: latestRun.summary,
+              }
+            : null;
+
+  const previewKind = previewSource?.kind ?? null;
+  const previewText = clipInsightText(previewSource?.text ?? null);
+  const summary = previewText;
 
   if (
     !highlight &&
-    !summary &&
+    !previewText &&
     !latestRun &&
     !latestApproval &&
     !latestFinalResult
@@ -402,6 +424,8 @@ function buildTaskInsight(params: {
   return {
     highlight,
     summary,
+    previewKind,
+    previewText,
     latestRunStatus: latestRun?.status ?? null,
     latestRunPhase: latestRun?.phase ?? null,
     latestApprovalType: latestApproval?.type ?? null,

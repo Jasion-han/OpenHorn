@@ -15,7 +15,13 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
-import type { ApiAgentTask, ApiAgentApprovalStatus, ApiAgentApprovalType, ApiAgentRunPhase, ApiAgentRunStatus } from "@/lib/api";
+import type {
+  ApiAgentTask,
+  ApiAgentApprovalStatus,
+  ApiAgentApprovalType,
+  ApiAgentRunPhase,
+  ApiAgentRunStatus,
+} from "@/lib/api";
 
 const TASK_LIST_SECTION_STORAGE_KEY = "openhorn.agentTaskList.sections";
 
@@ -179,6 +185,21 @@ function getTaskMetaLine(task: ApiAgentTask) {
   return segments.length > 0 ? segments.join(" · ") : null;
 }
 
+function getTaskPreview(task: ApiAgentTask) {
+  const previewText = task.insight?.previewText ?? task.insight?.summary ?? null;
+  if (!previewText) return null;
+
+  return {
+    text: previewText,
+    tone:
+      task.insight?.previewKind === "error"
+        ? "error"
+        : task.insight?.previewKind === "result"
+          ? "result"
+          : "default",
+  } as const;
+}
+
 export function AgentTaskList({
   tasks,
   selectedTaskId,
@@ -229,7 +250,8 @@ export function AgentTaskList({
 
       const insightLabel = getInsightLabel(task);
       const metaLine = getTaskMetaLine(task);
-      return [task.title, task.goal, insightLabel, metaLine, task.insight?.summary]
+      const preview = getTaskPreview(task);
+      return [task.title, task.goal, insightLabel, metaLine, preview?.text]
         .filter((value): value is string => Boolean(value))
         .some((value) => value.toLowerCase().includes(normalizedQuery));
     });
@@ -386,6 +408,7 @@ export function AgentTaskList({
               const quickActions = getTaskQuickActions(task.status);
               const insightLabel = getInsightLabel(task);
               const metaLine = getTaskMetaLine(task);
+              const preview = getTaskPreview(task);
               const isTaskBusy = activeQuickAction?.taskId === task.id;
               return (
                 <div
@@ -431,9 +454,18 @@ export function AgentTaskList({
                     </p>
                   ) : null}
 
-                  {task.insight?.summary ? (
-                    <p className="mt-2 line-clamp-2 text-[11px] leading-5 text-muted-foreground">
-                      {task.insight.summary}
+                  {preview ? (
+                    <p
+                      className={cn(
+                        "mt-2 line-clamp-2 text-[11px] leading-5",
+                        preview.tone === "error"
+                          ? "text-destructive"
+                          : preview.tone === "result"
+                            ? "text-foreground/90"
+                            : "text-muted-foreground",
+                      )}
+                    >
+                      {preview.text}
                     </p>
                   ) : null}
 

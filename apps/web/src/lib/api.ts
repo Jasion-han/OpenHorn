@@ -139,6 +139,7 @@ export type ApiAgentTaskInsightHighlight =
   | "plan_approval"
   | "execution_failed"
   | "final_result";
+export type ApiAgentTaskInsightPreviewKind = "error" | "result" | "summary";
 export type ApiAgentArtifactType =
   | "final_result"
   | "execution_summary"
@@ -165,6 +166,8 @@ export interface ApiAgentTaskAttachment {
 export interface ApiAgentTaskInsight {
   highlight: ApiAgentTaskInsightHighlight | null;
   summary: string | null;
+  previewKind: ApiAgentTaskInsightPreviewKind | null;
+  previewText: string | null;
   latestRunStatus: ApiAgentRunStatus | null;
   latestRunPhase: ApiAgentRunPhase | null;
   latestApprovalType: ApiAgentApprovalType | null;

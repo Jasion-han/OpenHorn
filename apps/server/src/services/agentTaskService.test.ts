@@ -185,6 +185,8 @@ test("agentTaskService persists execution artifacts separately from raw events",
     expect(detail.task.status).toBe("completed");
     expect(detail.task.insight?.highlight).toBe("final_result");
     expect(detail.task.insight?.summary).toBe("Task completed successfully.");
+    expect(detail.task.insight?.previewKind).toBe("result");
+    expect(detail.task.insight?.previewText).toBe("Task completed successfully.");
     expect(detail.task.insight?.hasFinalResult).toBe(true);
     expect(detail.events).toHaveLength(1);
     expect(detail.artifacts).toHaveLength(2);
@@ -197,6 +199,50 @@ test("agentTaskService persists execution artifacts separately from raw events",
     const list = await listAgentTasks(userId);
     expect(list[0]?.insight?.highlight).toBe("final_result");
     expect(list[0]?.insight?.summary).toBe("Task completed successfully.");
+    expect(list[0]?.insight?.previewKind).toBe("result");
+    expect(list[0]?.insight?.previewText).toBe("Task completed successfully.");
+  } finally {
+    await cleanupTestUser(userId);
+  }
+});
+
+test("agentTaskService prefers execution errors over generic summaries for failed tasks", async () => {
+  await bootstrapDatabase();
+  const userId = crypto.randomUUID();
+  await insertTestUser(userId);
+
+  try {
+    const task = await createAgentTask(userId, {
+      title: "Broken task",
+      goal: "Demonstrate failed execution previews.",
+    });
+
+    const run = await createAgentRun(userId, task.id, {
+      phase: "execution",
+      status: "running",
+      startedAt: new Date(),
+    });
+
+    await updateAgentTaskStatus(userId, task.id, "running");
+    await updateAgentRunStatus(userId, run.id, "failed", {
+      error: "Command exited with code 1 while fetching remote metadata.",
+      summary: "Execution stopped unexpectedly.",
+      completedAt: new Date(),
+    });
+    await updateAgentTaskStatus(userId, task.id, "failed");
+
+    const detail = await getAgentTaskDetail(userId, task.id);
+    expect(detail.task.insight?.highlight).toBe("execution_failed");
+    expect(detail.task.insight?.previewKind).toBe("error");
+    expect(detail.task.insight?.previewText).toBe(
+      "Command exited with code 1 while fetching remote metadata.",
+    );
+
+    const list = await listAgentTasks(userId);
+    expect(list[0]?.insight?.previewKind).toBe("error");
+    expect(list[0]?.insight?.previewText).toBe(
+      "Command exited with code 1 while fetching remote metadata.",
+    );
   } finally {
     await cleanupTestUser(userId);
   }
