@@ -14,7 +14,11 @@ import { AgentGoalPanel } from "./AgentGoalPanel";
 import { AgentPlanPanel } from "./AgentPlanPanel";
 import { AgentRunSelector, type AgentRunSummary } from "./AgentRunSelector";
 import { AgentTaskHeader } from "./AgentTaskHeader";
-import { AgentTaskList, type AgentTaskListInsight } from "./AgentTaskList";
+import {
+  AgentTaskList,
+  type AgentTaskListInsight,
+  type AgentTaskQuickAction,
+} from "./AgentTaskList";
 
 function findPlanningRunForSelection(detail: ApiAgentTaskDetail, selectedRun: ApiAgentTaskRun | null) {
   if (!selectedRun) return null;
@@ -226,6 +230,26 @@ export function AgentWorkbench() {
     selectedRun.phase === "execution"
       ? streamError
       : null;
+  const isMutatingTask = isPlanning || isExecuting || isSavingGoal;
+
+  const handleTaskQuickAction = async (taskId: string, action: AgentTaskQuickAction) => {
+    switch (action) {
+      case "plan":
+        await requestPlan(taskId);
+        return;
+      case "retry":
+        await retryTask(taskId);
+        return;
+      case "continue":
+        await continueTask(taskId);
+        return;
+      case "cancel":
+        await cancelTask(taskId);
+        return;
+      default:
+        return;
+    }
+  };
 
   return (
     <div className="h-full min-h-0">
@@ -265,7 +289,9 @@ export function AgentWorkbench() {
               tasks={tasks}
               insights={taskListInsights}
               selectedTaskId={selectedTaskId}
+              isMutating={isMutatingTask}
               onSelect={(taskId) => void selectTask(taskId)}
+              onQuickAction={(taskId, action) => void handleTaskQuickAction(taskId, action)}
             />
           </div>
         </section>

@@ -270,25 +270,52 @@ interface AgentTaskState {
   draftGoal: string;
   loadTasks: () => Promise<void>;
   selectTask: (taskId: string | null) => Promise<void>;
-  refreshTask: (taskId?: string | null, options?: { silent?: boolean }) => Promise<void>;
+  refreshTask: (
+    taskId?: string | null,
+    options?: { silent?: boolean; select?: boolean },
+  ) => Promise<ApiAgentTaskDetail | null>;
   setDraftTitle: (value: string) => void;
   setDraftGoal: (value: string) => void;
   createTask: () => Promise<void>;
-  requestPlan: () => Promise<void>;
+  requestPlan: (taskId?: string | null) => Promise<void>;
   respondApproval: (
     approvalId: string,
     status: "approved" | "rejected",
     response?: unknown,
   ) => Promise<void>;
-  executeTask: () => Promise<void>;
-  retryTask: () => Promise<void>;
-  continueTask: () => Promise<void>;
-  replanTask: () => Promise<void>;
+  executeTask: (taskId?: string | null) => Promise<void>;
+  retryTask: (taskId?: string | null) => Promise<void>;
+  continueTask: (taskId?: string | null) => Promise<void>;
+  replanTask: (taskId?: string | null) => Promise<void>;
   saveTaskGoal: (goal: string) => Promise<boolean>;
-  cancelTask: () => Promise<void>;
+  cancelTask: (taskId?: string | null) => Promise<void>;
 }
 
-export const useAgentTaskStore = create<AgentTaskState>((set, get) => ({
+export const useAgentTaskStore = create<AgentTaskState>((set, get) => {
+  const ensureTaskContext = async (
+    taskId?: string | null,
+    options?: { silent?: boolean; select?: boolean },
+  ) => {
+    const nextTaskId = taskId ?? get().selectedTaskId;
+    if (!nextTaskId) return null;
+
+    const shouldSelect = options?.select ?? true;
+    if (shouldSelect && get().selectedTaskId !== nextTaskId) {
+      set({ selectedTaskId: nextTaskId });
+    }
+
+    const current = get().detail;
+    if (current?.task.id === nextTaskId) {
+      return current;
+    }
+
+    return get().refreshTask(nextTaskId, {
+      silent: options?.silent,
+      select: shouldSelect,
+    });
+  };
+
+  return ({
   tasks: [],
   selectedTaskId: null,
   detail: null,
@@ -332,7 +359,10 @@ export const useAgentTaskStore = create<AgentTaskState>((set, get) => ({
 
   refreshTask: async (taskId, options) => {
     const nextTaskId = taskId ?? get().selectedTaskId;
-    if (!nextTaskId) return;
+    if (!nextTaskId) return null;
+    if (options?.select && get().selectedTaskId !== nextTaskId) {
+      set({ selectedTaskId: nextTaskId });
+    }
     if (!options?.silent) {
       set({ isRefreshingDetail: true });
     }
@@ -344,10 +374,12 @@ export const useAgentTaskStore = create<AgentTaskState>((set, get) => ({
         isExecuting: detail.task.status === "running",
         streamError: detail.task.status === "running" ? state.streamError : null,
       }));
+      return detail;
     } catch (error) {
       if (!options?.silent) {
         notifyError("加载失败", error instanceof Error ? error.message : "无法加载任务详情");
       }
+      return null;
     } finally {
       if (!options?.silent) {
         set({ isRefreshingDetail: false });
@@ -386,15 +418,15 @@ export const useAgentTaskStore = create<AgentTaskState>((set, get) => ({
     }
   },
 
-  requestPlan: async () => {
-    const taskId = get().selectedTaskId;
-    if (!taskId) return;
+  requestPlan: async (taskId) => {
+    const detail = await ensureTaskContext(taskId, { silent: true, select: true });
+    if (!detail) return;
     set({ isPlanning: true });
     try {
-      const detail = await api.agentTasks.plan(taskId);
+      const nextDetail = await api.agentTasks.plan(detail.task.id);
       set((state) => ({
-        detail,
-        tasks: upsertTask(state.tasks, detail.task),
+        detail: nextDetail,
+        tasks: upsertTask(state.tasks, nextDetail.task),
         isExecuting: false,
       }));
       notifySuccess("规划完成", "任务计划已生成。");
@@ -422,8 +454,8 @@ export const useAgentTaskStore = create<AgentTaskState>((set, get) => ({
     }
   },
 
-  executeTask: async () => {
-    const detail = get().detail;
+  executeTask: async (taskId) => {
+    const detail = await ensureTaskContext(taskId, { silent: true, select: true });
     if (!detail) return;
     await runTaskExecutionStream({
       taskId: detail.task.id,
@@ -434,8 +466,8 @@ export const useAgentTaskStore = create<AgentTaskState>((set, get) => ({
     });
   },
 
-  retryTask: async () => {
-    const detail = get().detail;
+  retryTask: async (taskId) => {
+    const detail = await ensureTaskContext(taskId, { silent: true, select: true });
     if (!detail) return;
     await runTaskExecutionStream({
       taskId: detail.task.id,
@@ -446,8 +478,8 @@ export const useAgentTaskStore = create<AgentTaskState>((set, get) => ({
     });
   },
 
-  continueTask: async () => {
-    const detail = get().detail;
+  continueTask: async (taskId) => {
+    const detail = await ensureTaskContext(taskId, { silent: true, select: true });
     if (!detail) return;
     await runTaskExecutionStream({
       taskId: detail.task.id,
@@ -458,15 +490,15 @@ export const useAgentTaskStore = create<AgentTaskState>((set, get) => ({
     });
   },
 
-  replanTask: async () => {
-    const taskId = get().selectedTaskId;
-    if (!taskId) return;
+  replanTask: async (taskId) => {
+    const detail = await ensureTaskContext(taskId, { silent: true, select: true });
+    if (!detail) return;
     set({ isPlanning: true, isExecuting: false, streamError: null });
     try {
-      const detail = await api.agentTasks.plan(taskId);
+      const nextDetail = await api.agentTasks.plan(detail.task.id);
       set((state) => ({
-        detail,
-        tasks: upsertTask(state.tasks, detail.task),
+        detail: nextDetail,
+        tasks: upsertTask(state.tasks, nextDetail.task),
       }));
       notifySuccess("已重新规划", "任务计划已根据当前目标重新生成。");
     } catch (error) {
@@ -502,14 +534,14 @@ export const useAgentTaskStore = create<AgentTaskState>((set, get) => ({
     }
   },
 
-  cancelTask: async () => {
-    const taskId = get().selectedTaskId;
-    if (!taskId) return;
+  cancelTask: async (taskId) => {
+    const detail = await ensureTaskContext(taskId, { silent: true, select: true });
+    if (!detail) return;
     try {
-      const detail = await api.agentTasks.cancel(taskId);
+      const nextDetail = await api.agentTasks.cancel(detail.task.id);
       set((state) => ({
-        detail,
-        tasks: upsertTask(state.tasks, detail.task),
+        detail: nextDetail,
+        tasks: upsertTask(state.tasks, nextDetail.task),
         isExecuting: false,
         streamError: null,
       }));
@@ -518,4 +550,4 @@ export const useAgentTaskStore = create<AgentTaskState>((set, get) => ({
       notifyError("取消失败", error instanceof Error ? error.message : "无法取消任务");
     }
   },
-}));
+})});

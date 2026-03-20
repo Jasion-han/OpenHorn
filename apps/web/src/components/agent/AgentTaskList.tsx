@@ -1,7 +1,15 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ChevronDown, ChevronRight, Search } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronRight,
+  RotateCcw,
+  Search,
+  SkipForward,
+  Square,
+  Wand2,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -60,17 +68,52 @@ export type AgentTaskListInsight = {
 
 type TaskListFilter = "all" | ApiAgentTask["status"];
 type TaskSectionId = (typeof TASK_SECTIONS)[number]["id"];
+export type AgentTaskQuickAction = "plan" | "retry" | "continue" | "cancel";
+
+type TaskQuickActionSpec = {
+  key: AgentTaskQuickAction;
+  label: string;
+  icon: typeof Wand2;
+  tone?: "default" | "danger";
+};
+
+function getTaskQuickActions(status: ApiAgentTask["status"]): TaskQuickActionSpec[] {
+  switch (status) {
+    case "draft":
+      return [{ key: "plan", label: "生成计划", icon: Wand2 }];
+    case "failed":
+      return [
+        { key: "continue", label: "继续", icon: SkipForward },
+        { key: "retry", label: "重试", icon: RotateCcw },
+      ];
+    case "completed":
+      return [
+        { key: "continue", label: "继续", icon: SkipForward },
+        { key: "retry", label: "重试", icon: RotateCcw },
+      ];
+    case "cancelled":
+      return [{ key: "retry", label: "重试", icon: RotateCcw }];
+    case "running":
+      return [{ key: "cancel", label: "取消", icon: Square, tone: "danger" }];
+    default:
+      return [];
+  }
+}
 
 export function AgentTaskList({
   tasks,
   insights,
   selectedTaskId,
+  isMutating,
   onSelect,
+  onQuickAction,
 }: {
   tasks: ApiAgentTask[];
   insights: AgentTaskListInsight[];
   selectedTaskId: string | null;
+  isMutating: boolean;
   onSelect: (taskId: string) => void;
+  onQuickAction: (taskId: string, action: AgentTaskQuickAction) => Promise<void> | void;
 }) {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<TaskListFilter>("all");
@@ -268,13 +311,21 @@ export function AgentTaskList({
 
             {(showSectionHeaders && !expandedSections.has(section.id) ? [] : section.tasks).map((task) => {
               const insight = insightByTaskId.get(task.id) ?? null;
+              const quickActions = getTaskQuickActions(task.status);
               return (
-                <button
+                <div
                   key={task.id}
-                  type="button"
                   onClick={() => onSelect(task.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      onSelect(task.id);
+                    }
+                  }}
+                  role="button"
+                  tabIndex={0}
                   className={cn(
-                    "w-full rounded-2xl border p-3 text-left transition-colors",
+                    "w-full rounded-2xl border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/20",
                     task.id === selectedTaskId
                       ? "border-foreground/20 bg-foreground/[0.05]"
                       : "border-border/60 bg-background/70 hover:bg-muted/30",
@@ -307,7 +358,35 @@ export function AgentTaskList({
                   <div className="mt-3 text-[11px] text-muted-foreground">
                     更新于 {new Date(task.updatedAt).toLocaleString()}
                   </div>
-                </button>
+
+                  {quickActions.length > 0 ? (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {quickActions.map((action) => {
+                        const Icon = action.icon;
+                        return (
+                          <button
+                            key={action.key}
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void onQuickAction(task.id, action.key);
+                            }}
+                            className={cn(
+                              "inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] transition-colors",
+                              action.tone === "danger"
+                                ? "border-destructive/20 bg-destructive/5 text-destructive hover:bg-destructive/10"
+                                : "border-border/60 bg-background/80 text-foreground/80 hover:bg-muted/40",
+                            )}
+                            disabled={isMutating}
+                          >
+                            <Icon className="mr-1.5 h-3.5 w-3.5" />
+                            {action.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                </div>
               );
             })}
           </div>
