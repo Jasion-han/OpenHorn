@@ -1,12 +1,14 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { Search } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { ChevronDown, ChevronRight, Search } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import type { ApiAgentTask } from "@/lib/api";
+
+const TASK_LIST_SECTION_STORAGE_KEY = "openhorn.agentTaskList.sections";
 
 const STATUS_LABELS: Record<ApiAgentTask["status"], string> = {
   draft: "草稿",
@@ -57,6 +59,7 @@ export type AgentTaskListInsight = {
 };
 
 type TaskListFilter = "all" | ApiAgentTask["status"];
+type TaskSectionId = (typeof TASK_SECTIONS)[number]["id"];
 
 export function AgentTaskList({
   tasks,
@@ -71,6 +74,9 @@ export function AgentTaskList({
 }) {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<TaskListFilter>("all");
+  const [expandedSections, setExpandedSections] = useState<Set<TaskSectionId>>(
+    () => new Set(TASK_SECTIONS.map((section) => section.id)),
+  );
   const normalizedQuery = query.trim().toLowerCase();
 
   const statusCounts = useMemo(() => {
@@ -135,6 +141,63 @@ export function AgentTaskList({
   );
   const showSectionHeaders = statusFilter === "all" && !normalizedQuery && taskSections.length > 1;
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const raw = window.localStorage.getItem(TASK_LIST_SECTION_STORAGE_KEY);
+    if (!raw) return;
+
+    try {
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return;
+
+      const allowedIds = new Set(TASK_SECTIONS.map((section) => section.id));
+      const next = parsed.filter(
+        (value): value is TaskSectionId =>
+          typeof value === "string" && allowedIds.has(value as TaskSectionId),
+      );
+
+      if (next.length > 0) {
+        setExpandedSections(new Set(next));
+      }
+    } catch {
+      // Ignore malformed local state and keep defaults.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(
+      TASK_LIST_SECTION_STORAGE_KEY,
+      JSON.stringify(Array.from(expandedSections)),
+    );
+  }, [expandedSections]);
+
+  useEffect(() => {
+    if (!selectedTaskId || !showSectionHeaders) return;
+
+    const ownerSection = taskSections.find((section) =>
+      section.tasks.some((task) => task.id === selectedTaskId),
+    );
+
+    if (!ownerSection || expandedSections.has(ownerSection.id)) return;
+
+    setExpandedSections((prev) => {
+      const next = new Set(prev);
+      next.add(ownerSection.id);
+      return next;
+    });
+  }, [expandedSections, selectedTaskId, showSectionHeaders, taskSections]);
+
+  const toggleSection = (sectionId: TaskSectionId) => {
+    setExpandedSections((prev) => {
+      const next = new Set(prev);
+      if (next.has(sectionId)) next.delete(sectionId);
+      else next.add(sectionId);
+      return next;
+    });
+  };
+
   return (
     <div className="flex h-full min-h-0 flex-col gap-3">
       <div className="space-y-3 pr-3">
@@ -184,12 +247,26 @@ export function AgentTaskList({
         {taskSections.map((section) => (
           <div key={section.id} className="space-y-2">
             {showSectionHeaders ? (
-              <div className="px-1 text-[11px] font-medium tracking-[0.12em] text-muted-foreground/80">
-                {section.label}
-              </div>
+              <button
+                type="button"
+                onClick={() => toggleSection(section.id)}
+                className="flex w-full items-center justify-between rounded-xl px-1 py-1 text-left text-[11px] font-medium tracking-[0.12em] text-muted-foreground/80 transition-colors hover:bg-muted/20"
+              >
+                <span className="inline-flex items-center gap-1.5">
+                  {expandedSections.has(section.id) ? (
+                    <ChevronDown className="h-3.5 w-3.5" />
+                  ) : (
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  )}
+                  <span>{section.label}</span>
+                </span>
+                <span className="rounded-full border border-border/60 bg-background/80 px-2 py-0.5 text-[10px] tracking-normal text-muted-foreground">
+                  {section.tasks.length}
+                </span>
+              </button>
             ) : null}
 
-            {section.tasks.map((task) => {
+            {(showSectionHeaders && !expandedSections.has(section.id) ? [] : section.tasks).map((task) => {
               const insight = insightByTaskId.get(task.id) ?? null;
               return (
                 <button
