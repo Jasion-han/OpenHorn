@@ -12,7 +12,7 @@ import { AgentArtifactsPanel } from "./AgentArtifactsPanel";
 import { AgentExecutionPanel } from "./AgentExecutionPanel";
 import { AgentGoalPanel } from "./AgentGoalPanel";
 import { AgentPlanPanel } from "./AgentPlanPanel";
-import { AgentRunSelector } from "./AgentRunSelector";
+import { AgentRunSelector, type AgentRunSummary } from "./AgentRunSelector";
 import { AgentTaskHeader } from "./AgentTaskHeader";
 import { AgentTaskList } from "./AgentTaskList";
 
@@ -47,6 +47,36 @@ function getSelectedApproval(detail: ApiAgentTaskDetail, selectedRun: ApiAgentTa
 function getRunLabel(run: ApiAgentTaskRun | null) {
   if (!run) return null;
   return `${run.phase === "planning" ? "规划" : "执行"} #${run.id.slice(0, 6)}`;
+}
+
+function getRunSummaries(detail: ApiAgentTaskDetail): AgentRunSummary[] {
+  return detail.runs.map((run) => {
+    const runEvents = detail.events.filter((event) => event.runId === run.id);
+    const runArtifacts = detail.artifacts.filter((artifact) => artifact.runId === run.id);
+    const toolStarts = runEvents.filter((event) => {
+      if (event.type !== "execution_event") return false;
+      if (typeof event.metadata !== "object" || !event.metadata) return false;
+      return (event.metadata as Record<string, unknown>).eventType === "tool_start";
+    }).length;
+    const finalResult = runArtifacts.find((artifact) => artifact.type === "final_result") ?? null;
+    const executionSummary =
+      runArtifacts.find((artifact) => artifact.type === "execution_summary") ?? null;
+    const planStepCount = detail.planSteps.filter((step) => step.runId === run.id).length;
+
+    const summarySource =
+      run.error?.trim() ||
+      run.summary?.trim() ||
+      finalResult?.content.trim() ||
+      executionSummary?.content.trim() ||
+      (run.phase === "planning" && planStepCount > 0 ? `共生成 ${planStepCount} 个计划步骤。` : "");
+
+    return {
+      runId: run.id,
+      toolStarts,
+      hasFinalResult: Boolean(finalResult),
+      summary: summarySource ? summarySource.slice(0, 160) : null,
+    };
+  });
 }
 
 export function AgentWorkbench() {
@@ -139,6 +169,7 @@ export function AgentWorkbench() {
   const selectedRun = detail?.runs.find((run) => run.id === selectedRunId) ?? detail?.runs[0] ?? null;
   const planningRun = detail ? findPlanningRunForSelection(detail, selectedRun) : null;
   const selectedApproval: ApiAgentApproval | null = detail ? getSelectedApproval(detail, selectedRun) : null;
+  const runSummaries = detail ? getRunSummaries(detail) : [];
   const selectedPlanSteps =
     detail && planningRun ? detail.planSteps.filter((step) => step.runId === planningRun.id) : [];
   const selectedEvents =
@@ -223,6 +254,7 @@ export function AgentWorkbench() {
                   />
                   <AgentRunSelector
                     runs={detail.runs}
+                    summaries={runSummaries}
                     selectedRunId={selectedRun?.id ?? null}
                     onSelect={setSelectedRunId}
                   />

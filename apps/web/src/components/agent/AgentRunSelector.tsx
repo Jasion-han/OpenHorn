@@ -18,12 +18,21 @@ const RUN_STATUS_LABELS: Record<ApiAgentTaskRun["status"], string> = {
   cancelled: "已取消",
 };
 
+export type AgentRunSummary = {
+  runId: string;
+  summary: string | null;
+  toolStarts: number;
+  hasFinalResult: boolean;
+};
+
 export function AgentRunSelector({
   runs,
+  summaries,
   selectedRunId,
   onSelect,
 }: {
   runs: ApiAgentTaskRun[];
+  summaries: AgentRunSummary[];
   selectedRunId: string | null;
   onSelect: (runId: string) => void;
 }) {
@@ -40,25 +49,44 @@ export function AgentRunSelector({
       </div>
 
       <div className="flex flex-wrap gap-2">
-        {runs.map((run, index) => (
-          <Button
-            key={run.id}
-            size="sm"
-            variant={run.id === selectedRunId ? "default" : "outline"}
-            onClick={() => onSelect(run.id)}
-            className="h-auto min-w-[140px] justify-start px-3 py-2 text-left"
-          >
-            <div>
-              <div className="text-xs opacity-80">
-                #{runs.length - index} {RUN_PHASE_LABELS[run.phase]}
+        {runs.map((run, index) => {
+          const summary = summaries.find((item) => item.runId === run.id) ?? null;
+          return (
+            <Button
+              key={run.id}
+              size="sm"
+              variant={run.id === selectedRunId ? "default" : "outline"}
+              onClick={() => onSelect(run.id)}
+              className="h-auto min-w-[220px] justify-start px-3 py-3 text-left"
+            >
+              <div className="w-full">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-xs opacity-80">
+                    #{runs.length - index} {RUN_PHASE_LABELS[run.phase]}
+                  </div>
+                  <div className="text-[11px] opacity-70">{RUN_STATUS_LABELS[run.status]}</div>
+                </div>
+
+                <div className="mt-2 text-[11px] opacity-70">
+                  {new Date(run.createdAt).toLocaleString()}
+                </div>
+
+                <div className="mt-2 flex flex-wrap gap-2 text-[11px] opacity-80">
+                  {run.phase === "execution" ? (
+                    <span>工具 {summary?.toolStarts ?? 0}</span>
+                  ) : null}
+                  {summary?.hasFinalResult ? <span>有结果</span> : null}
+                </div>
+
+                {summary?.summary ? (
+                  <p className="mt-2 line-clamp-3 whitespace-pre-wrap break-words text-xs leading-5 opacity-85">
+                    {summary.summary}
+                  </p>
+                ) : null}
               </div>
-              <div className="mt-1 text-sm">{RUN_STATUS_LABELS[run.status]}</div>
-              <div className="mt-1 text-[11px] opacity-70">
-                {new Date(run.createdAt).toLocaleString()}
-              </div>
-            </div>
-          </Button>
-        ))}
+            </Button>
+          );
+        })}
       </div>
     </section>
   );
