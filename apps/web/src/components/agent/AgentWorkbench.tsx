@@ -233,6 +233,17 @@ export function AgentWorkbench() {
         case "plan":
           await requestPlan(taskId);
           return;
+        case "review_approval":
+          await selectTask(taskId);
+          window.requestAnimationFrame(() => {
+            window.setTimeout(() => {
+              document.getElementById("agent-approval-block")?.scrollIntoView({
+                behavior: "smooth",
+                block: "center",
+              });
+            }, 80);
+          });
+          return;
         case "retry":
           await retryTask(taskId);
           return;

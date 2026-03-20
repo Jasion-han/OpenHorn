@@ -69,7 +69,7 @@ const TASK_SECTIONS = [
 
 type TaskListFilter = "all" | ApiAgentTask["status"];
 type TaskSectionId = (typeof TASK_SECTIONS)[number]["id"];
-export type AgentTaskQuickAction = "plan" | "retry" | "continue" | "cancel";
+export type AgentTaskQuickAction = "plan" | "retry" | "continue" | "cancel" | "review_approval";
 export type AgentTaskQuickActionState = {
   taskId: string;
   action: AgentTaskQuickAction;
@@ -82,10 +82,19 @@ type TaskQuickActionSpec = {
   tone?: "default" | "danger";
 };
 
-function getTaskQuickActions(status: ApiAgentTask["status"]): TaskQuickActionSpec[] {
-  switch (status) {
+function getTaskQuickActions(task: ApiAgentTask): TaskQuickActionSpec[] {
+  switch (task.status) {
     case "draft":
       return [{ key: "plan", label: "生成计划", icon: Wand2 }];
+    case "awaiting_approval":
+      return [
+        {
+          key: "review_approval",
+          label:
+            task.insight?.latestApprovalType === "tool_approval" ? "处理工具审批" : "处理审批",
+          icon: Wand2,
+        },
+      ];
     case "failed":
       return [
         { key: "continue", label: "继续", icon: SkipForward },
@@ -115,6 +124,8 @@ function getQuickActionBusyLabel(action: AgentTaskQuickAction) {
       return "继续中";
     case "cancel":
       return "取消中";
+    case "review_approval":
+      return "定位中";
     default:
       return "处理中";
   }
@@ -426,7 +437,7 @@ export function AgentTaskList({
             ) : null}
 
             {(showSectionHeaders && !expandedSections.has(section.id) ? [] : section.tasks).map((task) => {
-              const quickActions = getTaskQuickActions(task.status);
+              const quickActions = getTaskQuickActions(task);
               const insightLabel = getInsightLabel(task);
               const metaLine = getTaskMetaLine(task);
               const preview = getTaskPreview(task);

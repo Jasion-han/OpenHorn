@@ -76,7 +76,7 @@ export function AgentApprovalBlock({
   const toolSummary = summarizeToolInput(toolPayload?.toolInput);
 
   return (
-    <div className="rounded-2xl border border-border/70 bg-muted/20 p-4">
+    <div id="agent-approval-block" className="rounded-2xl border border-border/70 bg-muted/20 p-4">
       <div className="flex items-start gap-3">
         {approval.status === "approved" ? (
           <CheckCircle2 className="mt-0.5 h-4 w-4 text-emerald-600" />
