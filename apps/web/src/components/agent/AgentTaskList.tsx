@@ -28,6 +28,28 @@ const STATUS_TONE: Record<ApiAgentTask["status"], string> = {
   cancelled: "bg-slate-500/10 text-slate-700 dark:text-slate-300",
 };
 
+const TASK_SECTIONS = [
+  {
+    id: "attention",
+    label: "需要处理",
+    statuses: ["awaiting_approval", "failed"],
+  },
+  {
+    id: "recent",
+    label: "最近更新",
+    statuses: ["running", "planning", "draft"],
+  },
+  {
+    id: "finished",
+    label: "已结束",
+    statuses: ["completed", "cancelled"],
+  },
+] satisfies Array<{
+  id: string;
+  label: string;
+  statuses: ApiAgentTask["status"][];
+}>;
+
 export type AgentTaskListInsight = {
   taskId: string;
   highlight: string | null;
@@ -49,6 +71,7 @@ export function AgentTaskList({
 }) {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<TaskListFilter>("all");
+  const normalizedQuery = query.trim().toLowerCase();
 
   const statusCounts = useMemo(() => {
     return tasks.reduce<Record<ApiAgentTask["status"], number>>(
@@ -68,9 +91,12 @@ export function AgentTaskList({
     );
   }, [tasks]);
 
-  const filteredTasks = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase();
+  const insightByTaskId = useMemo(
+    () => new Map(insights.map((item) => [item.taskId, item])),
+    [insights],
+  );
 
+  const filteredTasks = useMemo(() => {
     return tasks.filter((task) => {
       if (statusFilter !== "all" && task.status !== statusFilter) {
         return false;
@@ -80,12 +106,21 @@ export function AgentTaskList({
         return true;
       }
 
-      const insight = insights.find((item) => item.taskId === task.id) ?? null;
+      const insight = insightByTaskId.get(task.id) ?? null;
       return [task.title, task.goal, insight?.highlight, insight?.summary]
         .filter((value): value is string => Boolean(value))
         .some((value) => value.toLowerCase().includes(normalizedQuery));
     });
-  }, [insights, query, statusFilter, tasks]);
+  }, [insightByTaskId, normalizedQuery, statusFilter, tasks]);
+
+  const taskSections = useMemo(() => {
+    return TASK_SECTIONS.map((section) => ({
+      ...section,
+      tasks: filteredTasks.filter((task) =>
+        section.statuses.some((status) => status === task.status),
+      ),
+    })).filter((section) => section.tasks.length > 0);
+  }, [filteredTasks]);
 
   const filterOptions = [
     { value: "all", label: "全部", count: tasks.length },
@@ -98,6 +133,7 @@ export function AgentTaskList({
   const visibleFilterOptions = filterOptions.filter(
     (option) => option.value === "all" || option.count > 0,
   );
+  const showSectionHeaders = statusFilter === "all" && !normalizedQuery && taskSections.length > 1;
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3">
@@ -145,48 +181,60 @@ export function AgentTaskList({
           </div>
         ) : null}
 
-        {filteredTasks.map((task) => {
-          const insight = insights.find((item) => item.taskId === task.id) ?? null;
-          return (
-            <button
-              key={task.id}
-              type="button"
-              onClick={() => onSelect(task.id)}
-              className={cn(
-                "w-full rounded-2xl border p-3 text-left transition-colors",
-                task.id === selectedTaskId
-                  ? "border-foreground/20 bg-foreground/[0.05]"
-                  : "border-border/60 bg-background/70 hover:bg-muted/30",
-              )}
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-medium">{task.title}</div>
-                  <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{task.goal}</p>
-                </div>
-                <Badge className={cn("shrink-0 border-0", STATUS_TONE[task.status])}>
-                  {STATUS_LABELS[task.status]}
-                </Badge>
+        {taskSections.map((section) => (
+          <div key={section.id} className="space-y-2">
+            {showSectionHeaders ? (
+              <div className="px-1 text-[11px] font-medium tracking-[0.12em] text-muted-foreground/80">
+                {section.label}
               </div>
+            ) : null}
 
-              {insight?.highlight ? (
-                <div className="mt-3">
-                  <span className="inline-flex rounded-full border border-border/60 bg-muted/20 px-2 py-1 text-[11px] text-foreground/80">
-                    {insight.highlight}
-                  </span>
-                </div>
-              ) : null}
+            {section.tasks.map((task) => {
+              const insight = insightByTaskId.get(task.id) ?? null;
+              return (
+                <button
+                  key={task.id}
+                  type="button"
+                  onClick={() => onSelect(task.id)}
+                  className={cn(
+                    "w-full rounded-2xl border p-3 text-left transition-colors",
+                    task.id === selectedTaskId
+                      ? "border-foreground/20 bg-foreground/[0.05]"
+                      : "border-border/60 bg-background/70 hover:bg-muted/30",
+                  )}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium">{task.title}</div>
+                      <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{task.goal}</p>
+                    </div>
+                    <Badge className={cn("shrink-0 border-0", STATUS_TONE[task.status])}>
+                      {STATUS_LABELS[task.status]}
+                    </Badge>
+                  </div>
 
-              {insight?.summary ? (
-                <p className="mt-2 line-clamp-2 text-[11px] leading-5 text-muted-foreground">{insight.summary}</p>
-              ) : null}
+                  {insight?.highlight ? (
+                    <div className="mt-3">
+                      <span className="inline-flex rounded-full border border-border/60 bg-muted/20 px-2 py-1 text-[11px] text-foreground/80">
+                        {insight.highlight}
+                      </span>
+                    </div>
+                  ) : null}
 
-              <div className="mt-3 text-[11px] text-muted-foreground">
-                更新于 {new Date(task.updatedAt).toLocaleString()}
-              </div>
-            </button>
-          );
-        })}
+                  {insight?.summary ? (
+                    <p className="mt-2 line-clamp-2 text-[11px] leading-5 text-muted-foreground">
+                      {insight.summary}
+                    </p>
+                  ) : null}
+
+                  <div className="mt-3 text-[11px] text-muted-foreground">
+                    更新于 {new Date(task.updatedAt).toLocaleString()}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        ))}
         </div>
       </ScrollArea>
     </div>

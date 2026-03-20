@@ -6,13 +6,43 @@ import {
   api,
   type ApiAgentArtifact,
   type ApiAgentTask,
+  type ApiAgentTaskStatus,
   type ApiAgentTaskDetail,
   type ApiAgentTaskEvent,
 } from "@/lib/api";
 import { notifyError, notifySuccess } from "@/lib/notify";
 
+const TASK_STATUS_PRIORITY: Record<ApiAgentTaskStatus, number> = {
+  awaiting_approval: 0,
+  failed: 1,
+  running: 2,
+  planning: 3,
+  draft: 4,
+  completed: 5,
+  cancelled: 6,
+};
+
+function compareTasks(left: ApiAgentTask, right: ApiAgentTask) {
+  const priorityDiff = TASK_STATUS_PRIORITY[left.status] - TASK_STATUS_PRIORITY[right.status];
+  if (priorityDiff !== 0) {
+    return priorityDiff;
+  }
+
+  const updatedDiff = right.updatedAt.localeCompare(left.updatedAt);
+  if (updatedDiff !== 0) {
+    return updatedDiff;
+  }
+
+  const createdDiff = right.createdAt.localeCompare(left.createdAt);
+  if (createdDiff !== 0) {
+    return createdDiff;
+  }
+
+  return left.id.localeCompare(right.id);
+}
+
 function sortTasks(tasks: ApiAgentTask[]) {
-  return [...tasks].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+  return [...tasks].sort(compareTasks);
 }
 
 function upsertTask(tasks: ApiAgentTask[], task: ApiAgentTask) {
