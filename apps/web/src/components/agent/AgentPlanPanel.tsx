@@ -16,20 +16,29 @@ export function AgentPlanPanel({
   approval,
   onApprove,
   onReject,
+  embedded = false,
 }: {
   planSteps: ApiAgentPlanStep[];
   approval: ApiAgentApproval | null;
   onApprove: (approvalId: string) => void;
   onReject: (approvalId: string) => void;
+  embedded?: boolean;
 }) {
   return (
-    <section id="agent-plan-panel" className="rounded-3xl border border-border/70 bg-background/80 p-5">
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <div>
-          <div className="text-sm font-medium">执行计划</div>
-          <p className="mt-1 text-xs text-muted-foreground">Agent 会按这组步骤自主推进，你也可以随时查看过程。</p>
+    <section
+      id="agent-plan-panel"
+      className={embedded ? "space-y-4" : "rounded-3xl border border-border/70 bg-background/80 p-5"}
+    >
+      {!embedded ? (
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <div>
+            <div className="text-sm font-medium">执行计划</div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Agent 会按这组步骤自主推进，你也可以随时查看过程。
+            </p>
+          </div>
         </div>
-      </div>
+      ) : null}
 
       {planSteps.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-border/70 bg-muted/20 p-4 text-sm text-muted-foreground">
@@ -38,7 +47,10 @@ export function AgentPlanPanel({
       ) : (
         <div className="space-y-3">
           {planSteps.map((step) => (
-            <div key={step.id} className="rounded-2xl border border-border/60 bg-muted/15 p-4">
+            <div
+              key={step.id}
+              className={embedded ? "rounded-2xl border border-border/60 bg-muted/10 p-4" : "rounded-2xl border border-border/60 bg-muted/15 p-4"}
+            >
               <div className="flex gap-3">
                 <StepIcon status={step.status} />
                 <div className="min-w-0">

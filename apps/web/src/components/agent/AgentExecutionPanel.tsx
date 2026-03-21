@@ -18,21 +18,28 @@ export function AgentExecutionPanel({
   events,
   streamError,
   runLabel,
+  embedded = false,
 }: {
   events: ApiAgentTaskEvent[];
   streamError: string | null;
   runLabel?: string | null;
+  embedded?: boolean;
 }) {
   const visibleEvents = events.filter((event) => event.type === "execution_event" || event.type === "error");
 
   return (
-    <section id="agent-execution-panel" className="rounded-3xl border border-border/70 bg-background/80 p-5">
-      <div className="mb-4">
-        <div className="text-sm font-medium">执行过程</div>
-        <p className="mt-1 text-xs text-muted-foreground">
-          {runLabel ? `${runLabel} 的工具调用与流式输出会显示在这里。` : "工具调用与流式输出会在这里持续累积。"}
-        </p>
-      </div>
+    <section
+      id="agent-execution-panel"
+      className={embedded ? "space-y-4" : "rounded-3xl border border-border/70 bg-background/80 p-5"}
+    >
+      {!embedded ? (
+        <div className="mb-4">
+          <div className="text-sm font-medium">执行过程</div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {runLabel ? `${runLabel} 的工具调用与流式输出会显示在这里。` : "工具调用与流式输出会在这里持续累积。"}
+          </p>
+        </div>
+      ) : null}
 
       {streamError ? (
         <div className="mb-4 rounded-2xl border border-destructive/20 bg-destructive/5 p-4 text-sm text-destructive">
@@ -54,7 +61,10 @@ export function AgentExecutionPanel({
                 (event.metadata as Record<string, unknown>).eventType === "tool_result");
 
             return (
-              <div key={event.id} className="rounded-2xl border border-border/60 bg-muted/15 p-4">
+              <div
+                key={event.id}
+                className={embedded ? "rounded-2xl border border-border/60 bg-muted/10 p-4" : "rounded-2xl border border-border/60 bg-muted/15 p-4"}
+              >
                 <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
                   {event.type === "error" ? (
                     <AlertCircle className="h-3.5 w-3.5 text-destructive" />

@@ -1,7 +1,19 @@
 "use client";
 
-import { ChevronDown, Loader2, Play, RotateCcw, SkipForward, Wand2 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  AlertCircle,
+  ChevronDown,
+  FileText,
+  ListTodo,
+  Loader2,
+  PackageOpen,
+  Play,
+  RotateCcw,
+  SkipForward,
+  Wand2,
+  Wrench,
+} from "lucide-react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { AgentArtifactsPanel } from "@/components/agent/AgentArtifactsPanel";
 import { AgentExecutionPanel } from "@/components/agent/AgentExecutionPanel";
 import { AgentPlanPanel } from "@/components/agent/AgentPlanPanel";
@@ -37,6 +49,69 @@ const COMPLEXITY_LABELS = {
   standard: "简洁流程",
   deep: "完整流程",
 } satisfies Record<ApiAgentTaskComplexity, string>;
+
+function TaskMetaPill({
+  label,
+  tone = "default",
+}: {
+  label: string;
+  tone?: "default" | "accent" | "danger";
+}) {
+  return (
+    <span
+      className={cn(
+        "rounded-full border px-2 py-0.5 text-[11px]",
+        tone === "accent"
+          ? "border-emerald-300/60 bg-emerald-50 text-emerald-700"
+          : tone === "danger"
+            ? "border-destructive/20 bg-destructive/5 text-destructive"
+            : "border-border/60 bg-background/70 text-muted-foreground",
+      )}
+    >
+      {label}
+    </span>
+  );
+}
+
+function ProcessSection({
+  title,
+  meta,
+  icon,
+  defaultOpen = false,
+  children,
+}: {
+  title: string;
+  meta?: string | null;
+  icon: ReactNode;
+  defaultOpen?: boolean;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+
+  useEffect(() => {
+    setOpen(defaultOpen);
+  }, [defaultOpen]);
+
+  return (
+    <section className="overflow-hidden rounded-2xl border border-border/60 bg-background/75">
+      <button
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
+      >
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-sm font-medium text-foreground/90">
+            {icon}
+            <span>{title}</span>
+          </div>
+          {meta ? <p className="mt-1 text-xs text-muted-foreground">{meta}</p> : null}
+        </div>
+        <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", open && "rotate-180")} />
+      </button>
+      {open ? <div className="border-t border-border/50 px-3 py-3">{children}</div> : null}
+    </section>
+  );
+}
 
 function buildTaskStatusSummary(
   status: ApiAgentTaskDetail["task"]["status"],
@@ -300,6 +375,11 @@ export function ChatAgentTaskCard({
     () => (detail ? getRunEvents(detail, executionRun?.id ?? null) : []),
     [detail, executionRun],
   );
+  const visibleExecutionEvents = useMemo(
+    () =>
+      executionEvents.filter((event) => event.type === "execution_event" || event.type === "error"),
+    [executionEvents],
+  );
   const executionArtifacts = useMemo(
     () => (detail ? getRunArtifacts(detail, executionRun?.id ?? null) : []),
     [detail, executionRun],
@@ -313,12 +393,22 @@ export function ChatAgentTaskCard({
     if (!detail) return;
     if (
       effectiveUxMode === "full" ||
-      detail.task.status === "planning" ||
-      detail.task.status === "running" ||
       detail.task.status === "failed" ||
-      detail.task.status === "awaiting_approval"
+      detail.task.status === "awaiting_approval" ||
+      (detail.task.status === "planning" && effectiveUxMode !== "direct") ||
+      (detail.task.status === "running" && effectiveUxMode === "compact")
     ) {
       setExpanded(true);
+    }
+  }, [detail, effectiveUxMode]);
+
+  useEffect(() => {
+    if (!detail) return;
+    if (
+      (effectiveUxMode === "direct" || effectiveUxMode === "compact") &&
+      (detail.task.status === "completed" || detail.task.status === "cancelled")
+    ) {
+      setExpanded(false);
     }
   }, [detail, effectiveUxMode]);
 
@@ -342,7 +432,9 @@ export function ChatAgentTaskCard({
   ) => {
     if (!detail) return;
     setBusyAction(action);
-    setExpanded(true);
+    if (detail.task.uxMode !== "direct") {
+      setExpanded(true);
+    }
     setStreamError(null);
 
     try {
@@ -506,6 +598,50 @@ export function ChatAgentTaskCard({
   const showCompactPlan = effectiveUxMode === "compact" && planSteps.length > 0;
   const visibleCompactSteps = planSteps.slice(0, 3);
   const showInlineError = effectiveUxMode !== "full" && Boolean(streamError);
+  const completedStepCount = planSteps.filter((step) => step.status === "completed").length;
+  const toolEventCount = executionEvents.filter((event) => {
+    const eventType =
+      typeof event.metadata === "object" && event.metadata
+        ? (event.metadata as Record<string, unknown>).eventType
+        : null;
+    return eventType === "tool_start";
+  }).length;
+  const nonFinalArtifacts = executionArtifacts.filter((artifact) => artifact.type !== "final_result");
+  const planMeta =
+    planSteps.length > 0 ? `${completedStepCount}/${planSteps.length} 步已推进` : "当前还没有可展示的计划步骤";
+  const executionMeta = streamError
+    ? "本轮执行出现错误"
+    : toolEventCount > 0
+      ? `已调用 ${toolEventCount} 个工具`
+      : detail.task.status === "running"
+        ? "正在执行中"
+        : "当前还没有执行日志";
+  const artifactMeta =
+    executionArtifacts.length > 0
+      ? `共 ${executionArtifacts.length} 项结果与产物`
+      : detail.task.status === "completed"
+        ? "本轮未单独沉淀产物"
+        : "执行完成后会在这里汇总";
+  const defaultPlanOpen = Boolean(approval) || detail.task.status === "planning" || detail.task.status === "awaiting_approval";
+  const defaultExecutionOpen =
+    Boolean(streamError) || visibleExecutionEvents.length > 0 || detail.task.status === "failed";
+  const defaultArtifactsOpen = detail.task.status === "completed" && executionArtifacts.length > 0;
+  const showExecutionSection = showFullPanels && (visibleExecutionEvents.length > 0 || Boolean(streamError));
+  const showArtifactsSection = showFullPanels && (executionArtifacts.length > 0 || detail.task.status === "completed");
+  const showActionBar =
+    detail.task.status === "draft" ||
+    detail.task.status === "failed" ||
+    detail.task.status === "cancelled";
+  const condensedSummary =
+    effectiveUxMode === "full"
+      ? streamError
+        ? "执行中断，可查看过程并调整。"
+        : detail.task.status === "running"
+          ? "正在推进任务。"
+          : detail.task.status === "completed"
+            ? "任务已完成，可按需展开查看过程。"
+            : inlineSummary
+      : inlineSummary;
 
   return (
     <section className="mt-2 overflow-hidden rounded-2xl border border-border/60 bg-muted/20">
@@ -515,13 +651,20 @@ export function ChatAgentTaskCard({
         className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
       >
         <div className="min-w-0">
-          <div className="text-sm font-medium">Agent 任务</div>
+          <div className="text-sm font-medium">任务进度</div>
           <p className="mt-1 text-xs text-muted-foreground">
             {TASK_STATUS_LABELS[detail.task.status]} · {detail.task.title}
           </p>
           {effectiveUxMode !== "full" ? (
             <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{inlineSummary}</p>
-          ) : null}
+          ) : (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              <TaskMetaPill label={planMeta} />
+              {toolEventCount > 0 ? <TaskMetaPill label={`${toolEventCount} 个工具`} /> : null}
+              {executionArtifacts.length > 0 ? <TaskMetaPill label={`${executionArtifacts.length} 项产物`} /> : null}
+              {streamError ? <TaskMetaPill label="执行异常" tone="danger" /> : null}
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-2">
           {busyAction ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /> : null}
@@ -537,7 +680,17 @@ export function ChatAgentTaskCard({
 
       {expanded ? (
         <div className="space-y-3 border-t border-border/50 px-3 py-3">
-          {effectiveUxMode !== "full" ? (
+          {showFullPanels ? (
+            <section className="rounded-2xl border border-border/60 bg-background/75 px-4 py-3">
+              <div className="flex flex-wrap gap-1.5">
+                <TaskMetaPill label={planMeta} />
+                {toolEventCount > 0 ? <TaskMetaPill label={`${toolEventCount} 个工具`} /> : null}
+                {executionArtifacts.length > 0 ? <TaskMetaPill label={`${executionArtifacts.length} 项产物`} /> : null}
+                {streamError ? <TaskMetaPill label="执行异常" tone="danger" /> : null}
+              </div>
+              <p className="mt-3 text-sm leading-6 text-foreground/90">{condensedSummary}</p>
+            </section>
+          ) : (
             <section className="rounded-2xl border border-border/60 bg-background/75 px-4 py-3">
               <p className="text-sm leading-6 text-foreground/90">{inlineSummary}</p>
               {showCompactPlan ? (
@@ -555,65 +708,75 @@ export function ChatAgentTaskCard({
                 </div>
               ) : null}
             </section>
+          )}
+
+          {showActionBar ? (
+            <div className="flex flex-wrap gap-2">
+              {canExecute ? (
+                <Button
+                  size="sm"
+                  onClick={() =>
+                    void runExecutionAction("execute", () => api.agentTasks.execute(detail.task.id))
+                  }
+                  disabled={busyAction !== null}
+                >
+                  <Play className="mr-1 h-3.5 w-3.5" />
+                  开始执行
+                </Button>
+              ) : null}
+              {canContinue ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() =>
+                    void runExecutionAction("continue", () => api.agentTasks.continue(detail.task.id))
+                  }
+                  disabled={busyAction !== null}
+                >
+                  <SkipForward className="mr-1 h-3.5 w-3.5" />
+                  继续
+                </Button>
+              ) : null}
+              {canRetry ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() =>
+                    void runExecutionAction("retry", () => api.agentTasks.retry(detail.task.id))
+                  }
+                  disabled={busyAction !== null}
+                >
+                  <RotateCcw className="mr-1 h-3.5 w-3.5" />
+                  重试
+                </Button>
+              ) : null}
+              <Button size="sm" variant="outline" onClick={() => void handleReplan()} disabled={busyAction !== null}>
+                <Wand2 className="mr-1 h-3.5 w-3.5" />
+                重新规划
+              </Button>
+              {canCancel ? (
+                <Button size="sm" variant="outline" onClick={() => void handleCancel()} disabled={busyAction !== null}>
+                  取消
+                </Button>
+              ) : null}
+            </div>
           ) : null}
 
-          <div className="flex flex-wrap gap-2">
-            {canExecute ? (
-              <Button
-                size="sm"
-                onClick={() =>
-                  void runExecutionAction("execute", () => api.agentTasks.execute(detail.task.id))
-                }
-                disabled={busyAction !== null}
-              >
-                <Play className="mr-1 h-3.5 w-3.5" />
-                开始执行
-              </Button>
-            ) : null}
-            {canContinue ? (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() =>
-                  void runExecutionAction("continue", () => api.agentTasks.continue(detail.task.id))
-                }
-                disabled={busyAction !== null}
-              >
-                <SkipForward className="mr-1 h-3.5 w-3.5" />
-                继续
-              </Button>
-            ) : null}
-            {canRetry ? (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() =>
-                  void runExecutionAction("retry", () => api.agentTasks.retry(detail.task.id))
-                }
-                disabled={busyAction !== null}
-              >
-                <RotateCcw className="mr-1 h-3.5 w-3.5" />
-                重试
-              </Button>
-            ) : null}
-            <Button size="sm" variant="outline" onClick={() => void handleReplan()} disabled={busyAction !== null}>
-              <Wand2 className="mr-1 h-3.5 w-3.5" />
-              重新规划
-            </Button>
-            {canCancel ? (
-              <Button size="sm" variant="outline" onClick={() => void handleCancel()} disabled={busyAction !== null}>
-                取消
-              </Button>
-            ) : null}
-          </div>
-
           {showFullPanels ? (
-            <AgentPlanPanel
-              planSteps={planSteps}
-              approval={approval}
-              onApprove={() => void handleApproval("approved")}
-              onReject={() => void handleApproval("rejected")}
-            />
+            <ProcessSection
+              title="执行计划"
+              meta={planMeta}
+              icon={<ListTodo className="h-4 w-4 text-muted-foreground" />}
+              defaultOpen={defaultPlanOpen}
+            >
+              <AgentPlanPanel
+                planSteps={planSteps}
+                approval={approval}
+                onApprove={() => void handleApproval("approved")}
+                onReject={() => void handleApproval("rejected")}
+                embedded
+              />
+            </ProcessSection>
           ) : approval ? (
             <div className="rounded-2xl border border-border/60 bg-background/75 px-4 py-3">
               <div className="mb-3 text-sm font-medium">{approval.title}</div>
@@ -636,15 +799,44 @@ export function ChatAgentTaskCard({
             </div>
           ) : null}
 
-          {showFullPanels ? (
-            <AgentExecutionPanel
-              events={executionEvents}
-              streamError={streamError}
-              runLabel={executionRun ? `执行 #${executionRun.id.slice(0, 6)}` : null}
-            />
+          {showExecutionSection ? (
+            <ProcessSection
+              title="执行过程"
+              meta={executionMeta}
+              icon={
+                streamError ? (
+                  <AlertCircle className="h-4 w-4 text-destructive" />
+                ) : (
+                  <Wrench className="h-4 w-4 text-muted-foreground" />
+                )
+              }
+              defaultOpen={defaultExecutionOpen}
+            >
+              <AgentExecutionPanel
+                events={visibleExecutionEvents}
+                streamError={streamError}
+                runLabel={executionRun ? `执行 #${executionRun.id.slice(0, 6)}` : null}
+                embedded
+              />
+            </ProcessSection>
           ) : null}
 
-          {showFullPanels ? <AgentArtifactsPanel artifacts={executionArtifacts} /> : null}
+          {showArtifactsSection ? (
+            <ProcessSection
+              title="结果与产物"
+              meta={artifactMeta}
+              icon={
+                nonFinalArtifacts.length > 0 ? (
+                  <PackageOpen className="h-4 w-4 text-muted-foreground" />
+                ) : (
+                  <FileText className="h-4 w-4 text-muted-foreground" />
+                )
+              }
+              defaultOpen={defaultArtifactsOpen}
+            >
+              <AgentArtifactsPanel artifacts={executionArtifacts} embedded />
+            </ProcessSection>
+          ) : null}
         </div>
       ) : null}
     </section>
