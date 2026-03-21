@@ -3,12 +3,77 @@
 import { Bot, Wrench, AlertCircle } from "lucide-react";
 import type { ApiAgentTaskEvent } from "@/lib/api";
 
+function getEventType(event: ApiAgentTaskEvent) {
+  return typeof event.metadata === "object" && event.metadata
+    ? (event.metadata as Record<string, unknown>).eventType
+    : null;
+}
+
+function humanizeToolName(toolName: string | null | undefined) {
+  const normalized = (toolName ?? "").trim().toLowerCase();
+  if (!normalized) return "工具";
+  if (normalized === "bash") return "命令执行";
+  if (normalized.includes("browser")) return "网页操作";
+  if (normalized.includes("search")) return "网络搜索";
+  if (normalized.includes("fetch")) return "网页抓取";
+  if (normalized.includes("read")) return "读取内容";
+  if (normalized.includes("write") || normalized.includes("edit")) return "修改内容";
+  return toolName ?? "工具";
+}
+
+function summarizeToolInput(toolInput: ApiAgentTaskEvent["toolInput"]) {
+  if (!toolInput || typeof toolInput !== "object") return null;
+
+  const input = toolInput as Record<string, unknown>;
+  const query =
+    typeof input.query === "string"
+      ? input.query
+      : typeof input.q === "string"
+        ? input.q
+        : typeof input.search_query === "string"
+          ? input.search_query
+          : null;
+  if (query) {
+    return `“${query.slice(0, 48)}${query.length > 48 ? "..." : ""}”`;
+  }
+
+  const url = typeof input.url === "string" ? input.url : null;
+  if (url) {
+    return url.length > 72 ? `${url.slice(0, 69)}...` : url;
+  }
+
+  const path =
+    typeof input.path === "string"
+      ? input.path
+      : typeof input.file_path === "string"
+        ? input.file_path
+        : null;
+  if (path) {
+    return path;
+  }
+
+  const command =
+    typeof input.command === "string"
+      ? input.command
+      : typeof input.cmd === "string"
+        ? input.cmd
+        : null;
+  if (command) {
+    return command.length > 72 ? `${command.slice(0, 69)}...` : command;
+  }
+
+  return null;
+}
+
+function summarizeEventContent(content: string | null | undefined) {
+  const normalized = (content ?? "").trim().replace(/\s+/g, " ");
+  if (!normalized) return null;
+  return normalized.length > 180 ? `${normalized.slice(0, 177)}...` : normalized;
+}
+
 function eventLabel(event: ApiAgentTaskEvent) {
   if (event.type === "error") return "错误";
-  const eventType =
-    typeof event.metadata === "object" && event.metadata
-      ? (event.metadata as Record<string, unknown>).eventType
-      : null;
+  const eventType = getEventType(event);
   if (eventType === "tool_start") return "工具启动";
   if (eventType === "tool_result") return "工具结果";
   return "执行更新";
@@ -54,11 +119,21 @@ export function AgentExecutionPanel({
       ) : (
         <div className="space-y-3">
           {visibleEvents.map((event) => {
-            const isToolEvent =
-              typeof event.metadata === "object" &&
-              event.metadata &&
-              ((event.metadata as Record<string, unknown>).eventType === "tool_start" ||
-                (event.metadata as Record<string, unknown>).eventType === "tool_result");
+            const eventType = getEventType(event);
+            const isToolEvent = eventType === "tool_start" || eventType === "tool_result";
+            const toolTitle = isToolEvent ? humanizeToolName(event.toolName) : null;
+            const inputSummary = isToolEvent ? summarizeToolInput(event.toolInput) : null;
+            const contentSummary = summarizeEventContent(event.content);
+            const semanticSummary =
+              event.type === "error"
+                ? contentSummary
+                : eventType === "tool_start"
+                  ? inputSummary
+                    ? `正在处理 ${inputSummary}`
+                    : "已开始执行。"
+                  : eventType === "tool_result"
+                    ? contentSummary || "已返回结果。"
+                    : contentSummary;
 
             return (
               <div
@@ -76,9 +151,9 @@ export function AgentExecutionPanel({
                   <span>{eventLabel(event)}</span>
                   <span>{new Date(event.createdAt).toLocaleTimeString()}</span>
                 </div>
-                {event.toolName ? <div className="mb-1 text-sm font-medium">{event.toolName}</div> : null}
-                {event.content ? (
-                  <p className="whitespace-pre-wrap text-sm leading-6 text-foreground/90">{event.content}</p>
+                {toolTitle ? <div className="mb-1 text-sm font-medium">{toolTitle}</div> : null}
+                {semanticSummary ? (
+                  <p className="text-sm leading-6 text-foreground/90">{semanticSummary}</p>
                 ) : null}
               </div>
             );

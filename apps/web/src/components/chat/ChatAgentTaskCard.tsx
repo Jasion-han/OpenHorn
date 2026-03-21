@@ -618,14 +618,14 @@ export function ChatAgentTaskCard({
         : "当前还没有执行日志";
   const artifactMeta =
     executionArtifacts.length > 0
-      ? `共 ${executionArtifacts.length} 项结果与产物`
+      ? `${executionArtifacts.length} 项结果可查看`
       : detail.task.status === "completed"
-        ? "本轮未单独沉淀产物"
+        ? "可按需查看结果摘要"
         : "执行完成后会在这里汇总";
   const defaultPlanOpen = Boolean(approval) || detail.task.status === "planning" || detail.task.status === "awaiting_approval";
   const defaultExecutionOpen =
     Boolean(streamError) || visibleExecutionEvents.length > 0 || detail.task.status === "failed";
-  const defaultArtifactsOpen = detail.task.status === "completed" && executionArtifacts.length > 0;
+  const defaultArtifactsOpen = false;
   const showExecutionSection = showFullPanels && (visibleExecutionEvents.length > 0 || Boolean(streamError));
   const showArtifactsSection = showFullPanels && (executionArtifacts.length > 0 || detail.task.status === "completed");
   const showActionBar =
