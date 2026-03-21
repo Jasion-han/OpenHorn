@@ -5,6 +5,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 const nextConfig: NextConfig = {
+  // Keep development and production outputs isolated.
+  // Otherwise running `next build` while a local `next dev` server is alive can
+  // corrupt the active dev chunk manifest and trigger ChunkLoadError.
+  distDir: process.env.NODE_ENV === "development" ? ".next-dev" : ".next",
   transpilePackages: ["ui", "shared", "agent", "db"],
   experimental: {
     devtoolSegmentExplorer: false,
