@@ -541,6 +541,24 @@ test("task routes cover create, list, detail, plan, approval, and execute precon
     expect(finalToolDetailJson.task.status).toBe("completed");
     expect(finalToolDetailJson.approvals[0]?.type).toBe("tool_approval");
     expect(finalToolDetailJson.approvals[0]?.status).toBe("approved");
+
+    expect(
+      events.some(
+        (item) =>
+          item.type === "execution_event" &&
+          typeof item.metadata === "object" &&
+          item.metadata !== null &&
+          (item.metadata as { eventType?: string }).eventType === "text",
+      ),
+    ).toBe(false);
+    expect(
+      artifacts.some(
+        (item) =>
+          item.type === "final_result" &&
+          typeof item.content === "string" &&
+          item.content.includes("Starting execution."),
+      ),
+    ).toBe(true);
   } finally {
     mock.restore();
   }

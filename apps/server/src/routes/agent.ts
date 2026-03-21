@@ -530,18 +530,6 @@ async function createTaskExecutionResponse(
 
         if (event.type === "text") {
           finalText += event.content ?? "";
-          await createAgentTaskEvent(userId, taskId, run.id, {
-            type: "execution_event",
-            content: event.content ?? null,
-            metadata: { eventType: "text" },
-          });
-          send({
-            type: "execution_event",
-            taskId,
-            runId: run.id,
-            eventType: "text",
-            content: event.content ?? "",
-          });
           continue;
         }
 
