@@ -1,12 +1,12 @@
 import type { CanUseTool, PermissionMode, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
-import { agentEvents, agentSessions } from "db";
+import { agentEvents, agentSessions, conversations } from "db";
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "../db";
 import { generateId } from "../utils";
 import { runClaudeAgentSdk } from "./agentSdk";
 import { buildAttachmentPayloadFromIds } from "./attachmentService";
 import { getResolvedChannelForConversation, getResolvedChannelForUser } from "./channelService";
-import { buildLiveContext } from "./liveCapabilities";
+import { buildLiveContext, type LiveContextResult } from "./liveCapabilities";
 import { classifyLiveRouteWithModel } from "./liveRouteClassifier";
 import { loadEnabledMcpServersForUser } from "./mcpLoader";
 import { TAVILY_API_KEY_SETTING, TAVILY_ENABLED_SETTING } from "./searchService";
@@ -101,6 +101,7 @@ export interface PreparedAgentRuntimeContext {
   modelId: string | null;
   globalSystemPrompt?: string;
   liveSystemContext?: string;
+  liveContext?: LiveContextResult;
 }
 
 export async function buildAgentRuntimeContext(params: {
@@ -108,6 +109,8 @@ export async function buildAgentRuntimeContext(params: {
   prompt: string;
   channelId?: string | null;
   modelId?: string | null;
+  conversationId?: string | null;
+  forceWebSearch?: boolean | null;
 }): Promise<PreparedAgentRuntimeContext> {
   const values = await getSettingValues(params.userId, [
     "chat.systemPrompt",
@@ -115,6 +118,15 @@ export async function buildAgentRuntimeContext(params: {
     TAVILY_ENABLED_SETTING,
   ]);
   const globalSystemPrompt = values["chat.systemPrompt"] || undefined;
+  let forceWebSearch = params.forceWebSearch;
+  if (forceWebSearch == null && params.conversationId) {
+    const [conversation] = await db
+      .select({ forceWebSearch: conversations.forceWebSearch })
+      .from(conversations)
+      .where(and(eq(conversations.id, params.conversationId), eq(conversations.userId, params.userId)))
+      .limit(1);
+    forceWebSearch = conversation?.forceWebSearch ?? null;
+  }
   const resolvedChannel = await getResolvedChannelForConversation(params.userId, {
     channelId: params.channelId ?? null,
     modelId: params.modelId ?? null,
@@ -133,6 +145,7 @@ export async function buildAgentRuntimeContext(params: {
     prompt: params.prompt,
     userSettings: values,
     tavilyEnvKey: process.env.TAVILY_API_KEY ?? null,
+    forceWebSearch: forceWebSearch == null ? true : Boolean(forceWebSearch),
     classifier,
   });
 
@@ -141,6 +154,7 @@ export async function buildAgentRuntimeContext(params: {
     modelId: params.modelId ?? resolvedChannel?.modelId ?? null,
     globalSystemPrompt,
     liveSystemContext: liveContext.systemContext,
+    liveContext,
   };
 }
 
@@ -399,6 +413,7 @@ export async function* runAgent(
     prompt,
     channelId: session.channelId || null,
     modelId: session.modelId || null,
+    conversationId: session.conversationId || null,
   });
 
   for await (const event of runAgentWithConfig({

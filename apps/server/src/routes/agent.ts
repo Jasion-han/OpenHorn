@@ -97,6 +97,22 @@ function summarizeExecution(params: {
   return parts.join(" ");
 }
 
+function buildLiveSearchSummary(params: {
+  route: "web_search" | "research";
+  prompt: string;
+  citations?: Array<{ title: string; url: string }>;
+}) {
+  const sourceTitles = (params.citations || [])
+    .map((citation) => citation.title?.trim())
+    .filter((title): title is string => Boolean(title))
+    .slice(0, 2);
+  if (sourceTitles.length === 0) {
+    return params.route === "research" ? "已完成在线研究检索。" : "已完成网络搜索。";
+  }
+  const prefix = params.route === "research" ? "已参考" : "已检索";
+  return `${prefix}${sourceTitles.join("、")} 等来源。`;
+}
+
 function buildExecutionModeContext(
   params: {
     mode: "execute" | "retry" | "continue";
@@ -509,9 +525,55 @@ async function createTaskExecutionResponse(
       prompt: executionPrompt,
       channelId: task.channelId,
       modelId: task.modelId,
+      conversationId: task.conversationId,
     });
 
     try {
+      if (
+        runtimeContext.liveContext?.status === "live" &&
+        (runtimeContext.liveContext.route === "web_search" ||
+          runtimeContext.liveContext.route === "research")
+      ) {
+        toolStarts += 1;
+        await createAgentTaskEvent(userId, taskId, run.id, {
+          type: "execution_event",
+          content: null,
+          toolName: runtimeContext.liveContext.route,
+          toolInput: { query: task.goal },
+          metadata: { eventType: "tool_start", source: "live_context" },
+        });
+        send({
+          type: "execution_event",
+          taskId,
+          runId: run.id,
+          eventType: "tool_start",
+          toolName: runtimeContext.liveContext.route,
+          toolInput: { query: task.goal },
+          content: null,
+        });
+
+        toolResults += 1;
+        const summary = buildLiveSearchSummary({
+          route: runtimeContext.liveContext.route,
+          prompt: task.goal,
+          citations: runtimeContext.liveContext.citations,
+        });
+        await createAgentTaskEvent(userId, taskId, run.id, {
+          type: "execution_event",
+          content: summary,
+          toolName: runtimeContext.liveContext.route,
+          metadata: { eventType: "tool_result", source: "live_context" },
+        });
+        send({
+          type: "execution_event",
+          taskId,
+          runId: run.id,
+          eventType: "tool_result",
+          toolName: runtimeContext.liveContext.route,
+          content: summary,
+        });
+      }
+
       for await (const event of runAgentWithConfig({
         userId,
         prompt: executionPrompt,

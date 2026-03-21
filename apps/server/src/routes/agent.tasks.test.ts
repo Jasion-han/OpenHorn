@@ -67,11 +67,29 @@ test("task routes cover create, list, detail, plan, approval, and execute precon
         yield { type: "text", content: "Resumed after approval." };
       }
     },
-    buildAgentRuntimeContext: async () => ({
+    buildAgentRuntimeContext: async (input: { prompt?: string }) => ({
       channelId: "channel-1",
       modelId: "claude-3-7-sonnet",
       globalSystemPrompt: undefined,
-      liveSystemContext: undefined,
+      liveSystemContext:
+        input.prompt?.includes("联网搜索 OpenAI")
+          ? "Injected live search context."
+          : undefined,
+      liveContext: input.prompt?.includes("联网搜索 OpenAI")
+        ? {
+            status: "live",
+            route: "web_search",
+            userLabel: "已使用实时搜索",
+            source: { type: "web_search", provider: "tavily" },
+            systemContext: "Injected live search context.",
+            citations: [
+              {
+                title: "OpenAI API Docs",
+                url: "https://platform.openai.com/docs/api-reference/responses",
+              },
+            ],
+          }
+        : undefined,
     }),
     updateAgentSessionChannel: async () => ({ success: true }),
     updateAgentSessionStatus: async () => ({ success: true }),
@@ -160,6 +178,8 @@ test("task routes cover create, list, detail, plan, approval, and execute precon
         runId,
         type: input.type,
         content: input.content ?? null,
+        toolName: input.toolName ?? null,
+        toolInput: input.toolInput ?? null,
         metadata: input.metadata ?? null,
         createdAt: new Date().toISOString(),
       };
@@ -557,6 +577,74 @@ test("task routes cover create, list, detail, plan, approval, and execute precon
           item.type === "final_result" &&
           typeof item.content === "string" &&
           item.content.includes("Starting execution."),
+      ),
+    ).toBe(true);
+
+    const createWebSearchTask = await agent.request("/tasks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: "token=test-token" },
+      body: JSON.stringify({
+        title: "Web search",
+        goal: "请联网搜索 OpenAI 官方网站并总结 Responses API 标题。",
+      }),
+    });
+    const createWebSearchJson = (await createWebSearchTask.json()) as { task: { id: string } };
+    expect(createWebSearchTask.status).toBe(201);
+
+    const webPlanResponse = await agent.request(`/tasks/${createWebSearchJson.task.id}/plan`, {
+      method: "POST",
+      headers: { Cookie: "token=test-token" },
+    });
+    const webPlanJson = (await webPlanResponse.json()) as {
+      approvals: Array<{ id: string }>;
+    };
+    expect(webPlanResponse.status).toBe(200);
+
+    const webPlanApprovalResponse = await agent.request(
+      `/approvals/${webPlanJson.approvals[0]!.id}/respond`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Cookie: "token=test-token" },
+        body: JSON.stringify({ status: "approved", response: { source: "web-search-test" } }),
+      },
+    );
+    expect(webPlanApprovalResponse.status).toBe(200);
+
+    const webExecuteResponse = await agent.request(`/tasks/${createWebSearchJson.task.id}/execute`, {
+      method: "POST",
+      headers: { Cookie: "token=test-token" },
+    });
+    expect(webExecuteResponse.status).toBe(200);
+    await webExecuteResponse.text();
+
+    const webDetailResponse = await agent.request(`/tasks/${createWebSearchJson.task.id}`, {
+      method: "GET",
+      headers: { Cookie: "token=test-token" },
+    });
+    const webDetailJson = (await webDetailResponse.json()) as {
+      events: Array<{
+        type: string;
+        toolName?: string | null;
+        metadata?: { eventType?: string; source?: string } | null;
+        toolInput?: { query?: string } | null;
+      }>;
+    };
+    expect(
+      webDetailJson.events.some(
+        (event) =>
+          event.type === "execution_event" &&
+          event.toolName === "web_search" &&
+          event.metadata?.eventType === "tool_start" &&
+          event.metadata?.source === "live_context",
+      ),
+    ).toBe(true);
+    expect(
+      webDetailJson.events.some(
+        (event) =>
+          event.type === "execution_event" &&
+          event.toolName === "web_search" &&
+          event.metadata?.eventType === "tool_result" &&
+          event.metadata?.source === "live_context",
       ),
     ).toBe(true);
   } finally {
