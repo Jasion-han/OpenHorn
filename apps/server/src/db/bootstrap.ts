@@ -100,6 +100,10 @@ const SCHEMA_DDL: string[] = [
     title TEXT NOT NULL,
     goal TEXT NOT NULL,
     attachments TEXT,
+    complexity TEXT NOT NULL DEFAULT 'deep',
+    ux_mode TEXT NOT NULL DEFAULT 'full',
+    requires_plan_approval INTEGER NOT NULL DEFAULT 1,
+    auto_start INTEGER NOT NULL DEFAULT 0,
     status TEXT NOT NULL DEFAULT 'draft',
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
@@ -503,6 +507,46 @@ async function ensureAgentEventsTable(): Promise<void> {
   }
 }
 
+async function ensureAgentTaskComplexityColumn(): Promise<void> {
+  const result = await client.execute(`PRAGMA table_info('agent_tasks');`);
+  const rows = getRows(result);
+  if (!hasColumnNamed(rows, "complexity")) {
+    await client.execute(`ALTER TABLE agent_tasks ADD COLUMN complexity TEXT DEFAULT 'deep';`);
+    await client.execute(`UPDATE agent_tasks SET complexity = 'deep' WHERE complexity IS NULL;`);
+  }
+}
+
+async function ensureAgentTaskUxModeColumn(): Promise<void> {
+  const result = await client.execute(`PRAGMA table_info('agent_tasks');`);
+  const rows = getRows(result);
+  if (!hasColumnNamed(rows, "ux_mode")) {
+    await client.execute(`ALTER TABLE agent_tasks ADD COLUMN ux_mode TEXT DEFAULT 'full';`);
+    await client.execute(`UPDATE agent_tasks SET ux_mode = 'full' WHERE ux_mode IS NULL;`);
+  }
+}
+
+async function ensureAgentTaskRequiresPlanApprovalColumn(): Promise<void> {
+  const result = await client.execute(`PRAGMA table_info('agent_tasks');`);
+  const rows = getRows(result);
+  if (!hasColumnNamed(rows, "requires_plan_approval")) {
+    await client.execute(
+      `ALTER TABLE agent_tasks ADD COLUMN requires_plan_approval INTEGER DEFAULT 1;`,
+    );
+    await client.execute(
+      `UPDATE agent_tasks SET requires_plan_approval = 1 WHERE requires_plan_approval IS NULL;`,
+    );
+  }
+}
+
+async function ensureAgentTaskAutoStartColumn(): Promise<void> {
+  const result = await client.execute(`PRAGMA table_info('agent_tasks');`);
+  const rows = getRows(result);
+  if (!hasColumnNamed(rows, "auto_start")) {
+    await client.execute(`ALTER TABLE agent_tasks ADD COLUMN auto_start INTEGER DEFAULT 0;`);
+    await client.execute(`UPDATE agent_tasks SET auto_start = 0 WHERE auto_start IS NULL;`);
+  }
+}
+
 export async function bootstrapDatabase(): Promise<void> {
   await client.execute("PRAGMA foreign_keys=ON;");
 
@@ -528,5 +572,9 @@ export async function bootstrapDatabase(): Promise<void> {
   await ensureAgentEventsTable();
   await ensureAgentSessionModelIdColumn();
   await ensureAgentSessionConversationIdColumn();
+  await ensureAgentTaskComplexityColumn();
+  await ensureAgentTaskUxModeColumn();
+  await ensureAgentTaskRequiresPlanApprovalColumn();
+  await ensureAgentTaskAutoStartColumn();
   await ensureAttachmentsSessionIdColumn();
 }

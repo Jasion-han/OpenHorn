@@ -101,6 +101,12 @@ export const agentTasks = sqliteTable("agent_tasks", {
   title: text("title").notNull(),
   goal: text("goal").notNull(),
   attachments: text("attachments"),
+  complexity: text("complexity").notNull().default("deep"),
+  uxMode: text("ux_mode").notNull().default("full"),
+  requiresPlanApproval: integer("requires_plan_approval", { mode: "boolean" })
+    .notNull()
+    .default(true),
+  autoStart: integer("auto_start", { mode: "boolean" }).notNull().default(false),
   status: text("status").notNull().default("draft"),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),

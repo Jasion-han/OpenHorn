@@ -6,11 +6,14 @@ import { generateId } from "../utils";
 import { createSseStream } from "../utils/sse";
 import { type AgentRuntimeConfig, runAgentWithConfig } from "./agentService";
 import {
+  type AgentTaskComplexity,
+  type AgentTaskUxMode,
   createAgentApprovalRequest,
   createAgentRun,
   createAgentTask,
   createAgentTaskEvent,
   getAgentTaskDetail,
+  respondToAgentApproval,
   setAgentPlanSteps,
   updateAgentRunStatus,
   updateAgentTaskStatus,
@@ -56,6 +59,10 @@ type AgentRunData = {
   error?: string;
   steps: AgentRunStep[];
   taskId?: string;
+  complexity?: AgentTaskComplexity;
+  uxMode?: AgentTaskUxMode;
+  requiresPlanApproval?: boolean;
+  autoStart?: boolean;
   taskStatus?: "draft" | "planning" | "awaiting_approval" | "running" | "completed" | "failed" | "cancelled";
   latestRunId?: string | null;
   latestRunPhase?: "planning" | "execution" | null;
@@ -152,34 +159,201 @@ function buildAgentRunSummary(steps: AgentRunStep[], error?: string) {
   return toolCount > 0 ? `Agent 已调用 ${toolCount} 个工具` : "Agent 已完成本轮执行";
 }
 
-function buildTaskPlanFromGoal(goal: string) {
+function classifyChatAgentComplexity(params: {
+  goal: string;
+  attachmentCount: number;
+}): {
+  complexity: AgentTaskComplexity;
+  uxMode: AgentTaskUxMode;
+  requiresPlanApproval: boolean;
+  autoStart: boolean;
+} {
+  const normalized = params.goal.trim().toLowerCase();
+  const hasAttachments = params.attachmentCount > 0;
+  const deepSignals = [
+    /调研/,
+    /研究/,
+    /竞品/,
+    /报告/,
+    /方案/,
+    /完整/,
+    /全面/,
+    /多步骤/,
+    /多阶段/,
+    /持续/,
+    /对比.+对比/,
+    /compare/i,
+    /analysis/i,
+    /research/i,
+    /report/i,
+  ];
+  const deepStructureSignals = [
+    /需要包含/,
+    /包括/,
+    /边界/,
+    /风险/,
+    /验证/,
+    /恢复/,
+    /审批/,
+    /流程/,
+    /步骤/,
+    /多维/,
+  ];
+  const standardSignals = [
+    /对比/,
+    /比较/,
+    /汇总/,
+    /整理/,
+    /提取/,
+    /总结/,
+    /多个/,
+    /几家/,
+    /最近/,
+    /网页/,
+    /链接/,
+    /资讯/,
+    /新闻/,
+  ];
+  const deepSignalCount = deepSignals.filter((pattern) => pattern.test(normalized)).length;
+  const deepStructureCount = deepStructureSignals.filter((pattern) => pattern.test(normalized)).length;
+  const isDeep =
+    deepSignalCount > 0 ||
+    (normalized.length >= 120 && deepStructureCount >= 2) ||
+    (hasAttachments && normalized.length >= 80 && deepStructureCount >= 1);
+
+  if (isDeep) {
+    return {
+      complexity: "deep",
+      uxMode: "full",
+      requiresPlanApproval: false,
+      autoStart: true,
+    };
+  }
+
+  const isStandard =
+    hasAttachments ||
+    normalized.length >= 36 ||
+    standardSignals.some((pattern) => pattern.test(normalized));
+
+  if (isStandard) {
+    return {
+      complexity: "standard",
+      uxMode: "compact",
+      requiresPlanApproval: false,
+      autoStart: true,
+    };
+  }
+
+  return {
+    complexity: "light",
+    uxMode: "direct",
+    requiresPlanApproval: false,
+    autoStart: true,
+  };
+}
+
+function buildTaskPlanFromGoal(goal: string, complexity: AgentTaskComplexity) {
   const normalized = goal.trim().replace(/\s+/g, " ");
   const executionTitle =
     normalized.length > 72 ? `${normalized.slice(0, 69).trim()}...` : normalized;
 
+  if (complexity === "light") {
+    return [
+      {
+        title: "获取所需信息",
+        description: "只查询完成当前请求所需的最少信息。",
+        status: "ready" as const,
+      },
+      {
+        title: executionTitle || "直接给出结果",
+        description: "整理结论并直接返回可用答案。",
+        status: "pending" as const,
+      },
+    ];
+  }
+
+  if (complexity === "standard") {
+    return [
+      {
+        title: "收集关键信息",
+        description: "先抓取完成任务所需的关键资料或来源。",
+        status: "ready" as const,
+      },
+      {
+        title: executionTitle || "整理主要内容",
+        description: "提炼重点并形成一版结构化结果。",
+        status: "pending" as const,
+      },
+      {
+        title: "输出简洁结论",
+        description: "把结果压缩成用户可以直接使用的结论。",
+        status: "pending" as const,
+      },
+    ];
+  }
+
   return [
     {
-      title: "Inspect task scope and available context",
-      description: "Review the goal, attachments, and constraints before execution.",
+      title: "明确任务范围与约束",
+      description: "先确认目标、附件和边界条件，避免执行偏题。",
       status: "ready" as const,
     },
     {
-      title: executionTitle || "Execute the requested task",
-      description: "Carry out the task using the approved plan and required tools.",
+      title: executionTitle || "执行任务",
+      description: "按照计划推进核心处理流程，并按需调用工具。",
       status: "pending" as const,
     },
     {
-      title: "Verify outcome and summarize results",
-      description: "Validate the output, note risks, and produce a final result artifact.",
+      title: "核验结果并整理交付",
+      description: "校验结果质量、补充风险说明并生成最终交付。",
       status: "pending" as const,
     },
   ];
 }
 
-function buildTaskBackedAgentSummary(taskStatus: AgentRunData["taskStatus"]) {
+function buildTaskBackedAgentSummary(
+  taskStatus: AgentRunData["taskStatus"],
+  uxMode: AgentTaskUxMode,
+) {
+  if (uxMode === "direct") {
+    switch (taskStatus) {
+      case "planning":
+        return "正在准备后直接处理这项任务。";
+      case "running":
+        return "正在直接处理这项任务。";
+      case "completed":
+        return "任务已完成。";
+      case "failed":
+        return "任务处理失败，可以重试。";
+      case "cancelled":
+        return "任务已取消。";
+      default:
+        return "我先直接处理这项任务。";
+    }
+  }
+
+  if (uxMode === "compact") {
+    switch (taskStatus) {
+      case "planning":
+        return "正在整理简要步骤并开始执行。";
+      case "running":
+        return "正在按简要步骤处理这项任务。";
+      case "completed":
+        return "任务已完成。";
+      case "failed":
+        return "任务处理失败，可以重试或查看过程。";
+      case "cancelled":
+        return "任务已取消。";
+      default:
+        return "我会按简要步骤直接开始处理。";
+    }
+  }
+
   switch (taskStatus) {
+    case "planning":
+      return "正在整理执行路径并开始执行。";
     case "awaiting_approval":
-      return "已生成任务计划，等待你批准后开始执行。";
+      return "任务暂时停下，等待进一步批准。";
     case "running":
       return "任务正在执行。";
     case "completed":
@@ -189,23 +363,25 @@ function buildTaskBackedAgentSummary(taskStatus: AgentRunData["taskStatus"]) {
     case "cancelled":
       return "任务已取消。";
     default:
-      return "已创建 Agent 任务。";
+      return "我会先展开任务并开始执行。";
   }
 }
 
 function buildTaskBackedAgentContent(detail: Awaited<ReturnType<typeof getAgentTaskDetail>>) {
-  const summary = buildTaskBackedAgentSummary(detail.task.status);
-  const planSteps = detail.planSteps
-    .slice()
-    .sort((left, right) => left.orderIndex - right.orderIndex)
-    .map((step, index) => `${index + 1}. ${step.title}`);
-
-  const lines = [summary];
-  if (planSteps.length > 0) {
-    lines.push("", "当前计划：", ...planSteps);
+  const finalResult =
+    detail.artifacts.find((artifact) => artifact.type === "final_result")?.content.trim() ?? "";
+  const statusSummary = buildTaskBackedAgentSummary(detail.task.status, detail.task.uxMode);
+  if (detail.task.status === "completed" && finalResult) {
+    return finalResult;
   }
-  lines.push("", "你可以在下方直接审批、执行、继续、重试或重新规划。");
-  return lines.join("\n");
+
+  const preview = detail.task.insight?.previewText?.trim() || "";
+  const completedSummary = detail.task.insight?.summary?.trim() || "";
+  if (detail.task.status === "completed") {
+    return preview || completedSummary || statusSummary;
+  }
+
+  return preview || statusSummary;
 }
 
 function buildTaskBackedAgentRun(detail: Awaited<ReturnType<typeof getAgentTaskDetail>>): AgentRunData {
@@ -223,9 +399,13 @@ function buildTaskBackedAgentRun(detail: Awaited<ReturnType<typeof getAgentTaskD
             : detail.task.status === "cancelled"
               ? "cancelled"
               : "completed",
-    summary: buildTaskBackedAgentSummary(detail.task.status),
+    summary: buildTaskBackedAgentSummary(detail.task.status, detail.task.uxMode),
     steps: [],
     taskId: detail.task.id,
+    complexity: detail.task.complexity,
+    uxMode: detail.task.uxMode,
+    requiresPlanApproval: detail.task.requiresPlanApproval,
+    autoStart: detail.task.autoStart,
     taskStatus: detail.task.status,
     latestRunId: latestRun?.id ?? null,
     latestRunPhase: latestRun?.phase ?? null,
@@ -235,7 +415,7 @@ function buildTaskBackedAgentRun(detail: Awaited<ReturnType<typeof getAgentTaskD
   };
 }
 
-async function createPlannedAgentTaskForConversation(params: {
+async function createChatAgentTaskForConversation(params: {
   userId: string;
   conversationId: string;
   channelId: string | null;
@@ -243,6 +423,10 @@ async function createPlannedAgentTaskForConversation(params: {
   goal: string;
   attachmentIds: string[];
 }) {
+  const routing = classifyChatAgentComplexity({
+    goal: params.goal,
+    attachmentCount: params.attachmentIds.length,
+  });
   const task = await createAgentTask(params.userId, {
     conversationId: params.conversationId,
     channelId: params.channelId,
@@ -252,6 +436,10 @@ async function createPlannedAgentTaskForConversation(params: {
       id,
       fileName: "attachment",
     })),
+    complexity: routing.complexity,
+    uxMode: routing.uxMode,
+    requiresPlanApproval: routing.requiresPlanApproval,
+    autoStart: routing.autoStart,
   });
 
   await updateAgentTaskStatus(params.userId, task.id, "planning");
@@ -267,7 +455,7 @@ async function createPlannedAgentTaskForConversation(params: {
   });
 
   const planSteps = await setAgentPlanSteps(params.userId, task.id, run.id, {
-    steps: buildTaskPlanFromGoal(params.goal),
+    steps: buildTaskPlanFromGoal(params.goal, routing.complexity),
   });
 
   for (const step of planSteps) {
@@ -284,27 +472,57 @@ async function createPlannedAgentTaskForConversation(params: {
 
   const approval = await createAgentApprovalRequest(params.userId, task.id, run.id, {
     type: "plan_approval",
-    title: "Approve task execution",
-    description: "Review the generated plan before the agent starts executing it.",
+    title: routing.requiresPlanApproval ? "Approve task execution" : "Task execution auto-approved",
+    description: routing.requiresPlanApproval
+      ? "Review the generated plan before the agent starts executing it."
+      : "This task was auto-approved because it is simple enough to start immediately.",
     payload: {
       planStepIds: planSteps.map((step) => step.id),
       planStepCount: planSteps.length,
+      autoApproved: !routing.requiresPlanApproval,
     },
   });
 
-  await createAgentTaskEvent(params.userId, task.id, run.id, {
-    type: "approval_requested",
-    content: approval.title,
-    metadata: { approvalId: approval.id, approvalType: approval.type, source: "chat" },
-  });
+  if (routing.requiresPlanApproval) {
+    await createAgentTaskEvent(params.userId, task.id, run.id, {
+      type: "approval_requested",
+      content: approval.title,
+      metadata: { approvalId: approval.id, approvalType: approval.type, source: "chat" },
+    });
 
-  await updateAgentRunStatus(params.userId, run.id, "awaiting_approval");
-  await updateAgentTaskStatus(params.userId, task.id, "awaiting_approval");
-  await createAgentTaskEvent(params.userId, task.id, run.id, {
-    type: "task_status",
-    content: "Task is awaiting approval.",
-    metadata: { status: "awaiting_approval", source: "chat" },
-  });
+    await updateAgentRunStatus(params.userId, run.id, "awaiting_approval");
+    await updateAgentTaskStatus(params.userId, task.id, "awaiting_approval");
+    await createAgentTaskEvent(params.userId, task.id, run.id, {
+      type: "task_status",
+      content: "Task is awaiting approval.",
+      metadata: { status: "awaiting_approval", source: "chat" },
+    });
+  } else {
+    const resolvedApproval = await respondToAgentApproval(params.userId, approval.id, {
+      status: "approved",
+      response: { source: "chat_auto_approved" },
+    });
+    await createAgentTaskEvent(params.userId, task.id, run.id, {
+      type: "approval_resolved",
+      content: resolvedApproval.title,
+      metadata: {
+        approvalId: resolvedApproval.id,
+        approvalType: resolvedApproval.type,
+        status: resolvedApproval.status,
+        source: "chat",
+      },
+    });
+    await updateAgentRunStatus(params.userId, run.id, "completed", {
+      summary: "Planning completed and execution is ready to start.",
+      completedAt: new Date(),
+    });
+    await updateAgentTaskStatus(params.userId, task.id, "draft");
+    await createAgentTaskEvent(params.userId, task.id, run.id, {
+      type: "task_status",
+      content: "Task is ready to execute.",
+      metadata: { status: "draft", autoStart: routing.autoStart, source: "chat" },
+    });
+  }
 
   return getAgentTaskDetail(params.userId, task.id);
 }
@@ -742,7 +960,7 @@ export async function streamMessage(
         createdAt: assistantCreatedAt,
       });
 
-      const detail = await createPlannedAgentTaskForConversation({
+      const detail = await createChatAgentTaskForConversation({
         userId,
         conversationId: input.conversationId,
         channelId: conversation.channelId || null,
@@ -992,7 +1210,7 @@ export async function editUserMessage(
         })
         .where(eq(conversations.id, userMsg.conversationId));
 
-      const detail = await createPlannedAgentTaskForConversation({
+      const detail = await createChatAgentTaskForConversation({
         userId,
         conversationId: userMsg.conversationId,
         channelId: conversation.channelId || null,
@@ -1195,7 +1413,7 @@ export async function regenerateMessage(
         })
         .where(eq(conversations.id, assistantMsg.conversationId));
 
-      const detail = await createPlannedAgentTaskForConversation({
+      const detail = await createChatAgentTaskForConversation({
         userId,
         conversationId: assistantMsg.conversationId,
         channelId: conversation.channelId || null,

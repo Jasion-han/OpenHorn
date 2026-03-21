@@ -18,6 +18,8 @@ export type AgentTaskStatus =
   | "completed"
   | "failed"
   | "cancelled";
+export type AgentTaskComplexity = "light" | "standard" | "deep";
+export type AgentTaskUxMode = "direct" | "compact" | "full";
 
 export type AgentRunPhase = "planning" | "execution";
 export type AgentRunStatus =
@@ -62,6 +64,10 @@ export interface AgentTaskRecord {
   title: string;
   goal: string;
   attachments: AgentTaskAttachment[];
+  complexity: AgentTaskComplexity;
+  uxMode: AgentTaskUxMode;
+  requiresPlanApproval: boolean;
+  autoStart: boolean;
   status: AgentTaskStatus;
   insight: AgentTaskInsightRecord | null;
   createdAt: string;
@@ -169,6 +175,10 @@ export interface CreateAgentTaskInput {
   title?: string | null;
   goal: string;
   attachments?: AgentTaskAttachment[];
+  complexity?: AgentTaskComplexity;
+  uxMode?: AgentTaskUxMode;
+  requiresPlanApproval?: boolean;
+  autoStart?: boolean;
 }
 
 export interface UpdateAgentTaskInput {
@@ -265,6 +275,10 @@ function mapTask(row: typeof agentTasks.$inferSelect): AgentTaskRecord {
     title: row.title,
     goal: row.goal,
     attachments: parseJson<AgentTaskAttachment[]>(row.attachments) ?? [],
+    complexity: (row.complexity as AgentTaskComplexity) ?? "deep",
+    uxMode: (row.uxMode as AgentTaskUxMode) ?? "full",
+    requiresPlanApproval: Boolean(row.requiresPlanApproval),
+    autoStart: Boolean(row.autoStart),
     status: row.status as AgentTaskStatus,
     insight: null,
     createdAt: row.createdAt.toISOString(),
@@ -525,6 +539,10 @@ export async function createAgentTask(userId: string, input: CreateAgentTaskInpu
     title: buildTaskTitle(goal, input.title),
     goal,
     attachments: stringifyJson(input.attachments ?? []),
+    complexity: input.complexity ?? "deep",
+    uxMode: input.uxMode ?? "full",
+    requiresPlanApproval: input.requiresPlanApproval ?? true,
+    autoStart: input.autoStart ?? false,
     status: "draft",
     createdAt: now,
     updatedAt: now,

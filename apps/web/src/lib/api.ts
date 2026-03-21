@@ -72,6 +72,10 @@ export interface ApiAgentRun {
   steps: ApiAgentRunStep[];
   legacySessionId?: string;
   taskId?: string;
+  complexity?: "light" | "standard" | "deep";
+  uxMode?: "direct" | "compact" | "full";
+  requiresPlanApproval?: boolean;
+  autoStart?: boolean;
   taskStatus?:
     | "draft"
     | "planning"
@@ -139,6 +143,8 @@ export type ApiAgentTaskStatus =
   | "cancelled";
 
 export type ApiAgentRunPhase = "planning" | "execution";
+export type ApiAgentTaskComplexity = "light" | "standard" | "deep";
+export type ApiAgentTaskUxMode = "direct" | "compact" | "full";
 export type ApiAgentRunStatus =
   | "pending"
   | "running"
@@ -199,6 +205,10 @@ export interface ApiAgentTask {
   title: string;
   goal: string;
   attachments: ApiAgentTaskAttachment[];
+  complexity: ApiAgentTaskComplexity;
+  uxMode: ApiAgentTaskUxMode;
+  requiresPlanApproval: boolean;
+  autoStart: boolean;
   status: ApiAgentTaskStatus;
   insight: ApiAgentTaskInsight | null;
   createdAt: string;
