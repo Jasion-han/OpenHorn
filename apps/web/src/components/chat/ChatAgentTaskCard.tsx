@@ -1,7 +1,7 @@
 "use client";
 
 import { ChevronDown, Loader2, Play, RotateCcw, SkipForward, Wand2 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AgentArtifactsPanel } from "@/components/agent/AgentArtifactsPanel";
 import { AgentExecutionPanel } from "@/components/agent/AgentExecutionPanel";
 import { AgentPlanPanel } from "@/components/agent/AgentPlanPanel";
@@ -12,8 +12,10 @@ import {
   type ApiAgentApproval,
   type ApiAgentArtifact,
   type ApiAgentRun,
+  type ApiAgentTaskComplexity,
   type ApiAgentTaskDetail,
   type ApiAgentTaskEvent,
+  type ApiAgentTaskUxMode,
   extractErrorMessage,
 } from "@/lib/api";
 import { streamAgentTaskExecution, type AgentTaskStreamEvent } from "@/lib/agent-task-stream";
@@ -29,6 +31,68 @@ const TASK_STATUS_LABELS = {
   failed: "失败",
   cancelled: "已取消",
 } satisfies Record<NonNullable<ApiAgentRun["taskStatus"]>, string>;
+
+const COMPLEXITY_LABELS = {
+  light: "快速处理",
+  standard: "简洁流程",
+  deep: "完整流程",
+} satisfies Record<ApiAgentTaskComplexity, string>;
+
+function buildTaskStatusSummary(
+  status: ApiAgentTaskDetail["task"]["status"],
+  uxMode: ApiAgentTaskUxMode,
+) {
+  if (uxMode === "direct") {
+    switch (status) {
+      case "planning":
+        return "正在准备后直接处理这项任务。";
+      case "running":
+        return "正在直接处理这项任务。";
+      case "completed":
+        return "任务已完成。";
+      case "failed":
+        return "任务处理失败，可以重试。";
+      case "cancelled":
+        return "任务已取消。";
+      default:
+        return "我先直接处理这项任务。";
+    }
+  }
+
+  if (uxMode === "compact") {
+    switch (status) {
+      case "planning":
+        return "正在整理简要步骤并开始执行。";
+      case "running":
+        return "正在按简要步骤处理这项任务。";
+      case "completed":
+        return "任务已完成。";
+      case "failed":
+        return "任务处理失败，可以重试或查看过程。";
+      case "cancelled":
+        return "任务已取消。";
+      default:
+        return "我会按简要步骤直接开始处理。";
+    }
+  }
+
+  switch (status) {
+    case "planning":
+      return "正在整理执行路径并开始执行。";
+    case "awaiting_approval":
+      return "任务暂时停下，等待进一步批准。";
+    case "running":
+      return "任务正在执行。";
+    case "completed":
+      return "任务已完成。";
+    case "failed":
+      return "任务执行失败，可继续、重试或重新规划。";
+    case "cancelled":
+      return "任务已取消。";
+    default:
+      return "我会先展开任务并开始执行。";
+  }
+}
 
 function buildTaskBackedAgentRun(detail: ApiAgentTaskDetail): ApiAgentRun {
   const latestRun = detail.runs[0] ?? null;
@@ -48,6 +112,10 @@ function buildTaskBackedAgentRun(detail: ApiAgentTaskDetail): ApiAgentRun {
     summary: buildTaskMessageSummary(detail),
     steps: [],
     taskId: detail.task.id,
+    complexity: detail.task.complexity,
+    uxMode: detail.task.uxMode,
+    requiresPlanApproval: detail.task.requiresPlanApproval,
+    autoStart: detail.task.autoStart,
     taskStatus: detail.task.status,
     latestRunId: latestRun?.id ?? null,
     latestRunPhase: latestRun?.phase ?? null,
@@ -60,49 +128,22 @@ function buildTaskBackedAgentRun(detail: ApiAgentTaskDetail): ApiAgentRun {
 function buildTaskMessageSummary(detail: ApiAgentTaskDetail) {
   const finalResult =
     detail.artifacts.find((artifact) => artifact.type === "final_result")?.content.trim() ?? "";
+  const statusSummary = buildTaskStatusSummary(detail.task.status, detail.task.uxMode);
   if (detail.task.status === "completed" && finalResult) {
     return finalResult;
   }
 
-  const preview =
-    detail.task.insight?.previewText?.trim() || detail.task.insight?.summary?.trim() || "";
-  const planSteps = detail.planSteps
-    .slice()
-    .sort((left, right) => left.orderIndex - right.orderIndex)
-    .map((step, index) => `${index + 1}. ${step.title}`);
-
-  if (detail.task.status === "awaiting_approval") {
-    return [
-      "已生成任务计划，等待你批准后开始执行。",
-      ...(planSteps.length > 0 ? ["", "当前计划：", ...planSteps] : []),
-    ].join("\n");
+  const preview = detail.task.insight?.previewText?.trim() || "";
+  const completedSummary = detail.task.insight?.summary?.trim() || "";
+  if (detail.task.status === "completed") {
+    return preview || completedSummary || statusSummary;
   }
 
-  if (detail.task.status === "running") {
-    return preview || "任务正在执行。";
-  }
-
-  if (detail.task.status === "failed") {
-    return preview || "任务执行失败，可继续、重试或重新规划。";
-  }
-
-  if (detail.task.status === "cancelled") {
-    return "任务已取消。";
-  }
-
-  if (detail.task.status === "draft") {
-    return "任务计划已批准，可以开始执行或重新规划。";
-  }
-
-  return preview || "已创建 Agent 任务。";
+  return preview || statusSummary;
 }
 
 function getPendingApproval(detail: ApiAgentTaskDetail): ApiAgentApproval | null {
-  return (
-    detail.approvals.find((approval) => approval.status === "pending") ??
-    detail.approvals[0] ??
-    null
-  );
+  return detail.approvals.find((approval) => approval.status === "pending") ?? null;
 }
 
 function getPlanStepsForDetail(detail: ApiAgentTaskDetail, approval: ApiAgentApproval | null) {
@@ -192,7 +233,8 @@ export function ChatAgentTaskCard({
     "approve" | "reject" | "execute" | "retry" | "continue" | "replan" | "cancel" | null
   >(null);
   const [streamError, setStreamError] = useState<string | null>(null);
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(false);
+  const autoExecuteKeyRef = useRef<string | null>(null);
 
   const syncMessage = (nextDetail: ApiAgentTaskDetail) => {
     useChatStore
@@ -242,6 +284,13 @@ export function ChatAgentTaskCard({
   }, [detail?.task.status, taskId]);
 
   const approval = useMemo(() => (detail ? getPendingApproval(detail) : null), [detail]);
+  const effectiveUxMode = useMemo<ApiAgentTaskUxMode>(() => {
+    if (!detail) return "full";
+    if (approval?.status === "pending") {
+      return "full";
+    }
+    return detail.task.uxMode;
+  }, [detail, approval]);
   const planSteps = useMemo(
     () => (detail ? getPlanStepsForDetail(detail, approval) : []),
     [detail, approval],
@@ -255,6 +304,37 @@ export function ChatAgentTaskCard({
     () => (detail ? getRunArtifacts(detail, executionRun?.id ?? null) : []),
     [detail, executionRun],
   );
+  const inlineSummary = useMemo(() => {
+    if (!detail) return "";
+    return buildTaskStatusSummary(detail.task.status, effectiveUxMode);
+  }, [detail, effectiveUxMode]);
+
+  useEffect(() => {
+    if (!detail) return;
+    if (
+      effectiveUxMode === "full" ||
+      detail.task.status === "planning" ||
+      detail.task.status === "running" ||
+      detail.task.status === "failed" ||
+      detail.task.status === "awaiting_approval"
+    ) {
+      setExpanded(true);
+    }
+  }, [detail, effectiveUxMode]);
+
+  useEffect(() => {
+    if (!detail || !detail.task.autoStart || detail.task.status !== "draft") {
+      return;
+    }
+
+    const key = `${detail.task.id}:${detail.task.updatedAt}:${detail.task.status}`;
+    if (autoExecuteKeyRef.current === key || busyAction !== null) {
+      return;
+    }
+    autoExecuteKeyRef.current = key;
+
+    void runExecutionAction("execute", () => api.agentTasks.execute(detail.task.id));
+  }, [detail, busyAction]);
 
   const runExecutionAction = async (
     action: "execute" | "retry" | "continue",
@@ -422,6 +502,10 @@ export function ChatAgentTaskCard({
   const canRetry = detail.task.status === "failed" || detail.task.status === "completed" || detail.task.status === "cancelled";
   const canContinue = detail.task.status === "failed" || detail.task.status === "completed";
   const canCancel = detail.task.status === "running";
+  const showFullPanels = effectiveUxMode === "full";
+  const showCompactPlan = effectiveUxMode === "compact" && planSteps.length > 0;
+  const visibleCompactSteps = planSteps.slice(0, 3);
+  const showInlineError = effectiveUxMode !== "full" && Boolean(streamError);
 
   return (
     <section className="mt-2 overflow-hidden rounded-2xl border border-border/60 bg-muted/20">
@@ -435,9 +519,15 @@ export function ChatAgentTaskCard({
           <p className="mt-1 text-xs text-muted-foreground">
             {TASK_STATUS_LABELS[detail.task.status]} · {detail.task.title}
           </p>
+          {effectiveUxMode !== "full" ? (
+            <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{inlineSummary}</p>
+          ) : null}
         </div>
         <div className="flex items-center gap-2">
           {busyAction ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /> : null}
+          <span className="rounded-full border border-border/60 bg-background/70 px-2 py-0.5 text-[11px] text-muted-foreground">
+            {COMPLEXITY_LABELS[detail.task.complexity]}
+          </span>
           <span className="rounded-full border border-border/60 bg-background/70 px-2 py-0.5 text-[11px] text-muted-foreground">
             {TASK_STATUS_LABELS[detail.task.status]}
           </span>
@@ -447,6 +537,26 @@ export function ChatAgentTaskCard({
 
       {expanded ? (
         <div className="space-y-3 border-t border-border/50 px-3 py-3">
+          {effectiveUxMode !== "full" ? (
+            <section className="rounded-2xl border border-border/60 bg-background/75 px-4 py-3">
+              <p className="text-sm leading-6 text-foreground/90">{inlineSummary}</p>
+              {showCompactPlan ? (
+                <div className="mt-3 space-y-2">
+                  {visibleCompactSteps.map((step) => (
+                    <div key={step.id} className="text-sm text-muted-foreground">
+                      {step.orderIndex + 1}. {step.title}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              {showInlineError && streamError ? (
+                <div className="mt-3 rounded-xl border border-destructive/20 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+                  {streamError}
+                </div>
+              ) : null}
+            </section>
+          ) : null}
+
           <div className="flex flex-wrap gap-2">
             {canExecute ? (
               <Button
@@ -497,20 +607,44 @@ export function ChatAgentTaskCard({
             ) : null}
           </div>
 
-          <AgentPlanPanel
-            planSteps={planSteps}
-            approval={approval}
-            onApprove={() => void handleApproval("approved")}
-            onReject={() => void handleApproval("rejected")}
-          />
+          {showFullPanels ? (
+            <AgentPlanPanel
+              planSteps={planSteps}
+              approval={approval}
+              onApprove={() => void handleApproval("approved")}
+              onReject={() => void handleApproval("rejected")}
+            />
+          ) : approval ? (
+            <div className="rounded-2xl border border-border/60 bg-background/75 px-4 py-3">
+              <div className="mb-3 text-sm font-medium">{approval.title}</div>
+              {approval.description ? (
+                <p className="mb-3 text-sm text-muted-foreground">{approval.description}</p>
+              ) : null}
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" onClick={() => void handleApproval("approved")} disabled={busyAction !== null}>
+                  批准
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => void handleApproval("rejected")}
+                  disabled={busyAction !== null}
+                >
+                  拒绝
+                </Button>
+              </div>
+            </div>
+          ) : null}
 
-          <AgentExecutionPanel
-            events={executionEvents}
-            streamError={streamError}
-            runLabel={executionRun ? `执行 #${executionRun.id.slice(0, 6)}` : null}
-          />
+          {showFullPanels ? (
+            <AgentExecutionPanel
+              events={executionEvents}
+              streamError={streamError}
+              runLabel={executionRun ? `执行 #${executionRun.id.slice(0, 6)}` : null}
+            />
+          ) : null}
 
-          <AgentArtifactsPanel artifacts={executionArtifacts} />
+          {showFullPanels ? <AgentArtifactsPanel artifacts={executionArtifacts} /> : null}
         </div>
       ) : null}
     </section>

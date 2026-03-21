@@ -27,7 +27,7 @@ export function AgentPlanPanel({
       <div className="mb-4 flex items-center justify-between gap-3">
         <div>
           <div className="text-sm font-medium">执行计划</div>
-          <p className="mt-1 text-xs text-muted-foreground">先审阅计划，再决定是否执行。</p>
+          <p className="mt-1 text-xs text-muted-foreground">Agent 会按这组步骤自主推进，你也可以随时查看过程。</p>
         </div>
       </div>
 

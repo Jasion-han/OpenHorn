@@ -456,6 +456,11 @@ function MessageBubble({
   const isAgent = msg.mode === "agent";
   const streamTailLength =
     isAssistant && isStreaming && hasAssistantText ? (msg.streamTail || "").length : 0;
+  const processPanel = isAssistant
+    ? msg.agentRun?.taskId
+      ? <ChatAgentTaskCard messageId={msg.id} taskId={msg.agentRun.taskId} />
+      : <AgentRunPanel run={msg.agentRun} />
+    : null;
 
   return (
     <div
@@ -491,10 +496,11 @@ function MessageBubble({
           <MessageAttachments attachments={attachments} />
         )}
 
+        {processPanel}
+
         {isAssistant ? (
-          <div className="min-w-0 max-w-full" style={WRAP_TEXT}>
+          <div className={cn("min-w-0 max-w-full", processPanel && "mt-3")} style={WRAP_TEXT}>
             <LiveStatusBadge status={msg.liveStatus} route={msg.liveRoute} label={msg.liveLabel} />
-            <CitationList citations={msg.citations} content={displayContent} />
             {hasAssistantText ? (
               isStreaming ? (
                 <StreamingMarkdownMessage
@@ -509,17 +515,12 @@ function MessageBubble({
             ) : isStreaming ? (
               <TypingIndicator className="ml-1" />
             ) : null}
+            <CitationList citations={msg.citations} content={displayContent} />
           </div>
         ) : msg.content?.trim() ? (
           <p className="text-sm" style={WRAP_TEXT}>
             {msg.content}
           </p>
-        ) : null}
-
-        {isAssistant && msg.agentRun?.taskId ? (
-          <ChatAgentTaskCard messageId={msg.id} taskId={msg.agentRun.taskId} />
-        ) : isAssistant ? (
-          <AgentRunPanel run={msg.agentRun} />
         ) : null}
       </div>
       <div
