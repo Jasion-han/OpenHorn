@@ -34,12 +34,6 @@ const nextConfig: NextConfig = {
       }
     }
 
-    if (dev && isServer && config.output) {
-      // Next's server webpack runtime in this repo expects chunks next to `webpack-runtime.js`.
-      // Keep the emitted server chunk files aligned with that runtime.
-      config.output.chunkFilename = "[id].js";
-    }
-
     return config;
   },
   typescript: {
