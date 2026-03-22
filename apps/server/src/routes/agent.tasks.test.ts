@@ -86,6 +86,8 @@ test("task routes cover create, list, detail, plan, approval, and execute precon
               {
                 title: "OpenAI API Docs",
                 url: "https://platform.openai.com/docs/api-reference/responses",
+                snippet:
+                  "### Events Meetups Hackathon Support Forum Discord API Dashboard Responses API # Responses Overview OpenAI’s most advanced interface for generating model responses. Supports text and image inputs, and text outputs.",
               },
             ],
           }
@@ -628,6 +630,11 @@ test("task routes cover create, list, detail, plan, approval, and execute precon
         metadata?: { eventType?: string; source?: string } | null;
         toolInput?: { query?: string } | null;
       }>;
+      artifacts: Array<{
+        type: string;
+        content?: string | null;
+        metadata?: { citations?: Array<{ title: string; url: string }> } | null;
+      }>;
     };
     expect(
       webDetailJson.events.some(
@@ -647,6 +654,16 @@ test("task routes cover create, list, detail, plan, approval, and execute precon
           event.metadata?.source === "live_context",
       ),
     ).toBe(true);
+    const webFinalResult = webDetailJson.artifacts.find((artifact) => artifact.type === "final_result");
+    expect(webFinalResult?.content).toContain("[1]");
+    expect(webFinalResult?.metadata?.citations?.[0]?.title).toBe("OpenAI API Docs");
+    expect(webFinalResult?.metadata?.citations?.[0]?.url).toBe(
+      "https://platform.openai.com/docs/api-reference/responses",
+    );
+    expect(webFinalResult?.content).toContain(
+      "一句总结：OpenAI’s most advanced interface for generating model responses.",
+    );
+    expect(webFinalResult?.content).not.toContain("### Events Meetups");
   } finally {
     mock.restore();
   }

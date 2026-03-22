@@ -18,6 +18,7 @@ import { AgentArtifactsPanel } from "@/components/agent/AgentArtifactsPanel";
 import { AgentExecutionPanel } from "@/components/agent/AgentExecutionPanel";
 import { AgentPlanPanel } from "@/components/agent/AgentPlanPanel";
 import { Button } from "@/components/ui/button";
+import { getArtifactCitations } from "@/lib/citations";
 import { cn } from "@/lib/utils";
 import {
   api,
@@ -200,9 +201,16 @@ function buildTaskBackedAgentRun(detail: ApiAgentTaskDetail): ApiAgentRun {
   };
 }
 
+function getTaskFinalResultArtifact(detail: ApiAgentTaskDetail) {
+  return detail.artifacts.find((artifact) => artifact.type === "final_result") ?? null;
+}
+
+function getTaskFinalResultCitations(detail: ApiAgentTaskDetail) {
+  return getArtifactCitations(getTaskFinalResultArtifact(detail));
+}
+
 function buildTaskMessageSummary(detail: ApiAgentTaskDetail) {
-  const finalResult =
-    detail.artifacts.find((artifact) => artifact.type === "final_result")?.content.trim() ?? "";
+  const finalResult = getTaskFinalResultArtifact(detail)?.content.trim() ?? "";
   const statusSummary = buildTaskStatusSummary(detail.task.status, detail.task.uxMode);
   if (detail.task.status === "completed" && finalResult) {
     return finalResult;
@@ -316,6 +324,7 @@ export function ChatAgentTaskCard({
       .getState()
       .updateMessage(messageId, buildTaskMessageSummary(nextDetail), {
         agentRun: buildTaskBackedAgentRun(nextDetail),
+        citations: getTaskFinalResultCitations(nextDetail),
       });
   };
 
@@ -475,6 +484,9 @@ export function ChatAgentTaskCard({
             }
 
             if (event.type === "final_result") {
+              useChatStore.getState().updateMessage(messageId, event.content, {
+                citations: event.citations,
+              });
               setDetail((current) => {
                 if (!current) return current;
                 const artifact: ApiAgentArtifact = {
@@ -484,7 +496,7 @@ export function ChatAgentTaskCard({
                   type: "final_result",
                   title: "Final result",
                   content: event.content,
-                  metadata: { live: true },
+                  metadata: { live: true, citations: event.citations ?? null },
                   createdAt: new Date().toISOString(),
                   updatedAt: new Date().toISOString(),
                 };

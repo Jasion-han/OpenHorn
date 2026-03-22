@@ -1,6 +1,6 @@
 "use client";
 
-import type { ApiAgentPlanStep, ApiAgentTaskStatus } from "./api";
+import type { ApiAgentPlanStep, ApiAgentTaskStatus, ApiCitation } from "./api";
 import { api, readErrorMessage } from "./api";
 import { readSseStream, type SseEvent } from "./sse";
 
@@ -25,7 +25,7 @@ export type AgentTaskStreamEvent =
       toolInput?: unknown;
     }
   | { type: "artifact_created"; taskId: string; runId: string; artifactType: string }
-  | { type: "final_result"; taskId: string; runId: string; content: string }
+  | { type: "final_result"; taskId: string; runId: string; content: string; citations?: ApiCitation[] }
   | { type: "error"; taskId?: string; runId?: string; content: string }
   | { type: "done"; taskId: string; runId: string };
 

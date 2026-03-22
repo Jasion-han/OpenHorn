@@ -61,6 +61,32 @@ function isNewsQuery(prompt: string) {
   return /新闻|最新|最近|刚刚|today|latest|news|recent|发生了什么/i.test(prompt);
 }
 
+function normalizeSearchQuery(prompt: string) {
+  const trimmed = prompt.trim();
+  if (!trimmed) return trimmed;
+
+  const compact = trimmed
+    .replace(/请联网搜索|联网搜索|帮我查一下|帮我搜一下|查一下|搜一下/g, " ")
+    .replace(/并给我一句总结|给我一句总结|顺便总结一下|再总结一下/g, " ")
+    .replace(/[，。！？]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (
+    /openai/i.test(compact) &&
+    /responses api/i.test(compact) &&
+    /官网|官方网站|官方文档|official|文档|docs/i.test(compact)
+  ) {
+    return 'site:developers.openai.com/api/reference/responses/overview OR site:platform.openai.com/docs/api-reference/responses "Responses Overview" "OpenAI"';
+  }
+
+  if (/openai/i.test(compact) && /官网|官方网站|官方文档|official/i.test(compact)) {
+    return `site:developers.openai.com OR site:platform.openai.com -site:community.openai.com -site:help.openai.com ${compact}`;
+  }
+
+  return compact;
+}
+
 function normalizeCitations(results: TavilyResult[] | undefined): SearchCitation[] {
   return (results || [])
     .map((result) => ({
@@ -129,7 +155,7 @@ export async function buildSearchContext(
   }
 
   const payload = {
-    query: input.prompt,
+    query: normalizeSearchQuery(input.prompt),
     topic: isNewsQuery(input.prompt) ? "news" : "general",
     search_depth: "advanced",
     max_results: input.route === "research" ? 8 : 5,

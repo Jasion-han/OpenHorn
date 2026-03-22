@@ -2,6 +2,9 @@
 
 import { FileText, PackageOpen } from "lucide-react";
 import type { ApiAgentArtifact } from "@/lib/api";
+import { CitationList } from "@/components/ui/CitationList";
+import { MarkdownMessage } from "@/components/ui/MarkdownMessage";
+import { getArtifactCitations, stripTrailingCitationAppendix } from "@/lib/citations";
 
 function compactText(text: string, limit: number) {
   const normalized = text.trim().replace(/\s+/g, " ");
@@ -22,6 +25,15 @@ export function AgentArtifactsPanel({
   const nonSummaryArtifacts = artifacts.filter(
     (artifact) => artifact.type !== "final_result" && artifact.type !== "execution_summary",
   );
+  const finalResultCitations = getArtifactCitations(finalResult);
+  const finalResultDisplay = finalResult
+    ? stripTrailingCitationAppendix(finalResult.content, finalResultCitations)
+    : "";
+  const summaryCitations =
+    summaryArtifact?.type === "final_result" ? getArtifactCitations(summaryArtifact) : undefined;
+  const summaryDisplay = summaryArtifact
+    ? stripTrailingCitationAppendix(summaryArtifact.content, summaryCitations)
+    : "";
   const containerClassName = embedded
     ? "rounded-2xl border border-border/60 bg-muted/10 p-4"
     : "rounded-3xl border border-border/70 bg-background/80 p-5";
@@ -35,9 +47,18 @@ export function AgentArtifactsPanel({
             结果摘要
           </div>
           {summaryArtifact ? (
-            <p className="text-sm leading-6 text-foreground/90">
-              {compactText(summaryArtifact.content, summaryArtifact.type === "execution_summary" ? 180 : 220)}
-            </p>
+            summaryArtifact.type === "final_result" ? (
+              <div className="space-y-3">
+                <div className="min-w-0 text-sm leading-6 text-foreground/90">
+                  <MarkdownMessage content={summaryDisplay} citations={summaryCitations} />
+                </div>
+                <CitationList citations={summaryCitations} content={summaryDisplay} />
+              </div>
+            ) : (
+              <p className="text-sm leading-6 text-foreground/90">
+                {compactText(summaryDisplay, 180)}
+              </p>
+            )
           ) : (
             <p className="text-sm text-muted-foreground">当前运行还没有可展示的摘要。</p>
           )}
@@ -73,7 +94,12 @@ export function AgentArtifactsPanel({
           最终结果
         </div>
         {finalResult ? (
-          <p className="whitespace-pre-wrap text-sm leading-6 text-foreground/90">{finalResult.content}</p>
+          <div className="space-y-3">
+            <div className="min-w-0 text-sm leading-6 text-foreground/90">
+              <MarkdownMessage content={finalResultDisplay} citations={finalResultCitations} />
+            </div>
+            <CitationList citations={finalResultCitations} content={finalResultDisplay} />
+          </div>
         ) : (
           <p className="text-sm text-muted-foreground">当前运行没有单独保存的最终结果。</p>
         )}

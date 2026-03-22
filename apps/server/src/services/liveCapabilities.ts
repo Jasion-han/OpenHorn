@@ -16,11 +16,7 @@ export type LiveRoute = {
   needsCitation: boolean;
 };
 
-export type WebSearchPolicy =
-  | "never"
-  | "always_web_search"
-  | "always_research"
-  | "defer_to_router";
+export type WebSearchPolicy = "never" | "always_web_search" | "always_research" | "defer_to_router";
 
 export type StoredLiveMetadata = {
   status: LiveStatus;
@@ -258,6 +254,20 @@ function looksLikeCurrentPracticeOrTrendQuery(prompt: string) {
   return hasCurrentSignal && hasPracticeDomain;
 }
 
+function hasExplicitWebLookupSignal(prompt: string) {
+  const text = prompt.trim();
+  if (!text) return false;
+
+  return (
+    /最新|最近|刚刚|今日|今天.*新闻|发布了什么|发生了什么|现价|股价|比分|战绩|热搜|新闻|news|recent|latest|today/i.test(
+      text,
+    ) ||
+    /帮我查|搜一下|查一下|联网搜索|联网查|look up|search for|find online|官网|官方文档|给我链接|给我来源|给出处/i.test(
+      text,
+    )
+  );
+}
+
 export function getWebSearchPolicy(prompt: string): WebSearchPolicy {
   const text = prompt.trim();
   if (!text) return "never";
@@ -268,9 +278,11 @@ export function getWebSearchPolicy(prompt: string): WebSearchPolicy {
       text,
     ) ||
     /你能做什么|你会做什么|what can you do/i.test(text) ||
-    /翻译|translate|润色|改写|重写|paraphrase|rewrite|总结|摘要|summari[sz]e|解释这段|解释一下这段|解释代码|explain this code/i.test(
+    (/翻译|translate|润色|改写|重写|paraphrase|rewrite|总结|摘要|summari[sz]e|解释这段|解释一下这段|解释代码|explain this code/i.test(
       text,
-    )
+    ) &&
+      !hasExplicitWebLookupSignal(text) &&
+      !looksLikeCurrentPracticeOrTrendQuery(text))
   ) {
     return "never";
   }
@@ -283,14 +295,7 @@ export function getWebSearchPolicy(prompt: string): WebSearchPolicy {
     return /差异|区别|对比|比较/i.test(text) ? "always_research" : "always_web_search";
   }
 
-  if (
-    /最新|最近|刚刚|今日|今天.*新闻|发布了什么|发生了什么|现价|股价|比分|战绩|热搜|新闻|news|recent|latest|today/i.test(
-      text,
-    ) ||
-    /帮我查|搜一下|查一下|look up|search for|find online|官网|官方文档|给我链接|给我来源|给出处/i.test(
-      text,
-    )
-  ) {
+  if (hasExplicitWebLookupSignal(text)) {
     return "always_web_search";
   }
 
@@ -407,7 +412,10 @@ export function routeLiveQuery(prompt: string): LiveRoute {
     return { type: "structured_live", needsCitation: false };
   }
 
-  if (policy === "always_research" || /比较|分析|调研|汇总|整理.*最近|research|survey/i.test(text)) {
+  if (
+    policy === "always_research" ||
+    /比较|分析|调研|汇总|整理.*最近|research|survey/i.test(text)
+  ) {
     return { type: "research", needsCitation: true };
   }
 
@@ -440,9 +448,7 @@ export async function buildLiveContext(input: BuildLiveContextInput): Promise<Li
     input.forceWebSearch &&
     looksLikeNamedToolOrProductQuery(input.prompt)
   ) {
-    route = routeFromType(
-      /区别|对比|比较|相较于/i.test(input.prompt) ? "research" : "web_search",
-    );
+    route = routeFromType(/区别|对比|比较|相较于/i.test(input.prompt) ? "research" : "web_search");
   }
 
   if (route.type === "direct_model" && allowSemanticWebRouting && input.classifier) {

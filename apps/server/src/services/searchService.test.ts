@@ -67,3 +67,31 @@ test("buildSearchContext returns offline when disabled", async () => {
   expect(result.label).toContain("已关闭");
   expect(result.citations).toEqual([]);
 });
+
+test("buildSearchContext narrows OpenAI official-doc queries to official domains", async () => {
+  await buildSearchContext({
+    route: "web_search",
+    prompt:
+      "请联网搜索 OpenAI 官方网站，查一下 OpenAI API 最新的 Responses API 文档首页标题是什么，并给我一句总结。",
+    envKey: "env-key",
+    fetchImpl: async (_input, init) => {
+      const payload = JSON.parse(String(init?.body ?? "{}")) as { query?: string };
+      expect(payload.query).toContain(
+        "site:developers.openai.com/api/reference/responses/overview",
+      );
+      expect(payload.query).toContain("site:platform.openai.com/docs/api-reference/responses");
+      expect(payload.query).toContain("Responses Overview");
+      return new Response(
+        JSON.stringify({
+          results: [
+            {
+              title: "Responses Overview | OpenAI API Reference",
+              url: "https://developers.openai.com/api/reference/responses/overview/",
+              content: "Responses Overview",
+            },
+          ],
+        }),
+      );
+    },
+  });
+});

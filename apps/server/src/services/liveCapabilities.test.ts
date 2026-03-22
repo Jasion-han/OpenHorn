@@ -32,6 +32,14 @@ test("getWebSearchPolicy forces web search for explicit lookup prompts", () => {
   expect(getWebSearchPolicy("帮我查一下 OpenAI 最新动态")).toBe("always_web_search");
 });
 
+test("getWebSearchPolicy still forces web search when lookup prompts also request a summary", () => {
+  expect(
+    getWebSearchPolicy(
+      "请联网搜索 OpenAI 官方网站，查一下 OpenAI API 最新的 Responses API 文档首页标题是什么，并给我一句总结。",
+    ),
+  ).toBe("always_web_search");
+});
+
 test("getWebSearchPolicy forces research for recent comparison prompts", () => {
   expect(getWebSearchPolicy("帮我调研最近几家 AI 公司的发布和融资")).toBe("always_research");
 });

@@ -1,5 +1,6 @@
 import type { CanUseTool } from "@anthropic-ai/claude-agent-sdk";
 import { Hono } from "hono";
+import { createAdapter } from "../agent-adapters";
 import {
   buildAgentRuntimeContext,
   createAgentSession,
@@ -70,7 +71,10 @@ function buildPlanFromGoal(goal: string) {
   ];
 }
 
-function buildExecutionPrompt(goal: string, planSteps: Array<{ title: string; description?: string | null }>) {
+function buildExecutionPrompt(
+  goal: string,
+  planSteps: Array<{ title: string; description?: string | null }>,
+) {
   const renderedPlan = planSteps
     .map((step, index) =>
       [`${index + 1}. ${step.title}`, step.description?.trim()].filter(Boolean).join("\n"),
@@ -113,15 +117,172 @@ function buildLiveSearchSummary(params: {
   return `${prefix}${sourceTitles.join("、")} 等来源。`;
 }
 
-function buildExecutionModeContext(
-  params: {
-    mode: "execute" | "retry" | "continue";
-    previousRun?: { summary: string | null; error: string | null } | null;
-    previousFinalResult?: string | null;
-    resumeStepTitle?: string | null;
-    completedStepTitles?: string[];
-  },
+function normalizeCitationSnippetText(value: string) {
+  return value
+    .replace(/\r\n/g, "\n")
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, "$1")
+    .replace(/`{1,3}/g, "")
+    .replace(/[|•·]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function truncateAtSentenceBoundary(value: string, limit: number) {
+  if (value.length <= limit) return value;
+  const truncated = value.slice(0, limit);
+  const sentenceBoundary = Math.max(
+    truncated.lastIndexOf("。"),
+    truncated.lastIndexOf("！"),
+    truncated.lastIndexOf("？"),
+    truncated.lastIndexOf(". "),
+    truncated.lastIndexOf("! "),
+    truncated.lastIndexOf("? "),
+  );
+  if (sentenceBoundary >= Math.floor(limit * 0.45)) {
+    return truncated.slice(0, sentenceBoundary + 1).trim();
+  }
+
+  const wordBoundary = truncated.lastIndexOf(" ");
+  if (wordBoundary >= Math.floor(limit * 0.6)) {
+    return `${truncated.slice(0, wordBoundary).trim()}…`;
+  }
+  return `${truncated.trim()}…`;
+}
+
+function buildSummaryFallback(citation: { title: string; url: string }) {
+  const title = citation.title.toLowerCase();
+  const url = citation.url.toLowerCase();
+  if (/responses overview/.test(title) || /\/responses\/overview/.test(url)) {
+    return "这是 OpenAI Responses API 的总览页，介绍响应生成、工具调用和多轮状态管理能力。";
+  }
+  return "这是与该问题最相关的官方文档页面。";
+}
+
+function buildCleanCitationSummary(citation: {
+  title: string;
+  url: string;
+  snippet?: string;
+}) {
+  const rawSnippet = citation.snippet?.trim() || "";
+  if (!rawSnippet) {
+    return buildSummaryFallback(citation);
+  }
+
+  const headingSegments = rawSnippet
+    .split(/\s*#{1,6}\s+/g)
+    .map((segment) => normalizeCitationSnippetText(segment))
+    .filter(Boolean);
+
+  const scoreSegment = (segment: string) => {
+    let score = 0;
+    if (segment.length >= 30) score += 2;
+    if (/[.!?。！？]/.test(segment)) score += 4;
+    if (
+      /interface|supports|allows|provides|overview|guide|model|api|介绍|概览|支持|文档|能力/i.test(
+        segment,
+      )
+    ) {
+      score += 4;
+    }
+    if (/^(?:[A-Z][A-Za-z]+(?:\s+|$)){5,}/.test(segment)) {
+      score -= 3;
+    }
+    return score;
+  };
+
+  let bestSegment =
+    headingSegments
+      .map((segment) => ({ segment, score: scoreSegment(segment) }))
+      .sort((left, right) => right.score - left.score)[0]?.segment || "";
+
+  if (!bestSegment) {
+    bestSegment = normalizeCitationSnippetText(rawSnippet);
+  }
+
+  const titlePrefix = citation.title.split("|")[0]?.trim();
+  if (titlePrefix && bestSegment.toLowerCase().startsWith(titlePrefix.toLowerCase())) {
+    bestSegment = bestSegment.slice(titlePrefix.length).trim();
+  }
+  bestSegment = bestSegment.replace(
+    /^(?:[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,3})\s+(?=[A-Z][A-Za-z]+[’']s\s)/,
+    "",
+  );
+
+  const sentences =
+    bestSegment.match(/[^.!?。！？]+[.!?。！？]?/g)?.map((item) => item.trim()).filter(Boolean) || [];
+  const summaryParts: string[] = [];
+  for (const sentence of sentences) {
+    if (!sentence) continue;
+    if (summaryParts.length === 0 && sentence.length < 12 && sentences.length > 1) {
+      continue;
+    }
+    const next = [...summaryParts, sentence].join(" ").trim();
+    if (next.length > 180) break;
+    summaryParts.push(sentence);
+    if (next.length >= 70 || summaryParts.length >= 2) break;
+  }
+
+  const summary = (summaryParts.join(" ").trim() || bestSegment).replace(/\s+/g, " ");
+  if (!summary || /^#+/.test(summary)) {
+    return buildSummaryFallback(citation);
+  }
+  return truncateAtSentenceBoundary(summary, 180);
+}
+
+function pickBestCitationForGoal(
+  goal: string,
+  citations: Array<{ title: string; url: string; snippet?: string }>,
 ) {
+  const normalizedGoal = goal.toLowerCase();
+  return [...citations]
+    .map((citation, index) => {
+      const title = citation.title.toLowerCase();
+      const url = citation.url.toLowerCase();
+      let score = 0;
+
+      if (/developers\.openai\.com\/api\/reference/.test(url)) score += 30;
+      else if (/platform\.openai\.com\/docs\/api-reference/.test(url)) score += 28;
+      else if (/developers\.openai\.com\/api\/docs/.test(url)) score += 20;
+      else if (/developers\.openai\.com|platform\.openai\.com/.test(url)) score += 14;
+      else if (/openai\.com/.test(url)) score += 4;
+
+      if (/community\.openai\.com|help\.openai\.com/.test(url)) score -= 30;
+      if (/\/index\//.test(url)) score -= 8;
+
+      if (/responses overview/.test(title)) score += 16;
+      if (/responses api/.test(title)) score += 12;
+      if (/responses/.test(title) || /responses/.test(url)) score += 8;
+      if (/api reference/.test(title) || /reference/.test(url)) score += 8;
+      if (/docs/.test(url)) score += 4;
+      if (/openai/.test(normalizedGoal) && /openai/.test(title + url)) score += 2;
+      if (/标题|title/i.test(goal) && /overview|reference|标题|title/i.test(title)) score += 6;
+      score -= index * 0.01;
+
+      return { citation, score };
+    })
+    .sort((left, right) => right.score - left.score)[0]?.citation;
+}
+
+function buildCitationTitleAnswer(params: {
+  goal: string;
+  citation: { title: string; url: string; snippet?: string };
+}) {
+  const summary = buildCleanCitationSummary(params.citation);
+
+  return [
+    `最相关的官方来源标题是：${params.citation.title} [1]`,
+    `一句总结：${summary}`,
+    `[1] ${params.citation.url}`,
+  ].join("\n\n");
+}
+
+function buildExecutionModeContext(params: {
+  mode: "execute" | "retry" | "continue";
+  previousRun?: { summary: string | null; error: string | null } | null;
+  previousFinalResult?: string | null;
+  resumeStepTitle?: string | null;
+  completedStepTitles?: string[];
+}) {
   if (params.mode === "execute") {
     return null;
   }
@@ -129,7 +290,9 @@ function buildExecutionModeContext(
   const parts: string[] = [];
   if (params.mode === "retry") {
     parts.push("Execution mode: retry the task from scratch.");
-    parts.push("Ignore any incomplete prior progress and execute the approved plan again from the beginning.");
+    parts.push(
+      "Ignore any incomplete prior progress and execute the approved plan again from the beginning.",
+    );
   } else {
     parts.push("Execution mode: continue from the previous attempt when useful.");
     if ((params.completedStepTitles?.length ?? 0) > 0) {
@@ -138,9 +301,13 @@ function buildExecutionModeContext(
       );
     }
     if (params.resumeStepTitle) {
-      parts.push(`Resume focus: continue from the next unfinished plan step.\n${params.resumeStepTitle}`);
+      parts.push(
+        `Resume focus: continue from the next unfinished plan step.\n${params.resumeStepTitle}`,
+      );
     } else {
-      parts.push("All approved plan steps were previously completed. Continue by refining or extending the latest result when useful.");
+      parts.push(
+        "All approved plan steps were previously completed. Continue by refining or extending the latest result when useful.",
+      );
     }
   }
 
@@ -165,10 +332,10 @@ type ExecutionPlanStepShape = {
   status: ExecutionPlanStepStatus;
 };
 
-function getContinueResumeStepIndex(
-  planSteps: Array<{ status: ExecutionPlanStepStatus }>,
-) {
-  const firstNonCompletedIndex = planSteps.findIndex((step, index) => index > 0 && step.status !== "completed");
+function getContinueResumeStepIndex(planSteps: Array<{ status: ExecutionPlanStepStatus }>) {
+  const firstNonCompletedIndex = planSteps.findIndex(
+    (step, index) => index > 0 && step.status !== "completed",
+  );
   if (firstNonCompletedIndex >= 0) {
     return firstNonCompletedIndex;
   }
@@ -187,20 +354,11 @@ function buildExecutionStepStartStatuses(
   }
 
   const activeIndex =
-    mode === "continue"
-      ? getContinueResumeStepIndex(planSteps)
-      : planSteps.length > 1
-        ? 1
-        : 0;
+    mode === "continue" ? getContinueResumeStepIndex(planSteps) : planSteps.length > 1 ? 1 : 0;
 
   return planSteps.map((step, index) => ({
     id: step.id,
-    status:
-      index < activeIndex
-        ? "completed"
-        : index === activeIndex
-          ? "running"
-          : "pending",
+    status: index < activeIndex ? "completed" : index === activeIndex ? "running" : "pending",
   }));
 }
 
@@ -213,18 +371,11 @@ function buildExecutionFailureStatuses(
   }
   return planSteps.map((step, index) => ({
     id: step.id,
-    status:
-      index < activeIndex
-        ? "completed"
-        : index === activeIndex
-          ? "failed"
-          : "pending",
+    status: index < activeIndex ? "completed" : index === activeIndex ? "failed" : "pending",
   }));
 }
 
-function buildExecutionSuccessStatuses(
-  planSteps: Array<{ id: string }>,
-): ExecutionPlanStepShape[] {
+function buildExecutionSuccessStatuses(planSteps: Array<{ id: string }>): ExecutionPlanStepShape[] {
   return planSteps.map((step) => ({
     id: step.id,
     status: "completed" as const,
@@ -349,7 +500,10 @@ async function resolveTaskExecutionContext(
     .sort((left, right) => left.orderIndex - right.orderIndex);
 
   if (mode === "retry" && !["failed", "cancelled", "completed"].includes(task.status)) {
-    return { error: "Only failed, cancelled, or completed tasks can be retried.", status: 400 as const };
+    return {
+      error: "Only failed, cancelled, or completed tasks can be retried.",
+      status: 400 as const,
+    };
   }
 
   if (mode === "continue" && !["failed", "completed"].includes(task.status)) {
@@ -359,12 +513,12 @@ async function resolveTaskExecutionContext(
   const previousExecutionRun =
     mode === "execute" ? null : await getLatestRunForTask(userId, taskId, "execution");
 
-  const previousFinalResult =
-    previousExecutionRun
-      ? detail.artifacts.find(
-          (artifact) => artifact.runId === previousExecutionRun.id && artifact.type === "final_result",
-        )?.content ?? null
-      : null;
+  const previousFinalResult = previousExecutionRun
+    ? (detail.artifacts.find(
+        (artifact) =>
+          artifact.runId === previousExecutionRun.id && artifact.type === "final_result",
+      )?.content ?? null)
+    : null;
   const continueResumeIndex = getContinueResumeStepIndex(approvedPlanSteps);
   const hasUnfinishedContinueStep =
     mode === "continue" &&
@@ -376,7 +530,7 @@ async function resolveTaskExecutionContext(
     previousFinalResult,
     resumeStepTitle:
       mode === "continue" && hasUnfinishedContinueStep
-        ? approvedPlanSteps[continueResumeIndex]?.title ?? null
+        ? (approvedPlanSteps[continueResumeIndex]?.title ?? null)
         : null,
     completedStepTitles:
       mode === "continue"
@@ -391,6 +545,7 @@ async function resolveTaskExecutionContext(
     task,
     approvedPlanSteps,
     executionPrompt,
+    resolvedChannel,
   };
 }
 
@@ -404,7 +559,7 @@ async function createTaskExecutionResponse(
     return new Response(resolved.error, { status: resolved.status });
   }
 
-  const { task, approvedPlanSteps, executionPrompt } = resolved;
+  const { task, approvedPlanSteps, executionPrompt, resolvedChannel } = resolved;
   const attachmentIds = task.attachments
     .map((attachment) => attachment.id)
     .filter((value): value is string => typeof value === "string" && value.trim().length > 0);
@@ -465,7 +620,10 @@ async function createTaskExecutionResponse(
       const approval = await createAgentApprovalRequest(userId, taskId, run.id, {
         type: "tool_approval",
         title: "Approve Bash command",
-        description: risk.reason ?? options.decisionReason ?? "This command requires explicit approval before it can run.",
+        description:
+          risk.reason ??
+          options.decisionReason ??
+          "This command requires explicit approval before it can run.",
         payload: {
           toolUseId: options.toolUseID,
           toolName,
@@ -490,7 +648,11 @@ async function createTaskExecutionResponse(
       await createAgentTaskEvent(userId, taskId, run.id, {
         type: "task_status",
         content: "Task is awaiting tool approval.",
-        metadata: { status: "awaiting_approval", approvalId: approval.id, approvalType: approval.type },
+        metadata: {
+          status: "awaiting_approval",
+          approvalId: approval.id,
+          approvalType: approval.type,
+        },
       });
       send({ type: "task_status", taskId, runId: run.id, status: "awaiting_approval" });
 
@@ -522,7 +684,7 @@ async function createTaskExecutionResponse(
 
     const runtimeContext = await buildAgentRuntimeContext({
       userId,
-      prompt: executionPrompt,
+      prompt: task.goal,
       channelId: task.channelId,
       modelId: task.modelId,
       conversationId: task.conversationId,
@@ -574,80 +736,136 @@ async function createTaskExecutionResponse(
         });
       }
 
-      for await (const event of runAgentWithConfig({
-        userId,
-        prompt: executionPrompt,
-        attachmentIds,
-        channelId: runtimeContext.channelId,
-        modelId: runtimeContext.modelId,
-        globalSystemPrompt: runtimeContext.globalSystemPrompt,
-        liveSystemContext: runtimeContext.liveSystemContext,
-        permissionMode: "default",
-        canUseTool,
-        abortController: ctx.abortController,
-      })) {
-        if (event.type === "meta" || event.type === "done" || event.type === "user") {
-          continue;
+      const shouldUseDirectLiveAnswer =
+        runtimeContext.liveContext?.status === "live" &&
+        (runtimeContext.liveContext.route === "web_search" ||
+          runtimeContext.liveContext.route === "research") &&
+        task.complexity !== "deep" &&
+        attachmentIds.length === 0;
+
+      if (shouldUseDirectLiveAnswer) {
+        const directCitations = runtimeContext.liveContext?.citations || [];
+        const shouldUseCitationTitleAnswer =
+          /标题|title/i.test(task.goal) && directCitations.length > 0;
+        if (shouldUseCitationTitleAnswer) {
+          const bestCitation = pickBestCitationForGoal(task.goal, directCitations);
+          if (bestCitation) {
+            finalText = buildCitationTitleAnswer({
+              goal: task.goal,
+              citation: bestCitation,
+            });
+          }
         }
 
-        if (event.type === "text") {
-          finalText += event.content ?? "";
-          continue;
+        if (!finalText.trim()) {
+          const adapter = createAdapter(
+            resolvedChannel.channel.provider,
+            resolvedChannel.apiKey,
+            resolvedChannel.channel.baseUrl || undefined,
+          );
+          const directLiveGuardrail = [
+            "You already have the live search/research results in system context.",
+            "Answer directly from that context.",
+            "If the provided sources contain a relevant official page, use it instead of saying the results are insufficient.",
+            "Choose the most relevant official source match when multiple sources are present.",
+            "Do not mention internal tool limits, unavailable browsing tools, Cursor docs, or environment restrictions.",
+            "If sources are provided, cite them inline with [n] only and do not append a final references section.",
+          ].join(" ");
+          const response = await adapter.chat({
+            model: resolvedChannel.modelId,
+            messages: [
+              {
+                role: "system",
+                content: [directLiveGuardrail, runtimeContext.liveSystemContext]
+                  .filter((value): value is string => Boolean(value?.trim()))
+                  .join("\n\n"),
+              },
+              {
+                role: "user",
+                content: task.goal,
+              },
+            ],
+            temperature: 0,
+            maxTokens: 1400,
+          });
+          finalText = response.content.trim();
         }
+      } else {
+        for await (const event of runAgentWithConfig({
+          userId,
+          prompt: executionPrompt,
+          attachmentIds,
+          channelId: runtimeContext.channelId,
+          modelId: runtimeContext.modelId,
+          globalSystemPrompt: runtimeContext.globalSystemPrompt,
+          liveSystemContext: runtimeContext.liveSystemContext,
+          permissionMode: "default",
+          canUseTool,
+          abortController: ctx.abortController,
+        })) {
+          if (event.type === "meta" || event.type === "done" || event.type === "user") {
+            continue;
+          }
 
-        if (event.type === "tool_start") {
-          toolStarts += 1;
-          await createAgentTaskEvent(userId, taskId, run.id, {
-            type: "execution_event",
-            content: event.content ?? null,
-            toolName: event.toolName ?? null,
-            toolInput: event.toolInput,
-            metadata: { eventType: "tool_start" },
-          });
-          send({
-            type: "execution_event",
-            taskId,
-            runId: run.id,
-            eventType: "tool_start",
-            toolName: event.toolName,
-            toolInput: event.toolInput,
-            content: event.content,
-          });
-          continue;
-        }
+          if (event.type === "text") {
+            finalText += event.content ?? "";
+            continue;
+          }
 
-        if (event.type === "tool_result") {
-          toolResults += 1;
-          await createAgentTaskEvent(userId, taskId, run.id, {
-            type: "execution_event",
-            content: event.content ?? null,
-            toolName: event.toolName ?? null,
-            metadata: { eventType: "tool_result" },
-          });
-          send({
-            type: "execution_event",
-            taskId,
-            runId: run.id,
-            eventType: "tool_result",
-            toolName: event.toolName,
-            content: event.content,
-          });
-          continue;
-        }
+          if (event.type === "tool_start") {
+            toolStarts += 1;
+            await createAgentTaskEvent(userId, taskId, run.id, {
+              type: "execution_event",
+              content: event.content ?? null,
+              toolName: event.toolName ?? null,
+              toolInput: event.toolInput,
+              metadata: { eventType: "tool_start" },
+            });
+            send({
+              type: "execution_event",
+              taskId,
+              runId: run.id,
+              eventType: "tool_start",
+              toolName: event.toolName,
+              toolInput: event.toolInput,
+              content: event.content,
+            });
+            continue;
+          }
 
-        if (event.type === "error") {
-          hadError = true;
-          errorText = event.content ?? "Agent error";
-          await createAgentTaskEvent(userId, taskId, run.id, {
-            type: "error",
-            content: errorText,
-          });
-          send({
-            type: "error",
-            taskId,
-            runId: run.id,
-            content: errorText,
-          });
+          if (event.type === "tool_result") {
+            toolResults += 1;
+            await createAgentTaskEvent(userId, taskId, run.id, {
+              type: "execution_event",
+              content: event.content ?? null,
+              toolName: event.toolName ?? null,
+              metadata: { eventType: "tool_result" },
+            });
+            send({
+              type: "execution_event",
+              taskId,
+              runId: run.id,
+              eventType: "tool_result",
+              toolName: event.toolName,
+              content: event.content,
+            });
+            continue;
+          }
+
+          if (event.type === "error") {
+            hadError = true;
+            errorText = event.content ?? "Agent error";
+            await createAgentTaskEvent(userId, taskId, run.id, {
+              type: "error",
+              content: errorText,
+            });
+            send({
+              type: "error",
+              taskId,
+              runId: run.id,
+              content: errorText,
+            });
+          }
         }
       }
 
@@ -676,10 +894,15 @@ async function createTaskExecutionResponse(
       });
 
       if (finalText.trim()) {
+        const finalResultCitations = runtimeContext.liveContext?.citations;
         await createAgentArtifact(userId, taskId, run.id, {
           type: "final_result",
           title: "Final result",
           content: finalText.trim(),
+          metadata:
+            finalResultCitations && finalResultCitations.length > 0
+              ? { citations: finalResultCitations }
+              : undefined,
         });
         send({
           type: "artifact_created",
@@ -692,6 +915,7 @@ async function createTaskExecutionResponse(
           taskId,
           runId: run.id,
           content: finalText.trim(),
+          citations: finalResultCitations,
         });
       }
 
@@ -846,12 +1070,14 @@ agent.post("/tasks", async (c) => {
   }
 
   const attachments = Array.isArray(body.attachments)
-    ? body.attachments.filter((item): item is Record<string, unknown> => isRecord(item)).map((item) => ({
-        id: typeof item.id === "string" ? item.id : undefined,
-        fileName: typeof item.fileName === "string" ? item.fileName : "attachment",
-        fileType: typeof item.fileType === "string" ? item.fileType : undefined,
-        fileSize: typeof item.fileSize === "number" ? item.fileSize : undefined,
-      }))
+    ? body.attachments
+        .filter((item): item is Record<string, unknown> => isRecord(item))
+        .map((item) => ({
+          id: typeof item.id === "string" ? item.id : undefined,
+          fileName: typeof item.fileName === "string" ? item.fileName : "attachment",
+          fileType: typeof item.fileType === "string" ? item.fileType : undefined,
+          fileSize: typeof item.fileSize === "number" ? item.fileSize : undefined,
+        }))
     : [];
 
   try {
@@ -949,7 +1175,8 @@ agent.post("/approvals/:id/respond", async (c) => {
   try {
     const approval = await respondToAgentApproval(user.id, approvalId, {
       status: body.status,
-      response: isRecord(body.response) || Array.isArray(body.response) ? body.response : body.response,
+      response:
+        isRecord(body.response) || Array.isArray(body.response) ? body.response : body.response,
     });
 
     const nextStatus =
@@ -984,7 +1211,10 @@ agent.post("/approvals/:id/respond", async (c) => {
     return c.json(detail);
   } catch (error) {
     const status = error instanceof Error && error.message === "Approval not found" ? 404 : 400;
-    return c.json({ error: error instanceof Error ? error.message : "Failed to respond to approval" }, status);
+    return c.json(
+      { error: error instanceof Error ? error.message : "Failed to respond to approval" },
+      status,
+    );
   }
 });
 
