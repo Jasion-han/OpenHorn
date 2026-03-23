@@ -127,4 +127,13 @@ export class SidecarClient {
       if (s.size === 0) this.listeners.delete(event);
     };
   }
+
+  disconnect() {
+    for (const [id, handler] of this.pending.entries()) {
+      this.pending.delete(id);
+      handler.reject(new Error(`WebSocket closed (pending request ${id})`));
+    }
+
+    this.ws.close();
+  }
 }
