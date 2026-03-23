@@ -221,6 +221,23 @@ describe("desktop chat store", () => {
     expect(store.getState().composerMode).toBe("chat");
   });
 
+  test("stops active streaming via adapter", () => {
+    let aborted = false;
+    const { adapter } = createStubAdapter();
+    const store = createDesktopChatStore({
+      ...adapter,
+      abortActiveStream: () => {
+        aborted = true;
+      },
+    });
+
+    store.getState().setStreaming(true);
+    store.getState().abortStreaming();
+
+    expect(aborted).toBe(true);
+    expect(store.getState().isStreaming).toBe(false);
+  });
+
   test("updates conversation fields optimistically", async () => {
     const { adapter } = createStubAdapter();
     const store = createDesktopChatStore(adapter);

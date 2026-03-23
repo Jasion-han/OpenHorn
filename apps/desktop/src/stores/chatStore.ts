@@ -102,6 +102,7 @@ export interface ChatState {
   sendMessage: (
     input: Omit<SendMessageInput, "conversationId">,
   ) => Promise<{ assistantMessageId: string; response: Response }>;
+  abortStreaming: () => void;
   applyStreamEvent: (messageId: string, event: ChatStreamEvent) => void;
   completeStreamingMessage: (messageId: string) => void;
   failStreamingMessage: (messageId: string, error: string) => void;
@@ -320,6 +321,11 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
         });
         throw error;
       }
+    },
+
+    abortStreaming() {
+      adapter.abortActiveStream();
+      set({ isStreaming: false });
     },
 
     applyStreamEvent(messageId, event) {

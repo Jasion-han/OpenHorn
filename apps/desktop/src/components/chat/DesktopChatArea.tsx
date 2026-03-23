@@ -108,6 +108,10 @@ function AgentRunPanel({ run }: { run?: ApiAgentRun }) {
   );
 }
 
+function isAbortError(error: unknown) {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
 export function DesktopChatArea() {
   const currentConversation = useChatStore((state) => state.currentConversation);
   const messages = useChatStore((state) => state.messages);
@@ -133,6 +137,9 @@ export function DesktopChatArea() {
       await Promise.all([loadMessages(currentConversation.id), loadConversations()]);
     } catch (error) {
       setStreaming(false);
+      if (isAbortError(error)) {
+        return;
+      }
       setError(error instanceof Error ? error.message : "Stream error");
     }
   };
