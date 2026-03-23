@@ -2,6 +2,7 @@ import { Bot, Check, Copy, MessageSquare, Pencil, RefreshCw, Trash2 } from "luci
 import { type ReactNode, useState } from "react";
 import { Button, ScrollArea, Textarea, cn } from "ui";
 import { sanitizeDisplayContent } from "../../lib/citations";
+import { getEffectiveModelForConversation } from "../../lib/effectiveModel";
 import { readErrorMessage } from "../../lib/serverApi";
 import { readSseStream } from "../../lib/sse";
 import { useChatStore } from "../../stores/chatStore";
@@ -263,6 +264,7 @@ export function DesktopChatArea() {
   const ASSISTANT_BUBBLE_WIDTH = "92%";
   const USER_BUBBLE_MAX_WIDTH = "72%";
   const currentConversation = useChatStore((state) => state.currentConversation);
+  const channels = useChatStore((state) => state.channels);
   const messages = useChatStore((state) => state.messages);
   const isLoading = useChatStore((state) => state.isLoading);
   const isStreaming = useChatStore((state) => state.isStreaming);
@@ -277,6 +279,7 @@ export function DesktopChatArea() {
   const editUserMessage = useChatStore((state) => state.editUserMessage);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editingContent, setEditingContent] = useState("");
+  const effectiveModel = getEffectiveModelForConversation(channels, currentConversation);
 
   const getEditableAssistantForUser = (messageId: string) => {
     const messageIndex = messages.findIndex((message) => message.id === messageId);
@@ -617,6 +620,23 @@ export function DesktopChatArea() {
           </ScrollArea>
         )}
       </div>
+
+      {currentConversation && !effectiveModel.ok && (
+        <div className="px-4">
+          {effectiveModel.scope === "conversation" ? (
+            <div className="mb-2 rounded-xl border border-orange-200 bg-orange-50 p-3 text-sm shadow-minimal">
+              <p className="font-medium text-orange-800">当前会话模型不可用</p>
+              <p className="text-orange-700">{effectiveModel.reason}</p>
+              <p className="mt-1 text-xs text-muted-foreground">请到左侧 Settings → 渠道里修复。</p>
+            </div>
+          ) : (
+            <div className="mb-2 flex items-center gap-3 rounded-xl border border-orange-200 bg-orange-50 p-3 text-sm shadow-minimal">
+              <p className="flex-1 text-orange-700">{effectiveModel.reason}</p>
+              <p className="text-xs text-muted-foreground">左侧 Settings → 渠道</p>
+            </div>
+          )}
+        </div>
+      )}
 
       <DesktopComposer disabled={!currentConversation} onSubmit={handleSubmit} />
     </div>
