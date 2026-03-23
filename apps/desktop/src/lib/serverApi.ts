@@ -7,12 +7,20 @@ import type {
   SendMessageInput,
   UpdateConversationInput,
 } from "../types/chat";
+import type { ApiUser, LoginInput, RegisterInput } from "../types/auth";
 
 export const DEFAULT_DESKTOP_BACKEND_BASE = "http://localhost:3000";
+export const UNAUTHORIZED_EVENT = "openhorn:unauthorized";
 
 type FetchLike = typeof fetch;
 
 export interface ServerApi {
+  auth: {
+    login: (data: LoginInput) => Promise<{ user: ApiUser }>;
+    register: (data: RegisterInput) => Promise<{ user: ApiUser }>;
+    logout: () => Promise<{ success: boolean }>;
+    me: () => Promise<{ user: ApiUser | null }>;
+  };
   conversations: {
     list: () => Promise<{ conversations: ApiConversation[] }>;
     create: (data: CreateConversationInput) => Promise<{ conversation: ApiConversation }>;
@@ -29,6 +37,11 @@ export interface ServerApi {
   settings: {
     get: (keys: string[]) => Promise<{ settings: ApiSettingsMap }>;
   };
+}
+
+function emitUnauthorized() {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
 }
 
 function getEnvBase() {
@@ -85,6 +98,10 @@ async function fetchJson<T>(
     },
   });
 
+  if (response.status === 401) {
+    emitUnauthorized();
+  }
+
   if (!response.ok) {
     throw new Error(await readErrorMessage(response, "Request failed"));
   }
@@ -97,6 +114,24 @@ export function createServerApi(options?: { baseUrl?: string; fetch?: FetchLike 
   const fetchImpl = options?.fetch || fetch;
 
   return {
+    auth: {
+      login: (data) =>
+        fetchJson(fetchImpl, baseUrl, "/auth/login", {
+          method: "POST",
+          body: JSON.stringify(data),
+        }),
+      register: (data) =>
+        fetchJson(fetchImpl, baseUrl, "/auth/register", {
+          method: "POST",
+          body: JSON.stringify(data),
+        }),
+      logout: () =>
+        fetchJson(fetchImpl, baseUrl, "/auth/logout", {
+          method: "POST",
+        }),
+      me: () => fetchJson(fetchImpl, baseUrl, "/auth/me"),
+    },
+
     conversations: {
       list: () => fetchJson(fetchImpl, baseUrl, "/conversations"),
       create: (data) =>
@@ -118,8 +153,8 @@ export function createServerApi(options?: { baseUrl?: string; fetch?: FetchLike 
     messages: {
       list: (conversationId) =>
         fetchJson(fetchImpl, baseUrl, `/messages/${encodeURIComponent(conversationId)}`),
-      stream: (data, options) =>
-        fetchImpl(`${baseUrl}/messages/stream`, {
+      stream: async (data, options) => {
+        const response = await fetchImpl(`${baseUrl}/messages/stream`, {
           method: "POST",
           credentials: "include",
           signal: options?.signal,
@@ -127,7 +162,14 @@ export function createServerApi(options?: { baseUrl?: string; fetch?: FetchLike 
             "Content-Type": "application/json",
           },
           body: JSON.stringify(data),
-        }),
+        });
+
+        if (response.status === 401) {
+          emitUnauthorized();
+        }
+
+        return response;
+      },
     },
 
     channels: {

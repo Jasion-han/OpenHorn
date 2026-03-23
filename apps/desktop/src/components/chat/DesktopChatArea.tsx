@@ -148,9 +148,9 @@ export function DesktopChatArea() {
               <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-muted text-muted-foreground">
                 <MessageSquare size={20} />
               </div>
-              <div className="mt-4 text-lg font-semibold">桌面端聊天壳已对齐 Web 结构</div>
+              <div className="mt-4 text-lg font-semibold">开始一个新对话</div>
               <p className="mt-2 text-sm text-muted-foreground">
-                左侧管理会话，中间完成聊天与 Agent 模式切换，不再保留旧三栏 IDE 主界面。
+                在左侧选择历史会话，或新建一个会话后直接开始输入。
               </p>
             </div>
           </div>

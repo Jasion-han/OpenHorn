@@ -1,6 +1,7 @@
 import {
   ChevronDown,
   ChevronRight,
+  LogOut,
   MessageSquarePlus,
   MoreHorizontal,
   Pencil,
@@ -22,6 +23,7 @@ import {
   ScrollArea,
   cn,
 } from "ui";
+import { useAuthStore } from "../../stores/authStore";
 import { useDesktopShellStore } from "../../stores/desktopShellStore";
 import { useChatStore } from "../../stores/chatStore";
 import type { Conversation } from "../../types/chat";
@@ -154,6 +156,8 @@ export function DesktopLeftSidebar() {
   const activeView = useDesktopShellStore((state) => state.activeView);
   const setActiveView = useDesktopShellStore((state) => state.setActiveView);
   const sidecarStatus = useDesktopShellStore((state) => state.sidecarStatus);
+  const user = useAuthStore((state) => state.user);
+  const logout = useAuthStore((state) => state.logout);
 
   const conversations = useChatStore((state) => state.conversations);
   const currentConversation = useChatStore((state) => state.currentConversation);
@@ -164,6 +168,7 @@ export function DesktopLeftSidebar() {
   const selectConversation = useChatStore((state) => state.selectConversation);
   const updateConversation = useChatStore((state) => state.updateConversation);
   const deleteConversation = useChatStore((state) => state.deleteConversation);
+  const reset = useChatStore((state) => state.reset);
 
   useEffect(() => {
     void Promise.allSettled([loadChannels(), loadConversations()]);
@@ -178,10 +183,10 @@ export function DesktopLeftSidebar() {
   }, [conversations, query]);
 
   const statusBadge = (() => {
-    if (sidecarStatus === "connected") return <Badge variant="secondary">connected</Badge>;
-    if (sidecarStatus === "loading") return <Badge variant="outline">loading</Badge>;
-    if (sidecarStatus === "error") return <Badge variant="destructive">error</Badge>;
-    return <Badge variant="outline">{sidecarStatus}</Badge>;
+    if (sidecarStatus === "connected") return <Badge variant="secondary">已连接</Badge>;
+    if (sidecarStatus === "loading") return <Badge variant="outline">连接中</Badge>;
+    if (sidecarStatus === "error") return <Badge variant="destructive">不可用</Badge>;
+    return <Badge variant="outline">待命</Badge>;
   })();
 
   const handleCreateConversation = async () => {
@@ -225,6 +230,15 @@ export function DesktopLeftSidebar() {
     }
   };
 
+  const handleLogout = async () => {
+    try {
+      await logout();
+    } finally {
+      reset();
+      setActiveView("chat");
+    }
+  };
+
   const pinned = filteredConversations.filter((conversation) => conversation.isPinned);
   const rest = filteredConversations.filter((conversation) => !conversation.isPinned);
   const groups = groupByUpdatedAt(rest);
@@ -236,7 +250,7 @@ export function DesktopLeftSidebar() {
           <div className="min-w-0">
             <div className="truncate text-sm font-semibold leading-5">OpenHorn</div>
             <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground">
-              <span>Desktop</span>
+              <span>桌面端</span>
               {statusBadge}
             </div>
           </div>
@@ -375,22 +389,33 @@ export function DesktopLeftSidebar() {
         </div>
       )}
 
-      <div className="border-t border-border/50 px-2 pt-3 pb-5">
-        <div className="flex h-[56px] items-center justify-center">
-          <button
-            type="button"
-            aria-label="Settings"
-            title="Settings"
-            onClick={() => setActiveView("settings")}
-            className={cn(
-              "inline-flex h-10 w-10 items-center justify-center rounded-xl transition-colors",
-              activeView === "settings"
-                ? "bg-foreground/[0.08] text-foreground"
-                : "text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground",
-            )}
-          >
-            <Settings size={18} />
-          </button>
+      <div className="border-t border-border/50 px-3 pt-3 pb-4">
+        <div className="rounded-2xl border border-border/60 bg-background/70 px-3 py-3">
+          <div className="min-w-0">
+            <div className="truncate text-sm font-medium">{user?.username || "未登录"}</div>
+            <div className="truncate text-xs text-muted-foreground">{user?.email || ""}</div>
+          </div>
+
+          <div className="mt-3 flex items-center gap-2">
+            <Button
+              type="button"
+              variant={activeView === "settings" ? "secondary" : "outline"}
+              className="flex-1"
+              onClick={() => setActiveView("settings")}
+            >
+              <Settings size={16} />
+              设置
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="flex-1"
+              onClick={() => void handleLogout()}
+            >
+              <LogOut size={16} />
+              退出
+            </Button>
+          </div>
         </div>
       </div>
     </div>

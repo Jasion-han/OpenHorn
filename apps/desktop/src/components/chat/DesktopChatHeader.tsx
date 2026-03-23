@@ -8,6 +8,14 @@ export function DesktopChatHeader({ conversation }: { conversation: Conversation
   const composerMode = useChatStore((state) => state.composerMode);
   const sidecarStatus = useDesktopShellStore((state) => state.sidecarStatus);
   const sidecarError = useDesktopShellStore((state) => state.sidecarError);
+  const sidecarLabel =
+    sidecarStatus === "connected"
+      ? "已连接"
+      : sidecarStatus === "loading"
+        ? "连接中"
+        : sidecarStatus === "error"
+          ? "不可用"
+          : "待命";
 
   return (
     <div className="flex items-center justify-between gap-3 border-b border-border/50 px-4 py-3">
@@ -16,14 +24,14 @@ export function DesktopChatHeader({ conversation }: { conversation: Conversation
           {conversation?.title || "选择一个会话开始"}
         </div>
         <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground">
-          <span>{conversation ? "Desktop Chat" : "Chat Shell"}</span>
+          <span>{conversation ? "当前会话" : "准备开始"}</span>
           {sidecarStatus === "error" ? (
             <span className="inline-flex items-center gap-1 text-destructive">
               <WifiOff size={12} />
-              {sidecarError || "Sidecar unavailable"}
+              {sidecarError || "本地连接不可用"}
             </span>
           ) : (
-            <Badge variant="outline">{sidecarStatus}</Badge>
+            <Badge variant="outline">{sidecarLabel}</Badge>
           )}
         </div>
       </div>

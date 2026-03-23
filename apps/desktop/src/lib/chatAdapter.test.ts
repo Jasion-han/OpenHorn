@@ -8,6 +8,30 @@ function createStubServerApi() {
   let streamedSignal: AbortSignal | undefined;
 
   const api: ServerApi = {
+    auth: {
+      login: async () => ({
+        user: {
+          id: "user-1",
+          email: "han@example.com",
+          username: "han",
+        },
+      }),
+      register: async () => ({
+        user: {
+          id: "user-1",
+          email: "han@example.com",
+          username: "han",
+        },
+      }),
+      logout: async () => ({ success: true }),
+      me: async () => ({
+        user: {
+          id: "user-1",
+          email: "han@example.com",
+          username: "han",
+        },
+      }),
+    },
     conversations: {
       list: async () => ({
         conversations: [
