@@ -108,6 +108,74 @@ function AgentRunPanel({ run }: { run?: ApiAgentRun }) {
   );
 }
 
+function TypingIndicator() {
+  return (
+    <div
+      aria-label="正在生成"
+      className="inline-flex items-center gap-1 rounded-full bg-muted/30 px-2.5 py-1.5 text-muted-foreground/80"
+    >
+      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current opacity-70" />
+      <span
+        className="h-1.5 w-1.5 animate-pulse rounded-full bg-current opacity-70"
+        style={{ animationDelay: "160ms" }}
+      />
+      <span
+        className="h-1.5 w-1.5 animate-pulse rounded-full bg-current opacity-70"
+        style={{ animationDelay: "320ms" }}
+      />
+    </div>
+  );
+}
+
+function CitationPanel({
+  citations,
+}: {
+  citations: NonNullable<Message["citations"]>;
+}) {
+  if (citations.length === 0) return null;
+
+  return (
+    <details className="mt-3 rounded-xl border border-border/50 bg-muted/20 px-3 py-2 text-sm">
+      <summary className="cursor-pointer list-none">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+              Sources
+            </span>
+            <span className="text-[11px] text-muted-foreground/80">{citations.length}</span>
+          </div>
+          <Badge variant="outline">引用来源</Badge>
+        </div>
+      </summary>
+
+      <div className="mt-2 flex flex-col gap-2">
+        {citations.map((citation, index) => (
+          <a
+            key={`${citation.url}-${index + 1}`}
+            href={citation.url}
+            target="_blank"
+            rel="noreferrer"
+            className="block rounded-md border border-border/40 bg-background/70 px-3 py-2 text-xs transition-colors hover:bg-background"
+          >
+            <div className="flex items-center gap-2">
+              <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full border border-border/60 px-1.5 text-[10px] font-semibold text-muted-foreground">
+                {index + 1}
+              </span>
+              <span className="min-w-0 flex-1 truncate font-medium text-foreground">
+                {citation.title || citation.url}
+              </span>
+            </div>
+            <div className="mt-1 truncate text-muted-foreground">{citation.url}</div>
+            {citation.snippet && (
+              <div className="mt-1 line-clamp-2 text-muted-foreground">{citation.snippet}</div>
+            )}
+          </a>
+        ))}
+      </div>
+    </details>
+  );
+}
+
 function isAbortError(error: unknown) {
   return error instanceof DOMException && error.name === "AbortError";
 }
@@ -192,23 +260,16 @@ export function DesktopChatArea() {
                     />
                   )}
                   <div className="whitespace-pre-wrap break-words text-sm leading-6">
-                    {message.content || (message.role === "assistant" ? "..." : "")}
+                    {message.content ? (
+                      message.content
+                    ) : message.role === "assistant" ? (
+                      <TypingIndicator />
+                    ) : (
+                      ""
+                    )}
                   </div>
                   {message.citations && message.citations.length > 0 && (
-                    <div className="mt-3 flex flex-col gap-2 rounded-xl border border-border/50 bg-muted/20 p-3">
-                      <div className="text-xs font-medium text-muted-foreground">引用来源</div>
-                      {message.citations.map((citation) => (
-                        <a
-                          key={citation.url}
-                          href={citation.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-sm text-blue-600 underline-offset-2 hover:underline"
-                        >
-                          {citation.title || citation.url}
-                        </a>
-                      ))}
-                    </div>
+                    <CitationPanel citations={message.citations} />
                   )}
                   {message.role === "assistant" && <AgentRunPanel run={message.agentRun} />}
                 </div>
