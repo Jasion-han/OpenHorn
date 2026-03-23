@@ -220,4 +220,21 @@ describe("desktop chat store", () => {
 
     expect(store.getState().composerMode).toBe("chat");
   });
+
+  test("updates conversation fields optimistically", async () => {
+    const { adapter } = createStubAdapter();
+    const store = createDesktopChatStore(adapter);
+
+    await store.getState().loadConversations();
+    await store.getState().updateConversation("conv-1", {
+      title: "已重命名",
+      isPinned: true,
+    });
+
+    expect(store.getState().conversations[0]).toMatchObject({
+      id: "conv-1",
+      title: "已重命名",
+      isPinned: true,
+    });
+  });
 });

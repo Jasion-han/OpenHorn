@@ -96,6 +96,7 @@ export interface ChatState {
     title: string,
     options?: { channelId?: string | null; modelId?: string | null },
   ) => Promise<Conversation>;
+  updateConversation: (conversationId: string, updates: Partial<Conversation>) => Promise<void>;
   deleteConversation: (conversationId: string) => Promise<void>;
   loadMessages: (conversationId: string) => Promise<void>;
   sendMessage: (
@@ -203,6 +204,49 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
       }));
 
       return conversation;
+    },
+
+    async updateConversation(conversationId, updates) {
+      const state = get();
+      const previous = state.conversations.find((conversation) => conversation.id === conversationId) || null;
+
+      set((nextState) => ({
+        conversations: nextState.conversations.map((conversation) =>
+          conversation.id === conversationId ? { ...conversation, ...updates } : conversation,
+        ),
+        currentConversation:
+          nextState.currentConversation?.id === conversationId
+            ? { ...nextState.currentConversation, ...updates }
+            : nextState.currentConversation,
+      }));
+
+      try {
+        await adapter.updateConversation(conversationId, {
+          title: updates.title,
+          channelId: updates.channelId,
+          modelId: updates.modelId,
+          systemPrompt: updates.systemPrompt,
+          contextLength: updates.contextLength,
+          isPinned: updates.isPinned,
+          forceWebSearch: updates.forceWebSearch,
+        });
+      } catch (error) {
+        if (previous) {
+          set((nextState) => ({
+            conversations: nextState.conversations.map((conversation) =>
+              conversation.id === conversationId ? previous : conversation,
+            ),
+            currentConversation:
+              nextState.currentConversation?.id === conversationId
+                ? previous
+                : nextState.currentConversation,
+            error: toErrorMessage(error),
+          }));
+        } else {
+          set({ error: toErrorMessage(error) });
+        }
+        throw error;
+      }
     },
 
     async deleteConversation(conversationId) {

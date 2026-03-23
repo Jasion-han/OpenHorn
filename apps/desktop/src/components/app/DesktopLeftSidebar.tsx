@@ -1,8 +1,32 @@
-import { MessageSquarePlus, Search, Settings } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronRight,
+  MessageSquarePlus,
+  MoreHorizontal,
+  Pencil,
+  Pin,
+  Search,
+  Settings,
+  Trash2,
+} from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { Badge, Button, Input, ScrollArea, cn } from "ui";
+import {
+  Badge,
+  Button,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+  Input,
+  ScrollArea,
+  cn,
+} from "ui";
 import { useDesktopShellStore } from "../../stores/desktopShellStore";
 import { useChatStore } from "../../stores/chatStore";
+import type { Conversation } from "../../types/chat";
+
+type DateGroup = "今天" | "昨天" | "更早";
 
 function formatNewConversationTitle() {
   const date = new Date();
@@ -13,9 +37,119 @@ function formatNewConversationTitle() {
   return `新会话 ${mm}-${dd} ${hh}:${min}`;
 }
 
+function groupByUpdatedAt(
+  items: Conversation[],
+): Array<{ label: DateGroup; items: Conversation[] }> {
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const yesterdayStart = todayStart - 86_400_000;
+
+  const today: Conversation[] = [];
+  const yesterday: Conversation[] = [];
+  const earlier: Conversation[] = [];
+
+  for (const item of items) {
+    const ts = item.updatedAt.getTime();
+    if (ts >= todayStart) today.push(item);
+    else if (ts >= yesterdayStart) yesterday.push(item);
+    else earlier.push(item);
+  }
+
+  const groups: Array<{ label: DateGroup; items: Conversation[] }> = [];
+  if (today.length) groups.push({ label: "今天", items: today });
+  if (yesterday.length) groups.push({ label: "昨天", items: yesterday });
+  if (earlier.length) groups.push({ label: "更早", items: earlier });
+  return groups;
+}
+
+function ConversationRow({
+  conversation,
+  isActive,
+  onSelect,
+  onRename,
+  onTogglePin,
+  onDelete,
+  pinLabel,
+}: {
+  conversation: Conversation;
+  isActive: boolean;
+  onSelect: () => void;
+  onRename: () => void;
+  onTogglePin: () => void;
+  onDelete: () => void;
+  pinLabel: string;
+}) {
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onSelect}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onSelect();
+        }
+      }}
+      className={cn(
+        "group flex cursor-pointer items-center justify-between rounded-[10px] border border-transparent px-3 py-[7px] text-left text-sm transition-colors duration-100",
+        isActive
+          ? "bg-foreground/[0.08] text-foreground shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]"
+          : "text-foreground/70 hover:bg-foreground/[0.04] hover:text-foreground",
+      )}
+    >
+      <span className="min-w-0 flex-1 truncate">{conversation.title}</span>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild onClick={(event) => event.stopPropagation()}>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100"
+          >
+            <MoreHorizontal size={13} />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-36">
+          <DropdownMenuItem
+            onClick={(event) => {
+              event.stopPropagation();
+              onRename();
+            }}
+          >
+            <Pencil size={14} />
+            重命名
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onClick={(event) => {
+              event.stopPropagation();
+              onTogglePin();
+            }}
+          >
+            <Pin size={14} />
+            {pinLabel}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            className="text-destructive focus:text-destructive"
+            onClick={(event) => {
+              event.stopPropagation();
+              window.setTimeout(() => onDelete(), 0);
+            }}
+          >
+            <Trash2 size={14} />
+            删除
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  );
+}
+
 export function DesktopLeftSidebar() {
   const [query, setQuery] = useState("");
   const [creating, setCreating] = useState(false);
+  const [pinnedOpen, setPinnedOpen] = useState(true);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
 
   const activeView = useDesktopShellStore((state) => state.activeView);
   const setActiveView = useDesktopShellStore((state) => state.setActiveView);
@@ -28,6 +162,8 @@ export function DesktopLeftSidebar() {
   const loadConversations = useChatStore((state) => state.loadConversations);
   const createConversation = useChatStore((state) => state.createConversation);
   const selectConversation = useChatStore((state) => state.selectConversation);
+  const updateConversation = useChatStore((state) => state.updateConversation);
+  const deleteConversation = useChatStore((state) => state.deleteConversation);
 
   useEffect(() => {
     void Promise.allSettled([loadChannels(), loadConversations()]);
@@ -57,6 +193,41 @@ export function DesktopLeftSidebar() {
       setCreating(false);
     }
   };
+
+  const handleDeleteConversation = async (conversation: Conversation) => {
+    const confirmed = window.confirm(`确定删除「${conversation.title}」？此操作不可恢复。`);
+    if (!confirmed) return;
+
+    try {
+      await deleteConversation(conversation.id);
+    } catch {
+      // store 已记录 error
+    }
+  };
+
+  const handleTogglePin = async (conversation: Conversation) => {
+    try {
+      await updateConversation(conversation.id, { isPinned: !conversation.isPinned });
+    } catch {
+      // store 已记录 error
+    }
+  };
+
+  const handleSubmitRename = async (conversation: Conversation) => {
+    const nextTitle = renameValue.trim();
+    setRenamingId(null);
+    if (!nextTitle || nextTitle === conversation.title) return;
+
+    try {
+      await updateConversation(conversation.id, { title: nextTitle });
+    } catch {
+      void loadConversations();
+    }
+  };
+
+  const pinned = filteredConversations.filter((conversation) => conversation.isPinned);
+  const rest = filteredConversations.filter((conversation) => !conversation.isPinned);
+  const groups = groupByUpdatedAt(rest);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -95,23 +266,96 @@ export function DesktopLeftSidebar() {
       <div className="min-h-0 flex-1 overflow-hidden px-2 pb-2">
         <ScrollArea className="h-full">
           <div className="flex flex-col gap-1 pr-3">
-            {filteredConversations.map((conversation) => (
-              <button
-                key={conversation.id}
-                type="button"
-                onClick={() => {
-                  setActiveView("chat");
-                  void selectConversation(conversation.id);
-                }}
-                className={cn(
-                  "flex items-center justify-between rounded-[10px] border border-transparent px-3 py-[7px] text-left text-sm transition-colors duration-100",
-                  currentConversation?.id === conversation.id && activeView === "chat"
-                    ? "bg-foreground/[0.08] text-foreground shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]"
-                    : "text-foreground/70 hover:bg-foreground/[0.04] hover:text-foreground",
+            {pinned.length > 0 && (
+              <div>
+                <div className="flex items-center justify-between px-2 py-1">
+                  <span className="text-xs font-semibold text-muted-foreground">置顶</span>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="h-5 w-5"
+                    onClick={() => setPinnedOpen((value) => !value)}
+                  >
+                    {pinnedOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                  </Button>
+                </div>
+
+                {pinnedOpen &&
+                  pinned.map((conversation) =>
+                    renamingId === conversation.id ? (
+                      <div key={conversation.id} className="px-2 py-1">
+                        <Input
+                          autoFocus
+                          value={renameValue}
+                          onChange={(event) => setRenameValue(event.target.value)}
+                          onBlur={() => void handleSubmitRename(conversation)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") void handleSubmitRename(conversation);
+                            if (event.key === "Escape") setRenamingId(null);
+                          }}
+                        />
+                      </div>
+                    ) : (
+                      <ConversationRow
+                        key={`pinned-${conversation.id}`}
+                        conversation={conversation}
+                        isActive={currentConversation?.id === conversation.id && activeView === "chat"}
+                        onSelect={() => {
+                          setActiveView("chat");
+                          void selectConversation(conversation.id);
+                        }}
+                        onRename={() => {
+                          setRenamingId(conversation.id);
+                          setRenameValue(conversation.title);
+                        }}
+                        onTogglePin={() => void handleTogglePin(conversation)}
+                        onDelete={() => void handleDeleteConversation(conversation)}
+                        pinLabel="取消置顶"
+                      />
+                    ),
+                  )}
+              </div>
+            )}
+
+            {groups.map((group) => (
+              <div key={group.label}>
+                <p className="px-2 py-1 text-xs font-semibold text-muted-foreground">
+                  {group.label}
+                </p>
+                {group.items.map((conversation) =>
+                  renamingId === conversation.id ? (
+                    <div key={conversation.id} className="px-2 py-1">
+                      <Input
+                        autoFocus
+                        value={renameValue}
+                        onChange={(event) => setRenameValue(event.target.value)}
+                        onBlur={() => void handleSubmitRename(conversation)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") void handleSubmitRename(conversation);
+                          if (event.key === "Escape") setRenamingId(null);
+                        }}
+                      />
+                    </div>
+                  ) : (
+                    <ConversationRow
+                      key={conversation.id}
+                      conversation={conversation}
+                      isActive={currentConversation?.id === conversation.id && activeView === "chat"}
+                      onSelect={() => {
+                        setActiveView("chat");
+                        void selectConversation(conversation.id);
+                      }}
+                      onRename={() => {
+                        setRenamingId(conversation.id);
+                        setRenameValue(conversation.title);
+                      }}
+                      onTogglePin={() => void handleTogglePin(conversation)}
+                      onDelete={() => void handleDeleteConversation(conversation)}
+                      pinLabel="置顶"
+                    />
+                  ),
                 )}
-              >
-                <span className="truncate">{conversation.title}</span>
-              </button>
+              </div>
             ))}
 
             {filteredConversations.length === 0 && (
