@@ -435,24 +435,11 @@ export function DesktopChatArea() {
       <div className="min-h-0 flex-1">
         {!currentConversation ? (
           <div className="flex h-full items-center justify-center px-6">
-            <div className="max-w-md rounded-[28px] border border-border/60 bg-background/70 px-6 py-8 text-center shadow-sm">
-              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-muted text-muted-foreground">
-                <MessageSquare size={20} />
-              </div>
-              <div className="mt-4 text-lg font-semibold">开始一个新对话</div>
-              <p className="mt-2 text-sm text-muted-foreground">
-                在左侧选择历史会话，或新建一个会话后直接开始输入。
-              </p>
-            </div>
+            <p className="text-sm text-muted-foreground">在左侧选择一个会话，或创建新会话开始交流</p>
           </div>
         ) : (
           <ScrollArea className="h-full">
-            <div className="flex min-h-full flex-col gap-3 px-4 py-4">
-              {messages.length === 0 && !isLoading && (
-                <div className="rounded-2xl border border-dashed border-border/60 px-4 py-8 text-center text-sm text-muted-foreground">
-                  这个会话还没有消息，直接在下方输入即可。
-                </div>
-              )}
+            <div className="flex min-h-full flex-col gap-2 px-4 py-4">
 
               {messages.map((message) => (
                 <div

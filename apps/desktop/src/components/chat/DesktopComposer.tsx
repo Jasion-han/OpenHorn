@@ -1,5 +1,5 @@
-import { Bot, CornerDownLeft, MessageSquare, SendHorizontal, Square } from "lucide-react";
-import { useState } from "react";
+import { Bot, ChevronDown, CornerDownLeft, MessageSquare, Square } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { Button, Textarea, cn } from "ui";
 import { useChatStore } from "../../stores/chatStore";
 import type { ChatMode } from "../../types/chat";
@@ -16,6 +16,8 @@ export function DesktopComposer({
   const isStreaming = useChatStore((state) => state.isStreaming);
   const abortStreaming = useChatStore((state) => state.abortStreaming);
   const [value, setValue] = useState("");
+  const [modeMenuOpen, setModeMenuOpen] = useState(false);
+  const modeMenuRef = useRef<HTMLDivElement>(null);
 
   const canSubmit = !disabled && !isStreaming && value.trim().length > 0;
 
@@ -26,67 +28,137 @@ export function DesktopComposer({
     await onSubmit(next);
   };
 
-  const renderModeButton = (mode: ChatMode) => {
-    const active = composerMode === mode;
-    return (
-      <button
-        key={mode}
-        type="button"
-        onClick={() => setComposerMode(mode)}
-        className={cn(
-          "inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs transition-colors",
-          active
-            ? "bg-foreground text-background"
-            : "bg-muted text-muted-foreground hover:text-foreground",
-        )}
-      >
-        {mode === "agent" ? <Bot size={12} /> : <MessageSquare size={12} />}
-        {mode === "agent" ? "Agent" : "Chat"}
-      </button>
-    );
-  };
+  const modeDisabled = disabled || isStreaming;
+  const alternateMode: ChatMode = composerMode === "chat" ? "agent" : "chat";
+
+  useEffect(() => {
+    if (!modeMenuOpen) return;
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!modeMenuRef.current?.contains(event.target as Node)) {
+        setModeMenuOpen(false);
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setModeMenuOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [modeMenuOpen]);
 
   return (
-    <div className="border-t border-border/50 px-4 py-4">
-      <div className="rounded-[17px] border border-border/60 bg-background/85 p-3 shadow-sm backdrop-blur-sm">
-        <div className="mb-3 flex items-center gap-2">
-          <div className="inline-flex rounded-full bg-muted/80 p-1">
-            {(["chat", "agent"] as const).map(renderModeButton)}
-          </div>
+    <div className="px-4 pb-4 pt-2">
+      <div className="rounded-[17px] border-[0.5px] border-border bg-background/70 pt-2 shadow-minimal backdrop-blur-sm transition-all duration-200 focus-within:border-foreground/20">
+        <div className="px-[15px] pb-2">
+          <Textarea
+            value={value}
+            onChange={(event) => setValue(event.target.value)}
+            placeholder={
+              disabled ? "请先在左侧创建或选择一个会话" : "输入你的问题，聊天与 Agent 在这里切换"
+            }
+            rows={1}
+            className="min-h-[36px] max-h-[160px] resize-none border-0 bg-transparent p-0 shadow-none placeholder:text-muted-foreground/70 focus-visible:ring-0"
+            onKeyDown={(event) => {
+              const nativeEvent = event.nativeEvent;
+              const keyCode =
+                "keyCode" in nativeEvent ? (nativeEvent.keyCode as number | undefined) : undefined;
+
+              if (nativeEvent.isComposing || keyCode === 229) {
+                return;
+              }
+
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                if (!canSubmit) return;
+                void handleSubmit();
+              }
+            }}
+          />
         </div>
 
-        <Textarea
-          value={value}
-          onChange={(event) => setValue(event.target.value)}
-          placeholder={
-            disabled ? "请先在左侧创建或选择一个会话" : "输入你的问题，聊天与 Agent 在这里切换"
-          }
-          rows={1}
-          className="min-h-[36px] max-h-[160px] resize-none border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
-          onKeyDown={(event) => {
-            if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
-              event.preventDefault();
-              if (!canSubmit) return;
-              void handleSubmit();
-            }
-          }}
-        />
+        <div className="flex h-[40px] items-center justify-between gap-4 px-2 py-[5px]">
+          <div className="flex min-w-0 flex-1 items-center gap-1.5">
+            <div ref={modeMenuRef} className="relative inline-flex flex-col items-center">
+              {modeMenuOpen && !modeDisabled && (
+                <div className="pointer-events-none absolute bottom-full left-0 right-0 z-20 mb-1 flex justify-center">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setComposerMode(alternateMode);
+                      setModeMenuOpen(false);
+                    }}
+                    className="pointer-events-auto flex w-full items-center justify-center gap-1.5 rounded-[10px] bg-accent/88 px-2.5 py-1 text-xs text-foreground shadow-[0_10px_24px_rgba(15,23,42,0.12)] ring-1 ring-border/25 backdrop-blur-md transition-colors hover:bg-accent"
+                  >
+                    <span>{alternateMode === "chat" ? "Chat" : "Agent"}</span>
+                    <ChevronDown className="size-3 shrink-0 opacity-0" aria-hidden="true" />
+                  </button>
+                </div>
+              )}
 
-        <div className="mt-3 flex items-center justify-between gap-3">
-          <div className="inline-flex items-center gap-2 text-xs text-muted-foreground">
-            <CornerDownLeft size={12} />
-            <span>Ctrl/Cmd + Enter 发送</span>
+              <button
+                type="button"
+                disabled={modeDisabled}
+                onClick={() => {
+                  if (modeDisabled) return;
+                  setModeMenuOpen((open) => !open);
+                }}
+                className={cn(
+                  "flex min-w-[68px] items-center justify-center gap-1.5 rounded-[10px] px-2.5 py-1 text-xs transition-colors",
+                  modeMenuOpen
+                    ? "bg-accent/80 text-foreground"
+                    : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                  modeDisabled && "pointer-events-none opacity-60",
+                )}
+                aria-label="Mode"
+                title="Mode"
+              >
+                {composerMode === "agent" ? <Bot size={12} /> : <MessageSquare size={12} />}
+                <span className="truncate">{composerMode === "chat" ? "Chat" : "Agent"}</span>
+                <ChevronDown className={cn("size-3 transition-transform", modeMenuOpen && "rotate-180")} />
+              </button>
+            </div>
+
+            <div className="inline-flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+              <CornerDownLeft size={12} />
+              <span>Enter 发送</span>
+            </div>
           </div>
 
           {isStreaming ? (
-            <Button variant="outline" onClick={() => abortStreaming()}>
-              <Square size={14} className="fill-current" />
-              停止
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              className="size-[30px] rounded-full text-destructive hover:bg-destructive/10"
+              onClick={() => abortStreaming()}
+              aria-label="Stop"
+              title="Stop"
+            >
+              <Square className="size-[22px]" />
             </Button>
           ) : (
-            <Button onClick={() => void handleSubmit()} disabled={!canSubmit}>
-              <SendHorizontal size={16} />
-              发送
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              className={cn(
+                "size-[30px] rounded-full",
+                canSubmit ? "text-primary hover:bg-primary/10" : "cursor-not-allowed text-foreground/30",
+              )}
+              onClick={() => void handleSubmit()}
+              disabled={!canSubmit}
+              aria-label="Send"
+              title="Send"
+            >
+              <CornerDownLeft className="size-[22px]" />
             </Button>
           )}
         </div>
