@@ -1,6 +1,13 @@
 import type { ResultSet, Row } from "@libsql/client";
 import { client } from "./index";
 
+type ForeignKeyExpectation = {
+  from: string;
+  table: string;
+  to: string;
+  onDelete: string;
+};
+
 const SCHEMA_DDL: string[] = [
   `CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
@@ -36,7 +43,7 @@ const SCHEMA_DDL: string[] = [
     is_default INTEGER DEFAULT 0,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
-    FOREIGN KEY (channel_id) REFERENCES channels(id)
+    FOREIGN KEY (channel_id) REFERENCES channels(id) ON DELETE CASCADE
   );`,
 
   `CREATE TABLE IF NOT EXISTS conversations (
@@ -56,7 +63,7 @@ const SCHEMA_DDL: string[] = [
 	    created_at INTEGER NOT NULL,
 	    updated_at INTEGER NOT NULL,
 	    FOREIGN KEY (user_id) REFERENCES users(id),
-	    FOREIGN KEY (channel_id) REFERENCES channels(id)
+	    FOREIGN KEY (channel_id) REFERENCES channels(id) ON DELETE SET NULL
 	  );`,
 
   `CREATE TABLE IF NOT EXISTS messages (
@@ -73,7 +80,7 @@ const SCHEMA_DDL: string[] = [
 	    live_metadata TEXT,
 	    citations TEXT,
 	    created_at INTEGER NOT NULL,
-	    FOREIGN KEY (conversation_id) REFERENCES conversations(id)
+	    FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
 	  );`,
 
   `CREATE TABLE IF NOT EXISTS agent_sessions (
@@ -87,8 +94,8 @@ const SCHEMA_DDL: string[] = [
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     FOREIGN KEY (user_id) REFERENCES users(id),
-    FOREIGN KEY (conversation_id) REFERENCES conversations(id),
-    FOREIGN KEY (channel_id) REFERENCES channels(id)
+    FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
+    FOREIGN KEY (channel_id) REFERENCES channels(id) ON DELETE SET NULL
   );`,
 
   `CREATE TABLE IF NOT EXISTS agent_tasks (
@@ -108,8 +115,8 @@ const SCHEMA_DDL: string[] = [
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     FOREIGN KEY (user_id) REFERENCES users(id),
-    FOREIGN KEY (conversation_id) REFERENCES conversations(id),
-    FOREIGN KEY (channel_id) REFERENCES channels(id)
+    FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
+    FOREIGN KEY (channel_id) REFERENCES channels(id) ON DELETE SET NULL
   );`,
 
   `CREATE TABLE IF NOT EXISTS agent_runs (
@@ -208,9 +215,9 @@ const SCHEMA_DDL: string[] = [
     file_type TEXT NOT NULL,
     file_size INTEGER NOT NULL,
     created_at INTEGER NOT NULL,
-    FOREIGN KEY (conversation_id) REFERENCES conversations(id),
-    FOREIGN KEY (session_id) REFERENCES agent_sessions(id),
-    FOREIGN KEY (message_id) REFERENCES messages(id)
+    FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
+    FOREIGN KEY (session_id) REFERENCES agent_sessions(id) ON DELETE CASCADE,
+    FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
   );`,
 
   `CREATE TABLE IF NOT EXISTS settings (
@@ -238,6 +245,10 @@ function getRows(result: ResultSet): Row[] {
   return Array.isArray(result.rows) ? result.rows : [];
 }
 
+function normalizeForeignKeyAction(value: unknown): string {
+  return typeof value === "string" ? value.trim().toUpperCase() : "NO ACTION";
+}
+
 function hasColumnNamed(rows: Row[], columnName: string): boolean {
   return rows.some((row) => typeof row.name === "string" && row.name === columnName);
 }
@@ -246,7 +257,9 @@ function getColumnDefaultValue(rows: Row[], columnName: string): string | null {
   const row = rows.find((item) => typeof item.name === "string" && item.name === columnName);
   const raw = row?.dflt_value;
   if (raw == null) return null;
-  return String(raw).trim().replace(/^['"]|['"]$/g, "");
+  return String(raw)
+    .trim()
+    .replace(/^['"]|['"]$/g, "");
 }
 
 async function ensureConversationModelIdColumn(): Promise<void> {
@@ -331,7 +344,7 @@ async function ensureConversationForceWebSearchEnabledByDefault(): Promise<void>
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL,
       FOREIGN KEY (user_id) REFERENCES users(id),
-      FOREIGN KEY (channel_id) REFERENCES channels(id)
+      FOREIGN KEY (channel_id) REFERENCES channels(id) ON DELETE SET NULL
     );`);
     await client.execute(`INSERT INTO conversations__migrated (
       id,
@@ -502,8 +515,344 @@ async function ensureAgentEventsTable(): Promise<void> {
       tool_name TEXT,
       tool_input TEXT,
       created_at INTEGER NOT NULL,
-      FOREIGN KEY (session_id) REFERENCES agent_sessions(id)
+      FOREIGN KEY (session_id) REFERENCES agent_sessions(id) ON DELETE CASCADE
     );`);
+  }
+}
+
+async function tableHasExpectedForeignKeys(
+  tableName: string,
+  expectedForeignKeys: ForeignKeyExpectation[],
+): Promise<boolean> {
+  const result = await client.execute(`PRAGMA foreign_key_list('${tableName}');`);
+  const rows = getRows(result);
+  if (rows.length !== expectedForeignKeys.length) {
+    return false;
+  }
+
+  return expectedForeignKeys.every((expected) =>
+    rows.some(
+      (row) =>
+        row.from === expected.from &&
+        row.table === expected.table &&
+        row.to === expected.to &&
+        normalizeForeignKeyAction(row.on_delete) === expected.onDelete,
+    ),
+  );
+}
+
+async function ensureDeleteSemanticsForeignKeys(): Promise<void> {
+  const expectations: Array<{ tableName: string; foreignKeys: ForeignKeyExpectation[] }> = [
+    {
+      tableName: "channel_models",
+      foreignKeys: [{ from: "channel_id", table: "channels", to: "id", onDelete: "CASCADE" }],
+    },
+    {
+      tableName: "conversations",
+      foreignKeys: [
+        { from: "user_id", table: "users", to: "id", onDelete: "NO ACTION" },
+        { from: "channel_id", table: "channels", to: "id", onDelete: "SET NULL" },
+      ],
+    },
+    {
+      tableName: "messages",
+      foreignKeys: [
+        {
+          from: "conversation_id",
+          table: "conversations",
+          to: "id",
+          onDelete: "CASCADE",
+        },
+      ],
+    },
+    {
+      tableName: "agent_sessions",
+      foreignKeys: [
+        { from: "user_id", table: "users", to: "id", onDelete: "NO ACTION" },
+        {
+          from: "conversation_id",
+          table: "conversations",
+          to: "id",
+          onDelete: "CASCADE",
+        },
+        { from: "channel_id", table: "channels", to: "id", onDelete: "SET NULL" },
+      ],
+    },
+    {
+      tableName: "agent_tasks",
+      foreignKeys: [
+        { from: "user_id", table: "users", to: "id", onDelete: "NO ACTION" },
+        {
+          from: "conversation_id",
+          table: "conversations",
+          to: "id",
+          onDelete: "CASCADE",
+        },
+        { from: "channel_id", table: "channels", to: "id", onDelete: "SET NULL" },
+      ],
+    },
+    {
+      tableName: "attachments",
+      foreignKeys: [
+        {
+          from: "conversation_id",
+          table: "conversations",
+          to: "id",
+          onDelete: "CASCADE",
+        },
+        {
+          from: "session_id",
+          table: "agent_sessions",
+          to: "id",
+          onDelete: "CASCADE",
+        },
+        {
+          from: "message_id",
+          table: "messages",
+          to: "id",
+          onDelete: "CASCADE",
+        },
+      ],
+    },
+    {
+      tableName: "agent_events",
+      foreignKeys: [
+        {
+          from: "session_id",
+          table: "agent_sessions",
+          to: "id",
+          onDelete: "CASCADE",
+        },
+      ],
+    },
+  ];
+
+  const matches = await Promise.all(
+    expectations.map((item) => tableHasExpectedForeignKeys(item.tableName, item.foreignKeys)),
+  );
+  if (matches.every(Boolean)) {
+    return;
+  }
+
+  await client.execute("PRAGMA foreign_keys=OFF;");
+  try {
+    await client.execute("BEGIN;");
+
+    await client.execute(`CREATE TABLE channel_models__migrated (
+      id TEXT PRIMARY KEY,
+      channel_id TEXT NOT NULL,
+      model_id TEXT NOT NULL,
+      display_name TEXT NOT NULL,
+      enabled INTEGER DEFAULT 1,
+      is_default INTEGER DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      FOREIGN KEY (channel_id) REFERENCES channels(id) ON DELETE CASCADE
+    );`);
+    await client.execute(`INSERT INTO channel_models__migrated
+      SELECT id, channel_id, model_id, display_name, enabled, is_default, created_at, updated_at
+      FROM channel_models;`);
+
+    await client.execute(`CREATE TABLE conversations__migrated (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      channel_id TEXT,
+      model_id TEXT,
+      title TEXT NOT NULL,
+      system_prompt TEXT,
+      context_length INTEGER DEFAULT 4096,
+      default_mode TEXT DEFAULT 'agent',
+      last_mode TEXT DEFAULT 'agent',
+      is_pinned INTEGER DEFAULT 0,
+      force_web_search INTEGER DEFAULT 1,
+      run_status TEXT,
+      workspace_id TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id),
+      FOREIGN KEY (channel_id) REFERENCES channels(id) ON DELETE SET NULL
+    );`);
+    await client.execute(`INSERT INTO conversations__migrated
+      SELECT
+        id,
+        user_id,
+        channel_id,
+        model_id,
+        title,
+        system_prompt,
+        COALESCE(context_length, 4096),
+        COALESCE(default_mode, 'agent'),
+        COALESCE(last_mode, 'agent'),
+        COALESCE(is_pinned, 0),
+        COALESCE(force_web_search, 1),
+        run_status,
+        workspace_id,
+        created_at,
+        updated_at
+      FROM conversations;`);
+
+    await client.execute(`CREATE TABLE messages__migrated (
+      id TEXT PRIMARY KEY,
+      conversation_id TEXT NOT NULL,
+      role TEXT NOT NULL,
+      content TEXT NOT NULL,
+      model TEXT,
+      mode TEXT DEFAULT 'chat',
+      attachments TEXT,
+      agent_run TEXT,
+      workspace_id TEXT,
+      context_paths TEXT,
+      live_metadata TEXT,
+      citations TEXT,
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+    );`);
+    await client.execute(`INSERT INTO messages__migrated
+      SELECT
+        id,
+        conversation_id,
+        role,
+        content,
+        model,
+        COALESCE(mode, 'chat'),
+        attachments,
+        agent_run,
+        workspace_id,
+        context_paths,
+        live_metadata,
+        citations,
+        created_at
+      FROM messages;`);
+
+    await client.execute(`CREATE TABLE agent_sessions__migrated (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      conversation_id TEXT,
+      channel_id TEXT,
+      model_id TEXT,
+      title TEXT NOT NULL,
+      status TEXT DEFAULT 'active',
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id),
+      FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
+      FOREIGN KEY (channel_id) REFERENCES channels(id) ON DELETE SET NULL
+    );`);
+    await client.execute(`INSERT INTO agent_sessions__migrated
+      SELECT
+        id,
+        user_id,
+        conversation_id,
+        channel_id,
+        model_id,
+        title,
+        COALESCE(status, 'active'),
+        created_at,
+        updated_at
+      FROM agent_sessions;`);
+
+    await client.execute(`CREATE TABLE agent_tasks__migrated (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      conversation_id TEXT,
+      channel_id TEXT,
+      model_id TEXT,
+      title TEXT NOT NULL,
+      goal TEXT NOT NULL,
+      attachments TEXT,
+      complexity TEXT NOT NULL DEFAULT 'deep',
+      ux_mode TEXT NOT NULL DEFAULT 'full',
+      requires_plan_approval INTEGER NOT NULL DEFAULT 1,
+      auto_start INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'draft',
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id),
+      FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
+      FOREIGN KEY (channel_id) REFERENCES channels(id) ON DELETE SET NULL
+    );`);
+    await client.execute(`INSERT INTO agent_tasks__migrated
+      SELECT
+        id,
+        user_id,
+        conversation_id,
+        channel_id,
+        model_id,
+        title,
+        goal,
+        attachments,
+        COALESCE(complexity, 'deep'),
+        COALESCE(ux_mode, 'full'),
+        COALESCE(requires_plan_approval, 1),
+        COALESCE(auto_start, 0),
+        COALESCE(status, 'draft'),
+        created_at,
+        updated_at
+      FROM agent_tasks;`);
+
+    await client.execute(`CREATE TABLE attachments__migrated (
+      id TEXT PRIMARY KEY,
+      conversation_id TEXT,
+      session_id TEXT,
+      message_id TEXT,
+      file_name TEXT NOT NULL,
+      file_path TEXT NOT NULL,
+      file_type TEXT NOT NULL,
+      file_size INTEGER NOT NULL,
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
+      FOREIGN KEY (session_id) REFERENCES agent_sessions(id) ON DELETE CASCADE,
+      FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
+    );`);
+    await client.execute(`INSERT INTO attachments__migrated
+      SELECT
+        id,
+        conversation_id,
+        session_id,
+        message_id,
+        file_name,
+        file_path,
+        file_type,
+        file_size,
+        created_at
+      FROM attachments;`);
+
+    await client.execute(`CREATE TABLE agent_events__migrated (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      type TEXT NOT NULL,
+      content TEXT,
+      tool_name TEXT,
+      tool_input TEXT,
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (session_id) REFERENCES agent_sessions(id) ON DELETE CASCADE
+    );`);
+    await client.execute(`INSERT INTO agent_events__migrated
+      SELECT id, session_id, type, content, tool_name, tool_input, created_at
+      FROM agent_events;`);
+
+    await client.execute("DROP TABLE channel_models;");
+    await client.execute("DROP TABLE attachments;");
+    await client.execute("DROP TABLE agent_events;");
+    await client.execute("DROP TABLE messages;");
+    await client.execute("DROP TABLE agent_sessions;");
+    await client.execute("DROP TABLE agent_tasks;");
+    await client.execute("DROP TABLE conversations;");
+
+    await client.execute("ALTER TABLE conversations__migrated RENAME TO conversations;");
+    await client.execute("ALTER TABLE messages__migrated RENAME TO messages;");
+    await client.execute("ALTER TABLE agent_sessions__migrated RENAME TO agent_sessions;");
+    await client.execute("ALTER TABLE agent_tasks__migrated RENAME TO agent_tasks;");
+    await client.execute("ALTER TABLE attachments__migrated RENAME TO attachments;");
+    await client.execute("ALTER TABLE agent_events__migrated RENAME TO agent_events;");
+    await client.execute("ALTER TABLE channel_models__migrated RENAME TO channel_models;");
+
+    await client.execute("COMMIT;");
+  } catch (error) {
+    await client.execute("ROLLBACK;");
+    throw error;
+  } finally {
+    await client.execute("PRAGMA foreign_keys=ON;");
   }
 }
 
@@ -577,4 +926,5 @@ export async function bootstrapDatabase(): Promise<void> {
   await ensureAgentTaskRequiresPlanApprovalColumn();
   await ensureAgentTaskAutoStartColumn();
   await ensureAttachmentsSessionIdColumn();
+  await ensureDeleteSemanticsForeignKeys();
 }

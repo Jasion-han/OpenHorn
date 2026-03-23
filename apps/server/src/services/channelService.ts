@@ -1,4 +1,4 @@
-import { agentSessions, channelModels, channels, conversations } from "db";
+import { agentSessions, agentTasks, channelModels, channels, conversations } from "db";
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "../db";
 import { decrypt, encrypt, generateId } from "../utils";
@@ -602,6 +602,11 @@ export async function deleteChannel(userId: string, channelId: string) {
     .update(agentSessions)
     .set({ channelId: null, modelId: null, updatedAt: new Date() })
     .where(and(eq(agentSessions.userId, userId), eq(agentSessions.channelId, channelId)));
+
+  await db
+    .update(agentTasks)
+    .set({ channelId: null, modelId: null, updatedAt: new Date() })
+    .where(and(eq(agentTasks.userId, userId), eq(agentTasks.channelId, channelId)));
 
   await db.delete(channelModels).where(eq(channelModels.channelId, channelId));
   await db.delete(channels).where(and(eq(channels.id, channelId), eq(channels.userId, userId)));

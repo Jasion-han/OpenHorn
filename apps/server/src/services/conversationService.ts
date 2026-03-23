@@ -1,5 +1,17 @@
-import { conversations, messages } from "db";
-import { and, desc, eq } from "drizzle-orm";
+import {
+  agentApprovalRequests,
+  agentArtifacts,
+  agentEvents,
+  agentPlanSteps,
+  agentRuns,
+  agentSessions,
+  agentTaskEvents,
+  agentTasks,
+  attachments,
+  conversations,
+  messages,
+} from "db";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "../db";
 import { generateId } from "../utils";
 
@@ -144,6 +156,69 @@ export async function updateConversation(
 }
 
 export async function deleteConversation(userId: string, conversationId: string) {
+  const conversation = await getConversationById(userId, conversationId);
+  if (!conversation) {
+    return { success: true };
+  }
+
+  const [messageRows, sessionRows, taskRows] = await Promise.all([
+    db
+      .select({ id: messages.id })
+      .from(messages)
+      .where(eq(messages.conversationId, conversationId)),
+    db
+      .select({ id: agentSessions.id })
+      .from(agentSessions)
+      .where(
+        and(eq(agentSessions.conversationId, conversationId), eq(agentSessions.userId, userId)),
+      ),
+    db
+      .select({ id: agentTasks.id })
+      .from(agentTasks)
+      .where(and(eq(agentTasks.conversationId, conversationId), eq(agentTasks.userId, userId))),
+  ]);
+
+  const messageIds = messageRows.map((row) => row.id);
+  const sessionIds = sessionRows.map((row) => row.id);
+  const taskIds = taskRows.map((row) => row.id);
+
+  if (messageIds.length > 0) {
+    await db.delete(attachments).where(inArray(attachments.messageId, messageIds));
+  }
+
+  if (sessionIds.length > 0) {
+    await db.delete(attachments).where(inArray(attachments.sessionId, sessionIds));
+    await db.delete(agentEvents).where(inArray(agentEvents.sessionId, sessionIds));
+    await db
+      .delete(agentSessions)
+      .where(and(eq(agentSessions.userId, userId), inArray(agentSessions.id, sessionIds)));
+  }
+
+  if (taskIds.length > 0) {
+    const runRows = await db
+      .select({ id: agentRuns.id })
+      .from(agentRuns)
+      .where(inArray(agentRuns.taskId, taskIds));
+    const runIds = runRows.map((row) => row.id);
+
+    if (runIds.length > 0) {
+      await db.delete(agentPlanSteps).where(inArray(agentPlanSteps.runId, runIds));
+      await db.delete(agentTaskEvents).where(inArray(agentTaskEvents.runId, runIds));
+      await db.delete(agentApprovalRequests).where(inArray(agentApprovalRequests.runId, runIds));
+      await db.delete(agentArtifacts).where(inArray(agentArtifacts.runId, runIds));
+      await db.delete(agentRuns).where(inArray(agentRuns.id, runIds));
+    }
+
+    await db.delete(agentPlanSteps).where(inArray(agentPlanSteps.taskId, taskIds));
+    await db.delete(agentTaskEvents).where(inArray(agentTaskEvents.taskId, taskIds));
+    await db.delete(agentApprovalRequests).where(inArray(agentApprovalRequests.taskId, taskIds));
+    await db.delete(agentArtifacts).where(inArray(agentArtifacts.taskId, taskIds));
+    await db
+      .delete(agentTasks)
+      .where(and(eq(agentTasks.userId, userId), inArray(agentTasks.id, taskIds)));
+  }
+
+  await db.delete(attachments).where(eq(attachments.conversationId, conversationId));
   await db.delete(messages).where(eq(messages.conversationId, conversationId));
 
   await db

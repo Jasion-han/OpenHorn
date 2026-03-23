@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { agentSessions, channels, conversations, users } from "db";
+import { agentSessions, agentTasks, channels, conversations, users } from "db";
 import { and, eq } from "drizzle-orm";
 import { db } from "../db";
 import { encrypt } from "../utils";
@@ -10,6 +10,7 @@ test("deleteChannel clears conversation and agent session references before dele
   const channelId = crypto.randomUUID();
   const conversationId = crypto.randomUUID();
   const sessionId = crypto.randomUUID();
+  const taskId = crypto.randomUUID();
   const now = new Date();
 
   await db.insert(users).values({
@@ -65,6 +66,24 @@ test("deleteChannel clears conversation and agent session references before dele
     updatedAt: now,
   });
 
+  await db.insert(agentTasks).values({
+    id: taskId,
+    userId,
+    conversationId,
+    channelId,
+    modelId: "gpt-5.2",
+    title: "task",
+    goal: "goal",
+    attachments: null,
+    complexity: "standard",
+    uxMode: "full",
+    requiresPlanApproval: true,
+    autoStart: false,
+    status: "draft",
+    createdAt: now,
+    updatedAt: now,
+  });
+
   try {
     await deleteChannel(userId, channelId);
 
@@ -89,8 +108,21 @@ test("deleteChannel clears conversation and agent session references before dele
     expect(sessionRows).toHaveLength(1);
     expect(sessionRows[0]?.channelId).toBeNull();
     expect(sessionRows[0]?.modelId).toBeNull();
+
+    const taskRows = await db
+      .select()
+      .from(agentTasks)
+      .where(and(eq(agentTasks.id, taskId), eq(agentTasks.userId, userId)));
+    expect(taskRows).toHaveLength(1);
+    expect(taskRows[0]?.channelId).toBeNull();
+    expect(taskRows[0]?.modelId).toBeNull();
   } finally {
-    await db.delete(agentSessions).where(and(eq(agentSessions.id, sessionId), eq(agentSessions.userId, userId)));
+    await db
+      .delete(agentTasks)
+      .where(and(eq(agentTasks.id, taskId), eq(agentTasks.userId, userId)));
+    await db
+      .delete(agentSessions)
+      .where(and(eq(agentSessions.id, sessionId), eq(agentSessions.userId, userId)));
     await db
       .delete(conversations)
       .where(and(eq(conversations.id, conversationId), eq(conversations.userId, userId)));

@@ -29,7 +29,7 @@ export const channelModels = sqliteTable("channel_models", {
   id: text("id").primaryKey(),
   channelId: text("channel_id")
     .notNull()
-    .references(() => channels.id),
+    .references(() => channels.id, { onDelete: "cascade" }),
   modelId: text("model_id").notNull(),
   displayName: text("display_name").notNull(),
   enabled: integer("enabled", { mode: "boolean" }).default(true),
@@ -43,7 +43,7 @@ export const conversations = sqliteTable("conversations", {
   userId: text("user_id")
     .notNull()
     .references(() => users.id),
-  channelId: text("channel_id").references(() => channels.id),
+  channelId: text("channel_id").references(() => channels.id, { onDelete: "set null" }),
   modelId: text("model_id"),
   title: text("title").notNull(),
   systemPrompt: text("system_prompt"),
@@ -62,7 +62,7 @@ export const messages = sqliteTable("messages", {
   id: text("id").primaryKey(),
   conversationId: text("conversation_id")
     .notNull()
-    .references(() => conversations.id),
+    .references(() => conversations.id, { onDelete: "cascade" }),
   role: text("role").notNull(),
   content: text("content").notNull(),
   model: text("model"),
@@ -81,8 +81,10 @@ export const agentSessions = sqliteTable("agent_sessions", {
   userId: text("user_id")
     .notNull()
     .references(() => users.id),
-  conversationId: text("conversation_id").references(() => conversations.id),
-  channelId: text("channel_id").references(() => channels.id),
+  conversationId: text("conversation_id").references(() => conversations.id, {
+    onDelete: "cascade",
+  }),
+  channelId: text("channel_id").references(() => channels.id, { onDelete: "set null" }),
   modelId: text("model_id"),
   title: text("title").notNull(),
   status: text("status").default("active"),
@@ -95,8 +97,10 @@ export const agentTasks = sqliteTable("agent_tasks", {
   userId: text("user_id")
     .notNull()
     .references(() => users.id),
-  conversationId: text("conversation_id").references(() => conversations.id),
-  channelId: text("channel_id").references(() => channels.id),
+  conversationId: text("conversation_id").references(() => conversations.id, {
+    onDelete: "cascade",
+  }),
+  channelId: text("channel_id").references(() => channels.id, { onDelete: "set null" }),
   modelId: text("model_id"),
   title: text("title").notNull(),
   goal: text("goal").notNull(),
@@ -210,9 +214,11 @@ export const mcpServers = sqliteTable("mcp_servers", {
 
 export const attachments = sqliteTable("attachments", {
   id: text("id").primaryKey(),
-  conversationId: text("conversation_id").references(() => conversations.id),
-  sessionId: text("session_id").references(() => agentSessions.id),
-  messageId: text("message_id").references(() => messages.id),
+  conversationId: text("conversation_id").references(() => conversations.id, {
+    onDelete: "cascade",
+  }),
+  sessionId: text("session_id").references(() => agentSessions.id, { onDelete: "cascade" }),
+  messageId: text("message_id").references(() => messages.id, { onDelete: "cascade" }),
   fileName: text("file_name").notNull(),
   filePath: text("file_path").notNull(),
   fileType: text("file_type").notNull(),
@@ -224,7 +230,7 @@ export const agentEvents = sqliteTable("agent_events", {
   id: text("id").primaryKey(),
   sessionId: text("session_id")
     .notNull()
-    .references(() => agentSessions.id),
+    .references(() => agentSessions.id, { onDelete: "cascade" }),
   type: text("type").notNull(),
   content: text("content"),
   toolName: text("tool_name"),

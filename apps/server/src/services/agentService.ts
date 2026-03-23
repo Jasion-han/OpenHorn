@@ -1,5 +1,5 @@
 import type { CanUseTool, PermissionMode, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
-import { agentEvents, agentSessions, conversations } from "db";
+import { agentEvents, agentSessions, attachments, conversations } from "db";
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "../db";
 import { generateId } from "../utils";
@@ -247,6 +247,7 @@ export async function deleteAgentSession(userId: string, sessionId: string) {
     throw new Error("Session not found");
   }
 
+  await db.delete(attachments).where(eq(attachments.sessionId, sessionId));
   await db.delete(agentEvents).where(eq(agentEvents.sessionId, sessionId));
   await db
     .delete(agentSessions)
