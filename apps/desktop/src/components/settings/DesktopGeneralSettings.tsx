@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { Button, Input, SettingsCard, SettingsRow, SettingsSection } from "ui";
-
-import { useIdeStore } from "../../stores/ideStore";
+import { useDesktopShellStore } from "../../stores/desktopShellStore";
 
 const WORKSPACE_ROOT_STORAGE_KEY = "openhorn.desktop.workspaceRoot";
 
@@ -24,8 +23,8 @@ export function saveWorkspaceRoot(value: string) {
 }
 
 export function DesktopGeneralSettings() {
-  const workspaceRootInput = useIdeStore((s) => s.workspaceRootInput);
-  const setWorkspaceRootInput = useIdeStore((s) => s.setWorkspaceRootInput);
+  const workspaceRootInput = useDesktopShellStore((state) => state.workspaceRootInput);
+  const setWorkspaceRootInput = useDesktopShellStore((state) => state.setWorkspaceRootInput);
 
   const [draft, setDraft] = useState(workspaceRootInput);
 
