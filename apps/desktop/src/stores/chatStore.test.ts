@@ -130,6 +130,88 @@ describe("desktop chat store", () => {
     });
   });
 
+  test("appends stream delta to assistant placeholder", async () => {
+    const { adapter } = createStubAdapter();
+    const store = createDesktopChatStore(adapter);
+
+    await store.getState().loadConversations();
+    await store.getState().selectConversation("conv-1");
+    const result = await store.getState().sendMessage({ content: "继续执行" });
+
+    store.getState().applyStreamEvent(result.assistantMessageId, {
+      type: "delta",
+      content: "第一段",
+    });
+    store.getState().applyStreamEvent(result.assistantMessageId, {
+      type: "delta",
+      content: "第二段",
+    });
+
+    expect(store.getState().messages[2]?.content).toBe("第一段第二段");
+  });
+
+  test("maps live status metadata onto the assistant message", async () => {
+    const { adapter } = createStubAdapter();
+    const store = createDesktopChatStore(adapter);
+
+    await store.getState().loadConversations();
+    await store.getState().selectConversation("conv-1");
+    const result = await store.getState().sendMessage({ content: "继续执行" });
+
+    store.getState().applyStreamEvent(result.assistantMessageId, {
+      type: "live_status",
+      status: "live",
+      route: "web_search",
+      label: "联网搜索",
+    });
+
+    expect(store.getState().messages[2]).toMatchObject({
+      liveStatus: "live",
+      liveRoute: "web_search",
+      liveLabel: "联网搜索",
+    });
+  });
+
+  test("updates inline agent run metadata and marks stream complete", async () => {
+    const { adapter } = createStubAdapter();
+    const store = createDesktopChatStore(adapter);
+
+    await store.getState().loadConversations();
+    await store.getState().selectConversation("conv-1");
+    const result = await store.getState().sendMessage({ content: "继续执行", mode: "agent" });
+
+    store.getState().applyStreamEvent(result.assistantMessageId, {
+      type: "agent_event",
+      event: {
+        type: "tool_start",
+        toolName: "web.search",
+        toolInput: { q: "OpenHorn" },
+      },
+    });
+    store.getState().applyStreamEvent(result.assistantMessageId, {
+      type: "done",
+      messageId: "assistant-final-1",
+      model: "claude-3-7-sonnet",
+      agentRun: {
+        status: "completed",
+        summary: "完成",
+        steps: [
+          {
+            type: "tool_start",
+            toolName: "web.search",
+          },
+        ],
+      },
+    });
+
+    expect(store.getState().isStreaming).toBe(false);
+    expect(store.getState().messages[2]).toMatchObject({
+      id: "assistant-final-1",
+      model: "claude-3-7-sonnet",
+    });
+    expect(store.getState().messages[2]?.agentRun?.status).toBe("completed");
+  });
+
   test("toggles composer mode", () => {
     const { adapter } = createStubAdapter();
     const store = createDesktopChatStore(adapter);

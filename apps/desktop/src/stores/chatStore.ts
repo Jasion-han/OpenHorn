@@ -1,6 +1,9 @@
 import { create } from "zustand";
 import { createChatAdapter, type ChatAdapter } from "../lib/chatAdapter";
 import type {
+  ApiAgentRun,
+  ApiCitation,
+  ChatStreamEvent,
   Channel,
   ChatMode,
   Conversation,
@@ -31,6 +34,50 @@ function createDraftMessage(input: {
   };
 }
 
+function createPartialAgentRun(): ApiAgentRun {
+  return {
+    status: "partial",
+    summary: "Agent 正在执行",
+    steps: [],
+  };
+}
+
+function applyAgentEventToRun(
+  run: ApiAgentRun | undefined,
+  event: Extract<ChatStreamEvent, { type: "agent_event" }>["event"],
+): ApiAgentRun {
+  const base = run || createPartialAgentRun();
+
+  if (event.type === "tool_start" || event.type === "tool_result") {
+    return {
+      ...base,
+      summary: "Agent 正在执行",
+      steps: [
+        ...base.steps,
+        {
+          type: event.type,
+          toolName: event.toolName,
+          content: event.content,
+          toolInput: event.toolInput,
+        },
+      ],
+    };
+  }
+
+  if (event.type === "error") {
+    const message = event.content || "Agent error";
+    return {
+      ...base,
+      status: "failed",
+      summary: "Agent 执行失败",
+      error: message,
+      steps: [...base.steps, { type: "error", content: message }],
+    };
+  }
+
+  return base;
+}
+
 export interface ChatState {
   channels: Channel[];
   conversations: Conversation[];
@@ -54,6 +101,9 @@ export interface ChatState {
   sendMessage: (
     input: Omit<SendMessageInput, "conversationId">,
   ) => Promise<{ assistantMessageId: string; response: Response }>;
+  applyStreamEvent: (messageId: string, event: ChatStreamEvent) => void;
+  completeStreamingMessage: (messageId: string) => void;
+  failStreamingMessage: (messageId: string, error: string) => void;
   updateMessage: (messageId: string, updates: Partial<Message>) => void;
   appendMessageDelta: (messageId: string, delta: string, updates?: Partial<Message>) => void;
   replaceMessages: (messages: Message[]) => void;
@@ -226,6 +276,84 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
         });
         throw error;
       }
+    },
+
+    applyStreamEvent(messageId, event) {
+      if (event.type === "delta") {
+        get().appendMessageDelta(messageId, event.content || "");
+        return;
+      }
+
+      if (event.type === "live_status") {
+        get().updateMessage(messageId, {
+          liveStatus: event.status,
+          liveRoute: event.route,
+          liveLabel: event.label,
+        });
+        return;
+      }
+
+      if (event.type === "citations") {
+        get().updateMessage(messageId, {
+          citations: event.citations as ApiCitation[],
+        });
+        return;
+      }
+
+      if (event.type === "agent_event") {
+        set((state) => ({
+          messages: state.messages.map((message) =>
+            message.id === messageId
+              ? {
+                  ...message,
+                  agentRun: applyAgentEventToRun(message.agentRun, event.event),
+                }
+              : message,
+          ),
+        }));
+        return;
+      }
+
+      if (event.type === "done") {
+        get().updateMessage(messageId, {
+          id: event.messageId || messageId,
+          model: event.model,
+          agentRun: event.agentRun,
+        });
+        get().completeStreamingMessage(event.messageId || messageId);
+        return;
+      }
+
+      if (event.type === "error") {
+        get().failStreamingMessage(messageId, event.message || "Stream error");
+      }
+    },
+
+    completeStreamingMessage(_messageId) {
+      set({ isStreaming: false });
+    },
+
+    failStreamingMessage(messageId, error) {
+      set((state) => ({
+        isStreaming: false,
+        error,
+        messages: state.messages.map((message) =>
+          message.id === messageId
+            ? {
+                ...message,
+                content: message.content || error,
+                agentRun: message.agentRun
+                  ? {
+                      ...message.agentRun,
+                      status: "failed",
+                      summary: "Agent 执行失败",
+                      error,
+                    }
+                  : message.agentRun,
+              }
+            : message,
+        ),
+      }));
     },
 
     updateMessage(messageId, updates) {

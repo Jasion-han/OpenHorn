@@ -1,19 +1,121 @@
 import { Bot, MessageSquare } from "lucide-react";
-import { ScrollArea, cn } from "ui";
+import { Badge, ScrollArea, cn } from "ui";
 import { readSseStream } from "../../lib/sse";
 import { useChatStore } from "../../stores/chatStore";
+import type { ApiAgentRun, Message } from "../../types/chat";
 import { DesktopChatHeader } from "./DesktopChatHeader";
 import { DesktopComposer } from "./DesktopComposer";
+
+function LiveStatusBadge({
+  status,
+  route,
+  label,
+}: {
+  status?: Message["liveStatus"];
+  route?: Message["liveRoute"];
+  label?: string;
+}) {
+  if (!label) return null;
+
+  const routeLabel = (() => {
+    switch (route) {
+      case "local":
+        return "本地";
+      case "structured_live":
+        return "天气";
+      case "web_search":
+        return "搜索";
+      case "research":
+        return "调研";
+      default:
+        return "直答";
+    }
+  })();
+
+  return (
+    <div
+      className={cn(
+        "mb-2 inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[11px] font-medium",
+        status === "live"
+          ? "border-emerald-300/60 bg-emerald-50 text-emerald-700"
+          : "border-amber-300/60 bg-amber-50 text-amber-700",
+      )}
+    >
+      <span className="rounded-full bg-black/5 px-1.5 py-0.5 text-[10px] uppercase tracking-wide">
+        {routeLabel}
+      </span>
+      <span>{label}</span>
+    </div>
+  );
+}
+
+function AgentRunPanel({ run }: { run?: ApiAgentRun }) {
+  if (!run) return null;
+  const toolCount = run.steps.filter((step) => step.type === "tool_start").length;
+  const shouldRender = Boolean(run.error) || toolCount > 0;
+  if (!shouldRender) return null;
+
+  const statusLabel = (() => {
+    switch (run.status) {
+      case "completed":
+        return "已完成";
+      case "failed":
+        return "失败";
+      case "cancelled":
+        return "已取消";
+      default:
+        return "进行中";
+    }
+  })();
+
+  return (
+    <details className="mt-3 rounded-xl border border-border/50 bg-muted/20 px-3 py-2 text-sm">
+      <summary className="cursor-pointer list-none">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-2">
+            <Bot size={12} className="shrink-0 text-muted-foreground" />
+            <span className="truncate font-medium">{`执行记录 · ${toolCount} 个工具`}</span>
+          </div>
+          <Badge variant={run.status === "failed" ? "destructive" : "outline"}>{statusLabel}</Badge>
+        </div>
+      </summary>
+
+      <div className="mt-2 flex flex-col gap-2">
+        {run.error && (
+          <div className="rounded-md border border-orange-200 bg-orange-50 px-2 py-1.5 text-xs text-orange-700">
+            {run.error}
+          </div>
+        )}
+        {run.steps.map((step, index) => (
+          <div
+            key={`${index}-${step.type}-${step.toolName || ""}`}
+            className="rounded-md border border-border/50 bg-background/60 px-2 py-2"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs font-medium text-muted-foreground">{step.type}</p>
+              {step.toolName && <p className="text-xs text-muted-foreground">{step.toolName}</p>}
+            </div>
+            {step.content && <p className="mt-1 text-sm whitespace-pre-wrap">{step.content}</p>}
+            {step.toolInput !== undefined && (
+              <pre className="mt-2 whitespace-pre-wrap break-words rounded-md bg-muted/40 p-2 text-xs">
+                {JSON.stringify(step.toolInput, null, 2)}
+              </pre>
+            )}
+          </div>
+        ))}
+      </div>
+    </details>
+  );
+}
 
 export function DesktopChatArea() {
   const currentConversation = useChatStore((state) => state.currentConversation);
   const messages = useChatStore((state) => state.messages);
   const isLoading = useChatStore((state) => state.isLoading);
   const sendMessage = useChatStore((state) => state.sendMessage);
-  const appendMessageDelta = useChatStore((state) => state.appendMessageDelta);
+  const applyStreamEvent = useChatStore((state) => state.applyStreamEvent);
   const loadMessages = useChatStore((state) => state.loadMessages);
   const loadConversations = useChatStore((state) => state.loadConversations);
-  const updateMessage = useChatStore((state) => state.updateMessage);
   const setStreaming = useChatStore((state) => state.setStreaming);
   const setError = useChatStore((state) => state.setError);
 
@@ -24,24 +126,12 @@ export function DesktopChatArea() {
 
     try {
       await readSseStream(response, (event) => {
-        if (event.type === "delta") {
-          appendMessageDelta(assistantMessageId, event.content || "");
-          return;
-        }
-
-        if (event.type === "error") {
-          setError(event.message || "Stream error");
-          setStreaming(false);
-          return;
-        }
+        applyStreamEvent(assistantMessageId, event);
       });
 
       setStreaming(false);
       await Promise.all([loadMessages(currentConversation.id), loadConversations()]);
     } catch (error) {
-      updateMessage(assistantMessageId, {
-        content: error instanceof Error ? error.message : "Stream error",
-      });
       setStreaming(false);
       setError(error instanceof Error ? error.message : "Stream error");
     }
@@ -87,9 +177,33 @@ export function DesktopChatArea() {
                     {message.role === "assistant" ? <Bot size={12} /> : <MessageSquare size={12} />}
                     <span>{message.role === "assistant" ? "Assistant" : "User"}</span>
                   </div>
+                  {message.role === "assistant" && (
+                    <LiveStatusBadge
+                      status={message.liveStatus}
+                      route={message.liveRoute}
+                      label={message.liveLabel}
+                    />
+                  )}
                   <div className="whitespace-pre-wrap break-words text-sm leading-6">
                     {message.content || (message.role === "assistant" ? "..." : "")}
                   </div>
+                  {message.citations && message.citations.length > 0 && (
+                    <div className="mt-3 flex flex-col gap-2 rounded-xl border border-border/50 bg-muted/20 p-3">
+                      <div className="text-xs font-medium text-muted-foreground">引用来源</div>
+                      {message.citations.map((citation) => (
+                        <a
+                          key={citation.url}
+                          href={citation.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-sm text-blue-600 underline-offset-2 hover:underline"
+                        >
+                          {citation.title || citation.url}
+                        </a>
+                      ))}
+                    </div>
+                  )}
+                  {message.role === "assistant" && <AgentRunPanel run={message.agentRun} />}
                 </div>
               ))}
             </div>
