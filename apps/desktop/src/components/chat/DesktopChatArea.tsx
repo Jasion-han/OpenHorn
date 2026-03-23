@@ -1,10 +1,12 @@
 import { Bot, MessageSquare } from "lucide-react";
 import { Badge, ScrollArea, cn } from "ui";
+import { normalizeExternalUrl } from "../../lib/normalizeExternalUrl";
 import { readSseStream } from "../../lib/sse";
 import { useChatStore } from "../../stores/chatStore";
 import type { ApiAgentRun, Message } from "../../types/chat";
 import { DesktopChatHeader } from "./DesktopChatHeader";
 import { DesktopComposer } from "./DesktopComposer";
+import { DesktopMarkdownMessage } from "./DesktopMarkdownMessage";
 
 function LiveStatusBadge({
   status,
@@ -152,7 +154,7 @@ function CitationPanel({
         {citations.map((citation, index) => (
           <a
             key={`${citation.url}-${index + 1}`}
-            href={citation.url}
+            href={normalizeExternalUrl(citation.url)}
             target="_blank"
             rel="noreferrer"
             className="block rounded-md border border-border/40 bg-background/70 px-3 py-2 text-xs transition-colors hover:bg-background"
@@ -259,9 +261,13 @@ export function DesktopChatArea() {
                       label={message.liveLabel}
                     />
                   )}
-                  <div className="whitespace-pre-wrap break-words text-sm leading-6">
+                  <div className="text-sm leading-6">
                     {message.content ? (
-                      message.content
+                      message.role === "assistant" ? (
+                        <DesktopMarkdownMessage content={message.content} />
+                      ) : (
+                        <p className="whitespace-pre-wrap break-words">{message.content}</p>
+                      )
                     ) : message.role === "assistant" ? (
                       <TypingIndicator />
                     ) : (
