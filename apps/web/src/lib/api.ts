@@ -366,7 +366,10 @@ export function extractErrorMessage(error: unknown, fallback = "Request failed")
   return fallback;
 }
 
-export async function readErrorMessage(response: Response, fallback = "Request failed"): Promise<string> {
+export async function readErrorMessage(
+  response: Response,
+  fallback = "Request failed",
+): Promise<string> {
   const rawText = await response.text().catch(() => "");
   return extractErrorMessage(rawText, fallback);
 }
@@ -604,12 +607,6 @@ export const api = {
     list: (conversationId: string) =>
       fetchApi<{ messages: ApiMessage[] }>(`/messages/${conversationId}`),
 
-    send: (data: { conversationId: string; content: string; attachments?: string[] }) =>
-      fetchApi<{ userMessage: ApiMessage; assistantMessage: ApiMessage }>("/messages", {
-        method: "POST",
-        body: JSON.stringify(data),
-      }),
-
     stream: (
       data: {
         conversationId: string;
@@ -660,101 +657,8 @@ export const api = {
     },
   },
 
-  agent: {
-    listSessions: () => fetchApi<{ sessions: unknown[] }>("/agent/sessions"),
-
-    getSession: (id: string) => fetchApi<{ session: unknown }>(`/agent/sessions/${id}`),
-
-    createSession: (data: { title: string; channelId?: string }) =>
-      fetchApi<{ session: unknown }>("/agent/sessions", {
-        method: "POST",
-        body: JSON.stringify(data),
-      }),
-
-    renameSession: (id: string, title: string) =>
-      fetchApi<{ success: boolean }>(`/agent/sessions/${id}`, {
-        method: "PUT",
-        body: JSON.stringify({ title }),
-      }),
-
-    autoTitle: (id: string, prompt: string) =>
-      fetchApi<{ success: boolean; title?: string }>(`/agent/sessions/${id}/auto-title`, {
-        method: "POST",
-        body: JSON.stringify({ prompt }),
-      }),
-
-    runSession: (
-      sessionId: string,
-      prompt: string,
-      attachments?: string[],
-      options?: { signal?: AbortSignal },
-    ) => {
-      return fetch(`${API_BASE}/agent/sessions/${sessionId}/run`, {
-        method: "POST",
-        credentials: "include",
-        signal: options?.signal,
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ prompt, attachments }),
-      });
-    },
-
-    updateStatus: (id: string, status: string) =>
-      fetchApi<{ success: boolean }>(`/agent/sessions/${id}/status`, {
-        method: "PUT",
-        body: JSON.stringify({ status }),
-      }),
-
-    deleteSession: (id: string) =>
-      fetchApi<{ success: boolean }>(`/agent/sessions/${id}`, {
-        method: "DELETE",
-      }),
-
-    listEvents: (sessionId: string) =>
-      fetchApi<{
-        events: Array<{
-          id?: string;
-          type: string;
-          content?: string;
-          toolName?: string;
-          toolInput?: unknown;
-        }>;
-      }>(`/agent/sessions/${sessionId}/events`),
-
-    deleteEvent: (eventId: string) =>
-      fetchApi<{ success: boolean }>(`/agent/events/${eventId}`, { method: "DELETE" }),
-
-    updateChannel: (sessionId: string, channelId: string, modelId: string) =>
-      fetchApi<{ success: boolean }>(`/agent/sessions/${sessionId}/channel`, {
-        method: "PUT",
-        body: JSON.stringify({ channelId, modelId }),
-      }),
-  },
-
   agentTasks: {
-    list: () => fetchApi<{ tasks: ApiAgentTask[] }>("/agent/tasks"),
-
     get: (id: string) => fetchApi<ApiAgentTaskDetail>(`/agent/tasks/${id}`),
-
-    create: (data: {
-      title?: string;
-      goal: string;
-      conversationId?: string | null;
-      channelId?: string | null;
-      modelId?: string | null;
-      attachments?: ApiAgentTaskAttachment[];
-    }) =>
-      fetchApi<{ task: ApiAgentTask }>("/agent/tasks", {
-        method: "POST",
-        body: JSON.stringify(data),
-      }),
-
-    update: (id: string, data: { title?: string; goal: string }) =>
-      fetchApi<ApiAgentTaskDetail>(`/agent/tasks/${id}`, {
-        method: "PATCH",
-        body: JSON.stringify(data),
-      }),
 
     plan: (id: string) =>
       fetchApi<ApiAgentTaskDetail>(`/agent/tasks/${id}/plan`, {
@@ -786,12 +690,6 @@ export const api = {
       fetchApi<ApiAgentTaskDetail>(`/agent/tasks/${id}/cancel`, {
         method: "POST",
       }),
-
-    listEvents: (id: string) =>
-      fetchApi<{ events: ApiAgentTaskEvent[] }>(`/agent/tasks/${id}/events`),
-
-    listArtifacts: (id: string) =>
-      fetchApi<{ artifacts: ApiAgentArtifact[] }>(`/agent/tasks/${id}/artifacts`),
 
     respondApproval: (
       id: string,

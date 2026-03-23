@@ -14,7 +14,7 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
 
   const isCompact = useMemo(() => {
-    // Keep Settings readable; chat/agent want edge-to-edge within the middle panel.
+    // Keep Settings readable; chat wants edge-to-edge within the middle panel.
     return pathname === "/settings" || pathname?.startsWith("/settings/");
   }, [pathname]);
 
