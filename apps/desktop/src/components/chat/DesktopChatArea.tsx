@@ -1,6 +1,6 @@
 import { Bot, Check, Copy, MessageSquare, Pencil, RefreshCw, Trash2 } from "lucide-react";
 import { type ReactNode, useState } from "react";
-import { Badge, Button, ScrollArea, Textarea, cn } from "ui";
+import { Button, ScrollArea, Textarea, cn } from "ui";
 import { sanitizeDisplayContent } from "../../lib/citations";
 import { readErrorMessage } from "../../lib/serverApi";
 import { readSseStream } from "../../lib/sse";
@@ -74,15 +74,47 @@ function AgentRunPanel({ run }: { run?: ApiAgentRun }) {
     }
   })();
 
+  const statusClassName = (() => {
+    switch (run.status) {
+      case "completed":
+        return "border-emerald-300/60 bg-emerald-50 text-emerald-700";
+      case "failed":
+        return "border-orange-300/60 bg-orange-50 text-orange-700";
+      case "cancelled":
+        return "border-slate-300/60 bg-slate-50 text-slate-700";
+      default:
+        return "border-blue-300/60 bg-blue-50 text-blue-700";
+    }
+  })();
+
+  const displayTitle = toolCount > 0 ? `执行记录 · ${toolCount} 个工具` : "执行记录";
+  const stepTypeLabel = (type: ApiAgentRun["steps"][number]["type"]) => {
+    switch (type) {
+      case "tool_start":
+        return "开始";
+      case "tool_result":
+        return "结果";
+      case "error":
+        return "错误";
+    }
+  };
+
   return (
-    <details className="mt-3 rounded-xl border border-border/50 bg-muted/20 px-3 py-2 text-sm">
+    <details className="mt-2 rounded-xl border border-border/50 bg-muted/20 px-3 py-2 text-sm">
       <summary className="cursor-pointer list-none">
         <div className="flex items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-2">
             <Bot size={12} className="shrink-0 text-muted-foreground" />
-            <span className="truncate font-medium">{`执行记录 · ${toolCount} 个工具`}</span>
+            <span className="truncate font-medium">{displayTitle}</span>
           </div>
-          <Badge variant={run.status === "failed" ? "destructive" : "outline"}>{statusLabel}</Badge>
+          <span
+            className={cn(
+              "shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-medium",
+              statusClassName,
+            )}
+          >
+            {statusLabel}
+          </span>
         </div>
       </summary>
 
@@ -98,7 +130,7 @@ function AgentRunPanel({ run }: { run?: ApiAgentRun }) {
             className="rounded-md border border-border/50 bg-background/60 px-2 py-2"
           >
             <div className="flex items-center justify-between gap-2">
-              <p className="text-xs font-medium text-muted-foreground">{step.type}</p>
+              <p className="text-xs font-medium text-muted-foreground">{stepTypeLabel(step.type)}</p>
               {step.toolName && <p className="text-xs text-muted-foreground">{step.toolName}</p>}
             </div>
             {step.content && <p className="mt-1 text-sm whitespace-pre-wrap">{step.content}</p>}
@@ -200,7 +232,7 @@ function MessageActionBar({
   return (
     <div
       className={cn(
-        "mt-1 flex gap-1 transition-opacity duration-150",
+        "mt-0.5 flex gap-0.5 transition-opacity duration-150",
         message.role === "assistant" ? "justify-start" : "justify-end",
         isStreaming
           ? "pointer-events-none opacity-0"
@@ -513,44 +545,7 @@ export function DesktopChatArea() {
                       </div>
                     ) : (
                       <div className="text-sm leading-6">
-                        {editingMessageId === message.id ? (
-                        <div className="space-y-3">
-                          <Textarea
-                            value={editingContent}
-                            onChange={(event) => setEditingContent(event.target.value)}
-                            onKeyDown={(event) => {
-                              if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
-                                event.preventDefault();
-                                void handleSaveEdit(message.id);
-                              }
-                              if (event.key === "Escape") {
-                                event.preventDefault();
-                                handleCancelEdit();
-                              }
-                            }}
-                            className="min-h-[120px] resize-none bg-background text-foreground"
-                            autoFocus
-                          />
-                          <div className="flex justify-end gap-2">
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              onClick={handleCancelEdit}
-                            >
-                              取消
-                            </Button>
-                            <Button
-                              type="button"
-                              size="sm"
-                              onClick={() => void handleSaveEdit(message.id)}
-                              disabled={!editingContent.trim() || isStreaming}
-                            >
-                              保存并重新生成
-                            </Button>
-                          </div>
-                        </div>
-                        ) : message.content?.trim() ? (
+                        {message.content?.trim() ? (
                           <p
                             className="text-sm"
                             style={{
@@ -582,6 +577,40 @@ export function DesktopChatArea() {
                     onRetry={() => void handleRetryMessage(message.id)}
                     onDelete={() => void handleDeleteMessage(message.id)}
                   />
+                  {message.role === "user" && editingMessageId === message.id && (
+                    <div className="mt-1 flex w-full max-w-[72%] self-end flex-col items-end gap-1">
+                      <Textarea
+                        value={editingContent}
+                        onChange={(event) => setEditingContent(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" && !event.shiftKey) {
+                            event.preventDefault();
+                            void handleSaveEdit(message.id);
+                          }
+                          if (event.key === "Escape") {
+                            event.preventDefault();
+                            handleCancelEdit();
+                          }
+                        }}
+                        className="w-full"
+                        rows={3}
+                        autoFocus
+                      />
+                      <div className="flex gap-2">
+                        <Button type="button" size="sm" variant="ghost" onClick={handleCancelEdit}>
+                          取消
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          onClick={() => void handleSaveEdit(message.id)}
+                          disabled={!editingContent.trim() || isStreaming}
+                        >
+                          确认
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
