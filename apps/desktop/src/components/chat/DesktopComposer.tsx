@@ -3,13 +3,22 @@ import { useEffect, useRef, useState } from "react";
 import { Button, Textarea, cn } from "ui";
 import { useChatStore } from "../../stores/chatStore";
 import type { ChatMode } from "../../types/chat";
+import { DesktopProviderLogo } from "./DesktopProviderLogo";
 
 export function DesktopComposer({
   disabled,
   onSubmit,
+  modelProvider,
+  modelLabel,
+  modelTone = "normal",
+  onOpenModelPicker,
 }: {
   disabled: boolean;
   onSubmit: (content: string) => Promise<void>;
+  modelProvider?: string | null;
+  modelLabel?: string | null;
+  modelTone?: "normal" | "warning";
+  onOpenModelPicker?: () => void;
 }) {
   const composerMode = useChatStore((state) => state.composerMode);
   const setComposerMode = useChatStore((state) => state.setComposerMode);
@@ -125,6 +134,25 @@ export function DesktopComposer({
                 <ChevronDown className={cn("size-3 transition-transform", modeMenuOpen && "rotate-180")} />
               </button>
             </div>
+
+            <button
+              type="button"
+              onClick={onOpenModelPicker}
+              disabled={!onOpenModelPicker || disabled}
+              className={cn(
+                "flex min-w-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors",
+                modelTone === "warning"
+                  ? "text-orange-600 hover:bg-orange-500/10 hover:text-orange-700"
+                  : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                (!onOpenModelPicker || disabled) && "pointer-events-none opacity-60",
+              )}
+              aria-label="Model"
+              title="Model"
+            >
+              {modelProvider ? <DesktopProviderLogo provider={modelProvider} className="size-4" /> : null}
+              <span className="max-w-[220px] truncate">{modelLabel || "选择模型"}</span>
+              <ChevronDown className="size-3" />
+            </button>
 
             <div className="inline-flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
               <CornerDownLeft size={12} />

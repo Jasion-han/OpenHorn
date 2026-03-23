@@ -225,6 +225,10 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
           nextState.currentConversation?.id === conversationId
             ? { ...nextState.currentConversation, ...updates }
             : nextState.currentConversation,
+        selectedChannelId:
+          nextState.currentConversation?.id === conversationId && updates.channelId !== undefined
+            ? updates.channelId || null
+            : nextState.selectedChannelId,
       }));
 
       try {
@@ -247,6 +251,10 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
               nextState.currentConversation?.id === conversationId
                 ? previous
                 : nextState.currentConversation,
+            selectedChannelId:
+              nextState.currentConversation?.id === conversationId
+                ? previous.channelId || null
+                : nextState.selectedChannelId,
             error: toErrorMessage(error),
           }));
         } else {

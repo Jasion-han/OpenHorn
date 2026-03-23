@@ -12,6 +12,7 @@ import { DesktopChatHeader } from "./DesktopChatHeader";
 import { DesktopComposer } from "./DesktopComposer";
 import { DesktopMarkdownMessage } from "./DesktopMarkdownMessage";
 import { DesktopMessageAttachments } from "./DesktopMessageAttachments";
+import { DesktopModelPickerModal } from "./DesktopModelPickerModal";
 
 function LiveStatusBadge({
   status,
@@ -279,6 +280,7 @@ export function DesktopChatArea() {
   const editUserMessage = useChatStore((state) => state.editUserMessage);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editingContent, setEditingContent] = useState("");
+  const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const effectiveModel = getEffectiveModelForConversation(channels, currentConversation);
 
   const getEditableAssistantForUser = (messageId: string) => {
@@ -627,18 +629,69 @@ export function DesktopChatArea() {
             <div className="mb-2 rounded-xl border border-orange-200 bg-orange-50 p-3 text-sm shadow-minimal">
               <p className="font-medium text-orange-800">当前会话模型不可用</p>
               <p className="text-orange-700">{effectiveModel.reason}</p>
-              <p className="mt-1 text-xs text-muted-foreground">请到左侧 Settings → 渠道里修复。</p>
+              <button
+                type="button"
+                className="mt-1 text-xs text-muted-foreground underline underline-offset-2"
+                onClick={() => setModelPickerOpen(true)}
+              >
+                现在重新选择模型
+              </button>
             </div>
           ) : (
             <div className="mb-2 flex items-center gap-3 rounded-xl border border-orange-200 bg-orange-50 p-3 text-sm shadow-minimal">
               <p className="flex-1 text-orange-700">{effectiveModel.reason}</p>
-              <p className="text-xs text-muted-foreground">左侧 Settings → 渠道</p>
+              <button
+                type="button"
+                className="text-xs text-muted-foreground underline underline-offset-2"
+                onClick={() => setModelPickerOpen(true)}
+              >
+                选择模型
+              </button>
             </div>
           )}
         </div>
       )}
 
-      <DesktopComposer disabled={!currentConversation} onSubmit={handleSubmit} />
+      <DesktopComposer
+        disabled={!currentConversation}
+        onSubmit={handleSubmit}
+        modelProvider={effectiveModel.ok ? effectiveModel.provider : null}
+        modelLabel={
+          effectiveModel.ok
+            ? effectiveModel.modelDisplayName
+            : effectiveModel.scope === "conversation"
+              ? "修复模型"
+              : "选择模型"
+        }
+        modelTone={effectiveModel.ok ? "normal" : "warning"}
+        onOpenModelPicker={currentConversation ? () => setModelPickerOpen(true) : undefined}
+      />
+
+      {currentConversation && modelPickerOpen && (
+        <DesktopModelPickerModal
+          opened={modelPickerOpen}
+          onClose={() => setModelPickerOpen(false)}
+          conversationId={currentConversation.id}
+          conversationFixReason={
+            !effectiveModel.ok && effectiveModel.scope === "conversation"
+              ? effectiveModel.reason
+              : null
+          }
+          current={
+            currentConversation.channelId && currentConversation.modelId
+              ? {
+                  channelId: currentConversation.channelId,
+                  modelId: currentConversation.modelId,
+                }
+              : effectiveModel.ok
+                ? {
+                    channelId: effectiveModel.channelId,
+                    modelId: effectiveModel.modelId,
+                  }
+                : null
+          }
+        />
+      )}
     </div>
   );
 }
