@@ -1,14 +1,16 @@
 import { Bot, Check, Copy, MessageSquare, Pencil, RefreshCw, Trash2 } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { Badge, Button, ScrollArea, Textarea, cn } from "ui";
-import { normalizeExternalUrl } from "../../lib/normalizeExternalUrl";
+import { sanitizeDisplayContent } from "../../lib/citations";
 import { readErrorMessage } from "../../lib/serverApi";
 import { readSseStream } from "../../lib/sse";
 import { useChatStore } from "../../stores/chatStore";
 import type { ApiAgentRun, Message } from "../../types/chat";
+import { DesktopCitationList } from "./DesktopCitationList";
 import { DesktopChatHeader } from "./DesktopChatHeader";
 import { DesktopComposer } from "./DesktopComposer";
 import { DesktopMarkdownMessage } from "./DesktopMarkdownMessage";
+import { DesktopMessageAttachments } from "./DesktopMessageAttachments";
 
 function LiveStatusBadge({
   status,
@@ -131,55 +133,6 @@ function TypingIndicator() {
   );
 }
 
-function CitationPanel({
-  citations,
-}: {
-  citations: NonNullable<Message["citations"]>;
-}) {
-  if (citations.length === 0) return null;
-
-  return (
-    <details className="mt-3 rounded-xl border border-border/50 bg-muted/20 px-3 py-2 text-sm">
-      <summary className="cursor-pointer list-none">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-              Sources
-            </span>
-            <span className="text-[11px] text-muted-foreground/80">{citations.length}</span>
-          </div>
-          <Badge variant="outline">引用来源</Badge>
-        </div>
-      </summary>
-
-      <div className="mt-2 flex flex-col gap-2">
-        {citations.map((citation, index) => (
-          <a
-            key={`${citation.url}-${index + 1}`}
-            href={normalizeExternalUrl(citation.url)}
-            target="_blank"
-            rel="noreferrer"
-            className="block rounded-md border border-border/40 bg-background/70 px-3 py-2 text-xs transition-colors hover:bg-background"
-          >
-            <div className="flex items-center gap-2">
-              <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full border border-border/60 px-1.5 text-[10px] font-semibold text-muted-foreground">
-                {index + 1}
-              </span>
-              <span className="min-w-0 flex-1 truncate font-medium text-foreground">
-                {citation.title || citation.url}
-              </span>
-            </div>
-            <div className="mt-1 truncate text-muted-foreground">{citation.url}</div>
-            {citation.snippet && (
-              <div className="mt-1 line-clamp-2 text-muted-foreground">{citation.snippet}</div>
-            )}
-          </a>
-        ))}
-      </div>
-    </details>
-  );
-}
-
 function isAbortError(error: unknown) {
   return error instanceof DOMException && error.name === "AbortError";
 }
@@ -275,6 +228,8 @@ function MessageActionBar({
 }
 
 export function DesktopChatArea() {
+  const ASSISTANT_BUBBLE_WIDTH = "92%";
+  const USER_BUBBLE_MAX_WIDTH = "72%";
   const currentConversation = useChatStore((state) => state.currentConversation);
   const messages = useChatStore((state) => state.messages);
   const isLoading = useChatStore((state) => state.isLoading);
@@ -502,29 +457,76 @@ export function DesktopChatArea() {
               {messages.map((message) => (
                 <div
                   key={message.id}
-                  className={cn("group flex flex-col", message.role === "user" ? "items-end" : "items-start")}
+                  className={cn(
+                    "group flex min-w-0 flex-col",
+                    message.role === "assistant" ? "w-full items-start self-start" : "items-end self-end",
+                  )}
+                  style={{
+                    maxWidth:
+                      message.role === "assistant" ? ASSISTANT_BUBBLE_WIDTH : USER_BUBBLE_MAX_WIDTH,
+                  }}
                 >
+                  {(() => {
+                    const isAssistant = message.role === "assistant";
+                    const label = message.mode === "agent" ? "Agent" : "Chat";
+                    const badgeIcon =
+                      message.mode === "agent" ? <Bot size={12} /> : <MessageSquare size={12} />;
+                    const displayContent = isAssistant
+                      ? sanitizeDisplayContent(message.content, message.citations)
+                      : message.content;
+                    const hasAssistantText = isAssistant && Boolean((displayContent || "").trim());
+                    const isAssistantPlaceholder = isAssistant && isStreaming && !hasAssistantText;
+
+                    return (
                   <div
                     className={cn(
-                      "max-w-[88%] rounded-[24px] border px-4 py-3 shadow-sm",
-                      message.role === "user"
-                        ? "ml-auto border-foreground/10 bg-foreground text-background"
-                        : "border-border/60 bg-background/85 text-foreground",
+                      isAssistant ? "block w-full min-w-0 max-w-full" : "inline-block min-w-0 max-w-full",
+                      isAssistantPlaceholder ? "border-0 bg-transparent px-0 py-0" : "rounded-2xl px-4 py-2",
+                      isAssistant
+                        ? isAssistantPlaceholder
+                          ? ""
+                          : "border border-border/50 bg-background/60"
+                        : "border border-border/50 bg-foreground/[0.06]",
                     )}
                   >
-                    <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-[0.12em] opacity-70">
-                      {message.role === "assistant" ? <Bot size={12} /> : <MessageSquare size={12} />}
-                      <span>{message.role === "assistant" ? "Assistant" : "User"}</span>
+                    <div
+                      className={cn(
+                        "mb-1 inline-flex items-center gap-1 text-[11px] font-medium",
+                        isAssistant ? "text-muted-foreground" : "text-foreground/60",
+                      )}
+                    >
+                      {badgeIcon}
+                      <span>{label}</span>
                     </div>
-                    {message.role === "assistant" && (
+
+                    {!isAssistant && message.attachmentsMeta && message.attachmentsMeta.length > 0 && (
+                      <DesktopMessageAttachments attachments={message.attachmentsMeta} />
+                    )}
+
+                    {message.role === "assistant" && message.agentRun && <AgentRunPanel run={message.agentRun} />}
+
+                    {isAssistant ? (
+                      <div className={cn("min-w-0 max-w-full", message.agentRun && "mt-3")}>
                       <LiveStatusBadge
                         status={message.liveStatus}
                         route={message.liveRoute}
                         label={message.liveLabel}
                       />
-                    )}
-                    <div className="text-sm leading-6">
-                      {editingMessageId === message.id ? (
+                        <div
+                          className="text-sm leading-6"
+                          style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", wordBreak: "break-word", maxWidth: "100%" }}
+                        >
+                          {hasAssistantText ? (
+                            <DesktopMarkdownMessage content={displayContent} />
+                          ) : isStreaming ? (
+                            <TypingIndicator />
+                          ) : null}
+                        </div>
+                        <DesktopCitationList citations={message.citations} content={displayContent} />
+                      </div>
+                    ) : (
+                      <div className="text-sm leading-6">
+                        {editingMessageId === message.id ? (
                         <div className="space-y-3">
                           <Textarea
                             value={editingContent}
@@ -561,23 +563,24 @@ export function DesktopChatArea() {
                             </Button>
                           </div>
                         </div>
-                      ) : message.content ? (
-                        message.role === "assistant" ? (
-                          <DesktopMarkdownMessage content={message.content} />
-                        ) : (
-                          <p className="whitespace-pre-wrap break-words">{message.content}</p>
-                        )
-                      ) : message.role === "assistant" ? (
-                        <TypingIndicator />
-                      ) : (
-                        ""
-                      )}
-                    </div>
-                    {message.citations && message.citations.length > 0 && (
-                      <CitationPanel citations={message.citations} />
+                        ) : message.content?.trim() ? (
+                          <p
+                            className="text-sm"
+                            style={{
+                              whiteSpace: "pre-wrap",
+                              overflowWrap: "anywhere",
+                              wordBreak: "break-word",
+                              maxWidth: "100%",
+                            }}
+                          >
+                            {message.content}
+                          </p>
+                        ) : null}
+                      </div>
                     )}
-                    {message.role === "assistant" && <AgentRunPanel run={message.agentRun} />}
                   </div>
+                    );
+                  })()}
                   <MessageActionBar
                     message={message}
                     canEdit={message.role === "user" && Boolean(getEditableAssistantForUser(message.id))}
