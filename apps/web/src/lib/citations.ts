@@ -68,7 +68,9 @@ export function extractLegacyAppendixCitations(content: string) {
   return citations.length > 0 ? citations : undefined;
 }
 
-export function getArtifactCitations(artifact?: Pick<ApiAgentArtifact, "content" | "metadata"> | null) {
+export function getArtifactCitations(
+  artifact?: Pick<ApiAgentArtifact, "content" | "metadata"> | null,
+) {
   if (!artifact) return undefined;
   if (isRecord(artifact.metadata)) {
     const structured = coerceCitations(artifact.metadata.citations);

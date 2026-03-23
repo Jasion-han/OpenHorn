@@ -27,7 +27,9 @@ export function AgentPlanPanel({
   return (
     <section
       id="agent-plan-panel"
-      className={embedded ? "space-y-3" : "rounded-3xl border border-border/70 bg-background/80 p-5"}
+      className={
+        embedded ? "space-y-3" : "rounded-3xl border border-border/70 bg-background/80 p-5"
+      }
     >
       {!embedded ? (
         <div className="mb-4 flex items-center justify-between gap-3">
@@ -64,7 +66,13 @@ export function AgentPlanPanel({
                     {step.orderIndex + 1}. {step.title}
                   </div>
                   {step.description ? (
-                    <p className={embedded ? "mt-1 text-[12px] leading-5 text-muted-foreground" : "mt-1 text-sm text-muted-foreground"}>
+                    <p
+                      className={
+                        embedded
+                          ? "mt-1 text-[12px] leading-5 text-muted-foreground"
+                          : "mt-1 text-sm text-muted-foreground"
+                      }
+                    >
                       {step.description}
                     </p>
                   ) : null}

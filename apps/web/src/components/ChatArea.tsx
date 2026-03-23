@@ -1,22 +1,14 @@
 "use client";
 
-import {
-  Bot,
-  Check,
-  Copy,
-  MessageSquare,
-  Pencil,
-  RefreshCw,
-  Trash2,
-} from "lucide-react";
+import { Bot, Check, Copy, MessageSquare, Pencil, RefreshCw, Trash2 } from "lucide-react";
 import type React from "react";
 import { useEffect, useRef, useState } from "react";
 import {
   type MessageAttachmentItem,
   MessageAttachments,
 } from "@/components/attachments/MessageAttachments";
-import { ChatHeader } from "@/components/chat/ChatHeader";
 import { ChatAgentTaskCard } from "@/components/chat/ChatAgentTaskCard";
+import { ChatHeader } from "@/components/chat/ChatHeader";
 import { ModelPickerModal } from "@/components/chat/ModelPickerModal";
 import { PromaComposer } from "@/components/composer/PromaComposer";
 import { Button } from "@/components/ui/button";
@@ -27,8 +19,8 @@ import { StreamingMarkdownMessage } from "@/components/ui/StreamingMarkdownMessa
 import { TypingIndicator } from "@/components/ui/TypingIndicator";
 import { Textarea } from "@/components/ui/textarea";
 import { WRAP_TEXT } from "@/components/ui/wrapText";
-import { getEffectiveModelForConversation } from "@/lib/effective-model";
 import { sanitizeDisplayContent } from "@/lib/citations";
+import { getEffectiveModelForConversation } from "@/lib/effective-model";
 import { createTextStreamSmoother, type TextStreamSmoother } from "@/lib/textStreamSmoother";
 import { cn } from "@/lib/utils";
 import {
@@ -329,9 +321,7 @@ function MessageBubble({
 }) {
   const [copied, setCopied] = useState(false);
   const displayContent =
-    msg.role === "assistant"
-      ? sanitizeDisplayContent(msg.content, msg.citations)
-      : msg.content;
+    msg.role === "assistant" ? sanitizeDisplayContent(msg.content, msg.citations) : msg.content;
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(displayContent);
@@ -345,11 +335,13 @@ function MessageBubble({
   const isAgent = msg.mode === "agent";
   const streamTailLength =
     isAssistant && isStreaming && hasAssistantText ? (msg.streamTail || "").length : 0;
-  const processPanel = isAssistant
-    ? msg.agentRun?.taskId
-      ? <ChatAgentTaskCard messageId={msg.id} taskId={msg.agentRun.taskId} />
-      : <AgentRunPanel run={msg.agentRun} />
-    : null;
+  const processPanel = isAssistant ? (
+    msg.agentRun?.taskId ? (
+      <ChatAgentTaskCard messageId={msg.id} taskId={msg.agentRun.taskId} />
+    ) : (
+      <AgentRunPanel run={msg.agentRun} />
+    )
+  ) : null;
 
   return (
     <div
@@ -769,10 +761,8 @@ export function ChatArea() {
   };
 
   const effective = getEffectiveModelForConversation(channels, currentConversation);
-  const agentModeSupported = effective.ok && effective.provider === "anthropic";
-  const agentModeDisabledReason = effective.ok
-    ? "Agent 模式目前仅支持 Anthropic 渠道，请先切换到 Anthropic 模型。"
-    : "请先配置可用模型后再使用 Agent 模式。";
+  const agentModeSupported = effective.ok;
+  const agentModeDisabledReason = effective.ok ? null : "请先配置可用模型后再使用 Agent 模式。";
   const hasInput = Boolean(input.trim());
   const hasFiles = files.length > 0;
   const forceWebSearch = currentConversation?.forceWebSearch ?? true;
@@ -843,7 +833,10 @@ export function ChatArea() {
     if (!canSend || !currentConversation) return;
 
     if (composerMode === "agent" && !agentModeSupported) {
-      notifyWarning("Agent 当前不可用", agentModeDisabledReason);
+      notifyWarning(
+        "Agent 当前不可用",
+        agentModeDisabledReason || "请先配置可用模型后再使用 Agent 模式。",
+      );
       return;
     }
 
@@ -1389,7 +1382,10 @@ export function ChatArea() {
           mode={composerMode}
           onModeChange={(nextMode) => {
             if (nextMode === "agent" && !agentModeSupported) {
-              notifyWarning("Agent 当前不可用", agentModeDisabledReason);
+              notifyWarning(
+                "Agent 当前不可用",
+                agentModeDisabledReason || "请先配置可用模型后再使用 Agent 模式。",
+              );
               return;
             }
             setComposerMode(nextMode);

@@ -72,7 +72,8 @@ export function AgentApprovalBlock({
   const isPending = approval.status === "pending";
   const approveLabel = approval.type === "tool_approval" ? "批准继续" : "批准执行";
   const rejectLabel = approval.type === "tool_approval" ? "拒绝本次工具调用" : "拒绝并返回草稿";
-  const toolPayload = approval.type === "tool_approval" ? getToolApprovalPayload(approval.payload) : null;
+  const toolPayload =
+    approval.type === "tool_approval" ? getToolApprovalPayload(approval.payload) : null;
   const toolSummary = summarizeToolInput(toolPayload?.toolInput);
   const statusToneClassName =
     approval.status === "approved"
@@ -97,7 +98,9 @@ export function AgentApprovalBlock({
         <div className="min-w-0 flex-1">
           <div className="text-[13px] font-medium">{approval.title}</div>
           {approval.description ? (
-            <p className="mt-1 text-[12px] leading-5 text-muted-foreground">{approval.description}</p>
+            <p className="mt-1 text-[12px] leading-5 text-muted-foreground">
+              {approval.description}
+            </p>
           ) : null}
           <div className="mt-2 inline-flex rounded-full border border-border/40 bg-background/70 px-2 py-0.5 text-[11px] text-muted-foreground">
             {APPROVAL_STATUS_LABELS[approval.status]}
@@ -117,14 +120,18 @@ export function AgentApprovalBlock({
           {toolPayload.decisionReason ? (
             <div className="rounded-lg border border-orange-500/15 bg-orange-500/5 px-3 py-2">
               <div className="text-[11px] text-muted-foreground">原因</div>
-              <p className="mt-0.5 text-[12px] leading-5 text-foreground/90">{toolPayload.decisionReason}</p>
+              <p className="mt-0.5 text-[12px] leading-5 text-foreground/90">
+                {toolPayload.decisionReason}
+              </p>
             </div>
           ) : null}
 
           {toolPayload.blockedPath ? (
             <div className="rounded-lg border border-border/45 bg-background/75 px-3 py-2">
               <div className="text-[11px] text-muted-foreground">受限路径</div>
-              <p className="mt-0.5 break-all font-mono text-[11px] text-foreground/90">{toolPayload.blockedPath}</p>
+              <p className="mt-0.5 break-all font-mono text-[11px] text-foreground/90">
+                {toolPayload.blockedPath}
+              </p>
             </div>
           ) : null}
 

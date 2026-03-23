@@ -18,20 +18,20 @@ import { AgentArtifactsPanel } from "@/components/agent/AgentArtifactsPanel";
 import { AgentExecutionPanel } from "@/components/agent/AgentExecutionPanel";
 import { AgentPlanPanel } from "@/components/agent/AgentPlanPanel";
 import { Button } from "@/components/ui/button";
-import { getArtifactCitations, sanitizeDisplayContent } from "@/lib/citations";
-import { cn } from "@/lib/utils";
+import { type AgentTaskStreamEvent, streamAgentTaskExecution } from "@/lib/agent-task-stream";
 import {
-  api,
   type ApiAgentApproval,
   type ApiAgentArtifact,
   type ApiAgentRun,
   type ApiAgentTaskDetail,
   type ApiAgentTaskEvent,
   type ApiAgentTaskUxMode,
+  api,
   extractErrorMessage,
 } from "@/lib/api";
-import { streamAgentTaskExecution, type AgentTaskStreamEvent } from "@/lib/agent-task-stream";
+import { getArtifactCitations, sanitizeDisplayContent } from "@/lib/citations";
 import { notifyError, notifySuccess } from "@/lib/notify";
+import { cn } from "@/lib/utils";
 import { useChatStore } from "@/stores/chatStore";
 
 const TASK_STATUS_LABELS = {
@@ -248,7 +248,7 @@ function getPlanStepsForDetail(detail: ApiAgentTaskDetail, approval: ApiAgentApp
   const planningRunId =
     approval?.type === "plan_approval"
       ? approval.runId
-      : detail.runs.find((run) => run.phase === "planning")?.id ?? null;
+      : (detail.runs.find((run) => run.phase === "planning")?.id ?? null);
 
   if (!planningRunId) return [];
   return detail.planSteps
@@ -395,7 +395,9 @@ function buildTimelineSteps(params: {
   const { detail, planSteps, visibleExecutionEvents, streamError } = params;
   const status = detail.task.status;
   const latestPlanStep =
-    [...planSteps].reverse().find((step) => step.status === "running" || step.status === "completed") ??
+    [...planSteps]
+      .reverse()
+      .find((step) => step.status === "running" || step.status === "completed") ??
     planSteps[0] ??
     null;
   const latestExecutionEvent = [...visibleExecutionEvents].reverse()[0] ?? null;
@@ -510,13 +512,7 @@ function TimelineStatusDot({ status }: { status: TimelineStepStatus }) {
   return <span className="h-2.5 w-2.5 rounded-full bg-border/80 transition-all duration-200" />;
 }
 
-function TimelineStepItem({
-  step,
-  isLast,
-}: {
-  step: TimelineStep;
-  isLast: boolean;
-}) {
+function TimelineStepItem({ step, isLast }: { step: TimelineStep; isLast: boolean }) {
   const cardClassName =
     step.status === "active"
       ? "border-blue-200/80 bg-blue-50/60"
@@ -593,20 +589,17 @@ function toLiveEvent(taskId: string, event: AgentTaskStreamEvent): ApiAgentTaskE
     runId: event.runId ?? "live-run",
     type: event.type === "error" ? "error" : "execution_event",
     content: event.content ?? null,
-    toolName: "toolName" in event ? event.toolName ?? null : null,
-    toolInput: "toolInput" in event ? event.toolInput ?? null : null,
-    metadata: { eventType: "eventType" in event ? event.eventType ?? "text" : "error", live: true },
+    toolName: "toolName" in event ? (event.toolName ?? null) : null,
+    toolInput: "toolInput" in event ? (event.toolInput ?? null) : null,
+    metadata: {
+      eventType: "eventType" in event ? (event.eventType ?? "text") : "error",
+      live: true,
+    },
     createdAt: new Date().toISOString(),
   };
 }
 
-export function ChatAgentTaskCard({
-  messageId,
-  taskId,
-}: {
-  messageId: string;
-  taskId: string;
-}) {
+export function ChatAgentTaskCard({ messageId, taskId }: { messageId: string; taskId: string }) {
   const [detail, setDetail] = useState<ApiAgentTaskDetail | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [busyAction, setBusyAction] = useState<
@@ -617,12 +610,10 @@ export function ChatAgentTaskCard({
   const autoExecuteKeyRef = useRef<string | null>(null);
 
   const syncMessage = (nextDetail: ApiAgentTaskDetail) => {
-    useChatStore
-      .getState()
-      .updateMessage(messageId, buildTaskMessageSummary(nextDetail), {
-        agentRun: buildTaskBackedAgentRun(nextDetail),
-        citations: getTaskFinalResultCitations(nextDetail),
-      });
+    useChatStore.getState().updateMessage(messageId, buildTaskMessageSummary(nextDetail), {
+      agentRun: buildTaskBackedAgentRun(nextDetail),
+      citations: getTaskFinalResultCitations(nextDetail),
+    });
   };
 
   const loadDetail = async (silent = false) => {
@@ -651,7 +642,10 @@ export function ChatAgentTaskCard({
   }, [taskId]);
 
   useEffect(() => {
-    if (!detail || (detail.task.status !== "running" && detail.task.status !== "awaiting_approval")) {
+    if (
+      !detail ||
+      (detail.task.status !== "running" && detail.task.status !== "awaiting_approval")
+    ) {
       return;
     }
 
@@ -751,7 +745,11 @@ export function ChatAgentTaskCard({
                     }
                   : current,
               );
-              if (event.status === "awaiting_approval" || event.status === "completed" || event.status === "failed") {
+              if (
+                event.status === "awaiting_approval" ||
+                event.status === "completed" ||
+                event.status === "failed"
+              ) {
                 const refreshed = await loadDetail(true);
                 if (refreshed) {
                   setDetail(refreshed);
@@ -793,7 +791,10 @@ export function ChatAgentTaskCard({
                 };
                 return {
                   ...current,
-                  artifacts: [artifact, ...current.artifacts.filter((item) => item.id !== artifact.id)],
+                  artifacts: [
+                    artifact,
+                    ...current.artifacts.filter((item) => item.id !== artifact.id),
+                  ],
                 };
               });
               return;
@@ -894,7 +895,10 @@ export function ChatAgentTaskCard({
   }
 
   const canExecute = detail.task.status === "draft";
-  const canRetry = detail.task.status === "failed" || detail.task.status === "completed" || detail.task.status === "cancelled";
+  const canRetry =
+    detail.task.status === "failed" ||
+    detail.task.status === "completed" ||
+    detail.task.status === "cancelled";
   const canContinue = detail.task.status === "failed" || detail.task.status === "completed";
   const canCancel = detail.task.status === "running";
   const showFullPanels = effectiveUxMode === "full";
@@ -904,7 +908,9 @@ export function ChatAgentTaskCard({
     const eventType = getExecutionEventType(event);
     return eventType === "tool_start";
   }).length;
-  const nonFinalArtifacts = executionArtifacts.filter((artifact) => artifact.type !== "final_result");
+  const nonFinalArtifacts = executionArtifacts.filter(
+    (artifact) => artifact.type !== "final_result",
+  );
   const timelineSteps = buildTimelineSteps({
     detail,
     planSteps,
@@ -912,7 +918,9 @@ export function ChatAgentTaskCard({
     streamError,
   });
   const planMeta =
-    planSteps.length > 0 ? `${completedStepCount}/${planSteps.length} 步已推进` : "当前还没有可展示的计划步骤";
+    planSteps.length > 0
+      ? `${completedStepCount}/${planSteps.length} 步已推进`
+      : "当前还没有可展示的计划步骤";
   const executionMeta = streamError
     ? "本轮执行出现错误"
     : toolEventCount > 0
@@ -926,17 +934,27 @@ export function ChatAgentTaskCard({
       : detail.task.status === "completed"
         ? "可按需查看结果摘要"
         : "执行完成后会在这里汇总";
-  const defaultPlanOpen = Boolean(approval) || detail.task.status === "planning" || detail.task.status === "awaiting_approval";
+  const defaultPlanOpen =
+    Boolean(approval) ||
+    detail.task.status === "planning" ||
+    detail.task.status === "awaiting_approval";
   const defaultExecutionOpen = Boolean(streamError) || detail.task.status === "failed";
   const defaultArtifactsOpen = false;
-  const showExecutionSection = showFullPanels && (visibleExecutionEvents.length > 0 || Boolean(streamError));
-  const showArtifactsSection = showFullPanels && (executionArtifacts.length > 0 || detail.task.status === "completed");
+  const showExecutionSection =
+    showFullPanels && (visibleExecutionEvents.length > 0 || Boolean(streamError));
+  const showArtifactsSection =
+    showFullPanels && (executionArtifacts.length > 0 || detail.task.status === "completed");
   const showActionBar =
     detail.task.status === "draft" ||
     detail.task.status === "failed" ||
     detail.task.status === "cancelled";
-  const primaryAction =
-    canExecute ? "execute" : canContinue ? "continue" : canRetry ? "retry" : null;
+  const primaryAction = canExecute
+    ? "execute"
+    : canContinue
+      ? "continue"
+      : canRetry
+        ? "retry"
+        : null;
   const detailToggleLabel = expanded ? "收起详情" : "查看详情";
   const activeTimelineStep =
     timelineSteps.find((step) => step.status === "active") ??
@@ -960,23 +978,31 @@ export function ChatAgentTaskCard({
         : activeTimelineStep
           ? `${activeTimelineStep.label}：${activeTimelineStep.description}`
           : inlineSummary;
-  const showExpandedMetaPills = expanded && (toolEventCount > 0 || executionArtifacts.length > 0 || streamError || planSteps.length > 0);
+  const showExpandedMetaPills =
+    expanded &&
+    (toolEventCount > 0 || executionArtifacts.length > 0 || streamError || planSteps.length > 0);
 
   return (
     <section className="mt-2 rounded-2xl border border-border/45 bg-muted/5 px-3 py-2.5">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-2">
-            <p className="truncate text-[13px] font-medium text-foreground/90">{compactPrimaryText}</p>
+            <p className="truncate text-[13px] font-medium text-foreground/90">
+              {compactPrimaryText}
+            </p>
             {detail.task.status === "failed" ? (
               <TaskMetaPill label={TASK_STATUS_LABELS[detail.task.status]} tone="danger" />
             ) : detail.task.status === "awaiting_approval" ? (
               <TaskMetaPill label={TASK_STATUS_LABELS[detail.task.status]} />
             ) : null}
-            {busyAction ? <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" /> : null}
+            {busyAction ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+            ) : null}
           </div>
           {compactSecondaryText ? (
-            <p className="mt-1 truncate text-[12px] text-muted-foreground">{compactSecondaryText}</p>
+            <p className="mt-1 truncate text-[12px] text-muted-foreground">
+              {compactSecondaryText}
+            </p>
           ) : null}
         </div>
         <button
@@ -985,7 +1011,9 @@ export function ChatAgentTaskCard({
           className="inline-flex shrink-0 items-center gap-1 rounded-full border border-border/50 bg-background/70 px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-background"
         >
           <span>{detailToggleLabel}</span>
-          <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", expanded && "rotate-180")} />
+          <ChevronDown
+            className={cn("h-3.5 w-3.5 transition-transform", expanded && "rotate-180")}
+          />
         </button>
       </div>
 
@@ -1011,7 +1039,9 @@ export function ChatAgentTaskCard({
             <div className="flex flex-wrap gap-1.5">
               {planSteps.length > 0 ? <TaskMetaPill label={planMeta} /> : null}
               {toolEventCount > 0 ? <TaskMetaPill label={`${toolEventCount} 个工具`} /> : null}
-              {executionArtifacts.length > 0 ? <TaskMetaPill label={`${executionArtifacts.length} 项产物`} /> : null}
+              {executionArtifacts.length > 0 ? (
+                <TaskMetaPill label={`${executionArtifacts.length} 项产物`} />
+              ) : null}
               {streamError ? <TaskMetaPill label="执行异常" tone="danger" /> : null}
             </div>
           )}
@@ -1026,7 +1056,9 @@ export function ChatAgentTaskCard({
                     variant={primaryAction === "execute" ? "default" : "ghost"}
                     className={primaryAction === "execute" ? "" : "text-muted-foreground"}
                     onClick={() =>
-                      void runExecutionAction("execute", () => api.agentTasks.execute(detail.task.id))
+                      void runExecutionAction("execute", () =>
+                        api.agentTasks.execute(detail.task.id),
+                      )
                     }
                     disabled={busyAction !== null}
                   >
@@ -1040,7 +1072,9 @@ export function ChatAgentTaskCard({
                     variant={primaryAction === "continue" ? "default" : "ghost"}
                     className={primaryAction === "continue" ? "" : "text-muted-foreground"}
                     onClick={() =>
-                      void runExecutionAction("continue", () => api.agentTasks.continue(detail.task.id))
+                      void runExecutionAction("continue", () =>
+                        api.agentTasks.continue(detail.task.id),
+                      )
                     }
                     disabled={busyAction !== null}
                   >
@@ -1106,10 +1140,16 @@ export function ChatAgentTaskCard({
             <div className="rounded-xl border border-border/45 bg-background/55 px-3 py-2.5">
               <div className="mb-2 text-[13px] font-medium">{approval.title}</div>
               {approval.description ? (
-                <p className="mb-3 text-[12px] leading-5 text-muted-foreground">{approval.description}</p>
+                <p className="mb-3 text-[12px] leading-5 text-muted-foreground">
+                  {approval.description}
+                </p>
               ) : null}
               <div className="flex flex-wrap gap-2">
-                <Button size="sm" onClick={() => void handleApproval("approved")} disabled={busyAction !== null}>
+                <Button
+                  size="sm"
+                  onClick={() => void handleApproval("approved")}
+                  disabled={busyAction !== null}
+                >
                   批准
                 </Button>
                 <Button

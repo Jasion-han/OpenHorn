@@ -1,6 +1,6 @@
 "use client";
 
-import { Bot, Wrench, AlertCircle } from "lucide-react";
+import { AlertCircle, Bot, Wrench } from "lucide-react";
 import type { ApiAgentTaskEvent } from "@/lib/api";
 
 function getEventType(event: ApiAgentTaskEvent) {
@@ -90,20 +90,26 @@ export function AgentExecutionPanel({
   runLabel?: string | null;
   embedded?: boolean;
 }) {
-  const visibleEvents = events.filter((event) => event.type === "execution_event" || event.type === "error");
+  const visibleEvents = events.filter(
+    (event) => event.type === "execution_event" || event.type === "error",
+  );
   const displayedEvents = embedded ? visibleEvents.slice(-6) : visibleEvents;
   const hiddenEventCount = embedded ? visibleEvents.length - displayedEvents.length : 0;
 
   return (
     <section
       id="agent-execution-panel"
-      className={embedded ? "space-y-3" : "rounded-3xl border border-border/70 bg-background/80 p-5"}
+      className={
+        embedded ? "space-y-3" : "rounded-3xl border border-border/70 bg-background/80 p-5"
+      }
     >
       {!embedded ? (
         <div className="mb-4">
           <div className="text-sm font-medium">执行过程</div>
           <p className="mt-1 text-xs text-muted-foreground">
-            {runLabel ? `${runLabel} 的工具调用与流式输出会显示在这里。` : "工具调用与流式输出会在这里持续累积。"}
+            {runLabel
+              ? `${runLabel} 的工具调用与流式输出会显示在这里。`
+              : "工具调用与流式输出会在这里持续累积。"}
           </p>
         </div>
       ) : null}
@@ -121,7 +127,9 @@ export function AgentExecutionPanel({
       ) : (
         <div className={embedded ? "space-y-2" : "space-y-3"}>
           {hiddenEventCount > 0 ? (
-            <p className="text-[11px] text-muted-foreground">仅展示最近 {displayedEvents.length} 条执行更新。</p>
+            <p className="text-[11px] text-muted-foreground">
+              仅展示最近 {displayedEvents.length} 条执行更新。
+            </p>
           ) : null}
 
           {displayedEvents.map((event) => {
@@ -162,12 +170,22 @@ export function AgentExecutionPanel({
                   <span>{new Date(event.createdAt).toLocaleTimeString()}</span>
                 </div>
                 {toolTitle ? (
-                  <div className={embedded ? "mb-1 text-[13px] font-medium" : "mb-1 text-sm font-medium"}>
+                  <div
+                    className={
+                      embedded ? "mb-1 text-[13px] font-medium" : "mb-1 text-sm font-medium"
+                    }
+                  >
                     {toolTitle}
                   </div>
                 ) : null}
                 {semanticSummary ? (
-                  <p className={embedded ? "text-[12px] leading-5 text-foreground/90" : "text-sm leading-6 text-foreground/90"}>
+                  <p
+                    className={
+                      embedded
+                        ? "text-[12px] leading-5 text-foreground/90"
+                        : "text-sm leading-6 text-foreground/90"
+                    }
+                  >
                     {semanticSummary}
                   </p>
                 ) : null}

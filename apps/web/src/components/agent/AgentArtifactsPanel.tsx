@@ -1,9 +1,9 @@
 "use client";
 
 import { FileText, PackageOpen } from "lucide-react";
-import type { ApiAgentArtifact } from "@/lib/api";
 import { CitationList } from "@/components/ui/CitationList";
 import { MarkdownMessage } from "@/components/ui/MarkdownMessage";
+import type { ApiAgentArtifact } from "@/lib/api";
 import { getArtifactCitations, sanitizeDisplayContent } from "@/lib/citations";
 
 function compactText(text: string, limit: number) {
@@ -141,7 +141,11 @@ export function AgentArtifactsPanel({
             {artifacts.map((artifact) => (
               <div
                 key={artifact.id}
-                className={embedded ? "rounded-2xl border border-border/60 bg-background/70 p-4" : "rounded-2xl border border-border/60 bg-muted/15 p-4"}
+                className={
+                  embedded
+                    ? "rounded-2xl border border-border/60 bg-background/70 p-4"
+                    : "rounded-2xl border border-border/60 bg-muted/15 p-4"
+                }
               >
                 <div className="flex items-center justify-between gap-3">
                   <div className="text-sm font-medium">{artifact.title}</div>

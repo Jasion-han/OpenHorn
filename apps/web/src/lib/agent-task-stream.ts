@@ -25,7 +25,13 @@ export type AgentTaskStreamEvent =
       toolInput?: unknown;
     }
   | { type: "artifact_created"; taskId: string; runId: string; artifactType: string }
-  | { type: "final_result"; taskId: string; runId: string; content: string; citations?: ApiCitation[] }
+  | {
+      type: "final_result";
+      taskId: string;
+      runId: string;
+      content: string;
+      citations?: ApiCitation[];
+    }
   | { type: "error"; taskId?: string; runId?: string; content: string }
   | { type: "done"; taskId: string; runId: string };
 
@@ -44,7 +50,8 @@ export async function streamAgentTaskExecution(
     response?: Response;
   },
 ) {
-  const response = options?.response ?? (await api.agentTasks.execute(taskId, { signal: options?.signal }));
+  const response =
+    options?.response ?? (await api.agentTasks.execute(taskId, { signal: options?.signal }));
 
   if (!response.ok) {
     throw new Error(await readErrorMessage(response, "Failed to execute task"));
