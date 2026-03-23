@@ -23,6 +23,11 @@ export interface ChatAdapter {
   deleteConversation: (conversationId: string) => Promise<void>;
   loadMessages: (conversationId: string) => Promise<Message[]>;
   sendMessage: (input: SendMessageInput) => Promise<Response>;
+  deleteMessage: (messageId: string) => Promise<void>;
+  regenerateMessage: (
+    messageId: string,
+    data?: { userMessageId?: string; userContent?: string },
+  ) => Promise<Response>;
   abortActiveStream: () => void;
   getSettings: (keys: string[]) => Promise<Record<string, string>>;
 }
@@ -210,6 +215,31 @@ export function createChatAdapter(api: ServerApi = createServerApi()): ChatAdapt
           activeController = null;
         }
         throw new Error(await readErrorMessage(response, "Failed to stream message"));
+      }
+
+      return response;
+    },
+
+    async deleteMessage(messageId) {
+      await api.messages.delete(messageId);
+    },
+
+    async regenerateMessage(messageId, data) {
+      if (activeController) {
+        activeController.abort();
+      }
+
+      const controller = new AbortController();
+      activeController = controller;
+
+      const response = await api.messages.regenerate(messageId, data, {
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        if (activeController === controller) {
+          activeController = null;
+        }
+        throw new Error(await readErrorMessage(response, "Failed to regenerate message"));
       }
 
       return response;

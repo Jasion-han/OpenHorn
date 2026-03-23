@@ -5,6 +5,9 @@ import type { Channel, Conversation, Message } from "../types/chat";
 
 function createStubAdapter() {
   let sendInput: unknown;
+  let deletedMessageId: string | null = null;
+  let regeneratedMessageId: string | null = null;
+  let regeneratedPayload: unknown;
 
   const adapter: ChatAdapter = {
     listChannels: async () =>
@@ -67,6 +70,14 @@ function createStubAdapter() {
       sendInput = input;
       return new Response("ok", { status: 200 });
     },
+    deleteMessage: async (messageId) => {
+      deletedMessageId = messageId;
+    },
+    regenerateMessage: async (messageId, data) => {
+      regeneratedMessageId = messageId;
+      regeneratedPayload = data;
+      return new Response("ok", { status: 200 });
+    },
     abortActiveStream: () => {},
     getSettings: async () => ({}),
   };
@@ -74,6 +85,9 @@ function createStubAdapter() {
   return {
     adapter,
     getSendInput: () => sendInput,
+    getDeletedMessageId: () => deletedMessageId,
+    getRegeneratedMessageId: () => regeneratedMessageId,
+    getRegeneratedPayload: () => regeneratedPayload,
   };
 }
 
@@ -236,6 +250,35 @@ describe("desktop chat store", () => {
 
     expect(aborted).toBe(true);
     expect(store.getState().isStreaming).toBe(false);
+  });
+
+  test("deletes message through adapter and removes it locally", async () => {
+    const { adapter, getDeletedMessageId } = createStubAdapter();
+    const store = createDesktopChatStore(adapter);
+
+    await store.getState().loadConversations();
+    await store.getState().selectConversation("conv-1");
+    await store.getState().deleteMessage("msg-1");
+
+    expect(getDeletedMessageId()).toBe("msg-1");
+    expect(store.getState().messages).toHaveLength(0);
+  });
+
+  test("regenerates message through adapter", async () => {
+    const { adapter, getRegeneratedMessageId, getRegeneratedPayload } = createStubAdapter();
+    const store = createDesktopChatStore(adapter);
+
+    const response = await store.getState().regenerateMessage("msg-1", {
+      userMessageId: "msg-user-1",
+      userContent: "继续",
+    });
+
+    expect(response.ok).toBe(true);
+    expect(getRegeneratedMessageId()).toBe("msg-1");
+    expect(getRegeneratedPayload()).toEqual({
+      userMessageId: "msg-user-1",
+      userContent: "继续",
+    });
   });
 
   test("updates conversation fields optimistically", async () => {

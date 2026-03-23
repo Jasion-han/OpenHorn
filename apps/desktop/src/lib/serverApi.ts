@@ -30,6 +30,12 @@ export interface ServerApi {
   messages: {
     list: (conversationId: string) => Promise<{ messages: ApiMessage[] }>;
     stream: (data: SendMessageInput, options?: { signal?: AbortSignal }) => Promise<Response>;
+    delete: (id: string) => Promise<{ success: boolean }>;
+    regenerate: (
+      id: string,
+      data?: { userMessageId?: string; userContent?: string },
+      options?: { signal?: AbortSignal },
+    ) => Promise<Response>;
   };
   channels: {
     list: () => Promise<{ channels: ApiChannel[] }>;
@@ -163,6 +169,30 @@ export function createServerApi(options?: { baseUrl?: string; fetch?: FetchLike 
           },
           body: JSON.stringify(data),
         });
+
+        if (response.status === 401) {
+          emitUnauthorized();
+        }
+
+        return response;
+      },
+      delete: (id) =>
+        fetchJson(fetchImpl, baseUrl, `/messages/${encodeURIComponent(id)}`, {
+          method: "DELETE",
+        }),
+      regenerate: async (id, data, options) => {
+        const response = await fetchImpl(
+          `${baseUrl}/messages/${encodeURIComponent(id)}/regenerate`,
+          {
+            method: "POST",
+            credentials: "include",
+            signal: options?.signal,
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: data ? JSON.stringify(data) : undefined,
+          },
+        );
 
         if (response.status === 401) {
           emitUnauthorized();

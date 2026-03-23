@@ -1,6 +1,8 @@
-import { Bot, MessageSquare } from "lucide-react";
+import { Bot, Check, Copy, MessageSquare, RefreshCw, Trash2 } from "lucide-react";
+import { type ReactNode, useState } from "react";
 import { Badge, ScrollArea, cn } from "ui";
 import { normalizeExternalUrl } from "../../lib/normalizeExternalUrl";
+import { readErrorMessage } from "../../lib/serverApi";
 import { readSseStream } from "../../lib/sse";
 import { useChatStore } from "../../stores/chatStore";
 import type { ApiAgentRun, Message } from "../../types/chat";
@@ -182,14 +184,98 @@ function isAbortError(error: unknown) {
   return error instanceof DOMException && error.name === "AbortError";
 }
 
+function IconActionButton({
+  title,
+  onClick,
+  children,
+  danger = false,
+  disabled = false,
+}: {
+  title: string;
+  onClick: () => void;
+  children: ReactNode;
+  danger?: boolean;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      onClick={onClick}
+      disabled={disabled}
+      className={cn(
+        "inline-flex h-7 w-7 items-center justify-center rounded-md border border-border/50 bg-background/70 text-muted-foreground transition-colors",
+        disabled
+          ? "cursor-not-allowed opacity-40"
+          : danger
+            ? "hover:border-red-300/70 hover:bg-red-50 hover:text-red-600"
+            : "hover:bg-background hover:text-foreground",
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+function MessageActionBar({
+  message,
+  canRetry,
+  canDelete,
+  isStreaming,
+  onRetry,
+  onDelete,
+}: {
+  message: Message;
+  canRetry: boolean;
+  canDelete: boolean;
+  isStreaming: boolean;
+  onRetry: () => void;
+  onDelete: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(message.content || "");
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div
+      className={cn(
+        "mt-1 flex gap-1 transition-opacity duration-150",
+        message.role === "assistant" ? "justify-start" : "justify-end",
+        isStreaming
+          ? "pointer-events-none opacity-0"
+          : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100",
+      )}
+    >
+      <IconActionButton onClick={() => void handleCopy()} title={copied ? "已复制" : "复制"}>
+        {copied ? <Check size={13} /> : <Copy size={13} />}
+      </IconActionButton>
+      {message.role === "assistant" && (
+        <IconActionButton onClick={onRetry} title="重新生成" disabled={!canRetry}>
+          <RefreshCw size={13} />
+        </IconActionButton>
+      )}
+      <IconActionButton onClick={onDelete} title="删除" danger disabled={!canDelete}>
+        <Trash2 size={13} />
+      </IconActionButton>
+    </div>
+  );
+}
+
 export function DesktopChatArea() {
   const currentConversation = useChatStore((state) => state.currentConversation);
   const messages = useChatStore((state) => state.messages);
   const isLoading = useChatStore((state) => state.isLoading);
+  const isStreaming = useChatStore((state) => state.isStreaming);
   const sendMessage = useChatStore((state) => state.sendMessage);
   const applyStreamEvent = useChatStore((state) => state.applyStreamEvent);
   const loadMessages = useChatStore((state) => state.loadMessages);
   const loadConversations = useChatStore((state) => state.loadConversations);
+  const deleteMessage = useChatStore((state) => state.deleteMessage);
+  const regenerateMessage = useChatStore((state) => state.regenerateMessage);
   const setStreaming = useChatStore((state) => state.setStreaming);
   const setError = useChatStore((state) => state.setError);
 
@@ -211,6 +297,82 @@ export function DesktopChatArea() {
         return;
       }
       setError(error instanceof Error ? error.message : "Stream error");
+    }
+  };
+
+  const handleDeleteMessage = async (messageId: string) => {
+    try {
+      await deleteMessage(messageId);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Delete message failed");
+    }
+  };
+
+  const handleRetryMessage = async (messageId: string) => {
+    if (!currentConversation) return;
+
+    const messageIndex = messages.findIndex((message) => message.id === messageId);
+    const assistantMessage = messageIndex >= 0 ? messages[messageIndex] : null;
+    if (!assistantMessage || assistantMessage.role !== "assistant") return;
+
+    let userMessage: Message | null = null;
+    for (let index = messageIndex - 1; index >= 0; index -= 1) {
+      const candidate = messages[index];
+      if (candidate?.role === "user") {
+        userMessage = candidate;
+        break;
+      }
+    }
+
+    setStreaming(true);
+    setError(null);
+    useChatStore.getState().updateMessage(messageId, {
+      content: "",
+      citations: undefined,
+      liveStatus: undefined,
+      liveRoute: undefined,
+      liveLabel: undefined,
+      agentRun:
+        assistantMessage.mode === "agent"
+          ? {
+              status: "partial",
+              summary: "Agent 正在执行",
+              steps: [],
+            }
+          : undefined,
+    });
+
+    try {
+      const response = await regenerateMessage(
+        messageId,
+        userMessage && !userMessage.id.startsWith("draft-")
+          ? {
+              userMessageId: userMessage.id,
+              userContent: userMessage.content,
+            }
+          : undefined,
+      );
+
+      if (!response.ok) {
+        throw new Error(await readErrorMessage(response, "Failed to regenerate message"));
+      }
+
+      await readSseStream(response, (event) => {
+        applyStreamEvent(messageId, event);
+      });
+
+      setStreaming(false);
+      await Promise.all([loadMessages(currentConversation.id), loadConversations()]);
+    } catch (error) {
+      setStreaming(false);
+      if (isAbortError(error)) {
+        return;
+      }
+      setError(error instanceof Error ? error.message : "Retry message failed");
+      useChatStore.getState().failStreamingMessage(
+        messageId,
+        error instanceof Error ? error.message : "Retry message failed",
+      );
     }
   };
 
@@ -243,41 +405,57 @@ export function DesktopChatArea() {
               {messages.map((message) => (
                 <div
                   key={message.id}
-                  className={cn(
-                    "max-w-[88%] rounded-[24px] border px-4 py-3 shadow-sm",
-                    message.role === "user"
-                      ? "ml-auto border-foreground/10 bg-foreground text-background"
-                      : "border-border/60 bg-background/85 text-foreground",
-                  )}
+                  className={cn("group flex flex-col", message.role === "user" ? "items-end" : "items-start")}
                 >
-                  <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-[0.12em] opacity-70">
-                    {message.role === "assistant" ? <Bot size={12} /> : <MessageSquare size={12} />}
-                    <span>{message.role === "assistant" ? "Assistant" : "User"}</span>
-                  </div>
-                  {message.role === "assistant" && (
-                    <LiveStatusBadge
-                      status={message.liveStatus}
-                      route={message.liveRoute}
-                      label={message.liveLabel}
-                    />
-                  )}
-                  <div className="text-sm leading-6">
-                    {message.content ? (
-                      message.role === "assistant" ? (
-                        <DesktopMarkdownMessage content={message.content} />
-                      ) : (
-                        <p className="whitespace-pre-wrap break-words">{message.content}</p>
-                      )
-                    ) : message.role === "assistant" ? (
-                      <TypingIndicator />
-                    ) : (
-                      ""
+                  <div
+                    className={cn(
+                      "max-w-[88%] rounded-[24px] border px-4 py-3 shadow-sm",
+                      message.role === "user"
+                        ? "ml-auto border-foreground/10 bg-foreground text-background"
+                        : "border-border/60 bg-background/85 text-foreground",
                     )}
+                  >
+                    <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-[0.12em] opacity-70">
+                      {message.role === "assistant" ? <Bot size={12} /> : <MessageSquare size={12} />}
+                      <span>{message.role === "assistant" ? "Assistant" : "User"}</span>
+                    </div>
+                    {message.role === "assistant" && (
+                      <LiveStatusBadge
+                        status={message.liveStatus}
+                        route={message.liveRoute}
+                        label={message.liveLabel}
+                      />
+                    )}
+                    <div className="text-sm leading-6">
+                      {message.content ? (
+                        message.role === "assistant" ? (
+                          <DesktopMarkdownMessage content={message.content} />
+                        ) : (
+                          <p className="whitespace-pre-wrap break-words">{message.content}</p>
+                        )
+                      ) : message.role === "assistant" ? (
+                        <TypingIndicator />
+                      ) : (
+                        ""
+                      )}
+                    </div>
+                    {message.citations && message.citations.length > 0 && (
+                      <CitationPanel citations={message.citations} />
+                    )}
+                    {message.role === "assistant" && <AgentRunPanel run={message.agentRun} />}
                   </div>
-                  {message.citations && message.citations.length > 0 && (
-                    <CitationPanel citations={message.citations} />
-                  )}
-                  {message.role === "assistant" && <AgentRunPanel run={message.agentRun} />}
+                  <MessageActionBar
+                    message={message}
+                    canRetry={
+                      message.role === "assistant" &&
+                      !message.id.startsWith("draft-") &&
+                      Boolean(currentConversation)
+                    }
+                    canDelete={!message.id.startsWith("draft-")}
+                    isStreaming={isStreaming}
+                    onRetry={() => void handleRetryMessage(message.id)}
+                    onDelete={() => void handleDeleteMessage(message.id)}
+                  />
                 </div>
               ))}
             </div>

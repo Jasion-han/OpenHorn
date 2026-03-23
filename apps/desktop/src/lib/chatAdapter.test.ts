@@ -6,6 +6,9 @@ import type { ApiChannel, ApiConversation, ApiMessage } from "../types/chat";
 function createStubServerApi() {
   let streamedBody: unknown;
   let streamedSignal: AbortSignal | undefined;
+  let deletedMessageId: string | null = null;
+  let regeneratedMessageId: string | null = null;
+  let regeneratedPayload: unknown;
 
   const api: ServerApi = {
     auth: {
@@ -119,6 +122,15 @@ function createStubServerApi() {
         streamedSignal = options?.signal;
         return new Response("ok", { status: 200 });
       },
+      delete: async (id) => {
+        deletedMessageId = id;
+        return { success: true };
+      },
+      regenerate: async (id, data) => {
+        regeneratedMessageId = id;
+        regeneratedPayload = data;
+        return new Response("ok", { status: 200 });
+      },
     },
     channels: {
       list: async () => ({
@@ -165,6 +177,9 @@ function createStubServerApi() {
     api,
     getStreamedBody: () => streamedBody,
     getStreamedSignal: () => streamedSignal,
+    getDeletedMessageId: () => deletedMessageId,
+    getRegeneratedMessageId: () => regeneratedMessageId,
+    getRegeneratedPayload: () => regeneratedPayload,
   };
 }
 
@@ -234,6 +249,30 @@ describe("chatAdapter", () => {
     expect(getStreamedSignal()?.aborted).toBe(true);
   });
 
+  test("deletes and regenerates messages through the desktop adapter", async () => {
+    const {
+      api,
+      getDeletedMessageId,
+      getRegeneratedMessageId,
+      getRegeneratedPayload,
+    } = createStubServerApi();
+    const adapter = createChatAdapter(api);
+
+    await adapter.deleteMessage("msg-1");
+    const response = await adapter.regenerateMessage("msg-1", {
+      userMessageId: "msg-user-1",
+      userContent: "继续",
+    });
+
+    expect(getDeletedMessageId()).toBe("msg-1");
+    expect(response.ok).toBe(true);
+    expect(getRegeneratedMessageId()).toBe("msg-1");
+    expect(getRegeneratedPayload()).toEqual({
+      userMessageId: "msg-user-1",
+      userContent: "继续",
+    });
+  });
+
   test("exposes the desktop chat contract", async () => {
     const { api } = createStubServerApi();
     const adapter = createChatAdapter(api);
@@ -245,6 +284,8 @@ describe("chatAdapter", () => {
     expect(typeof adapter.deleteConversation).toBe("function");
     expect(typeof adapter.loadMessages).toBe("function");
     expect(typeof adapter.sendMessage).toBe("function");
+    expect(typeof adapter.deleteMessage).toBe("function");
+    expect(typeof adapter.regenerateMessage).toBe("function");
     expect(typeof adapter.abortActiveStream).toBe("function");
     expect(await adapter.getSettings(["desktop_theme"])).toEqual({
       desktop_theme: "system",

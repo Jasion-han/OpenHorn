@@ -102,6 +102,11 @@ export interface ChatState {
   sendMessage: (
     input: Omit<SendMessageInput, "conversationId">,
   ) => Promise<{ assistantMessageId: string; response: Response }>;
+  deleteMessage: (messageId: string) => Promise<void>;
+  regenerateMessage: (
+    messageId: string,
+    data?: { userMessageId?: string; userContent?: string },
+  ) => Promise<Response>;
   abortStreaming: () => void;
   applyStreamEvent: (messageId: string, event: ChatStreamEvent) => void;
   completeStreamingMessage: (messageId: string) => void;
@@ -321,6 +326,17 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
         });
         throw error;
       }
+    },
+
+    async deleteMessage(messageId) {
+      await adapter.deleteMessage(messageId);
+      set((state) => ({
+        messages: state.messages.filter((message) => message.id !== messageId),
+      }));
+    },
+
+    async regenerateMessage(messageId, data) {
+      return adapter.regenerateMessage(messageId, data);
     },
 
     abortStreaming() {
