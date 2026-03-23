@@ -18,7 +18,8 @@ test("buildSearchContext prefers user tavily key over env key", async () => {
   });
 
   expect(result.status).toBe("offline");
-  expect(result.label).toContain("暂不可用");
+  expect(result.degradedToDirectModel).toBe(true);
+  expect(result.label).toBe("");
 });
 
 test("buildSearchContext uses env key when user key is absent", async () => {
@@ -94,4 +95,26 @@ test("buildSearchContext narrows OpenAI official-doc queries to official domains
       );
     },
   });
+});
+
+test("buildSearchContext aborts slow web search and degrades to direct model", async () => {
+  const result = await buildSearchContext({
+    route: "web_search",
+    prompt: "最近 AI 圈有什么新闻",
+    envKey: "env-key",
+    timeoutMs: 10,
+    fetchImpl: async (_input, init) =>
+      new Promise((_, reject) => {
+        const signal = init?.signal as AbortSignal | undefined;
+        signal?.addEventListener("abort", () => {
+          reject(new DOMException("timed out", "TimeoutError"));
+        });
+      }),
+  });
+
+  expect(result.status).toBe("offline");
+  expect(result.degradedToDirectModel).toBe(true);
+  expect(result.label).toBe("");
+  expect(result.citations).toEqual([]);
+  expect(result.systemContext).toContain("timed out");
 });

@@ -4,6 +4,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { db } from "../db";
 import { generateId } from "../utils";
 import { runClaudeAgentSdk } from "./agentSdk";
+import { resolveAgentWorkingDirectory } from "./agentWorkspace";
 import { buildAttachmentPayloadFromIds } from "./attachmentService";
 import {
   AGENT_FIRST_OUTPUT_TIMEOUT_MS,
@@ -288,6 +289,7 @@ export async function* runAgentWithConfig(config: AgentRuntimeConfig): AsyncGene
         .map((value) => value?.trim())
         .filter((value): value is string => Boolean(value))
         .join("\n\n") || undefined;
+    const agentWorkingDirectory = resolveAgentWorkingDirectory();
 
     const attachmentPayload = await buildAttachmentPayloadFromIds(config.attachmentIds || []);
     const attachmentContext = attachmentPayload.textContext;
@@ -352,6 +354,7 @@ export async function* runAgentWithConfig(config: AgentRuntimeConfig): AsyncGene
       model: resolvedChannel.modelId,
       prompt: promptForSdk,
       systemPrompt: combinedSystemPrompt,
+      cwd: agentWorkingDirectory,
       baseUrl: resolvedChannel.channel.baseUrl || undefined,
       mcpServers,
       permissionMode: config.permissionMode,

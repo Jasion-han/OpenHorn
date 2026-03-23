@@ -97,6 +97,26 @@ test("buildLiveContext uses tavily for web search when a key is available", asyn
   expect(result.systemContext).toContain("AI Roundup");
 });
 
+test("buildLiveContext degrades slow web search routes to direct_model", async () => {
+  const result = await buildLiveContext({
+    prompt: "最近 AI 圈有什么新闻",
+    tavilyEnvKey: "env-key",
+    fetchImpl: async (_input, init) =>
+      new Promise((_, reject) => {
+        const signal = init?.signal as AbortSignal | undefined;
+        signal?.addEventListener("abort", () => {
+          reject(new DOMException("timed out", "TimeoutError"));
+        });
+      }),
+  });
+
+  expect(result.status).toBe("offline");
+  expect(result.route).toBe("direct_model");
+  expect(result.source.type).toBe("none");
+  expect(result.userLabel).toBeUndefined();
+  expect(result.citations).toBeUndefined();
+});
+
 test("buildLiveContext keeps web search routing for lookup prompts that also ask for a summary", async () => {
   const result = await buildLiveContext({
     prompt:
@@ -181,6 +201,44 @@ test("buildLiveContext does not force web search for translation prompts even wh
   expect(result.route).toBe("direct_model");
   expect(result.status).toBe("offline");
   expect(result.userLabel).toBeUndefined();
+});
+
+test("buildLiveContext keeps current workspace README questions local even when web search is enabled", async () => {
+  let classifierCalled = false;
+
+  const result = await buildLiveContext({
+    prompt: "查看当前项目的 README 文档，并告诉我这个项目在做什么，有什么亮点。",
+    forceWebSearch: true,
+    classifier: async () => {
+      classifierCalled = true;
+      return "web_search";
+    },
+  });
+
+  expect(classifierCalled).toBe(false);
+  expect(result.route).toBe("direct_model");
+  expect(result.status).toBe("offline");
+  expect(result.userLabel).toBeUndefined();
+  expect(result.systemContext).toContain("Current workspace question detected.");
+});
+
+test("buildLiveContext still allows explicit web lookup requests for current project pages", async () => {
+  let classifierCalled = false;
+
+  const result = await buildLiveContext({
+    prompt: "请联网搜索这个项目的官网首页标题。",
+    forceWebSearch: true,
+    tavilyEnvKey: null,
+    classifier: async () => {
+      classifierCalled = true;
+      return "direct_model";
+    },
+  });
+
+  expect(classifierCalled).toBe(false);
+  expect(result.route).toBe("web_search");
+  expect(result.status).toBe("offline");
+  expect(result.userLabel).toContain("实时搜索未配置");
 });
 
 test("buildLiveContext prefers web search for named tool capability lookups when allowed", async () => {

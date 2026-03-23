@@ -16,6 +16,7 @@ export type SearchContextResult = {
   systemContext?: string;
   citations: SearchCitation[];
   provider: "tavily" | "none";
+  degradedToDirectModel?: boolean;
 };
 
 export type BuildSearchContextInput = {
@@ -24,6 +25,7 @@ export type BuildSearchContextInput = {
   userSettings?: Record<string, string>;
   envKey?: string | null;
   fetchImpl?: FetchFn;
+  timeoutMs?: number;
 };
 
 type FetchFn = (
@@ -39,6 +41,8 @@ type TavilyResult = {
 };
 
 const DEFAULT_FETCH: FetchFn = fetch;
+const DEFAULT_SEARCH_TIMEOUT_MS = 4_000;
+const DEFAULT_RESEARCH_TIMEOUT_MS = 5_000;
 
 function isTavilyEnabled(input: BuildSearchContextInput) {
   const raw = input.userSettings?.[TAVILY_ENABLED_SETTING];
@@ -126,13 +130,18 @@ function buildSystemContext(
   return [header, `Query: ${prompt}`, ...lines, instruction].join("\n");
 }
 
-function buildOfflineResult(label: string, systemContext: string): SearchContextResult {
+function buildOfflineResult(
+  label: string,
+  systemContext: string,
+  options?: { degradedToDirectModel?: boolean },
+): SearchContextResult {
   return {
     status: "offline",
     label,
     systemContext,
     citations: [],
     provider: "none",
+    degradedToDirectModel: Boolean(options?.degradedToDirectModel),
   };
 }
 
@@ -157,7 +166,7 @@ export async function buildSearchContext(
   const payload = {
     query: normalizeSearchQuery(input.prompt),
     topic: isNewsQuery(input.prompt) ? "news" : "general",
-    search_depth: "advanced",
+    search_depth: input.route === "research" ? "advanced" : "basic",
     max_results: input.route === "research" ? 8 : 5,
     chunks_per_source: 3,
     include_answer: false,
@@ -167,6 +176,8 @@ export async function buildSearchContext(
   };
 
   try {
+    const timeoutMs =
+      input.timeoutMs ?? (input.route === "research" ? DEFAULT_RESEARCH_TIMEOUT_MS : DEFAULT_SEARCH_TIMEOUT_MS);
     const response = await (input.fetchImpl || DEFAULT_FETCH)("https://api.tavily.com/search", {
       method: "POST",
       headers: {
@@ -174,12 +185,14 @@ export async function buildSearchContext(
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(timeoutMs),
     });
 
     if (!response.ok) {
       return buildOfflineResult(
-        "实时搜索暂不可用，本轮为离线回答",
+        "",
         "Live search failed. Do not claim you searched the web or cite sources. State that the answer may be outdated.",
+        { degradedToDirectModel: true },
       );
     }
 
@@ -187,8 +200,9 @@ export async function buildSearchContext(
     const citations = normalizeCitations(data.results);
     if (citations.length === 0) {
       return buildOfflineResult(
-        "实时搜索暂不可用，本轮为离线回答",
+        "",
         "Live search returned no usable sources. Do not claim you searched the web or cite sources. State that the answer may be outdated.",
+        { degradedToDirectModel: true },
       );
     }
 
@@ -199,10 +213,13 @@ export async function buildSearchContext(
       citations,
       provider: "tavily",
     };
-  } catch {
+  } catch (error) {
     return buildOfflineResult(
-      "实时搜索暂不可用，本轮为离线回答",
-      "Live search failed. Do not claim you searched the web or cite sources. State that the answer may be outdated.",
+      "",
+      error instanceof Error && error.name === "TimeoutError"
+        ? "Live search timed out. Do not claim you searched the web or cite sources. Answer directly and state that the answer may be outdated."
+        : "Live search failed. Do not claim you searched the web or cite sources. State that the answer may be outdated.",
+      { degradedToDirectModel: true },
     );
   }
 }

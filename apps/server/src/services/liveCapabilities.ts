@@ -8,6 +8,7 @@ export type LiveRouteType =
 export type LiveStatus = "live" | "offline";
 
 import { buildSearchContext, type SearchCitation } from "./searchService";
+import { buildCurrentWorkspaceSystemContext } from "./currentWorkspaceContext";
 
 export type LiveSourceType = "local" | "weather" | "web_search" | "none";
 
@@ -268,6 +269,23 @@ function hasExplicitWebLookupSignal(prompt: string) {
   );
 }
 
+function looksLikeCurrentWorkspaceQuestion(prompt: string) {
+  const text = prompt.trim();
+  if (!text || hasExplicitWebLookupSignal(text)) return false;
+
+  const hasWorkspaceAnchor =
+    /当前项目|这个项目|本项目|该项目|此项目|当前代码库|这个代码库|本代码库|该代码库|当前仓库|这个仓库|本仓库|该仓库|当前 repo|这个 repo|当前 repository|这个 repository/i.test(
+      text,
+    ) || /\bREADME\b|\breadme\b|\brepo\b|\brepository\b/i.test(text);
+
+  const hasWorkspaceIntent =
+    /readme|README|文档|说明|介绍|概览|总结|摘要|做什么|干什么|用途|亮点|特点|特性|功能|架构|结构|目录|文件|模块|源码|代码|实现/i.test(
+      text,
+    );
+
+  return hasWorkspaceAnchor && hasWorkspaceIntent;
+}
+
 export function getWebSearchPolicy(prompt: string): WebSearchPolicy {
   const text = prompt.trim();
   if (!text) return "never";
@@ -441,9 +459,11 @@ export async function buildLiveContext(input: BuildLiveContextInput): Promise<Li
   const timezone = inferTimezone(input.timezone);
   const webSearchPolicy = getWebSearchPolicy(input.prompt);
   const allowSemanticWebRouting = webSearchPolicy === "defer_to_router";
+  const isCurrentWorkspaceQuestion = looksLikeCurrentWorkspaceQuestion(input.prompt);
 
   if (
     route.type === "direct_model" &&
+    !isCurrentWorkspaceQuestion &&
     allowSemanticWebRouting &&
     input.forceWebSearch &&
     looksLikeNamedToolOrProductQuery(input.prompt)
@@ -451,7 +471,12 @@ export async function buildLiveContext(input: BuildLiveContextInput): Promise<Li
     route = routeFromType(/区别|对比|比较|相较于/i.test(input.prompt) ? "research" : "web_search");
   }
 
-  if (route.type === "direct_model" && allowSemanticWebRouting && input.classifier) {
+  if (
+    route.type === "direct_model" &&
+    !isCurrentWorkspaceQuestion &&
+    allowSemanticWebRouting &&
+    input.classifier
+  ) {
     const classified = await input.classifier(input.prompt);
     if (classified) {
       route = routeFromType(classified);
@@ -493,6 +518,15 @@ export async function buildLiveContext(input: BuildLiveContextInput): Promise<Li
       fetchImpl: input.fetchImpl,
     });
 
+    if (searchContext.status === "offline" && searchContext.degradedToDirectModel) {
+      return {
+        status: "offline",
+        route: "direct_model",
+        source: { type: "none" },
+        systemContext: searchContext.systemContext,
+      };
+    }
+
     return {
       status: searchContext.status,
       route: route.type,
@@ -510,6 +544,7 @@ export async function buildLiveContext(input: BuildLiveContextInput): Promise<Li
     status: "offline",
     route: route.type,
     source: { type: "none" },
+    systemContext: isCurrentWorkspaceQuestion ? buildCurrentWorkspaceSystemContext() : undefined,
   };
 }
 
