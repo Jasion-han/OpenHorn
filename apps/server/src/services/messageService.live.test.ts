@@ -53,9 +53,14 @@ test("stream chat emits live status metadata before assistant deltas", async () 
   const updatedRows: Array<Record<string, unknown>> = [];
 
   mock.module("db", () => ({
+    agentSessions: {},
+    agentTasks: {},
+    channelModels: {},
+    channels: {},
     conversations: conversationTable,
     messages: messageTable,
     attachments: attachmentTable,
+    users: {},
   }));
 
   mock.module("../db", () => ({
@@ -117,6 +122,8 @@ test("stream chat emits live status metadata before assistant deltas", async () 
   }));
 
   mock.module("../utils", () => ({
+    encrypt: (value: string) => value,
+    decrypt: (value: string) => value,
     generateId: (() => {
       const ids = ["user-msg-temp", "assistant-msg-temp"];
       return () => ids.shift() || `generated-${Date.now()}`;
@@ -144,6 +151,10 @@ test("stream chat emits live status metadata before assistant deltas", async () 
       apiKey: "test-key",
       modelId: "claude-3-7-sonnet",
     }),
+    getChannelRuntimeCredentialsById: async () => ({
+      channel: { baseUrl: "https://example.com" },
+      apiKey: "test-key",
+    }),
   }));
 
   mock.module("./attachmentService", () => ({
@@ -160,7 +171,7 @@ test("stream chat emits live status metadata before assistant deltas", async () 
   }));
 
   try {
-    const { streamMessage } = await import("./messageService");
+    const { streamMessage } = await import(`./messageService?agent-context=${crypto.randomUUID()}`);
     const stream = await streamMessage("user-1", {
       conversationId: "conv-1",
       content: "今天周几",
@@ -232,9 +243,14 @@ test("stream agent includes recent conversation context for follow-up turns", as
   const agentConfigs: Array<Record<string, unknown>> = [];
 
   mock.module("db", () => ({
+    agentSessions: {},
+    agentTasks: {},
+    channelModels: {},
+    channels: {},
     conversations: conversationTable,
     messages: messageTable,
     attachments: attachmentTable,
+    users: {},
   }));
 
   mock.module("../db", () => ({
@@ -331,6 +347,8 @@ test("stream agent includes recent conversation context for follow-up turns", as
   }));
 
   mock.module("../utils", () => ({
+    encrypt: (value: string) => value,
+    decrypt: (value: string) => value,
     generateId: (() => {
       const ids = ["user-msg-2", "assistant-msg-2"];
       return () => ids.shift() || `generated-${Date.now()}`;
@@ -346,11 +364,19 @@ test("stream agent includes recent conversation context for follow-up turns", as
       apiKey: "test-key",
       modelId: "claude-3-7-sonnet",
     }),
+    getChannelRuntimeCredentialsById: async () => ({
+      channel: { baseUrl: "https://example.com" },
+      apiKey: "test-key",
+    }),
   }));
 
   mock.module("./attachmentService", () => ({
     buildAttachmentPayloadFromIds: async () => ({ images: [], textContext: "", files: [] }),
     linkAttachmentsToMessage: async () => {},
+  }));
+
+  mock.module("./channelAgentCheckService", () => ({
+    checkChannelAgentCompatibility: async () => ({ success: true as const }),
   }));
 
   mock.module("./settingsService", () => ({
@@ -365,7 +391,7 @@ test("stream agent includes recent conversation context for follow-up turns", as
   }));
 
   try {
-    const { streamMessage } = await import("./messageService");
+    const { streamMessage } = await import(`./messageService?agent-timeout=${crypto.randomUUID()}`);
     const stream = await streamMessage("user-1", {
       conversationId: "conv-1",
       content: "那他能做什么",
@@ -404,6 +430,617 @@ test("stream agent includes recent conversation context for follow-up turns", as
     });
     expect(updatedRows.at(-1)).toMatchObject({
       runStatus: "completed",
+    });
+  } finally {
+    mock.restore();
+  }
+});
+
+test("stream agent aborts stalled runs when no visible output arrives", async () => {
+  const conversationTable = {
+    id: "conversation_id",
+    userId: "conversation_user_id",
+    channelId: "conversation_channel_id",
+    modelId: "conversation_model_id",
+    updatedAt: "conversation_updated_at",
+    lastMode: "conversation_last_mode",
+    runStatus: "conversation_run_status",
+  };
+  const messageTable = {
+    id: "message_id",
+    conversationId: "message_conversation_id",
+    createdAt: "message_created_at",
+  };
+  const attachmentTable = {
+    id: "attachment_id",
+    messageId: "attachment_message_id",
+    fileName: "attachment_file_name",
+    fileType: "attachment_file_type",
+    fileSize: "attachment_file_size",
+  };
+
+  const updatedRows: Array<Record<string, unknown>> = [];
+  const agentConfigs: Array<Record<string, unknown>> = [];
+
+  mock.module("db", () => ({
+    agentSessions: {},
+    agentTasks: {},
+    channelModels: {},
+    channels: {},
+    conversations: conversationTable,
+    messages: messageTable,
+    attachments: attachmentTable,
+    users: {},
+  }));
+
+  mock.module("../db", () => ({
+    db: {
+      select: () => ({
+        from: (table: unknown) => {
+          if (table === conversationTable) {
+            return {
+              where: () => ({
+                limit: async () => [
+                  {
+                    id: "conv-1",
+                    userId: "user-1",
+                    channelId: "channel-1",
+                    modelId: "claude-3-7-sonnet",
+                    systemPrompt: "Base system prompt",
+                    forceWebSearch: false,
+                    workspaceId: null,
+                  },
+                ],
+              }),
+            };
+          }
+
+          if (table === messageTable) {
+            return {
+              where: () => ({
+                orderBy: async () => [],
+              }),
+            };
+          }
+
+          if (table === attachmentTable) {
+            return {
+              where: async () => [],
+            };
+          }
+
+          throw new Error("Unexpected table in select");
+        },
+      }),
+      insert: () => ({
+        values: async () => {},
+      }),
+      update: () => ({
+        set: (value: unknown) => ({
+          where: async () => {
+            if (value && typeof value === "object") {
+              updatedRows.push(value as Record<string, unknown>);
+            }
+            return { rowsAffected: 1 };
+          },
+        }),
+      }),
+    },
+  }));
+
+  mock.module("../utils", () => ({
+    encrypt: (value: string) => value,
+    decrypt: (value: string) => value,
+    generateId: (() => {
+      const ids = ["user-msg-temp", "assistant-msg-temp"];
+      return () => ids.shift() || `generated-${Date.now()}`;
+    })(),
+  }));
+
+  mock.module("./channelService", () => ({
+    getResolvedChannelForConversation: async () => ({
+      channel: {
+        provider: "anthropic",
+        baseUrl: "https://example.com",
+      },
+      apiKey: "test-key",
+      modelId: "claude-3-7-sonnet",
+    }),
+    getChannelRuntimeCredentialsById: async () => ({
+      channel: { baseUrl: "https://example.com" },
+      apiKey: "test-key",
+    }),
+  }));
+
+  mock.module("./attachmentService", () => ({
+    buildAttachmentPayloadFromIds: async () => ({ images: [], textContext: "", files: [] }),
+    linkAttachmentsToMessage: async () => {},
+  }));
+
+  mock.module("./channelAgentCheckService", () => ({
+    checkChannelAgentCompatibility: async () => ({ success: true as const }),
+  }));
+
+  mock.module("./settingsService", () => ({
+    getSettingValues: async () => ({ "chat.systemPrompt": "Global prompt" }),
+  }));
+
+  mock.module("./agentStreamTimeouts", () => ({
+    createAgentStreamTimeoutGuard: (abortController: AbortController) => {
+      const timer = setTimeout(() => {
+        abortController.abort("first_output_timeout");
+      }, 5);
+      return {
+        markVisibleOutput: () => clearTimeout(timer),
+        cleanup: () => clearTimeout(timer),
+      };
+    },
+  }));
+
+  mock.module("./agentService", () => ({
+    runAgentWithConfig: async function* (config: Record<string, unknown>) {
+      agentConfigs.push(config);
+      const abortController = config.abortController as AbortController | undefined;
+      const signal = abortController?.signal;
+      await new Promise<void>((resolve) => {
+        if (!signal) {
+          resolve();
+          return;
+        }
+        if (signal.aborted) {
+          resolve();
+          return;
+        }
+        signal.addEventListener("abort", () => resolve(), { once: true });
+      });
+
+      if (signal?.reason === "first_output_timeout") {
+        yield {
+          type: "error",
+          content: "模型长时间无响应（10s）已停止。可能当前渠道不支持 Agent 运行模式，请检查 Provider/Base URL/模型配置。",
+        };
+      }
+    },
+  }));
+
+  try {
+    const { streamMessage } = await import(
+      `./messageService?agent-keepalive=${crypto.randomUUID()}`,
+    );
+    const stream = await streamMessage("user-1", {
+      conversationId: "conv-1",
+      content: "最近 AI 圈有什么新闻吗",
+      mode: "agent",
+    });
+
+    const payloads = parseSsePayloads(await readStreamText(stream));
+
+    expect(payloads[0]).toEqual({
+      type: "live_status",
+      status: "offline",
+      route: "web_search",
+      label: "实时搜索未配置，本轮为离线回答",
+    });
+    expect(payloads).toContainEqual({
+      type: "agent_event",
+      event: {
+        type: "error",
+        content:
+          "模型长时间无响应（10s）已停止。可能当前渠道不支持 Agent 运行模式，请检查 Provider/Base URL/模型配置。",
+      },
+    });
+    expect(payloads).toContainEqual({
+      type: "delta",
+      content:
+        "Error: 模型长时间无响应（10s）已停止。可能当前渠道不支持 Agent 运行模式，请检查 Provider/Base URL/模型配置。",
+    });
+    expect(payloads.at(-1)).toMatchObject({
+      type: "done",
+      messageId: "assistant-msg-temp",
+      model: "claude-3-7-sonnet",
+    });
+
+    expect(agentConfigs).toHaveLength(1);
+    expect(agentConfigs[0]?.abortController).toBeInstanceOf(AbortController);
+    const assistantUpdate = updatedRows.find(
+      (row) =>
+        row.content ===
+          "Error: 模型长时间无响应（10s）已停止。可能当前渠道不支持 Agent 运行模式，请检查 Provider/Base URL/模型配置。" &&
+        row.mode === "agent",
+    );
+    expect(assistantUpdate).toMatchObject({
+      content:
+        "Error: 模型长时间无响应（10s）已停止。可能当前渠道不支持 Agent 运行模式，请检查 Provider/Base URL/模型配置。",
+      mode: "agent",
+    });
+  } finally {
+    mock.restore();
+  }
+});
+
+test("stream agent keeps running when meta keepalive arrives before visible output", async () => {
+  const conversationTable = {
+    id: "conversation_id",
+    userId: "conversation_user_id",
+    channelId: "conversation_channel_id",
+    modelId: "conversation_model_id",
+    updatedAt: "conversation_updated_at",
+    lastMode: "conversation_last_mode",
+    runStatus: "conversation_run_status",
+  };
+  const messageTable = {
+    id: "message_id",
+    conversationId: "message_conversation_id",
+    createdAt: "message_created_at",
+  };
+  const attachmentTable = {
+    id: "attachment_id",
+    messageId: "attachment_message_id",
+    fileName: "attachment_file_name",
+    fileType: "attachment_file_type",
+    fileSize: "attachment_file_size",
+  };
+
+  const updatedRows: Array<Record<string, unknown>> = [];
+
+  mock.module("db", () => ({
+    agentSessions: {},
+    agentTasks: {},
+    channelModels: {},
+    channels: {},
+    conversations: conversationTable,
+    messages: messageTable,
+    attachments: attachmentTable,
+    users: {},
+  }));
+
+  mock.module("../db", () => ({
+    db: {
+      select: () => ({
+        from: (table: unknown) => {
+          if (table === conversationTable) {
+            return {
+              where: () => ({
+                limit: async () => [
+                  {
+                    id: "conv-1",
+                    userId: "user-1",
+                    channelId: "channel-1",
+                    modelId: "claude-3-7-sonnet",
+                    systemPrompt: "Base system prompt",
+                    forceWebSearch: false,
+                    workspaceId: null,
+                  },
+                ],
+              }),
+            };
+          }
+
+          if (table === messageTable) {
+            return {
+              where: () => ({
+                orderBy: async () => [],
+              }),
+            };
+          }
+
+          if (table === attachmentTable) {
+            return {
+              where: async () => [],
+            };
+          }
+
+          throw new Error("Unexpected table in select");
+        },
+      }),
+      insert: () => ({
+        values: async () => {},
+      }),
+      update: () => ({
+        set: (value: unknown) => ({
+          where: async () => {
+            if (value && typeof value === "object") {
+              updatedRows.push(value as Record<string, unknown>);
+            }
+            return { rowsAffected: 1 };
+          },
+        }),
+      }),
+    },
+  }));
+
+  mock.module("../utils", () => ({
+    encrypt: (value: string) => value,
+    decrypt: (value: string) => value,
+    generateId: (() => {
+      const ids = ["user-msg-temp", "assistant-msg-temp"];
+      return () => ids.shift() || `generated-${Date.now()}`;
+    })(),
+  }));
+
+  mock.module("./channelService", () => ({
+    getResolvedChannelForConversation: async () => ({
+      channel: {
+        provider: "anthropic",
+        baseUrl: "https://example.com",
+      },
+      apiKey: "test-key",
+      modelId: "claude-3-7-sonnet",
+    }),
+    getChannelRuntimeCredentialsById: async () => ({
+      channel: { baseUrl: "https://example.com" },
+      apiKey: "test-key",
+    }),
+  }));
+
+  mock.module("./attachmentService", () => ({
+    buildAttachmentPayloadFromIds: async () => ({ images: [], textContext: "", files: [] }),
+    linkAttachmentsToMessage: async () => {},
+  }));
+
+  mock.module("./channelAgentCheckService", () => ({
+    checkChannelAgentCompatibility: async () => ({ success: true as const }),
+  }));
+
+  mock.module("./settingsService", () => ({
+    getSettingValues: async () => ({ "chat.systemPrompt": "Global prompt" }),
+  }));
+
+  mock.module("./agentStreamTimeouts", () => ({
+    createAgentStreamTimeoutGuard: (abortController: AbortController) => {
+      let timer = setTimeout(() => {
+        abortController.abort("first_output_timeout");
+      }, 5);
+      return {
+        markActivity: () => {
+          clearTimeout(timer);
+          timer = setTimeout(() => {
+            abortController.abort("idle_timeout");
+          }, 20);
+        },
+        markVisibleOutput: () => clearTimeout(timer),
+        cleanup: () => clearTimeout(timer),
+      };
+    },
+  }));
+
+  mock.module("./agentService", () => ({
+    runAgentWithConfig: async function* (config: Record<string, unknown>) {
+      const abortController = config.abortController as AbortController | undefined;
+      const signal = abortController?.signal;
+
+      yield { type: "meta" };
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      if (signal?.aborted) {
+        yield {
+          type: "error",
+          content: `unexpected abort: ${String(signal.reason || "unknown")}`,
+        };
+        return;
+      }
+
+      yield { type: "text", content: "Agent is ready." };
+    },
+  }));
+
+  try {
+    const { streamMessage } = await import("./messageService");
+    const stream = await streamMessage("user-1", {
+      conversationId: "conv-1",
+      content: "检查 agent keepalive",
+      mode: "agent",
+    });
+
+    const payloads = parseSsePayloads(await readStreamText(stream));
+
+    expect(payloads).toContainEqual({
+      type: "delta",
+      content: "Agent is ready.",
+    });
+    expect(
+      payloads.some(
+        (payload) =>
+          payload.type === "agent_event" &&
+          payload.event?.type === "error" &&
+          String(payload.event?.content || "").includes("unexpected abort"),
+      ),
+    ).toBe(false);
+    expect(payloads.at(-1)).toMatchObject({
+      type: "done",
+      messageId: "assistant-msg-temp",
+      model: "claude-3-7-sonnet",
+    });
+
+    const assistantUpdate = updatedRows.find(
+      (row) => row.content === "Agent is ready." && row.mode === "agent",
+    );
+    expect(assistantUpdate).toMatchObject({
+      content: "Agent is ready.",
+      mode: "agent",
+    });
+  } finally {
+    mock.restore();
+  }
+});
+
+test("stream agent fails fast when channel is incompatible with Claude Agent SDK", async () => {
+  const conversationTable = {
+    id: "conversation_id",
+    userId: "conversation_user_id",
+    channelId: "conversation_channel_id",
+    modelId: "conversation_model_id",
+    updatedAt: "conversation_updated_at",
+    lastMode: "conversation_last_mode",
+    runStatus: "conversation_run_status",
+  };
+  const messageTable = {
+    id: "message_id",
+    conversationId: "message_conversation_id",
+    createdAt: "message_created_at",
+  };
+  const attachmentTable = {
+    id: "attachment_id",
+    messageId: "attachment_message_id",
+    fileName: "attachment_file_name",
+    fileType: "attachment_file_type",
+    fileSize: "attachment_file_size",
+  };
+
+  const updatedRows: Array<Record<string, unknown>> = [];
+  const agentConfigs: Array<Record<string, unknown>> = [];
+
+  mock.module("db", () => ({
+    agentSessions: {},
+    agentTasks: {},
+    channelModels: {},
+    channels: {},
+    conversations: conversationTable,
+    messages: messageTable,
+    attachments: attachmentTable,
+    users: {},
+  }));
+
+  mock.module("../db", () => ({
+    db: {
+      select: () => ({
+        from: (table: unknown) => {
+          if (table === conversationTable) {
+            return {
+              where: () => ({
+                limit: async () => [
+                  {
+                    id: "conv-1",
+                    userId: "user-1",
+                    channelId: "channel-1",
+                    modelId: "openrouter/free",
+                    systemPrompt: "Base system prompt",
+                    forceWebSearch: false,
+                    workspaceId: null,
+                  },
+                ],
+              }),
+            };
+          }
+
+          if (table === messageTable) {
+            return {
+              where: () => ({
+                orderBy: async () => [],
+              }),
+            };
+          }
+
+          if (table === attachmentTable) {
+            return {
+              where: async () => [],
+            };
+          }
+
+          throw new Error("Unexpected table in select");
+        },
+      }),
+      insert: () => ({
+        values: async () => {},
+      }),
+      update: () => ({
+        set: (value: unknown) => ({
+          where: async () => {
+            if (value && typeof value === "object") {
+              updatedRows.push(value as Record<string, unknown>);
+            }
+            return { rowsAffected: 1 };
+          },
+        }),
+      }),
+    },
+  }));
+
+  mock.module("../utils", () => ({
+    encrypt: (value: string) => value,
+    decrypt: (value: string) => value,
+    generateId: (() => {
+      const ids = ["user-msg-temp", "assistant-msg-temp"];
+      return () => ids.shift() || `generated-${Date.now()}`;
+    })(),
+  }));
+
+  mock.module("./channelService", () => ({
+    getResolvedChannelForConversation: async () => ({
+      channel: {
+        provider: "anthropic",
+        baseUrl: "https://openrouter.ai/api",
+        id: "channel-1",
+      },
+      apiKey: "test-key",
+      modelId: "openrouter/free",
+    }),
+  }));
+
+  mock.module("./channelAgentCheckService", () => ({
+    checkChannelAgentCompatibility: async () => ({
+      success: false as const,
+      error:
+        "该渠道支持普通聊天接口，但不兼容 Claude Agent SDK，无法用于 Agent 模式。它仍可用于普通聊天。",
+    }),
+  }));
+
+  mock.module("./attachmentService", () => ({
+    buildAttachmentPayloadFromIds: async () => ({ images: [], textContext: "", files: [] }),
+    linkAttachmentsToMessage: async () => {},
+  }));
+
+  mock.module("./settingsService", () => ({
+    getSettingValues: async () => ({ "chat.systemPrompt": "Global prompt" }),
+  }));
+
+  mock.module("./agentService", () => ({
+    runAgentWithConfig: async function* (config: Record<string, unknown>) {
+      agentConfigs.push(config);
+      yield { type: "text", content: "should not run" };
+    },
+  }));
+
+  try {
+    const { streamMessage } = await import(`./messageService?fast-fail=${crypto.randomUUID()}`);
+    const stream = await streamMessage("user-1", {
+      conversationId: "conv-1",
+      content: "请直接回复 OK",
+      mode: "agent",
+    });
+
+    const payloads = parseSsePayloads(await readStreamText(stream));
+
+    expect(payloads).toContainEqual({
+      type: "agent_event",
+      event: {
+        type: "error",
+        content:
+          "该渠道支持普通聊天接口，但不兼容 Claude Agent SDK，无法用于 Agent 模式。它仍可用于普通聊天。",
+      },
+    });
+    expect(payloads).toContainEqual({
+      type: "delta",
+      content:
+        "Error: 该渠道支持普通聊天接口，但不兼容 Claude Agent SDK，无法用于 Agent 模式。它仍可用于普通聊天。",
+    });
+    expect(payloads.at(-1)).toMatchObject({
+      type: "done",
+      messageId: "assistant-msg-temp",
+      model: "openrouter/free",
+    });
+
+    expect(agentConfigs).toHaveLength(0);
+    const assistantUpdate = updatedRows.find(
+      (row) =>
+        row.content ===
+          "Error: 该渠道支持普通聊天接口，但不兼容 Claude Agent SDK，无法用于 Agent 模式。它仍可用于普通聊天。" &&
+        row.mode === "agent",
+    );
+    expect(assistantUpdate).toMatchObject({
+      content:
+        "Error: 该渠道支持普通聊天接口，但不兼容 Claude Agent SDK，无法用于 Agent 模式。它仍可用于普通聊天。",
+      mode: "agent",
     });
   } finally {
     mock.restore();
@@ -454,9 +1091,14 @@ test("regenerate falls back to the previous user message when assistant id is mi
   };
 
   mock.module("db", () => ({
+    agentSessions: {},
+    agentTasks: {},
+    channelModels: {},
+    channels: {},
     conversations: conversationTable,
     messages: messageTable,
     attachments: attachmentTable,
+    users: {},
   }));
 
   mock.module("../db", () => ({
@@ -529,6 +1171,8 @@ test("regenerate falls back to the previous user message when assistant id is mi
   }));
 
   mock.module("../utils", () => ({
+    encrypt: (value: string) => value,
+    decrypt: (value: string) => value,
     generateId: (() => {
       const ids = ["assistant-msg-fallback"];
       return () => ids.shift() || `generated-${Date.now()}`;
@@ -555,6 +1199,10 @@ test("regenerate falls back to the previous user message when assistant id is mi
       },
       apiKey: "test-key",
       modelId: "claude-3-7-sonnet",
+    }),
+    getChannelRuntimeCredentialsById: async () => ({
+      channel: { baseUrl: "https://example.com" },
+      apiKey: "test-key",
     }),
   }));
 
@@ -637,9 +1285,14 @@ test("edit user message creates a new assistant reply when the user message is t
   }> = [];
 
   mock.module("db", () => ({
+    agentSessions: {},
+    agentTasks: {},
+    channelModels: {},
+    channels: {},
     conversations: conversationTable,
     messages: messageTable,
     attachments: attachmentTable,
+    users: {},
   }));
 
   mock.module("../db", () => ({
@@ -714,6 +1367,8 @@ test("edit user message creates a new assistant reply when the user message is t
   }));
 
   mock.module("../utils", () => ({
+    encrypt: (value: string) => value,
+    decrypt: (value: string) => value,
     generateId: (() => {
       const ids = ["assistant-msg-new"];
       return () => ids.shift() || `generated-${Date.now()}`;
@@ -741,6 +1396,10 @@ test("edit user message creates a new assistant reply when the user message is t
       apiKey: "test-key",
       modelId: "claude-3-7-sonnet",
     }),
+    getChannelRuntimeCredentialsById: async () => ({
+      channel: { baseUrl: "https://example.com" },
+      apiKey: "test-key",
+    }),
   }));
 
   mock.module("./attachmentService", () => ({
@@ -757,7 +1416,7 @@ test("edit user message creates a new assistant reply when the user message is t
   }));
 
   try {
-    const { editUserMessage } = await import("./messageService");
+    const { editUserMessage } = await import(`./messageService?edit-agent=${crypto.randomUUID()}`);
     const stream = await editUserMessage("user-1", "user-msg-1", "新问题");
     const payloads = parseSsePayloads(await readStreamText(stream));
 
@@ -791,6 +1450,194 @@ test("edit user message creates a new assistant reply when the user message is t
     expect(chatStreamCalls[0]?.messages.at(-1)).toEqual({
       role: "user",
       content: "新问题",
+    });
+  } finally {
+    mock.restore();
+  }
+});
+
+test("edit agent user message streams the updated reply instead of returning a task summary", async () => {
+  const conversationTable = {
+    id: "conversation_id",
+    userId: "conversation_user_id",
+    channelId: "conversation_channel_id",
+    modelId: "conversation_model_id",
+  };
+  const messageTable = {
+    id: "message_id",
+    conversationId: "message_conversation_id",
+    createdAt: "message_created_at",
+  };
+  const attachmentTable = {
+    id: "attachment_id",
+    messageId: "attachment_message_id",
+    fileName: "attachment_file_name",
+    fileType: "attachment_file_type",
+    fileSize: "attachment_file_size",
+  };
+
+  const updatedRows: Array<Record<string, unknown>> = [];
+  const agentConfigs: Array<Record<string, unknown>> = [];
+
+  const userMsg = {
+    id: "user-msg-1",
+    conversationId: "conv-1",
+    role: "user",
+    content: "旧问题",
+    attachments: null,
+    mode: "agent",
+    workspaceId: null,
+    contextPaths: null,
+    createdAt: new Date("2026-03-18T10:00:00.000Z"),
+  };
+  const assistantMsg = {
+    id: "assistant-msg-1",
+    conversationId: "conv-1",
+    role: "assistant",
+    content: "旧回答",
+    attachments: null,
+    mode: "agent",
+    workspaceId: null,
+    contextPaths: null,
+    createdAt: new Date("2026-03-18T10:00:01.000Z"),
+  };
+
+  mock.module("db", () => ({
+    agentSessions: {},
+    agentTasks: {},
+    channelModels: {},
+    channels: {},
+    conversations: conversationTable,
+    messages: messageTable,
+    attachments: attachmentTable,
+    users: {},
+  }));
+
+  mock.module("../db", () => ({
+    db: {
+      select: () => ({
+        from: (table: unknown) => {
+          if (table === messageTable) {
+            return {
+              where: () =>
+                Object.assign(Promise.resolve([userMsg]), {
+                  orderBy: async () => [userMsg, assistantMsg],
+                }),
+            };
+          }
+
+          if (table === conversationTable) {
+            return {
+              where: () => ({
+                limit: async () => [
+                  {
+                    id: "conv-1",
+                    userId: "user-1",
+                    channelId: "channel-1",
+                    modelId: "claude-3-7-sonnet",
+                    systemPrompt: "Base system prompt",
+                    forceWebSearch: false,
+                    workspaceId: null,
+                  },
+                ],
+              }),
+            };
+          }
+
+          if (table === attachmentTable) {
+            return {
+              where: async () => [],
+            };
+          }
+
+          throw new Error("Unexpected table in select");
+        },
+      }),
+      insert: () => ({
+        values: async () => {},
+      }),
+      update: (_table: unknown) => ({
+        set: (value: unknown) => ({
+          where: async () => {
+            if (value && typeof value === "object") {
+              updatedRows.push(value as Record<string, unknown>);
+            }
+            return { rowsAffected: 1 };
+          },
+        }),
+      }),
+    },
+  }));
+
+  mock.module("../utils", () => ({
+    encrypt: (value: string) => value,
+    decrypt: (value: string) => value,
+    generateId: () => `generated-${Date.now()}`,
+  }));
+
+  mock.module("./channelService", () => ({
+    getResolvedChannelForConversation: async () => ({
+      channel: {
+        provider: "anthropic",
+        baseUrl: "https://example.com",
+        id: "channel-1",
+      },
+      apiKey: "test-key",
+      modelId: "claude-3-7-sonnet",
+    }),
+  }));
+
+  mock.module("./attachmentService", () => ({
+    buildAttachmentPayloadFromIds: async () => ({ images: [], textContext: "", files: [] }),
+    linkAttachmentsToMessage: async () => {},
+  }));
+
+  mock.module("./channelAgentCheckService", () => ({
+    checkChannelAgentCompatibility: async () => ({ success: true as const }),
+  }));
+
+  mock.module("./settingsService", () => ({
+    getSettingValues: async () => ({ "chat.systemPrompt": "Global prompt" }),
+  }));
+
+  mock.module("./agentService", () => ({
+    runAgentWithConfig: async function* (config: Record<string, unknown>) {
+      agentConfigs.push(config);
+      yield { type: "text", content: "这是实时修正后的回答。" };
+    },
+  }));
+
+  try {
+    const { editUserMessage } = await import(`./messageService?edit-agent=${crypto.randomUUID()}`);
+    const stream = await editUserMessage("user-1", "user-msg-1", "新问题");
+    const payloads = parseSsePayloads(await readStreamText(stream));
+
+    expect(payloads[0]).toEqual({
+      type: "live_status",
+      status: "offline",
+      route: "direct_model",
+    });
+    expect(payloads[1]).toEqual({
+      type: "delta",
+      content: "这是实时修正后的回答。",
+    });
+    expect(payloads.at(-1)).toMatchObject({
+      type: "done",
+      messageId: "assistant-msg-1",
+      model: "claude-3-7-sonnet",
+    });
+
+    expect(agentConfigs).toHaveLength(1);
+    expect(agentConfigs[0]?.prompt).toBe("新问题");
+    expect(agentConfigs[0]?.conversationHistory).toEqual([]);
+    expect(updatedRows[0]).toMatchObject({ content: "新问题" });
+    const assistantUpdate = updatedRows.find(
+      (row) => row.content === "这是实时修正后的回答。" && row.mode === "agent",
+    );
+    expect(assistantUpdate).toMatchObject({
+      content: "这是实时修正后的回答。",
+      model: "claude-3-7-sonnet",
+      mode: "agent",
     });
   } finally {
     mock.restore();

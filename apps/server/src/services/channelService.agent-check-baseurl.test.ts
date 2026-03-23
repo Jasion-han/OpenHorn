@@ -1,46 +1,76 @@
-import { expect, test } from "bun:test";
-import { channels, users } from "db";
-import { and, eq } from "drizzle-orm";
-import { db } from "../db";
-import { encrypt } from "../utils";
-import { getChannelRuntimeCredentialsById } from "./channelService";
+import { expect, mock, test } from "bun:test";
 
-test("agent-check: runtime=anthropic baseUrl normalization tolerates mixed suffixes", async () => {
-  const userId = crypto.randomUUID();
-  const channelId = crypto.randomUUID();
-  const now = new Date();
+test("agent-check: runtime=agent_sdk baseUrl normalization tolerates mixed suffixes", async () => {
+  const channelTable = { id: "channel_id", userId: "channel_user_id" };
+  const channelModelTable = { channelId: "channel_model_channel_id" };
 
-  await db.insert(users).values({
-    id: userId,
-    email: `${userId}@test.local`,
-    username: "u",
-    passwordHash: "x",
-    createdAt: now,
-    updatedAt: now,
-  });
+  mock.module("db", () => ({
+    agentSessions: {},
+    agentTasks: {},
+    channelModels: channelModelTable,
+    channels: channelTable,
+    conversations: {},
+  }));
 
-  await db.insert(channels).values({
-    id: channelId,
-    userId,
-    name: "c",
-    provider: "openai",
-    apiKey: encrypt("k"),
-    // Simulate a relay URL that got normalized weirdly (e.g. /v1/messages/v1).
-    baseUrl: "https://relay.example.com/v1/messages/v1",
-    model: null,
-    enabled: true,
-    isDefault: false,
-    createdAt: now,
-    updatedAt: now,
-  });
+  mock.module("../db", () => ({
+    db: {
+      select: () => ({
+        from: (table: unknown) => {
+          if (table === channelTable) {
+            return {
+              where: () => ({
+                limit: async () => [
+                  {
+                    id: "channel-1",
+                    userId: "user-1",
+                    name: "c",
+                    provider: "openai",
+                    apiKey: "encrypted-key",
+                    baseUrl: "https://relay.example.com/v1/messages/v1",
+                    model: null,
+                    enabled: true,
+                    isDefault: false,
+                    createdAt: new Date("2026-03-23T00:00:00.000Z"),
+                    updatedAt: new Date("2026-03-23T00:00:00.000Z"),
+                  },
+                ],
+              }),
+            };
+          }
+
+          if (table === channelModelTable) {
+            return {
+              where: async () => [],
+            };
+          }
+
+          throw new Error("Unexpected table in select");
+        },
+      }),
+      insert: () => ({
+        values: async () => ({ rowsAffected: 1 }),
+      }),
+    },
+  }));
+
+  mock.module("../utils", () => ({
+    decrypt: (value: string) => value,
+    encrypt: (value: string) => value,
+    generateId: () => "generated-id",
+  }));
 
   try {
-    const resolved = await getChannelRuntimeCredentialsById(userId, channelId, {
-      runtime: "anthropic",
+    const { getChannelRuntimeCredentialsById } = await import(
+      `./channelService?agent-check=${crypto.randomUUID()}`
+    );
+
+    const resolved = await getChannelRuntimeCredentialsById("user-1", "channel-1", {
+      runtime: "agent_sdk",
     });
+
     expect(resolved.channel.baseUrl).toBe("https://relay.example.com");
+    expect(resolved.apiKey).toBe("encrypted-key");
   } finally {
-    await db.delete(channels).where(and(eq(channels.id, channelId), eq(channels.userId, userId)));
-    await db.delete(users).where(eq(users.id, userId));
+    mock.restore();
   }
 });

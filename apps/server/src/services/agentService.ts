@@ -5,6 +5,12 @@ import { db } from "../db";
 import { generateId } from "../utils";
 import { runClaudeAgentSdk } from "./agentSdk";
 import { buildAttachmentPayloadFromIds } from "./attachmentService";
+import {
+  AGENT_FIRST_OUTPUT_TIMEOUT_MS,
+  AGENT_IDLE_TIMEOUT_MS,
+  AGENT_TOTAL_TIMEOUT_MS,
+  formatTimeoutSeconds,
+} from "./agentStreamTimeouts";
 import { getResolvedChannelForConversation, getResolvedChannelForUser } from "./channelService";
 import { buildLiveContext, type LiveContextResult } from "./liveCapabilities";
 import { classifyLiveRouteWithModel } from "./liveRouteClassifier";
@@ -265,14 +271,6 @@ export async function* runAgentWithConfig(config: AgentRuntimeConfig): AsyncGene
     return;
   }
 
-  if (resolvedChannel.channel.provider !== "anthropic") {
-    yield {
-      type: "error",
-      content: `Agent 模式目前仅支持 Anthropic(Claude Agent SDK)。当前 Provider: ${resolvedChannel.channel.provider}。请切换到 Anthropic 渠道后重试。`,
-    };
-    return;
-  }
-
   if (config.modelId) {
     resolvedChannel.modelId = config.modelId;
   }
@@ -369,15 +367,21 @@ export async function* runAgentWithConfig(config: AgentRuntimeConfig): AsyncGene
       if (reason === "first_output_timeout") {
         yield await emit({
           type: "error",
-          content:
-            "模型长时间无响应（20s）已停止。可能当前渠道不支持 Agent 运行模式，请检查 Provider/Base URL/模型配置。",
+          content: `模型长时间无响应（${formatTimeoutSeconds(AGENT_FIRST_OUTPUT_TIMEOUT_MS)}s）已停止。可能当前渠道不兼容 Agent 运行协议，请检查 Base URL、模型和鉴权配置。`,
         });
         return;
       }
       if (reason === "idle_timeout") {
         yield await emit({
           type: "error",
-          content: "运行过程中长时间无响应（120s）已停止。请检查渠道配置或减少任务复杂度后重试。",
+          content: `运行过程中长时间无响应（${formatTimeoutSeconds(AGENT_IDLE_TIMEOUT_MS)}s）已停止。请检查渠道配置或减少任务复杂度后重试。`,
+        });
+        return;
+      }
+      if (reason === "total_timeout") {
+        yield await emit({
+          type: "error",
+          content: `运行总时长超时（${formatTimeoutSeconds(AGENT_TOTAL_TIMEOUT_MS)}s）已停止。请检查渠道配置或拆分任务后重试。`,
         });
         return;
       }

@@ -24,7 +24,29 @@ type SdkOptions = {
   canUseTool?: CanUseTool;
   allowDangerouslySkipPermissions?: boolean;
   maxTurns?: number;
+  heartbeatMs?: number;
 };
+
+const DEFAULT_SDK_HEARTBEAT_MS = 5_000;
+
+async function waitForSdkMessageOrHeartbeat<T>(
+  nextPromise: Promise<IteratorResult<T>>,
+  heartbeatMs: number,
+): Promise<IteratorResult<T> | null> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      nextPromise,
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), heartbeatMs);
+      }),
+    ]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
+}
 
 export async function* runClaudeAgentSdk(options: SdkOptions): AsyncGenerator<AgentEvent> {
   const sdk = await import("@anthropic-ai/claude-agent-sdk");
@@ -62,10 +84,33 @@ export async function* runClaudeAgentSdk(options: SdkOptions): AsyncGenerator<Ag
     },
   });
 
-  for await (const message of query as AsyncIterable<SdkMessage>) {
-    const converted = convertSdkEvent(message);
-    if (converted) {
-      yield converted;
+  const iterator = (query as AsyncIterable<SdkMessage>)[Symbol.asyncIterator]();
+  const heartbeatMs = options.heartbeatMs ?? DEFAULT_SDK_HEARTBEAT_MS;
+  let sawSdkMessage = false;
+
+  outer: while (true) {
+    const nextPromise = iterator.next();
+
+    while (true) {
+      const next = sawSdkMessage
+        ? await waitForSdkMessageOrHeartbeat(nextPromise, heartbeatMs)
+        : await nextPromise;
+
+      if (next === null) {
+        yield { type: "meta" };
+        continue;
+      }
+
+      if (next.done) {
+        break outer;
+      }
+
+      sawSdkMessage = true;
+      const converted = convertSdkEvent(next.value);
+      if (converted) {
+        yield converted;
+      }
+      break;
     }
   }
 
@@ -180,14 +225,18 @@ export function convertSdkEvent(message: SdkMessage): AgentEvent | null {
     };
   }
 
-  return null;
+  if (message.type === "user") {
+    return null;
+  }
+
+  return { type: "meta" };
 }
 
 function normalizeSdkErrorText(text: string) {
   const trimmed = text.trim();
   if (!trimmed) return "执行失败";
   if (/^network error$/i.test(trimmed)) {
-    return "网络错误：当前渠道可能不兼容 Claude Agent SDK。请检查 Provider、Base URL 和模型配置；如果你在使用 OpenAI 兼容中转，请把 Provider 改为 OpenAI/DeepSeek。";
+    return "网络错误：当前渠道可能不兼容 Claude Agent SDK。请检查 Base URL、模型和鉴权配置。";
   }
   return trimmed;
 }

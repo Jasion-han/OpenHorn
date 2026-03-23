@@ -38,12 +38,14 @@ import {
 import { generateAutoTitle } from "../services/autoTitleService";
 import { checkChannelAgentCompatibility } from "../services/channelAgentCheckService";
 import { getResolvedChannelForConversation } from "../services/channelService";
+import { createAgentStreamTimeoutGuard } from "../services/agentStreamTimeouts";
 import { requireUser, type UserEnv } from "../utils/requestUser";
 import { classifyBashCommandRisk } from "../utils/shellRisk";
 import { createSseStream } from "../utils/sse";
 import { isRecord } from "../utils/typeGuards";
 
 const agent = new Hono<UserEnv>();
+const RUNTIME_AGENT_CHECK_TIMEOUT_MS = 12_000;
 
 agent.use("*", requireUser);
 
@@ -474,21 +476,15 @@ async function resolveTaskExecutionContext(
     channelId: task.channelId,
     modelId: task.modelId,
   });
-  const provider = resolvedChannel?.channel?.provider;
-  if (!provider) {
+  if (!resolvedChannel) {
     return { error: "未配置可用的默认渠道/默认模型。请先在设置中完成配置。", status: 400 as const };
-  }
-  if (provider !== "anthropic") {
-    return {
-      error: `Agent 模式目前仅支持 Anthropic(Claude Agent SDK)。当前 Provider: ${provider}。请切换到 Anthropic 渠道后重试。`,
-      status: 400 as const,
-    };
   }
 
   const compatibility = await checkChannelAgentCompatibility(
     userId,
     resolvedChannel.channel.id,
     resolvedChannel.modelId,
+    { sdkTimeoutMs: RUNTIME_AGENT_CHECK_TIMEOUT_MS },
   );
   if (compatibility.success === false) {
     return { error: compatibility.error, status: 400 as const };
@@ -787,6 +783,7 @@ async function createTaskExecutionResponse(
             ],
             temperature: 0,
             maxTokens: 1400,
+            signal: ctx.signal,
           });
           finalText = response.content.trim();
         }
@@ -1328,62 +1325,30 @@ agent.post("/sessions/:id/run", async (c) => {
     return c.json({ error: "prompt or attachments are required" }, 400);
   }
 
-  // Agent runtime is Anthropic-only (Claude Agent SDK). Fail fast for other providers
-  // so users don't get stuck with a long "Running..." and no output.
+  // Fail fast before opening the SSE stream when the configured channel/model
+  // cannot actually run Claude Agent SDK, regardless of provider naming.
   const resolvedChannel = await getResolvedChannelForConversation(user.id, {
     channelId: session.channelId || null,
     modelId: session.modelId || null,
   });
-  const provider = resolvedChannel?.channel?.provider;
-  if (!provider) {
+  if (!resolvedChannel) {
     return c.text("未配置可用的默认渠道/默认模型。请先在设置中完成配置。", 400);
-  }
-  if (provider !== "anthropic") {
-    return c.text(
-      `Agent 模式目前仅支持 Anthropic(Claude Agent SDK)。当前 Provider: ${provider}。请切换到 Anthropic 渠道后重试。`,
-      400,
-    );
   }
 
   const compatibility = await checkChannelAgentCompatibility(
     user.id,
     resolvedChannel.channel.id,
     resolvedChannel.modelId,
+    { sdkTimeoutMs: RUNTIME_AGENT_CHECK_TIMEOUT_MS },
   );
   if (compatibility.success === false) {
     return c.text(compatibility.error, 400);
   }
 
   const stream = createSseStream(async (send, ctx) => {
-    let sawAny = false;
-    let idleTimer: ReturnType<typeof setTimeout> | null = null;
-    const clearIdle = () => {
-      if (idleTimer) clearTimeout(idleTimer);
-      idleTimer = null;
-    };
-
-    // If the provider doesn't produce any output quickly, fail fast instead of hanging forever.
-    const firstOutputTimer = setTimeout(() => {
-      try {
-        ctx.abortController.abort("first_output_timeout");
-      } catch {
-        // ignore
-      }
-    }, 20_000);
-
-    const armIdle = () => {
-      clearIdle();
-      idleTimer = setTimeout(() => {
-        try {
-          ctx.abortController.abort("idle_timeout");
-        } catch {
-          // ignore
-        }
-      }, 120_000);
-    };
+    const timeoutGuard = createAgentStreamTimeoutGuard(ctx.abortController);
 
     try {
-      armIdle();
       for await (const event of runAgent(
         user.id,
         sessionId,
@@ -1391,20 +1356,15 @@ agent.post("/sessions/:id/run", async (c) => {
         attachments,
         ctx.abortController,
       )) {
-        const isVisibleEvent = event.type !== "meta";
-        if (isVisibleEvent && !sawAny) {
-          sawAny = true;
-          clearTimeout(firstOutputTimer);
-        }
-        // Don't treat meta/keepalive as activity for the idle timer.
-        if (isVisibleEvent) {
-          armIdle();
+        if (event.type === "meta") {
+          timeoutGuard.markActivity?.();
+        } else {
+          timeoutGuard.markVisibleOutput();
         }
         send(event);
       }
     } finally {
-      clearTimeout(firstOutputTimer);
-      clearIdle();
+      timeoutGuard.cleanup();
     }
   });
 

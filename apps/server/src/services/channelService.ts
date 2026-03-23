@@ -113,7 +113,7 @@ function normalizeAnthropicApiBaseUrl(baseUrl: string): string {
   return url;
 }
 
-function normalizeAnthropicRuntimeBaseUrl(baseUrl: string): string {
+function normalizeAgentSdkRuntimeBaseUrl(baseUrl: string): string {
   let url = normalizeBaseUrl(baseUrl);
   // Relays sometimes mix Anthropic/OpenAI-style paths; be tolerant.
   // Keep stripping until stable for common suffix combos like:
@@ -315,7 +315,7 @@ function getRuntimeBaseUrl(provider: string, baseUrl: string | null) {
   const url = normalizeBaseUrl(baseUrl || fallback || "");
 
   if (provider === "anthropic") {
-    return normalizeAnthropicRuntimeBaseUrl(url);
+    return normalizeAgentSdkRuntimeBaseUrl(url);
   }
 
   if (provider === "google") {
@@ -814,7 +814,7 @@ export async function fetchChannelModels(
         return {
           success: false,
           error:
-            "该 Base URL 看起来是 OpenAI 兼容接口（支持 /v1/models）。请把 Provider 改为 OpenAI/DeepSeek（OpenAI 兼容），再点击同步模型。",
+            "该 Base URL 看起来是 OpenAI 兼容接口（支持 /v1/models）。请按实际协议把渠道配置为 OpenAI 兼容类型后，再点击同步模型。",
           models: [],
         };
       } catch {
@@ -858,7 +858,7 @@ export async function testChannel(userId: string, channelId: string): Promise<Ch
             return {
               success: false,
               error:
-                "你选择了 Anthropic，但该 Base URL/API Key 更像 OpenAI 兼容接口。建议把 Provider 改为 OpenAI/DeepSeek（OpenAI 兼容）。",
+                "你当前选择的是 Anthropic，但该 Base URL/API Key 更像 OpenAI 兼容接口。建议按实际协议改为 OpenAI 兼容类型。",
             };
           } catch {
             // Fall back to the Anthropic probe error below.
@@ -1023,7 +1023,7 @@ export async function getResolvedVisionChannelForUser(
 export async function getChannelRuntimeCredentialsById(
   userId: string,
   channelId: string,
-  options?: { runtime?: "channel" | "anthropic" },
+  options?: { runtime?: "channel" | "agent_sdk" },
 ): Promise<{
   channel: ChannelItem;
   apiKey: string;
@@ -1035,8 +1035,8 @@ export async function getChannelRuntimeCredentialsById(
     row.baseUrl || channel.baseUrl || getDefaultBaseUrl(channel.provider) || "";
 
   const runtimeBaseUrl =
-    options?.runtime === "anthropic"
-      ? normalizeAnthropicRuntimeBaseUrl(storedOrDefaultBaseUrl)
+    options?.runtime === "agent_sdk"
+      ? normalizeAgentSdkRuntimeBaseUrl(storedOrDefaultBaseUrl)
       : getRuntimeBaseUrl(channel.provider, storedOrDefaultBaseUrl);
 
   const channelWithRuntimeBaseUrl: ChannelItem = {

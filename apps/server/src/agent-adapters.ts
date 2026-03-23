@@ -13,6 +13,11 @@ export interface ChatOptions {
   stream?: boolean;
   temperature?: number;
   maxTokens?: number;
+  signal?: AbortSignal;
+  requestTimeoutMs?: number;
+  streamFirstTokenTimeoutMs?: number;
+  streamIdleTimeoutMs?: number;
+  streamTotalTimeoutMs?: number;
 }
 
 export interface ChatResponse {
@@ -45,8 +50,121 @@ function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+const DEFAULT_REQUEST_TIMEOUT_MS = 45_000;
+const DEFAULT_STREAM_FIRST_TOKEN_TIMEOUT_MS = 10_000;
+const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 25_000;
+const DEFAULT_STREAM_TOTAL_TIMEOUT_MS = 60_000;
+
 function shouldRetryStatus(status: number) {
   return status === 429 || status === 502 || status === 503 || status === 504;
+}
+
+function createTimeoutError(message: string) {
+  const error = new Error(message);
+  error.name = "TimeoutError";
+  return error;
+}
+
+function linkAbortSignal(signal?: AbortSignal) {
+  const controller = new AbortController();
+  if (!signal) {
+    return { controller, cleanup: () => undefined };
+  }
+  if (signal.aborted) {
+    controller.abort(signal.reason);
+    return { controller, cleanup: () => undefined };
+  }
+
+  const onAbort = () => controller.abort(signal.reason);
+  signal.addEventListener("abort", onAbort, { once: true });
+  return {
+    controller,
+    cleanup: () => signal.removeEventListener("abort", onAbort),
+  };
+}
+
+function createRequestTimeoutSignal(signal: AbortSignal | undefined, timeoutMs: number) {
+  const { controller, cleanup: cleanupLinkedSignal } = linkAbortSignal(signal);
+  const timer = setTimeout(() => {
+    if (!controller.signal.aborted) {
+      controller.abort(
+        createTimeoutError(`模型响应超时（${Math.round(timeoutMs / 1000)}s）已停止。`),
+      );
+    }
+  }, timeoutMs);
+
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      clearTimeout(timer);
+      cleanupLinkedSignal();
+    },
+  };
+}
+
+function createStreamTimeoutSignal(options?: {
+  signal?: AbortSignal;
+  firstTokenTimeoutMs?: number;
+  idleTimeoutMs?: number;
+  totalTimeoutMs?: number;
+}) {
+  const firstTokenTimeoutMs =
+    options?.firstTokenTimeoutMs ?? DEFAULT_STREAM_FIRST_TOKEN_TIMEOUT_MS;
+  const idleTimeoutMs = options?.idleTimeoutMs ?? DEFAULT_STREAM_IDLE_TIMEOUT_MS;
+  const totalTimeoutMs = options?.totalTimeoutMs ?? DEFAULT_STREAM_TOTAL_TIMEOUT_MS;
+  const { controller, cleanup: cleanupLinkedSignal } = linkAbortSignal(options?.signal);
+
+  let sawFirstChunk = false;
+  let idleTimer: ReturnType<typeof setTimeout> | null = null;
+  const firstTokenTimer = setTimeout(() => {
+    if (!controller.signal.aborted) {
+      controller.abort(
+        createTimeoutError(`模型首个响应超时（${Math.round(firstTokenTimeoutMs / 1000)}s）已停止。`),
+      );
+    }
+  }, firstTokenTimeoutMs);
+  const totalTimer = setTimeout(() => {
+    if (!controller.signal.aborted) {
+      controller.abort(
+        createTimeoutError(`模型响应总时长超时（${Math.round(totalTimeoutMs / 1000)}s）已停止。`),
+      );
+    }
+  }, totalTimeoutMs);
+
+  return {
+    signal: controller.signal,
+    markChunk: () => {
+      if (!sawFirstChunk) {
+        sawFirstChunk = true;
+        clearTimeout(firstTokenTimer);
+      }
+      if (idleTimer) {
+        clearTimeout(idleTimer);
+      }
+      idleTimer = setTimeout(() => {
+        if (!controller.signal.aborted) {
+          controller.abort(
+            createTimeoutError(`模型流式输出空闲超时（${Math.round(idleTimeoutMs / 1000)}s）已停止。`),
+          );
+        }
+      }, idleTimeoutMs);
+    },
+    cleanup: () => {
+      clearTimeout(firstTokenTimer);
+      clearTimeout(totalTimer);
+      if (idleTimer) {
+        clearTimeout(idleTimer);
+      }
+      cleanupLinkedSignal();
+    },
+  };
+}
+
+function rethrowAbortReason(signal: AbortSignal, error: unknown): never {
+  if (signal.aborted && signal.reason instanceof Error) {
+    throw signal.reason;
+  }
+  throw (error instanceof Error ? error : new Error(String(error)));
 }
 
 async function readErrorDetail(response: Response): Promise<string> {
@@ -138,19 +256,34 @@ export class OpenAIAdapter implements ProviderAdapter {
       max_tokens: options.maxTokens,
     });
 
+    const timeout = createRequestTimeoutSignal(
+      options.signal,
+      options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
+    );
     let response: Response | null = null;
-    for (let attempt = 0; attempt < 2; attempt++) {
-      response = await fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${this.apiKey}`,
-        },
-        body,
-      });
-      if (response.ok) break;
-      if (!shouldRetryStatus(response.status) || attempt === 1) break;
-      await sleep(500 * (attempt + 1));
+    try {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${this.apiKey}`,
+          },
+          body,
+          signal: timeout.signal,
+        });
+        if (response.ok) break;
+        if (!shouldRetryStatus(response.status) || attempt === 1) break;
+        await sleep(500 * (attempt + 1));
+      }
+    } catch (error) {
+      timeout.cleanup();
+      rethrowAbortReason(timeout.signal, error);
+    }
+    timeout.cleanup();
+
+    if (timeout.signal.aborted && timeout.signal.reason instanceof Error) {
+      throw timeout.signal.reason;
     }
 
     if (!response || !response.ok) {
@@ -212,23 +345,41 @@ export class OpenAIAdapter implements ProviderAdapter {
       stream: true,
     });
 
+    const timeout = createStreamTimeoutSignal({
+      signal: options.signal,
+      firstTokenTimeoutMs: options.streamFirstTokenTimeoutMs,
+      idleTimeoutMs: options.streamIdleTimeoutMs,
+      totalTimeoutMs: options.streamTotalTimeoutMs,
+    });
     let response: Response | null = null;
-    for (let attempt = 0; attempt < 2; attempt++) {
-      response = await fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "text/event-stream",
-          Authorization: `Bearer ${this.apiKey}`,
-        },
-        body,
-      });
-      if (response.ok) break;
-      if (!shouldRetryStatus(response.status) || attempt === 1) break;
-      await sleep(500 * (attempt + 1));
+    try {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "text/event-stream",
+            Authorization: `Bearer ${this.apiKey}`,
+          },
+          body,
+          signal: timeout.signal,
+        });
+        if (response.ok) break;
+        if (!shouldRetryStatus(response.status) || attempt === 1) break;
+        await sleep(500 * (attempt + 1));
+      }
+    } catch (error) {
+      timeout.cleanup();
+      rethrowAbortReason(timeout.signal, error);
+    }
+
+    if (timeout.signal.aborted && timeout.signal.reason instanceof Error) {
+      timeout.cleanup();
+      throw timeout.signal.reason;
     }
 
     if (!response || !response.ok) {
+      timeout.cleanup();
       const detail = response ? await readErrorDetail(response) : "Request failed";
       const status = response?.status ? ` (${response.status})` : "";
       throw new Error(`OpenAI API error${status}: ${detail}`);
@@ -236,6 +387,7 @@ export class OpenAIAdapter implements ProviderAdapter {
 
     const reader = response.body?.getReader();
     if (!reader) {
+      timeout.cleanup();
       throw new Error("No response body");
     }
 
@@ -244,59 +396,66 @@ export class OpenAIAdapter implements ProviderAdapter {
 
     // Some proxies incorrectly label streaming responses as application/json.
     // Sniff the first chunk: if it looks like SSE ("data:" lines), parse as stream.
-    const firstRead = await reader.read();
-    if (firstRead.done) return;
+    try {
+      const firstRead = await reader.read();
+      if (firstRead.done) return;
 
-    const firstChunkText = decoder.decode(firstRead.value, { stream: true });
-    buffer += firstChunkText;
+      timeout.markChunk();
+      const firstChunkText = decoder.decode(firstRead.value, { stream: true });
+      buffer += firstChunkText;
 
-    const looksLikeSse =
-      buffer.startsWith("data:") || buffer.includes("\ndata:") || buffer.includes("\r\ndata:");
+      const looksLikeSse =
+        buffer.startsWith("data:") || buffer.includes("\ndata:") || buffer.includes("\r\ndata:");
 
-    if (!looksLikeSse) {
-      // Fallback: treat as a non-streamed JSON/text response and emit once.
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-      }
-      const raw = buffer.trim();
-      if (!raw) return;
-      try {
-        const data = JSON.parse(raw);
-        const content =
-          data?.choices?.[0]?.message?.content ?? data?.choices?.[0]?.delta?.content ?? "";
-        if (typeof content === "string" && content.length > 0) {
-          yield content;
+      if (!looksLikeSse) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          timeout.markChunk();
+          buffer += decoder.decode(value, { stream: true });
         }
-      } catch {
-        // As a last resort, yield raw text.
-        yield raw;
+        const raw = buffer.trim();
+        if (!raw) return;
+        try {
+          const data = JSON.parse(raw);
+          const content =
+            data?.choices?.[0]?.message?.content ?? data?.choices?.[0]?.delta?.content ?? "";
+          if (typeof content === "string" && content.length > 0) {
+            yield content;
+          }
+        } catch {
+          yield raw;
+        }
+        return;
       }
-      return;
-    }
 
-    while (true) {
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
+      while (true) {
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
 
-      for (const line of lines) {
-        if (line.startsWith("data: ")) {
-          const data = line.slice(6);
-          if (data === "[DONE]") return;
-          try {
-            const parsed = JSON.parse(data);
-            const content = parsed.choices[0]?.delta?.content;
-            if (content) yield content;
-          } catch {
-            // Skip invalid JSON
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            const data = line.slice(6);
+            if (data === "[DONE]") return;
+            try {
+              const parsed = JSON.parse(data);
+              const content = parsed.choices[0]?.delta?.content;
+              if (content) yield content;
+            } catch {
+              // Skip invalid JSON
+            }
           }
         }
-      }
 
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
+        const { done, value } = await reader.read();
+        if (done) break;
+        timeout.markChunk();
+        buffer += decoder.decode(value, { stream: true });
+      }
+    } catch (error) {
+      rethrowAbortReason(timeout.signal, error);
+    } finally {
+      timeout.cleanup();
     }
   }
 }
@@ -336,20 +495,35 @@ export class AnthropicAdapter implements ProviderAdapter {
       max_tokens: options.maxTokens || 1024,
     });
 
+    const timeout = createRequestTimeoutSignal(
+      options.signal,
+      options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
+    );
     let response: Response | null = null;
-    for (let attempt = 0; attempt < 2; attempt++) {
-      response = await fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": this.apiKey,
-          "anthropic-version": "2023-06-01",
-        },
-        body,
-      });
-      if (response.ok) break;
-      if (!shouldRetryStatus(response.status) || attempt === 1) break;
-      await sleep(500 * (attempt + 1));
+    try {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": this.apiKey,
+            "anthropic-version": "2023-06-01",
+          },
+          body,
+          signal: timeout.signal,
+        });
+        if (response.ok) break;
+        if (!shouldRetryStatus(response.status) || attempt === 1) break;
+        await sleep(500 * (attempt + 1));
+      }
+    } catch (error) {
+      timeout.cleanup();
+      rethrowAbortReason(timeout.signal, error);
+    }
+    timeout.cleanup();
+
+    if (timeout.signal.aborted && timeout.signal.reason instanceof Error) {
+      throw timeout.signal.reason;
     }
 
     if (!response || !response.ok) {
@@ -415,23 +589,41 @@ export class AnthropicAdapter implements ProviderAdapter {
       stream: true,
     });
 
+    const timeout = createStreamTimeoutSignal({
+      signal: options.signal,
+      firstTokenTimeoutMs: options.streamFirstTokenTimeoutMs,
+      idleTimeoutMs: options.streamIdleTimeoutMs,
+      totalTimeoutMs: options.streamTotalTimeoutMs,
+    });
     let response: Response | null = null;
-    for (let attempt = 0; attempt < 2; attempt++) {
-      response = await fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": this.apiKey,
-          "anthropic-version": "2023-06-01",
-        },
-        body,
-      });
-      if (response.ok) break;
-      if (!shouldRetryStatus(response.status) || attempt === 1) break;
-      await sleep(500 * (attempt + 1));
+    try {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": this.apiKey,
+            "anthropic-version": "2023-06-01",
+          },
+          body,
+          signal: timeout.signal,
+        });
+        if (response.ok) break;
+        if (!shouldRetryStatus(response.status) || attempt === 1) break;
+        await sleep(500 * (attempt + 1));
+      }
+    } catch (error) {
+      timeout.cleanup();
+      rethrowAbortReason(timeout.signal, error);
+    }
+
+    if (timeout.signal.aborted && timeout.signal.reason instanceof Error) {
+      timeout.cleanup();
+      throw timeout.signal.reason;
     }
 
     if (!response || !response.ok) {
+      timeout.cleanup();
       const detail = response ? await readErrorDetail(response) : "Request failed";
       const status = response?.status ? ` (${response.status})` : "";
       throw new Error(`Anthropic API error${status}: ${detail}`);
@@ -439,37 +631,45 @@ export class AnthropicAdapter implements ProviderAdapter {
 
     const reader = response.body?.getReader();
     if (!reader) {
+      timeout.cleanup();
       throw new Error("No response body");
     }
 
     const decoder = new TextDecoder();
     let buffer = "";
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
 
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
+        timeout.markChunk();
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
 
-      for (const line of lines) {
-        if (line.startsWith("data: ")) {
-          const data = line.slice(6);
-          if (data === "[DONE]") return;
-          try {
-            const parsed = JSON.parse(data);
-            if (parsed.type === "content_block_delta") {
-              const text = parsed?.delta?.text;
-              if (typeof text === "string" && text.length > 0) {
-                yield text;
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            const data = line.slice(6);
+            if (data === "[DONE]") return;
+            try {
+              const parsed = JSON.parse(data);
+              if (parsed.type === "content_block_delta") {
+                const text = parsed?.delta?.text;
+                if (typeof text === "string" && text.length > 0) {
+                  yield text;
+                }
               }
+            } catch {
+              // Skip invalid JSON
             }
-          } catch {
-            // Skip invalid JSON
           }
         }
       }
+    } catch (error) {
+      rethrowAbortReason(timeout.signal, error);
+    } finally {
+      timeout.cleanup();
     }
   }
 }

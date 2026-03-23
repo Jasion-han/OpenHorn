@@ -2,7 +2,6 @@ import { expect, mock, test } from "bun:test";
 
 test("POST /sessions/:id/run returns compatibility error before starting SSE run", async () => {
   let runAgentCalled = false;
-  const originalFetch = globalThis.fetch;
 
   mock.module("../services/authService", () => ({
     verifyToken: async () => ({ userId: "user-1" }),
@@ -62,22 +61,26 @@ test("POST /sessions/:id/run returns compatibility error before starting SSE run
 
   mock.module("../services/channelService", () => ({
     getResolvedChannelForConversation: async () => ({
-      channel: { id: "channel-1", provider: "anthropic" },
+      channel: { id: "channel-1", provider: "openai" },
       modelId: "gpt-5.4",
     }),
     getChannelRuntimeCredentialsById: async () => ({
-      channel: { id: "channel-1", provider: "anthropic", baseUrl: "https://relay.example.com" },
+      channel: { id: "channel-1", provider: "openai", baseUrl: "https://relay.example.com" },
       apiKey: "test-key",
+    }),
+  }));
+
+  mock.module("../services/channelAgentCheckService", () => ({
+    checkChannelAgentCompatibility: async () => ({
+      success: false as const,
+      error:
+        "该渠道支持普通聊天接口，但不兼容 Claude Agent SDK，无法用于 Agent 模式。它仍可用于普通聊天。",
     }),
   }));
 
   mock.module("../services/autoTitleService", () => ({
     generateAutoTitle: async () => "Title",
   }));
-
-  globalThis.fetch = mock(
-    async () => new Response("missing", { status: 404 }),
-  ) as unknown as typeof fetch;
 
   try {
     const { default: agent } = await import(`./agent?case=${crypto.randomUUID()}`);
@@ -92,10 +95,11 @@ test("POST /sessions/:id/run returns compatibility error before starting SSE run
     });
 
     expect(response.status).toBe(400);
-    expect(await response.text()).toBe("该渠道不支持 Anthropic /v1/messages 接口（返回 404）。");
+    expect(await response.text()).toBe(
+      "该渠道支持普通聊天接口，但不兼容 Claude Agent SDK，无法用于 Agent 模式。它仍可用于普通聊天。",
+    );
     expect(runAgentCalled).toBe(false);
   } finally {
-    globalThis.fetch = originalFetch;
     mock.restore();
   }
 });
