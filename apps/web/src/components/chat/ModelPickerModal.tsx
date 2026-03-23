@@ -5,7 +5,13 @@ import { useEffect, useMemo, useState } from "react";
 import { ProviderLogo } from "@/components/providers/ProviderLogo";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { type ApiChannel, api } from "@/lib/api";
@@ -188,7 +194,7 @@ export function ModelPickerModal(props: {
         if (titleMatch?.[1]) {
           const title = titleMatch[1].trim();
           // Often: "domain | 525: SSL handshake failed"
-          const cfTitle = title.match(/\b(\d{3})\s*:\s*([^\|]+)\s*$/);
+          const cfTitle = title.match(/\b(\d{3})\s*:\s*([^|]+)\s*$/);
           if (cfTitle?.[1] && cfTitle?.[2]) return `${cfTitle[1]}: ${cfTitle[2].trim()}`;
           return title;
         }
@@ -226,15 +232,11 @@ export function ModelPickerModal(props: {
 
       const failedSummary =
         failCount > 0
-          ? formatSummary(
-              failed.map((f) => ({ name: f.name, msg: f.error || "同步失败" })),
-            )
+          ? formatSummary(failed.map((f) => ({ name: f.name, msg: f.error || "同步失败" })))
           : "";
       const warnedSummary =
         warnCount > 0
-          ? formatSummary(
-              warned.map((w) => ({ name: w.name, msg: w.warning || "需要处理" })),
-            )
+          ? formatSummary(warned.map((w) => ({ name: w.name, msg: w.warning || "需要处理" })))
           : "";
 
       if (failCount === 0 && warnCount === 0) {
@@ -314,6 +316,9 @@ export function ModelPickerModal(props: {
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>选择模型</DialogTitle>
+          <DialogDescription className="sr-only">
+            为当前会话选择可用渠道和模型，也可以在这里同步模型列表。
+          </DialogDescription>
         </DialogHeader>
         <div className="flex flex-col gap-3">
           {conversationFixReason && (

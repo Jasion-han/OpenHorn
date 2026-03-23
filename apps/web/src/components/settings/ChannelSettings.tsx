@@ -1,6 +1,16 @@
 "use client";
 
-import { Bot, Check, ChevronDown, ChevronUp, PenSquare, Pin, Plus, RefreshCw, Trash2 } from "lucide-react";
+import {
+  Bot,
+  Check,
+  ChevronDown,
+  ChevronUp,
+  PenSquare,
+  Pin,
+  Plus,
+  RefreshCw,
+  Trash2,
+} from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { SettingsSection } from "ui";
@@ -13,7 +23,14 @@ import { useChatStore } from "../../stores/chatStore";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Checkbox } from "../ui/checkbox";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "../ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "../ui/dialog";
 import { Input } from "../ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
@@ -44,10 +61,7 @@ export function ChannelSettings() {
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const didApplyFocusRef = useRef(false);
   const [channelNotice, setChannelNotice] = useState<
-    Record<
-      string,
-      { kind: "error" | "warn"; title?: string; message: string; action?: "switch_openai" }
-    >
+    Record<string, { kind: "error" | "warn"; title?: string; message: string }>
   >({});
 
   useEffect(() => {
@@ -116,9 +130,7 @@ export function ChannelSettings() {
     if (!result.success) {
       const msg = result.error || "无法获取模型列表";
       setChannelNotice((prev) => {
-        const action =
-          msg.includes("Provider") || msg.includes("OpenAI 兼容") ? "switch_openai" : undefined;
-        return { ...prev, [channelId]: { kind: "error", title: "同步失败", message: msg, action } };
+        return { ...prev, [channelId]: { kind: "error", title: "同步失败", message: msg } };
       });
       return { ok: false as const };
     }
@@ -480,28 +492,6 @@ export function ChannelSettings() {
                         </p>
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0">
-                        {notice.action === "switch_openai" && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => {
-                              void runChannelAction(`fix-provider:${channel.id}`, async () => {
-                                await api.channels.update(channel.id, { provider: "openai" });
-                                await loadChannels();
-                                setChannelNotice((prev) => {
-                                  const { [channel.id]: _, ...rest } = prev;
-                                  return rest;
-                                });
-                                notifySuccess(
-                                  "已更新",
-                                  "已切换为 OpenAI 兼容 Provider，请重新同步模型。",
-                                );
-                              });
-                            }}
-                          >
-                            切换为 OpenAI 兼容
-                          </Button>
-                        )}
                         <Button
                           size="sm"
                           variant="ghost"
@@ -593,6 +583,9 @@ export function ChannelSettings() {
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Agent 兼容性检查</DialogTitle>
+              <DialogDescription className="sr-only">
+                为所选渠道和模型执行一次 Agent 兼容性检查，确认当前配置能否用于 Agent 模式。
+              </DialogDescription>
             </DialogHeader>
             <div className="flex flex-col gap-4">
               {(() => {

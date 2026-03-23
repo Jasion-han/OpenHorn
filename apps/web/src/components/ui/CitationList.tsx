@@ -2,10 +2,10 @@
 
 import { ChevronDown } from "lucide-react";
 import { useState } from "react";
-import { normalizeExternalUrl } from "@/lib/normalizeExternalUrl";
 import type { ApiCitation } from "@/lib/api";
-import { CitationBadge } from "./CitationReference";
 import { extractUsedCitationIndices } from "@/lib/citations";
+import { normalizeExternalUrl } from "@/lib/normalizeExternalUrl";
+import { CitationBadge } from "./CitationReference";
 
 export function CitationList({
   citations,

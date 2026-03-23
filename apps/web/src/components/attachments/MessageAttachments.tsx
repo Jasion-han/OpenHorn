@@ -2,7 +2,7 @@
 
 import { ChevronLeft, ChevronRight, Paperclip, X } from "lucide-react";
 import * as React from "react";
-import { Dialog, DialogClose, DialogContent } from "@/components/ui/dialog";
+import { Dialog, DialogClose, DialogContent, DialogDescription } from "@/components/ui/dialog";
 import { getAttachmentUrl } from "@/lib/attachment-url";
 import { cn } from "@/lib/utils";
 
@@ -127,6 +127,9 @@ export function MessageAttachments({
 
       <Dialog open={lightboxOpen} onOpenChange={setLightboxOpen}>
         <DialogContent className="max-w-[min(980px,94vw)] p-0 overflow-hidden">
+          <DialogDescription className="sr-only">
+            预览当前消息中的图片附件，可切换查看上一张或下一张图片。
+          </DialogDescription>
           <div className="relative bg-background">
             <DialogClose className="absolute right-3 top-3 z-10 rounded-full bg-background/80 p-1.5 text-foreground/70 shadow-sm backdrop-blur hover:text-foreground">
               <X className="size-5" />

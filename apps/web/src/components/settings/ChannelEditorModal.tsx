@@ -9,7 +9,7 @@ import { notifyError, notifySuccess } from "../../lib/notify";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Checkbox } from "../ui/checkbox";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "../ui/dialog";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { ScrollArea } from "../ui/scroll-area";
@@ -310,6 +310,9 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
       <DialogContent className="max-w-4xl h-[min(72vh,760px)] flex flex-col p-0">
         <DialogHeader className="px-4 pt-4 pb-0">
           <DialogTitle>渠道管理</DialogTitle>
+          <DialogDescription className="sr-only">
+            管理渠道列表，并编辑 API Key、Base URL、模型列表和默认模型设置。
+          </DialogDescription>
         </DialogHeader>
         <div className="flex flex-1 min-h-0 gap-3 p-4">
           {/* Left panel: channel list */}

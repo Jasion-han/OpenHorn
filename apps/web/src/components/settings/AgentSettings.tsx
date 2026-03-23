@@ -10,7 +10,14 @@ import { notifyError, notifySuccess } from "../../lib/notify";
 import { BACKEND_UP_EVENT } from "../../stores/backendStatusStore";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "../ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "../ui/dialog";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Switch } from "../ui/switch";
@@ -337,6 +344,9 @@ export function AgentSettings() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>添加 MCP Server</DialogTitle>
+            <DialogDescription className="sr-only">
+              填写名称、类型和 JSON 配置，创建一个新的 MCP Server。
+            </DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-3">
             <div className="flex flex-col gap-1.5">
