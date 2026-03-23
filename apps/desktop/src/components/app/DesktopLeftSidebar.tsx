@@ -2,11 +2,10 @@ import {
   ChevronDown,
   ChevronRight,
   LogOut,
-  MessageSquarePlus,
   MoreHorizontal,
   Pencil,
+  Plus,
   Pin,
-  Search,
   Settings,
   Trash2,
 } from "lucide-react";
@@ -17,6 +16,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
   Input,
@@ -245,36 +245,56 @@ export function DesktopLeftSidebar() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="border-b border-border/50 px-3 py-3">
-        <div className="flex items-start justify-between gap-3">
+      <div className="border-b border-border/50 px-3 py-2">
+        <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
             <div className="truncate text-sm font-semibold leading-5">OpenHorn</div>
-            <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground">
-              <span>桌面端</span>
+            <div className="mt-0.5 flex items-center gap-2 text-[11px] text-muted-foreground">
+              <span>本地</span>
               {statusBadge}
             </div>
           </div>
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon-sm" className="flex w-auto items-center gap-1 px-2">
+                <div className="flex h-7 w-7 items-center justify-center rounded-full bg-muted text-xs font-semibold">
+                  {user?.username?.slice(0, 1)?.toUpperCase() || "U"}
+                </div>
+                <ChevronDown size={14} />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-44">
+              <DropdownMenuLabel>
+                <div className="truncate text-sm font-medium">{user?.username || "用户"}</div>
+                <div className="truncate text-xs font-normal text-muted-foreground">
+                  {user?.email || ""}
+                </div>
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                className="text-destructive focus:text-destructive"
+                onClick={() => void handleLogout()}
+              >
+                <LogOut size={16} />
+                退出登录
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 
       <div className="flex flex-col gap-2 p-2">
         <Button onClick={() => void handleCreateConversation()} disabled={creating}>
-          <MessageSquarePlus size={16} />
+          <Plus size={16} />
           新会话
         </Button>
 
-        <div className="relative">
-          <Search
-            size={14}
-            className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-muted-foreground"
-          />
-          <Input
-            placeholder="搜索会话..."
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            className="pl-9"
-          />
-        </div>
+        <Input
+          placeholder="搜索会话..."
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+        />
       </div>
 
       <div className="min-h-0 flex-1 overflow-hidden px-2 pb-2">
@@ -389,33 +409,22 @@ export function DesktopLeftSidebar() {
         </div>
       )}
 
-      <div className="border-t border-border/50 px-3 pt-3 pb-4">
-        <div className="rounded-2xl border border-border/60 bg-background/70 px-3 py-3">
-          <div className="min-w-0">
-            <div className="truncate text-sm font-medium">{user?.username || "未登录"}</div>
-            <div className="truncate text-xs text-muted-foreground">{user?.email || ""}</div>
-          </div>
-
-          <div className="mt-3 flex items-center gap-2">
-            <Button
-              type="button"
-              variant={activeView === "settings" ? "secondary" : "outline"}
-              className="flex-1"
-              onClick={() => setActiveView("settings")}
-            >
-              <Settings size={16} />
-              设置
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              className="flex-1"
-              onClick={() => void handleLogout()}
-            >
-              <LogOut size={16} />
-              退出
-            </Button>
-          </div>
+      <div className="border-t border-border/50 px-2 pt-3 pb-5">
+        <div className="flex h-[56px] items-center justify-center">
+          <button
+            type="button"
+            aria-label="Settings"
+            title="Settings"
+            onClick={() => setActiveView("settings")}
+            className={cn(
+              "inline-flex h-10 w-10 items-center justify-center rounded-xl transition-colors",
+              activeView === "settings"
+                ? "bg-foreground/[0.08] text-foreground"
+                : "text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground",
+            )}
+          >
+            <Settings size={18} />
+          </button>
         </div>
       </div>
     </div>

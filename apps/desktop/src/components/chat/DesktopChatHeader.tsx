@@ -1,11 +1,13 @@
-import { Bot, MessageSquare, WifiOff } from "lucide-react";
-import { Badge } from "ui";
+import { Bot, MessageSquare, PanelLeft, PanelLeftClose, WifiOff } from "lucide-react";
+import { Badge, Button } from "ui";
 import type { Conversation } from "../../types/chat";
 import { useDesktopShellStore } from "../../stores/desktopShellStore";
 import { useChatStore } from "../../stores/chatStore";
 
 export function DesktopChatHeader({ conversation }: { conversation: Conversation | null }) {
   const composerMode = useChatStore((state) => state.composerMode);
+  const sidebarCollapsed = useDesktopShellStore((state) => state.sidebarCollapsed);
+  const setSidebarCollapsed = useDesktopShellStore((state) => state.setSidebarCollapsed);
   const sidecarStatus = useDesktopShellStore((state) => state.sidecarStatus);
   const sidecarError = useDesktopShellStore((state) => state.sidecarError);
   const sidecarLabel =
@@ -19,20 +21,28 @@ export function DesktopChatHeader({ conversation }: { conversation: Conversation
 
   return (
     <div className="flex items-center justify-between gap-3 border-b border-border/50 px-4 py-3">
-      <div className="min-w-0">
-        <div className="truncate text-sm font-semibold">
-          {conversation?.title || "选择一个会话开始"}
-        </div>
-        <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground">
-          <span>{conversation ? "当前会话" : "准备开始"}</span>
-          {sidecarStatus === "error" ? (
-            <span className="inline-flex items-center gap-1 text-destructive">
-              <WifiOff size={12} />
-              {sidecarError || "本地连接不可用"}
-            </span>
-          ) : (
-            <Badge variant="outline">{sidecarLabel}</Badge>
-          )}
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          className="shrink-0"
+          aria-label={sidebarCollapsed ? "打开侧栏" : "收起侧栏"}
+          onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+        >
+          {sidebarCollapsed ? <PanelLeft size={18} /> : <PanelLeftClose size={18} />}
+        </Button>
+        <div className="min-w-0">
+          <div className="truncate text-sm font-semibold">{conversation?.title || "会话"}</div>
+          <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground">
+            {sidecarStatus === "error" ? (
+              <span className="inline-flex items-center gap-1 text-destructive">
+                <WifiOff size={12} />
+                {sidecarError || "本地连接不可用"}
+              </span>
+            ) : (
+              <Badge variant="outline">{sidecarLabel}</Badge>
+            )}
+          </div>
         </div>
       </div>
 
