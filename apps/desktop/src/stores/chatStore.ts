@@ -107,6 +107,7 @@ export interface ChatState {
     messageId: string,
     data?: { userMessageId?: string; userContent?: string },
   ) => Promise<Response>;
+  editUserMessage: (messageId: string, content: string) => Promise<Response>;
   abortStreaming: () => void;
   applyStreamEvent: (messageId: string, event: ChatStreamEvent) => void;
   completeStreamingMessage: (messageId: string) => void;
@@ -337,6 +338,10 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
 
     async regenerateMessage(messageId, data) {
       return adapter.regenerateMessage(messageId, data);
+    },
+
+    async editUserMessage(messageId, content) {
+      return adapter.editUserMessage(messageId, content);
     },
 
     abortStreaming() {

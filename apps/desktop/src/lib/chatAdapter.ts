@@ -28,6 +28,7 @@ export interface ChatAdapter {
     messageId: string,
     data?: { userMessageId?: string; userContent?: string },
   ) => Promise<Response>;
+  editUserMessage: (messageId: string, content: string) => Promise<Response>;
   abortActiveStream: () => void;
   getSettings: (keys: string[]) => Promise<Record<string, string>>;
 }
@@ -240,6 +241,27 @@ export function createChatAdapter(api: ServerApi = createServerApi()): ChatAdapt
           activeController = null;
         }
         throw new Error(await readErrorMessage(response, "Failed to regenerate message"));
+      }
+
+      return response;
+    },
+
+    async editUserMessage(messageId, content) {
+      if (activeController) {
+        activeController.abort();
+      }
+
+      const controller = new AbortController();
+      activeController = controller;
+
+      const response = await api.messages.edit(messageId, content, {
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        if (activeController === controller) {
+          activeController = null;
+        }
+        throw new Error(await readErrorMessage(response, "Failed to edit message"));
       }
 
       return response;

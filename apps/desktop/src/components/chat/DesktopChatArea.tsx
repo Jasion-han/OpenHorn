@@ -1,6 +1,6 @@
-import { Bot, Check, Copy, MessageSquare, RefreshCw, Trash2 } from "lucide-react";
+import { Bot, Check, Copy, MessageSquare, Pencil, RefreshCw, Trash2 } from "lucide-react";
 import { type ReactNode, useState } from "react";
-import { Badge, ScrollArea, cn } from "ui";
+import { Badge, Button, ScrollArea, Textarea, cn } from "ui";
 import { normalizeExternalUrl } from "../../lib/normalizeExternalUrl";
 import { readErrorMessage } from "../../lib/serverApi";
 import { readSseStream } from "../../lib/sse";
@@ -219,16 +219,20 @@ function IconActionButton({
 
 function MessageActionBar({
   message,
+  canEdit,
   canRetry,
   canDelete,
   isStreaming,
+  onEdit,
   onRetry,
   onDelete,
 }: {
   message: Message;
+  canEdit: boolean;
   canRetry: boolean;
   canDelete: boolean;
   isStreaming: boolean;
+  onEdit: () => void;
   onRetry: () => void;
   onDelete: () => void;
 }) {
@@ -250,6 +254,11 @@ function MessageActionBar({
           : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100",
       )}
     >
+      {message.role === "user" && (
+        <IconActionButton onClick={onEdit} title="编辑" disabled={!canEdit}>
+          <Pencil size={13} />
+        </IconActionButton>
+      )}
       <IconActionButton onClick={() => void handleCopy()} title={copied ? "已复制" : "复制"}>
         {copied ? <Check size={13} /> : <Copy size={13} />}
       </IconActionButton>
@@ -278,6 +287,30 @@ export function DesktopChatArea() {
   const regenerateMessage = useChatStore((state) => state.regenerateMessage);
   const setStreaming = useChatStore((state) => state.setStreaming);
   const setError = useChatStore((state) => state.setError);
+  const editUserMessage = useChatStore((state) => state.editUserMessage);
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editingContent, setEditingContent] = useState("");
+
+  const getEditableAssistantForUser = (messageId: string) => {
+    const messageIndex = messages.findIndex((message) => message.id === messageId);
+    if (messageIndex < 0) return null;
+
+    const userMessage = messages[messageIndex];
+    const assistantMessage = messages[messageIndex + 1];
+    if (!userMessage || userMessage.role !== "user" || userMessage.id.startsWith("draft-")) {
+      return null;
+    }
+    if (
+      !assistantMessage ||
+      assistantMessage.role !== "assistant" ||
+      assistantMessage.mode !== userMessage.mode ||
+      assistantMessage.id.startsWith("draft-")
+    ) {
+      return null;
+    }
+
+    return { userMessage, assistantMessage };
+  };
 
   const handleSubmit = async (content: string) => {
     if (!currentConversation) return;
@@ -376,6 +409,70 @@ export function DesktopChatArea() {
     }
   };
 
+  const handleStartEdit = (message: Message) => {
+    const editable = getEditableAssistantForUser(message.id);
+    if (!editable) return;
+    setEditingMessageId(message.id);
+    setEditingContent(message.content);
+  };
+
+  const handleCancelEdit = () => {
+    setEditingMessageId(null);
+    setEditingContent("");
+  };
+
+  const handleSaveEdit = async (messageId: string) => {
+    const nextContent = editingContent.trim();
+    if (!currentConversation || !nextContent) return;
+
+    const editable = getEditableAssistantForUser(messageId);
+    if (!editable) {
+      handleCancelEdit();
+      return;
+    }
+
+    const { userMessage, assistantMessage } = editable;
+    handleCancelEdit();
+    setStreaming(true);
+    setError(null);
+    useChatStore.getState().updateMessage(userMessage.id, { content: nextContent });
+    useChatStore.getState().updateMessage(assistantMessage.id, {
+      content: "",
+      citations: undefined,
+      liveStatus: undefined,
+      liveRoute: undefined,
+      liveLabel: undefined,
+      agentRun:
+        assistantMessage.mode === "agent"
+          ? {
+              status: "partial",
+              summary: "Agent 正在执行",
+              steps: [],
+            }
+          : undefined,
+    });
+
+    try {
+      const response = await editUserMessage(userMessage.id, nextContent);
+      await readSseStream(response, (event) => {
+        applyStreamEvent(assistantMessage.id, event);
+      });
+
+      setStreaming(false);
+      await Promise.all([loadMessages(currentConversation.id), loadConversations()]);
+    } catch (error) {
+      setStreaming(false);
+      if (isAbortError(error)) {
+        return;
+      }
+      setError(error instanceof Error ? error.message : "Edit message failed");
+      useChatStore.getState().failStreamingMessage(
+        assistantMessage.id,
+        error instanceof Error ? error.message : "Edit message failed",
+      );
+    }
+  };
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       <DesktopChatHeader conversation={currentConversation} />
@@ -427,7 +524,44 @@ export function DesktopChatArea() {
                       />
                     )}
                     <div className="text-sm leading-6">
-                      {message.content ? (
+                      {editingMessageId === message.id ? (
+                        <div className="space-y-3">
+                          <Textarea
+                            value={editingContent}
+                            onChange={(event) => setEditingContent(event.target.value)}
+                            onKeyDown={(event) => {
+                              if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+                                event.preventDefault();
+                                void handleSaveEdit(message.id);
+                              }
+                              if (event.key === "Escape") {
+                                event.preventDefault();
+                                handleCancelEdit();
+                              }
+                            }}
+                            className="min-h-[120px] resize-none bg-background text-foreground"
+                            autoFocus
+                          />
+                          <div className="flex justify-end gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={handleCancelEdit}
+                            >
+                              取消
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              onClick={() => void handleSaveEdit(message.id)}
+                              disabled={!editingContent.trim() || isStreaming}
+                            >
+                              保存并重新生成
+                            </Button>
+                          </div>
+                        </div>
+                      ) : message.content ? (
                         message.role === "assistant" ? (
                           <DesktopMarkdownMessage content={message.content} />
                         ) : (
@@ -446,13 +580,15 @@ export function DesktopChatArea() {
                   </div>
                   <MessageActionBar
                     message={message}
+                    canEdit={message.role === "user" && Boolean(getEditableAssistantForUser(message.id))}
                     canRetry={
                       message.role === "assistant" &&
                       !message.id.startsWith("draft-") &&
                       Boolean(currentConversation)
                     }
                     canDelete={!message.id.startsWith("draft-")}
-                    isStreaming={isStreaming}
+                    isStreaming={isStreaming || editingMessageId === message.id}
+                    onEdit={() => handleStartEdit(message)}
                     onRetry={() => void handleRetryMessage(message.id)}
                     onDelete={() => void handleDeleteMessage(message.id)}
                   />

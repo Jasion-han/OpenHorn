@@ -8,6 +8,8 @@ function createStubAdapter() {
   let deletedMessageId: string | null = null;
   let regeneratedMessageId: string | null = null;
   let regeneratedPayload: unknown;
+  let editedMessageId: string | null = null;
+  let editedContent: string | null = null;
 
   const adapter: ChatAdapter = {
     listChannels: async () =>
@@ -78,6 +80,11 @@ function createStubAdapter() {
       regeneratedPayload = data;
       return new Response("ok", { status: 200 });
     },
+    editUserMessage: async (messageId, content) => {
+      editedMessageId = messageId;
+      editedContent = content;
+      return new Response("ok", { status: 200 });
+    },
     abortActiveStream: () => {},
     getSettings: async () => ({}),
   };
@@ -88,6 +95,8 @@ function createStubAdapter() {
     getDeletedMessageId: () => deletedMessageId,
     getRegeneratedMessageId: () => regeneratedMessageId,
     getRegeneratedPayload: () => regeneratedPayload,
+    getEditedMessageId: () => editedMessageId,
+    getEditedContent: () => editedContent,
   };
 }
 
@@ -279,6 +288,17 @@ describe("desktop chat store", () => {
       userMessageId: "msg-user-1",
       userContent: "继续",
     });
+  });
+
+  test("edits user message through adapter", async () => {
+    const { adapter, getEditedMessageId, getEditedContent } = createStubAdapter();
+    const store = createDesktopChatStore(adapter);
+
+    const response = await store.getState().editUserMessage("msg-user-1", "重新描述");
+
+    expect(response.ok).toBe(true);
+    expect(getEditedMessageId()).toBe("msg-user-1");
+    expect(getEditedContent()).toBe("重新描述");
   });
 
   test("updates conversation fields optimistically", async () => {

@@ -9,6 +9,8 @@ function createStubServerApi() {
   let deletedMessageId: string | null = null;
   let regeneratedMessageId: string | null = null;
   let regeneratedPayload: unknown;
+  let editedMessageId: string | null = null;
+  let editedContent: string | null = null;
 
   const api: ServerApi = {
     auth: {
@@ -131,6 +133,11 @@ function createStubServerApi() {
         regeneratedPayload = data;
         return new Response("ok", { status: 200 });
       },
+      edit: async (id, content) => {
+        editedMessageId = id;
+        editedContent = content;
+        return new Response("ok", { status: 200 });
+      },
     },
     channels: {
       list: async () => ({
@@ -180,6 +187,8 @@ function createStubServerApi() {
     getDeletedMessageId: () => deletedMessageId,
     getRegeneratedMessageId: () => regeneratedMessageId,
     getRegeneratedPayload: () => regeneratedPayload,
+    getEditedMessageId: () => editedMessageId,
+    getEditedContent: () => editedContent,
   };
 }
 
@@ -273,6 +282,17 @@ describe("chatAdapter", () => {
     });
   });
 
+  test("edits user messages through the desktop adapter", async () => {
+    const { api, getEditedMessageId, getEditedContent } = createStubServerApi();
+    const adapter = createChatAdapter(api);
+
+    const response = await adapter.editUserMessage("msg-user-1", "新的问题");
+
+    expect(response.ok).toBe(true);
+    expect(getEditedMessageId()).toBe("msg-user-1");
+    expect(getEditedContent()).toBe("新的问题");
+  });
+
   test("exposes the desktop chat contract", async () => {
     const { api } = createStubServerApi();
     const adapter = createChatAdapter(api);
@@ -286,6 +306,7 @@ describe("chatAdapter", () => {
     expect(typeof adapter.sendMessage).toBe("function");
     expect(typeof adapter.deleteMessage).toBe("function");
     expect(typeof adapter.regenerateMessage).toBe("function");
+    expect(typeof adapter.editUserMessage).toBe("function");
     expect(typeof adapter.abortActiveStream).toBe("function");
     expect(await adapter.getSettings(["desktop_theme"])).toEqual({
       desktop_theme: "system",

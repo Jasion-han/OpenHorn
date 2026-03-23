@@ -36,6 +36,7 @@ export interface ServerApi {
       data?: { userMessageId?: string; userContent?: string },
       options?: { signal?: AbortSignal },
     ) => Promise<Response>;
+    edit: (id: string, content: string, options?: { signal?: AbortSignal }) => Promise<Response>;
   };
   channels: {
     list: () => Promise<{ channels: ApiChannel[] }>;
@@ -193,6 +194,23 @@ export function createServerApi(options?: { baseUrl?: string; fetch?: FetchLike 
             body: data ? JSON.stringify(data) : undefined,
           },
         );
+
+        if (response.status === 401) {
+          emitUnauthorized();
+        }
+
+        return response;
+      },
+      edit: async (id, content, options) => {
+        const response = await fetchImpl(`${baseUrl}/messages/${encodeURIComponent(id)}/edit`, {
+          method: "POST",
+          credentials: "include",
+          signal: options?.signal,
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ content }),
+        });
 
         if (response.status === 401) {
           emitUnauthorized();
