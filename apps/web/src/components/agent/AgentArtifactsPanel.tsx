@@ -4,12 +4,26 @@ import { FileText, PackageOpen } from "lucide-react";
 import type { ApiAgentArtifact } from "@/lib/api";
 import { CitationList } from "@/components/ui/CitationList";
 import { MarkdownMessage } from "@/components/ui/MarkdownMessage";
-import { getArtifactCitations, stripTrailingCitationAppendix } from "@/lib/citations";
+import { getArtifactCitations, sanitizeDisplayContent } from "@/lib/citations";
 
 function compactText(text: string, limit: number) {
   const normalized = text.trim().replace(/\s+/g, " ");
   if (normalized.length <= limit) return normalized;
   return `${normalized.slice(0, limit - 3)}...`;
+}
+
+function summarizeArtifactLabel(artifact: ApiAgentArtifact) {
+  const typeLabel =
+    artifact.type === "execution_summary"
+      ? "摘要"
+      : artifact.type === "final_result"
+        ? "结果"
+        : artifact.type === "structured_result"
+          ? "结构化结果"
+          : artifact.type === "source_bundle"
+            ? "来源集合"
+            : "产物";
+  return `${typeLabel} · ${artifact.title}`;
 }
 
 export function AgentArtifactsPanel({
@@ -27,35 +41,35 @@ export function AgentArtifactsPanel({
   );
   const finalResultCitations = getArtifactCitations(finalResult);
   const finalResultDisplay = finalResult
-    ? stripTrailingCitationAppendix(finalResult.content, finalResultCitations)
+    ? sanitizeDisplayContent(finalResult.content, finalResultCitations)
     : "";
   const summaryCitations =
     summaryArtifact?.type === "final_result" ? getArtifactCitations(summaryArtifact) : undefined;
   const summaryDisplay = summaryArtifact
-    ? stripTrailingCitationAppendix(summaryArtifact.content, summaryCitations)
+    ? sanitizeDisplayContent(summaryArtifact.content, summaryCitations)
     : "";
   const containerClassName = embedded
-    ? "rounded-2xl border border-border/60 bg-muted/10 p-4"
+    ? "rounded-xl border border-border/45 bg-background/55 px-3 py-2.5"
     : "rounded-3xl border border-border/70 bg-background/80 p-5";
 
   if (embedded) {
     return (
-      <div className="space-y-4">
+      <div className="space-y-3">
         <section className={containerClassName}>
-          <div className="mb-3 flex items-center gap-2 text-sm font-medium">
+          <div className="mb-2 flex items-center gap-2 text-[12px] font-medium text-foreground/85">
             <FileText className="h-4 w-4" />
-            结果摘要
+            结果
           </div>
           {summaryArtifact ? (
             summaryArtifact.type === "final_result" ? (
-              <div className="space-y-3">
-                <div className="min-w-0 text-sm leading-6 text-foreground/90">
+              <div className="space-y-2.5">
+                <div className="min-w-0 text-[12px] leading-5 text-foreground/90">
                   <MarkdownMessage content={summaryDisplay} citations={summaryCitations} />
                 </div>
                 <CitationList citations={summaryCitations} content={summaryDisplay} />
               </div>
             ) : (
-              <p className="text-sm leading-6 text-foreground/90">
+              <p className="text-[12px] leading-5 text-foreground/90">
                 {compactText(summaryDisplay, 180)}
               </p>
             )
@@ -66,19 +80,29 @@ export function AgentArtifactsPanel({
 
         {nonSummaryArtifacts.length > 0 ? (
           <section className={containerClassName}>
-            <div className="mb-3 flex items-center gap-2 text-sm font-medium">
+            <div className="mb-2 flex items-center gap-2 text-[12px] font-medium text-foreground/85">
               <PackageOpen className="h-4 w-4" />
-              产物列表
+              产物
             </div>
-            <div className="flex flex-wrap gap-2">
-              {nonSummaryArtifacts.map((artifact) => (
-                <span
+            <div className="space-y-2">
+              {nonSummaryArtifacts.slice(0, 4).map((artifact) => (
+                <div
                   key={artifact.id}
-                  className="rounded-full border border-border/60 bg-background/70 px-3 py-1 text-xs text-muted-foreground"
+                  className="rounded-lg border border-border/40 bg-background/75 px-3 py-2"
                 >
-                  {artifact.title}
-                </span>
+                  <div className="text-[11px] text-muted-foreground">
+                    {summarizeArtifactLabel(artifact)}
+                  </div>
+                  <p className="mt-0.5 text-[12px] leading-5 text-foreground/90">
+                    {compactText(artifact.content, 100)}
+                  </p>
+                </div>
               ))}
+              {nonSummaryArtifacts.length > 4 ? (
+                <p className="text-[11px] text-muted-foreground">
+                  其余 {nonSummaryArtifacts.length - 4} 项产物已折叠到完整结果页。
+                </p>
+              ) : null}
             </div>
           </section>
         ) : null}

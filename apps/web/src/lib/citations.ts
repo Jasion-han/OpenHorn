@@ -100,3 +100,76 @@ export function stripTrailingCitationAppendix(content: string, citations?: ApiCi
 
   return normalized.slice(0, appendixMatch.index).replace(/\s+$/, "");
 }
+
+function stripLegacySearchSummaryNoise(content: string) {
+  const normalized = (content || "").replace(/\r\n/g, "\n");
+  if (!normalized.trim()) return normalized;
+
+  const rescueMeaningfulSummary = (line: string) => {
+    const withoutHashes = line.replace(/^#+\s*/u, "").trim();
+    const openAiIndex = withoutHashes.search(/\bOpenAI[’']?s?\b/i);
+    if (openAiIndex > 0) {
+      const rescued = withoutHashes.slice(openAiIndex).trim();
+      if (rescued.length >= 24) return rescued;
+    }
+
+    const responsesOverviewIndex = withoutHashes.search(/\bResponses?\s+Overview\b/i);
+    if (responsesOverviewIndex > 0) {
+      const rescued = withoutHashes.slice(responsesOverviewIndex).trim();
+      if (rescued.length >= 24) return rescued;
+    }
+
+    return null;
+  };
+
+  const isLikelyLegacyNavNoise = (line: string) => {
+    const trimmed = line.trim();
+    if (!trimmed) return false;
+    const tokenCount = trimmed.split(/\s+/).length;
+    const headingCount = (trimmed.match(/#/g) || []).length;
+    const hasNavKeyword =
+      /\b(events?|meetups?|hackathon|support|forum|discord|api|dashboard|responses?|overview|docs?)\b/i.test(
+        trimmed,
+      );
+    const hasSentencePunctuation = /[。！？.!?]/u.test(trimmed);
+    return hasNavKeyword && (headingCount > 0 || tokenCount >= 6) && !hasSentencePunctuation;
+  };
+
+  let changed = false;
+  const lines = normalized.split("\n").map((rawLine) => {
+    const line = rawLine.trim();
+    if (!line) return rawLine;
+
+    if (/^一句总结[:：]\s*/u.test(line)) {
+      const withoutSummaryPrefix = line.replace(/^一句总结[:：]\s*/u, "").trim();
+      const rescuedSummary = rescueMeaningfulSummary(withoutSummaryPrefix);
+      changed = true;
+      return rescuedSummary ?? withoutSummaryPrefix.replace(/^#+\s*/u, "").trim();
+    }
+
+    return rawLine;
+  });
+
+  while (lines.length > 0) {
+    const firstLine = lines[0]?.trim() ?? "";
+    if (!isLikelyLegacyNavNoise(firstLine)) break;
+    const rescuedSummary = rescueMeaningfulSummary(firstLine);
+    if (rescuedSummary) {
+      lines[0] = rescuedSummary;
+      changed = true;
+      break;
+    }
+    lines.shift();
+    changed = true;
+  }
+
+  const cleaned = lines.join("\n").replace(/^\s+/, "");
+  if (!changed && cleaned === normalized) return normalized;
+  return cleaned.trim() ? cleaned : normalized;
+}
+
+export function sanitizeDisplayContent(content: string, citations?: ApiCitation[]) {
+  const withoutAppendix = stripTrailingCitationAppendix(content, citations);
+  const withoutLegacyNoise = stripLegacySearchSummaryNoise(withoutAppendix);
+  return withoutLegacyNoise.replace(/\n{3,}/g, "\n\n").trimEnd();
+}

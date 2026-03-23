@@ -28,7 +28,7 @@ import { TypingIndicator } from "@/components/ui/TypingIndicator";
 import { Textarea } from "@/components/ui/textarea";
 import { WRAP_TEXT } from "@/components/ui/wrapText";
 import { getEffectiveModelForConversation } from "@/lib/effective-model";
-import { stripTrailingCitationAppendix } from "@/lib/citations";
+import { sanitizeDisplayContent } from "@/lib/citations";
 import { createTextStreamSmoother, type TextStreamSmoother } from "@/lib/textStreamSmoother";
 import { cn } from "@/lib/utils";
 import {
@@ -330,7 +330,7 @@ function MessageBubble({
   const [copied, setCopied] = useState(false);
   const displayContent =
     msg.role === "assistant"
-      ? stripTrailingCitationAppendix(msg.content, msg.citations)
+      ? sanitizeDisplayContent(msg.content, msg.citations)
       : msg.content;
 
   const handleCopy = async () => {
@@ -1345,10 +1345,6 @@ export function ChatArea() {
                   : null}
               </div>
             ))}
-
-            {messages.length === 0 && (
-              <p className="py-8 text-center text-sm text-muted-foreground">开始新一轮消息...</p>
-            )}
           </div>
         </div>
       </div>
