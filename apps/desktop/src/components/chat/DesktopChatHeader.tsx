@@ -13,7 +13,7 @@ export function DesktopChatHeader({ conversation }: { conversation: Conversation
         <Button
           variant="ghost"
           size="icon-sm"
-          className="shrink-0"
+          className="shrink-0 titlebar-no-drag"
           aria-label={sidebarCollapsed ? "打开侧栏" : "收起侧栏"}
           onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
         >

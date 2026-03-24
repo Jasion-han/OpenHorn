@@ -7,6 +7,8 @@ import type { ChatMode } from "../../types/chat";
 import { DesktopAttachmentPreviewItem } from "./DesktopAttachmentPreviewItem";
 import { DesktopProviderLogo } from "./DesktopProviderLogo";
 
+const ACCEPT_FILES = "image/png,image/jpeg,image/webp,application/pdf,text/plain,text/markdown";
+
 function fileKey(file: File) {
   return `${file.name}:${file.size}:${file.lastModified}`;
 }
@@ -134,10 +136,10 @@ export function DesktopComposer({
   }, [modeMenuOpen]);
 
   return (
-    <div className="px-4 pb-4 pt-2">
+    <div className="pt-2">
       <div
         className={cn(
-          "rounded-[17px] border-[0.5px] border-border bg-background/70 pt-2 shadow-minimal backdrop-blur-sm transition-all duration-200 focus-within:border-foreground/20",
+          "rounded-[17px] border-[0.5px] border-border bg-background/70 pt-2 shadow-minimal backdrop-blur-sm transition-all duration-200 titlebar-no-drag focus-within:border-foreground/20",
           dragActive && "border-[#37a5aa]/70 bg-[#37a5aa]/[0.06]",
         )}
         onDragOver={handleDragOver}
@@ -148,6 +150,7 @@ export function DesktopComposer({
           ref={fileInputRef}
           type="file"
           multiple
+          accept={ACCEPT_FILES}
           className="hidden"
           onChange={(event) => {
             if (event.target.files) {
@@ -158,7 +161,7 @@ export function DesktopComposer({
         />
 
         {attachments.length > 0 && (
-          <div className="flex flex-wrap gap-2 px-[15px] pb-2">
+          <div className="flex flex-wrap gap-1 px-[15px] py-[5px]">
             {attachments.map((file) => (
               <DesktopAttachmentPreviewItem
                 key={fileKey(file)}

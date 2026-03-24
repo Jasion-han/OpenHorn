@@ -98,7 +98,7 @@ function ConversationRow({
         }
       }}
       className={cn(
-        "group flex cursor-pointer items-center justify-between rounded-[10px] border border-transparent px-3 py-[7px] text-left text-sm transition-colors duration-100",
+        "group flex cursor-pointer items-center justify-between rounded-[10px] border border-transparent px-3 py-[7px] text-left text-sm transition-colors duration-100 titlebar-no-drag",
         isActive
           ? "bg-foreground/[0.08] text-foreground shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]"
           : "text-foreground/70 hover:bg-foreground/[0.04] hover:text-foreground",
@@ -249,7 +249,11 @@ export function DesktopLeftSidebar() {
 
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon-sm" className="flex w-auto items-center gap-1 px-2">
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="flex w-auto items-center gap-1 px-2 titlebar-no-drag"
+              >
                 <div className="flex h-7 w-7 items-center justify-center rounded-full bg-muted text-xs font-semibold">
                   {user?.username?.slice(0, 1)?.toUpperCase() || "U"}
                 </div>
