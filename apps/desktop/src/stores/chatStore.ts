@@ -8,6 +8,7 @@ import type {
   ChatMode,
   Conversation,
   Message,
+  MessageAttachmentMeta,
   SendMessageInput,
 } from "../types/chat";
 
@@ -22,6 +23,7 @@ function createDraftMessage(input: {
   content: string;
   mode: ChatMode;
   attachments?: string[];
+  attachmentsMeta?: MessageAttachmentMeta[];
 }): Message {
   return {
     id: input.id,
@@ -30,6 +32,7 @@ function createDraftMessage(input: {
     content: input.content,
     mode: input.mode,
     attachments: input.attachments,
+    attachmentsMeta: input.attachmentsMeta,
     createdAt: new Date(),
   };
 }
@@ -100,8 +103,8 @@ export interface ChatState {
   deleteConversation: (conversationId: string) => Promise<void>;
   loadMessages: (conversationId: string) => Promise<void>;
   sendMessage: (
-    input: Omit<SendMessageInput, "conversationId">,
-  ) => Promise<{ assistantMessageId: string; response: Response }>;
+    input: Omit<SendMessageInput, "conversationId"> & { attachmentsMeta?: MessageAttachmentMeta[] },
+  ) => Promise<{ userMessageId: string; assistantMessageId: string; response: Response }>;
   deleteMessage: (messageId: string) => Promise<void>;
   regenerateMessage: (
     messageId: string,
@@ -303,6 +306,7 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
           content: input.content,
           mode,
           attachments: input.attachments,
+          attachmentsMeta: input.attachmentsMeta,
         }),
         createDraftMessage({
           id: assistantMessageId,
@@ -327,9 +331,10 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
           mode,
         });
 
-        return { assistantMessageId, response };
+        return { userMessageId, assistantMessageId, response };
       } catch (error) {
         set({
+          messages: state.messages,
           isStreaming: false,
           error: toErrorMessage(error),
         });

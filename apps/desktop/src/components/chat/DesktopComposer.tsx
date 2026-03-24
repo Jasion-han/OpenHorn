@@ -1,12 +1,22 @@
-import { Bot, ChevronDown, CornerDownLeft, Globe, MessageSquare, Square } from "lucide-react";
+import { Bot, ChevronDown, CornerDownLeft, Globe, MessageSquare, Paperclip, Square } from "lucide-react";
+import type { ClipboardEvent, DragEvent } from "react";
 import { useEffect, useRef, useState } from "react";
 import { Button, Textarea, cn } from "ui";
 import { useChatStore } from "../../stores/chatStore";
 import type { ChatMode } from "../../types/chat";
+import { DesktopAttachmentPreviewItem } from "./DesktopAttachmentPreviewItem";
 import { DesktopProviderLogo } from "./DesktopProviderLogo";
 
+function fileKey(file: File) {
+  return `${file.name}:${file.size}:${file.lastModified}`;
+}
+
 export function DesktopComposer({
+  attachments,
   disabled,
+  busy = false,
+  onAddAttachments,
+  onRemoveAttachment,
   onSubmit,
   modelProvider,
   modelLabel,
@@ -15,8 +25,12 @@ export function DesktopComposer({
   forceWebSearch,
   onToggleWebSearch,
 }: {
+  attachments: File[];
   disabled: boolean;
-  onSubmit: (content: string) => Promise<void>;
+  busy?: boolean;
+  onAddAttachments: (files: File[]) => void;
+  onRemoveAttachment: (file: File) => void;
+  onSubmit: (content: string, files: File[]) => Promise<void>;
   modelProvider?: string | null;
   modelLabel?: string | null;
   modelTone?: "normal" | "warning";
@@ -30,18 +44,59 @@ export function DesktopComposer({
   const abortStreaming = useChatStore((state) => state.abortStreaming);
   const [value, setValue] = useState("");
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
   const modeMenuRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const canSubmit = !disabled && !isStreaming && value.trim().length > 0;
+  const isBusy = busy || isStreaming;
+  const canSubmit = !disabled && !isBusy && (value.trim().length > 0 || attachments.length > 0);
 
   const handleSubmit = async () => {
     const next = value.trim();
-    if (!next) return;
+    if (!next && attachments.length === 0) return;
+    await onSubmit(next, attachments);
     setValue("");
-    await onSubmit(next);
   };
 
-  const modeDisabled = disabled || isStreaming;
+  const handleAppendAttachments = (files: File[] | FileList) => {
+    const nextFiles = Array.from(files);
+    if (nextFiles.length === 0) return;
+    onAddAttachments(nextFiles);
+  };
+
+  const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    const files = Array.from(event.clipboardData.files || []);
+    if (files.length === 0) return;
+    event.preventDefault();
+    handleAppendAttachments(files);
+  };
+
+  const handleDragOver = (event: DragEvent<HTMLDivElement>) => {
+    if (disabled || isBusy || !Array.from(event.dataTransfer.types).includes("Files")) {
+      return;
+    }
+    event.preventDefault();
+    if (!dragActive) {
+      setDragActive(true);
+    }
+  };
+
+  const handleDragLeave = (event: DragEvent<HTMLDivElement>) => {
+    const relatedTarget = event.relatedTarget;
+    if (relatedTarget instanceof Node && event.currentTarget.contains(relatedTarget)) {
+      return;
+    }
+    setDragActive(false);
+  };
+
+  const handleDrop = (event: DragEvent<HTMLDivElement>) => {
+    if (disabled || isBusy) return;
+    event.preventDefault();
+    setDragActive(false);
+    handleAppendAttachments(event.dataTransfer.files);
+  };
+
+  const modeDisabled = disabled || isBusy;
   const alternateMode: ChatMode = composerMode === "chat" ? "agent" : "chat";
 
   useEffect(() => {
@@ -69,16 +124,57 @@ export function DesktopComposer({
 
   return (
     <div className="px-4 pb-4 pt-2">
-      <div className="rounded-[17px] border-[0.5px] border-border bg-background/70 pt-2 shadow-minimal backdrop-blur-sm transition-all duration-200 focus-within:border-foreground/20">
+      <div
+        className={cn(
+          "rounded-[17px] border-[0.5px] border-border bg-background/70 pt-2 shadow-minimal backdrop-blur-sm transition-all duration-200 focus-within:border-foreground/20",
+          dragActive && "border-[#37a5aa]/70 bg-[#37a5aa]/[0.06]",
+        )}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+      >
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          className="hidden"
+          onChange={(event) => {
+            if (event.target.files) {
+              handleAppendAttachments(event.target.files);
+            }
+            event.target.value = "";
+          }}
+        />
+
+        {attachments.length > 0 && (
+          <div className="flex flex-wrap gap-2 px-[15px] pb-2">
+            {attachments.map((file) => (
+              <DesktopAttachmentPreviewItem
+                key={fileKey(file)}
+                file={file}
+                onRemove={() => onRemoveAttachment(file)}
+              />
+            ))}
+          </div>
+        )}
+
         <div className="px-[15px] pb-2">
           <Textarea
             value={value}
+            disabled={disabled || isBusy}
             onChange={(event) => setValue(event.target.value)}
+            onPaste={handlePaste}
             placeholder={
-              disabled ? "请先在左侧创建或选择一个会话" : "输入你的问题，聊天与 Agent 在这里切换"
+              disabled
+                ? "请先在左侧创建或选择一个会话"
+                : isBusy
+                  ? "正在处理，请稍候"
+                : attachments.length > 0
+                  ? "可继续输入文本，或直接发送附件"
+                  : "输入你的问题，聊天与 Agent 在这里切换"
             }
             rows={1}
-            className="min-h-[36px] max-h-[160px] resize-none border-0 bg-transparent p-0 shadow-none placeholder:text-muted-foreground/70 focus-visible:ring-0"
+            className="min-h-[36px] max-h-[160px] resize-none border-0 bg-transparent p-0 shadow-none placeholder:text-muted-foreground/70 focus-visible:ring-0 disabled:cursor-default disabled:opacity-100"
             onKeyDown={(event) => {
               const nativeEvent = event.nativeEvent;
               const keyCode =
@@ -99,6 +195,22 @@ export function DesktopComposer({
 
         <div className="flex h-[40px] items-center justify-between gap-4 px-2 py-[5px]">
           <div className="flex min-w-0 flex-1 items-center gap-1.5">
+            <button
+              type="button"
+              disabled={disabled || isBusy}
+              onClick={() => fileInputRef.current?.click()}
+              className={cn(
+                "flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors",
+                "text-muted-foreground hover:bg-accent hover:text-foreground",
+                (disabled || isBusy) && "pointer-events-none opacity-60",
+              )}
+              aria-label="添加附件"
+              title="添加附件"
+            >
+              <Paperclip className="size-3.5" />
+              <span>附件</span>
+            </button>
+
             <div ref={modeMenuRef} className="relative inline-flex flex-col items-center">
               {modeMenuOpen && !modeDisabled && (
                 <div className="pointer-events-none absolute bottom-full left-0 right-0 z-20 mb-1 flex justify-center">
@@ -161,13 +273,13 @@ export function DesktopComposer({
             <button
               type="button"
               onClick={onToggleWebSearch}
-              disabled={disabled || isStreaming}
+              disabled={disabled || isBusy}
               className={cn(
                 "flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors",
                 forceWebSearch
                   ? "bg-emerald-400/20 text-emerald-500 hover:bg-emerald-400/30"
                   : "text-muted-foreground hover:bg-accent hover:text-foreground",
-                (disabled || isStreaming) && "pointer-events-none opacity-60",
+                (disabled || isBusy) && "pointer-events-none opacity-60",
               )}
               aria-label="Allow web search"
               title={forceWebSearch ? "需要最新信息时允许联网：已开启" : "需要最新信息时允许联网：已关闭"}

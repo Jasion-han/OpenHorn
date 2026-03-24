@@ -153,6 +153,42 @@ describe("desktop chat store", () => {
     });
   });
 
+  test("keeps uploaded attachment metadata on optimistic user message", async () => {
+    const { adapter } = createStubAdapter();
+    const store = createDesktopChatStore(adapter);
+
+    await store.getState().loadConversations();
+    await store.getState().selectConversation("conv-1");
+
+    const result = await store.getState().sendMessage({
+      content: "",
+      attachments: ["att-1"],
+      attachmentsMeta: [
+        {
+          id: "att-1",
+          fileName: "README.md",
+          fileType: "text/markdown",
+          fileSize: 128,
+        },
+      ],
+    });
+
+    expect(result.userMessageId.startsWith("draft-user-")).toBe(true);
+    expect(store.getState().messages[1]).toMatchObject({
+      id: result.userMessageId,
+      role: "user",
+      attachments: ["att-1"],
+      attachmentsMeta: [
+        {
+          id: "att-1",
+          fileName: "README.md",
+          fileType: "text/markdown",
+          fileSize: 128,
+        },
+      ],
+    });
+  });
+
   test("appends stream delta to assistant placeholder", async () => {
     const { adapter } = createStubAdapter();
     const store = createDesktopChatStore(adapter);
@@ -233,6 +269,32 @@ describe("desktop chat store", () => {
       model: "claude-3-7-sonnet",
     });
     expect(store.getState().messages[2]?.agentRun?.status).toBe("completed");
+  });
+
+  test("rolls back optimistic draft messages when send fails", async () => {
+    const { adapter } = createStubAdapter();
+    const store = createDesktopChatStore({
+      ...adapter,
+      sendMessage: async () => {
+        throw new Error("network failed");
+      },
+    });
+
+    await store.getState().loadConversations();
+    await store.getState().selectConversation("conv-1");
+
+    let caught: unknown;
+    try {
+      await store.getState().sendMessage({ content: "继续执行" });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as Error).message).toBe("network failed");
+    expect(store.getState().isStreaming).toBe(false);
+    expect(store.getState().messages).toHaveLength(1);
+    expect(store.getState().messages[0]?.id).toBe("msg-1");
   });
 
   test("toggles composer mode", () => {

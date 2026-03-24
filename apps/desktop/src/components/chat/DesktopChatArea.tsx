@@ -1,6 +1,7 @@
 import { Bot, Check, Copy, MessageSquare, Pencil, RefreshCw, Trash2 } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { Button, ScrollArea, Textarea, cn } from "ui";
+import { uploadAttachments } from "../../lib/attachments";
 import { sanitizeDisplayContent } from "../../lib/citations";
 import { getEffectiveModelForConversation } from "../../lib/effectiveModel";
 import { readErrorMessage } from "../../lib/serverApi";
@@ -171,6 +172,10 @@ function isAbortError(error: unknown) {
   return error instanceof DOMException && error.name === "AbortError";
 }
 
+function fileKey(file: File) {
+  return `${file.name}:${file.size}:${file.lastModified}`;
+}
+
 function IconActionButton({
   title,
   onClick,
@@ -281,8 +286,14 @@ export function DesktopChatArea() {
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editingContent, setEditingContent] = useState("");
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  const [pendingAttachments, setPendingAttachments] = useState<File[]>([]);
+  const [isUploading, setIsUploading] = useState(false);
   const effectiveModel = getEffectiveModelForConversation(channels, currentConversation);
   const forceWebSearch = currentConversation?.forceWebSearch ?? true;
+
+  useEffect(() => {
+    setPendingAttachments([]);
+  }, [currentConversation?.id]);
 
   const getEditableAssistantForUser = (messageId: string) => {
     const messageIndex = messages.findIndex((message) => message.id === messageId);
@@ -305,12 +316,64 @@ export function DesktopChatArea() {
     return { userMessage, assistantMessage };
   };
 
-  const handleSubmit = async (content: string) => {
+  const handleAddAttachments = (files: File[]) => {
+    setPendingAttachments((currentFiles) => {
+      const seen = new Set(currentFiles.map(fileKey));
+      const nextFiles = [...currentFiles];
+
+      for (const file of files) {
+        const key = fileKey(file);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        nextFiles.push(file);
+      }
+
+      return nextFiles;
+    });
+  };
+
+  const handleRemoveAttachment = (file: File) => {
+    const targetKey = fileKey(file);
+    setPendingAttachments((currentFiles) => currentFiles.filter((item) => fileKey(item) !== targetKey));
+  };
+
+  const handleSubmit = async (content: string, files: File[]) => {
     if (!currentConversation) return;
 
-    const { assistantMessageId, response } = await sendMessage({ content });
+    const effectiveContent = content.trim();
+    let attachmentIds: string[] | undefined;
+    let attachmentsMeta:
+      | Array<{
+          id: string;
+          fileName: string;
+          fileType: string;
+          fileSize: number;
+        }>
+      | undefined;
 
     try {
+      if (files.length > 0) {
+        setIsUploading(true);
+        const upload = await uploadAttachments({
+          conversationId: currentConversation.id,
+          files,
+        });
+        attachmentIds = upload.attachments.map((attachment) => attachment.id);
+        attachmentsMeta = upload.attachments.map((attachment) => ({
+          id: attachment.id,
+          fileName: attachment.fileName,
+          fileType: attachment.fileType,
+          fileSize: attachment.fileSize,
+        }));
+      }
+
+      const { assistantMessageId, response } = await sendMessage({
+        content: effectiveContent,
+        attachments: attachmentIds,
+        attachmentsMeta,
+      });
+      setPendingAttachments([]);
+
       await readSseStream(response, (event) => {
         applyStreamEvent(assistantMessageId, event);
       });
@@ -323,6 +386,8 @@ export function DesktopChatArea() {
         return;
       }
       setError(error instanceof Error ? error.message : "Stream error");
+    } finally {
+      setIsUploading(false);
     }
   };
 
@@ -665,7 +730,11 @@ export function DesktopChatArea() {
       )}
 
       <DesktopComposer
+        attachments={pendingAttachments}
         disabled={!currentConversation}
+        busy={isUploading}
+        onAddAttachments={handleAddAttachments}
+        onRemoveAttachment={handleRemoveAttachment}
         onSubmit={handleSubmit}
         modelProvider={effectiveModel.ok ? effectiveModel.provider : null}
         modelLabel={
