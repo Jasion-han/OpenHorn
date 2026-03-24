@@ -11,7 +11,6 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import {
-  Badge,
   Button,
   Dialog,
   DialogContent,
@@ -162,7 +161,6 @@ export function DesktopLeftSidebar() {
 
   const activeView = useDesktopShellStore((state) => state.activeView);
   const setActiveView = useDesktopShellStore((state) => state.setActiveView);
-  const sidecarStatus = useDesktopShellStore((state) => state.sidecarStatus);
   const user = useAuthStore((state) => state.user);
   const logout = useAuthStore((state) => state.logout);
 
@@ -188,13 +186,6 @@ export function DesktopLeftSidebar() {
       conversation.title.toLowerCase().includes(normalizedQuery),
     );
   }, [conversations, query]);
-
-  const statusBadge = (() => {
-    if (sidecarStatus === "connected") return <Badge variant="secondary">已连接</Badge>;
-    if (sidecarStatus === "loading") return <Badge variant="outline">连接中</Badge>;
-    if (sidecarStatus === "error") return <Badge variant="destructive">不可用</Badge>;
-    return <Badge variant="outline">待命</Badge>;
-  })();
 
   const handleCreateConversation = async () => {
     setCreating(true);
@@ -253,10 +244,7 @@ export function DesktopLeftSidebar() {
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
             <div className="truncate text-sm font-semibold leading-5">OpenHorn</div>
-            <div className="mt-0.5 flex items-center gap-2 text-[11px] text-muted-foreground">
-              <span>本地</span>
-              {statusBadge}
-            </div>
+            <div className="mt-0.5 text-[11px] text-muted-foreground">Local</div>
           </div>
 
           <DropdownMenu>
@@ -342,7 +330,7 @@ export function DesktopLeftSidebar() {
                           setActiveView("chat");
                           void selectConversation(conversation.id);
                         }}
-                      onRename={() => {
+                        onRename={() => {
                           setRenamingId(conversation.id);
                           setRenameValue(conversation.title);
                         }}

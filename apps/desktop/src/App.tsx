@@ -1,4 +1,3 @@
-import { invoke } from "@tauri-apps/api/core";
 import { useEffect } from "react";
 import { DesktopAuthScreen } from "./components/auth/DesktopAuthScreen";
 import { SettingsView } from "./components/settings/SettingsView";
@@ -6,24 +5,12 @@ import { DesktopShellLayout } from "./components/app/DesktopShellLayout";
 import { DesktopChatArea } from "./components/chat/DesktopChatArea";
 import { ThemeListener } from "./components/theme/ThemeListener";
 import { UNAUTHORIZED_EVENT } from "./lib/serverApi";
-import { SidecarClient } from "./lib/sidecarClient";
 import { useAuthStore } from "./stores/authStore";
 import { useChatStore } from "./stores/chatStore";
 import { useDesktopShellStore } from "./stores/desktopShellStore";
 
-function canUseTauriInvoke() {
-  if (typeof window === "undefined") return false;
-  const maybeTauri = window as typeof window & {
-    __TAURI_INTERNALS__?: {
-      invoke?: unknown;
-    };
-  };
-  return typeof maybeTauri.__TAURI_INTERNALS__?.invoke === "function";
-}
-
 export function App() {
   const activeView = useDesktopShellStore((state) => state.activeView);
-  const setSidecarStatus = useDesktopShellStore((state) => state.setSidecarStatus);
   const setActiveView = useDesktopShellStore((state) => state.setActiveView);
   const authReady = useAuthStore((state) => state.ready);
   const user = useAuthStore((state) => state.user);
@@ -45,44 +32,6 @@ export function App() {
       window.removeEventListener(UNAUTHORIZED_EVENT, handleUnauthorized);
     };
   }, [bootstrapAuth, logout, resetChat, setActiveView]);
-
-  useEffect(() => {
-    let disposed = false;
-    let client: SidecarClient | null = null;
-
-    async function connectSidecar() {
-      if (!canUseTauriInvoke()) {
-        setSidecarStatus("idle");
-        return;
-      }
-
-      setSidecarStatus("loading");
-
-      try {
-        const info = await invoke<{ ws_url: string; token: string } | null>("get_sidecar_info");
-        if (!info) throw new Error("Sidecar not ready");
-
-        const nextClient = new SidecarClient({ wsUrl: info.ws_url, token: info.token });
-        await nextClient.connect();
-        if (disposed) {
-          nextClient.disconnect();
-          return;
-        }
-        client = nextClient;
-        setSidecarStatus("connected");
-      } catch (error) {
-        if (disposed) return;
-        setSidecarStatus("error");
-      }
-    }
-
-    void connectSidecar();
-
-    return () => {
-      disposed = true;
-      client?.disconnect();
-    };
-  }, [setSidecarStatus]);
 
   return (
     <>
