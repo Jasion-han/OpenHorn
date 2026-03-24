@@ -13,6 +13,12 @@ import { useEffect, useMemo, useState } from "react";
 import {
   Badge,
   Button,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -152,6 +158,7 @@ export function DesktopLeftSidebar() {
   const [pinnedOpen, setPinnedOpen] = useState(true);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
+  const [pendingDelete, setPendingDelete] = useState<Conversation | null>(null);
 
   const activeView = useDesktopShellStore((state) => state.activeView);
   const setActiveView = useDesktopShellStore((state) => state.setActiveView);
@@ -200,9 +207,6 @@ export function DesktopLeftSidebar() {
   };
 
   const handleDeleteConversation = async (conversation: Conversation) => {
-    const confirmed = window.confirm(`确定删除「${conversation.title}」？此操作不可恢复。`);
-    if (!confirmed) return;
-
     try {
       await deleteConversation(conversation.id);
     } catch {
@@ -338,12 +342,12 @@ export function DesktopLeftSidebar() {
                           setActiveView("chat");
                           void selectConversation(conversation.id);
                         }}
-                        onRename={() => {
+                      onRename={() => {
                           setRenamingId(conversation.id);
                           setRenameValue(conversation.title);
                         }}
                         onTogglePin={() => void handleTogglePin(conversation)}
-                        onDelete={() => void handleDeleteConversation(conversation)}
+                        onDelete={() => setPendingDelete(conversation)}
                         pinLabel="取消置顶"
                       />
                     ),
@@ -384,7 +388,7 @@ export function DesktopLeftSidebar() {
                         setRenameValue(conversation.title);
                       }}
                       onTogglePin={() => void handleTogglePin(conversation)}
-                      onDelete={() => void handleDeleteConversation(conversation)}
+                      onDelete={() => setPendingDelete(conversation)}
                       pinLabel="置顶"
                     />
                   ),
@@ -427,6 +431,36 @@ export function DesktopLeftSidebar() {
           </button>
         </div>
       </div>
+
+      <Dialog open={Boolean(pendingDelete)} onOpenChange={(open) => !open && setPendingDelete(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>删除会话</DialogTitle>
+            <DialogDescription className="whitespace-pre-line">
+              {pendingDelete
+                ? `确定删除「${pendingDelete.title}」？\n此操作不可恢复。`
+                : "此操作不可恢复。"}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setPendingDelete(null)}>
+              取消
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                const target = pendingDelete;
+                setPendingDelete(null);
+                if (target) {
+                  void handleDeleteConversation(target);
+                }
+              }}
+            >
+              删除
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
