@@ -2,7 +2,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { useEffect } from "react";
 import { DesktopAuthScreen } from "./components/auth/DesktopAuthScreen";
 import { SettingsView } from "./components/settings/SettingsView";
-import { readSavedWorkspaceRoot } from "./components/settings/DesktopGeneralSettings";
 import { DesktopShellLayout } from "./components/app/DesktopShellLayout";
 import { DesktopChatArea } from "./components/chat/DesktopChatArea";
 import { ThemeListener } from "./components/theme/ThemeListener";
@@ -24,10 +23,7 @@ function canUseTauriInvoke() {
 
 export function App() {
   const activeView = useDesktopShellStore((state) => state.activeView);
-  const setClient = useDesktopShellStore((state) => state.setClient);
   const setSidecarStatus = useDesktopShellStore((state) => state.setSidecarStatus);
-  const setSidecarError = useDesktopShellStore((state) => state.setSidecarError);
-  const setWorkspaceRootInput = useDesktopShellStore((state) => state.setWorkspaceRootInput);
   const setActiveView = useDesktopShellStore((state) => state.setActiveView);
   const authReady = useAuthStore((state) => state.ready);
   const user = useAuthStore((state) => state.user);
@@ -52,17 +48,15 @@ export function App() {
 
   useEffect(() => {
     let disposed = false;
+    let client: SidecarClient | null = null;
 
     async function connectSidecar() {
       if (!canUseTauriInvoke()) {
-        setClient(null);
         setSidecarStatus("idle");
-        setSidecarError("");
         return;
       }
 
       setSidecarStatus("loading");
-      setSidecarError("");
 
       try {
         const info = await invoke<{ ws_url: string; token: string } | null>("get_sidecar_info");
@@ -74,13 +68,11 @@ export function App() {
           nextClient.disconnect();
           return;
         }
-        setClient(nextClient);
+        client = nextClient;
         setSidecarStatus("connected");
       } catch (error) {
         if (disposed) return;
-        setClient(null);
         setSidecarStatus("error");
-        setSidecarError(error instanceof Error ? error.message : "Failed to connect");
       }
     }
 
@@ -88,13 +80,9 @@ export function App() {
 
     return () => {
       disposed = true;
+      client?.disconnect();
     };
-  }, [setClient, setSidecarError, setSidecarStatus]);
-
-  useEffect(() => {
-    const saved = readSavedWorkspaceRoot();
-    if (saved) setWorkspaceRootInput(saved);
-  }, [setWorkspaceRootInput]);
+  }, [setSidecarStatus]);
 
   return (
     <>

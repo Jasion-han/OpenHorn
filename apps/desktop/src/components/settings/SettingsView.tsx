@@ -1,15 +1,13 @@
-import { Info, Palette, Settings } from "lucide-react";
+import { Info, Palette } from "lucide-react";
 import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
 import { cn, ScrollArea } from "ui";
 import { AboutSettings } from "./AboutSettings";
 import { AppearanceSettings } from "./AppearanceSettings";
-import { DesktopGeneralSettings } from "./DesktopGeneralSettings";
 
-type SettingsTab = "general" | "appearance" | "about";
+type SettingsTab = "appearance" | "about";
 
 const TABS: Array<{ id: SettingsTab; label: string; icon: ReactNode }> = [
-  { id: "general", label: "通用", icon: <Settings size={16} /> },
   { id: "appearance", label: "外观", icon: <Palette size={16} /> },
   { id: "about", label: "关于", icon: <Info size={16} /> },
 ];
@@ -19,8 +17,6 @@ export function SettingsView({ initialTab = "appearance" }: { initialTab?: Setti
 
   const content = useMemo(() => {
     switch (activeTab) {
-      case "general":
-        return <DesktopGeneralSettings />;
       case "appearance":
         return <AppearanceSettings />;
       case "about":
