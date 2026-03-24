@@ -15,6 +15,7 @@ export function DesktopComposer({
   attachments,
   disabled,
   busy = false,
+  submitBlocked = false,
   onAddAttachments,
   onRemoveAttachment,
   onSubmit,
@@ -24,10 +25,13 @@ export function DesktopComposer({
   onOpenModelPicker,
   forceWebSearch,
   onToggleWebSearch,
+  agentModeAvailable = true,
+  agentModeDisabledReason,
 }: {
   attachments: File[];
   disabled: boolean;
   busy?: boolean;
+  submitBlocked?: boolean;
   onAddAttachments: (files: File[]) => void;
   onRemoveAttachment: (file: File) => void;
   onSubmit: (content: string, files: File[]) => Promise<void>;
@@ -37,6 +41,8 @@ export function DesktopComposer({
   onOpenModelPicker?: () => void;
   forceWebSearch: boolean;
   onToggleWebSearch: () => void;
+  agentModeAvailable?: boolean;
+  agentModeDisabledReason?: string | null;
 }) {
   const composerMode = useChatStore((state) => state.composerMode);
   const setComposerMode = useChatStore((state) => state.setComposerMode);
@@ -49,7 +55,11 @@ export function DesktopComposer({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const isBusy = busy || isStreaming;
-  const canSubmit = !disabled && !isBusy && (value.trim().length > 0 || attachments.length > 0);
+  const canSubmit =
+    !disabled &&
+    !isBusy &&
+    !submitBlocked &&
+    (value.trim().length > 0 || attachments.length > 0);
 
   const handleSubmit = async () => {
     const next = value.trim();
@@ -98,6 +108,7 @@ export function DesktopComposer({
 
   const modeDisabled = disabled || isBusy;
   const alternateMode: ChatMode = composerMode === "chat" ? "agent" : "chat";
+  const alternateModeDisabled = alternateMode === "agent" && !agentModeAvailable;
 
   useEffect(() => {
     if (!modeMenuOpen) return;
@@ -217,10 +228,18 @@ export function DesktopComposer({
                   <button
                     type="button"
                     onClick={() => {
+                      if (alternateModeDisabled) return;
                       setComposerMode(alternateMode);
                       setModeMenuOpen(false);
                     }}
-                    className="pointer-events-auto flex w-full items-center justify-center gap-1.5 rounded-[10px] bg-accent/88 px-2.5 py-1 text-xs text-foreground shadow-[0_10px_24px_rgba(15,23,42,0.12)] ring-1 ring-border/25 backdrop-blur-md transition-colors hover:bg-accent"
+                    disabled={alternateModeDisabled}
+                    className={cn(
+                      "pointer-events-auto flex w-full items-center justify-center gap-1.5 rounded-[10px] px-2.5 py-1 text-xs",
+                      alternateModeDisabled
+                        ? "cursor-not-allowed bg-muted/80 text-muted-foreground opacity-70 ring-1 ring-border/25"
+                        : "bg-accent/88 text-foreground shadow-[0_10px_24px_rgba(15,23,42,0.12)] ring-1 ring-border/25 backdrop-blur-md transition-colors hover:bg-accent",
+                    )}
+                    title={alternateModeDisabled ? (agentModeDisabledReason ?? "当前不可用") : undefined}
                   >
                     <span>{alternateMode === "chat" ? "Chat" : "Agent"}</span>
                     <ChevronDown className="size-3 shrink-0 opacity-0" aria-hidden="true" />

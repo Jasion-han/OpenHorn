@@ -289,6 +289,10 @@ export function DesktopChatArea() {
   const [pendingAttachments, setPendingAttachments] = useState<File[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const effectiveModel = getEffectiveModelForConversation(channels, currentConversation);
+  const agentModeSupported = effectiveModel.ok;
+  const agentModeDisabledReason = effectiveModel.ok
+    ? null
+    : "请先配置可用模型后再使用 Agent 模式。";
   const forceWebSearch = currentConversation?.forceWebSearch ?? true;
 
   useEffect(() => {
@@ -651,6 +655,9 @@ export function DesktopChatArea() {
                     canRetry={
                       message.role === "assistant" &&
                       !message.id.startsWith("draft-") &&
+                      !isLoading &&
+                      !isStreaming &&
+                      !isUploading &&
                       Boolean(currentConversation)
                     }
                     canDelete={!message.id.startsWith("draft-")}
@@ -732,7 +739,8 @@ export function DesktopChatArea() {
       <DesktopComposer
         attachments={pendingAttachments}
         disabled={!currentConversation}
-        busy={isUploading}
+        busy={isUploading || isLoading}
+        submitBlocked={!effectiveModel.ok}
         onAddAttachments={handleAddAttachments}
         onRemoveAttachment={handleRemoveAttachment}
         onSubmit={handleSubmit}
@@ -748,6 +756,8 @@ export function DesktopChatArea() {
         onOpenModelPicker={currentConversation ? () => setModelPickerOpen(true) : undefined}
         forceWebSearch={forceWebSearch}
         onToggleWebSearch={() => void handleToggleWebSearch()}
+        agentModeAvailable={agentModeSupported}
+        agentModeDisabledReason={agentModeDisabledReason}
       />
 
       {currentConversation && modelPickerOpen && (

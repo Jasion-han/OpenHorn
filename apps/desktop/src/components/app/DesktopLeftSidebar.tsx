@@ -257,12 +257,7 @@ export function DesktopLeftSidebar() {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-44">
-              <DropdownMenuLabel>
-                <div className="truncate text-sm font-medium">{user?.username || "用户"}</div>
-                <div className="truncate text-xs font-normal text-muted-foreground">
-                  {user?.email || ""}
-                </div>
-              </DropdownMenuLabel>
+              <DropdownMenuLabel>{user?.username || "User"}</DropdownMenuLabel>
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 className="text-destructive focus:text-destructive"
