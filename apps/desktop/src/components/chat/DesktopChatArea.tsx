@@ -719,24 +719,12 @@ export function DesktopChatArea() {
             <div className="mb-2 rounded-xl border border-orange-200 bg-orange-50 p-3 text-sm shadow-minimal">
               <p className="font-medium text-orange-800">当前会话模型不可用</p>
               <p className="text-orange-700">{effectiveModel.reason}</p>
-              <button
-                type="button"
-                className="mt-1 text-xs text-muted-foreground underline underline-offset-2"
-                onClick={() => setModelPickerOpen(true)}
-              >
-                现在重新选择模型
-              </button>
+              <p className="mt-1 text-xs text-muted-foreground">在下方输入框的 Model 里修复即可。</p>
             </div>
           ) : (
             <div className="mb-2 flex items-center gap-3 rounded-xl border border-orange-200 bg-orange-50 p-3 text-sm shadow-minimal">
               <p className="flex-1 text-orange-700">{effectiveModel.reason}</p>
-              <button
-                type="button"
-                className="text-xs text-muted-foreground underline underline-offset-2"
-                onClick={() => setModelPickerOpen(true)}
-              >
-                选择模型
-              </button>
+              <p className="text-xs text-muted-foreground">请先设置默认模型后再继续。</p>
             </div>
           )}
         </div>
