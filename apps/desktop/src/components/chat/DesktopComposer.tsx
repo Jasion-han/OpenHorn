@@ -1,4 +1,4 @@
-import { Bot, ChevronDown, CornerDownLeft, Globe, MessageSquare, Paperclip, Square } from "lucide-react";
+import { ChevronDown, CornerDownLeft, Globe, Paperclip, Square } from "lucide-react";
 import type { ClipboardEvent, DragEvent } from "react";
 import { useEffect, useRef, useState } from "react";
 import { Button, Textarea, cn } from "ui";
@@ -208,18 +208,16 @@ export function DesktopComposer({
           <div className="flex min-w-0 flex-1 items-center gap-1.5">
             <button
               type="button"
-              disabled={disabled || isBusy}
               onClick={() => fileInputRef.current?.click()}
+              disabled={disabled || isBusy}
               className={cn(
-                "flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors",
-                "text-muted-foreground hover:bg-accent hover:text-foreground",
+                "inline-flex size-[30px] items-center justify-center rounded-full text-foreground/60 transition-colors hover:text-foreground hover:bg-accent",
                 (disabled || isBusy) && "pointer-events-none opacity-60",
               )}
-              aria-label="添加附件"
-              title="添加附件"
+              aria-label="Attach"
+              title="Attach"
             >
-              <Paperclip className="size-3.5" />
-              <span>附件</span>
+              <Paperclip className="size-5" />
             </button>
 
             <div ref={modeMenuRef} className="relative inline-flex flex-col items-center">
@@ -264,7 +262,6 @@ export function DesktopComposer({
                 aria-label="Mode"
                 title="Mode"
               >
-                {composerMode === "agent" ? <Bot size={12} /> : <MessageSquare size={12} />}
                 <span className="truncate">{composerMode === "chat" ? "Chat" : "Agent"}</span>
                 <ChevronDown className={cn("size-3 transition-transform", modeMenuOpen && "rotate-180")} />
               </button>
@@ -307,10 +304,6 @@ export function DesktopComposer({
               <span>允许联网</span>
             </button>
 
-            <div className="inline-flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
-              <CornerDownLeft size={12} />
-              <span>Enter 发送</span>
-            </div>
           </div>
 
           {isStreaming ? (
