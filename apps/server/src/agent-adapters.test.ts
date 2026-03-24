@@ -88,3 +88,42 @@ test("OpenAIAdapter chatStream aborts when streamed output goes idle", async () 
     globalThis.fetch = originalFetch;
   }
 });
+
+test("OpenAIAdapter chatStream aborts when the first streamed chunk never arrives", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (_: FetchInput, init?: FetchInit) => {
+    const signal = init?.signal as AbortSignal | undefined;
+    const stream = new ReadableStream({
+      start(controller) {
+        signal?.addEventListener(
+          "abort",
+          () => controller.error(signal.reason ?? new Error("aborted")),
+          { once: true },
+        );
+      },
+    });
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "text/event-stream",
+      },
+    });
+  }) as typeof fetch;
+
+  try {
+    const adapter = new OpenAIAdapter("test-key", "https://example.com");
+
+    await expect(async () => {
+      for await (const _chunk of adapter.chatStream({
+        model: "gpt-test",
+        messages: getTestMessages(),
+        streamFirstTokenTimeoutMs: 10,
+        streamIdleTimeoutMs: 50,
+        streamTotalTimeoutMs: 50,
+      })) {
+        // no-op
+      }
+    }).toThrow("模型首个响应超时");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

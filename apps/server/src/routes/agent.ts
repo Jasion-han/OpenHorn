@@ -45,7 +45,6 @@ import { createSseStream } from "../utils/sse";
 import { isRecord } from "../utils/typeGuards";
 
 const agent = new Hono<UserEnv>();
-const RUNTIME_AGENT_CHECK_TIMEOUT_MS = 12_000;
 
 agent.use("*", requireUser);
 
@@ -484,7 +483,6 @@ async function resolveTaskExecutionContext(
     userId,
     resolvedChannel.channel.id,
     resolvedChannel.modelId,
-    { sdkTimeoutMs: RUNTIME_AGENT_CHECK_TIMEOUT_MS },
   );
   if (compatibility.success === false) {
     return { error: compatibility.error, status: 400 as const };
@@ -1339,7 +1337,6 @@ agent.post("/sessions/:id/run", async (c) => {
     user.id,
     resolvedChannel.channel.id,
     resolvedChannel.modelId,
-    { sdkTimeoutMs: RUNTIME_AGENT_CHECK_TIMEOUT_MS },
   );
   if (compatibility.success === false) {
     return c.text(compatibility.error, 400);

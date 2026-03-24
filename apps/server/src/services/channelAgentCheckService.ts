@@ -3,7 +3,7 @@ import { runClaudeAgentSdk } from "./agentSdk";
 
 export type AgentCheckResult = { success: true } | { success: false; error: string };
 
-const AGENT_SDK_PROBE_TIMEOUT_MS = 12_000;
+const AGENT_SDK_PROBE_TIMEOUT_MS = 20_000;
 const AGENT_SDK_PROBE_PROMPT = "Do not use any tools. Reply with exactly OK.";
 const AGENT_SDK_INCOMPATIBLE_ERROR =
   "该渠道支持普通聊天接口，但不兼容 Claude Agent SDK，无法用于 Agent 模式。它仍可用于普通聊天。";

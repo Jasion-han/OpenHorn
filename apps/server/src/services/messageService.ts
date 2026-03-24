@@ -20,8 +20,6 @@ import { getSettingValues } from "./settingsService";
 
 const GLOBAL_SYSTEM_PROMPT_KEY = "chat.systemPrompt";
 const AGENT_RECENT_CONTEXT_LIMIT = 8;
-const RUNTIME_AGENT_CHECK_TIMEOUT_MS = 12_000;
-
 export interface SendMessageInput {
   conversationId: string;
   content: string;
@@ -327,7 +325,6 @@ async function streamConversationAgentReply(params: {
     params.userId,
     resolvedChannel.channel.id,
     effectiveModelId || resolvedChannel.modelId,
-    { sdkTimeoutMs: RUNTIME_AGENT_CHECK_TIMEOUT_MS },
   );
   if (compatibility.success === false) {
     return failImmediately(compatibility.error);

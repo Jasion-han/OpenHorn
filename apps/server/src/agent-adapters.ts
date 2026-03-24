@@ -51,9 +51,11 @@ function sleep(ms: number) {
 }
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 45_000;
-const DEFAULT_STREAM_FIRST_TOKEN_TIMEOUT_MS = 10_000;
-const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 25_000;
-const DEFAULT_STREAM_TOTAL_TIMEOUT_MS = 60_000;
+// Real-world providers, compatible gateways, and multimodal requests can all
+// take noticeably longer before the first streamed chunk arrives.
+const DEFAULT_STREAM_FIRST_TOKEN_TIMEOUT_MS = 30_000;
+const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 60_000;
+const DEFAULT_STREAM_TOTAL_TIMEOUT_MS = 180_000;
 
 function shouldRetryStatus(status: number) {
   return status === 429 || status === 502 || status === 503 || status === 504;
