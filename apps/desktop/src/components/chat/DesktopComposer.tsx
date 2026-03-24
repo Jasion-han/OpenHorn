@@ -1,4 +1,4 @@
-import { Bot, ChevronDown, CornerDownLeft, MessageSquare, Square } from "lucide-react";
+import { Bot, ChevronDown, CornerDownLeft, Globe, MessageSquare, Square } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Button, Textarea, cn } from "ui";
 import { useChatStore } from "../../stores/chatStore";
@@ -12,6 +12,8 @@ export function DesktopComposer({
   modelLabel,
   modelTone = "normal",
   onOpenModelPicker,
+  forceWebSearch,
+  onToggleWebSearch,
 }: {
   disabled: boolean;
   onSubmit: (content: string) => Promise<void>;
@@ -19,6 +21,8 @@ export function DesktopComposer({
   modelLabel?: string | null;
   modelTone?: "normal" | "warning";
   onOpenModelPicker?: () => void;
+  forceWebSearch: boolean;
+  onToggleWebSearch: () => void;
 }) {
   const composerMode = useChatStore((state) => state.composerMode);
   const setComposerMode = useChatStore((state) => state.setComposerMode);
@@ -152,6 +156,24 @@ export function DesktopComposer({
               {modelProvider ? <DesktopProviderLogo provider={modelProvider} className="size-4" /> : null}
               <span className="max-w-[220px] truncate">{modelLabel || "选择模型"}</span>
               <ChevronDown className="size-3" />
+            </button>
+
+            <button
+              type="button"
+              onClick={onToggleWebSearch}
+              disabled={disabled || isStreaming}
+              className={cn(
+                "flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors",
+                forceWebSearch
+                  ? "bg-emerald-400/20 text-emerald-500 hover:bg-emerald-400/30"
+                  : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                (disabled || isStreaming) && "pointer-events-none opacity-60",
+              )}
+              aria-label="Allow web search"
+              title={forceWebSearch ? "需要最新信息时允许联网：已开启" : "需要最新信息时允许联网：已关闭"}
+            >
+              <Globe className="size-3.5" />
+              <span>允许联网</span>
             </button>
 
             <div className="inline-flex min-w-0 items-center gap-2 text-xs text-muted-foreground">

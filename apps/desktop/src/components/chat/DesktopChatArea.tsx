@@ -282,6 +282,7 @@ export function DesktopChatArea() {
   const [editingContent, setEditingContent] = useState("");
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const effectiveModel = getEffectiveModelForConversation(channels, currentConversation);
+  const forceWebSearch = currentConversation?.forceWebSearch ?? true;
 
   const getEditableAssistantForUser = (messageId: string) => {
     const messageIndex = messages.findIndex((message) => message.id === messageId);
@@ -462,6 +463,17 @@ export function DesktopChatArea() {
         assistantMessage.id,
         error instanceof Error ? error.message : "Edit message failed",
       );
+    }
+  };
+
+  const handleToggleWebSearch = async () => {
+    if (!currentConversation) return;
+    try {
+      await useChatStore
+        .getState()
+        .updateConversation(currentConversation.id, { forceWebSearch: !forceWebSearch });
+    } catch {
+      // updateConversation already restores previous state and records the error
     }
   };
 
@@ -665,6 +677,8 @@ export function DesktopChatArea() {
         }
         modelTone={effectiveModel.ok ? "normal" : "warning"}
         onOpenModelPicker={currentConversation ? () => setModelPickerOpen(true) : undefined}
+        forceWebSearch={forceWebSearch}
+        onToggleWebSearch={() => void handleToggleWebSearch()}
       />
 
       {currentConversation && modelPickerOpen && (
