@@ -547,7 +547,7 @@ export function DesktopChatArea() {
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="flex h-full min-h-0 min-w-0 flex-col overflow-x-hidden">
       <DesktopChatHeader conversation={currentConversation} />
 
       <div className="min-h-0 flex-1">
@@ -557,151 +557,157 @@ export function DesktopChatArea() {
           </div>
         ) : (
           <ScrollArea className="h-full">
-            <div className="flex min-h-full flex-col gap-2 px-4 py-4">
-
-              {messages.map((message) => (
-                <div
-                  key={message.id}
-                  className={cn(
-                    "group flex min-w-0 flex-col",
-                    message.role === "assistant" ? "w-full items-start self-start" : "items-end self-end",
-                  )}
-                  style={{
-                    maxWidth:
-                      message.role === "assistant" ? ASSISTANT_BUBBLE_WIDTH : USER_BUBBLE_MAX_WIDTH,
-                  }}
-                >
-                  {(() => {
-                    const isAssistant = message.role === "assistant";
-                    const label = message.mode === "agent" ? "Agent" : "Chat";
-                    const badgeIcon =
-                      message.mode === "agent" ? <Bot size={12} /> : <MessageSquare size={12} />;
-                    const displayContent = isAssistant
-                      ? sanitizeDisplayContent(message.content, message.citations)
-                      : message.content;
-                    const hasAssistantText = isAssistant && Boolean((displayContent || "").trim());
-                    const isAssistantPlaceholder = isAssistant && isStreaming && !hasAssistantText;
-
-                    return (
+            <div className="flex min-w-0 w-full flex-col px-4 py-4">
+              <div className="mt-auto flex min-w-0 flex-col gap-2 pb-2">
+                {messages.map((message) => (
                   <div
+                    key={message.id}
                     className={cn(
-                      isAssistant ? "block w-full min-w-0 max-w-full" : "inline-block min-w-0 max-w-full",
-                      isAssistantPlaceholder ? "border-0 bg-transparent px-0 py-0" : "rounded-2xl px-4 py-2",
-                      isAssistant
-                        ? isAssistantPlaceholder
-                          ? ""
-                          : "border border-border/50 bg-background/60"
-                        : "border border-border/50 bg-foreground/[0.06]",
+                      "group flex min-w-0 flex-col",
+                      message.role === "assistant" ? "w-full items-start self-start" : "items-end self-end",
                     )}
+                    style={{
+                      maxWidth:
+                        message.role === "assistant" ? ASSISTANT_BUBBLE_WIDTH : USER_BUBBLE_MAX_WIDTH,
+                    }}
                   >
-                    <div
-                      className={cn(
-                        "mb-1 inline-flex items-center gap-1 text-[11px] font-medium",
-                        isAssistant ? "text-muted-foreground" : "text-foreground/60",
-                      )}
-                    >
-                      {badgeIcon}
-                      <span>{label}</span>
-                    </div>
+                    {(() => {
+                      const isAssistant = message.role === "assistant";
+                      const label = message.mode === "agent" ? "Agent" : "Chat";
+                      const badgeIcon =
+                        message.mode === "agent" ? <Bot size={12} /> : <MessageSquare size={12} />;
+                      const displayContent = isAssistant
+                        ? sanitizeDisplayContent(message.content, message.citations)
+                        : message.content;
+                      const hasAssistantText = isAssistant && Boolean((displayContent || "").trim());
+                      const isAssistantPlaceholder = isAssistant && isStreaming && !hasAssistantText;
 
-                    {!isAssistant && message.attachmentsMeta && message.attachmentsMeta.length > 0 && (
-                      <DesktopMessageAttachments attachments={message.attachmentsMeta} />
-                    )}
-
-                    {message.role === "assistant" && message.agentRun && <AgentRunPanel run={message.agentRun} />}
-
-                    {isAssistant ? (
-                      <div className={cn("min-w-0 max-w-full", message.agentRun && "mt-3")}>
-                      <LiveStatusBadge
-                        status={message.liveStatus}
-                        route={message.liveRoute}
-                        label={message.liveLabel}
-                      />
+                      return (
                         <div
-                          className="text-sm leading-6"
-                          style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", wordBreak: "break-word", maxWidth: "100%" }}
+                          className={cn(
+                            isAssistant ? "block w-full min-w-0 max-w-full" : "inline-block min-w-0 max-w-full",
+                            isAssistantPlaceholder ? "border-0 bg-transparent px-0 py-0" : "rounded-2xl px-4 py-2",
+                            isAssistant
+                              ? isAssistantPlaceholder
+                                ? ""
+                                : "border border-border/50 bg-background/60"
+                              : "border border-border/50 bg-foreground/[0.06]",
+                          )}
                         >
-                          {hasAssistantText ? (
-                            <DesktopMarkdownMessage content={displayContent} />
-                          ) : isStreaming ? (
-                            <TypingIndicator />
-                          ) : null}
-                        </div>
-                        <DesktopCitationList citations={message.citations} content={displayContent} />
-                      </div>
-                    ) : (
-                      <div className="text-sm leading-6">
-                        {message.content?.trim() ? (
-                          <p
-                            className="text-sm"
-                            style={{
-                              whiteSpace: "pre-wrap",
-                              overflowWrap: "anywhere",
-                              wordBreak: "break-word",
-                              maxWidth: "100%",
-                            }}
+                          <div
+                            className={cn(
+                              "mb-1 inline-flex items-center gap-1 text-[11px] font-medium",
+                              isAssistant ? "text-muted-foreground" : "text-foreground/60",
+                            )}
                           >
-                            {message.content}
-                          </p>
-                        ) : null}
+                            {badgeIcon}
+                            <span>{label}</span>
+                          </div>
+
+                          {!isAssistant && message.attachmentsMeta && message.attachmentsMeta.length > 0 && (
+                            <DesktopMessageAttachments attachments={message.attachmentsMeta} />
+                          )}
+
+                          {message.role === "assistant" && message.agentRun && <AgentRunPanel run={message.agentRun} />}
+
+                          {isAssistant ? (
+                            <div className={cn("min-w-0 max-w-full", message.agentRun && "mt-3")}>
+                              <LiveStatusBadge
+                                status={message.liveStatus}
+                                route={message.liveRoute}
+                                label={message.liveLabel}
+                              />
+                              <div
+                                className="text-sm leading-6"
+                                style={{
+                                  whiteSpace: "pre-wrap",
+                                  overflowWrap: "anywhere",
+                                  wordBreak: "break-word",
+                                  maxWidth: "100%",
+                                }}
+                              >
+                                {hasAssistantText ? (
+                                  <DesktopMarkdownMessage content={displayContent} />
+                                ) : isStreaming ? (
+                                  <TypingIndicator />
+                                ) : null}
+                              </div>
+                              <DesktopCitationList citations={message.citations} content={displayContent} />
+                            </div>
+                          ) : (
+                            <div className="text-sm leading-6">
+                              {message.content?.trim() ? (
+                                <p
+                                  className="text-sm"
+                                  style={{
+                                    whiteSpace: "pre-wrap",
+                                    overflowWrap: "anywhere",
+                                    wordBreak: "break-word",
+                                    maxWidth: "100%",
+                                  }}
+                                >
+                                  {message.content}
+                                </p>
+                              ) : null}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+                    <MessageActionBar
+                      message={message}
+                      canEdit={message.role === "user" && Boolean(getEditableAssistantForUser(message.id))}
+                      canRetry={
+                        message.role === "assistant" &&
+                        !message.id.startsWith("draft-") &&
+                        !isLoading &&
+                        !isStreaming &&
+                        !isUploading &&
+                        Boolean(currentConversation)
+                      }
+                      canDelete={!message.id.startsWith("draft-")}
+                      isStreaming={isStreaming || editingMessageId === message.id}
+                      onEdit={() => handleStartEdit(message)}
+                      onRetry={() => void handleRetryMessage(message.id)}
+                      onDelete={() => void handleDeleteMessage(message.id)}
+                    />
+                    {message.role === "user" && editingMessageId === message.id && (
+                      <div className="mt-1 flex w-full max-w-[72%] self-end flex-col items-end gap-1">
+                        <Textarea
+                          value={editingContent}
+                          onChange={(event) => setEditingContent(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" && !event.shiftKey) {
+                              event.preventDefault();
+                              void handleSaveEdit(message.id);
+                            }
+                            if (event.key === "Escape") {
+                              event.preventDefault();
+                              handleCancelEdit();
+                            }
+                          }}
+                          className="w-full"
+                          rows={3}
+                          autoFocus
+                        />
+                        <div className="flex gap-2">
+                          <Button type="button" size="sm" variant="ghost" onClick={handleCancelEdit}>
+                            取消
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            onClick={() => void handleSaveEdit(message.id)}
+                            disabled={!editingContent.trim() || isStreaming}
+                          >
+                            确认
+                          </Button>
+                        </div>
                       </div>
                     )}
                   </div>
-                    );
-                  })()}
-                  <MessageActionBar
-                    message={message}
-                    canEdit={message.role === "user" && Boolean(getEditableAssistantForUser(message.id))}
-                    canRetry={
-                      message.role === "assistant" &&
-                      !message.id.startsWith("draft-") &&
-                      !isLoading &&
-                      !isStreaming &&
-                      !isUploading &&
-                      Boolean(currentConversation)
-                    }
-                    canDelete={!message.id.startsWith("draft-")}
-                    isStreaming={isStreaming || editingMessageId === message.id}
-                    onEdit={() => handleStartEdit(message)}
-                    onRetry={() => void handleRetryMessage(message.id)}
-                    onDelete={() => void handleDeleteMessage(message.id)}
-                  />
-                  {message.role === "user" && editingMessageId === message.id && (
-                    <div className="mt-1 flex w-full max-w-[72%] self-end flex-col items-end gap-1">
-                      <Textarea
-                        value={editingContent}
-                        onChange={(event) => setEditingContent(event.target.value)}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter" && !event.shiftKey) {
-                            event.preventDefault();
-                            void handleSaveEdit(message.id);
-                          }
-                          if (event.key === "Escape") {
-                            event.preventDefault();
-                            handleCancelEdit();
-                          }
-                        }}
-                        className="w-full"
-                        rows={3}
-                        autoFocus
-                      />
-                      <div className="flex gap-2">
-                        <Button type="button" size="sm" variant="ghost" onClick={handleCancelEdit}>
-                          取消
-                        </Button>
-                        <Button
-                          type="button"
-                          size="sm"
-                          onClick={() => void handleSaveEdit(message.id)}
-                          disabled={!editingContent.trim() || isStreaming}
-                        >
-                          确认
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           </ScrollArea>
         )}

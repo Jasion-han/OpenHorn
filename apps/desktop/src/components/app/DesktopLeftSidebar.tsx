@@ -380,9 +380,7 @@ export function DesktopLeftSidebar() {
             ))}
 
             {filteredConversations.length === 0 && (
-              <div className="rounded-xl border border-dashed border-border/60 px-3 py-6 text-center text-sm text-muted-foreground">
-                暂无会话
-              </div>
+              <p className="py-8 text-center text-xs text-muted-foreground">暂无会话</p>
             )}
           </div>
         </ScrollArea>
