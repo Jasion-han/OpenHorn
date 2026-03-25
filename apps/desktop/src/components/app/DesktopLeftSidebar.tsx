@@ -166,7 +166,6 @@ export function DesktopLeftSidebar() {
 
   const conversations = useChatStore((state) => state.conversations);
   const currentConversation = useChatStore((state) => state.currentConversation);
-  const error = useChatStore((state) => state.error);
   const loadChannels = useChatStore((state) => state.loadChannels);
   const loadConversations = useChatStore((state) => state.loadConversations);
   const createConversation = useChatStore((state) => state.createConversation);
@@ -240,57 +239,56 @@ export function DesktopLeftSidebar() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="border-b border-border/50 px-3 py-2">
-        <div className="flex items-center justify-between gap-3">
-          <div className="min-w-0">
-            <div className="truncate text-sm font-semibold leading-5">OpenHorn</div>
-            <div className="mt-0.5 text-[11px] text-muted-foreground">Local</div>
+      <div className="flex items-center justify-between border-b border-border/50 px-3 py-2">
+        <div className="min-w-0">
+          <div className="truncate text-sm font-semibold leading-5">OpenHorn</div>
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] text-muted-foreground">Local</span>
           </div>
-
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                className="flex w-auto items-center gap-1 px-2 titlebar-no-drag"
-              >
-                <div className="flex h-7 w-7 items-center justify-center rounded-full bg-muted text-xs font-semibold">
-                  {user?.username?.slice(0, 1)?.toUpperCase() || "U"}
-                </div>
-                <ChevronDown size={14} />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-44">
-              <DropdownMenuLabel>{user?.username || "User"}</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                className="text-destructive focus:text-destructive"
-                onClick={() => void handleLogout()}
-              >
-                <LogOut size={16} />
-                退出登录
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
         </div>
+
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="flex w-auto items-center gap-1 px-2 titlebar-no-drag"
+            >
+              <div className="flex h-7 w-7 items-center justify-center rounded-full bg-muted text-xs font-semibold">
+                {user?.username?.slice(0, 1)?.toUpperCase() || "U"}
+              </div>
+              <ChevronDown size={14} />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-44">
+            <DropdownMenuLabel>{user?.username || "User"}</DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              className="text-destructive focus:text-destructive"
+              onClick={() => void handleLogout()}
+            >
+              <LogOut size={16} />
+              退出登录
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
-      <div className="flex flex-col gap-2 p-2">
-        <Button onClick={() => void handleCreateConversation()} disabled={creating}>
-          <Plus size={16} />
-          新会话
-        </Button>
+      <div className="min-h-0 flex-1 overflow-hidden">
+        <div className="flex h-full flex-col gap-2 p-2">
+          <Button className="w-full" onClick={() => void handleCreateConversation()} disabled={creating}>
+            <Plus size={16} />
+            新会话
+          </Button>
 
-        <Input
-          placeholder="搜索会话..."
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-        />
-      </div>
+          <Input
+            placeholder="搜索会话..."
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
 
-      <div className="min-h-0 flex-1 overflow-hidden px-2 pb-2">
-        <ScrollArea className="h-full">
-          <div className="flex flex-col gap-1 pr-3">
+          <ScrollArea className="flex-1">
+            <div className="flex flex-col gap-1 py-1">
             {pinned.length > 0 && (
               <div>
                 <div className="flex items-center justify-between px-2 py-1">
@@ -324,7 +322,7 @@ export function DesktopLeftSidebar() {
                       <ConversationRow
                         key={`pinned-${conversation.id}`}
                         conversation={conversation}
-                        isActive={currentConversation?.id === conversation.id && activeView === "chat"}
+                        isActive={currentConversation?.id === conversation.id}
                         onSelect={() => {
                           setActiveView("chat");
                           void selectConversation(conversation.id);
@@ -365,7 +363,7 @@ export function DesktopLeftSidebar() {
                     <ConversationRow
                       key={conversation.id}
                       conversation={conversation}
-                      isActive={currentConversation?.id === conversation.id && activeView === "chat"}
+                      isActive={currentConversation?.id === conversation.id}
                       onSelect={() => {
                         setActiveView("chat");
                         void selectConversation(conversation.id);
@@ -386,17 +384,10 @@ export function DesktopLeftSidebar() {
             {filteredConversations.length === 0 && (
               <p className="py-8 text-center text-xs text-muted-foreground">暂无会话</p>
             )}
-          </div>
-        </ScrollArea>
-      </div>
-
-      {error && (
-        <div className="px-3 pb-3">
-          <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-            {error}
-          </div>
+            </div>
+          </ScrollArea>
         </div>
-      )}
+      </div>
 
       <div className="border-t border-border/50 px-2 pt-3 pb-5">
         <div className="flex h-[56px] items-center justify-center">
