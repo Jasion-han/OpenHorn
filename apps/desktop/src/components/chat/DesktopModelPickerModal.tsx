@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, Search } from "lucide-react";
+import { ChevronDown, ChevronRight, RefreshCw, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import {
   Badge,
@@ -12,9 +12,13 @@ import {
   ScrollArea,
   cn,
 } from "ui";
+import { createServerApi } from "../../lib/serverApi";
+import { notifyError, notifySuccess, notifyWarning } from "../../lib/notify";
 import type { Channel } from "../../types/chat";
 import { useChatStore } from "../../stores/chatStore";
 import { DesktopProviderLogo } from "./DesktopProviderLogo";
+
+const api = createServerApi();
 
 type ModelGroup = {
   channel: Channel;
@@ -112,6 +116,70 @@ export function DesktopModelPickerModal(props: {
     });
   };
 
+  const handleSyncModels = async () => {
+    setBusy(true);
+    try {
+      const enabled = channels.filter((channel) => channel.enabled);
+      const total = enabled.length;
+      if (total === 0) {
+        notifyWarning("无需同步", "当前没有启用的渠道。");
+        return;
+      }
+
+      const results = await Promise.allSettled(
+        enabled.map(async (channel) => ({
+          channel,
+          result: await api.channels.fetchModels(channel.id),
+        })),
+      );
+
+      let successCount = 0;
+      let failCount = 0;
+      let warnCount = 0;
+
+      for (const item of results) {
+        if (item.status === "rejected") {
+          failCount += 1;
+          continue;
+        }
+        if (!item.value.result.success) {
+          failCount += 1;
+          continue;
+        }
+        successCount += 1;
+        if (item.value.result.error) {
+          warnCount += 1;
+        }
+      }
+
+      await loadChannels();
+
+      if (failCount === 0 && warnCount === 0) {
+        notifySuccess(`同步完成（${successCount}/${total}）`, "已更新模型列表");
+        return;
+      }
+
+      if (failCount === 0 && warnCount > 0) {
+        notifyWarning(`同步完成（${successCount}/${total}）`, `提示 ${warnCount} 个渠道仍有待处理项。`);
+        return;
+      }
+
+      if (successCount > 0) {
+        notifyWarning(
+          `同步部分完成（${successCount}/${total}）`,
+          `失败 ${failCount} 个渠道${warnCount > 0 ? ` · 提示 ${warnCount} 个` : ""}`,
+        );
+        return;
+      }
+
+      notifyError(`同步失败（0/${total}）`, `失败 ${failCount} 个渠道。`);
+    } catch (error) {
+      notifyError("同步失败", error instanceof Error ? error.message : "无法同步模型列表");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const handleSelect = async (channelId: string, modelId: string) => {
     setBusy(true);
     try {
@@ -145,17 +213,23 @@ export function DesktopModelPickerModal(props: {
             </div>
           )}
 
-          <div className="relative flex-1">
-            <Search
-              size={16}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-            />
-            <Input
-              placeholder="搜索渠道或模型..."
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              className="pl-9"
-            />
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <Search
+                size={16}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+              />
+              <Input
+                placeholder="搜索渠道或模型..."
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                className="pl-9"
+              />
+            </div>
+            <Button variant="outline" onClick={() => void handleSyncModels()} disabled={busy}>
+              <RefreshCw size={16} className={busy ? "animate-spin" : ""} />
+              同步
+            </Button>
           </div>
 
           <ScrollArea className="h-[420px]">
@@ -199,7 +273,9 @@ export function DesktopModelPickerModal(props: {
                     {isExpanded && (
                       <div className="mt-1.5 flex flex-col gap-1.5 pl-4">
                         {models.length === 0 && (
-                          <p className="px-1 text-sm text-muted-foreground">当前渠道还没有可用模型。</p>
+                          <p className="px-1 text-sm text-muted-foreground">
+                            暂无模型，请先点击上方「同步」获取模型列表。
+                          </p>
                         )}
 
                         {models.map((model) => {
