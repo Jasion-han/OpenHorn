@@ -9,6 +9,7 @@ import { readSseStream } from "../../lib/sse";
 import { useChatStore } from "../../stores/chatStore";
 import type { ApiAgentRun, Message } from "../../types/chat";
 import { DesktopCitationList } from "./DesktopCitationList";
+import { DesktopAgentTaskCard } from "./DesktopAgentTaskCard";
 import { DesktopChatHeader } from "./DesktopChatHeader";
 import { DesktopComposer } from "./DesktopComposer";
 import { DesktopMarkdownMessage } from "./DesktopMarkdownMessage";
@@ -589,6 +590,13 @@ export function DesktopChatArea() {
                           : message.content;
                         const hasAssistantText = isAssistant && Boolean((displayContent || "").trim());
                         const isAssistantPlaceholder = isAssistant && isStreaming && !hasAssistantText;
+                        const processPanel = isAssistant ? (
+                          message.agentRun?.taskId ? (
+                            <DesktopAgentTaskCard messageId={message.id} taskId={message.agentRun.taskId} />
+                          ) : (
+                            <AgentRunPanel run={message.agentRun} />
+                          )
+                        ) : null;
 
                         return (
                           <div
@@ -622,12 +630,10 @@ export function DesktopChatArea() {
                                 <DesktopMessageAttachments attachments={message.attachmentsMeta} />
                               )}
 
-                            {message.role === "assistant" && message.agentRun && (
-                              <AgentRunPanel run={message.agentRun} />
-                            )}
+                            {processPanel}
 
                             {isAssistant ? (
-                              <div className={cn("min-w-0 max-w-full", message.agentRun && "mt-3")}>
+                              <div className={cn("min-w-0 max-w-full", processPanel && "mt-3")}>
                                 <LiveStatusBadge
                                   status={message.liveStatus}
                                   route={message.liveRoute}

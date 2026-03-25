@@ -1,12 +1,14 @@
 import type { ChatStreamEvent } from "../types/chat";
 
-export function parseSseLines(buffer: string): {
-  events: ChatStreamEvent[];
+export type SseEvent = { type?: string; [key: string]: unknown };
+
+export function parseSseLines<T extends SseEvent = ChatStreamEvent>(buffer: string): {
+  events: T[];
   rest: string;
 } {
   const lines = buffer.split("\n");
   const rest = lines.pop() || "";
-  const events: ChatStreamEvent[] = [];
+  const events: T[] = [];
 
   for (const line of lines) {
     if (!line.startsWith("data:")) continue;
@@ -14,7 +16,7 @@ export function parseSseLines(buffer: string): {
     if (!payload.trim()) continue;
 
     try {
-      events.push(JSON.parse(payload) as ChatStreamEvent);
+      events.push(JSON.parse(payload) as T);
     } catch {
       continue;
     }
@@ -26,6 +28,13 @@ export function parseSseLines(buffer: string): {
 export async function readSseStream(
   response: Response,
   onEvent: (event: ChatStreamEvent) => void,
+) {
+  return readTypedSseStream(response, onEvent);
+}
+
+export async function readTypedSseStream<T extends SseEvent>(
+  response: Response,
+  onEvent: (event: T) => void,
 ) {
   const reader = response.body?.getReader();
   if (!reader) {
@@ -40,7 +49,7 @@ export async function readSseStream(
     if (done) break;
 
     buffer += decoder.decode(value, { stream: true });
-    const { events, rest } = parseSseLines(buffer);
+    const { events, rest } = parseSseLines<T>(buffer);
     buffer = rest;
 
     for (const event of events) {
@@ -51,7 +60,7 @@ export async function readSseStream(
   buffer += decoder.decode();
   if (!buffer.trim()) return;
 
-  const { events } = parseSseLines(`${buffer}\n`);
+  const { events } = parseSseLines<T>(`${buffer}\n`);
   for (const event of events) {
     onEvent(event);
   }

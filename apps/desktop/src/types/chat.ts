@@ -117,6 +117,156 @@ export interface ApiMessage {
   createdAt: string;
 }
 
+export type ApiAgentTaskStatus =
+  | "draft"
+  | "planning"
+  | "awaiting_approval"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export type ApiAgentRunPhase = "planning" | "execution";
+export type ApiAgentTaskComplexity = "light" | "standard" | "deep";
+export type ApiAgentTaskUxMode = "direct" | "compact" | "full";
+export type ApiAgentRunStatus =
+  | "pending"
+  | "running"
+  | "awaiting_approval"
+  | "completed"
+  | "failed"
+  | "cancelled";
+export type ApiAgentApprovalStatus = "pending" | "approved" | "rejected";
+export type ApiAgentApprovalType = "plan_approval" | "tool_approval";
+export type ApiAgentArtifactType =
+  | "final_result"
+  | "execution_summary"
+  | "structured_result"
+  | "source_bundle";
+export type ApiAgentTaskEventType =
+  | "task_status"
+  | "plan_step"
+  | "execution_event"
+  | "approval_requested"
+  | "approval_resolved"
+  | "artifact_created"
+  | "final_result"
+  | "error"
+  | "done";
+
+export interface ApiAgentTaskAttachment {
+  id?: string;
+  fileName: string;
+  fileType?: string;
+  fileSize?: number;
+}
+
+export interface ApiAgentTaskInsight {
+  highlight: "tool_approval" | "plan_approval" | "execution_failed" | "final_result" | null;
+  summary: string | null;
+  previewKind: "error" | "result" | "summary" | null;
+  previewText: string | null;
+  runCount: number;
+  latestRunStatus: ApiAgentRunStatus | null;
+  latestRunPhase: ApiAgentRunPhase | null;
+  latestApprovalType: ApiAgentApprovalType | null;
+  latestApprovalStatus: ApiAgentApprovalStatus | null;
+  hasFinalResult: boolean;
+}
+
+export interface ApiAgentTask {
+  id: string;
+  userId: string;
+  conversationId: string | null;
+  channelId: string | null;
+  modelId: string | null;
+  title: string;
+  goal: string;
+  attachments: ApiAgentTaskAttachment[];
+  complexity: ApiAgentTaskComplexity;
+  uxMode: ApiAgentTaskUxMode;
+  requiresPlanApproval: boolean;
+  autoStart: boolean;
+  status: ApiAgentTaskStatus;
+  insight: ApiAgentTaskInsight | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ApiAgentTaskRun {
+  id: string;
+  taskId: string;
+  phase: ApiAgentRunPhase;
+  status: ApiAgentRunStatus;
+  summary: string | null;
+  error: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ApiAgentPlanStep {
+  id: string;
+  taskId: string;
+  runId: string;
+  orderIndex: number;
+  title: string;
+  description: string | null;
+  status: "pending" | "ready" | "running" | "completed" | "failed";
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ApiAgentApproval {
+  id: string;
+  taskId: string;
+  runId: string;
+  type: ApiAgentApprovalType;
+  status: ApiAgentApprovalStatus;
+  title: string;
+  description: string | null;
+  payload: unknown;
+  response: unknown;
+  requestedAt: string;
+  respondedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ApiAgentArtifact {
+  id: string;
+  taskId: string;
+  runId: string;
+  type: ApiAgentArtifactType;
+  title: string;
+  content: string;
+  metadata: unknown;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ApiAgentTaskEvent {
+  id: string;
+  taskId: string;
+  runId: string;
+  type: ApiAgentTaskEventType;
+  content: string | null;
+  toolName: string | null;
+  toolInput: unknown;
+  metadata: unknown;
+  createdAt: string;
+}
+
+export interface ApiAgentTaskDetail {
+  task: ApiAgentTask;
+  runs: ApiAgentTaskRun[];
+  planSteps: ApiAgentPlanStep[];
+  approvals: ApiAgentApproval[];
+  artifacts: ApiAgentArtifact[];
+  events: ApiAgentTaskEvent[];
+}
+
 export type ApiSettingsMap = Record<string, string>;
 
 export interface ChannelModel {

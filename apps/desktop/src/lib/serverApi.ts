@@ -1,7 +1,9 @@
 import type {
+  ApiAgentApprovalStatus,
   ApiChannel,
   ApiChannelModel,
   ApiConversation,
+  ApiAgentTaskDetail,
   ApiMessage,
   ApiSettingsMap,
   CreateConversationInput,
@@ -84,6 +86,21 @@ export interface ServerApi {
   };
   settings: {
     get: (keys: string[]) => Promise<{ settings: ApiSettingsMap }>;
+  };
+  agentTasks: {
+    get: (id: string) => Promise<ApiAgentTaskDetail>;
+    plan: (id: string) => Promise<ApiAgentTaskDetail>;
+    execute: (id: string, options?: { signal?: AbortSignal }) => Promise<Response>;
+    retry: (id: string, options?: { signal?: AbortSignal }) => Promise<Response>;
+    continue: (id: string, options?: { signal?: AbortSignal }) => Promise<Response>;
+    cancel: (id: string) => Promise<ApiAgentTaskDetail>;
+    respondApproval: (
+      id: string,
+      data: {
+        status: Exclude<ApiAgentApprovalStatus, "pending">;
+        response?: unknown;
+      },
+    ) => Promise<ApiAgentTaskDetail>;
   };
 }
 
@@ -371,6 +388,41 @@ export function createServerApi(options?: { baseUrl?: string; fetch?: FetchLike 
         const query = encodeURIComponent((keys || []).join(","));
         return fetchJson(fetchImpl, baseUrl, `/settings?keys=${query}`);
       },
+    },
+
+    agentTasks: {
+      get: (id) => fetchJson(fetchImpl, baseUrl, `/agent/tasks/${encodeURIComponent(id)}`),
+      plan: (id) =>
+        fetchJson(fetchImpl, baseUrl, `/agent/tasks/${encodeURIComponent(id)}/plan`, {
+          method: "POST",
+        }),
+      execute: (id, options) =>
+        fetchImpl(`${baseUrl}/agent/tasks/${encodeURIComponent(id)}/execute`, {
+          method: "POST",
+          credentials: "include",
+          signal: options?.signal,
+        }),
+      retry: (id, options) =>
+        fetchImpl(`${baseUrl}/agent/tasks/${encodeURIComponent(id)}/retry`, {
+          method: "POST",
+          credentials: "include",
+          signal: options?.signal,
+        }),
+      continue: (id, options) =>
+        fetchImpl(`${baseUrl}/agent/tasks/${encodeURIComponent(id)}/continue`, {
+          method: "POST",
+          credentials: "include",
+          signal: options?.signal,
+        }),
+      cancel: (id) =>
+        fetchJson(fetchImpl, baseUrl, `/agent/tasks/${encodeURIComponent(id)}/cancel`, {
+          method: "POST",
+        }),
+      respondApproval: (id, data) =>
+        fetchJson(fetchImpl, baseUrl, `/agent/approvals/${encodeURIComponent(id)}/respond`, {
+          method: "POST",
+          body: JSON.stringify(data),
+        }),
     },
   };
 }

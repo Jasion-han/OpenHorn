@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { createChatAdapter } from "./chatAdapter";
 import type { ServerApi } from "./serverApi";
-import type { ApiChannel, ApiConversation, ApiMessage } from "../types/chat";
+import type { ApiAgentTaskDetail, ApiChannel, ApiConversation, ApiMessage } from "../types/chat";
 
 function createStubServerApi() {
   let streamedBody: unknown;
@@ -11,6 +11,31 @@ function createStubServerApi() {
   let regeneratedPayload: unknown;
   let editedMessageId: string | null = null;
   let editedContent: string | null = null;
+  const emptyTaskDetail: ApiAgentTaskDetail = {
+    task: {
+      id: "task-1",
+      userId: "user-1",
+      conversationId: "conv-1",
+      channelId: "channel-1",
+      modelId: "claude-3-7-sonnet",
+      title: "Agent task",
+      goal: "Do work",
+      attachments: [],
+      complexity: "standard",
+      uxMode: "full",
+      requiresPlanApproval: false,
+      autoStart: false,
+      status: "draft",
+      insight: null,
+      createdAt: "2026-03-22T10:00:00.000Z",
+      updatedAt: "2026-03-22T10:00:00.000Z",
+    },
+    runs: [],
+    planSteps: [],
+    approvals: [],
+    artifacts: [],
+    events: [],
+  };
 
   const api: ServerApi = {
     auth: {
@@ -236,6 +261,15 @@ function createStubServerApi() {
           desktop_theme: "system",
         },
       }),
+    },
+    agentTasks: {
+      get: async () => emptyTaskDetail,
+      plan: async () => emptyTaskDetail,
+      execute: async () => new Response("ok", { status: 200 }),
+      retry: async () => new Response("ok", { status: 200 }),
+      continue: async () => new Response("ok", { status: 200 }),
+      cancel: async () => emptyTaskDetail,
+      respondApproval: async () => emptyTaskDetail,
     },
   };
 
