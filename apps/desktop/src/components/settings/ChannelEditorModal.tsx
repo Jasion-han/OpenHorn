@@ -1,4 +1,4 @@
-import { Plus, Search } from "lucide-react";
+import { Plus, Search, Wand2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import {
   Badge,
@@ -7,7 +7,6 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
   Input,
@@ -262,16 +261,16 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
     setBaseUrl(preset.baseUrl);
   };
 
-  const resolvedProtocol = inferProtocolFromProvider(
-    provider,
-    baseUrl,
-    activeChannel?.protocol || "openai",
-  );
   const suggestedBaseUrl = getDefaultBaseUrlForProvider(
     provider,
     baseUrl,
     activeChannel?.protocol || "openai",
   );
+  const canSubmitCreate =
+    Boolean(normalizeCompareText(name)) &&
+    Boolean(normalizeCompareText(apiKey)) &&
+    apiKey.trim() !== API_KEY_MASK;
+  const canSubmitEdit = Boolean(activeChannel?.id) && Boolean(normalizeCompareText(name));
 
   const handleSubmit = async () => {
     if (saving) return;
@@ -385,7 +384,7 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
 
   return (
     <Dialog open={opened} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
-      <DialogContent className="flex h-[min(76vh,820px)] max-w-5xl flex-col p-0">
+      <DialogContent className="flex h-[min(72vh,760px)] max-w-4xl flex-col p-0">
         <DialogHeader className="px-4 pt-4 pb-0">
           <DialogTitle>渠道管理</DialogTitle>
           <DialogDescription className="sr-only">
@@ -394,8 +393,8 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
         </DialogHeader>
 
         <div className="flex min-h-0 flex-1 gap-3 p-4">
-          <div className="flex w-[36%] min-w-[240px] flex-col gap-2 rounded-xl border border-border/60 bg-muted/10 p-3">
-            <div className="flex items-center justify-between gap-2">
+          <div className="flex w-[35%] min-w-[220px] flex-col gap-2 rounded-lg border p-3">
+            <div className="flex items-center justify-between">
               <span className="text-sm font-semibold">渠道</span>
               <Button size="sm" variant="outline" onClick={openCreate}>
                 <Plus size={14} /> 新建
@@ -415,8 +414,8 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
               />
             </div>
 
-            <ScrollArea className="min-h-0 flex-1">
-              <div className="flex flex-col gap-1.5 pr-2">
+            <ScrollArea className="flex-1">
+              <div className="flex flex-col gap-1 pr-2">
                 {filteredChannels.map((channel) => {
                   const selected = channel.id === activeKey;
                   return (
@@ -425,30 +424,29 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
                       type="button"
                       onClick={() => openEdit(channel.id)}
                       className={cn(
-                        "rounded-lg border px-3 py-2 text-left transition-colors",
-                        selected
-                          ? "border-primary bg-accent"
-                          : "border-border/60 hover:bg-accent/50",
-                        !channel.enabled && "opacity-75",
+                        "w-full rounded-md border px-3 py-2 text-left transition-colors",
+                        selected ? "border-primary bg-accent" : "hover:bg-accent/50",
+                        !channel.enabled && "opacity-70",
                       )}
                     >
-                      <div className="flex items-center gap-2">
-                        <DesktopProviderLogo provider={channel.provider} />
-                        <p className="min-w-0 flex-1 truncate text-sm font-semibold">{channel.name}</p>
-                      </div>
-                      <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                        <Badge variant="secondary" className="px-1.5 py-0 text-[11px]">
-                          {channel.provider}
+                      <p className="truncate text-sm font-semibold">{channel.name || "未命名渠道"}</p>
+                      <div className="mt-0.5 flex items-center gap-1">
+                        <Badge
+                          variant="secondary"
+                          className="gap-1 px-1 py-0 text-xs"
+                          title={channel.provider}
+                        >
+                          <DesktopProviderLogo provider={channel.provider} className="size-4" />
+                          <span className="sr-only">{channel.provider}</span>
                         </Badge>
-                        {channel.isDefault && <Badge className="px-1.5 py-0 text-[11px]">默认</Badge>}
-                        {!channel.enabled && (
-                          <Badge variant="outline" className="px-1.5 py-0 text-[11px]">
-                            已禁用
+                        {channel.isDefault && (
+                          <Badge variant="outline" className="px-1 py-0 text-xs">
+                            默认
                           </Badge>
                         )}
-                        {channel.hasApiKey && (
-                          <Badge variant="outline" className="px-1.5 py-0 text-[11px]">
-                            已配置 Key
+                        {!channel.enabled && (
+                          <Badge variant="secondary" className="px-1 py-0 text-xs">
+                            已禁用
                           </Badge>
                         )}
                       </div>
@@ -457,122 +455,153 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
                 })}
 
                 {filteredChannels.length === 0 && (
-                  <div className="rounded-lg border border-dashed border-border/60 px-3 py-6 text-center text-sm text-muted-foreground">
-                    没有匹配的渠道
-                  </div>
+                  <p className="py-4 text-center text-sm text-muted-foreground">没有匹配的渠道</p>
                 )}
               </div>
             </ScrollArea>
           </div>
 
-          <div className="flex min-w-0 flex-1 flex-col gap-4 rounded-xl border border-border/60 bg-background p-4">
-            <div className="space-y-2">
-              <div className="flex items-center justify-between gap-2">
-                <Label htmlFor="channel-name">渠道名称</Label>
-                {!isCreate && activeChannel?.isDefault && <Badge>当前默认渠道</Badge>}
-              </div>
-              <Input
-                id="channel-name"
-                placeholder="例如：Anthropic 官方 / Relay A"
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="channel-provider">Provider</Label>
-              <Input
-                id="channel-provider"
-                placeholder="例如：openai / anthropic / google"
-                value={provider}
-                onChange={(event) => setProvider(event.target.value)}
-              />
-              <p className="text-xs leading-5 text-muted-foreground">
-                Provider 表示该渠道兼容哪类接口。若是中转服务，渠道名称写真实来源，Provider
-                填兼容类型即可。
-              </p>
-              <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-                当前将按 <span className="font-medium text-foreground">{resolvedProtocol}</span>{" "}
-                兼容链路处理请求。
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {COMMON_PROVIDER_PRESETS.map((preset) => (
-                  <Button
-                    key={preset.value}
-                    type="button"
-                    size="sm"
-                    variant={provider.trim().toLowerCase() === preset.value ? "default" : "outline"}
-                    onClick={() => applyPreset(preset.value)}
-                  >
-                    {preset.label}
-                  </Button>
-                ))}
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="channel-base-url">Base URL</Label>
-              <Input
-                id="channel-base-url"
-                placeholder="留空时将按当前 Provider 默认值处理"
-                value={baseUrl}
-                onChange={(event) => setBaseUrl(event.target.value)}
-              />
-              <p className="text-xs text-muted-foreground">
-                当前 Provider 默认地址：{suggestedBaseUrl}
-              </p>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="channel-api-key">API Key</Label>
-              <Input
-                id="channel-api-key"
-                type="password"
-                placeholder={isCreate ? "sk-..." : "留空表示不修改"}
-                value={apiKey}
-                onChange={(event) => setApiKey(event.target.value)}
-              />
-            </div>
-
-            <label className="flex items-center gap-3 rounded-lg border border-border/60 px-3 py-2">
-              <Checkbox
-                checked={enabled}
-                onCheckedChange={(value) => setEnabled(Boolean(value))}
-              />
-              <div className="space-y-0.5">
-                <p className="text-sm font-medium">启用渠道</p>
+          <div className="flex min-w-0 flex-1 flex-col rounded-lg border p-3">
+            <div className="mb-3 flex items-start justify-between">
+              <div className="min-w-0">
+                <p className="truncate font-semibold">
+                  {isCreate ? "新建渠道" : activeChannel?.name || "编辑渠道"}
+                </p>
                 <p className="text-xs text-muted-foreground">
-                  禁用后该渠道不会出现在模型选择和默认配置中。
+                  provider 用于标识该渠道兼容的接口类型，保存后会自动同步模型列表。
                 </p>
               </div>
-            </label>
+              {!isCreate && (
+                <div className="flex shrink-0 items-center gap-1.5">
+                  {activeChannel?.isDefault && <Badge variant="outline">默认</Badge>}
+                  {activeChannel && !activeChannel.enabled && <Badge variant="secondary">已禁用</Badge>}
+                </div>
+              )}
+            </div>
 
-            {formNotice && (
-              <div
-                className={cn(
-                  "rounded-lg border px-3 py-2",
-                  formNotice.kind === "error"
-                    ? "border-red-200 bg-red-50 text-red-700 dark:border-red-900/70 dark:bg-red-950/40 dark:text-red-200"
-                    : formNotice.kind === "warn"
-                      ? "border-orange-200 bg-orange-50 text-orange-700 dark:border-orange-900/70 dark:bg-orange-950/40 dark:text-orange-200"
-                      : "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/70 dark:bg-emerald-950/40 dark:text-emerald-200",
+            <ScrollArea className="flex-1">
+              <div className="flex flex-col gap-3 pr-2">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="channel-name">名称 *</Label>
+                    <Input
+                      id="channel-name"
+                      placeholder="例如：我的 Claude 中转"
+                      value={name}
+                      onChange={(event) => setName(event.target.value)}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="channel-provider">Provider</Label>
+                    <Input
+                      id="channel-provider"
+                      placeholder="例如：anthropic / openrouter / my-relay"
+                      value={provider}
+                      onChange={(event) => setProvider(event.target.value)}
+                    />
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <Label>常见预设</Label>
+                  <div className="flex flex-wrap gap-2">
+                    {COMMON_PROVIDER_PRESETS.map((preset) => (
+                      <Button
+                        key={preset.value}
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => applyPreset(preset.value)}
+                      >
+                        <DesktopProviderLogo provider={preset.value} className="size-4" />
+                        <span>{preset.label}</span>
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="channel-base-url">Base URL</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      id="channel-base-url"
+                      value={baseUrl}
+                      onChange={(event) => setBaseUrl(event.target.value)}
+                      placeholder="例如：https://api.anthropic.com"
+                      className="flex-1"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      title="填入当前默认 Base URL"
+                      onClick={() => setBaseUrl(suggestedBaseUrl)}
+                    >
+                      <Wand2 size={16} />
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">当前建议地址：{suggestedBaseUrl}</p>
+                  <p className="text-xs text-muted-foreground">
+                    会根据 provider 与 Base URL 自动判断兼容链路；中转服务填写兼容类型即可。
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="channel-enabled"
+                    checked={enabled}
+                    onCheckedChange={(checked) => setEnabled(Boolean(checked))}
+                  />
+                  <Label htmlFor="channel-enabled">启用该渠道</Label>
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="channel-api-key">API Key {isCreate && "*"}</Label>
+                  <Input
+                    id="channel-api-key"
+                    type="password"
+                    placeholder={isCreate ? "输入 API Key" : "保持为 ******** 或留空表示不修改"}
+                    value={apiKey}
+                    onChange={(event) => setApiKey(event.target.value)}
+                  />
+                  {!isCreate && (
+                    <p className="text-xs text-muted-foreground">
+                      出于安全原因，不会展示已保存的明文 Key。输入新 Key 才会更新。
+                    </p>
+                  )}
+                </div>
+
+                {formNotice && (
+                  <div
+                    className={cn(
+                      "rounded-lg border px-3 py-2",
+                      formNotice.kind === "error"
+                        ? "border-red-200 bg-red-50 text-red-700 dark:border-red-900/70 dark:bg-red-950/40 dark:text-red-200"
+                        : formNotice.kind === "warn"
+                          ? "border-orange-200 bg-orange-50 text-orange-700 dark:border-orange-900/70 dark:bg-orange-950/40 dark:text-orange-200"
+                          : "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/70 dark:bg-emerald-950/40 dark:text-emerald-200",
+                    )}
+                  >
+                    <p className="text-sm font-semibold">{formNotice.title}</p>
+                    <p className="mt-1 text-sm">{formNotice.message}</p>
+                  </div>
                 )}
-              >
-                <p className="text-sm font-semibold">{formNotice.title}</p>
-                <p className="mt-1 text-sm">{formNotice.message}</p>
               </div>
-            )}
+            </ScrollArea>
+
+            <div className="mt-3 flex justify-end gap-2">
+              <Button variant="ghost" onClick={onClose} disabled={saving}>
+                取消
+              </Button>
+              <Button
+                onClick={() => void handleSubmit()}
+                disabled={saving || (isCreate ? !canSubmitCreate : !canSubmitEdit)}
+              >
+                {saving ? "处理中..." : isCreate ? "创建并同步模型" : "保存并同步模型"}
+              </Button>
+            </div>
           </div>
         </div>
-
-        <DialogFooter className="px-4 pb-4">
-          <Button variant="ghost" onClick={onClose} disabled={saving}>
-            取消
-          </Button>
-          <Button onClick={() => void handleSubmit()} disabled={saving}>
-            {saving ? "保存中..." : isCreate ? "创建渠道" : "保存变更"}
-          </Button>
-        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
