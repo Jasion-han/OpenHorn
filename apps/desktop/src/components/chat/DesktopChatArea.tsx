@@ -729,6 +729,19 @@ export function DesktopChatArea() {
     }
   };
 
+  if (!currentConversation) {
+    return (
+      <div className="flex flex-1 flex-col overflow-x-hidden">
+        <div style={{ padding: PAGE_PAD, paddingBottom: "8px" }}>
+          <DesktopChatHeader conversation={null} />
+        </div>
+        <div className="flex flex-1 items-center justify-center px-6">
+          <p className="text-sm text-muted-foreground">在左侧选择一个会话，或创建新会话开始交流</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col overflow-x-hidden">
       <div style={{ padding: PAGE_PAD, paddingBottom: "8px" }}>
@@ -736,103 +749,96 @@ export function DesktopChatArea() {
       </div>
 
       <div className="min-h-0 flex-1">
-        {!currentConversation ? (
-          <div className="flex h-full items-center justify-center px-6">
-            <p className="text-sm text-muted-foreground">在左侧选择一个会话，或创建新会话开始交流</p>
-          </div>
-        ) : (
-          <div className="h-full" style={{ paddingLeft: PAGE_PAD, paddingRight: PAGE_PAD }}>
-            <ScrollArea className="h-full">
-              <div className="flex min-w-0 w-full flex-col py-4">
-                <div className="mt-auto flex min-w-0 flex-col gap-2 pb-2">
-                  {groupedMessages.map((group) => (
-                    <div key={group.key} className="flex min-w-0 flex-col gap-2">
-                      {group.user ? (
-                        <div className="flex min-w-0 flex-col items-end self-end">
-                          <MessageBubble
-                            message={group.user.msg}
-                            isStreaming={isStreaming || editingMessageId === group.user.msg.id}
-                            canEdit={Boolean(getEditableAssistantForUser(group.user.msg.id))}
-                            canRetry={false}
-                            canDelete={!group.user.msg.id.startsWith("draft-")}
-                            onEdit={() => handleStartEdit(group.user!.msg)}
-                            onRetry={() => undefined}
-                            onDelete={() => void handleDeleteMessage(group.user!.msg.id)}
-                            assistantWidth={ASSISTANT_BUBBLE_WIDTH}
-                            userMaxWidth={USER_BUBBLE_MAX_WIDTH}
-                          />
-                          {editingMessageId === group.user.msg.id && (
-                            <div className="mt-1 flex w-full max-w-[72%] self-end flex-col items-end gap-1">
-                              <Textarea
-                                value={editingContent}
-                                onChange={(event) => setEditingContent(event.target.value)}
-                                onKeyDown={(event) => {
-                                  if (event.key === "Enter" && !event.shiftKey) {
-                                    event.preventDefault();
-                                    void handleSaveEdit(group.user!.msg.id);
-                                  }
-                                  if (event.key === "Escape") {
-                                    event.preventDefault();
-                                    handleCancelEdit();
-                                  }
-                                }}
-                                className="w-full"
-                                rows={3}
-                                autoFocus
-                              />
-                              <div className="flex gap-2">
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={handleCancelEdit}
-                                >
-                                  取消
-                                </Button>
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  onClick={() => void handleSaveEdit(group.user!.msg.id)}
-                                  disabled={!editingContent.trim() || isStreaming}
-                                >
-                                  确认
-                                </Button>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      ) : null}
-
-                      {group.assistant ? (
+        <div className="h-full" style={{ paddingLeft: PAGE_PAD, paddingRight: PAGE_PAD }}>
+          <ScrollArea className="h-full">
+            <div className="flex min-w-0 w-full flex-col py-4">
+              <div className="mt-auto flex min-w-0 flex-col gap-2 pb-2">
+                {groupedMessages.map((group) => (
+                  <div key={group.key} className="flex min-w-0 flex-col gap-2">
+                    {group.user ? (
+                      <div className="flex min-w-0 flex-col items-end self-end">
                         <MessageBubble
-                          message={group.assistant.msg}
-                          isStreaming={isStreaming}
-                          canEdit={false}
-                          canRetry={
-                            !group.assistant.msg.id.startsWith("draft-") &&
-                            !isLoading &&
-                            !isStreaming &&
-                            !isUploading &&
-                            Boolean(currentConversation)
-                          }
-                          canDelete={!group.assistant.msg.id.startsWith("draft-")}
-                          onEdit={() => undefined}
-                          onRetry={() => void handleRetryMessage(group.assistant!.msg.id)}
-                          onDelete={() => void handleDeleteMessage(group.assistant!.msg.id)}
+                          message={group.user.msg}
+                          isStreaming={isStreaming || editingMessageId === group.user.msg.id}
+                          canEdit={Boolean(getEditableAssistantForUser(group.user.msg.id))}
+                          canRetry={false}
+                          canDelete={!group.user.msg.id.startsWith("draft-")}
+                          onEdit={() => handleStartEdit(group.user!.msg)}
+                          onRetry={() => undefined}
+                          onDelete={() => void handleDeleteMessage(group.user!.msg.id)}
                           assistantWidth={ASSISTANT_BUBBLE_WIDTH}
                           userMaxWidth={USER_BUBBLE_MAX_WIDTH}
                         />
-                      ) : null}
-                    </div>
-                  ))}
-                </div>
+                        {editingMessageId === group.user.msg.id && (
+                          <div className="mt-1 flex w-full max-w-[72%] self-end flex-col items-end gap-1">
+                            <Textarea
+                              value={editingContent}
+                              onChange={(event) => setEditingContent(event.target.value)}
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter" && !event.shiftKey) {
+                                  event.preventDefault();
+                                  void handleSaveEdit(group.user!.msg.id);
+                                }
+                                if (event.key === "Escape") {
+                                  event.preventDefault();
+                                  handleCancelEdit();
+                                }
+                              }}
+                              className="w-full"
+                              rows={3}
+                              autoFocus
+                            />
+                            <div className="flex gap-2">
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                onClick={handleCancelEdit}
+                              >
+                                取消
+                              </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                onClick={() => void handleSaveEdit(group.user!.msg.id)}
+                                disabled={!editingContent.trim() || isStreaming}
+                              >
+                                确认
+                              </Button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ) : null}
+
+                    {group.assistant ? (
+                      <MessageBubble
+                        message={group.assistant.msg}
+                        isStreaming={isStreaming}
+                        canEdit={false}
+                        canRetry={
+                          !group.assistant.msg.id.startsWith("draft-") &&
+                          !isLoading &&
+                          !isStreaming &&
+                          !isUploading
+                        }
+                        canDelete={!group.assistant.msg.id.startsWith("draft-")}
+                        onEdit={() => undefined}
+                        onRetry={() => void handleRetryMessage(group.assistant!.msg.id)}
+                        onDelete={() => void handleDeleteMessage(group.assistant!.msg.id)}
+                        assistantWidth={ASSISTANT_BUBBLE_WIDTH}
+                        userMaxWidth={USER_BUBBLE_MAX_WIDTH}
+                      />
+                    ) : null}
+                  </div>
+                ))}
               </div>
-            </ScrollArea>
-          </div>
-        )}
+            </div>
+          </ScrollArea>
+        </div>
       </div>
 
-      {currentConversation && !effectiveModel.ok && (
+      {!effectiveModel.ok && (
         <div style={{ paddingLeft: PAGE_PAD, paddingRight: PAGE_PAD }}>
           {effectiveModel.scope === "conversation" ? (
             <div className="mb-2 rounded-xl border border-orange-200 bg-orange-50 p-3 text-sm shadow-minimal">
@@ -852,7 +858,7 @@ export function DesktopChatArea() {
       <div style={{ paddingLeft: PAGE_PAD, paddingRight: PAGE_PAD }}>
         <DesktopComposer
           attachments={pendingAttachments}
-          disabled={!currentConversation}
+          disabled={false}
           busy={isUploading || isLoading}
           submitBlocked={!effectiveModel.ok}
           onAddAttachments={handleAddAttachments}
@@ -867,7 +873,7 @@ export function DesktopChatArea() {
                 : "选择模型"
           }
           modelTone={effectiveModel.ok ? "normal" : "warning"}
-          onOpenModelPicker={currentConversation ? () => setModelPickerOpen(true) : undefined}
+          onOpenModelPicker={() => setModelPickerOpen(true)}
           forceWebSearch={forceWebSearch}
           onToggleWebSearch={() => void handleToggleWebSearch()}
           agentModeAvailable={agentModeSupported}
@@ -875,7 +881,7 @@ export function DesktopChatArea() {
         />
       </div>
 
-      {currentConversation && modelPickerOpen && (
+      {modelPickerOpen && (
         <DesktopModelPickerModal
           opened={modelPickerOpen}
           onClose={() => setModelPickerOpen(false)}
