@@ -2,12 +2,15 @@ import { Bot, Check, Copy, MessageSquare, Pencil, RefreshCw, Trash2 } from "luci
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { Button, Textarea, cn } from "ui";
 import { uploadAttachments } from "../../lib/attachments";
+import { getDesktopBackendBase } from "../../lib/backendBase";
 import { sanitizeDisplayContent } from "../../lib/citations";
 import { getEffectiveModelForConversation } from "../../lib/effectiveModel";
+import { notifyWarning } from "../../lib/notify";
 import { readErrorMessage } from "../../lib/serverApi";
 import { readSseStream } from "../../lib/sse";
+import { createTextStreamSmoother, type TextStreamSmoother } from "../../lib/textStreamSmoother";
 import { useChatStore } from "../../stores/chatStore";
-import type { ApiAgentRun, Message } from "../../types/chat";
+import type { ApiAgentRun, ChatStreamEvent, Message } from "../../types/chat";
 import { DesktopCitationList } from "./DesktopCitationList";
 import { DesktopAgentTaskCard } from "./DesktopAgentTaskCard";
 import { DesktopChatHeader } from "./DesktopChatHeader";
@@ -15,6 +18,23 @@ import { DesktopComposer } from "./DesktopComposer";
 import { DesktopMarkdownMessage } from "./DesktopMarkdownMessage";
 import { DesktopMessageAttachments } from "./DesktopMessageAttachments";
 import { DesktopModelPickerModal } from "./DesktopModelPickerModal";
+
+type DesktopSearchStatus = {
+  configured: boolean;
+  source: "user" | "server" | "none" | "disabled";
+};
+
+async function fetchDesktopSearchStatus(): Promise<DesktopSearchStatus> {
+  const response = await fetch(`${getDesktopBackendBase()}/settings/search-status`, {
+    credentials: "include",
+  });
+
+  if (!response.ok) {
+    throw new Error(await readErrorMessage(response, "Failed to read search status"));
+  }
+
+  return (await response.json()) as DesktopSearchStatus;
+}
 
 function LiveStatusBadge({
   status,
@@ -464,6 +484,7 @@ export function DesktopChatArea() {
   const setStreaming = useChatStore((state) => state.setStreaming);
   const setError = useChatStore((state) => state.setError);
   const editUserMessage = useChatStore((state) => state.editUserMessage);
+  const updateMessage = useChatStore((state) => state.updateMessage);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editingContent, setEditingContent] = useState("");
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
@@ -474,6 +495,7 @@ export function DesktopChatArea() {
     null,
   );
   const messageAnchorRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const textSmootherRef = useRef<TextStreamSmoother | null>(null);
   const [streamingAssistantId, setStreamingAssistantId] = useState<string | null>(null);
   const effectiveModel = getEffectiveModelForConversation(channels, currentConversation);
   const agentModeSupported = effectiveModel.ok;
@@ -545,6 +567,13 @@ export function DesktopChatArea() {
     setPendingAttachments([]);
   }, [currentConversation?.id]);
 
+  useEffect(() => {
+    return () => {
+      textSmootherRef.current?.cancel();
+      textSmootherRef.current = null;
+    };
+  }, []);
+
   const getEditableAssistantForUser = (messageId: string) => {
     const messageIndex = messages.findIndex((message) => message.id === messageId);
     if (messageIndex < 0) return null;
@@ -587,6 +616,60 @@ export function DesktopChatArea() {
     setPendingAttachments((currentFiles) => currentFiles.filter((item) => fileKey(item) !== targetKey));
   };
 
+  const clearTextSmoother = (opts?: { flush?: boolean }) => {
+    textSmootherRef.current?.cancel(opts);
+    textSmootherRef.current = null;
+  };
+
+  const createMessageSmoother = (messageId: string) => {
+    clearTextSmoother();
+
+    let nextContent =
+      useChatStore.getState().messages.find((message) => message.id === messageId)?.content || "";
+
+    const smoother = createTextStreamSmoother({
+      emit: (chunk) => {
+        if (!chunk) return;
+        nextContent += chunk;
+        updateMessage(messageId, { content: nextContent });
+      },
+    });
+
+    textSmootherRef.current = smoother;
+    return smoother;
+  };
+
+  const consumeStreamingResponse = async (messageId: string, response: Response) => {
+    const smoother = createMessageSmoother(messageId);
+    let terminalEvent: Extract<ChatStreamEvent, { type: "done" | "error" }> | null = null;
+
+    try {
+      await readSseStream(response, (event) => {
+        if (event.type === "delta") {
+          smoother.push(event.content || "");
+          return;
+        }
+
+        if (event.type === "done" || event.type === "error") {
+          terminalEvent = event;
+          return;
+        }
+
+        applyStreamEvent(messageId, event);
+      });
+
+      await smoother.finish();
+
+      if (terminalEvent) {
+        applyStreamEvent(messageId, terminalEvent);
+      }
+    } finally {
+      if (textSmootherRef.current === smoother) {
+        textSmootherRef.current = null;
+      }
+    }
+  };
+
   const handleSubmit = async (content: string, files: File[]) => {
     if (!currentConversation) return;
 
@@ -626,14 +709,13 @@ export function DesktopChatArea() {
       setStreamingAssistantId(assistantMessageId);
       setPendingAttachments([]);
 
-      await readSseStream(response, (event) => {
-        applyStreamEvent(assistantMessageId, event);
-      });
+      await consumeStreamingResponse(assistantMessageId, response);
 
       setStreaming(false);
       setStreamingAssistantId(null);
       await Promise.all([loadMessages(currentConversation.id), loadConversations()]);
     } catch (error) {
+      clearTextSmoother();
       setStreaming(false);
       setStreamingAssistantId(null);
       if (isAbortError(error)) {
@@ -706,14 +788,13 @@ export function DesktopChatArea() {
         throw new Error(await readErrorMessage(response, "Failed to regenerate message"));
       }
 
-      await readSseStream(response, (event) => {
-        applyStreamEvent(messageId, event);
-      });
+      await consumeStreamingResponse(messageId, response);
 
       setStreaming(false);
       setStreamingAssistantId(null);
       await Promise.all([loadMessages(currentConversation.id), loadConversations()]);
     } catch (error) {
+      clearTextSmoother();
       setStreaming(false);
       setStreamingAssistantId(null);
       if (isAbortError(error)) {
@@ -774,14 +855,13 @@ export function DesktopChatArea() {
 
     try {
       const response = await editUserMessage(userMessage.id, nextContent);
-      await readSseStream(response, (event) => {
-        applyStreamEvent(assistantMessage.id, event);
-      });
+      await consumeStreamingResponse(assistantMessage.id, response);
 
       setStreaming(false);
       setStreamingAssistantId(null);
       await Promise.all([loadMessages(currentConversation.id), loadConversations()]);
     } catch (error) {
+      clearTextSmoother();
       setStreaming(false);
       setStreamingAssistantId(null);
       if (isAbortError(error)) {
@@ -797,16 +877,38 @@ export function DesktopChatArea() {
 
   const handleToggleWebSearch = async () => {
     if (!currentConversation) return;
+
+    const next = !forceWebSearch;
+    if (next) {
+      try {
+        const status = await fetchDesktopSearchStatus();
+        if (!status.configured || status.source === "none") {
+          notifyWarning(
+            "未配置实时搜索",
+            "未检测到 Tavily Key，需要最新信息时的联网搜索可能无法使用。请在设置中填写或配置服务端 TAVILY_API_KEY。",
+          );
+        } else if (status.source === "disabled") {
+          notifyWarning(
+            "实时搜索已关闭",
+            "在设置中启用 Tavily 搜索后，系统才会在需要最新信息时联网。",
+          );
+        }
+      } catch {
+        // ignore search-status probe failures
+      }
+    }
+
     try {
       await useChatStore
         .getState()
-        .updateConversation(currentConversation.id, { forceWebSearch: !forceWebSearch });
+        .updateConversation(currentConversation.id, { forceWebSearch: next });
     } catch {
       // updateConversation already restores previous state and records the error
     }
   };
 
   const handleStop = async () => {
+    clearTextSmoother();
     abortStreaming();
     setStreaming(false);
     setStreamingAssistantId(null);
