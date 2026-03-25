@@ -1,6 +1,6 @@
 import { Bot, Check, Copy, MessageSquare, Pencil, RefreshCw, Trash2 } from "lucide-react";
-import { type ReactNode, useEffect, useState } from "react";
-import { Button, ScrollArea, Textarea, cn } from "ui";
+import { type ReactNode, useEffect, useRef, useState } from "react";
+import { Button, Textarea, cn } from "ui";
 import { uploadAttachments } from "../../lib/attachments";
 import { sanitizeDisplayContent } from "../../lib/citations";
 import { getEffectiveModelForConversation } from "../../lib/effectiveModel";
@@ -468,6 +468,12 @@ export function DesktopChatArea() {
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [pendingAttachments, setPendingAttachments] = useState<File[]>([]);
   const [isUploading, setIsUploading] = useState(false);
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const pendingScrollTargetRef = useRef<{ type: "bottom" } | { type: "message"; id: string } | null>(
+    null,
+  );
+  const messageAnchorRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const [streamingAssistantId, setStreamingAssistantId] = useState<string | null>(null);
   const effectiveModel = getEffectiveModelForConversation(channels, currentConversation);
   const agentModeSupported = effectiveModel.ok;
   const agentModeDisabledReason = effectiveModel.ok
@@ -475,6 +481,64 @@ export function DesktopChatArea() {
     : "请先配置可用模型后再使用 Agent 模式。";
   const forceWebSearch = currentConversation?.forceWebSearch ?? true;
   const groupedMessages = groupMessagesByRound(messages);
+
+  useEffect(() => {
+    pendingScrollTargetRef.current = { type: "bottom" };
+  }, [currentConversation?.id]);
+
+  useEffect(() => {
+    const viewportEl = viewportRef.current;
+    const pending = pendingScrollTargetRef.current;
+    if (!viewportEl || !pending) return;
+
+    let settleFrame: number | null = null;
+    const frame = requestAnimationFrame(() => {
+      const next = pendingScrollTargetRef.current;
+      if (!next || !viewportRef.current) return;
+
+      if (next.type === "bottom") {
+        viewportRef.current.scrollTo({ top: viewportRef.current.scrollHeight });
+        pendingScrollTargetRef.current = null;
+        return;
+      }
+
+      const anchorEl = messageAnchorRefs.current.get(next.id);
+      if (!anchorEl) return;
+
+      const desiredTop =
+        anchorEl.getBoundingClientRect().top -
+        viewportRef.current.getBoundingClientRect().top +
+        viewportRef.current.scrollTop;
+
+      viewportRef.current.scrollTo({ top: desiredTop });
+
+      settleFrame = requestAnimationFrame(() => {
+        if (!viewportRef.current) return;
+        const currentAnchor = messageAnchorRefs.current.get(next.id);
+        if (!currentAnchor) return;
+
+        const distanceFromTop =
+          currentAnchor.getBoundingClientRect().top -
+          viewportRef.current.getBoundingClientRect().top;
+
+        const reachedTarget = Math.abs(distanceFromTop) <= 4;
+        if (reachedTarget || !isStreaming) {
+          pendingScrollTargetRef.current = null;
+        }
+      });
+    });
+
+    return () => {
+      cancelAnimationFrame(frame);
+      if (settleFrame != null) {
+        cancelAnimationFrame(settleFrame);
+      }
+    };
+  }, [messages, currentConversation?.id, editingMessageId, isStreaming]);
+
+  useEffect(() => {
+    setStreamingAssistantId(null);
+  }, [currentConversation?.id]);
 
   useEffect(() => {
     setPendingAttachments([]);
@@ -552,11 +616,13 @@ export function DesktopChatArea() {
         }));
       }
 
-      const { assistantMessageId, response } = await sendMessage({
+      const { userMessageId, assistantMessageId, response } = await sendMessage({
         content: effectiveContent,
         attachments: attachmentIds,
         attachmentsMeta,
       });
+      pendingScrollTargetRef.current = { type: "message", id: userMessageId };
+      setStreamingAssistantId(assistantMessageId);
       setPendingAttachments([]);
 
       await readSseStream(response, (event) => {
@@ -564,9 +630,11 @@ export function DesktopChatArea() {
       });
 
       setStreaming(false);
+      setStreamingAssistantId(null);
       await Promise.all([loadMessages(currentConversation.id), loadConversations()]);
     } catch (error) {
       setStreaming(false);
+      setStreamingAssistantId(null);
       if (isAbortError(error)) {
         return;
       }
@@ -600,7 +668,11 @@ export function DesktopChatArea() {
       }
     }
 
+    if (userMessage) {
+      pendingScrollTargetRef.current = { type: "message", id: userMessage.id };
+    }
     setStreaming(true);
+    setStreamingAssistantId(messageId);
     setError(null);
     useChatStore.getState().updateMessage(messageId, {
       content: "",
@@ -638,9 +710,11 @@ export function DesktopChatArea() {
       });
 
       setStreaming(false);
+      setStreamingAssistantId(null);
       await Promise.all([loadMessages(currentConversation.id), loadConversations()]);
     } catch (error) {
       setStreaming(false);
+      setStreamingAssistantId(null);
       if (isAbortError(error)) {
         return;
       }
@@ -676,7 +750,9 @@ export function DesktopChatArea() {
 
     const { userMessage, assistantMessage } = editable;
     handleCancelEdit();
+    pendingScrollTargetRef.current = { type: "message", id: userMessage.id };
     setStreaming(true);
+    setStreamingAssistantId(assistantMessage.id);
     setError(null);
     useChatStore.getState().updateMessage(userMessage.id, { content: nextContent });
     useChatStore.getState().updateMessage(assistantMessage.id, {
@@ -702,9 +778,11 @@ export function DesktopChatArea() {
       });
 
       setStreaming(false);
+      setStreamingAssistantId(null);
       await Promise.all([loadMessages(currentConversation.id), loadConversations()]);
     } catch (error) {
       setStreaming(false);
+      setStreamingAssistantId(null);
       if (isAbortError(error)) {
         return;
       }
@@ -733,106 +811,98 @@ export function DesktopChatArea() {
         <div style={{ padding: PAGE_PAD, paddingBottom: "8px" }}>
           <DesktopChatHeader conversation={null} />
         </div>
-        <div className="flex flex-1 items-center justify-center px-6">
+        <div className="flex flex-1 items-center justify-center">
           <p className="text-sm text-muted-foreground">在左侧选择一个会话，或创建新会话开始交流</p>
         </div>
       </div>
     );
   }
 
+  const renderMessageRow = (message: Message, index: number) => (
+    <div
+      ref={(node) => {
+        if (message.role !== "user") return;
+        if (node) {
+          messageAnchorRefs.current.set(message.id, node);
+          return;
+        }
+        messageAnchorRefs.current.delete(message.id);
+      }}
+      className={cn(
+        "flex min-w-0 flex-col",
+        message.role === "assistant" ? "items-start" : "items-end",
+      )}
+    >
+      <MessageBubble
+        message={message}
+        isStreaming={Boolean(isStreaming && streamingAssistantId && message.id === streamingAssistantId)}
+        canEdit={Boolean(getEditableAssistantForUser(message.id))}
+        canRetry={message.role === "assistant" && !isLoading && !isStreaming && !isUploading}
+        canDelete={!message.id.startsWith("draft-")}
+        onEdit={() => handleStartEdit(message)}
+        onRetry={() => void handleRetryMessage(message.id)}
+        onDelete={() => void handleDeleteMessage(message.id)}
+        assistantWidth={ASSISTANT_BUBBLE_WIDTH}
+        userMaxWidth={USER_BUBBLE_MAX_WIDTH}
+      />
+
+      {message.role === "user" && editingMessageId === message.id && (
+        <div className="mt-1 flex w-full max-w-[72%] self-end flex-col items-end gap-1">
+          <Textarea
+            value={editingContent}
+            onChange={(event) => setEditingContent(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                void handleSaveEdit(message.id);
+              }
+              if (event.key === "Escape") {
+                event.preventDefault();
+                handleCancelEdit();
+              }
+            }}
+            className="w-full"
+            rows={3}
+            autoFocus
+          />
+          <div className="flex gap-2">
+            <Button type="button" size="sm" variant="ghost" onClick={handleCancelEdit}>
+              取消
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => void handleSaveEdit(message.id)}
+              disabled={!editingContent.trim() || isStreaming}
+            >
+              确认
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
   return (
-    <div className="flex h-full min-h-0 min-w-0 flex-col overflow-x-hidden">
+    <div className="flex h-full min-h-0 min-w-0 w-full flex-1 flex-col overflow-x-hidden">
       <div style={{ padding: PAGE_PAD, paddingBottom: "8px" }}>
         <DesktopChatHeader conversation={currentConversation} />
       </div>
 
-      <div className="min-h-0 flex-1">
-        <div className="h-full" style={{ paddingLeft: PAGE_PAD, paddingRight: PAGE_PAD }}>
-          <ScrollArea className="h-full">
-            <div className="flex min-w-0 w-full flex-col py-4">
-              <div className="mt-auto flex min-w-0 flex-col gap-2 pb-2">
-                {groupedMessages.map((group) => (
-                  <div key={group.key} className="flex min-w-0 flex-col gap-2">
-                    {group.user ? (
-                      <div className="flex min-w-0 flex-col items-end">
-                        <MessageBubble
-                          message={group.user.msg}
-                          isStreaming={isStreaming || editingMessageId === group.user.msg.id}
-                          canEdit={Boolean(getEditableAssistantForUser(group.user.msg.id))}
-                          canRetry={false}
-                          canDelete={!group.user.msg.id.startsWith("draft-")}
-                          onEdit={() => handleStartEdit(group.user!.msg)}
-                          onRetry={() => undefined}
-                          onDelete={() => void handleDeleteMessage(group.user!.msg.id)}
-                          assistantWidth={ASSISTANT_BUBBLE_WIDTH}
-                          userMaxWidth={USER_BUBBLE_MAX_WIDTH}
-                        />
-                        {editingMessageId === group.user.msg.id && (
-                          <div className="mt-1 flex w-full max-w-[72%] self-end flex-col items-end gap-1">
-                            <Textarea
-                              value={editingContent}
-                              onChange={(event) => setEditingContent(event.target.value)}
-                              onKeyDown={(event) => {
-                                if (event.key === "Enter" && !event.shiftKey) {
-                                  event.preventDefault();
-                                  void handleSaveEdit(group.user!.msg.id);
-                                }
-                                if (event.key === "Escape") {
-                                  event.preventDefault();
-                                  handleCancelEdit();
-                                }
-                              }}
-                              className="w-full"
-                              rows={3}
-                              autoFocus
-                            />
-                            <div className="flex gap-2">
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="ghost"
-                                onClick={handleCancelEdit}
-                              >
-                                取消
-                              </Button>
-                              <Button
-                                type="button"
-                                size="sm"
-                                onClick={() => void handleSaveEdit(group.user!.msg.id)}
-                                disabled={!editingContent.trim() || isStreaming}
-                              >
-                                确认
-                              </Button>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    ) : null}
-
-                    {group.assistant ? (
-                      <MessageBubble
-                        message={group.assistant.msg}
-                        isStreaming={isStreaming}
-                        canEdit={false}
-                        canRetry={
-                          !group.assistant.msg.id.startsWith("draft-") &&
-                          !isLoading &&
-                          !isStreaming &&
-                          !isUploading
-                        }
-                        canDelete={!group.assistant.msg.id.startsWith("draft-")}
-                        onEdit={() => undefined}
-                        onRetry={() => void handleRetryMessage(group.assistant!.msg.id)}
-                        onDelete={() => void handleDeleteMessage(group.assistant!.msg.id)}
-                        assistantWidth={ASSISTANT_BUBBLE_WIDTH}
-                        userMaxWidth={USER_BUBBLE_MAX_WIDTH}
-                      />
-                    ) : null}
-                  </div>
-                ))}
+      <div
+        ref={viewportRef}
+        className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto scrollbar-thin"
+        style={{ paddingLeft: PAGE_PAD, paddingRight: PAGE_PAD }}
+      >
+        <div className="flex min-w-0 w-full flex-col">
+          <div className="mt-auto flex min-w-0 flex-col gap-2 pb-2">
+            {groupedMessages.map((group) => (
+              <div key={group.key} className="flex min-w-0 flex-col gap-2">
+                {group.user ? renderMessageRow(group.user.msg, group.user.index) : null}
+                {group.assistant ? renderMessageRow(group.assistant.msg, group.assistant.index) : null}
               </div>
-            </div>
-          </ScrollArea>
+            ))}
+          </div>
         </div>
       </div>
 
