@@ -14,6 +14,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { api } from "@/lib/api";
+import { getBackendBase } from "@/lib/backendBase";
 import { hideNotification, notifyErrorOnce, notifySuccess } from "@/lib/notify";
 import { useAuthStore } from "@/stores/authStore";
 import { useBackendStatusStore } from "@/stores/backendStatusStore";
@@ -25,6 +26,7 @@ export function SidebarHeader() {
   const { setChannels } = useChatStore();
   const backend = useBackendStatusStore();
   const [retrying, setRetrying] = useState(false);
+  const backendBase = getBackendBase();
 
   const handleLogout = async () => {
     try {
@@ -52,7 +54,7 @@ export function SidebarHeader() {
             ? "仍然无法访问后端（可能被浏览器跨域/CORS 拦截）。请检查后端 CORS 是否允许当前页面 Origin，并查看 DevTools Console/Network。"
             : backend.lastError === "Blocked by browser (mixed content)"
               ? "仍然无法访问后端（可能被浏览器 Mixed Content 拦截：HTTPS 页面访问 HTTP 后端）。"
-              : `仍然无法连接到后端服务（http://localhost:3000）。`;
+              : `仍然无法连接到后端服务（${backendBase}）。`;
         notifyErrorOnce("backend_down", "后端不可用", hint);
       }
     } finally {

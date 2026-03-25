@@ -1,4 +1,5 @@
 import { type ExternalToast, toast } from "ui";
+import { getDesktopBackendBase } from "./backendBase";
 
 const lastShownAt = new Map<string, number>();
 
@@ -23,7 +24,7 @@ export function notifyError(title: string, message: string, options?: NotifyOpti
     notifyErrorOnce(
       "backend_down",
       "后端不可用",
-      "无法连接到后端服务（http://localhost:3000）。请启动 server 后点击「重试」。",
+      `无法连接到后端服务（${getDesktopBackendBase()}）。请启动 server 后点击「重试」。`,
     );
     return;
   }
