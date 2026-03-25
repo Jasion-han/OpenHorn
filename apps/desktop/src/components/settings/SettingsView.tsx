@@ -1,22 +1,26 @@
-import { Info, Palette } from "lucide-react";
+import { Info, Palette, PlugZap } from "lucide-react";
 import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
 import { cn, ScrollArea } from "ui";
 import { AboutSettings } from "./AboutSettings";
 import { AppearanceSettings } from "./AppearanceSettings";
+import { ChannelSettings } from "./ChannelSettings";
 
-type SettingsTab = "appearance" | "about";
+type SettingsTab = "channels" | "appearance" | "about";
 
 const TABS: Array<{ id: SettingsTab; label: string; icon: ReactNode }> = [
+  { id: "channels", label: "渠道", icon: <PlugZap size={16} /> },
   { id: "appearance", label: "外观", icon: <Palette size={16} /> },
   { id: "about", label: "关于", icon: <Info size={16} /> },
 ];
 
-export function SettingsView({ initialTab = "appearance" }: { initialTab?: SettingsTab }) {
+export function SettingsView({ initialTab = "channels" }: { initialTab?: SettingsTab }) {
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
 
   const content = useMemo(() => {
     switch (activeTab) {
+      case "channels":
+        return <ChannelSettings />;
       case "appearance":
         return <AppearanceSettings />;
       case "about":

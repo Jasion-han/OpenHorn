@@ -1,5 +1,6 @@
 import type {
   ApiChannel,
+  ApiChannelModel,
   ApiConversation,
   ApiMessage,
   ApiSettingsMap,
@@ -40,6 +41,46 @@ export interface ServerApi {
   };
   channels: {
     list: () => Promise<{ channels: ApiChannel[] }>;
+    get: (id: string) => Promise<{ channel: ApiChannel }>;
+    create: (data: {
+      name: string;
+      provider: string;
+      apiKey: string;
+      baseUrl?: string;
+      enabled?: boolean;
+      isDefault?: boolean;
+    }) => Promise<{ channel: ApiChannel }>;
+    update: (
+      id: string,
+      data: {
+        name?: string;
+        provider?: string;
+        apiKey?: string;
+        baseUrl?: string;
+        enabled?: boolean;
+        isDefault?: boolean;
+      },
+    ) => Promise<{ channel: ApiChannel }>;
+    delete: (id: string) => Promise<{ success: boolean }>;
+    test: (id: string) => Promise<{ success: boolean; error?: string }>;
+    fetchModels: (
+      id: string,
+    ) => Promise<{ success: boolean; error?: string; models: ApiChannelModel[] }>;
+    listModels: (id: string) => Promise<{ models: ApiChannelModel[] }>;
+    updateModels: (
+      id: string,
+      data: {
+        models: Array<{
+          modelId: string;
+          displayName?: string;
+          enabled?: boolean;
+          isDefault?: boolean;
+        }>;
+      },
+    ) => Promise<{ models: ApiChannelModel[] }>;
+    setDefault: (id: string) => Promise<{ success: boolean }>;
+    setDefaultModel: (id: string, modelId: string) => Promise<{ success: boolean }>;
+    agentCheck: (id: string, data: { modelId: string }) => Promise<{ success: boolean; error?: string }>;
   };
   settings: {
     get: (keys: string[]) => Promise<{ settings: ApiSettingsMap }>;
@@ -69,25 +110,78 @@ export function getDesktopBackendBase(): string {
   return DEFAULT_DESKTOP_BACKEND_BASE;
 }
 
-export async function readErrorMessage(response: Response, fallback = "Request failed") {
-  const contentType = response.headers.get("content-type") || "";
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
 
-  if (contentType.includes("application/json")) {
-    try {
-      const data = (await response.json()) as { error?: unknown; message?: unknown };
-      if (typeof data.error === "string" && data.error.trim()) return data.error;
-      if (typeof data.message === "string" && data.message.trim()) return data.message;
-    } catch {
-      return fallback;
-    }
-  }
-
+function decodeQuotedJsonString(value: string) {
   try {
-    const text = await response.text();
-    return text.trim() || fallback;
+    return JSON.parse(`"${value}"`);
   } catch {
-    return fallback;
+    return value.replace(/\\"/g, '"').replace(/\\\\/g, "\\");
   }
+}
+
+function extractErrorMessage(error: unknown, fallback = "Request failed"): string {
+  if (typeof error === "string") {
+    const normalized = error.trim();
+    if (!normalized) return fallback;
+
+    if (
+      (normalized.startsWith('"') && normalized.endsWith('"')) ||
+      (normalized.startsWith("'") && normalized.endsWith("'"))
+    ) {
+      try {
+        return extractErrorMessage(JSON.parse(normalized), fallback);
+      } catch {
+        return extractErrorMessage(normalized.slice(1, -1), fallback);
+      }
+    }
+
+    if (normalized.startsWith("{") || normalized.startsWith("[")) {
+      try {
+        return extractErrorMessage(JSON.parse(normalized), fallback);
+      } catch {
+        const nestedMessageMatch = normalized.match(/"message"\s*:\s*"((?:\\.|[^"])*)"/);
+        if (nestedMessageMatch?.[1]) {
+          return decodeQuotedJsonString(nestedMessageMatch[1]).trim() || fallback;
+        }
+
+        const nestedErrorMatch = normalized.match(/"error"\s*:\s*"((?:\\.|[^"])*)"/);
+        if (nestedErrorMatch?.[1]) {
+          return extractErrorMessage(decodeQuotedJsonString(nestedErrorMatch[1]), fallback);
+        }
+
+        return normalized;
+      }
+    }
+
+    return normalized;
+  }
+
+  if (error instanceof Error) {
+    return extractErrorMessage(error.message, fallback);
+  }
+
+  if (Array.isArray(error)) {
+    const messages = error
+      .map((item) => extractErrorMessage(item, ""))
+      .filter((item) => item.trim().length > 0);
+    return messages[0] || fallback;
+  }
+
+  if (isRecord(error)) {
+    if ("error" in error) return extractErrorMessage(error.error, fallback);
+    if ("message" in error) return extractErrorMessage(error.message, fallback);
+    if ("detail" in error) return extractErrorMessage(error.detail, fallback);
+  }
+
+  return fallback;
+}
+
+export async function readErrorMessage(response: Response, fallback = "Request failed") {
+  const rawText = await response.text().catch(() => "");
+  return extractErrorMessage(rawText, fallback);
 }
 
 async function fetchJson<T>(
@@ -222,6 +316,54 @@ export function createServerApi(options?: { baseUrl?: string; fetch?: FetchLike 
 
     channels: {
       list: () => fetchJson(fetchImpl, baseUrl, "/channels"),
+      get: (id) => fetchJson(fetchImpl, baseUrl, `/channels/${encodeURIComponent(id)}`),
+      create: (data) =>
+        fetchJson(fetchImpl, baseUrl, "/channels", {
+          method: "POST",
+          body: JSON.stringify(data),
+        }),
+      update: (id, data) =>
+        fetchJson(fetchImpl, baseUrl, `/channels/${encodeURIComponent(id)}`, {
+          method: "PUT",
+          body: JSON.stringify(data),
+        }),
+      delete: (id) =>
+        fetchJson(fetchImpl, baseUrl, `/channels/${encodeURIComponent(id)}`, {
+          method: "DELETE",
+        }),
+      test: (id) =>
+        fetchJson(fetchImpl, baseUrl, `/channels/${encodeURIComponent(id)}/test`, {
+          method: "POST",
+        }),
+      fetchModels: (id) =>
+        fetchJson(fetchImpl, baseUrl, `/channels/${encodeURIComponent(id)}/fetch-models`, {
+          method: "POST",
+        }),
+      listModels: (id) =>
+        fetchJson(fetchImpl, baseUrl, `/channels/${encodeURIComponent(id)}/models`),
+      updateModels: (id, data) =>
+        fetchJson(fetchImpl, baseUrl, `/channels/${encodeURIComponent(id)}/models`, {
+          method: "PUT",
+          body: JSON.stringify(data),
+        }),
+      setDefault: (id) =>
+        fetchJson(fetchImpl, baseUrl, `/channels/${encodeURIComponent(id)}/set-default`, {
+          method: "POST",
+        }),
+      setDefaultModel: (id, modelId) =>
+        fetchJson(
+          fetchImpl,
+          baseUrl,
+          `/channels/${encodeURIComponent(id)}/models/${encodeURIComponent(modelId)}/set-default`,
+          {
+            method: "POST",
+          },
+        ),
+      agentCheck: (id, data) =>
+        fetchJson(fetchImpl, baseUrl, `/channels/${encodeURIComponent(id)}/agent-check`, {
+          method: "POST",
+          body: JSON.stringify(data),
+        }),
     },
 
     settings: {
