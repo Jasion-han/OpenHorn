@@ -1,4 +1,5 @@
-import { getDesktopBackendBase, readErrorMessage } from "./serverApi";
+import { getDesktopBackendBase } from "./backendBase";
+import { readErrorMessage } from "./serverApi";
 
 export async function uploadAttachments(input: {
   conversationId?: string;

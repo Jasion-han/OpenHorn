@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import {
+  Badge,
   Button,
   Dialog,
   DialogContent,
@@ -28,7 +29,10 @@ import {
   ScrollArea,
   cn,
 } from "ui";
+import { notifyErrorOnce, notifySuccess } from "../../lib/notify";
+import { getDesktopBackendBase } from "../../lib/backendBase";
 import { useAuthStore } from "../../stores/authStore";
+import { BACKEND_UP_EVENT, useBackendStatusStore } from "../../stores/backendStatusStore";
 import { useDesktopShellStore } from "../../stores/desktopShellStore";
 import { useChatStore } from "../../stores/chatStore";
 import type { Conversation } from "../../types/chat";
@@ -163,6 +167,8 @@ export function DesktopLeftSidebar() {
   const setActiveView = useDesktopShellStore((state) => state.setActiveView);
   const user = useAuthStore((state) => state.user);
   const logout = useAuthStore((state) => state.logout);
+  const backend = useBackendStatusStore();
+  const [retrying, setRetrying] = useState(false);
 
   const conversations = useChatStore((state) => state.conversations);
   const currentConversation = useChatStore((state) => state.currentConversation);
@@ -173,9 +179,18 @@ export function DesktopLeftSidebar() {
   const updateConversation = useChatStore((state) => state.updateConversation);
   const deleteConversation = useChatStore((state) => state.deleteConversation);
   const reset = useChatStore((state) => state.reset);
+  const backendBase = getDesktopBackendBase();
 
   useEffect(() => {
     void Promise.allSettled([loadChannels(), loadConversations()]);
+  }, [loadChannels, loadConversations]);
+
+  useEffect(() => {
+    const onUp = () => {
+      void Promise.allSettled([loadChannels(), loadConversations()]);
+    };
+    window.addEventListener(BACKEND_UP_EVENT, onUp);
+    return () => window.removeEventListener(BACKEND_UP_EVENT, onUp);
   }, [loadChannels, loadConversations]);
 
   const filteredConversations = useMemo(() => {
@@ -233,6 +248,25 @@ export function DesktopLeftSidebar() {
     }
   };
 
+  const handleRetry = async () => {
+    if (retrying) return;
+    setRetrying(true);
+    try {
+      const ok = await backend.retry();
+      if (ok) {
+        notifySuccess("连接已恢复", "已重新连接后端");
+        return;
+      }
+      notifyErrorOnce(
+        "backend_down",
+        "后端不可用",
+        `仍然无法连接到后端服务（${backendBase}）。请确认 server 已启动。`,
+      );
+    } finally {
+      setRetrying(false);
+    }
+  };
+
   const pinned = filteredConversations.filter((conversation) => conversation.isPinned);
   const rest = filteredConversations.filter((conversation) => !conversation.isPinned);
   const groups = groupByUpdatedAt(rest);
@@ -244,6 +278,18 @@ export function DesktopLeftSidebar() {
           <div className="truncate text-sm font-semibold leading-5">OpenHorn</div>
           <div className="flex items-center gap-2">
             <span className="text-[11px] text-muted-foreground">Local</span>
+            {backend.status === "down" && <Badge variant="destructive">offline</Badge>}
+            {backend.status === "down" && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-6 px-2 text-xs"
+                onClick={() => void handleRetry()}
+                disabled={retrying}
+              >
+                {retrying ? "Retrying…" : "Retry"}
+              </Button>
+            )}
           </div>
         </div>
 

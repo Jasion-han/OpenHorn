@@ -11,8 +11,9 @@ import type {
   UpdateConversationInput,
 } from "../types/chat";
 import type { ApiUser, LoginInput, RegisterInput } from "../types/auth";
+import { useBackendStatusStore } from "../stores/backendStatusStore";
+import { getDesktopBackendBase } from "./backendBase";
 
-export const DEFAULT_DESKTOP_BACKEND_BASE = "http://localhost:3000";
 export const UNAUTHORIZED_EVENT = "openhorn:unauthorized";
 
 type FetchLike = typeof fetch;
@@ -109,24 +110,6 @@ function emitUnauthorized() {
   window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
 }
 
-function getEnvBase() {
-  return (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env
-    ?.VITE_API_BASE;
-}
-
-export function getDesktopBackendBase(): string {
-  const envBase = getEnvBase();
-  if (typeof envBase === "string" && envBase.trim()) {
-    return envBase.trim();
-  }
-
-  if (typeof window !== "undefined" && window.location.hostname === "127.0.0.1") {
-    return "http://127.0.0.1:3000";
-  }
-
-  return DEFAULT_DESKTOP_BACKEND_BASE;
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -201,13 +184,32 @@ export async function readErrorMessage(response: Response, fallback = "Request f
   return extractErrorMessage(rawText, fallback);
 }
 
+async function requestWithBackendStatus(
+  fetchImpl: FetchLike,
+  url: string,
+  init?: RequestInit,
+): Promise<Response> {
+  try {
+    const response = await fetchImpl(url, init);
+    useBackendStatusStore.getState().markUp();
+    if (response.status === 401) {
+      emitUnauthorized();
+    }
+    return response;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to fetch";
+    useBackendStatusStore.getState().markDown(message);
+    throw error;
+  }
+}
+
 async function fetchJson<T>(
   fetchImpl: FetchLike,
   baseUrl: string,
   path: string,
   init?: RequestInit,
 ): Promise<T> {
-  const response = await fetchImpl(`${baseUrl}${path}`, {
+  const response = await requestWithBackendStatus(fetchImpl, `${baseUrl}${path}`, {
     credentials: "include",
     ...init,
     headers: {
@@ -215,10 +217,6 @@ async function fetchJson<T>(
       ...(init?.headers || {}),
     },
   });
-
-  if (response.status === 401) {
-    emitUnauthorized();
-  }
 
   if (!response.ok) {
     throw new Error(await readErrorMessage(response, "Request failed"));
@@ -272,7 +270,7 @@ export function createServerApi(options?: { baseUrl?: string; fetch?: FetchLike 
       list: (conversationId) =>
         fetchJson(fetchImpl, baseUrl, `/messages/${encodeURIComponent(conversationId)}`),
       stream: async (data, options) => {
-        const response = await fetchImpl(`${baseUrl}/messages/stream`, {
+        return requestWithBackendStatus(fetchImpl, `${baseUrl}/messages/stream`, {
           method: "POST",
           credentials: "include",
           signal: options?.signal,
@@ -281,19 +279,14 @@ export function createServerApi(options?: { baseUrl?: string; fetch?: FetchLike 
           },
           body: JSON.stringify(data),
         });
-
-        if (response.status === 401) {
-          emitUnauthorized();
-        }
-
-        return response;
       },
       delete: (id) =>
         fetchJson(fetchImpl, baseUrl, `/messages/${encodeURIComponent(id)}`, {
           method: "DELETE",
         }),
       regenerate: async (id, data, options) => {
-        const response = await fetchImpl(
+        return requestWithBackendStatus(
+          fetchImpl,
           `${baseUrl}/messages/${encodeURIComponent(id)}/regenerate`,
           {
             method: "POST",
@@ -305,15 +298,9 @@ export function createServerApi(options?: { baseUrl?: string; fetch?: FetchLike 
             body: data ? JSON.stringify(data) : undefined,
           },
         );
-
-        if (response.status === 401) {
-          emitUnauthorized();
-        }
-
-        return response;
       },
       edit: async (id, content, options) => {
-        const response = await fetchImpl(`${baseUrl}/messages/${encodeURIComponent(id)}/edit`, {
+        return requestWithBackendStatus(fetchImpl, `${baseUrl}/messages/${encodeURIComponent(id)}/edit`, {
           method: "POST",
           credentials: "include",
           signal: options?.signal,
@@ -322,12 +309,6 @@ export function createServerApi(options?: { baseUrl?: string; fetch?: FetchLike 
           },
           body: JSON.stringify({ content }),
         });
-
-        if (response.status === 401) {
-          emitUnauthorized();
-        }
-
-        return response;
       },
     },
 
@@ -397,19 +378,19 @@ export function createServerApi(options?: { baseUrl?: string; fetch?: FetchLike 
           method: "POST",
         }),
       execute: (id, options) =>
-        fetchImpl(`${baseUrl}/agent/tasks/${encodeURIComponent(id)}/execute`, {
+        requestWithBackendStatus(fetchImpl, `${baseUrl}/agent/tasks/${encodeURIComponent(id)}/execute`, {
           method: "POST",
           credentials: "include",
           signal: options?.signal,
         }),
       retry: (id, options) =>
-        fetchImpl(`${baseUrl}/agent/tasks/${encodeURIComponent(id)}/retry`, {
+        requestWithBackendStatus(fetchImpl, `${baseUrl}/agent/tasks/${encodeURIComponent(id)}/retry`, {
           method: "POST",
           credentials: "include",
           signal: options?.signal,
         }),
       continue: (id, options) =>
-        fetchImpl(`${baseUrl}/agent/tasks/${encodeURIComponent(id)}/continue`, {
+        requestWithBackendStatus(fetchImpl, `${baseUrl}/agent/tasks/${encodeURIComponent(id)}/continue`, {
           method: "POST",
           credentials: "include",
           signal: options?.signal,
