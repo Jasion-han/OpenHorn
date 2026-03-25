@@ -1,40 +1,12 @@
 import { AlignLeft, Pencil } from "lucide-react";
 import { useEffect, useState } from "react";
 import { SettingsCard, SettingsSection, Badge, Button, Input, Label, Textarea, cn } from "ui";
+import { notifyError, notifySuccess } from "../../lib/notify";
 import { createServerApi } from "../../lib/serverApi";
 import { useAuthStore } from "../../stores/authStore";
 
 const api = createServerApi();
 const SYSTEM_PROMPT_KEY = "chat.systemPrompt";
-
-type Notice = {
-  kind: "success" | "error";
-  title: string;
-  message: string;
-};
-
-function NoticeBanner({ notice, onClose }: { notice: Notice; onClose: () => void }) {
-  return (
-    <div
-      className={cn(
-        "rounded-xl border px-4 py-3",
-        notice.kind === "error"
-          ? "border-red-200 bg-red-50 text-red-700 dark:border-red-900/70 dark:bg-red-950/40 dark:text-red-200"
-          : "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/70 dark:bg-emerald-950/40 dark:text-emerald-200",
-      )}
-    >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-sm font-semibold">{notice.title}</p>
-          <p className="mt-1 text-sm whitespace-pre-wrap">{notice.message}</p>
-        </div>
-        <Button variant="ghost" size="sm" onClick={onClose}>
-          关闭
-        </Button>
-      </div>
-    </div>
-  );
-}
 
 export function GeneralSettings() {
   const user = useAuthStore((state) => state.user);
@@ -44,7 +16,6 @@ export function GeneralSettings() {
   const [savedPrompt, setSavedPrompt] = useState("");
   const [editing, setEditing] = useState(false);
   const [savingPrompt, setSavingPrompt] = useState(false);
-  const [notice, setNotice] = useState<Notice | null>(null);
 
   useEffect(() => {
     api.settings
@@ -56,11 +27,7 @@ export function GeneralSettings() {
         setEditing(!value);
       })
       .catch((error) => {
-        setNotice({
-          kind: "error",
-          title: "加载失败",
-          message: error instanceof Error ? error.message : "无法加载系统提示词。",
-        });
+        notifyError("加载失败", error instanceof Error ? error.message : "无法加载系统提示词。");
       });
   }, []);
 
@@ -70,13 +37,9 @@ export function GeneralSettings() {
       await api.settings.set(SYSTEM_PROMPT_KEY, systemPrompt || null);
       setSavedPrompt(systemPrompt);
       setEditing(false);
-      setNotice({ kind: "success", title: "已保存", message: "系统提示词已更新。" });
+      notifySuccess("已保存", "系统提示词已更新。");
     } catch (error) {
-      setNotice({
-        kind: "error",
-        title: "保存失败",
-        message: error instanceof Error ? error.message : "无法保存系统提示词。",
-      });
+      notifyError("保存失败", error instanceof Error ? error.message : "无法保存系统提示词。");
     } finally {
       setSavingPrompt(false);
     }
@@ -89,8 +52,6 @@ export function GeneralSettings() {
 
   return (
     <div className="flex flex-col gap-8">
-      {notice && <NoticeBanner notice={notice} onClose={() => setNotice(null)} />}
-
       <SettingsSection title="账户信息" description="管理你的账号显示信息（本地展示）。">
         <SettingsCard divided={false} className="p-4">
           <div className="mb-4 flex items-center gap-3">
@@ -111,7 +72,7 @@ export function GeneralSettings() {
             <div className="flex flex-col gap-1.5">
               <Label>邮箱</Label>
               <Input value={email} disabled />
-              <p className="text-xs text-muted-foreground">桌面端暂不支持修改账户资料</p>
+              <p className="text-xs text-muted-foreground">邮箱暂不支持修改</p>
             </div>
             <div>
               <Button disabled>暂不支持修改</Button>

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { SettingsCard, SettingsRow, SettingsSection, SettingsSegmentedControl } from "ui";
+import { cn, SettingsCard, SettingsRow, SettingsSection, SettingsSegmentedControl } from "ui";
 
 import type { ThemeMode } from "../../lib/theme";
 import { readThemeMode, setThemeMode, THEME_MODE_CHANGE_EVENT } from "../../lib/theme";
@@ -46,6 +46,9 @@ export function AppearanceSettings() {
         />
         <SettingsRow label="界面缩放" description={zoomHint} />
       </SettingsCard>
+      <p className={cn("text-xs text-muted-foreground")}>
+        提示：主题模式会保存到本地设备（仅影响当前客户端）。
+      </p>
     </SettingsSection>
   );
 }

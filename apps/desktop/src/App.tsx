@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { Toaster } from "ui";
 import { DesktopAuthScreen } from "./components/auth/DesktopAuthScreen";
 import { SettingsView } from "./components/settings/SettingsView";
 import { DesktopShellLayout } from "./components/app/DesktopShellLayout";
@@ -36,6 +37,7 @@ export function App() {
   return (
     <>
       <ThemeListener />
+      <Toaster />
       {!authReady ? (
         <div className="flex h-dvh w-dvw items-center justify-center gap-3 bg-gradient-to-br from-background via-background to-muted/20">
           <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />

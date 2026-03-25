@@ -54,6 +54,8 @@ export {
 } from "./components/ui/select";
 export { Separator } from "./components/ui/separator";
 export { Toaster } from "./components/ui/sonner";
+export { toast } from "sonner";
+export type { ExternalToast } from "sonner";
 export { Switch } from "./components/ui/switch";
 export type { TextareaProps } from "./components/ui/textarea";
 export { Textarea } from "./components/ui/textarea";

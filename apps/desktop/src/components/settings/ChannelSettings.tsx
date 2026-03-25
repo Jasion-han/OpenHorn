@@ -28,8 +28,13 @@ import {
   SelectTrigger,
   SelectValue,
   SettingsSection,
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
   cn,
 } from "ui";
+import { notifyError, notifySuccess, notifyWarning } from "../../lib/notify";
 import { createServerApi } from "../../lib/serverApi";
 import { useChatStore } from "../../stores/chatStore";
 import type { Channel, ChannelModel } from "../../types/chat";
@@ -45,11 +50,6 @@ function sortChannels(a: Channel, b: Channel) {
   return a.name.localeCompare(b.name);
 }
 
-function getPreferredChannel(channels: Channel[]) {
-  const sorted = channels.slice().sort(sortChannels);
-  return sorted[0] || null;
-}
-
 export function ChannelSettings() {
   const channels = useChatStore((state) => state.channels);
   const loadChannels = useChatStore((state) => state.loadChannels);
@@ -62,7 +62,6 @@ export function ChannelSettings() {
   const [agentCheckOpen, setAgentCheckOpen] = useState(false);
   const [agentCheckChannelId, setAgentCheckChannelId] = useState<string | null>(null);
   const [agentCheckModelId, setAgentCheckModelId] = useState("");
-  const [pageNotice, setPageNotice] = useState<SettingsNotice | null>(null);
   const [channelNotice, setChannelNotice] = useState<
     Record<string, { kind: "error" | "warn"; title?: string; message: string }>
   >({});
@@ -73,15 +72,8 @@ export function ChannelSettings() {
     setLoading(true);
     try {
       await loadChannels();
-      if (!options?.preserveExpanded && !expandedChannelId) {
-        setExpandedChannelId((current) => current || getPreferredChannel(channels)?.id || null);
-      }
     } catch (error) {
-      setPageNotice({
-        kind: "error",
-        title: "加载失败",
-        message: error instanceof Error ? error.message : "无法加载渠道列表。",
-      });
+      notifyError("加载失败", error instanceof Error ? error.message : "无法加载渠道列表。");
     } finally {
       setLoading(false);
     }
@@ -90,14 +82,6 @@ export function ChannelSettings() {
   useEffect(() => {
     void loadChannelList();
   }, []);
-
-  useEffect(() => {
-    if (expandedChannelId) return;
-    const preferred = getPreferredChannel(sortedChannels);
-    if (preferred) {
-      setExpandedChannelId(preferred.id);
-    }
-  }, [expandedChannelId, sortedChannels]);
 
   const applyFetchModelsOutcome = (
     channelId: string,
@@ -133,11 +117,7 @@ export function ChannelSettings() {
     try {
       await action();
     } catch (error) {
-      setPageNotice({
-        kind: "error",
-        title: "操作失败",
-        message: error instanceof Error ? error.message : "渠道操作失败。",
-      });
+      notifyError("操作失败", error instanceof Error ? error.message : "渠道操作失败。");
     } finally {
       setBusyKey(null);
     }
@@ -146,7 +126,15 @@ export function ChannelSettings() {
   const handleEditorSaved = async (channelId: string, notice: SettingsNotice) => {
     await loadChannelList({ preserveExpanded: true });
     setExpandedChannelId(channelId);
-    setPageNotice(notice);
+    if (notice.kind === "error") {
+      notifyError(notice.title, notice.message);
+      return;
+    }
+    if (notice.kind === "warn") {
+      notifyWarning(notice.title, notice.message);
+      return;
+    }
+    notifySuccess(notice.title, notice.message);
   };
 
   const openEditor = (channelId?: string | null) => {
@@ -187,22 +175,18 @@ export function ChannelSettings() {
         setExpandedChannelId(null);
       }
       await loadChannelList();
-      setPageNotice({ kind: "success", title: "已删除", message: "渠道已删除。" });
+      notifySuccess("已删除", "渠道已删除。");
     });
   };
 
   const handleTest = async (channelId: string) => {
     await runChannelAction(`test:${channelId}`, async () => {
       const result = await api.channels.test(channelId);
-      setPageNotice(
-        result.success
-          ? { kind: "success", title: "连接成功", message: "该渠道可正常连接。" }
-          : {
-              kind: "error",
-              title: "连接失败",
-              message: result.error || "无法连接该渠道。",
-            },
-      );
+      if (result.success) {
+        notifySuccess("连接成功", "该渠道可正常连接。");
+        return;
+      }
+      notifyError("连接失败", result.error || "无法连接该渠道。");
     });
   };
 
@@ -212,26 +196,22 @@ export function ChannelSettings() {
       await loadChannelList({ preserveExpanded: true });
       setExpandedChannelId(channelId);
       const outcome = applyFetchModelsOutcome(channelId, result);
-      setPageNotice(
-        outcome.ok
-          ? {
-              kind: outcome.warn ? "warn" : "success",
-              title: outcome.warn ? "同步已完成" : "同步成功",
-              message: outcome.warn ? "模型列表已刷新，但该渠道还有待处理项。" : "模型列表已更新。",
-            }
-          : {
-              kind: "error",
-              title: "同步失败",
-              message: result.error || "无法获取模型列表。",
-            },
-      );
+      if (!outcome.ok) {
+        notifyError("同步失败", result.error || "无法获取模型列表。");
+        return;
+      }
+      if (outcome.warn) {
+        notifyWarning("同步已完成", "模型列表已刷新，但该渠道还有待处理项。");
+        return;
+      }
+      notifySuccess("同步成功", "模型列表已更新。");
     });
   };
 
   const handleAgentCheck = async (channelId: string, modelId: string) => {
     const trimmed = modelId.trim();
     if (!trimmed) {
-      setPageNotice({ kind: "error", title: "缺少模型", message: "请选择或输入 modelId。" });
+      notifyError("缺少模型", "请选择或输入 modelId。");
       return;
     }
 
@@ -243,11 +223,7 @@ export function ChannelSettings() {
           const { [channelId]: _removed, ...rest } = prev;
           return rest;
         });
-        setPageNotice({
-          kind: "success",
-          title: "Agent 可用",
-          message: `模型 ${trimmed} 已通过 Agent 兼容性检查。`,
-        });
+        notifySuccess("Agent 可用", `模型 ${trimmed} 已通过 Agent 兼容性检查。`);
       } else {
         setChannelNotice((prev) => ({
           ...prev,
@@ -257,11 +233,7 @@ export function ChannelSettings() {
             message: result.error || "当前配置不能用于 Agent。",
           },
         }));
-        setPageNotice({
-          kind: "error",
-          title: "Agent 检查失败",
-          message: result.error || "当前配置不能用于 Agent。",
-        });
+        notifyError("Agent 检查失败", result.error || "当前配置不能用于 Agent。");
       }
       closeAgentCheck();
     });
@@ -271,7 +243,7 @@ export function ChannelSettings() {
     await runChannelAction(`default:${channelId}`, async () => {
       await api.channels.setDefault(channelId);
       await loadChannelList({ preserveExpanded: true });
-      setPageNotice({ kind: "success", title: "已更新", message: "默认渠道已更新。" });
+      notifySuccess("已更新", "默认渠道已更新。");
     });
   };
 
@@ -294,7 +266,7 @@ export function ChannelSettings() {
         model.modelId === modelId ? { ...model, enabled: !model.enabled } : model,
       );
       await updateModels(channel, nextModels);
-      setPageNotice({ kind: "success", title: "已更新", message: "模型启用状态已保存。" });
+      notifySuccess("已更新", "模型启用状态已保存。");
     });
   };
 
@@ -303,44 +275,21 @@ export function ChannelSettings() {
       await api.channels.setDefaultModel(channel.id, modelId);
       await loadChannelList({ preserveExpanded: true });
       setExpandedChannelId(channel.id);
-      setPageNotice({ kind: "success", title: "已更新", message: "默认模型已更新。" });
+      notifySuccess("已更新", "默认模型已更新。");
     });
   };
 
   return (
     <SettingsSection
       title="渠道配置"
-      description="桌面端与 Web 端共用同一套用户级渠道设置。"
+      description="全局用户级配置，对话与 Agent 共用。"
       action={
         <Button onClick={() => openEditor(NEW_CHANNEL_KEY)}>
-          <Plus size={16} /> 新增渠道
+          <Plus size={16} /> 渠道管理
         </Button>
       }
     >
       <div className="flex flex-col gap-3">
-        {pageNotice && (
-          <div
-            className={cn(
-              "rounded-xl border px-4 py-3",
-              pageNotice.kind === "error"
-                ? "border-red-200 bg-red-50 text-red-700 dark:border-red-900/70 dark:bg-red-950/40 dark:text-red-200"
-                : pageNotice.kind === "warn"
-                  ? "border-orange-200 bg-orange-50 text-orange-700 dark:border-orange-900/70 dark:bg-orange-950/40 dark:text-orange-200"
-                  : "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/70 dark:bg-emerald-950/40 dark:text-emerald-200",
-            )}
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <p className="text-sm font-semibold">{pageNotice.title}</p>
-                <p className="mt-1 text-sm whitespace-pre-wrap">{pageNotice.message}</p>
-              </div>
-              <Button variant="ghost" size="sm" onClick={() => setPageNotice(null)}>
-                关闭
-              </Button>
-            </div>
-          </div>
-        )}
-
         {sortedChannels.map((channel) => {
           const isExpanded = expandedChannelId === channel.id;
           const needsDefaultModel = Boolean(channel.isDefault && channel.enabled && !channel.defaultModelId);
@@ -355,7 +304,7 @@ export function ChannelSettings() {
                 <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
                   <div className="min-w-0">
                     <div className="mb-1 flex flex-wrap items-center gap-1.5">
-                      <p className="text-base font-semibold">{channel.name}</p>
+                      <p className="font-semibold">{channel.name}</p>
                       {channel.isDefault && <Badge>默认</Badge>}
                       {needsDefaultModel && (
                         <Badge variant="outline" className="border-orange-400 text-orange-600">
@@ -366,69 +315,134 @@ export function ChannelSettings() {
                     </div>
 
                     <div className="flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
-                      <Badge variant="secondary" className="gap-1">
+                      <Badge variant="secondary" className="gap-1" title={channel.provider}>
                         <DesktopProviderLogo provider={channel.provider} />
-                        <span>{channel.provider}</span>
+                        <span className="sr-only">{channel.provider}</span>
                       </Badge>
                       {channel.defaultModelId && <Badge variant="outline">{channel.defaultModelId}</Badge>}
                       <span className="break-all">{channel.baseUrl || "未设置 Base URL"}</span>
                     </div>
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Button variant="outline" size="sm" onClick={() => openEditor(channel.id)}>
-                      <PenSquare size={14} /> 编辑
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => openAgentCheck(channel)}
-                      disabled={busyKey === `agent-check:${channel.id}`}
-                    >
-                      <Bot size={14} /> Agent 检查
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => void handleTest(channel.id)}
-                      disabled={busyKey === `test:${channel.id}`}
-                    >
-                      <Check size={14} /> 连接测试
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => void handleFetchModels(channel.id)}
-                      disabled={busyKey === `fetch:${channel.id}`}
-                    >
-                      <RefreshCw
-                        size={14}
-                        className={busyKey === `fetch:${channel.id}` ? "animate-spin" : ""}
-                      />
-                      同步模型
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => void handleSetDefaultChannel(channel.id)}
-                      disabled={Boolean(busyKey) || channel.isDefault}
-                    >
-                      <Pin size={14} /> 设为默认
-                    </Button>
-                    <Button variant="outline" size="sm" onClick={() => toggleExpanded(channel.id)}>
-                      {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                      {isExpanded ? "收起" : "展开"}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="text-destructive"
-                      onClick={() => void handleDelete(channel.id)}
-                      disabled={busyKey === `delete:${channel.id}`}
-                    >
-                      <Trash2 size={14} /> 删除
-                    </Button>
-                  </div>
+                  <TooltipProvider>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            onClick={() => openEditor(channel.id)}
+                            aria-label="编辑渠道"
+                          >
+                            <PenSquare size={16} />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top">
+                          <p>编辑渠道</p>
+                        </TooltipContent>
+                      </Tooltip>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            onClick={() => openAgentCheck(channel)}
+                            disabled={busyKey === `agent-check:${channel.id}`}
+                            aria-label="Agent 检查"
+                          >
+                            <Bot size={16} />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top">
+                          <p>Agent 检查</p>
+                        </TooltipContent>
+                      </Tooltip>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            onClick={() => void handleTest(channel.id)}
+                            disabled={busyKey === `test:${channel.id}`}
+                            aria-label="连接测试"
+                          >
+                            <Check size={16} />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top">
+                          <p>连接测试</p>
+                        </TooltipContent>
+                      </Tooltip>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            onClick={() => void handleFetchModels(channel.id)}
+                            disabled={busyKey === `fetch:${channel.id}`}
+                            aria-label="同步模型"
+                          >
+                            <RefreshCw
+                              size={16}
+                              className={busyKey === `fetch:${channel.id}` ? "animate-spin" : ""}
+                            />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top">
+                          <p>同步模型</p>
+                        </TooltipContent>
+                      </Tooltip>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            className={channel.isDefault ? "text-yellow-500" : ""}
+                            onClick={() => void handleSetDefaultChannel(channel.id)}
+                            disabled={Boolean(busyKey)}
+                            aria-label="设为默认"
+                          >
+                            <Pin size={16} />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top">
+                          <p>设为默认</p>
+                        </TooltipContent>
+                      </Tooltip>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            onClick={() => toggleExpanded(channel.id)}
+                            aria-label={isExpanded ? "收起" : "展开"}
+                          >
+                            {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top">
+                          <p>{isExpanded ? "收起" : "展开"}</p>
+                        </TooltipContent>
+                      </Tooltip>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            className="text-destructive"
+                            onClick={() => void handleDelete(channel.id)}
+                            disabled={busyKey === `delete:${channel.id}`}
+                            aria-label="删除渠道"
+                          >
+                            <Trash2 size={16} />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top">
+                          <p>删除渠道</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                  </TooltipProvider>
                 </div>
 
                 {notice && (

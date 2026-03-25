@@ -15,9 +15,9 @@ import {
   SettingsSection,
   Switch,
   Textarea,
-  cn,
 } from "ui";
 import { getGlobalDefaultChannel } from "../../lib/defaultChannel";
+import { notifyError, notifySuccess } from "../../lib/notify";
 import { createServerApi } from "../../lib/serverApi";
 import type { ApiChannel, Channel } from "../../types/chat";
 import { DesktopProviderLogo } from "../chat/DesktopProviderLogo";
@@ -30,12 +30,6 @@ type MCPServer = {
   type: string;
   config: Record<string, unknown>;
   isEnabled: boolean;
-};
-
-type Notice = {
-  kind: "success" | "error";
-  title: string;
-  message: string;
 };
 
 const TAVILY_API_KEY_SETTING = "liveSearch.tavilyApiKey";
@@ -69,34 +63,10 @@ function mapChannel(channel: ApiChannel): Channel {
   };
 }
 
-function NoticeBanner({ notice, onClose }: { notice: Notice; onClose: () => void }) {
-  return (
-    <div
-      className={cn(
-        "rounded-xl border px-4 py-3",
-        notice.kind === "error"
-          ? "border-red-200 bg-red-50 text-red-700 dark:border-red-900/70 dark:bg-red-950/40 dark:text-red-200"
-          : "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/70 dark:bg-emerald-950/40 dark:text-emerald-200",
-      )}
-    >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-sm font-semibold">{notice.title}</p>
-          <p className="mt-1 text-sm whitespace-pre-wrap">{notice.message}</p>
-        </div>
-        <Button variant="ghost" size="sm" onClick={onClose}>
-          关闭
-        </Button>
-      </div>
-    </div>
-  );
-}
-
 export function AgentSettings() {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [mcpServers, setMcpServers] = useState<MCPServer[]>([]);
   const [loading, setLoading] = useState(false);
-  const [notice, setNotice] = useState<Notice | null>(null);
 
   const [tavilyApiKey, setTavilyApiKey] = useState("");
   const [savedTavilyApiKey, setSavedTavilyApiKey] = useState("");
@@ -132,11 +102,7 @@ export function AgentSettings() {
         enabledRaw == null ? true : String(enabledRaw).trim().toLowerCase() !== "false",
       );
     } catch (error) {
-      setNotice({
-        kind: "error",
-        title: "加载失败",
-        message: error instanceof Error ? error.message : "无法加载 Agent 设置。",
-      });
+      notifyError("加载失败", error instanceof Error ? error.message : "无法加载 Agent 设置。");
     } finally {
       setLoading(false);
     }
@@ -151,19 +117,14 @@ export function AgentSettings() {
     try {
       await api.settings.set(TAVILY_API_KEY_SETTING, tavilyApiKey.trim() || null);
       setSavedTavilyApiKey(tavilyApiKey.trim());
-      setNotice({
-        kind: "success",
-        title: "已保存",
-        message: tavilyApiKey.trim()
+      notifySuccess(
+        "已保存",
+        tavilyApiKey.trim()
           ? "Tavily API Key 已更新，将优先覆盖服务端默认 Key。"
           : "已恢复使用服务端默认 Tavily Key。",
-      });
+      );
     } catch (error) {
-      setNotice({
-        kind: "error",
-        title: "保存失败",
-        message: error instanceof Error ? error.message : "无法保存 Tavily Key。",
-      });
+      notifyError("保存失败", error instanceof Error ? error.message : "无法保存 Tavily Key。");
     } finally {
       setSavingTavilyApiKey(false);
     }
@@ -175,18 +136,10 @@ export function AgentSettings() {
     setSavingTavilyEnabled(true);
     try {
       await api.settings.set(TAVILY_ENABLED_SETTING, next ? "true" : "false");
-      setNotice({
-        kind: "success",
-        title: "已更新",
-        message: next ? "Tavily 搜索已启用。" : "Tavily 搜索已关闭。",
-      });
+      notifySuccess("已更新", next ? "Tavily 搜索已启用。" : "Tavily 搜索已关闭。");
     } catch (error) {
       setTavilyEnabled(!next);
-      setNotice({
-        kind: "error",
-        title: "更新失败",
-        message: error instanceof Error ? error.message : "无法更新 Tavily 状态。",
-      });
+      notifyError("更新失败", error instanceof Error ? error.message : "无法更新 Tavily 状态。");
     } finally {
       setSavingTavilyEnabled(false);
     }
@@ -194,7 +147,7 @@ export function AgentSettings() {
 
   const handleCreateMcp = async () => {
     if (!mcpName.trim()) {
-      setNotice({ kind: "error", title: "配置错误", message: "请填写 MCP Server 名称。" });
+      notifyError("配置错误", "请填写 MCP Server 名称。");
       return;
     }
 
@@ -202,7 +155,7 @@ export function AgentSettings() {
     try {
       parsedConfig = JSON.parse(mcpConfig);
     } catch {
-      setNotice({ kind: "error", title: "配置错误", message: "MCP config 必须是合法 JSON。" });
+      notifyError("配置错误", "MCP config 必须是合法 JSON。");
       return;
     }
 
@@ -218,13 +171,9 @@ export function AgentSettings() {
       setMcpType("stdio");
       setMcpConfig("{\n  \n}");
       await loadAll();
-      setNotice({ kind: "success", title: "已创建", message: "MCP Server 已添加。" });
+      notifySuccess("已创建", "MCP Server 已添加。");
     } catch (error) {
-      setNotice({
-        kind: "error",
-        title: "创建失败",
-        message: error instanceof Error ? error.message : "无法创建 MCP Server。",
-      });
+      notifyError("创建失败", error instanceof Error ? error.message : "无法创建 MCP Server。");
     } finally {
       setLoading(false);
     }
@@ -235,13 +184,9 @@ export function AgentSettings() {
     try {
       await api.mcp.deleteServer(id);
       await loadAll();
-      setNotice({ kind: "success", title: "已删除", message: "MCP Server 已删除。" });
+      notifySuccess("已删除", "MCP Server 已删除。");
     } catch (error) {
-      setNotice({
-        kind: "error",
-        title: "删除失败",
-        message: error instanceof Error ? error.message : "无法删除 MCP Server。",
-      });
+      notifyError("删除失败", error instanceof Error ? error.message : "无法删除 MCP Server。");
     } finally {
       setMcpBusyId(null);
     }
@@ -252,13 +197,9 @@ export function AgentSettings() {
     try {
       await api.mcp.updateServer(server.id, { isEnabled: !server.isEnabled });
       await loadAll();
-      setNotice({ kind: "success", title: "已更新", message: "MCP Server 状态已更新。" });
+      notifySuccess("已更新", "MCP Server 状态已更新。");
     } catch (error) {
-      setNotice({
-        kind: "error",
-        title: "更新失败",
-        message: error instanceof Error ? error.message : "无法更新 MCP Server 状态。",
-      });
+      notifyError("更新失败", error instanceof Error ? error.message : "无法更新 MCP Server 状态。");
     } finally {
       setMcpBusyId(null);
     }
@@ -266,8 +207,6 @@ export function AgentSettings() {
 
   return (
     <div className="flex flex-col gap-8">
-      {notice && <NoticeBanner notice={notice} onClose={() => setNotice(null)} />}
-
       <SettingsSection
         title="默认允许联网能力"
         description="普通聊天会在需要最新信息时使用产品内置的实时能力；Agent 在此基础上叠加更多工具。默认渠道决定模型供应商，但不是实时能力的开关。"
@@ -423,8 +362,8 @@ export function AgentSettings() {
         <DialogContent className="sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>添加 MCP Server</DialogTitle>
-            <DialogDescription>
-              输入 MCP Server 名称、类型和 JSON 配置。桌面端先按 Web 端相同结构展示。
+            <DialogDescription className="sr-only">
+              填写名称、类型和 JSON 配置，创建一个新的 MCP Server。
             </DialogDescription>
           </DialogHeader>
 
