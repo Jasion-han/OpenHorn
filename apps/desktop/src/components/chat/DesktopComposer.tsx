@@ -140,7 +140,7 @@ export function DesktopComposer({
       <div
         className={cn(
           "rounded-[17px] border-[0.5px] border-border bg-background/70 pt-2 shadow-minimal backdrop-blur-sm transition-all duration-200 titlebar-no-drag focus-within:border-foreground/20",
-          dragActive && "border-[#37a5aa]/70 bg-[#37a5aa]/[0.06]",
+          dragActive && "border-[2px] border-dashed border-[#2ecc71] bg-[#2ecc71]/[0.03]",
         )}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
@@ -152,6 +152,7 @@ export function DesktopComposer({
           multiple
           accept={ACCEPT_FILES}
           className="hidden"
+          disabled={disabled}
           onChange={(event) => {
             if (event.target.files) {
               handleAppendAttachments(event.target.files);
@@ -259,8 +260,8 @@ export function DesktopComposer({
                   "flex min-w-[68px] items-center justify-center gap-1.5 rounded-[10px] px-2.5 py-1 text-xs transition-colors",
                   modeMenuOpen
                     ? "bg-accent/80 text-foreground"
-                    : "text-muted-foreground hover:bg-accent hover:text-foreground",
-                  modeDisabled && "pointer-events-none opacity-60",
+                    : "text-muted-foreground hover:text-foreground hover:bg-accent",
+                  modeDisabled && "opacity-60 pointer-events-none",
                 )}
                 aria-label="Mode"
                 title="Mode"
@@ -277,9 +278,9 @@ export function DesktopComposer({
               className={cn(
                 "flex min-w-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors",
                 modelTone === "warning"
-                  ? "text-orange-600 hover:bg-orange-500/10 hover:text-orange-700"
-                  : "text-muted-foreground hover:bg-accent hover:text-foreground",
-                (!onOpenModelPicker || disabled) && "pointer-events-none opacity-60",
+                  ? "text-orange-600 hover:text-orange-700 hover:bg-orange-500/10"
+                  : "text-muted-foreground hover:text-foreground hover:bg-accent",
+                (!onOpenModelPicker || disabled) && "opacity-60 pointer-events-none",
               )}
               aria-label="Model"
               title="Model"
@@ -296,9 +297,9 @@ export function DesktopComposer({
               className={cn(
                 "flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors",
                 forceWebSearch
-                  ? "bg-emerald-400/20 text-emerald-500 hover:bg-emerald-400/30"
-                  : "text-muted-foreground hover:bg-accent hover:text-foreground",
-                (disabled || isBusy) && "pointer-events-none opacity-60",
+                  ? "text-emerald-500 bg-emerald-400/20 hover:bg-emerald-400/30"
+                  : "text-muted-foreground hover:text-foreground hover:bg-accent",
+                (disabled || isBusy) && "opacity-60 pointer-events-none",
               )}
               aria-label="Allow web search"
               title={forceWebSearch ? "需要最新信息时允许联网：已开启" : "需要最新信息时允许联网：已关闭"}
@@ -306,38 +307,39 @@ export function DesktopComposer({
               <Globe className="size-3.5" />
               <span>允许联网</span>
             </button>
-
           </div>
 
-          {isStreaming ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              className="size-[30px] rounded-full text-destructive hover:bg-destructive/10"
-              onClick={() => abortStreaming()}
-              aria-label="Stop"
-              title="Stop"
-            >
-              <Square className="size-[22px]" />
-            </Button>
-          ) : (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              className={cn(
-                "size-[30px] rounded-full",
-                canSubmit ? "text-primary hover:bg-primary/10" : "cursor-not-allowed text-foreground/30",
-              )}
-              onClick={() => void handleSubmit()}
-              disabled={!canSubmit}
-              aria-label="Send"
-              title="Send"
-            >
-              <CornerDownLeft className="size-[22px]" />
-            </Button>
-          )}
+          <div className="flex items-center gap-1.5">
+            {isStreaming ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                className="size-[30px] rounded-full text-destructive hover:bg-destructive/10"
+                onClick={() => abortStreaming()}
+                aria-label="Stop"
+                title="Stop"
+              >
+                <Square className="size-[22px]" />
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                className={cn(
+                  "size-[30px] rounded-full",
+                  canSubmit ? "text-primary hover:bg-primary/10" : "text-foreground/30 cursor-not-allowed",
+                )}
+                onClick={() => void handleSubmit()}
+                disabled={!canSubmit}
+                aria-label="Send"
+                title="Send"
+              >
+                <CornerDownLeft className="size-[22px]" />
+              </Button>
+            )}
+          </div>
         </div>
       </div>
     </div>
