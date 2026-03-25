@@ -74,6 +74,7 @@ export function DesktopComposer({
   onOpenModelPicker,
   forceWebSearch,
   onToggleWebSearch,
+  onStop,
   agentModeAvailable = true,
   agentModeDisabledReason,
 }: {
@@ -91,6 +92,7 @@ export function DesktopComposer({
   onOpenModelPicker?: () => void;
   forceWebSearch: boolean;
   onToggleWebSearch: () => void;
+  onStop?: () => void | Promise<void>;
   agentModeAvailable?: boolean;
   agentModeDisabledReason?: string | null;
 }) {
@@ -380,7 +382,13 @@ export function DesktopComposer({
                 variant="ghost"
                 size="icon-sm"
                 className="size-[30px] rounded-full text-destructive hover:bg-destructive/10"
-                onClick={() => abortStreaming()}
+                onClick={() => {
+                  if (onStop) {
+                    void onStop();
+                    return;
+                  }
+                  abortStreaming();
+                }}
                 aria-label="Stop"
                 title="Stop"
               >

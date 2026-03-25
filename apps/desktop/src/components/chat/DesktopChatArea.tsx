@@ -460,6 +460,7 @@ export function DesktopChatArea() {
   const loadConversations = useChatStore((state) => state.loadConversations);
   const deleteMessage = useChatStore((state) => state.deleteMessage);
   const regenerateMessage = useChatStore((state) => state.regenerateMessage);
+  const abortStreaming = useChatStore((state) => state.abortStreaming);
   const setStreaming = useChatStore((state) => state.setStreaming);
   const setError = useChatStore((state) => state.setError);
   const editUserMessage = useChatStore((state) => state.editUserMessage);
@@ -805,6 +806,18 @@ export function DesktopChatArea() {
     }
   };
 
+  const handleStop = async () => {
+    abortStreaming();
+    setStreaming(false);
+    setStreamingAssistantId(null);
+    if (!currentConversation) return;
+    try {
+      await loadMessages(currentConversation.id);
+    } catch {
+      // ignore reload failures after stop
+    }
+  };
+
   if (!currentConversation) {
     return (
       <div className="flex flex-1 flex-col overflow-x-hidden">
@@ -945,6 +958,7 @@ export function DesktopChatArea() {
           onOpenModelPicker={() => setModelPickerOpen(true)}
           forceWebSearch={forceWebSearch}
           onToggleWebSearch={() => void handleToggleWebSearch()}
+          onStop={() => void handleStop()}
           agentModeAvailable={agentModeSupported}
           agentModeDisabledReason={agentModeDisabledReason}
         />
