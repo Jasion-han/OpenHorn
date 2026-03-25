@@ -415,21 +415,19 @@ function MessageBubble({
             <DesktopCitationList citations={message.citations} content={displayContent} />
           </div>
         ) : (
-          <div className="text-sm leading-6">
-            {message.content?.trim() ? (
-              <p
-                className="text-sm"
-                style={{
-                  whiteSpace: "pre-wrap",
-                  overflowWrap: "anywhere",
-                  wordBreak: "break-word",
-                  maxWidth: "100%",
-                }}
-              >
-                {message.content}
-              </p>
-            ) : null}
-          </div>
+          message.content?.trim() ? (
+            <p
+              className="text-sm"
+              style={{
+                whiteSpace: "pre-wrap",
+                overflowWrap: "anywhere",
+                wordBreak: "break-word",
+                maxWidth: "100%",
+              }}
+            >
+              {message.content}
+            </p>
+          ) : null
         )}
       </div>
       <MessageActionBar
@@ -756,7 +754,7 @@ export function DesktopChatArea() {
                 {groupedMessages.map((group) => (
                   <div key={group.key} className="flex min-w-0 flex-col gap-2">
                     {group.user ? (
-                      <div className="flex min-w-0 flex-col items-end self-end">
+                      <div className="flex min-w-0 flex-col items-end">
                         <MessageBubble
                           message={group.user.msg}
                           isStreaming={isStreaming || editingMessageId === group.user.msg.id}
@@ -864,6 +862,7 @@ export function DesktopChatArea() {
           onAddAttachments={handleAddAttachments}
           onRemoveAttachment={handleRemoveAttachment}
           onSubmit={handleSubmit}
+          conversationId={currentConversation.id}
           modelProvider={effectiveModel.ok ? effectiveModel.provider : null}
           modelLabel={
             effectiveModel.ok

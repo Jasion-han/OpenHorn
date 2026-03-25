@@ -8,6 +8,52 @@ import { DesktopAttachmentPreviewItem } from "./DesktopAttachmentPreviewItem";
 import { DesktopProviderLogo } from "./DesktopProviderLogo";
 
 const ACCEPT_FILES = "image/png,image/jpeg,image/webp,application/pdf,text/plain,text/markdown";
+const PLACEHOLDERS = [
+  "Start with a spark — I will shape the rest.",
+  "What should we build, refine, or rethink today?",
+  "Drop a thought. I will turn it into something real.",
+  "Give me a direction, I will find the path.",
+  "Ask anything. Then push it one level deeper.",
+  "Sketch the idea. I will fill in the lines.",
+  "Let us turn a question into a plan.",
+  "Pitch the headline. I will write the story.",
+  "Take the blank page. I will bring the motion.",
+  "Name the problem. I will cut through it.",
+  "Start messy. End elegant.",
+  "One prompt away from clarity.",
+  "Tell me the goal, I will map the route.",
+  "What would you love to ship this week?",
+  "Let us turn curiosity into momentum.",
+  "If you can imagine it, we can draft it.",
+  "Give me the vibe. I will deliver the words.",
+  "Turn a rough idea into a sharp answer.",
+  "Ask for bold. I will keep it grounded.",
+  "What do you wish existed right now?",
+  "We can brainstorm or go straight to done.",
+  "Write less. Say more.",
+  "A single line can unlock the whole plan.",
+  "Let us design the next move.",
+  "Bring the question. Leave with the output.",
+  "Make it clear, make it quick, make it real.",
+  "Want a first draft that actually works?",
+  "Turn complexity into clean steps.",
+  "Take a breath — then type the dream.",
+  "If it matters, put it here.",
+];
+
+function pickPlaceholder(avoid?: string) {
+  if (PLACEHOLDERS.length === 0) return "";
+  if (PLACEHOLDERS.length === 1) return PLACEHOLDERS[0] ?? "";
+  let next = PLACEHOLDERS[Math.floor(Math.random() * PLACEHOLDERS.length)] ?? "";
+  if (avoid && PLACEHOLDERS.length > 1) {
+    let tries = 0;
+    while (next === avoid && tries < 4) {
+      next = PLACEHOLDERS[Math.floor(Math.random() * PLACEHOLDERS.length)] ?? next;
+      tries += 1;
+    }
+  }
+  return next;
+}
 
 function fileKey(file: File) {
   return `${file.name}:${file.size}:${file.lastModified}`;
@@ -21,6 +67,7 @@ export function DesktopComposer({
   onAddAttachments,
   onRemoveAttachment,
   onSubmit,
+  conversationId,
   modelProvider,
   modelLabel,
   modelTone = "normal",
@@ -37,6 +84,7 @@ export function DesktopComposer({
   onAddAttachments: (files: File[]) => void;
   onRemoveAttachment: (file: File) => void;
   onSubmit: (content: string, files: File[]) => Promise<void>;
+  conversationId?: string | null;
   modelProvider?: string | null;
   modelLabel?: string | null;
   modelTone?: "normal" | "warning";
@@ -53,6 +101,7 @@ export function DesktopComposer({
   const [value, setValue] = useState("");
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
   const [dragActive, setDragActive] = useState(false);
+  const [placeholder, setPlaceholder] = useState(() => pickPlaceholder());
   const modeMenuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -111,6 +160,16 @@ export function DesktopComposer({
   const modeDisabled = disabled || isBusy;
   const alternateMode: ChatMode = composerMode === "chat" ? "agent" : "chat";
   const alternateModeDisabled = alternateMode === "agent" && !agentModeAvailable;
+
+  useEffect(() => {
+    setPlaceholder((prev) => pickPlaceholder(prev));
+  }, [conversationId]);
+
+  useEffect(() => {
+    if (!value.trim()) {
+      setPlaceholder((prev) => pickPlaceholder(prev));
+    }
+  }, [value]);
 
   useEffect(() => {
     if (!modeMenuOpen) return;
@@ -179,6 +238,11 @@ export function DesktopComposer({
             disabled={disabled || isBusy}
             onChange={(event) => setValue(event.target.value)}
             onPaste={handlePaste}
+            onFocus={() => {
+              if (!value.trim()) {
+                setPlaceholder((prev) => pickPlaceholder(prev));
+              }
+            }}
             placeholder={
               disabled
                 ? "请先在左侧创建或选择一个会话"
@@ -186,7 +250,7 @@ export function DesktopComposer({
                   ? "正在处理，请稍候"
                 : attachments.length > 0
                   ? "可继续输入文本，或直接发送附件"
-                  : "输入你的问题，聊天与 Agent 在这里切换"
+                  : placeholder
             }
             rows={1}
             className="min-h-[36px] max-h-[160px] resize-none border-0 bg-transparent p-0 shadow-none placeholder:text-muted-foreground/70 focus-visible:ring-0 disabled:cursor-default disabled:opacity-100"
