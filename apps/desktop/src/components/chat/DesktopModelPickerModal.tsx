@@ -196,7 +196,7 @@ export function DesktopModelPickerModal(props: {
         <DialogHeader>
           <DialogTitle>选择模型</DialogTitle>
           <DialogDescription className="sr-only">
-            为当前会话选择可用渠道和模型。
+            为当前会话选择可用渠道和模型，也可以在这里同步模型列表。
           </DialogDescription>
         </DialogHeader>
 

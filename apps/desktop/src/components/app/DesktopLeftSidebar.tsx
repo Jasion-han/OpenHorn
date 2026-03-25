@@ -29,7 +29,7 @@ import {
   ScrollArea,
   cn,
 } from "ui";
-import { notifyErrorOnce, notifySuccess } from "../../lib/notify";
+import { notifyError, notifyErrorOnce, notifySuccess } from "../../lib/notify";
 import { getDesktopBackendBase } from "../../lib/backendBase";
 import { useAuthStore } from "../../stores/authStore";
 import { BACKEND_UP_EVENT, useBackendStatusStore } from "../../stores/backendStatusStore";
@@ -206,6 +206,9 @@ export function DesktopLeftSidebar() {
     try {
       await createConversation(formatNewConversationTitle());
       setActiveView("chat");
+      notifySuccess("已创建", "新会话已创建");
+    } catch (error) {
+      notifyError("创建失败", error instanceof Error ? error.message : "无法创建会话");
     } finally {
       setCreating(false);
     }
@@ -214,8 +217,9 @@ export function DesktopLeftSidebar() {
   const handleDeleteConversation = async (conversation: Conversation) => {
     try {
       await deleteConversation(conversation.id);
-    } catch {
-      // store 已记录 error
+      notifySuccess("已删除", "会话已删除");
+    } catch (error) {
+      notifyError("删除失败", error instanceof Error ? error.message : "无法删除会话");
     }
   };
 
@@ -234,7 +238,9 @@ export function DesktopLeftSidebar() {
 
     try {
       await updateConversation(conversation.id, { title: nextTitle });
-    } catch {
+      notifySuccess("已保存", "标题已更新");
+    } catch (error) {
+      notifyError("保存失败", error instanceof Error ? error.message : "无法更新标题");
       void loadConversations();
     }
   };
