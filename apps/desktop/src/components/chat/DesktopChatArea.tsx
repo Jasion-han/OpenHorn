@@ -212,6 +212,7 @@ function IconActionButton({
 
 function MessageActionBar({
   message,
+  copyValue,
   canEdit,
   canRetry,
   canDelete,
@@ -221,6 +222,7 @@ function MessageActionBar({
   onDelete,
 }: {
   message: Message;
+  copyValue?: string;
   canEdit: boolean;
   canRetry: boolean;
   canDelete: boolean;
@@ -232,7 +234,7 @@ function MessageActionBar({
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
-    await navigator.clipboard.writeText(message.content || "");
+    await navigator.clipboard.writeText(copyValue ?? message.content ?? "");
     setCopied(true);
     window.setTimeout(() => setCopied(false), 2000);
   };
@@ -267,6 +269,184 @@ function MessageActionBar({
   );
 }
 
+type GroupedMessageEntry = {
+  msg: Message;
+  index: number;
+};
+
+type MessageRoundGroup = {
+  key: string;
+  user?: GroupedMessageEntry;
+  assistant?: GroupedMessageEntry;
+};
+
+function groupMessagesByRound(messages: Message[]): MessageRoundGroup[] {
+  const groups: MessageRoundGroup[] = [];
+
+  for (let index = 0; index < messages.length; index += 1) {
+    const msg = messages[index];
+    if (!msg) continue;
+
+    if (msg.role === "user") {
+      const next = messages[index + 1];
+      if (next?.role === "assistant" && next.mode === msg.mode) {
+        groups.push({
+          key: `${msg.id}:${next.id}`,
+          user: { msg, index },
+          assistant: { msg: next, index: index + 1 },
+        });
+        index += 1;
+        continue;
+      }
+
+      groups.push({
+        key: msg.id,
+        user: { msg, index },
+      });
+      continue;
+    }
+
+    groups.push({
+      key: msg.id,
+      assistant: { msg, index },
+    });
+  }
+
+  return groups;
+}
+
+function MessageBubble({
+  message,
+  isStreaming,
+  canEdit,
+  canRetry,
+  canDelete,
+  onEdit,
+  onRetry,
+  onDelete,
+  assistantWidth,
+  userMaxWidth,
+}: {
+  message: Message;
+  isStreaming: boolean;
+  canEdit: boolean;
+  canRetry: boolean;
+  canDelete: boolean;
+  onEdit: () => void;
+  onRetry: () => void;
+  onDelete: () => void;
+  assistantWidth: string;
+  userMaxWidth: string;
+}) {
+  const isAssistant = message.role === "assistant";
+  const label = message.mode === "agent" ? "Agent" : "Chat";
+  const badgeIcon = message.mode === "agent" ? <Bot size={12} /> : <MessageSquare size={12} />;
+  const displayContent = isAssistant
+    ? sanitizeDisplayContent(message.content, message.citations)
+    : message.content;
+  const hasAssistantText = isAssistant && Boolean((displayContent || "").trim());
+  const isAssistantPlaceholder = isAssistant && isStreaming && !hasAssistantText;
+  const processPanel = isAssistant ? (
+    message.agentRun?.taskId ? (
+      <DesktopAgentTaskCard messageId={message.id} taskId={message.agentRun.taskId} />
+    ) : (
+      <AgentRunPanel run={message.agentRun} />
+    )
+  ) : null;
+
+  return (
+    <div
+      className={cn(
+        "group flex min-w-0 flex-col",
+        isAssistant && "w-full",
+        isAssistant ? "items-start self-start" : "items-end self-end",
+      )}
+      style={{ maxWidth: isAssistant ? assistantWidth : userMaxWidth }}
+    >
+      <div
+        className={cn(
+          isAssistant ? "block w-full min-w-0 max-w-full" : "inline-block min-w-0 max-w-full",
+          isAssistantPlaceholder ? "border-0 bg-transparent px-0 py-0" : "rounded-2xl px-4 py-2",
+          isAssistant
+            ? isAssistantPlaceholder
+              ? ""
+              : "border border-border/50 bg-background/60"
+            : "border border-border/50 bg-foreground/[0.06]",
+        )}
+      >
+        <div
+          className={cn(
+            "mb-1 inline-flex items-center gap-1 text-[11px] font-medium",
+            isAssistant ? "text-muted-foreground" : "text-foreground/60",
+          )}
+        >
+          {badgeIcon}
+          <span>{label}</span>
+        </div>
+
+        {!isAssistant && message.attachmentsMeta && message.attachmentsMeta.length > 0 && (
+          <DesktopMessageAttachments attachments={message.attachmentsMeta} />
+        )}
+
+        {processPanel}
+
+        {isAssistant ? (
+          <div className={cn("min-w-0 max-w-full", processPanel && "mt-3")}>
+            <LiveStatusBadge
+              status={message.liveStatus}
+              route={message.liveRoute}
+              label={message.liveLabel}
+            />
+            <div
+              className="text-sm leading-6"
+              style={{
+                whiteSpace: "pre-wrap",
+                overflowWrap: "anywhere",
+                wordBreak: "break-word",
+                maxWidth: "100%",
+              }}
+            >
+              {hasAssistantText ? (
+                <DesktopMarkdownMessage content={displayContent} />
+              ) : isStreaming ? (
+                <TypingIndicator />
+              ) : null}
+            </div>
+            <DesktopCitationList citations={message.citations} content={displayContent} />
+          </div>
+        ) : (
+          <div className="text-sm leading-6">
+            {message.content?.trim() ? (
+              <p
+                className="text-sm"
+                style={{
+                  whiteSpace: "pre-wrap",
+                  overflowWrap: "anywhere",
+                  wordBreak: "break-word",
+                  maxWidth: "100%",
+                }}
+              >
+                {message.content}
+              </p>
+            ) : null}
+          </div>
+        )}
+      </div>
+      <MessageActionBar
+        message={message}
+        copyValue={displayContent}
+        canEdit={canEdit}
+        canRetry={canRetry}
+        canDelete={canDelete}
+        isStreaming={isStreaming}
+        onEdit={onEdit}
+        onRetry={onRetry}
+        onDelete={onDelete}
+      />
+    </div>
+  );
+}
+
 export function DesktopChatArea() {
   const ASSISTANT_BUBBLE_WIDTH = "92%";
   const USER_BUBBLE_MAX_WIDTH = "72%";
@@ -296,6 +476,7 @@ export function DesktopChatArea() {
     ? null
     : "请先配置可用模型后再使用 Agent 模式。";
   const forceWebSearch = currentConversation?.forceWebSearch ?? true;
+  const groupedMessages = groupMessagesByRound(messages);
 
   useEffect(() => {
     setPendingAttachments([]);
@@ -564,180 +745,84 @@ export function DesktopChatArea() {
             <ScrollArea className="h-full">
               <div className="flex min-w-0 w-full flex-col py-4">
                 <div className="mt-auto flex min-w-0 flex-col gap-2 pb-2">
-                  {messages.map((message) => (
-                    <div
-                      key={message.id}
-                      className={cn(
-                        "group flex min-w-0 flex-col",
-                        message.role === "assistant"
-                          ? "w-full items-start self-start"
-                          : "items-end self-end",
-                      )}
-                      style={{
-                        maxWidth:
-                          message.role === "assistant"
-                            ? ASSISTANT_BUBBLE_WIDTH
-                            : USER_BUBBLE_MAX_WIDTH,
-                      }}
-                    >
-                      {(() => {
-                        const isAssistant = message.role === "assistant";
-                        const label = message.mode === "agent" ? "Agent" : "Chat";
-                        const badgeIcon =
-                          message.mode === "agent" ? <Bot size={12} /> : <MessageSquare size={12} />;
-                        const displayContent = isAssistant
-                          ? sanitizeDisplayContent(message.content, message.citations)
-                          : message.content;
-                        const hasAssistantText = isAssistant && Boolean((displayContent || "").trim());
-                        const isAssistantPlaceholder = isAssistant && isStreaming && !hasAssistantText;
-                        const processPanel = isAssistant ? (
-                          message.agentRun?.taskId ? (
-                            <DesktopAgentTaskCard messageId={message.id} taskId={message.agentRun.taskId} />
-                          ) : (
-                            <AgentRunPanel run={message.agentRun} />
-                          )
-                        ) : null;
-
-                        return (
-                          <div
-                            className={cn(
-                              isAssistant
-                                ? "block w-full min-w-0 max-w-full"
-                                : "inline-block min-w-0 max-w-full",
-                              isAssistantPlaceholder
-                                ? "border-0 bg-transparent px-0 py-0"
-                                : "rounded-2xl px-4 py-2",
-                              isAssistant
-                                ? isAssistantPlaceholder
-                                  ? ""
-                                  : "border border-border/50 bg-background/60"
-                                : "border border-border/50 bg-foreground/[0.06]",
-                            )}
-                          >
-                            <div
-                              className={cn(
-                                "mb-1 inline-flex items-center gap-1 text-[11px] font-medium",
-                                isAssistant ? "text-muted-foreground" : "text-foreground/60",
-                              )}
-                            >
-                              {badgeIcon}
-                              <span>{label}</span>
-                            </div>
-
-                            {!isAssistant &&
-                              message.attachmentsMeta &&
-                              message.attachmentsMeta.length > 0 && (
-                                <DesktopMessageAttachments attachments={message.attachmentsMeta} />
-                              )}
-
-                            {processPanel}
-
-                            {isAssistant ? (
-                              <div className={cn("min-w-0 max-w-full", processPanel && "mt-3")}>
-                                <LiveStatusBadge
-                                  status={message.liveStatus}
-                                  route={message.liveRoute}
-                                  label={message.liveLabel}
-                                />
-                                <div
-                                  className="text-sm leading-6"
-                                  style={{
-                                    whiteSpace: "pre-wrap",
-                                    overflowWrap: "anywhere",
-                                    wordBreak: "break-word",
-                                    maxWidth: "100%",
-                                  }}
-                                >
-                                  {hasAssistantText ? (
-                                    <DesktopMarkdownMessage content={displayContent} />
-                                  ) : isStreaming ? (
-                                    <TypingIndicator />
-                                  ) : null}
-                                </div>
-                                <DesktopCitationList
-                                  citations={message.citations}
-                                  content={displayContent}
-                                />
-                              </div>
-                            ) : (
-                              <div className="text-sm leading-6">
-                                {message.content?.trim() ? (
-                                  <p
-                                    className="text-sm"
-                                    style={{
-                                      whiteSpace: "pre-wrap",
-                                      overflowWrap: "anywhere",
-                                      wordBreak: "break-word",
-                                      maxWidth: "100%",
-                                    }}
-                                  >
-                                    {message.content}
-                                  </p>
-                                ) : null}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })()}
-                      <MessageActionBar
-                        message={message}
-                        canEdit={
-                          message.role === "user" &&
-                          Boolean(getEditableAssistantForUser(message.id))
-                        }
-                        canRetry={
-                          message.role === "assistant" &&
-                          !message.id.startsWith("draft-") &&
-                          !isLoading &&
-                          !isStreaming &&
-                          !isUploading &&
-                          Boolean(currentConversation)
-                        }
-                        canDelete={!message.id.startsWith("draft-")}
-                        isStreaming={isStreaming || editingMessageId === message.id}
-                        onEdit={() => handleStartEdit(message)}
-                        onRetry={() => void handleRetryMessage(message.id)}
-                        onDelete={() => void handleDeleteMessage(message.id)}
-                      />
-                      {message.role === "user" && editingMessageId === message.id && (
-                        <div className="mt-1 flex w-full max-w-[72%] self-end flex-col items-end gap-1">
-                          <Textarea
-                            value={editingContent}
-                            onChange={(event) => setEditingContent(event.target.value)}
-                            onKeyDown={(event) => {
-                              if (event.key === "Enter" && !event.shiftKey) {
-                                event.preventDefault();
-                                void handleSaveEdit(message.id);
-                              }
-                              if (event.key === "Escape") {
-                                event.preventDefault();
-                                handleCancelEdit();
-                              }
-                            }}
-                            className="w-full"
-                            rows={3}
-                            autoFocus
+                  {groupedMessages.map((group) => (
+                    <div key={group.key} className="flex min-w-0 flex-col gap-2">
+                      {group.user ? (
+                        <div className="flex min-w-0 flex-col items-end self-end">
+                          <MessageBubble
+                            message={group.user.msg}
+                            isStreaming={isStreaming || editingMessageId === group.user.msg.id}
+                            canEdit={Boolean(getEditableAssistantForUser(group.user.msg.id))}
+                            canRetry={false}
+                            canDelete={!group.user.msg.id.startsWith("draft-")}
+                            onEdit={() => handleStartEdit(group.user!.msg)}
+                            onRetry={() => undefined}
+                            onDelete={() => void handleDeleteMessage(group.user!.msg.id)}
+                            assistantWidth={ASSISTANT_BUBBLE_WIDTH}
+                            userMaxWidth={USER_BUBBLE_MAX_WIDTH}
                           />
-                          <div className="flex gap-2">
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="ghost"
-                              onClick={handleCancelEdit}
-                            >
-                              取消
-                            </Button>
-                            <Button
-                              type="button"
-                              size="sm"
-                              onClick={() => void handleSaveEdit(message.id)}
-                              disabled={!editingContent.trim() || isStreaming}
-                            >
-                              确认
-                            </Button>
-                          </div>
+                          {editingMessageId === group.user.msg.id && (
+                            <div className="mt-1 flex w-full max-w-[72%] self-end flex-col items-end gap-1">
+                              <Textarea
+                                value={editingContent}
+                                onChange={(event) => setEditingContent(event.target.value)}
+                                onKeyDown={(event) => {
+                                  if (event.key === "Enter" && !event.shiftKey) {
+                                    event.preventDefault();
+                                    void handleSaveEdit(group.user!.msg.id);
+                                  }
+                                  if (event.key === "Escape") {
+                                    event.preventDefault();
+                                    handleCancelEdit();
+                                  }
+                                }}
+                                className="w-full"
+                                rows={3}
+                                autoFocus
+                              />
+                              <div className="flex gap-2">
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={handleCancelEdit}
+                                >
+                                  取消
+                                </Button>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  onClick={() => void handleSaveEdit(group.user!.msg.id)}
+                                  disabled={!editingContent.trim() || isStreaming}
+                                >
+                                  确认
+                                </Button>
+                              </div>
+                            </div>
+                          )}
                         </div>
-                      )}
+                      ) : null}
+
+                      {group.assistant ? (
+                        <MessageBubble
+                          message={group.assistant.msg}
+                          isStreaming={isStreaming}
+                          canEdit={false}
+                          canRetry={
+                            !group.assistant.msg.id.startsWith("draft-") &&
+                            !isLoading &&
+                            !isStreaming &&
+                            !isUploading &&
+                            Boolean(currentConversation)
+                          }
+                          canDelete={!group.assistant.msg.id.startsWith("draft-")}
+                          onEdit={() => undefined}
+                          onRetry={() => void handleRetryMessage(group.assistant!.msg.id)}
+                          onDelete={() => void handleDeleteMessage(group.assistant!.msg.id)}
+                          assistantWidth={ASSISTANT_BUBBLE_WIDTH}
+                          userMaxWidth={USER_BUBBLE_MAX_WIDTH}
+                        />
+                      ) : null}
                     </div>
                   ))}
                 </div>
