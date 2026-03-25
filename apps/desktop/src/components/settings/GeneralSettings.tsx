@@ -1,0 +1,183 @@
+import { AlignLeft, Pencil } from "lucide-react";
+import { useEffect, useState } from "react";
+import { SettingsCard, SettingsSection, Badge, Button, Input, Label, Textarea, cn } from "ui";
+import { createServerApi } from "../../lib/serverApi";
+import { useAuthStore } from "../../stores/authStore";
+
+const api = createServerApi();
+const SYSTEM_PROMPT_KEY = "chat.systemPrompt";
+
+type Notice = {
+  kind: "success" | "error";
+  title: string;
+  message: string;
+};
+
+function NoticeBanner({ notice, onClose }: { notice: Notice; onClose: () => void }) {
+  return (
+    <div
+      className={cn(
+        "rounded-xl border px-4 py-3",
+        notice.kind === "error"
+          ? "border-red-200 bg-red-50 text-red-700 dark:border-red-900/70 dark:bg-red-950/40 dark:text-red-200"
+          : "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/70 dark:bg-emerald-950/40 dark:text-emerald-200",
+      )}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold">{notice.title}</p>
+          <p className="mt-1 text-sm whitespace-pre-wrap">{notice.message}</p>
+        </div>
+        <Button variant="ghost" size="sm" onClick={onClose}>
+          关闭
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+export function GeneralSettings() {
+  const user = useAuthStore((state) => state.user);
+  const [username] = useState(user?.username || "");
+  const [email] = useState(user?.email || "");
+  const [systemPrompt, setSystemPrompt] = useState("");
+  const [savedPrompt, setSavedPrompt] = useState("");
+  const [editing, setEditing] = useState(false);
+  const [savingPrompt, setSavingPrompt] = useState(false);
+  const [notice, setNotice] = useState<Notice | null>(null);
+
+  useEffect(() => {
+    api.settings
+      .get([SYSTEM_PROMPT_KEY])
+      .then(({ settings }) => {
+        const value = settings[SYSTEM_PROMPT_KEY] || "";
+        setSystemPrompt(value);
+        setSavedPrompt(value);
+        setEditing(!value);
+      })
+      .catch((error) => {
+        setNotice({
+          kind: "error",
+          title: "加载失败",
+          message: error instanceof Error ? error.message : "无法加载系统提示词。",
+        });
+      });
+  }, []);
+
+  const handleSavePrompt = async () => {
+    setSavingPrompt(true);
+    try {
+      await api.settings.set(SYSTEM_PROMPT_KEY, systemPrompt || null);
+      setSavedPrompt(systemPrompt);
+      setEditing(false);
+      setNotice({ kind: "success", title: "已保存", message: "系统提示词已更新。" });
+    } catch (error) {
+      setNotice({
+        kind: "error",
+        title: "保存失败",
+        message: error instanceof Error ? error.message : "无法保存系统提示词。",
+      });
+    } finally {
+      setSavingPrompt(false);
+    }
+  };
+
+  const handleCancelEdit = () => {
+    setSystemPrompt(savedPrompt);
+    setEditing(false);
+  };
+
+  return (
+    <div className="flex flex-col gap-8">
+      {notice && <NoticeBanner notice={notice} onClose={() => setNotice(null)} />}
+
+      <SettingsSection title="账户信息" description="管理你的账号显示信息（本地展示）。">
+        <SettingsCard divided={false} className="p-4">
+          <div className="mb-4 flex items-center gap-3">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-primary text-xl font-bold text-primary-foreground">
+              {username?.charAt(0).toUpperCase() || "U"}
+            </div>
+            <div>
+              <p className="text-base leading-tight font-bold">{username || "未设置用户名"}</p>
+              <p className="text-sm text-muted-foreground">{email}</p>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-1.5">
+              <Label>用户名</Label>
+              <Input value={username} disabled />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>邮箱</Label>
+              <Input value={email} disabled />
+              <p className="text-xs text-muted-foreground">桌面端暂不支持修改账户资料</p>
+            </div>
+            <div>
+              <Button disabled>暂不支持修改</Button>
+            </div>
+          </div>
+        </SettingsCard>
+      </SettingsSection>
+
+      <SettingsSection
+        title="全局系统提示词"
+        description="对所有对话与 Agent 会话生效，优先级低于对话级提示词。"
+      >
+        <SettingsCard divided={false} className="p-4">
+          <div className="mb-3 flex items-start justify-between">
+            <div className="flex items-center gap-2">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-muted">
+                <AlignLeft size={18} className="text-muted-foreground" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <p className="font-bold">全局系统提示词</p>
+                  {savedPrompt && !editing && <Badge variant="secondary">{savedPrompt.length} 字符</Badge>}
+                </div>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  用于约束模型回答风格、语言与偏好。
+                </p>
+              </div>
+            </div>
+            {!editing && (
+              <Button size="sm" variant="ghost" onClick={() => setEditing(true)}>
+                <Pencil size={13} />
+                编辑
+              </Button>
+            )}
+          </div>
+
+          <Textarea
+            placeholder="例如：你是一个专业的代码助手，请用中文回答所有问题..."
+            value={editing ? systemPrompt : savedPrompt || ""}
+            onChange={(event) => setSystemPrompt(event.target.value)}
+            readOnly={!editing}
+            className={cn(
+              "mt-2 h-[min(460px,50vh)] min-h-[320px] resize-y font-mono text-sm leading-relaxed",
+              !editing && "cursor-default bg-muted text-muted-foreground",
+            )}
+            rows={14}
+          />
+
+          {editing ? (
+            <div className="mt-3 flex justify-end gap-2">
+              <Button variant="ghost" onClick={handleCancelEdit} disabled={savingPrompt}>
+                取消
+              </Button>
+              <Button onClick={() => void handleSavePrompt()} disabled={savingPrompt}>
+                {savingPrompt ? "保存中..." : "保存"}
+              </Button>
+            </div>
+          ) : (
+            !savedPrompt && (
+              <p className="mt-2 text-sm italic text-muted-foreground">
+                暂未设置，点击右上角「编辑」添加。
+              </p>
+            )
+          )}
+        </SettingsCard>
+      </SettingsSection>
+    </div>
+  );
+}

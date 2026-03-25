@@ -23,30 +23,47 @@ const api = createServerApi();
 const API_KEY_MASK = "********";
 const NEW_CHANNEL_KEY = "__new__";
 
+const CHANNEL_PROTOCOLS = {
+  openai: {
+    label: "OpenAI 兼容",
+    baseUrl: "https://api.openai.com/v1",
+  },
+  anthropic: {
+    label: "Anthropic",
+    baseUrl: "https://api.anthropic.com",
+  },
+  google: {
+    label: "Google",
+    baseUrl: "https://generativelanguage.googleapis.com",
+  },
+} as const;
+
+type ChannelProtocol = keyof typeof CHANNEL_PROTOCOLS;
+
 const COMMON_PROVIDER_PRESETS = [
   {
     value: "openai",
     label: "OpenAI",
+    protocol: "openai" as const,
     baseUrl: "https://api.openai.com/v1",
-    hint: "OpenAI 兼容",
   },
   {
     value: "anthropic",
     label: "Anthropic",
+    protocol: "anthropic" as const,
     baseUrl: "https://api.anthropic.com",
-    hint: "Anthropic 协议",
   },
   {
     value: "deepseek",
     label: "DeepSeek",
+    protocol: "openai" as const,
     baseUrl: "https://api.deepseek.com/v1",
-    hint: "OpenAI 兼容",
   },
   {
     value: "google",
     label: "Google",
+    protocol: "google" as const,
     baseUrl: "https://generativelanguage.googleapis.com",
-    hint: "Gemini 原生",
   },
 ] as const;
 
@@ -83,8 +100,35 @@ function getProviderPreset(provider: string | null | undefined) {
   return COMMON_PROVIDER_PRESETS.find((item) => item.value === normalized) || null;
 }
 
-function providerNeedsExplicitBaseUrl(provider: string | null | undefined) {
-  return !getProviderPreset(provider);
+function inferProtocolFromProvider(
+  provider: string | null | undefined,
+  baseUrl: string | null | undefined,
+  fallback: ChannelProtocol = "openai",
+): ChannelProtocol {
+  const normalized = `${normalizeCompareText(provider)} ${normalizeCompareText(baseUrl)}`
+    .trim()
+    .toLowerCase();
+
+  if (!normalized) return fallback;
+  if (normalized.includes("anthropic") || normalized.includes("claude")) return "anthropic";
+  if (
+    normalized.includes("google") ||
+    normalized.includes("gemini") ||
+    normalized.includes("generativelanguage")
+  ) {
+    return "google";
+  }
+  if (normalized.includes("openai") || normalized.includes("deepseek")) return "openai";
+  return fallback;
+}
+
+function getDefaultBaseUrlForProvider(
+  provider: string | null | undefined,
+  baseUrl: string | null | undefined,
+  fallback: ChannelProtocol = "openai",
+) {
+  const protocol = inferProtocolFromProvider(provider, baseUrl, fallback);
+  return CHANNEL_PROTOCOLS[protocol].baseUrl;
 }
 
 export function ChannelEditorModal(props: ChannelEditorModalProps) {
@@ -94,7 +138,7 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
   const [activeKey, setActiveKey] = useState<string>(NEW_CHANNEL_KEY);
   const [name, setName] = useState("");
   const [provider, setProvider] = useState("openai");
-  const [baseUrl, setBaseUrl] = useState("https://api.openai.com/v1");
+  const [baseUrl, setBaseUrl] = useState<string>(CHANNEL_PROTOCOLS.openai.baseUrl);
   const [enabled, setEnabled] = useState(true);
   const [apiKey, setApiKey] = useState("");
   const [saving, setSaving] = useState(false);
@@ -132,7 +176,7 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
   const prefillCreate = () => {
     setName("");
     setProvider("openai");
-    setBaseUrl("https://api.openai.com/v1");
+    setBaseUrl(CHANNEL_PROTOCOLS.openai.baseUrl);
     setEnabled(true);
     setApiKey("");
     setFormNotice(null);
@@ -141,7 +185,10 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
   const prefillFromChannel = (channel: Channel) => {
     setName(channel.name || "");
     setProvider(channel.provider || "");
-    setBaseUrl(channel.baseUrl || getProviderPreset(channel.provider)?.baseUrl || "");
+    setBaseUrl(
+      channel.baseUrl ||
+        getDefaultBaseUrlForProvider(channel.provider, channel.baseUrl, channel.protocol || "openai"),
+    );
     setEnabled(Boolean(channel.enabled));
     setApiKey(channel.hasApiKey ? API_KEY_MASK : "");
     setFormNotice(null);
@@ -215,6 +262,17 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
     setBaseUrl(preset.baseUrl);
   };
 
+  const resolvedProtocol = inferProtocolFromProvider(
+    provider,
+    baseUrl,
+    activeChannel?.protocol || "openai",
+  );
+  const suggestedBaseUrl = getDefaultBaseUrlForProvider(
+    provider,
+    baseUrl,
+    activeChannel?.protocol || "openai",
+  );
+
   const handleSubmit = async () => {
     if (saving) return;
 
@@ -222,7 +280,6 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
     const trimmedProvider = provider.trim();
     const trimmedBaseUrl = baseUrl.trim();
     const trimmedApiKey = apiKey.trim();
-    const nextBaseUrl = trimmedBaseUrl || activeChannel?.baseUrl || "";
 
     if (!trimmedName) {
       setFormNotice({ kind: "error", title: "无法保存", message: "请填写渠道名称。" });
@@ -239,21 +296,6 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
         setFormNotice({ kind: "error", title: "无法创建", message: "请填写 API Key。" });
         return;
       }
-      if (providerNeedsExplicitBaseUrl(trimmedProvider) && !trimmedBaseUrl) {
-        setFormNotice({
-          kind: "error",
-          title: "无法创建",
-          message: "自定义 provider 需要显式填写 Base URL。",
-        });
-        return;
-      }
-    } else if (providerNeedsExplicitBaseUrl(trimmedProvider) && !nextBaseUrl) {
-      setFormNotice({
-        kind: "error",
-        title: "无法保存",
-        message: "自定义 provider 需要显式填写 Base URL。",
-      });
-      return;
     }
 
     setSaving(true);
@@ -264,6 +306,7 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
         const { channel } = await api.channels.create({
           name: trimmedName,
           provider: trimmedProvider,
+          protocol: inferProtocolFromProvider(trimmedProvider, trimmedBaseUrl, "openai"),
           apiKey: trimmedApiKey,
           baseUrl: trimmedBaseUrl || undefined,
           enabled,
@@ -294,6 +337,16 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
       }
       if (normalizeCompareText(trimmedProvider) !== normalizeCompareText(activeChannel.provider)) {
         payload.provider = trimmedProvider;
+      }
+      if (
+        inferProtocolFromProvider(trimmedProvider, trimmedBaseUrl, activeChannel.protocol) !==
+        activeChannel.protocol
+      ) {
+        payload.protocol = inferProtocolFromProvider(
+          trimmedProvider,
+          trimmedBaseUrl,
+          activeChannel.protocol,
+        );
       }
       if (normalizeCompareBaseUrl(trimmedBaseUrl) !== normalizeCompareBaseUrl(activeChannel.baseUrl)) {
         payload.baseUrl = trimmedBaseUrl;
@@ -334,7 +387,7 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
     <Dialog open={opened} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
       <DialogContent className="flex h-[min(76vh,820px)] max-w-5xl flex-col p-0">
         <DialogHeader className="px-4 pt-4 pb-0">
-          <DialogTitle>{isCreate ? "新增渠道" : "编辑渠道"}</DialogTitle>
+          <DialogTitle>渠道管理</DialogTitle>
           <DialogDescription className="sr-only">
             管理桌面端渠道配置，包括 provider、Base URL、API Key 和模型同步。
           </DialogDescription>
@@ -343,7 +396,7 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
         <div className="flex min-h-0 flex-1 gap-3 p-4">
           <div className="flex w-[36%] min-w-[240px] flex-col gap-2 rounded-xl border border-border/60 bg-muted/10 p-3">
             <div className="flex items-center justify-between gap-2">
-              <span className="text-sm font-semibold">渠道列表</span>
+              <span className="text-sm font-semibold">渠道</span>
               <Button size="sm" variant="outline" onClick={openCreate}>
                 <Plus size={14} /> 新建
               </Button>
@@ -430,10 +483,18 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
               <Label htmlFor="channel-provider">Provider</Label>
               <Input
                 id="channel-provider"
-                placeholder="例如：anthropic / openai / my-relay"
+                placeholder="例如：openai / anthropic / google"
                 value={provider}
                 onChange={(event) => setProvider(event.target.value)}
               />
+              <p className="text-xs leading-5 text-muted-foreground">
+                Provider 表示该渠道兼容哪类接口。若是中转服务，渠道名称写真实来源，Provider
+                填兼容类型即可。
+              </p>
+              <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+                当前将按 <span className="font-medium text-foreground">{resolvedProtocol}</span>{" "}
+                兼容链路处理请求。
+              </div>
               <div className="flex flex-wrap gap-2">
                 {COMMON_PROVIDER_PRESETS.map((preset) => (
                   <Button
@@ -447,29 +508,19 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
                   </Button>
                 ))}
               </div>
-              <p className="text-xs leading-5 text-muted-foreground">
-                使用 <code>anthropic</code> 可走 Anthropic 协议。其他任意 provider 默认按
-                OpenAI 兼容协议处理；若不是上面的常见 provider，请手动填写 Base URL。
-              </p>
             </div>
 
             <div className="space-y-2">
               <Label htmlFor="channel-base-url">Base URL</Label>
               <Input
                 id="channel-base-url"
-                placeholder="留空时将按常见 provider 默认值处理"
+                placeholder="留空时将按当前 Provider 默认值处理"
                 value={baseUrl}
                 onChange={(event) => setBaseUrl(event.target.value)}
               />
-              {getProviderPreset(provider) ? (
-                <p className="text-xs text-muted-foreground">
-                  当前常见 provider 默认地址：{getProviderPreset(provider)?.baseUrl}
-                </p>
-              ) : (
-                <p className="text-xs text-muted-foreground">
-                  自定义 provider 需要你提供完整 Base URL。
-                </p>
-              )}
+              <p className="text-xs text-muted-foreground">
+                当前 Provider 默认地址：{suggestedBaseUrl}
+              </p>
             </div>
 
             <div className="space-y-2">

@@ -1,17 +1,19 @@
-import { Info, Palette, PlugZap } from "lucide-react";
+import { Bot, Palette, Radio, Settings } from "lucide-react";
 import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
 import { cn, ScrollArea } from "ui";
-import { AboutSettings } from "./AboutSettings";
+import { AgentSettings } from "./AgentSettings";
 import { AppearanceSettings } from "./AppearanceSettings";
 import { ChannelSettings } from "./ChannelSettings";
+import { GeneralSettings } from "./GeneralSettings";
 
-type SettingsTab = "channels" | "appearance" | "about";
+type SettingsTab = "general" | "channels" | "agent" | "appearance";
 
 const TABS: Array<{ id: SettingsTab; label: string; icon: ReactNode }> = [
-  { id: "channels", label: "渠道", icon: <PlugZap size={16} /> },
+  { id: "general", label: "通用", icon: <Settings size={16} /> },
+  { id: "channels", label: "渠道", icon: <Radio size={16} /> },
+  { id: "agent", label: "Agent", icon: <Bot size={16} /> },
   { id: "appearance", label: "外观", icon: <Palette size={16} /> },
-  { id: "about", label: "关于", icon: <Info size={16} /> },
 ];
 
 export function SettingsView({ initialTab = "channels" }: { initialTab?: SettingsTab }) {
@@ -19,12 +21,14 @@ export function SettingsView({ initialTab = "channels" }: { initialTab?: Setting
 
   const content = useMemo(() => {
     switch (activeTab) {
+      case "general":
+        return <GeneralSettings />;
       case "channels":
         return <ChannelSettings />;
+      case "agent":
+        return <AgentSettings />;
       case "appearance":
         return <AppearanceSettings />;
-      case "about":
-        return <AboutSettings />;
     }
   }, [activeTab]);
 
