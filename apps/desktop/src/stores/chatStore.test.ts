@@ -19,6 +19,7 @@ function createStubAdapter() {
           userId: "user-1",
           name: "Anthropic",
           provider: "anthropic",
+          protocol: "anthropic",
           enabled: true,
           isDefault: true,
           createdAt: new Date("2026-03-20T10:00:00.000Z"),
@@ -57,6 +58,10 @@ function createStubAdapter() {
     }),
     updateConversation: async () => {},
     deleteConversation: async () => {},
+    autoTitleConversation: async (_conversationId, prompt) => ({
+      success: true,
+      title: `标题: ${prompt}`,
+    }),
     loadMessages: async () =>
       [
         {
@@ -206,7 +211,11 @@ describe("desktop chat store", () => {
       content: "第二段",
     });
 
-    expect(store.getState().messages[2]?.content).toBe("第一段第二段");
+    expect(store.getState().messages[2]).toMatchObject({
+      content: "第一段第二段",
+      streamTail: "第一段第二段",
+      streamPulseKey: 2,
+    });
   });
 
   test("maps live status metadata onto the assistant message", async () => {
@@ -378,5 +387,22 @@ describe("desktop chat store", () => {
       title: "已重命名",
       isPinned: true,
     });
+  });
+
+  test("updates local conversation title after auto title succeeds", async () => {
+    const { adapter } = createStubAdapter();
+    const store = createDesktopChatStore(adapter);
+
+    await store.getState().loadConversations();
+    await store.getState().selectConversation("conv-1");
+
+    const result = await store.getState().autoTitleConversation("conv-1", "第一条消息");
+
+    expect(result).toEqual({
+      success: true,
+      title: "标题: 第一条消息",
+    });
+    expect(store.getState().conversations[0]?.title).toBe("标题: 第一条消息");
+    expect(store.getState().currentConversation?.title).toBe("标题: 第一条消息");
   });
 });

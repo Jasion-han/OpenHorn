@@ -48,13 +48,14 @@ export function DesktopAttachmentPreviewItem({
           type="button"
           onClick={onRemove}
           className={cn(
-            "absolute right-1 top-1 flex size-[18px] items-center justify-center rounded-full",
+            "absolute right-1 top-1 size-[18px] rounded-full",
             "bg-black/50 text-white backdrop-blur-sm",
+            "flex items-center justify-center",
             "opacity-0 transition-opacity duration-200 group-hover/attachment:opacity-100",
             "hover:bg-black/70",
           )}
-          aria-label="移除附件"
-          title="移除附件"
+          aria-label="Remove attachment"
+          title="Remove"
         >
           <X className="size-3" />
         </button>
@@ -76,12 +77,13 @@ export function DesktopAttachmentPreviewItem({
         type="button"
         onClick={onRemove}
         className={cn(
-          "absolute right-1.5 top-1/2 flex size-[18px] -translate-y-1/2 items-center justify-center rounded-full",
-          "text-[#37a5aa]/60 transition-all duration-200 hover:bg-[#37a5aa]/20 hover:text-[#37a5aa]",
-          "opacity-0 group-hover/attachment:opacity-100",
+          "absolute right-1.5 top-1/2 -translate-y-1/2 size-[18px] rounded-full",
+          "flex items-center justify-center",
+          "text-[#37a5aa]/60 hover:text-[#37a5aa] hover:bg-[#37a5aa]/20",
+          "opacity-0 transition-all duration-200 group-hover/attachment:opacity-100",
         )}
-        aria-label="移除附件"
-        title="移除附件"
+        aria-label="Remove attachment"
+        title="Remove"
       >
         <X className="size-3" />
       </button>

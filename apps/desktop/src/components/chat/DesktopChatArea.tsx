@@ -10,7 +10,7 @@ import { readErrorMessage } from "../../lib/serverApi";
 import { readSseStream } from "../../lib/sse";
 import { createTextStreamSmoother, type TextStreamSmoother } from "../../lib/textStreamSmoother";
 import { useChatStore } from "../../stores/chatStore";
-import type { ApiAgentRun, ChatStreamEvent, Message } from "../../types/chat";
+import type { ApiAgentRun, ChatStreamEvent, Message, MessageAttachmentMeta } from "../../types/chat";
 import { DesktopCitationList } from "./DesktopCitationList";
 import { DesktopAgentTaskCard } from "./DesktopAgentTaskCard";
 import { DesktopChatHeader } from "./DesktopChatHeader";
@@ -18,11 +18,61 @@ import { DesktopComposer } from "./DesktopComposer";
 import { DesktopMarkdownMessage } from "./DesktopMarkdownMessage";
 import { DesktopMessageAttachments } from "./DesktopMessageAttachments";
 import { DesktopModelPickerModal } from "./DesktopModelPickerModal";
+import { DesktopStreamingMarkdownMessage } from "./DesktopStreamingMarkdownMessage";
+
+const PAGE_PAD = "16px";
+const COMPOSER_PAD_BOTTOM = "env(safe-area-inset-bottom, 0px)";
+const PLACEHOLDERS = [
+  "Start with a spark — I will shape the rest.",
+  "What should we build, refine, or rethink today?",
+  "Drop a thought. I will turn it into something real.",
+  "Give me a direction, I will find the path.",
+  "Ask anything. Then push it one level deeper.",
+  "Sketch the idea. I will fill in the lines.",
+  "Let us turn a question into a plan.",
+  "Pitch the headline. I will write the story.",
+  "Take the blank page. I will bring the motion.",
+  "Name the problem. I will cut through it.",
+  "Start messy. End elegant.",
+  "One prompt away from clarity.",
+  "Tell me the goal, I will map the route.",
+  "What would you love to ship this week?",
+  "Let us turn curiosity into momentum.",
+  "If you can imagine it, we can draft it.",
+  "Give me the vibe. I will deliver the words.",
+  "Turn a rough idea into a sharp answer.",
+  "Ask for bold. I will keep it grounded.",
+  "What do you wish existed right now?",
+  "We can brainstorm or go straight to done.",
+  "Write less. Say more.",
+  "A single line can unlock the whole plan.",
+  "Let us design the next move.",
+  "Bring the question. Leave with the output.",
+  "Make it clear, make it quick, make it real.",
+  "Want a first draft that actually works?",
+  "Turn complexity into clean steps.",
+  "Take a breath — then type the dream.",
+  "If it matters, put it here.",
+];
 
 type DesktopSearchStatus = {
   configured: boolean;
   source: "user" | "server" | "none" | "disabled";
 };
+
+function pickPlaceholder(avoid?: string) {
+  if (PLACEHOLDERS.length === 0) return "";
+  if (PLACEHOLDERS.length === 1) return PLACEHOLDERS[0] ?? "";
+  let next = PLACEHOLDERS[Math.floor(Math.random() * PLACEHOLDERS.length)] ?? "";
+  if (avoid && PLACEHOLDERS.length > 1) {
+    let tries = 0;
+    while (next === avoid && tries < 4) {
+      next = PLACEHOLDERS[Math.floor(Math.random() * PLACEHOLDERS.length)] ?? next;
+      tries += 1;
+    }
+  }
+  return next;
+}
 
 async function fetchDesktopSearchStatus(): Promise<DesktopSearchStatus> {
   const response = await fetch(`${getDesktopBackendBase()}/settings/search-status`, {
@@ -366,6 +416,8 @@ function MessageBubble({
     : message.content;
   const hasAssistantText = isAssistant && Boolean((displayContent || "").trim());
   const isAssistantPlaceholder = isAssistant && isStreaming && !hasAssistantText;
+  const streamTailLength =
+    isAssistant && isStreaming && hasAssistantText ? (message.streamTail || "").length : 0;
   const processPanel = isAssistant ? (
     message.agentRun?.taskId ? (
       <DesktopAgentTaskCard messageId={message.id} taskId={message.agentRun.taskId} />
@@ -427,7 +479,15 @@ function MessageBubble({
               }}
             >
               {hasAssistantText ? (
-                <DesktopMarkdownMessage content={displayContent} />
+                isStreaming ? (
+                  <DesktopStreamingMarkdownMessage
+                    content={displayContent}
+                    tailLength={streamTailLength}
+                    pulseKey={message.streamPulseKey ?? 0}
+                  />
+                ) : (
+                  <DesktopMarkdownMessage content={displayContent} />
+                )
               ) : isStreaming ? (
                 <TypingIndicator />
               ) : null}
@@ -468,12 +528,15 @@ function MessageBubble({
 export function DesktopChatArea() {
   const ASSISTANT_BUBBLE_WIDTH = "92%";
   const USER_BUBBLE_MAX_WIDTH = "72%";
-  const PAGE_PAD = "16px";
   const currentConversation = useChatStore((state) => state.currentConversation);
   const channels = useChatStore((state) => state.channels);
   const messages = useChatStore((state) => state.messages);
   const isLoading = useChatStore((state) => state.isLoading);
   const isStreaming = useChatStore((state) => state.isStreaming);
+  const composerMode = useChatStore((state) => state.composerMode);
+  const setComposerMode = useChatStore((state) => state.setComposerMode);
+  const addMessage = useChatStore((state) => state.addMessage);
+  const autoTitleConversation = useChatStore((state) => state.autoTitleConversation);
   const sendMessage = useChatStore((state) => state.sendMessage);
   const applyStreamEvent = useChatStore((state) => state.applyStreamEvent);
   const loadMessages = useChatStore((state) => state.loadMessages);
@@ -481,16 +544,21 @@ export function DesktopChatArea() {
   const deleteMessage = useChatStore((state) => state.deleteMessage);
   const regenerateMessage = useChatStore((state) => state.regenerateMessage);
   const abortStreaming = useChatStore((state) => state.abortStreaming);
+  const setLoading = useChatStore((state) => state.setLoading);
   const setStreaming = useChatStore((state) => state.setStreaming);
   const setError = useChatStore((state) => state.setError);
   const editUserMessage = useChatStore((state) => state.editUserMessage);
   const updateMessage = useChatStore((state) => state.updateMessage);
+  const [input, setInput] = useState("");
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editingContent, setEditingContent] = useState("");
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [pendingAttachments, setPendingAttachments] = useState<File[]>([]);
   const [isUploading, setIsUploading] = useState(false);
+  const [placeholder, setPlaceholder] = useState(() => pickPlaceholder());
   const viewportRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const pendingPreviewUrlsRef = useRef<Map<string, string[]>>(new Map());
   const pendingScrollTargetRef = useRef<{ type: "bottom" } | { type: "message"; id: string } | null>(
     null,
   );
@@ -502,7 +570,16 @@ export function DesktopChatArea() {
   const agentModeDisabledReason = effectiveModel.ok
     ? null
     : "请先配置可用模型后再使用 Agent 模式。";
+  const hasInput = Boolean(input.trim());
+  const hasFiles = pendingAttachments.length > 0;
   const forceWebSearch = currentConversation?.forceWebSearch ?? true;
+  const canSend =
+    effectiveModel.ok &&
+    Boolean(currentConversation) &&
+    !isLoading &&
+    !isStreaming &&
+    !isUploading &&
+    (hasInput || hasFiles);
   const groupedMessages = groupMessagesByRound(messages);
 
   useEffect(() => {
@@ -568,26 +645,53 @@ export function DesktopChatArea() {
   }, [currentConversation?.id]);
 
   useEffect(() => {
+    if (!input.trim()) {
+      setPlaceholder((prev) => pickPlaceholder(prev));
+    }
+  }, [currentConversation?.id, input]);
+
+  useEffect(() => {
+    return () => {
+      for (const urls of pendingPreviewUrlsRef.current.values()) {
+        for (const url of urls) {
+          try {
+            URL.revokeObjectURL(url);
+          } catch {
+            // ignore
+          }
+        }
+      }
+      pendingPreviewUrlsRef.current.clear();
+    };
+  }, [currentConversation?.id]);
+
+  useEffect(() => {
     return () => {
       textSmootherRef.current?.cancel();
       textSmootherRef.current = null;
     };
   }, []);
 
-  const getEditableAssistantForUser = (messageId: string) => {
+  const getEditableMessageRound = (messageId: string) => {
     const messageIndex = messages.findIndex((message) => message.id === messageId);
     if (messageIndex < 0) return null;
 
     const userMessage = messages[messageIndex];
     const assistantMessage = messages[messageIndex + 1];
-    if (!userMessage || userMessage.role !== "user" || userMessage.id.startsWith("draft-")) {
+    if (
+      !userMessage ||
+      userMessage.role !== "user" ||
+      userMessage.id.startsWith("draft-") ||
+      userMessage.id.startsWith("temp-")
+    ) {
       return null;
     }
     if (
-      !assistantMessage ||
-      assistantMessage.role !== "assistant" ||
-      assistantMessage.mode !== userMessage.mode ||
-      assistantMessage.id.startsWith("draft-")
+      assistantMessage &&
+      (assistantMessage.role !== "assistant" ||
+        assistantMessage.mode !== userMessage.mode ||
+        assistantMessage.id.startsWith("draft-") ||
+        assistantMessage.id.startsWith("temp-"))
     ) {
       return null;
     }
@@ -670,10 +774,66 @@ export function DesktopChatArea() {
     }
   };
 
-  const handleSubmit = async (content: string, files: File[]) => {
-    if (!currentConversation) return;
+  const handleInputFocus = () => {
+    if (!input.trim()) {
+      setPlaceholder((prev) => pickPlaceholder(prev));
+    }
+  };
 
-    const effectiveContent = content.trim();
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      const nativeEvent = event.nativeEvent;
+      const keyCode =
+        "keyCode" in nativeEvent ? (nativeEvent.keyCode as number | undefined) : undefined;
+      if (nativeEvent.isComposing || keyCode === 229) {
+        return;
+      }
+      event.preventDefault();
+      void handleSend();
+    }
+  };
+
+  const handleSend = async () => {
+    if (!canSend || !currentConversation) return;
+
+    if (composerMode === "agent" && !agentModeSupported) {
+      notifyWarning(
+        "Agent 当前不可用",
+        agentModeDisabledReason || "请先配置可用模型后再使用 Agent 模式。",
+      );
+      return;
+    }
+
+    const conversationId = currentConversation.id;
+    const mode = composerMode;
+    const trimmed = input.trim();
+    const effectiveContent = trimmed.length > 0 ? trimmed : "";
+    const files = pendingAttachments;
+    const autoTitleSeed =
+      trimmed.length > 0
+        ? trimmed
+        : files.length > 0
+          ? `Attachments: ${files.map((file) => file.name).join(", ")}`
+          : "";
+    const previewUrls: string[] = [];
+    const localAttachmentMeta: MessageAttachmentMeta[] = files.map((file) => {
+      const previewUrl = file.type?.startsWith("image/") ? URL.createObjectURL(file) : undefined;
+      if (previewUrl) {
+        previewUrls.push(previewUrl);
+      }
+      return {
+        fileName: file.name,
+        fileType: file.type || undefined,
+        fileSize: file.size,
+        previewUrl,
+      };
+    });
+    const userMessageId = `temp-${Date.now()}`;
+    const assistantMessageId = `temp-assistant-${Date.now()}`;
+    if (previewUrls.length > 0) {
+      pendingPreviewUrlsRef.current.set(userMessageId, previewUrls);
+    }
+
     let attachmentIds: string[] | undefined;
     let attachmentsMeta:
       | Array<{
@@ -681,14 +841,47 @@ export function DesktopChatArea() {
           fileName: string;
           fileType: string;
           fileSize: number;
-        }>
+      }>
       | undefined;
 
     try {
+      addMessage({
+        id: userMessageId,
+        conversationId,
+        role: "user",
+        content: effectiveContent,
+        mode,
+        attachmentsMeta: localAttachmentMeta.length > 0 ? localAttachmentMeta : undefined,
+        createdAt: new Date(),
+      });
+      addMessage({
+        id: assistantMessageId,
+        conversationId,
+        role: "assistant",
+        content: "",
+        mode,
+        agentRun:
+          mode === "agent"
+            ? {
+                status: "partial",
+                summary: "Agent 正在执行",
+                steps: [],
+              }
+            : undefined,
+        createdAt: new Date(),
+      });
+      pendingScrollTargetRef.current = { type: "message", id: userMessageId };
+      setInput("");
+      setLoading(true);
+      setStreaming(true);
+      setStreamingAssistantId(assistantMessageId);
+      setError(null);
+      queueMicrotask(() => inputRef.current?.focus());
+
       if (files.length > 0) {
         setIsUploading(true);
         const upload = await uploadAttachments({
-          conversationId: currentConversation.id,
+          conversationId,
           files,
         });
         attachmentIds = upload.attachments.map((attachment) => attachment.id);
@@ -698,32 +891,75 @@ export function DesktopChatArea() {
           fileType: attachment.fileType,
           fileSize: attachment.fileSize,
         }));
+        updateMessage(userMessageId, {
+          attachments: attachmentIds,
+          attachmentsMeta: localAttachmentMeta.map((local, index) => {
+            const server = upload.attachments[index];
+            return {
+              ...local,
+              id: server?.id ?? local.id,
+              fileName: server?.fileName ?? local.fileName,
+              fileType: server?.fileType ?? local.fileType,
+              fileSize: server?.fileSize ?? local.fileSize,
+            };
+          }),
+        });
+        setPendingAttachments([]);
       }
 
-      const { userMessageId, assistantMessageId, response } = await sendMessage({
+      const { response } = await sendMessage({
         content: effectiveContent,
         attachments: attachmentIds,
-        attachmentsMeta,
+        attachmentsMeta:
+          attachmentsMeta || (localAttachmentMeta.length > 0 ? localAttachmentMeta : undefined),
+        mode,
+        existingMessageIds: {
+          userMessageId,
+          assistantMessageId,
+        },
       });
-      pendingScrollTargetRef.current = { type: "message", id: userMessageId };
-      setStreamingAssistantId(assistantMessageId);
-      setPendingAttachments([]);
 
       await consumeStreamingResponse(assistantMessageId, response);
 
       setStreaming(false);
       setStreamingAssistantId(null);
-      await Promise.all([loadMessages(currentConversation.id), loadConversations()]);
+      await Promise.all([loadMessages(conversationId), loadConversations()]);
+      const nextConversation = useChatStore.getState().currentConversation;
+      if (
+        nextConversation &&
+        nextConversation.id === conversationId &&
+        /^新会话 \d{2}-\d{2} \d{2}:\d{2}$/.test(nextConversation.title) &&
+        autoTitleSeed
+      ) {
+        void autoTitleConversation(conversationId, autoTitleSeed).catch(() => {});
+      }
+
+      const urls = pendingPreviewUrlsRef.current.get(userMessageId);
+      if (urls) {
+        for (const url of urls) {
+          try {
+            URL.revokeObjectURL(url);
+          } catch {
+            // ignore
+          }
+        }
+        pendingPreviewUrlsRef.current.delete(userMessageId);
+      }
     } catch (error) {
       clearTextSmoother();
+      setLoading(false);
       setStreaming(false);
       setStreamingAssistantId(null);
       if (isAbortError(error)) {
         return;
       }
-      setError(error instanceof Error ? error.message : "Stream error");
+      const message = error instanceof Error ? error.message : "Stream error";
+      useChatStore.getState().failStreamingMessage(assistantMessageId, message);
+      setError(message);
     } finally {
+      setLoading(false);
       setIsUploading(false);
+      queueMicrotask(() => inputRef.current?.focus());
     }
   };
 
@@ -754,11 +990,14 @@ export function DesktopChatArea() {
     if (userMessage) {
       pendingScrollTargetRef.current = { type: "message", id: userMessage.id };
     }
+    setLoading(true);
     setStreaming(true);
     setStreamingAssistantId(messageId);
     setError(null);
     useChatStore.getState().updateMessage(messageId, {
       content: "",
+      streamTail: undefined,
+      streamPulseKey: 0,
       citations: undefined,
       liveStatus: undefined,
       liveRoute: undefined,
@@ -795,6 +1034,7 @@ export function DesktopChatArea() {
       await Promise.all([loadMessages(currentConversation.id), loadConversations()]);
     } catch (error) {
       clearTextSmoother();
+      setLoading(false);
       setStreaming(false);
       setStreamingAssistantId(null);
       if (isAbortError(error)) {
@@ -805,11 +1045,13 @@ export function DesktopChatArea() {
         messageId,
         error instanceof Error ? error.message : "Retry message failed",
       );
+    } finally {
+      setLoading(false);
     }
   };
 
   const handleStartEdit = (message: Message) => {
-    const editable = getEditableAssistantForUser(message.id);
+    const editable = getEditableMessageRound(message.id);
     if (!editable) return;
     setEditingMessageId(message.id);
     setEditingContent(message.content);
@@ -824,44 +1066,70 @@ export function DesktopChatArea() {
     const nextContent = editingContent.trim();
     if (!currentConversation || !nextContent) return;
 
-    const editable = getEditableAssistantForUser(messageId);
+    const editable = getEditableMessageRound(messageId);
     if (!editable) {
+      notifyWarning("当前消息不可编辑", "这条用户消息后面没有对应的助手回复，无法重新编辑并生成。");
       handleCancelEdit();
       return;
     }
 
-    const { userMessage, assistantMessage } = editable;
+    const { userMessage, assistantMessage: existingAssistantMessage } = editable;
+    const assistantMessageId =
+      existingAssistantMessage?.id ?? `temp-assistant-edit-${Date.now()}`;
     handleCancelEdit();
     pendingScrollTargetRef.current = { type: "message", id: userMessage.id };
+    setLoading(true);
     setStreaming(true);
-    setStreamingAssistantId(assistantMessage.id);
+    setStreamingAssistantId(assistantMessageId);
     setError(null);
     useChatStore.getState().updateMessage(userMessage.id, { content: nextContent });
-    useChatStore.getState().updateMessage(assistantMessage.id, {
-      content: "",
-      citations: undefined,
-      liveStatus: undefined,
-      liveRoute: undefined,
-      liveLabel: undefined,
-      agentRun:
-        assistantMessage.mode === "agent"
-          ? {
-              status: "partial",
-              summary: "Agent 正在执行",
-              steps: [],
-            }
-          : undefined,
-    });
+    if (existingAssistantMessage) {
+      useChatStore.getState().updateMessage(existingAssistantMessage.id, {
+        content: "",
+        streamTail: undefined,
+        streamPulseKey: 0,
+        citations: undefined,
+        liveStatus: undefined,
+        liveRoute: undefined,
+        liveLabel: undefined,
+        agentRun:
+          existingAssistantMessage.mode === "agent"
+            ? {
+                status: "partial",
+                summary: "Agent 正在执行",
+                steps: [],
+              }
+            : undefined,
+      });
+    } else {
+      addMessage({
+        id: assistantMessageId,
+        conversationId: currentConversation.id,
+        role: "assistant",
+        content: "",
+        mode: userMessage.mode,
+        agentRun:
+          userMessage.mode === "agent"
+            ? {
+                status: "partial",
+                summary: "Agent 正在执行",
+                steps: [],
+              }
+            : undefined,
+        createdAt: new Date(),
+      });
+    }
 
     try {
       const response = await editUserMessage(userMessage.id, nextContent);
-      await consumeStreamingResponse(assistantMessage.id, response);
+      await consumeStreamingResponse(assistantMessageId, response);
 
       setStreaming(false);
       setStreamingAssistantId(null);
       await Promise.all([loadMessages(currentConversation.id), loadConversations()]);
     } catch (error) {
       clearTextSmoother();
+      setLoading(false);
       setStreaming(false);
       setStreamingAssistantId(null);
       if (isAbortError(error)) {
@@ -869,9 +1137,11 @@ export function DesktopChatArea() {
       }
       setError(error instanceof Error ? error.message : "Edit message failed");
       useChatStore.getState().failStreamingMessage(
-        assistantMessage.id,
+        assistantMessageId,
         error instanceof Error ? error.message : "Edit message failed",
       );
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -910,6 +1180,7 @@ export function DesktopChatArea() {
   const handleStop = async () => {
     clearTextSmoother();
     abortStreaming();
+    setLoading(false);
     setStreaming(false);
     setStreamingAssistantId(null);
     if (!currentConversation) return;
@@ -918,6 +1189,7 @@ export function DesktopChatArea() {
     } catch {
       // ignore reload failures after stop
     }
+    queueMicrotask(() => inputRef.current?.focus());
   };
 
   if (!currentConversation) {
@@ -951,7 +1223,7 @@ export function DesktopChatArea() {
       <MessageBubble
         message={message}
         isStreaming={Boolean(isStreaming && streamingAssistantId && message.id === streamingAssistantId)}
-        canEdit={Boolean(getEditableAssistantForUser(message.id))}
+        canEdit={Boolean(getEditableMessageRound(message.id))}
         canRetry={message.role === "assistant" && !isLoading && !isStreaming && !isUploading}
         canDelete={!message.id.startsWith("draft-")}
         onEdit={() => handleStartEdit(message)}
@@ -1032,37 +1304,61 @@ export function DesktopChatArea() {
           ) : (
             <div className="mb-2 flex items-center gap-3 rounded-xl border border-orange-200 bg-orange-50 p-3 text-sm shadow-minimal">
               <p className="flex-1 text-orange-700">{effectiveModel.reason}</p>
-              <p className="text-xs text-muted-foreground">请先设置默认模型后再继续。</p>
+              <p className="text-xs text-muted-foreground">
+                Set a default model in Settings (gear) → Channels
+              </p>
             </div>
           )}
         </div>
       )}
 
-      <div style={{ paddingLeft: PAGE_PAD, paddingRight: PAGE_PAD }}>
+      <div
+        style={{
+          paddingLeft: PAGE_PAD,
+          paddingRight: PAGE_PAD,
+          paddingBottom: COMPOSER_PAD_BOTTOM,
+        }}
+      >
         <DesktopComposer
+          value={input}
+          onChange={setInput}
+          onKeyDown={handleKeyDown}
+          placeholder={placeholder}
           attachments={pendingAttachments}
-          disabled={false}
-          busy={isUploading || isLoading}
-          submitBlocked={!effectiveModel.ok}
+          disabled={isUploading}
           onAddAttachments={handleAddAttachments}
           onRemoveAttachment={handleRemoveAttachment}
-          onSubmit={handleSubmit}
-          conversationId={currentConversation.id}
+          mode={composerMode}
+          onModeChange={(nextMode) => {
+            if (nextMode === "agent" && !agentModeSupported) {
+              notifyWarning(
+                "Agent 当前不可用",
+                agentModeDisabledReason || "请先配置可用模型后再使用 Agent 模式。",
+              );
+              return;
+            }
+            setComposerMode(nextMode);
+          }}
+          agentModeAvailable={agentModeSupported}
+          agentModeDisabledReason={agentModeDisabledReason}
+          onSubmit={() => void handleSend()}
           modelProvider={effectiveModel.ok ? effectiveModel.provider : null}
           modelLabel={
             effectiveModel.ok
               ? effectiveModel.modelDisplayName
               : effectiveModel.scope === "conversation"
-                ? "修复模型"
-                : "选择模型"
+                ? "Fix model"
+                : "Select model"
           }
           modelTone={effectiveModel.ok ? "normal" : "warning"}
           onOpenModelPicker={() => setModelPickerOpen(true)}
           forceWebSearch={forceWebSearch}
           onToggleWebSearch={() => void handleToggleWebSearch()}
+          onInputFocus={handleInputFocus}
+          streaming={isStreaming}
+          canSubmit={canSend}
           onStop={() => void handleStop()}
-          agentModeAvailable={agentModeSupported}
-          agentModeDisabledReason={agentModeDisabledReason}
+          inputRef={inputRef}
         />
       </div>
 

@@ -90,24 +90,20 @@ export function DesktopMessageAttachments({
                 href={href}
                 target="_blank"
                 rel="noreferrer"
-                className="shrink-0 rounded-lg border border-[#37a5aa]/20 bg-[#37a5aa]/10 px-3 py-1.5 text-[13px] text-[#37a5aa] transition-colors hover:bg-[#37a5aa]/15"
+                className="flex shrink-0 items-center gap-2 rounded-lg border border-[#37a5aa]/20 bg-[#37a5aa]/10 px-3 py-1.5 text-[13px] text-[#37a5aa] transition-colors hover:bg-[#37a5aa]/15"
                 title={att.fileName}
               >
-                <span className="flex items-center gap-2">
-                  <Paperclip className="size-4" />
-                  <span>{label}</span>
-                </span>
+                <Paperclip className="size-4" />
+                <span>{label}</span>
               </a>
             ) : (
               <div
                 key={att.id || `${att.fileName}-${idx}`}
-                className="shrink-0 rounded-lg border border-[#37a5aa]/20 bg-[#37a5aa]/10 px-3 py-1.5 text-[13px] text-[#37a5aa] opacity-70"
+                className="flex shrink-0 items-center gap-2 rounded-lg border border-[#37a5aa]/20 bg-[#37a5aa]/10 px-3 py-1.5 text-[13px] text-[#37a5aa] opacity-70"
                 title={att.fileName}
               >
-                <span className="flex items-center gap-2">
-                  <Paperclip className="size-4" />
-                  <span>{label}</span>
-                </span>
+                <Paperclip className="size-4" />
+                <span>{label}</span>
               </div>
             );
           })}

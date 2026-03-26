@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Toaster } from "ui";
+import { Toaster, TooltipProvider } from "ui";
 import { DesktopAuthScreen } from "./components/auth/DesktopAuthScreen";
 import { SettingsView } from "./components/settings/SettingsView";
 import { DesktopShellLayout } from "./components/app/DesktopShellLayout";
@@ -35,7 +35,7 @@ export function App() {
   }, [bootstrapAuth, logout, resetChat, setActiveView]);
 
   return (
-    <>
+    <TooltipProvider delayDuration={200}>
       <ThemeListener />
       <Toaster />
       {!authReady ? (
@@ -50,6 +50,6 @@ export function App() {
           {activeView === "settings" ? <SettingsView /> : <DesktopChatArea />}
         </DesktopShellLayout>
       )}
-    </>
+    </TooltipProvider>
   );
 }

@@ -45,6 +45,13 @@ function createPartialAgentRun(): ApiAgentRun {
   };
 }
 
+const STREAM_TAIL_WINDOW = 18;
+
+function getRollingTail(text: string, size = STREAM_TAIL_WINDOW) {
+  const chars = Array.from(text);
+  return chars.slice(Math.max(0, chars.length - size)).join("");
+}
+
 function applyAgentEventToRun(
   run: ApiAgentRun | undefined,
   event: Extract<ChatStreamEvent, { type: "agent_event" }>["event"],
@@ -101,10 +108,18 @@ export interface ChatState {
   ) => Promise<Conversation>;
   updateConversation: (conversationId: string, updates: Partial<Conversation>) => Promise<void>;
   deleteConversation: (conversationId: string) => Promise<void>;
+  autoTitleConversation: (
+    conversationId: string,
+    prompt: string,
+  ) => Promise<{ success: boolean; title?: string }>;
   loadMessages: (conversationId: string) => Promise<void>;
   sendMessage: (
-    input: Omit<SendMessageInput, "conversationId"> & { attachmentsMeta?: MessageAttachmentMeta[] },
+    input: Omit<SendMessageInput, "conversationId"> & {
+      attachmentsMeta?: MessageAttachmentMeta[];
+      existingMessageIds?: { userMessageId: string; assistantMessageId: string };
+    },
   ) => Promise<{ userMessageId: string; assistantMessageId: string; response: Response }>;
+  addMessage: (message: Message) => void;
   deleteMessage: (messageId: string) => Promise<void>;
   regenerateMessage: (
     messageId: string,
@@ -120,6 +135,7 @@ export interface ChatState {
   replaceMessages: (messages: Message[]) => void;
   setComposerMode: (mode: ChatMode) => void;
   setSelectedChannelId: (channelId: string | null) => void;
+  setLoading: (loading: boolean) => void;
   setStreaming: (streaming: boolean) => void;
   setError: (error: string | null) => void;
   reset: () => void;
@@ -277,6 +293,28 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
       }));
     },
 
+    async autoTitleConversation(conversationId, prompt) {
+      const result = await adapter.autoTitleConversation(conversationId, prompt);
+      if (!result.success || !result.title) {
+        return result;
+      }
+
+      const nextUpdatedAt = new Date();
+      set((state) => ({
+        conversations: state.conversations.map((conversation) =>
+          conversation.id === conversationId
+            ? { ...conversation, title: result.title!, updatedAt: nextUpdatedAt }
+            : conversation,
+        ),
+        currentConversation:
+          state.currentConversation?.id === conversationId
+            ? { ...state.currentConversation, title: result.title!, updatedAt: nextUpdatedAt }
+            : state.currentConversation,
+      }));
+
+      return result;
+    },
+
     async loadMessages(conversationId) {
       set({ isLoading: true, error: null });
       try {
@@ -295,27 +333,31 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
       }
 
       const mode = input.mode || state.composerMode;
-      const userMessageId = `draft-user-${crypto.randomUUID()}`;
-      const assistantMessageId = `draft-assistant-${crypto.randomUUID()}`;
-      const nextMessages = [
-        ...state.messages,
-        createDraftMessage({
-          id: userMessageId,
-          conversationId: state.currentConversation.id,
-          role: "user",
-          content: input.content,
-          mode,
-          attachments: input.attachments,
-          attachmentsMeta: input.attachmentsMeta,
-        }),
-        createDraftMessage({
-          id: assistantMessageId,
-          conversationId: state.currentConversation.id,
-          role: "assistant",
-          content: "",
-          mode,
-        }),
-      ];
+      const userMessageId =
+        input.existingMessageIds?.userMessageId || `draft-user-${crypto.randomUUID()}`;
+      const assistantMessageId =
+        input.existingMessageIds?.assistantMessageId || `draft-assistant-${crypto.randomUUID()}`;
+      const nextMessages = input.existingMessageIds
+        ? state.messages
+        : [
+            ...state.messages,
+            createDraftMessage({
+              id: userMessageId,
+              conversationId: state.currentConversation.id,
+              role: "user",
+              content: input.content,
+              mode,
+              attachments: input.attachments,
+              attachmentsMeta: input.attachmentsMeta,
+            }),
+            createDraftMessage({
+              id: assistantMessageId,
+              conversationId: state.currentConversation.id,
+              role: "assistant",
+              content: "",
+              mode,
+            }),
+          ];
 
       set({
         messages: nextMessages,
@@ -333,13 +375,26 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
 
         return { userMessageId, assistantMessageId, response };
       } catch (error) {
-        set({
-          messages: state.messages,
-          isStreaming: false,
-          error: toErrorMessage(error),
-        });
+        if (input.existingMessageIds) {
+          set({
+            isStreaming: false,
+            error: toErrorMessage(error),
+          });
+        } else {
+          set({
+            messages: state.messages,
+            isStreaming: false,
+            error: toErrorMessage(error),
+          });
+        }
         throw error;
       }
+    },
+
+    addMessage(message) {
+      set((state) => ({
+        messages: [...state.messages, message],
+      }));
     },
 
     async deleteMessage(messageId) {
@@ -456,6 +511,8 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
                 ...message,
                 ...updates,
                 content: `${message.content}${delta}`,
+                streamTail: getRollingTail(`${message.content}${delta}`),
+                streamPulseKey: (message.streamPulseKey ?? 0) + 1,
               }
             : message,
         ),
@@ -472,6 +529,10 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
 
     setSelectedChannelId(channelId) {
       set({ selectedChannelId: channelId });
+    },
+
+    setLoading(loading) {
+      set({ isLoading: loading });
     },
 
     setStreaming(streaming) {
