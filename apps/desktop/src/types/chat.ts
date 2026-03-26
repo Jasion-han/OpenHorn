@@ -16,6 +16,7 @@ export interface ApiChannel {
   userId: string;
   name: string;
   provider: string;
+  protocol: "openai" | "anthropic" | "google";
   baseUrl: string | null;
   enabled: boolean;
   isDefault: boolean;
@@ -285,6 +286,7 @@ export interface Channel {
   userId: string;
   name: string;
   provider: string;
+  protocol: "openai" | "anthropic" | "google";
   baseUrl?: string;
   enabled: boolean;
   isDefault: boolean;
@@ -334,6 +336,8 @@ export interface Message {
   liveRoute?: ApiLiveRoute;
   liveLabel?: string;
   citations?: ApiCitation[];
+  streamTail?: string;
+  streamPulseKey?: number;
   createdAt: Date;
 }
 

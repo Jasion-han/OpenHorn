@@ -338,7 +338,7 @@ async function streamConversationAgentReply(params: {
   const classifier = resolvedChannel
     ? (prompt: string) =>
         classifyLiveRouteWithModel({
-          provider: resolvedChannel.channel.provider,
+          protocol: resolvedChannel.channel.protocol,
           apiKey: resolvedChannel.apiKey,
           baseUrl: resolvedChannel.channel.baseUrl,
           modelId: resolvedChannel.modelId,
@@ -555,7 +555,7 @@ export async function sendMessage(userId: string, input: SendMessageInput) {
   const classifier = resolvedChannel
     ? (prompt: string) =>
         classifyLiveRouteWithModel({
-          provider: resolvedChannel.channel.provider,
+          protocol: resolvedChannel.channel.protocol,
           apiKey: resolvedChannel.apiKey,
           baseUrl: resolvedChannel.channel.baseUrl,
           modelId: resolvedChannel.modelId,
@@ -581,7 +581,7 @@ export async function sendMessage(userId: string, input: SendMessageInput) {
 
   if (resolvedChannel) {
     const adapter = createAdapter(
-      resolvedChannel.channel.provider,
+      resolvedChannel.channel.protocol,
       resolvedChannel.apiKey,
       resolvedChannel.channel.baseUrl || undefined,
     );
@@ -769,7 +769,7 @@ export async function streamMessage(
     const classifier = resolvedChannel
       ? (prompt: string) =>
           classifyLiveRouteWithModel({
-            provider: resolvedChannel.channel.provider,
+            protocol: resolvedChannel.channel.protocol,
             apiKey: resolvedChannel.apiKey,
             baseUrl: resolvedChannel.channel.baseUrl,
             modelId: resolvedChannel.modelId,
@@ -840,7 +840,7 @@ export async function streamMessage(
     });
 
     const adapter = createAdapter(
-      resolvedChannel.channel.provider,
+      resolvedChannel.channel.protocol,
       resolvedChannel.apiKey,
       resolvedChannel.channel.baseUrl || undefined,
     );
@@ -1026,7 +1026,7 @@ export async function editUserMessage(
     const classifier = resolvedChannel
       ? (prompt: string) =>
           classifyLiveRouteWithModel({
-            provider: resolvedChannel.channel.provider,
+            protocol: resolvedChannel.channel.protocol,
             apiKey: resolvedChannel.apiKey,
             baseUrl: resolvedChannel.channel.baseUrl,
             modelId: resolvedChannel.modelId,
@@ -1071,7 +1071,7 @@ export async function editUserMessage(
     }
 
     const adapter = createAdapter(
-      resolvedChannel.channel.provider,
+      resolvedChannel.channel.protocol,
       resolvedChannel.apiKey,
       resolvedChannel.channel.baseUrl || undefined,
     );
@@ -1238,7 +1238,7 @@ export async function regenerateMessage(
     const classifier = resolvedChannel
       ? (prompt: string) =>
           classifyLiveRouteWithModel({
-            provider: resolvedChannel.channel.provider,
+            protocol: resolvedChannel.channel.protocol,
             apiKey: resolvedChannel.apiKey,
             baseUrl: resolvedChannel.channel.baseUrl,
             modelId: resolvedChannel.modelId,
@@ -1266,7 +1266,7 @@ export async function regenerateMessage(
     }
 
     const adapter = createAdapter(
-      resolvedChannel.channel.provider,
+      resolvedChannel.channel.protocol,
       resolvedChannel.apiKey,
       resolvedChannel.channel.baseUrl || undefined,
     );

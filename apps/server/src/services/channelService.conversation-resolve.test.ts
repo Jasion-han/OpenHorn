@@ -8,6 +8,7 @@ test("resolveModelIdFromChannelItem returns explicit modelId only when enabled; 
     userId: "u1",
     name: "test",
     provider: "openai",
+    protocol: "openai",
     baseUrl: null,
     enabled: true,
     isDefault: false,

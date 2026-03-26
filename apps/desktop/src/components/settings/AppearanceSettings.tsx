@@ -47,7 +47,7 @@ export function AppearanceSettings() {
         <SettingsRow label="界面缩放" description={zoomHint} />
       </SettingsCard>
       <p className={cn("text-xs text-muted-foreground")}>
-        提示：主题模式会保存到本地设备（仅影响当前客户端）。
+        提示：主题模式会保存到本地浏览器（仅影响当前设备）。
       </p>
     </SettingsSection>
   );

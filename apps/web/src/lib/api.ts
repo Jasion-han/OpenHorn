@@ -30,6 +30,7 @@ export interface ApiChannel {
   userId: string;
   name: string;
   provider: string;
+  protocol: "openai" | "anthropic" | "google";
   baseUrl: string | null;
   enabled: boolean;
   isDefault: boolean;
@@ -481,6 +482,7 @@ export const api = {
     create: (data: {
       name: string;
       provider: string;
+      protocol?: "openai" | "anthropic" | "google";
       apiKey: string;
       baseUrl?: string;
       enabled?: boolean;
@@ -496,6 +498,7 @@ export const api = {
       data: {
         name?: string;
         provider?: string;
+        protocol?: "openai" | "anthropic" | "google";
         apiKey?: string;
         baseUrl?: string;
         enabled?: boolean;

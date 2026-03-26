@@ -753,7 +753,7 @@ async function createTaskExecutionResponse(
 
         if (!finalText.trim()) {
           const adapter = createAdapter(
-            resolvedChannel.channel.provider,
+            resolvedChannel.channel.protocol,
             resolvedChannel.apiKey,
             resolvedChannel.channel.baseUrl || undefined,
           );

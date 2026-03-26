@@ -11,7 +11,7 @@ export async function generateAutoTitle(
     if (!resolved) return null;
 
     const adapter = createAdapter(
-      resolved.channel.provider,
+      resolved.channel.protocol,
       resolved.apiKey,
       resolved.channel.baseUrl || undefined,
     );

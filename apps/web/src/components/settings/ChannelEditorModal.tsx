@@ -18,28 +18,48 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 const API_KEY_MASK = "********";
 const NEW_CHANNEL_KEY = "__new__";
 
-const PROVIDERS = {
+const CHANNEL_PROTOCOLS = {
   openai: {
-    name: "OpenAI",
+    name: "OpenAI 兼容",
     defaultBaseUrl: "https://api.openai.com/v1",
   },
   anthropic: {
     name: "Anthropic",
     defaultBaseUrl: "https://api.anthropic.com",
   },
-  deepseek: {
-    name: "DeepSeek",
-    defaultBaseUrl: "https://api.deepseek.com/v1",
-  },
   google: {
     name: "Google",
     defaultBaseUrl: "https://generativelanguage.googleapis.com",
   },
-};
+} as const;
 
-type ProviderKey = keyof typeof PROVIDERS;
+const COMMON_CHANNEL_PRESETS = {
+  openai: {
+    name: "OpenAI",
+    protocol: "openai",
+    defaultBaseUrl: "https://api.openai.com/v1",
+  },
+  anthropic: {
+    name: "Anthropic",
+    protocol: "anthropic",
+    defaultBaseUrl: "https://api.anthropic.com",
+  },
+  deepseek: {
+    name: "DeepSeek",
+    protocol: "openai",
+    defaultBaseUrl: "https://api.deepseek.com/v1",
+  },
+  google: {
+    name: "Google",
+    protocol: "google",
+    defaultBaseUrl: "https://generativelanguage.googleapis.com",
+  },
+} as const;
+
+type ChannelProtocol = keyof typeof CHANNEL_PROTOCOLS;
 
 const LAST_PROVIDER_KEY = "channels.lastProvider";
+const LAST_PROTOCOL_KEY = "channels.lastProtocol";
 const LAST_BASEURL_KEY = "channels.lastBaseUrl";
 
 export type ChannelEditorModalProps = {
@@ -62,15 +82,20 @@ function normalizeCompareBaseUrl(value: string | null | undefined) {
   return normalizeCompareText(value).replace(/\/+$/, "");
 }
 
-function readLastProvider(): ProviderKey {
+function readLastProvider(): string {
   if (typeof window === "undefined") return "openai";
-  const raw = window.localStorage.getItem(LAST_PROVIDER_KEY);
-  return raw && raw in PROVIDERS ? (raw as ProviderKey) : "openai";
+  return window.localStorage.getItem(LAST_PROVIDER_KEY) || "openai";
+}
+
+function readLastProtocol(): ChannelProtocol {
+  if (typeof window === "undefined") return "openai";
+  const raw = window.localStorage.getItem(LAST_PROTOCOL_KEY);
+  return raw && raw in CHANNEL_PROTOCOLS ? (raw as ChannelProtocol) : "openai";
 }
 
 function readLastBaseUrl(): string {
-  if (typeof window === "undefined") return PROVIDERS.openai.defaultBaseUrl;
-  return window.localStorage.getItem(LAST_BASEURL_KEY) || PROVIDERS.openai.defaultBaseUrl;
+  if (typeof window === "undefined") return CHANNEL_PROTOCOLS.openai.defaultBaseUrl;
+  return window.localStorage.getItem(LAST_BASEURL_KEY) || CHANNEL_PROTOCOLS.openai.defaultBaseUrl;
 }
 
 export function ChannelEditorModal(props: ChannelEditorModalProps) {
@@ -80,14 +105,15 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
   const [activeKey, setActiveKey] = useState<string>(NEW_CHANNEL_KEY);
 
   const [name, setName] = useState("");
-  const [provider, setProvider] = useState<ProviderKey>("openai");
+  const [provider, setProvider] = useState("openai");
+  const [protocol, setProtocol] = useState<ChannelProtocol>("openai");
   const [baseUrl, setBaseUrl] = useState("");
   const [enabled, setEnabled] = useState(true);
   const [apiKey, setApiKey] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const providerOptions = useMemo(
-    () => Object.entries(PROVIDERS).map(([value, item]) => ({ value, label: item.name })),
+  const protocolOptions = useMemo(
+    () => Object.entries(CHANNEL_PROTOCOLS).map(([value, item]) => ({ value, label: item.name })),
     [],
   );
 
@@ -108,6 +134,7 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
       return (
         (c.name || "").toLowerCase().includes(q) ||
         (c.provider || "").toLowerCase().includes(q) ||
+        (c.protocol || "").toLowerCase().includes(q) ||
         (c.baseUrl || "").toLowerCase().includes(q)
       );
     });
@@ -119,10 +146,17 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
     return channels.find((c) => c.id === activeKey) || null;
   }, [activeKey, channels, isCreate]);
 
-  const setProviderAndRemember = (next: ProviderKey) => {
+  const setProviderAndRemember = (next: string) => {
     setProvider(next);
     if (typeof window !== "undefined") {
       window.localStorage.setItem(LAST_PROVIDER_KEY, next);
+    }
+  };
+
+  const setProtocolAndRemember = (next: ChannelProtocol) => {
+    setProtocol(next);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(LAST_PROTOCOL_KEY, next);
     }
   };
 
@@ -135,17 +169,19 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
 
   const prefillCreateDefaults = () => {
     const lastProvider = readLastProvider();
+    const lastProtocol = readLastProtocol();
     setName("");
     setProvider(lastProvider);
-    setBaseUrl(readLastBaseUrl());
+    setProtocol(lastProtocol);
+    setBaseUrl(readLastBaseUrl() || CHANNEL_PROTOCOLS[lastProtocol].defaultBaseUrl);
     setEnabled(true);
     setApiKey("");
   };
 
   const prefillFromChannel = (c: ApiChannel) => {
-    const p = c.provider in PROVIDERS ? (c.provider as ProviderKey) : "openai";
     setName(c.name || "");
-    setProvider(p);
+    setProvider(c.provider || "");
+    setProtocol(c.protocol || "openai");
     setBaseUrl(c.baseUrl || "");
     setEnabled(Boolean(c.enabled ?? true));
     setApiKey(c.hasApiKey ? API_KEY_MASK : "");
@@ -234,7 +270,8 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
 
         const { channel: created } = await api.channels.create({
           name: name.trim(),
-          provider,
+          provider: provider.trim(),
+          protocol,
           apiKey: apiKey.trim(),
           baseUrl: baseUrl.trim() || undefined,
           enabled,
@@ -262,7 +299,10 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
         payload.name = name.trim();
       }
       if (normalizeCompareText(provider) !== normalizeCompareText(channel.provider)) {
-        payload.provider = provider;
+        payload.provider = provider.trim();
+      }
+      if (protocol !== channel.protocol) {
+        payload.protocol = protocol;
       }
       if (normalizeCompareBaseUrl(baseUrl) !== normalizeCompareBaseUrl(channel.baseUrl)) {
         payload.baseUrl = baseUrl.trim();
@@ -365,6 +405,9 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
                             默认
                           </Badge>
                         )}
+                        <Badge variant="outline" className="text-xs px-1 py-0">
+                          {c.protocol}
+                        </Badge>
                         {!c.enabled && (
                           <Badge variant="secondary" className="text-xs px-1 py-0">
                             已禁用
@@ -389,7 +432,7 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
                   {isCreate ? "新建渠道" : activeChannel?.name || "编辑渠道"}
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  Provider 切换不会自动修改 Base URL。保存后会自动同步模型列表。
+                  provider 仅用于标识渠道，真正协议由 protocol 决定。保存后会自动同步模型列表。
                 </p>
               </div>
               {!isCreate && (
@@ -414,25 +457,54 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
                     />
                   </div>
                   <div className="flex flex-col gap-1.5">
-                    <Label>厂商</Label>
-                    <Select
+                    <Label>Provider</Label>
+                    <Input
                       value={provider}
-                      onValueChange={(v) => setProviderAndRemember(v as ProviderKey)}
+                      onChange={(e) => setProviderAndRemember(e.target.value)}
+                      placeholder="例如：anthropic / openrouter / my-relay"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="flex flex-col gap-1.5">
+                    <Label>Protocol</Label>
+                    <Select
+                      value={protocol}
+                      onValueChange={(v) => setProtocolAndRemember(v as ChannelProtocol)}
                     >
                       <SelectTrigger>
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {providerOptions.map((opt) => (
+                        {protocolOptions.map((opt) => (
                           <SelectItem key={opt.value} value={opt.value}>
-                            <div className="flex items-center gap-2">
-                              <ProviderLogo provider={opt.value} className="size-4" />
-                              <span>{opt.label}</span>
-                            </div>
+                            {opt.label}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <Label>常见预设</Label>
+                    <div className="flex flex-wrap gap-2">
+                      {Object.entries(COMMON_CHANNEL_PRESETS).map(([value, item]) => (
+                        <Button
+                          key={value}
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setProviderAndRemember(value);
+                            setProtocolAndRemember(item.protocol);
+                            setBaseUrlAndRemember(item.defaultBaseUrl);
+                          }}
+                        >
+                          <ProviderLogo provider={value} className="size-4" />
+                          <span>{item.name}</span>
+                        </Button>
+                      ))}
+                    </div>
                   </div>
                 </div>
 
@@ -448,12 +520,15 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
                     <Button
                       variant="outline"
                       size="icon"
-                      title="填入该厂商默认 Base URL"
-                      onClick={() => setBaseUrlAndRemember(PROVIDERS[provider].defaultBaseUrl)}
+                      title="填入当前协议默认 Base URL"
+                      onClick={() => setBaseUrlAndRemember(CHANNEL_PROTOCOLS[protocol].defaultBaseUrl)}
                     >
                       <Wand2 size={16} />
                     </Button>
                   </div>
+                  <p className="text-xs text-muted-foreground">
+                    当前协议默认地址：{CHANNEL_PROTOCOLS[protocol].defaultBaseUrl}
+                  </p>
                 </div>
 
                 <div className="flex items-center gap-2">

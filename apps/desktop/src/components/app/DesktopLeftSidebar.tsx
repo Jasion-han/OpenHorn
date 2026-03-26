@@ -4,8 +4,8 @@ import {
   LogOut,
   MoreHorizontal,
   Pencil,
-  Plus,
   Pin,
+  Plus,
   Settings,
   Trash2,
 } from "lucide-react";
@@ -13,6 +13,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   Badge,
   Button,
+  cn,
   Dialog,
   DialogContent,
   DialogDescription,
@@ -27,14 +28,18 @@ import {
   DropdownMenuTrigger,
   Input,
   ScrollArea,
-  cn,
 } from "ui";
-import { notifyError, notifyErrorOnce, notifySuccess } from "../../lib/notify";
 import { getDesktopBackendBase } from "../../lib/backendBase";
+import {
+  hideNotification,
+  notifyError,
+  notifyErrorOnce,
+  notifySuccess,
+} from "../../lib/notify";
 import { useAuthStore } from "../../stores/authStore";
 import { BACKEND_UP_EVENT, useBackendStatusStore } from "../../stores/backendStatusStore";
-import { useDesktopShellStore } from "../../stores/desktopShellStore";
 import { useChatStore } from "../../stores/chatStore";
+import { useDesktopShellStore } from "../../stores/desktopShellStore";
 import type { Conversation } from "../../types/chat";
 
 type DateGroup = "今天" | "昨天" | "更早";
@@ -91,6 +96,7 @@ function ConversationRow({
   pinLabel: string;
 }) {
   return (
+    // biome-ignore lint/a11y/useSemanticElements: cannot use <button> due to nested interactive menu controls
     <div
       role="button"
       tabIndex={0}
@@ -165,6 +171,7 @@ export function DesktopLeftSidebar() {
 
   const activeView = useDesktopShellStore((state) => state.activeView);
   const setActiveView = useDesktopShellStore((state) => state.setActiveView);
+  const openSettings = useDesktopShellStore((state) => state.openSettings);
   const user = useAuthStore((state) => state.user);
   const logout = useAuthStore((state) => state.logout);
   const backend = useBackendStatusStore();
@@ -260,14 +267,17 @@ export function DesktopLeftSidebar() {
     try {
       const ok = await backend.retry();
       if (ok) {
+        hideNotification("backend_down");
         notifySuccess("连接已恢复", "已重新连接后端");
         return;
       }
-      notifyErrorOnce(
-        "backend_down",
-        "后端不可用",
-        `仍然无法连接到后端服务（${backendBase}）。请确认 server 已启动。`,
-      );
+      const hint =
+        backend.lastError === "Blocked by browser (CORS?)"
+          ? "仍然无法访问后端（可能被浏览器跨域/CORS 拦截）。请检查后端 CORS 是否允许当前页面 Origin，并查看 DevTools Console/Network。"
+          : backend.lastError === "Blocked by browser (mixed content)"
+            ? "仍然无法访问后端（可能被浏览器 Mixed Content 拦截：HTTPS 页面访问 HTTP 后端）。"
+            : `仍然无法连接到后端服务（${backendBase}）。`;
+      notifyErrorOnce("backend_down", "后端不可用", hint);
     } finally {
       setRetrying(false);
     }
@@ -328,7 +338,11 @@ export function DesktopLeftSidebar() {
 
       <div className="min-h-0 flex-1 overflow-hidden">
         <div className="flex h-full flex-col gap-2 p-2">
-          <Button className="w-full" onClick={() => void handleCreateConversation()} disabled={creating}>
+          <Button
+            className="w-full"
+            onClick={() => void handleCreateConversation()}
+            disabled={creating}
+          >
             <Plus size={16} />
             新会话
           </Button>
@@ -339,24 +353,65 @@ export function DesktopLeftSidebar() {
             onChange={(event) => setQuery(event.target.value)}
           />
 
-          <ScrollArea className="flex-1">
+          <ScrollArea className="flex-1 min-h-0">
             <div className="flex flex-col gap-1 py-1">
-            {pinned.length > 0 && (
-              <div>
-                <div className="flex items-center justify-between px-2 py-1">
-                  <span className="text-xs font-semibold text-muted-foreground">置顶</span>
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    className="h-5 w-5"
-                    onClick={() => setPinnedOpen((value) => !value)}
-                  >
-                    {pinnedOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                  </Button>
-                </div>
+              {pinned.length > 0 && (
+                <div>
+                  <div className="flex items-center justify-between px-2 py-1">
+                    <span className="text-xs font-semibold text-muted-foreground">置顶</span>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      className="h-5 w-5"
+                      onClick={() => setPinnedOpen((value) => !value)}
+                    >
+                      {pinnedOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                    </Button>
+                  </div>
 
-                {pinnedOpen &&
-                  pinned.map((conversation) =>
+                  {pinnedOpen &&
+                    pinned.map((conversation) =>
+                      renamingId === conversation.id ? (
+                        <div key={conversation.id} className="px-2 py-1">
+                          <Input
+                            autoFocus
+                            value={renameValue}
+                            onChange={(event) => setRenameValue(event.target.value)}
+                            onBlur={() => void handleSubmitRename(conversation)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") void handleSubmitRename(conversation);
+                              if (event.key === "Escape") setRenamingId(null);
+                            }}
+                          />
+                        </div>
+                      ) : (
+                        <ConversationRow
+                          key={`pinned-${conversation.id}`}
+                          conversation={conversation}
+                          isActive={currentConversation?.id === conversation.id}
+                          onSelect={() => {
+                            setActiveView("chat");
+                            void selectConversation(conversation.id);
+                          }}
+                          onRename={() => {
+                            setRenamingId(conversation.id);
+                            setRenameValue(conversation.title);
+                          }}
+                          onTogglePin={() => void handleTogglePin(conversation)}
+                          onDelete={() => setPendingDelete(conversation)}
+                          pinLabel="取消置顶"
+                        />
+                      ),
+                    )}
+                </div>
+              )}
+
+              {groups.map((group) => (
+                <div key={group.label}>
+                  <p className="px-2 py-1 text-xs font-semibold text-muted-foreground">
+                    {group.label}
+                  </p>
+                  {group.items.map((conversation) =>
                     renamingId === conversation.id ? (
                       <div key={conversation.id} className="px-2 py-1">
                         <Input
@@ -372,7 +427,7 @@ export function DesktopLeftSidebar() {
                       </div>
                     ) : (
                       <ConversationRow
-                        key={`pinned-${conversation.id}`}
+                        key={conversation.id}
                         conversation={conversation}
                         isActive={currentConversation?.id === conversation.id}
                         onSelect={() => {
@@ -385,57 +440,16 @@ export function DesktopLeftSidebar() {
                         }}
                         onTogglePin={() => void handleTogglePin(conversation)}
                         onDelete={() => setPendingDelete(conversation)}
-                        pinLabel="取消置顶"
+                        pinLabel="置顶"
                       />
                     ),
                   )}
-              </div>
-            )}
+                </div>
+              ))}
 
-            {groups.map((group) => (
-              <div key={group.label}>
-                <p className="px-2 py-1 text-xs font-semibold text-muted-foreground">
-                  {group.label}
-                </p>
-                {group.items.map((conversation) =>
-                  renamingId === conversation.id ? (
-                    <div key={conversation.id} className="px-2 py-1">
-                      <Input
-                        autoFocus
-                        value={renameValue}
-                        onChange={(event) => setRenameValue(event.target.value)}
-                        onBlur={() => void handleSubmitRename(conversation)}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter") void handleSubmitRename(conversation);
-                          if (event.key === "Escape") setRenamingId(null);
-                        }}
-                      />
-                    </div>
-                  ) : (
-                    <ConversationRow
-                      key={conversation.id}
-                      conversation={conversation}
-                      isActive={currentConversation?.id === conversation.id}
-                      onSelect={() => {
-                        setActiveView("chat");
-                        void selectConversation(conversation.id);
-                      }}
-                      onRename={() => {
-                        setRenamingId(conversation.id);
-                        setRenameValue(conversation.title);
-                      }}
-                      onTogglePin={() => void handleTogglePin(conversation)}
-                      onDelete={() => setPendingDelete(conversation)}
-                      pinLabel="置顶"
-                    />
-                  ),
-                )}
-              </div>
-            ))}
-
-            {filteredConversations.length === 0 && (
-              <p className="py-8 text-center text-xs text-muted-foreground">暂无会话</p>
-            )}
+              {filteredConversations.length === 0 && (
+                <p className="py-8 text-center text-xs text-muted-foreground">暂无会话</p>
+              )}
             </div>
           </ScrollArea>
         </div>
@@ -447,9 +461,9 @@ export function DesktopLeftSidebar() {
             type="button"
             aria-label="Settings"
             title="Settings"
-            onClick={() => setActiveView("settings")}
+            onClick={() => openSettings("channels")}
             className={cn(
-              "inline-flex h-10 w-10 items-center justify-center rounded-xl transition-colors",
+              "titlebar-no-drag inline-flex h-10 w-10 items-center justify-center rounded-xl transition-colors",
               activeView === "settings"
                 ? "bg-foreground/[0.08] text-foreground"
                 : "text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground",
@@ -460,15 +474,14 @@ export function DesktopLeftSidebar() {
         </div>
       </div>
 
-      <Dialog open={Boolean(pendingDelete)} onOpenChange={(open) => !open && setPendingDelete(null)}>
-        <DialogContent className="max-w-sm">
+      <Dialog
+        open={Boolean(pendingDelete)}
+        onOpenChange={(open) => !open && setPendingDelete(null)}
+      >
+        <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>删除会话</DialogTitle>
-            <DialogDescription className="whitespace-pre-line">
-              {pendingDelete
-                ? `确定删除「${pendingDelete.title}」？\n此操作不可恢复。`
-                : "此操作不可恢复。"}
-            </DialogDescription>
+            <DialogTitle>删除对话？</DialogTitle>
+            <DialogDescription>确定删除该会话？此操作不可恢复。</DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setPendingDelete(null)}>

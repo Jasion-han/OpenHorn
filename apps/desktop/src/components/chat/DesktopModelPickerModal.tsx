@@ -16,6 +16,7 @@ import { createServerApi } from "../../lib/serverApi";
 import { notifyError, notifySuccess, notifyWarning } from "../../lib/notify";
 import type { Channel } from "../../types/chat";
 import { useChatStore } from "../../stores/chatStore";
+import { useDesktopShellStore } from "../../stores/desktopShellStore";
 import { DesktopProviderLogo } from "./DesktopProviderLogo";
 
 const api = createServerApi();
@@ -61,6 +62,7 @@ export function DesktopModelPickerModal(props: {
   const channels = useChatStore((state) => state.channels);
   const loadChannels = useChatStore((state) => state.loadChannels);
   const updateConversation = useChatStore((state) => state.updateConversation);
+  const openSettings = useDesktopShellStore((state) => state.openSettings);
 
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
@@ -121,8 +123,18 @@ export function DesktopModelPickerModal(props: {
     try {
       const enabled = channels.filter((channel) => channel.enabled);
       const total = enabled.length;
+      const goChannels = () => {
+        onClose();
+        openSettings("channels");
+      };
+
       if (total === 0) {
-        notifyWarning("无需同步", "当前没有启用的渠道。");
+        notifyWarning("无需同步", "当前没有启用的渠道。", {
+          action: {
+            label: "去渠道设置",
+            onClick: goChannels,
+          },
+        });
         return;
       }
 
@@ -133,46 +145,130 @@ export function DesktopModelPickerModal(props: {
         })),
       );
 
+      const failed: Array<{ name: string; error: string }> = [];
+      const warned: Array<{ name: string; warning: string }> = [];
       let successCount = 0;
-      let failCount = 0;
-      let warnCount = 0;
 
       for (const item of results) {
         if (item.status === "rejected") {
-          failCount += 1;
+          failed.push({
+            name: "未知渠道",
+            error: item.reason instanceof Error ? item.reason.message : "同步失败",
+          });
           continue;
         }
         if (!item.value.result.success) {
-          failCount += 1;
+          failed.push({
+            name: item.value.channel.name,
+            error: item.value.result.error || "同步失败",
+          });
           continue;
         }
         successCount += 1;
         if (item.value.result.error) {
-          warnCount += 1;
+          warned.push({
+            name: item.value.channel.name,
+            warning: item.value.result.error,
+          });
         }
       }
 
       await loadChannels();
+
+      const failCount = failed.length;
+      const warnCount = warned.length;
+      const normalizeMsg = (message: string) => message.replace(/\s+/g, " ").trim();
+      const clipText = (text: string, maxLen: number) =>
+        text.length <= maxLen ? text : `${text.slice(0, Math.max(0, maxLen - 1))}…`;
+      const summarizeChannelName = (name: string) => {
+        const normalized = normalizeMsg(name);
+        if (!normalized) return "未知渠道";
+        try {
+          const url = new URL(normalized);
+          return clipText(url.hostname.replace(/^www\./, "") || normalized, 22);
+        } catch {
+          return clipText(normalized, 16);
+        }
+      };
+      const summarizeForDisplay = (message: string) => {
+        const normalized = normalizeMsg(message);
+        if (!normalized) return normalized;
+        const lower = normalized.toLowerCase();
+        const titleMatch = normalized.match(/<title>\s*([^<]+)\s*<\/title>/i);
+        if (titleMatch?.[1]) {
+          const title = titleMatch[1].trim();
+          const cfTitle = title.match(/\b(\d{3})\s*:\s*([^|]+)\s*$/);
+          if (cfTitle?.[1] && cfTitle?.[2]) {
+            return `${cfTitle[1]}: ${cfTitle[2].trim()}`;
+          }
+          return title;
+        }
+        if (lower.includes("error code 525") || lower.includes("ssl handshake failed")) {
+          return "525: SSL handshake failed";
+        }
+        return normalized;
+      };
+      const clip = (message: string, maxLen = 32) => clipText(summarizeForDisplay(message), maxLen);
+      const formatSummary = (items: Array<{ name: string; msg: string }>, limit = 1) => {
+        const shown = items.slice(0, limit);
+        const rest = items.length - shown.length;
+        const head = shown
+          .map((item) => `${summarizeChannelName(item.name)}: ${clip(item.msg)}`)
+          .join("；");
+        return rest > 0 ? `${head}，另 ${rest} 个` : head;
+      };
+      const failedSummary =
+        failCount > 0
+          ? formatSummary(failed.map((item) => ({ name: item.name, msg: item.error || "同步失败" })))
+          : "";
+      const warnedSummary =
+        warnCount > 0
+          ? formatSummary(
+              warned.map((item) => ({ name: item.name, msg: item.warning || "需要处理" })),
+            )
+          : "";
 
       if (failCount === 0 && warnCount === 0) {
         notifySuccess(`同步完成（${successCount}/${total}）`, "已更新模型列表");
         return;
       }
 
+      const actionGoSettings = {
+        label: "去渠道设置",
+        onClick: goChannels,
+      } as const;
+
       if (failCount === 0 && warnCount > 0) {
-        notifyWarning(`同步完成（${successCount}/${total}）`, `提示 ${warnCount} 个渠道仍有待处理项。`);
+        notifyWarning(
+          `同步完成（${successCount}/${total}）`,
+          `提示 ${warnCount} 个${warnedSummary ? `（${warnedSummary}）` : ""}`,
+          { action: actionGoSettings, duration: 12_000 },
+        );
         return;
       }
 
       if (successCount > 0) {
         notifyWarning(
           `同步部分完成（${successCount}/${total}）`,
-          `失败 ${failCount} 个渠道${warnCount > 0 ? ` · 提示 ${warnCount} 个` : ""}`,
+          [
+            `失败 ${failCount} 个${failedSummary ? `（${failedSummary}）` : ""}`,
+            warnCount > 0 ? `提示 ${warnCount} 个` : null,
+          ]
+            .filter(Boolean)
+            .join(" · "),
+          { action: actionGoSettings, duration: 12_000 },
         );
         return;
       }
 
-      notifyError(`同步失败（0/${total}）`, `失败 ${failCount} 个渠道。`);
+      notifyError(
+        `同步失败（0/${total}）`,
+        `失败 ${failCount} 个${failedSummary ? `（${failedSummary}）` : ""}`,
+        {
+        action: actionGoSettings,
+        duration: 12_000,
+        },
+      );
     } catch (error) {
       notifyError("同步失败", error instanceof Error ? error.message : "无法同步模型列表");
     } finally {
@@ -184,7 +280,10 @@ export function DesktopModelPickerModal(props: {
     setBusy(true);
     try {
       await updateConversation(conversationId, { channelId, modelId });
+      notifySuccess("模型已更新", "已保存到当前对话");
       onClose();
+    } catch (error) {
+      notifyError("更新失败", error instanceof Error ? error.message : "无法更新模型选择");
     } finally {
       setBusy(false);
     }
@@ -205,10 +304,12 @@ export function DesktopModelPickerModal(props: {
             <div className="rounded-xl border border-orange-200 bg-orange-50 p-3 shadow-minimal">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="text-sm font-semibold text-orange-800">当前会话模型不可用</p>
+                  <p className="text-sm font-semibold text-orange-800">当前对话模型不可用</p>
                   <p className="break-words text-sm text-orange-700">{conversationFixReason}</p>
                 </div>
-                <p className="shrink-0 text-xs text-muted-foreground">请在这里重新选择</p>
+                <p className="shrink-0 text-xs text-muted-foreground">
+                  Set a default model in Settings (gear) → Channels
+                </p>
               </div>
             </div>
           )}

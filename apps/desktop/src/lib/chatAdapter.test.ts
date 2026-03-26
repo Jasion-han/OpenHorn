@@ -103,6 +103,10 @@ function createStubServerApi() {
       }),
       update: async () => ({ success: true }),
       delete: async () => ({ success: true }),
+      autoTitle: async (_id, prompt) => ({
+        success: true,
+        title: `标题: ${prompt}`,
+      }),
     },
     messages: {
       list: async () => ({
@@ -172,6 +176,7 @@ function createStubServerApi() {
             userId: "user-1",
             name: "Anthropic",
             provider: "anthropic",
+            protocol: "anthropic",
             baseUrl: "https://api.anthropic.com",
             enabled: true,
             isDefault: true,
@@ -201,6 +206,7 @@ function createStubServerApi() {
           userId: "user-1",
           name: "Anthropic",
           provider: "anthropic",
+          protocol: "anthropic",
           baseUrl: "https://api.anthropic.com",
           enabled: true,
           isDefault: true,
@@ -218,6 +224,7 @@ function createStubServerApi() {
           userId: "user-1",
           name: "Created",
           provider: "openai",
+          protocol: "openai",
           baseUrl: "https://api.openai.com/v1",
           enabled: true,
           isDefault: false,
@@ -235,6 +242,7 @@ function createStubServerApi() {
           userId: "user-1",
           name: "Anthropic",
           provider: "anthropic",
+          protocol: "anthropic",
           baseUrl: "https://api.anthropic.com",
           enabled: true,
           isDefault: true,
@@ -261,6 +269,14 @@ function createStubServerApi() {
           desktop_theme: "system",
         },
       }),
+      set: async () => ({ success: true }),
+    },
+    mcp: {
+      listServers: async () => ({ servers: [] }),
+      createServer: async () => ({ server: {} }),
+      updateServer: async () => ({ success: true }),
+      deleteServer: async () => ({ success: true }),
+      testServer: async () => ({ success: true }),
     },
     agentTasks: {
       get: async () => emptyTaskDetail,
@@ -386,6 +402,18 @@ describe("chatAdapter", () => {
     expect(getEditedContent()).toBe("新的问题");
   });
 
+  test("auto titles conversations through the desktop adapter", async () => {
+    const { api } = createStubServerApi();
+    const adapter = createChatAdapter(api);
+
+    const result = await adapter.autoTitleConversation("conv-1", "第一条消息");
+
+    expect(result).toEqual({
+      success: true,
+      title: "标题: 第一条消息",
+    });
+  });
+
   test("exposes the desktop chat contract", async () => {
     const { api } = createStubServerApi();
     const adapter = createChatAdapter(api);
@@ -395,6 +423,7 @@ describe("chatAdapter", () => {
     expect(typeof adapter.createConversation).toBe("function");
     expect(typeof adapter.updateConversation).toBe("function");
     expect(typeof adapter.deleteConversation).toBe("function");
+    expect(typeof adapter.autoTitleConversation).toBe("function");
     expect(typeof adapter.loadMessages).toBe("function");
     expect(typeof adapter.sendMessage).toBe("function");
     expect(typeof adapter.deleteMessage).toBe("function");

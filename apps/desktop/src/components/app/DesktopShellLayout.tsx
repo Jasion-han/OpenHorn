@@ -22,12 +22,13 @@ export function DesktopShellLayout({
         </div>
       )}
 
-      <div className={cn("min-w-0 flex-1 p-2", !sidebarCollapsed && "pl-0")}>
+      <div className={cn("flex-1 min-w-0 p-2", !sidebarCollapsed && "pl-0")}>
         <div
           className={cn(
             "h-full min-h-0 overflow-hidden rounded-2xl border border-border/50 bg-background/70 shadow-minimal backdrop-blur-sm",
             isCompact ? "p-4" : "p-2",
           )}
+          style={{ paddingTop: "calc(0.5rem + env(safe-area-inset-top, 0px))" }}
         >
           <div
             className={cn(

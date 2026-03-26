@@ -36,6 +36,8 @@ export interface ProviderAdapter {
   chatStream(options: ChatOptions): AsyncGenerator<string>;
 }
 
+export type AdapterProtocol = "openai" | "anthropic" | "google";
+
 type NonSystemChatMessage = Omit<ChatMessage, "role"> & { role: "user" | "assistant" };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -676,8 +678,8 @@ export class AnthropicAdapter implements ProviderAdapter {
   }
 }
 
-export function createAdapter(provider: string, apiKey: string, baseUrl?: string): ProviderAdapter {
-  const normalized = (provider || "").trim().toLowerCase();
+export function createAdapter(protocol: string, apiKey: string, baseUrl?: string): ProviderAdapter {
+  const normalized = (protocol || "").trim().toLowerCase() as AdapterProtocol | string;
   if (normalized === "anthropic") {
     return new AnthropicAdapter(apiKey, baseUrl);
   }

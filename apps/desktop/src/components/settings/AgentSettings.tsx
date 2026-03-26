@@ -1,5 +1,5 @@
 import { Plus, Trash2 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Badge,
   Button,
@@ -19,6 +19,7 @@ import {
 import { getGlobalDefaultChannel } from "../../lib/defaultChannel";
 import { notifyError, notifySuccess } from "../../lib/notify";
 import { createServerApi } from "../../lib/serverApi";
+import { BACKEND_UP_EVENT } from "../../stores/backendStatusStore";
 import type { ApiChannel, Channel } from "../../types/chat";
 import { DesktopProviderLogo } from "../chat/DesktopProviderLogo";
 
@@ -66,7 +67,7 @@ function mapChannel(channel: ApiChannel): Channel {
 export function AgentSettings() {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [mcpServers, setMcpServers] = useState<MCPServer[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [, setLoading] = useState(false);
 
   const [tavilyApiKey, setTavilyApiKey] = useState("");
   const [savedTavilyApiKey, setSavedTavilyApiKey] = useState("");
@@ -82,7 +83,7 @@ export function AgentSettings() {
 
   const defaultChannel = useMemo(() => getGlobalDefaultChannel(channels), [channels]);
 
-  const loadAll = async () => {
+  const loadAll = useCallback(async () => {
     setLoading(true);
     try {
       const [{ channels }, { servers }, { settings }] = await Promise.all([
@@ -106,11 +107,22 @@ export function AgentSettings() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     void loadAll();
-  }, []);
+  }, [loadAll]);
+
+  useEffect(() => {
+    const onUp = () => {
+      void loadAll();
+    };
+
+    window.addEventListener(BACKEND_UP_EVENT, onUp);
+    return () => {
+      window.removeEventListener(BACKEND_UP_EVENT, onUp);
+    };
+  }, [loadAll]);
 
   const handleSaveTavilyApiKey = async () => {
     setSavingTavilyApiKey(true);
@@ -199,7 +211,10 @@ export function AgentSettings() {
       await loadAll();
       notifySuccess("已更新", "MCP Server 状态已更新。");
     } catch (error) {
-      notifyError("更新失败", error instanceof Error ? error.message : "无法更新 MCP Server 状态。");
+      notifyError(
+        "更新失败",
+        error instanceof Error ? error.message : "无法更新 MCP Server 状态。",
+      );
     } finally {
       setMcpBusyId(null);
     }
@@ -232,6 +247,7 @@ export function AgentSettings() {
               {defaultChannel ? (
                 <Badge variant="secondary" className="gap-1" title={defaultChannel.provider}>
                   <DesktopProviderLogo provider={defaultChannel.provider} className="size-4" />
+                  <span className="sr-only">{defaultChannel.provider}</span>
                   <span>{defaultChannel.modelId}</span>
                 </Badge>
               ) : (
@@ -266,7 +282,7 @@ export function AgentSettings() {
               )}
             </div>
 
-            <div className="flex items-center justify-between gap-3 rounded-xl border border-border/50 bg-background/60 p-3">
+            <div className="flex items-center justify-between rounded-xl border border-border/50 bg-background/60 p-3">
               <div>
                 <p className="text-sm font-medium">启用 Tavily 搜索</p>
                 <p className="text-xs text-muted-foreground">
@@ -321,9 +337,7 @@ export function AgentSettings() {
       >
         <SettingsCard divided={false} className="p-4">
           {mcpServers.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              {loading ? "正在加载..." : "暂无 MCP Server 配置。"}
-            </p>
+            <p className="text-sm text-muted-foreground">暂无 MCP Server 配置。</p>
           ) : (
             <div className="flex flex-col gap-2">
               {mcpServers.map((server) => (
@@ -342,13 +356,13 @@ export function AgentSettings() {
                       disabled={mcpBusyId === server.id}
                     />
                     <Button
-                      size="icon-sm"
                       variant="ghost"
+                      size="icon"
                       className="text-destructive"
                       onClick={() => void handleDeleteMcp(server.id)}
                       disabled={mcpBusyId === server.id}
                     >
-                      <Trash2 size={16} />
+                      <Trash2 size={18} />
                     </Button>
                   </div>
                 </div>

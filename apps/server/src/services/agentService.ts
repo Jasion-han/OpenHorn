@@ -141,7 +141,7 @@ export async function buildAgentRuntimeContext(params: {
   const classifier = resolvedChannel
     ? (inputPrompt: string) =>
         classifyLiveRouteWithModel({
-          provider: resolvedChannel.channel.provider,
+          protocol: resolvedChannel.channel.protocol,
           apiKey: resolvedChannel.apiKey,
           baseUrl: resolvedChannel.channel.baseUrl,
           modelId: resolvedChannel.modelId,

@@ -30,6 +30,7 @@ export interface ServerApi {
     create: (data: CreateConversationInput) => Promise<{ conversation: ApiConversation }>;
     update: (id: string, data: UpdateConversationInput) => Promise<{ success: boolean }>;
     delete: (id: string) => Promise<{ success: boolean }>;
+    autoTitle: (id: string, prompt: string) => Promise<{ success: boolean; title?: string }>;
   };
   messages: {
     list: (conversationId: string) => Promise<{ messages: ApiMessage[] }>;
@@ -48,6 +49,7 @@ export interface ServerApi {
     create: (data: {
       name: string;
       provider: string;
+      protocol?: "openai" | "anthropic" | "google";
       apiKey: string;
       baseUrl?: string;
       enabled?: boolean;
@@ -58,6 +60,7 @@ export interface ServerApi {
       data: {
         name?: string;
         provider?: string;
+        protocol?: "openai" | "anthropic" | "google";
         apiKey?: string;
         baseUrl?: string;
         enabled?: boolean;
@@ -87,6 +90,26 @@ export interface ServerApi {
   };
   settings: {
     get: (keys: string[]) => Promise<{ settings: ApiSettingsMap }>;
+    set: (key: string, value: string | null) => Promise<{ success: boolean }>;
+  };
+  mcp: {
+    listServers: () => Promise<{ servers: unknown[] }>;
+    createServer: (data: {
+      name: string;
+      type: string;
+      config: Record<string, unknown>;
+    }) => Promise<{ server: unknown }>;
+    updateServer: (
+      id: string,
+      data: {
+        name?: string;
+        type?: string;
+        config?: Record<string, unknown>;
+        isEnabled?: boolean;
+      },
+    ) => Promise<{ success: boolean }>;
+    deleteServer: (id: string) => Promise<{ success: boolean }>;
+    testServer: (id: string) => Promise<{ success: boolean; error?: string }>;
   };
   agentTasks: {
     get: (id: string) => Promise<ApiAgentTaskDetail>;
@@ -264,6 +287,11 @@ export function createServerApi(options?: { baseUrl?: string; fetch?: FetchLike 
         fetchJson(fetchImpl, baseUrl, `/conversations/${encodeURIComponent(id)}`, {
           method: "DELETE",
         }),
+      autoTitle: (id, prompt) =>
+        fetchJson(fetchImpl, baseUrl, `/conversations/${encodeURIComponent(id)}/auto-title`, {
+          method: "POST",
+          body: JSON.stringify({ prompt }),
+        }),
     },
 
     messages: {
@@ -369,6 +397,33 @@ export function createServerApi(options?: { baseUrl?: string; fetch?: FetchLike 
         const query = encodeURIComponent((keys || []).join(","));
         return fetchJson(fetchImpl, baseUrl, `/settings?keys=${query}`);
       },
+      set: (key, value) =>
+        fetchJson(fetchImpl, baseUrl, `/settings/${encodeURIComponent(key)}`, {
+          method: "PUT",
+          body: JSON.stringify({ value }),
+        }),
+    },
+
+    mcp: {
+      listServers: () => fetchJson(fetchImpl, baseUrl, "/mcp/servers"),
+      createServer: (data) =>
+        fetchJson(fetchImpl, baseUrl, "/mcp/servers", {
+          method: "POST",
+          body: JSON.stringify(data),
+        }),
+      updateServer: (id, data) =>
+        fetchJson(fetchImpl, baseUrl, `/mcp/servers/${encodeURIComponent(id)}`, {
+          method: "PUT",
+          body: JSON.stringify(data),
+        }),
+      deleteServer: (id) =>
+        fetchJson(fetchImpl, baseUrl, `/mcp/servers/${encodeURIComponent(id)}`, {
+          method: "DELETE",
+        }),
+      testServer: (id) =>
+        fetchJson(fetchImpl, baseUrl, `/mcp/servers/${encodeURIComponent(id)}/test`, {
+          method: "POST",
+        }),
     },
 
     agentTasks: {

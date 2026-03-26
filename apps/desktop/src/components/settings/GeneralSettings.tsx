@@ -1,7 +1,7 @@
 import { AlignLeft, Pencil } from "lucide-react";
 import { useEffect, useState } from "react";
-import { SettingsCard, SettingsSection, Badge, Button, Input, Label, Textarea, cn } from "ui";
-import { notifyError, notifySuccess } from "../../lib/notify";
+import { Badge, Button, cn, Input, Label, SettingsCard, SettingsSection, Textarea } from "ui";
+import { notifySuccess } from "../../lib/notify";
 import { createServerApi } from "../../lib/serverApi";
 import { useAuthStore } from "../../stores/authStore";
 
@@ -10,7 +10,7 @@ const SYSTEM_PROMPT_KEY = "chat.systemPrompt";
 
 export function GeneralSettings() {
   const user = useAuthStore((state) => state.user);
-  const [username] = useState(user?.username || "");
+  const [username, setUsername] = useState(user?.username || "");
   const [email] = useState(user?.email || "");
   const [systemPrompt, setSystemPrompt] = useState("");
   const [savedPrompt, setSavedPrompt] = useState("");
@@ -26,9 +26,7 @@ export function GeneralSettings() {
         setSavedPrompt(value);
         setEditing(!value);
       })
-      .catch((error) => {
-        notifyError("加载失败", error instanceof Error ? error.message : "无法加载系统提示词。");
-      });
+      .catch(() => {});
   }, []);
 
   const handleSavePrompt = async () => {
@@ -37,9 +35,9 @@ export function GeneralSettings() {
       await api.settings.set(SYSTEM_PROMPT_KEY, systemPrompt || null);
       setSavedPrompt(systemPrompt);
       setEditing(false);
-      notifySuccess("已保存", "系统提示词已更新。");
-    } catch (error) {
-      notifyError("保存失败", error instanceof Error ? error.message : "无法保存系统提示词。");
+      notifySuccess("已保存", "系统提示词已更新");
+    } catch {
+      // Keep behavior aligned with web for now.
     } finally {
       setSavingPrompt(false);
     }
@@ -67,7 +65,7 @@ export function GeneralSettings() {
           <div className="flex flex-col gap-3">
             <div className="flex flex-col gap-1.5">
               <Label>用户名</Label>
-              <Input value={username} disabled />
+              <Input value={username} onChange={(event) => setUsername(event.target.value)} />
             </div>
             <div className="flex flex-col gap-1.5">
               <Label>邮箱</Label>
@@ -75,7 +73,7 @@ export function GeneralSettings() {
               <p className="text-xs text-muted-foreground">邮箱暂不支持修改</p>
             </div>
             <div>
-              <Button disabled>暂不支持修改</Button>
+              <Button type="button">保存修改</Button>
             </div>
           </div>
         </SettingsCard>
@@ -94,7 +92,9 @@ export function GeneralSettings() {
               <div>
                 <div className="flex items-center gap-2">
                   <p className="font-bold">全局系统提示词</p>
-                  {savedPrompt && !editing && <Badge variant="secondary">{savedPrompt.length} 字符</Badge>}
+                  {savedPrompt && !editing && (
+                    <Badge variant="secondary">{savedPrompt.length} 字符</Badge>
+                  )}
                 </div>
                 <p className="mt-0.5 text-xs text-muted-foreground">
                   用于约束模型回答风格、语言与偏好。

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, Input, Label, cn } from "ui";
+import { Button, cn, Input, Label } from "ui";
 import { useAuthStore } from "../../stores/authStore";
 
 type AuthTab = "login" | "register";
@@ -39,86 +39,86 @@ export function DesktopAuthScreen() {
   };
 
   return (
-    <div className="flex h-dvh w-dvw items-center justify-center bg-gradient-to-br from-background via-background to-muted/20 px-4">
-      <div className="w-full max-w-[420px] rounded-[28px] border border-border/60 bg-background/85 p-7 shadow-minimal backdrop-blur-sm">
-        <div className="text-center">
-          <div className="text-2xl font-semibold tracking-tight">登录 OpenHorn</div>
-          <p className="mt-2 text-sm text-muted-foreground">
-            登录后即可继续查看历史会话，并在聊天与 Agent 模式之间切换。
-          </p>
+    <div className="flex h-dvh items-center justify-center bg-gradient-to-br from-background via-background to-muted/20 px-4">
+      <div className="w-full max-w-sm">
+        <div className="mb-6 text-center">
+          <h1 className="text-2xl font-bold">Welcome to OpenHorn</h1>
+          <p className="mt-1 text-sm text-muted-foreground">AI Assistant</p>
         </div>
 
-        <div className="mt-6 flex gap-1 rounded-xl bg-muted/60 p-1">
-          {(["login", "register"] as const).map((tab) => (
-            <button
-              key={tab}
-              type="button"
-              onClick={() => {
-                clearError();
-                setActiveTab(tab);
-              }}
-              className={cn(
-                "flex-1 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-                activeTab === tab
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {tab === "login" ? "登录" : "注册"}
-            </button>
-          ))}
-        </div>
+        <div className="rounded-2xl border border-border/50 bg-card p-6 shadow-minimal">
+          <div className="mb-4 flex gap-1 rounded-lg bg-muted/60 p-1">
+            {(["login", "register"] as const).map((tab) => (
+              <button
+                key={tab}
+                type="button"
+                onClick={() => {
+                  clearError();
+                  setActiveTab(tab);
+                }}
+                className={cn(
+                  "flex-1 rounded-md py-1.5 text-sm font-medium transition-colors",
+                  activeTab === tab
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {tab === "login" ? "Login" : "Register"}
+              </button>
+            ))}
+          </div>
 
-        <div className="mt-5 flex flex-col gap-4">
-          {activeTab === "register" && (
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="desktop-auth-username">用户名</Label>
+          <div className="flex flex-col gap-3">
+            {activeTab === "register" && (
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="desktop-auth-username">Username</Label>
+                <Input
+                  id="desktop-auth-username"
+                  placeholder="Your username"
+                  value={username}
+                  onChange={(event) => setUsername(event.target.value)}
+                />
+              </div>
+            )}
+
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="desktop-auth-email">Email</Label>
               <Input
-                id="desktop-auth-username"
-                placeholder="输入用户名"
-                value={username}
-                onChange={(event) => setUsername(event.target.value)}
+                id="desktop-auth-email"
+                type="email"
+                placeholder="your@email.com"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
               />
             </div>
-          )}
 
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="desktop-auth-email">邮箱</Label>
-            <Input
-              id="desktop-auth-email"
-              type="email"
-              placeholder="you@example.com"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-            />
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="desktop-auth-password">Password</Label>
+              <Input
+                id="desktop-auth-password"
+                type="password"
+                placeholder="Your password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && canSubmit && !loading) {
+                    void handleSubmit();
+                  }
+                }}
+              />
+            </div>
+
+            <Button
+              className="mt-1 w-full"
+              disabled={!canSubmit || loading}
+              onClick={() => void handleSubmit()}
+            >
+              {loading ? "Loading..." : activeTab === "login" ? "Login" : "Register"}
+            </Button>
           </div>
 
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="desktop-auth-password">密码</Label>
-            <Input
-              id="desktop-auth-password"
-              type="password"
-              placeholder="输入密码"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && canSubmit && !loading) {
-                  void handleSubmit();
-                }
-              }}
-            />
-          </div>
-
-          <Button
-            className="mt-1 w-full"
-            disabled={!canSubmit || loading}
-            onClick={() => void handleSubmit()}
-          >
-            {loading ? "处理中..." : activeTab === "login" ? "登录" : "注册并进入"}
-          </Button>
+          {error && <p className="mt-3 text-center text-sm text-destructive">{error}</p>}
         </div>
-
-        {error && <div className="mt-4 text-center text-sm text-destructive">{error}</div>}
       </div>
     </div>
   );

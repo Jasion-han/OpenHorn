@@ -24,6 +24,7 @@ const SCHEMA_DDL: string[] = [
     user_id TEXT NOT NULL,
     name TEXT NOT NULL,
     provider TEXT NOT NULL,
+    protocol TEXT NOT NULL DEFAULT 'openai',
     api_key TEXT NOT NULL,
     base_url TEXT,
     model TEXT,
@@ -269,6 +270,24 @@ async function ensureConversationModelIdColumn(): Promise<void> {
   if (!hasColumn) {
     await client.execute(`ALTER TABLE conversations ADD COLUMN model_id TEXT;`);
   }
+}
+
+async function ensureChannelProtocolColumn(): Promise<void> {
+  const result = await client.execute(`PRAGMA table_info('channels');`);
+  const rows = getRows(result);
+  if (!hasColumnNamed(rows, "protocol")) {
+    await client.execute(`ALTER TABLE channels ADD COLUMN protocol TEXT DEFAULT 'openai';`);
+  }
+
+  await client.execute(`
+    UPDATE channels
+    SET protocol = CASE
+      WHEN lower(trim(provider)) = 'anthropic' THEN 'anthropic'
+      WHEN lower(trim(provider)) IN ('google', 'gemini') THEN 'google'
+      ELSE 'openai'
+    END
+    WHERE protocol IS NULL OR trim(protocol) = '';
+  `);
 }
 
 async function ensureConversationDefaultModeColumn(): Promise<void> {
@@ -904,6 +923,7 @@ export async function bootstrapDatabase(): Promise<void> {
   }
 
   // Backward compatible alter for databases created before model_id existed.
+  await ensureChannelProtocolColumn();
   await ensureConversationModelIdColumn();
   await ensureConversationDefaultModeColumn();
   await ensureConversationLastModeColumn();

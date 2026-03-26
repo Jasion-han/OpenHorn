@@ -21,6 +21,10 @@ export interface ChatAdapter {
   createConversation: (input: CreateConversationInput) => Promise<Conversation>;
   updateConversation: (conversationId: string, updates: UpdateConversationInput) => Promise<void>;
   deleteConversation: (conversationId: string) => Promise<void>;
+  autoTitleConversation: (
+    conversationId: string,
+    prompt: string,
+  ) => Promise<{ success: boolean; title?: string }>;
   loadMessages: (conversationId: string) => Promise<Message[]>;
   sendMessage: (input: SendMessageInput) => Promise<Response>;
   deleteMessage: (messageId: string) => Promise<void>;
@@ -134,6 +138,7 @@ function mapChannel(channel: {
   userId: string;
   name: string;
   provider: string;
+  protocol: "openai" | "anthropic" | "google";
   baseUrl: string | null;
   enabled: boolean;
   isDefault: boolean;
@@ -158,6 +163,7 @@ function mapChannel(channel: {
     userId: channel.userId,
     name: channel.name,
     provider: channel.provider,
+    protocol: channel.protocol,
     baseUrl: channel.baseUrl || undefined,
     enabled: channel.enabled,
     isDefault: channel.isDefault,
@@ -195,6 +201,10 @@ export function createChatAdapter(api: ServerApi = createServerApi()): ChatAdapt
 
     async deleteConversation(conversationId) {
       await api.conversations.delete(conversationId);
+    },
+
+    async autoTitleConversation(conversationId, prompt) {
+      return api.conversations.autoTitle(conversationId, prompt);
     },
 
     async loadMessages(conversationId) {

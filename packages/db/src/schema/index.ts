@@ -16,6 +16,7 @@ export const channels = sqliteTable("channels", {
     .references(() => users.id),
   name: text("name").notNull(),
   provider: text("provider").notNull(),
+  protocol: text("protocol").notNull().default("openai"),
   apiKey: text("api_key").notNull(),
   baseUrl: text("base_url"),
   model: text("model"),

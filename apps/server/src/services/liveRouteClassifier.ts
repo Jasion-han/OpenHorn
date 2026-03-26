@@ -2,7 +2,7 @@ import { createAdapter } from "../agent-adapters";
 import type { LiveRouteType } from "./liveCapabilities";
 
 export async function classifyLiveRouteWithModel(params: {
-  provider: string;
+  protocol: "openai" | "anthropic" | "google";
   apiKey: string;
   baseUrl?: string | null;
   modelId: string;
@@ -12,7 +12,7 @@ export async function classifyLiveRouteWithModel(params: {
   if (!trimmed) return null;
 
   try {
-    const adapter = createAdapter(params.provider, params.apiKey, params.baseUrl || undefined);
+    const adapter = createAdapter(params.protocol, params.apiKey, params.baseUrl || undefined);
     const response = await adapter.chat({
       model: params.modelId,
       temperature: 0,

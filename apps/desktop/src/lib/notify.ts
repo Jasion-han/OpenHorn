@@ -5,6 +5,10 @@ const lastShownAt = new Map<string, number>();
 
 type NotifyOptions = Omit<ExternalToast, "description">;
 
+export function hideNotification(id: string | number) {
+  toast.dismiss(id);
+}
+
 function isLikelyBrowserFetchFailure(message: string): boolean {
   const normalized = message.trim();
   if (!normalized) return false;

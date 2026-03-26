@@ -6,6 +6,7 @@ import { probeAnthropicModel } from "./anthropicProbe";
 import { summarizeProviderError } from "./providerErrorSummary";
 
 type ChannelRow = typeof channels.$inferSelect;
+export type ChannelProtocol = "openai" | "anthropic" | "google";
 
 export interface ChannelModelItem {
   id: string;
@@ -23,6 +24,7 @@ export interface ChannelItem {
   userId: string;
   name: string;
   provider: string;
+  protocol: ChannelProtocol;
   baseUrl: string | null;
   enabled: boolean;
   isDefault: boolean;
@@ -37,6 +39,7 @@ export interface ChannelItem {
 export interface CreateChannelInput {
   name: string;
   provider: string;
+  protocol?: ChannelProtocol;
   apiKey: string;
   baseUrl?: string;
   enabled?: boolean;
@@ -46,6 +49,7 @@ export interface CreateChannelInput {
 export interface UpdateChannelInput {
   name?: string;
   provider?: string;
+  protocol?: ChannelProtocol;
   apiKey?: string;
   baseUrl?: string;
   enabled?: boolean;
@@ -78,16 +82,32 @@ export interface ResolvedChannel {
   modelId: string;
 }
 
-const PROVIDER_DEFAULT_BASE_URLS: Record<string, string> = {
+const PROTOCOL_DEFAULT_BASE_URLS: Record<ChannelProtocol, string> = {
   anthropic: "https://api.anthropic.com",
   openai: "https://api.openai.com/v1",
-  // DeepSeek is OpenAI-compatible; include /v1 so runtime endpoints resolve correctly.
-  deepseek: "https://api.deepseek.com/v1",
   google: "https://generativelanguage.googleapis.com",
 };
 
-function getDefaultBaseUrl(provider: string): string | null {
-  return PROVIDER_DEFAULT_BASE_URLS[provider] || null;
+function inferProtocolFromProvider(provider: string | null | undefined): ChannelProtocol {
+  const normalized = (provider || "").trim().toLowerCase();
+  if (normalized === "anthropic") return "anthropic";
+  if (normalized === "google" || normalized === "gemini") return "google";
+  return "openai";
+}
+
+function normalizeProtocol(
+  protocol: string | null | undefined,
+  fallbackProvider?: string | null | undefined,
+): ChannelProtocol {
+  const normalized = (protocol || "").trim().toLowerCase();
+  if (normalized === "anthropic") return "anthropic";
+  if (normalized === "google" || normalized === "gemini") return "google";
+  if (normalized === "openai") return "openai";
+  return inferProtocolFromProvider(fallbackProvider);
+}
+
+function getDefaultBaseUrl(protocol: ChannelProtocol): string {
+  return PROTOCOL_DEFAULT_BASE_URLS[protocol];
 }
 
 function normalizeBaseUrl(baseUrl: string): string {
@@ -128,13 +148,13 @@ function normalizeAgentSdkRuntimeBaseUrl(baseUrl: string): string {
   return url;
 }
 
-function normalizeChannelBaseUrl(provider: string, baseUrl: string): string {
-  if (provider === "anthropic") {
+function normalizeChannelBaseUrl(protocol: ChannelProtocol, baseUrl: string): string {
+  if (protocol === "anthropic") {
     // Store whatever user provides (root or /v1); runtime/API normalizers handle both.
     return normalizeBaseUrl(baseUrl);
   }
 
-  if (provider === "google") {
+  if (protocol === "google") {
     return normalizeBaseUrl(baseUrl);
   }
 
@@ -244,13 +264,15 @@ async function buildChannelItems(channelRows: ChannelRow[]) {
   return channelRows.map((row) => {
     const models = modelsByChannel.get(row.id) || [];
     const defaultModel = models.find((model) => model.isDefault && model.enabled) || null;
+    const protocol = normalizeProtocol(row.protocol, row.provider);
 
     return {
       id: row.id,
       userId: row.userId,
       name: row.name,
       provider: row.provider,
-      baseUrl: row.baseUrl || getDefaultBaseUrl(row.provider),
+      protocol,
+      baseUrl: row.baseUrl || getDefaultBaseUrl(protocol),
       enabled: Boolean(row.enabled ?? true),
       isDefault: Boolean(row.isDefault),
       createdAt: row.createdAt,
@@ -310,15 +332,15 @@ async function setDefaultModelInternal(channelId: string, modelId: string) {
     .where(and(eq(channelModels.channelId, channelId), eq(channelModels.modelId, modelId)));
 }
 
-function getRuntimeBaseUrl(provider: string, baseUrl: string | null) {
-  const fallback = getDefaultBaseUrl(provider);
+function getRuntimeBaseUrl(protocol: ChannelProtocol, baseUrl: string | null) {
+  const fallback = getDefaultBaseUrl(protocol);
   const url = normalizeBaseUrl(baseUrl || fallback || "");
 
-  if (provider === "anthropic") {
+  if (protocol === "anthropic") {
     return normalizeAgentSdkRuntimeBaseUrl(url);
   }
 
-  if (provider === "google") {
+  if (protocol === "google") {
     return url || undefined;
   }
 
@@ -410,12 +432,12 @@ async function fetchGoogleModels(baseUrl: string, apiKey: string) {
     });
 }
 
-async function fetchProviderModels(provider: string, baseUrl: string, apiKey: string) {
-  if (provider === "anthropic") {
+async function fetchProviderModels(protocol: ChannelProtocol, baseUrl: string, apiKey: string) {
+  if (protocol === "anthropic") {
     return fetchAnthropicModels(baseUrl, apiKey);
   }
 
-  if (provider === "google") {
+  if (protocol === "google") {
     return fetchGoogleModels(baseUrl, apiKey);
   }
 
@@ -474,6 +496,11 @@ export async function getChannelById(userId: string, channelId: string) {
 export async function createChannel(userId: string, input: CreateChannelInput) {
   const id = generateId();
   const now = new Date();
+  const provider = input.provider.trim();
+  if (!provider) {
+    throw new Error("provider is required");
+  }
+  const protocol = normalizeProtocol(input.protocol, provider);
   const existingChannels = await db
     .select({ id: channels.id })
     .from(channels)
@@ -492,12 +519,10 @@ export async function createChannel(userId: string, input: CreateChannelInput) {
     id,
     userId,
     name: input.name.trim(),
-    provider: input.provider,
+    provider,
+    protocol,
     apiKey: encrypt(input.apiKey.trim()),
-    baseUrl: normalizeChannelBaseUrl(
-      input.provider,
-      input.baseUrl || getDefaultBaseUrl(input.provider) || "",
-    ),
+    baseUrl: normalizeChannelBaseUrl(protocol, input.baseUrl || getDefaultBaseUrl(protocol) || ""),
     enabled: input.enabled ?? true,
     isDefault: shouldSetDefault,
     createdAt: now,
@@ -523,6 +548,7 @@ export async function updateChannel(userId: string, channelId: string, input: Up
   }
 
   let nextProvider = current.provider;
+  let nextProtocol = normalizeProtocol(current.protocol, current.provider);
   if (input.provider !== undefined) {
     const trimmed = input.provider.trim();
     if (!trimmed) {
@@ -531,15 +557,27 @@ export async function updateChannel(userId: string, channelId: string, input: Up
     nextProvider = trimmed;
     updates.provider = trimmed;
   }
+  if (input.protocol !== undefined) {
+    nextProtocol = normalizeProtocol(input.protocol, nextProvider);
+    updates.protocol = nextProtocol;
+  } else if (input.provider !== undefined) {
+    nextProtocol = normalizeProtocol(current.protocol, nextProvider);
+  }
 
   if (input.baseUrl !== undefined) {
     const trimmed = input.baseUrl.trim();
-    updates.baseUrl = trimmed ? normalizeChannelBaseUrl(nextProvider, trimmed) : null;
-  } else if (nextProvider !== current.provider) {
-    // Provider changed but baseUrl not explicitly provided: keep existing baseUrl if present,
-    // otherwise fill with the new provider default.
-    const preserved = current.baseUrl || getDefaultBaseUrl(nextProvider);
-    updates.baseUrl = preserved ? normalizeChannelBaseUrl(nextProvider, preserved) : null;
+    updates.baseUrl = trimmed ? normalizeChannelBaseUrl(nextProtocol, trimmed) : null;
+  } else if (
+    nextProvider !== current.provider ||
+    nextProtocol !== normalizeProtocol(current.protocol, current.provider)
+  ) {
+    // Provider/protocol changed but baseUrl not explicitly provided: keep existing baseUrl if present,
+    // otherwise fill with the new protocol default.
+    const preserved =
+      current.baseUrl ||
+      getDefaultBaseUrl(normalizeProtocol(current.protocol, current.provider)) ||
+      getDefaultBaseUrl(nextProtocol);
+    updates.baseUrl = preserved ? normalizeChannelBaseUrl(nextProtocol, preserved) : null;
   }
 
   if (input.enabled !== undefined) {
@@ -562,8 +600,11 @@ export async function updateChannel(userId: string, channelId: string, input: Up
     .set(updates)
     .where(and(eq(channels.id, channelId), eq(channels.userId, userId)));
 
-  if (nextProvider !== current.provider) {
-    // Provider change invalidates the cached model list and legacy model field.
+  if (
+    nextProvider !== current.provider ||
+    nextProtocol !== normalizeProtocol(current.protocol, current.provider)
+  ) {
+    // Protocol-bearing changes invalidate the cached model list and legacy model field.
     await db.delete(channelModels).where(eq(channelModels.channelId, channelId));
     await db
       .update(channels)
@@ -741,15 +782,16 @@ export async function fetchChannelModels(
   channelId: string,
 ): Promise<FetchModelsResult> {
   const channel = await getOwnedChannelRow(userId, channelId);
+  const protocol = normalizeProtocol(channel.protocol, channel.provider);
   const apiKey = decrypt(channel.apiKey);
-  const baseUrl = channel.baseUrl || getDefaultBaseUrl(channel.provider);
+  const baseUrl = channel.baseUrl || getDefaultBaseUrl(protocol);
 
   if (!baseUrl) {
     return { success: false, error: "Base URL is required", models: [] };
   }
 
   try {
-    const models = await fetchProviderModels(channel.provider, baseUrl, apiKey);
+    const models = await fetchProviderModels(protocol, baseUrl, apiKey);
     const existingModels = await listChannelModels(userId, channelId);
     const existingByModelId = new Map(existingModels.map((model) => [model.modelId, model]));
     const nextModelIds = new Set(models.map((m) => m.modelId));
@@ -808,7 +850,7 @@ export async function fetchChannelModels(
     // Common pitfall: many "Claude relay" services expose an OpenAI-compatible API.
     // If user picked "anthropic" but the endpoint only supports OpenAI-compatible /v1/models,
     // give a concrete suggestion instead of a generic error.
-    if (channel.provider === "anthropic") {
+    if (protocol === "anthropic") {
       try {
         await testOpenAICompatibleChannel(baseUrl, apiKey);
         return {
@@ -834,14 +876,15 @@ export async function testChannel(userId: string, channelId: string): Promise<Ch
   try {
     const channel = await getOwnedChannelItem(userId, channelId);
     const row = await getOwnedChannelRow(userId, channelId);
+    const protocol = normalizeProtocol(row.protocol, channel.provider);
     const apiKey = decrypt(row.apiKey);
-    const baseUrl = row.baseUrl || getDefaultBaseUrl(channel.provider);
+    const baseUrl = row.baseUrl || getDefaultBaseUrl(protocol);
 
     if (!baseUrl) {
       return { success: false, error: "Base URL is required" };
     }
 
-    if (channel.provider === "anthropic") {
+    if (protocol === "anthropic") {
       const modelId = resolveModelIdFromChannelItem(channel, null);
       if (!modelId) {
         return {
@@ -866,7 +909,7 @@ export async function testChannel(userId: string, channelId: string): Promise<Ch
         }
         return { success: false, error: probe.error };
       }
-    } else if (channel.provider === "google") {
+    } else if (protocol === "google") {
       await testGoogleChannel(baseUrl, apiKey);
     } else {
       await testOpenAICompatibleChannel(baseUrl, apiKey);
@@ -901,7 +944,7 @@ export async function getResolvedChannelForUser(
 
   const channelWithRuntimeBaseUrl: ChannelItem = {
     ...targetChannel,
-    baseUrl: getRuntimeBaseUrl(targetChannel.provider, row.baseUrl || targetChannel.baseUrl),
+    baseUrl: getRuntimeBaseUrl(targetChannel.protocol, row.baseUrl || targetChannel.baseUrl),
   };
 
   return {
@@ -952,7 +995,7 @@ export async function getResolvedChannelForConversation(
 
     const channelWithRuntimeBaseUrl: ChannelItem = {
       ...targetChannel,
-      baseUrl: getRuntimeBaseUrl(targetChannel.provider, row.baseUrl || targetChannel.baseUrl),
+      baseUrl: getRuntimeBaseUrl(targetChannel.protocol, row.baseUrl || targetChannel.baseUrl),
     };
 
     return {
@@ -991,10 +1034,17 @@ export async function getResolvedVisionChannelForUser(
     .filter((c) => c.enabled && c.hasApiKey)
     .map((c) => {
       const modelId = resolveModelIdFromChannelItem(c, null);
-      return { channelId: c.id, provider: c.provider, baseUrl: c.baseUrl || "", modelId };
+      return {
+        channelId: c.id,
+        protocol: c.protocol,
+        provider: c.provider,
+        baseUrl: c.baseUrl || "",
+        modelId,
+      };
     })
     .filter((c) => Boolean(c.modelId)) as Array<{
     channelId: string;
+    protocol: ChannelProtocol;
     provider: string;
     baseUrl: string;
     modelId: string;
@@ -1006,8 +1056,8 @@ export async function getResolvedVisionChannelForUser(
     .map((c) => ({
       ...c,
       score:
-        (c.provider === "openai" ? 1000 : 0) +
-        (c.provider === "anthropic" && c.baseUrl.includes("api.anthropic.com") ? 200 : 0) +
+        (c.protocol === "openai" ? 1000 : 0) +
+        (c.protocol === "anthropic" && c.baseUrl.includes("api.anthropic.com") ? 200 : 0) +
         scoreVisionModelId(c.modelId),
     }))
     .sort((a, b) => b.score - a.score);
@@ -1032,12 +1082,12 @@ export async function getChannelRuntimeCredentialsById(
   const row = await getOwnedChannelRow(userId, channelId);
 
   const storedOrDefaultBaseUrl =
-    row.baseUrl || channel.baseUrl || getDefaultBaseUrl(channel.provider) || "";
+    row.baseUrl || channel.baseUrl || getDefaultBaseUrl(channel.protocol) || "";
 
   const runtimeBaseUrl =
     options?.runtime === "agent_sdk"
       ? normalizeAgentSdkRuntimeBaseUrl(storedOrDefaultBaseUrl)
-      : getRuntimeBaseUrl(channel.provider, storedOrDefaultBaseUrl);
+      : getRuntimeBaseUrl(channel.protocol, storedOrDefaultBaseUrl);
 
   const channelWithRuntimeBaseUrl: ChannelItem = {
     ...channel,

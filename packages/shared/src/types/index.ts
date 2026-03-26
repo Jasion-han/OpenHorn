@@ -1,10 +1,12 @@
-export type Provider = "openai" | "anthropic" | "deepseek" | "google";
+export type ChannelProtocol = "openai" | "anthropic" | "google";
+export type Provider = string;
 
 export interface Channel {
   id: string;
   userId: string;
   name: string;
   provider: Provider;
+  protocol: ChannelProtocol;
   apiKey: string;
   baseUrl?: string;
   model?: string;
