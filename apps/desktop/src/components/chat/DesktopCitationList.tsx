@@ -1,81 +1,45 @@
 import { ChevronDown } from "lucide-react";
-import { useState } from "react";
-import { extractUsedCitationIndices } from "../../lib/citations";
 import { normalizeExternalUrl } from "../../lib/normalizeExternalUrl";
 import type { ApiCitation } from "../../types/chat";
 
 export function DesktopCitationList({
   citations,
-  content,
 }: {
   citations?: ApiCitation[];
   content?: string;
 }) {
-  const [showAll, setShowAll] = useState(false);
   if (!citations || citations.length === 0) return null;
 
-  const used = content ? extractUsedCitationIndices(content, citations.length) : [];
-  const effectiveShowAll = used.length === 0 ? true : showAll;
-  const displayed = effectiveShowAll
-    ? citations.map((citation, index) => ({ citation, index: index + 1 }))
-    : used.map((index) => ({ citation: citations[index - 1], index }));
-  const usedCount = used.length > 0 ? used.length : citations.length;
-
   return (
-    <details className="group mb-2 w-full min-w-0 max-w-full rounded-xl border border-border/50 bg-muted/20 px-3 py-2 text-sm">
+    <details className="group mt-2 w-full min-w-0 max-w-full text-sm">
       <summary className="block w-full cursor-pointer list-none select-none [&::-webkit-details-marker]:hidden">
-        <div className="flex min-w-0 items-center justify-between gap-3">
-          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-            <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-              Sources
-            </span>
-            <span className="shrink-0 text-[11px] text-muted-foreground/80">
-              · {usedCount}/{citations.length}
-            </span>
-          </div>
-          <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-150 group-open:rotate-180" />
+        <div className="flex min-w-0 items-center gap-1.5 text-sm leading-6 text-foreground/56">
+          <span>Sources</span>
+          <span className="text-foreground/34">· {citations.length}</span>
+          <ChevronDown className="h-3.5 w-3.5 shrink-0 transition-transform duration-150 group-open:rotate-180" />
         </div>
       </summary>
 
-      <div className="mt-2 flex flex-col gap-1.5">
-        <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1 pb-1">
-          <p className="min-w-0 text-[11px] text-muted-foreground">
-            {used.length === 0
-              ? "本轮未在正文标注引用，展示全部来源。"
-              : effectiveShowAll
-                ? "展示全部来源。"
-                : "仅展示已引用来源。"}
-          </p>
-          {used.length > 0 && (
-            <button
-              type="button"
-              className="justify-self-end whitespace-nowrap rounded-md border border-border/50 bg-background/50 px-2 py-1 text-left text-[11px] text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
-              onClick={() => setShowAll((prev) => !prev)}
-            >
-              {effectiveShowAll ? "Show used only" : "Show all"}
-            </button>
-          )}
-        </div>
-
-        {displayed.map(({ citation, index }) => (
+      <div className="mt-1.5 flex flex-col gap-1.5">
+        {citations.map((citation, index) => (
           <a
             key={`${citation.url}-${index}`}
             href={normalizeExternalUrl(citation.url)}
             target="_blank"
             rel="noreferrer"
-            className="block w-full min-w-0 max-w-full overflow-hidden rounded-md border border-border/40 bg-background/70 px-2 py-1.5 text-xs transition-colors hover:bg-background"
+            className="block w-full min-w-0 max-w-full overflow-hidden py-0.5 text-sm leading-6 text-foreground/56 transition-colors hover:text-foreground"
           >
             <div className="flex min-w-0 items-baseline gap-2">
-              <span className="inline-flex shrink-0 items-center rounded-md border border-border/50 bg-background/80 px-1.5 py-0.5 text-[10px] font-medium leading-none text-muted-foreground shadow-sm">
+              <span className="shrink-0 text-foreground/30">
                 [{index}]
               </span>
-              <div className="min-w-0 flex-1 break-words font-medium text-foreground">
-                {citation.title}
+              <div className="min-w-0 flex-1 break-words text-foreground/70">
+                {citation.title || citation.url}
               </div>
             </div>
-            <div className="truncate text-muted-foreground">{citation.url}</div>
+            <div className="truncate text-foreground/36">{citation.url}</div>
             {citation.snippet && (
-              <div className="mt-0.5 line-clamp-2 text-muted-foreground">{citation.snippet}</div>
+              <div className="line-clamp-2 text-foreground/36">{citation.snippet}</div>
             )}
           </a>
         ))}

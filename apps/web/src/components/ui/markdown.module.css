@@ -20,7 +20,8 @@
 .root ul,
 .root ol {
   margin: 0;
-  padding-left: 0.95em;
+  padding-left: 0;
+  list-style-position: inside;
 }
 
 .root li {

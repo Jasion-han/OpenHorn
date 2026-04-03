@@ -1,5 +1,5 @@
 import { Bot, Check, Copy, MessageSquare, Pencil, RefreshCw, Trash2 } from "lucide-react";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Button, Textarea, cn } from "ui";
 import { uploadAttachments } from "../../lib/attachments";
 import { getDesktopBackendBase } from "../../lib/backendBase";
@@ -8,11 +8,10 @@ import { getEffectiveModelForConversation } from "../../lib/effectiveModel";
 import { notifyWarning } from "../../lib/notify";
 import { readErrorMessage } from "../../lib/serverApi";
 import { readSseStream } from "../../lib/sse";
-import { createTextStreamSmoother, type TextStreamSmoother } from "../../lib/textStreamSmoother";
 import { useChatStore } from "../../stores/chatStore";
 import type { ApiAgentRun, ChatStreamEvent, Message, MessageAttachmentMeta } from "../../types/chat";
 import { DesktopCitationList } from "./DesktopCitationList";
-import { DesktopAgentTaskCard } from "./DesktopAgentTaskCard";
+import { DesktopAgentTaskCard, DesktopAgentTaskMetaLine } from "./DesktopAgentTaskCard";
 import { DesktopChatHeader } from "./DesktopChatHeader";
 import { DesktopComposer } from "./DesktopComposer";
 import { DesktopMarkdownMessage } from "./DesktopMarkdownMessage";
@@ -135,86 +134,169 @@ function AgentRunPanel({ run }: { run?: ApiAgentRun }) {
   const shouldRender = Boolean(run.error) || toolCount > 0;
   if (!shouldRender) return null;
 
+  const presentToolLabel = (toolName: string | null | undefined) => {
+    const normalized = (toolName ?? "").trim().toLowerCase();
+    if (!normalized) return "Tool";
+    if (normalized.includes("bash") || normalized.includes("terminal") || normalized === "shell") {
+      return "Bash";
+    }
+    if (normalized.includes("search")) return "Search";
+    if (normalized.includes("fetch")) return "Fetch";
+    if (normalized.includes("read")) return "Read";
+    if (normalized.includes("write")) return "Write";
+    if (normalized.includes("browser")) return "Browser";
+    if (normalized.startsWith("mcp__")) return "MCP";
+    return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+  };
+
+  const summarizeToolInput = (toolInput: unknown) => {
+    if (!toolInput || typeof toolInput !== "object") return null;
+    const input = toolInput as Record<string, unknown>;
+    const query =
+      typeof input.query === "string"
+        ? input.query
+        : typeof input.q === "string"
+          ? input.q
+          : typeof input.search_query === "string"
+            ? input.search_query
+            : null;
+    if (query?.trim()) return query.trim();
+
+    const command =
+      typeof input.command === "string"
+        ? input.command
+        : typeof input.cmd === "string"
+          ? input.cmd
+          : null;
+    if (command?.trim()) return command.trim();
+
+    const path =
+      typeof input.path === "string"
+        ? input.path
+        : typeof input.file_path === "string"
+          ? input.file_path
+          : null;
+    if (path?.trim()) return path.trim();
+
+    const url = typeof input.url === "string" ? input.url : null;
+    if (url?.trim()) return url.trim();
+
+    try {
+      return JSON.stringify(toolInput);
+    } catch {
+      return null;
+    }
+  };
+
+  const summarizeToolResult = (content: string | null | undefined) => {
+    const lines = (content ?? "")
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .filter((line) => !/^stdout:?$/i.test(line))
+      .filter((line) => !/^stderr:?$/i.test(line))
+      .filter((line) => !/^exit_?code\s*:/i.test(line));
+
+    if (lines.length === 0) return null;
+    const summary = lines.slice(0, 2).join(" · ").replace(/\s+/g, " ").trim();
+    return summary.length > 112 ? `${summary.slice(0, 109)}...` : summary;
+  };
+
   const statusLabel = (() => {
     switch (run.status) {
       case "completed":
-        return "已完成";
+        return "Done";
       case "failed":
-        return "失败";
+        return "Failed";
       case "cancelled":
-        return "已取消";
+        return "Cancelled";
       default:
-        return "进行中";
+        return "Running";
     }
   })();
 
   const statusClassName = (() => {
     switch (run.status) {
       case "completed":
-        return "border-emerald-300/60 bg-emerald-50 text-emerald-700";
+        return "text-emerald-700";
       case "failed":
-        return "border-orange-300/60 bg-orange-50 text-orange-700";
+        return "text-orange-700";
       case "cancelled":
-        return "border-slate-300/60 bg-slate-50 text-slate-700";
+        return "text-slate-700";
       default:
-        return "border-blue-300/60 bg-blue-50 text-blue-700";
+        return "text-blue-700";
     }
   })();
 
-  const displayTitle = toolCount > 0 ? `执行记录 · ${toolCount} 个工具` : "执行记录";
-  const stepTypeLabel = (type: ApiAgentRun["steps"][number]["type"]) => {
-    switch (type) {
-      case "tool_start":
-        return "开始";
-      case "tool_result":
-        return "结果";
-      case "error":
-        return "错误";
+  const displayTitle =
+    toolCount > 0 ? `Execution · ${toolCount} ${toolCount === 1 ? "tool" : "tools"}` : "Execution";
+  const activeStartKey = (() => {
+    if (run.status !== "running") return null;
+    for (let index = run.steps.length - 1; index >= 0; index -= 1) {
+      const step = run.steps[index];
+      if (!step) continue;
+      if (step.type === "tool_result" || step.type === "error") return null;
+      if (step.type === "tool_start") {
+        return `${step.type}-${step.toolName || ""}-${step.content || ""}-${JSON.stringify(step.toolInput ?? null)}`;
+      }
     }
-  };
+    return null;
+  })();
 
   return (
-    <details className="mt-2 rounded-xl border border-border/50 bg-muted/20 px-3 py-2 text-sm">
-      <summary className="cursor-pointer list-none">
-        <div className="flex items-center justify-between gap-3">
+    <details className="mt-2 text-sm">
+      <style>{`
+        @keyframes agentMetaTextFlow {
+          0% { background-position: 130% 50%; text-shadow: 0 0 0 rgba(15,23,42,0); }
+          50% { text-shadow: 0 0 8px rgba(15,23,42,0.08); }
+          100% { background-position: -30% 50%; text-shadow: 0 0 0 rgba(15,23,42,0); }
+        }
+      `}</style>
+      <summary className="list-none cursor-pointer">
+        <div className="flex items-center justify-between gap-3 border-b border-border/35 pb-1.5">
           <div className="flex min-w-0 items-center gap-2">
             <Bot size={12} className="shrink-0 text-muted-foreground" />
-            <span className="truncate font-medium">{displayTitle}</span>
+            <span className="truncate text-sm leading-6 text-muted-foreground">
+              {displayTitle} <span className={cn("text-muted-foreground/70", statusClassName)}>&middot; {statusLabel}</span>
+            </span>
           </div>
-          <span
-            className={cn(
-              "shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-medium",
-              statusClassName,
-            )}
-          >
-            {statusLabel}
-          </span>
         </div>
       </summary>
 
-      <div className="mt-2 flex flex-col gap-2">
+      <div className="mt-2 flex flex-col gap-2.5">
         {run.error && (
-          <div className="rounded-md border border-orange-200 bg-orange-50 px-2 py-1.5 text-xs text-orange-700">
-            {run.error}
-          </div>
+          <DesktopAgentTaskMetaLine text={run.error} tone="danger" />
         )}
-        {run.steps.map((step, index) => (
-          <div
-            key={`${index}-${step.type}-${step.toolName || ""}`}
-            className="rounded-md border border-border/50 bg-background/60 px-2 py-2"
-          >
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-xs font-medium text-muted-foreground">{stepTypeLabel(step.type)}</p>
-              {step.toolName && <p className="text-xs text-muted-foreground">{step.toolName}</p>}
-            </div>
-            {step.content && <p className="mt-1 text-sm whitespace-pre-wrap">{step.content}</p>}
-            {step.toolInput !== undefined && (
-              <pre className="mt-2 whitespace-pre-wrap break-words rounded-md bg-muted/40 p-2 text-xs">
-                {JSON.stringify(step.toolInput, null, 2)}
-              </pre>
-            )}
-          </div>
-        ))}
+        {run.steps.map((step) => {
+          const stepKey = `${step.type}-${step.toolName || ""}-${step.content || ""}-${JSON.stringify(step.toolInput ?? null)}`;
+          const isActive = activeStartKey === stepKey;
+          const label = step.type === "error" ? "Error" : presentToolLabel(step.toolName);
+          const detail =
+            step.type === "tool_start"
+              ? summarizeToolInput(step.toolInput)
+              : step.type === "tool_result"
+                ? summarizeToolResult(step.content)
+                : step.content?.trim() || summarizeToolInput(step.toolInput);
+
+          const text =
+            step.type === "tool_result"
+              ? `${label} done`
+              : step.type === "error"
+                ? label
+                : label || detail;
+
+          if (!text && !detail) return null;
+
+          return (
+            <DesktopAgentTaskMetaLine
+              key={stepKey}
+              text={text ?? detail ?? "Tool"}
+              subtext={detail}
+              active={isActive}
+              tone={step.type === "tool_result" ? "success" : step.type === "error" ? "danger" : "default"}
+            />
+          );
+        })}
       </div>
     </details>
   );
@@ -409,18 +491,35 @@ function MessageBubble({
   userMaxWidth: string;
 }) {
   const isAssistant = message.role === "assistant";
+  const isTaskStreaming =
+    isAssistant &&
+    Boolean(message.agentRun?.taskId) &&
+    !["completed", "failed", "cancelled"].includes(
+      message.agentRun?.taskStatus ?? message.agentRun?.status ?? "",
+    );
+  const isMessageStreaming = isStreaming || isTaskStreaming;
   const label = message.mode === "agent" ? "Agent" : "Chat";
   const badgeIcon = message.mode === "agent" ? <Bot size={12} /> : <MessageSquare size={12} />;
   const displayContent = isAssistant
     ? sanitizeDisplayContent(message.content, message.citations)
     : message.content;
   const hasAssistantText = isAssistant && Boolean((displayContent || "").trim());
-  const isAssistantPlaceholder = isAssistant && isStreaming && !hasAssistantText;
+  const isAssistantPlaceholder = isAssistant && isMessageStreaming && !hasAssistantText;
   const streamTailLength =
-    isAssistant && isStreaming && hasAssistantText ? (message.streamTail || "").length : 0;
+    isAssistant && isMessageStreaming && hasAssistantText ? (message.streamTail || "").length : 0;
+  const isAgentTaskMessage = isAssistant && Boolean(message.agentRun?.taskId);
+  const isFlatAgentAssistant = isAssistant && message.mode === "agent";
   const processPanel = isAssistant ? (
     message.agentRun?.taskId ? (
-      <DesktopAgentTaskCard messageId={message.id} taskId={message.agentRun.taskId} />
+      <DesktopAgentTaskCard
+        messageId={message.id}
+        taskId={message.agentRun.taskId}
+        fallbackContent={message.content || message.agentRun.summary}
+      />
+    ) : message.mode === "agent" && isMessageStreaming ? (
+      <section className="mt-0.5 px-1 pt-0 pb-1">
+        <DesktopAgentTaskMetaLine text="Thinking through the task" active />
+      </section>
     ) : (
       <AgentRunPanel run={message.agentRun} />
     )
@@ -438,9 +537,11 @@ function MessageBubble({
       <div
         className={cn(
           isAssistant ? "block w-full min-w-0 max-w-full" : "inline-block min-w-0 max-w-full",
-          isAssistantPlaceholder ? "border-0 bg-transparent px-0 py-0" : "rounded-2xl px-4 py-2",
+          isAssistantPlaceholder || isFlatAgentAssistant
+            ? "border-0 bg-transparent px-0 py-0"
+            : "rounded-2xl px-4 py-2",
           isAssistant
-            ? isAssistantPlaceholder
+            ? isAssistantPlaceholder || isFlatAgentAssistant
               ? ""
               : "border border-border/50 bg-background/60"
             : "border border-border/50 bg-foreground/[0.06]",
@@ -448,7 +549,8 @@ function MessageBubble({
       >
         <div
           className={cn(
-            "mb-1 inline-flex items-center gap-1 text-[11px] font-medium",
+            "flex items-center gap-1 text-[11px] leading-none font-medium",
+            isAssistant ? "mb-1.5" : "mb-1",
             isAssistant ? "text-muted-foreground" : "text-foreground/60",
           )}
         >
@@ -462,7 +564,7 @@ function MessageBubble({
 
         {processPanel}
 
-        {isAssistant ? (
+        {isAssistant && !isAgentTaskMessage ? (
           <div className={cn("min-w-0 max-w-full", processPanel && "mt-3")}>
             <LiveStatusBadge
               status={message.liveStatus}
@@ -479,7 +581,7 @@ function MessageBubble({
               }}
             >
               {hasAssistantText ? (
-                isStreaming ? (
+                isMessageStreaming ? (
                   <DesktopStreamingMarkdownMessage
                     content={displayContent}
                     tailLength={streamTailLength}
@@ -488,13 +590,13 @@ function MessageBubble({
                 ) : (
                   <DesktopMarkdownMessage content={displayContent} />
                 )
-              ) : isStreaming ? (
+              ) : isMessageStreaming ? (
                 <TypingIndicator />
               ) : null}
             </div>
             <DesktopCitationList citations={message.citations} content={displayContent} />
           </div>
-        ) : (
+        ) : !isAssistant ? (
           message.content?.trim() ? (
             <p
               className="text-sm"
@@ -508,7 +610,7 @@ function MessageBubble({
               {message.content}
             </p>
           ) : null
-        )}
+        ) : null}
       </div>
       <MessageActionBar
         message={message}
@@ -563,7 +665,6 @@ export function DesktopChatArea() {
     null,
   );
   const messageAnchorRefs = useRef<Map<string, HTMLDivElement>>(new Map());
-  const textSmootherRef = useRef<TextStreamSmoother | null>(null);
   const [streamingAssistantId, setStreamingAssistantId] = useState<string | null>(null);
   const effectiveModel = getEffectiveModelForConversation(channels, currentConversation);
   const agentModeSupported = effectiveModel.ok;
@@ -586,54 +687,36 @@ export function DesktopChatArea() {
     pendingScrollTargetRef.current = { type: "bottom" };
   }, [currentConversation?.id]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const viewportEl = viewportRef.current;
     const pending = pendingScrollTargetRef.current;
     if (!viewportEl || !pending) return;
 
-    let settleFrame: number | null = null;
-    const frame = requestAnimationFrame(() => {
-      const next = pendingScrollTargetRef.current;
-      if (!next || !viewportRef.current) return;
+    if (pending.type === "bottom") {
+      viewportEl.scrollTop = viewportEl.scrollHeight;
+      pendingScrollTargetRef.current = null;
+      return;
+    }
 
-      if (next.type === "bottom") {
-        viewportRef.current.scrollTo({ top: viewportRef.current.scrollHeight });
-        pendingScrollTargetRef.current = null;
-        return;
-      }
+    const anchorEl = messageAnchorRefs.current.get(pending.id);
+    if (!anchorEl) return;
 
-      const anchorEl = messageAnchorRefs.current.get(next.id);
-      if (!anchorEl) return;
+    const desiredTop =
+      anchorEl.getBoundingClientRect().top -
+      viewportEl.getBoundingClientRect().top +
+      viewportEl.scrollTop;
 
-      const desiredTop =
-        anchorEl.getBoundingClientRect().top -
-        viewportRef.current.getBoundingClientRect().top +
-        viewportRef.current.scrollTop;
+    viewportEl.scrollTop = desiredTop;
 
-      viewportRef.current.scrollTo({ top: desiredTop });
+    const currentAnchor = messageAnchorRefs.current.get(pending.id);
+    if (!currentAnchor) return;
 
-      settleFrame = requestAnimationFrame(() => {
-        if (!viewportRef.current) return;
-        const currentAnchor = messageAnchorRefs.current.get(next.id);
-        if (!currentAnchor) return;
+    const distanceFromTop =
+      currentAnchor.getBoundingClientRect().top - viewportEl.getBoundingClientRect().top;
 
-        const distanceFromTop =
-          currentAnchor.getBoundingClientRect().top -
-          viewportRef.current.getBoundingClientRect().top;
-
-        const reachedTarget = Math.abs(distanceFromTop) <= 4;
-        if (reachedTarget || !isStreaming) {
-          pendingScrollTargetRef.current = null;
-        }
-      });
-    });
-
-    return () => {
-      cancelAnimationFrame(frame);
-      if (settleFrame != null) {
-        cancelAnimationFrame(settleFrame);
-      }
-    };
+    if (Math.abs(distanceFromTop) <= 4 || !isStreaming) {
+      pendingScrollTargetRef.current = null;
+    }
   }, [messages, currentConversation?.id, editingMessageId, isStreaming]);
 
   useEffect(() => {
@@ -664,13 +747,6 @@ export function DesktopChatArea() {
       pendingPreviewUrlsRef.current.clear();
     };
   }, [currentConversation?.id]);
-
-  useEffect(() => {
-    return () => {
-      textSmootherRef.current?.cancel();
-      textSmootherRef.current = null;
-    };
-  }, []);
 
   const getEditableMessageRound = (messageId: string) => {
     const messageIndex = messages.findIndex((message) => message.id === messageId);
@@ -720,57 +796,27 @@ export function DesktopChatArea() {
     setPendingAttachments((currentFiles) => currentFiles.filter((item) => fileKey(item) !== targetKey));
   };
 
-  const clearTextSmoother = (opts?: { flush?: boolean }) => {
-    textSmootherRef.current?.cancel(opts);
-    textSmootherRef.current = null;
-  };
-
-  const createMessageSmoother = (messageId: string) => {
-    clearTextSmoother();
-
-    let nextContent =
-      useChatStore.getState().messages.find((message) => message.id === messageId)?.content || "";
-
-    const smoother = createTextStreamSmoother({
-      emit: (chunk) => {
-        if (!chunk) return;
-        nextContent += chunk;
-        updateMessage(messageId, { content: nextContent });
-      },
-    });
-
-    textSmootherRef.current = smoother;
-    return smoother;
-  };
-
   const consumeStreamingResponse = async (messageId: string, response: Response) => {
-    const smoother = createMessageSmoother(messageId);
     let terminalEvent: Extract<ChatStreamEvent, { type: "done" | "error" }> | null = null;
 
-    try {
-      await readSseStream(response, (event) => {
-        if (event.type === "delta") {
-          smoother.push(event.content || "");
-          return;
-        }
-
-        if (event.type === "done" || event.type === "error") {
-          terminalEvent = event;
-          return;
-        }
-
-        applyStreamEvent(messageId, event);
-      });
-
-      await smoother.finish();
-
-      if (terminalEvent) {
-        applyStreamEvent(messageId, terminalEvent);
+    await readSseStream(response, (event) => {
+      if (event.type === "delta") {
+        const chunk = event.content || "";
+        if (!chunk) return;
+        useChatStore.getState().appendMessageDelta(messageId, chunk);
+        return;
       }
-    } finally {
-      if (textSmootherRef.current === smoother) {
-        textSmootherRef.current = null;
+
+      if (event.type === "done" || event.type === "error") {
+        terminalEvent = event;
+        return;
       }
+
+      applyStreamEvent(messageId, event);
+    });
+
+    if (terminalEvent) {
+      applyStreamEvent(messageId, terminalEvent);
     }
   };
 
@@ -946,7 +992,6 @@ export function DesktopChatArea() {
         pendingPreviewUrlsRef.current.delete(userMessageId);
       }
     } catch (error) {
-      clearTextSmoother();
       setLoading(false);
       setStreaming(false);
       setStreamingAssistantId(null);
@@ -1033,7 +1078,6 @@ export function DesktopChatArea() {
       setStreamingAssistantId(null);
       await Promise.all([loadMessages(currentConversation.id), loadConversations()]);
     } catch (error) {
-      clearTextSmoother();
       setLoading(false);
       setStreaming(false);
       setStreamingAssistantId(null);
@@ -1128,7 +1172,6 @@ export function DesktopChatArea() {
       setStreamingAssistantId(null);
       await Promise.all([loadMessages(currentConversation.id), loadConversations()]);
     } catch (error) {
-      clearTextSmoother();
       setLoading(false);
       setStreaming(false);
       setStreamingAssistantId(null);
@@ -1178,7 +1221,6 @@ export function DesktopChatArea() {
   };
 
   const handleStop = async () => {
-    clearTextSmoother();
     abortStreaming();
     setLoading(false);
     setStreaming(false);
@@ -1220,18 +1262,31 @@ export function DesktopChatArea() {
         message.role === "assistant" ? "items-start" : "items-end",
       )}
     >
-      <MessageBubble
-        message={message}
-        isStreaming={Boolean(isStreaming && streamingAssistantId && message.id === streamingAssistantId)}
-        canEdit={Boolean(getEditableMessageRound(message.id))}
-        canRetry={message.role === "assistant" && !isLoading && !isStreaming && !isUploading}
-        canDelete={!message.id.startsWith("draft-")}
-        onEdit={() => handleStartEdit(message)}
-        onRetry={() => void handleRetryMessage(message.id)}
-        onDelete={() => void handleDeleteMessage(message.id)}
-        assistantWidth={ASSISTANT_BUBBLE_WIDTH}
-        userMaxWidth={USER_BUBBLE_MAX_WIDTH}
-      />
+      {(() => {
+        const isTaskStreaming =
+          message.role === "assistant" &&
+          Boolean(message.agentRun?.taskId) &&
+          !["completed", "failed", "cancelled"].includes(
+            message.agentRun?.taskStatus ?? message.agentRun?.status ?? "",
+          );
+        const isMessageStreaming =
+          Boolean(isStreaming && streamingAssistantId && message.id === streamingAssistantId) || isTaskStreaming;
+
+        return (
+          <MessageBubble
+            message={message}
+            isStreaming={isMessageStreaming}
+            canEdit={Boolean(getEditableMessageRound(message.id))}
+            canRetry={message.role === "assistant" && !isLoading && !isMessageStreaming && !isUploading}
+            canDelete={!message.id.startsWith("draft-")}
+            onEdit={() => handleStartEdit(message)}
+            onRetry={() => void handleRetryMessage(message.id)}
+            onDelete={() => void handleDeleteMessage(message.id)}
+            assistantWidth={ASSISTANT_BUBBLE_WIDTH}
+            userMaxWidth={USER_BUBBLE_MAX_WIDTH}
+          />
+        );
+      })()}
 
       {message.role === "user" && editingMessageId === message.id && (
         <div className="mt-1 flex w-full max-w-[72%] self-end flex-col items-end gap-1">
