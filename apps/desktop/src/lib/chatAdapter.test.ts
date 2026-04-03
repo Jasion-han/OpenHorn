@@ -279,6 +279,9 @@ function createStubServerApi() {
       testServer: async () => ({ success: true }),
     },
     agentTasks: {
+      create: async () => ({
+        task: emptyTaskDetail.task,
+      }),
       get: async () => emptyTaskDetail,
       plan: async () => emptyTaskDetail,
       execute: async () => new Response("ok", { status: 200 }),

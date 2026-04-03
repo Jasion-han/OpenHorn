@@ -112,6 +112,23 @@ export interface ServerApi {
     testServer: (id: string) => Promise<{ success: boolean; error?: string }>;
   };
   agentTasks: {
+    create: (data: {
+      conversationId?: string | null;
+      channelId?: string | null;
+      modelId?: string | null;
+      title?: string | null;
+      goal: string;
+      attachments?: Array<{
+        id?: string;
+        fileName: string;
+        fileType?: string;
+        fileSize?: number;
+      }>;
+      complexity?: "light" | "standard" | "deep";
+      uxMode?: "direct" | "compact" | "full";
+      requiresPlanApproval?: boolean;
+      autoStart?: boolean;
+    }) => Promise<{ task: ApiAgentTaskDetail["task"] }>;
     get: (id: string) => Promise<ApiAgentTaskDetail>;
     plan: (id: string) => Promise<ApiAgentTaskDetail>;
     execute: (id: string, options?: { signal?: AbortSignal }) => Promise<Response>;
@@ -427,6 +444,11 @@ export function createServerApi(options?: { baseUrl?: string; fetch?: FetchLike 
     },
 
     agentTasks: {
+      create: (data) =>
+        fetchJson(fetchImpl, baseUrl, "/agent/tasks", {
+          method: "POST",
+          body: JSON.stringify(data),
+        }),
       get: (id) => fetchJson(fetchImpl, baseUrl, `/agent/tasks/${encodeURIComponent(id)}`),
       plan: (id) =>
         fetchJson(fetchImpl, baseUrl, `/agent/tasks/${encodeURIComponent(id)}/plan`, {

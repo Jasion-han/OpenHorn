@@ -154,6 +154,8 @@ const INITIAL_STATE = {
 };
 
 export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter()) {
+  let selectConversationRequestId = 0;
+
   return create<ChatState>((set, get) => ({
     ...INITIAL_STATE,
 
@@ -203,15 +205,33 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
       const conversation =
         get().conversations.find((item) => item.id === conversationId) || null;
 
-      set({
-        currentConversation: conversation,
-        messages: [],
-        composerMode: conversation?.lastMode || get().composerMode,
-        selectedChannelId: conversation?.channelId || get().selectedChannelId,
-      });
+      if (!conversation) {
+        set({
+          currentConversation: null,
+          messages: [],
+        });
+        return;
+      }
 
-      if (!conversation) return;
-      await get().loadMessages(conversation.id);
+      const requestId = ++selectConversationRequestId;
+      set({ isLoading: true, error: null });
+
+      try {
+        const messages = await adapter.loadMessages(conversation.id);
+        if (requestId !== selectConversationRequestId) return;
+
+        set((state) => ({
+          currentConversation: conversation,
+          messages,
+          composerMode: conversation.lastMode || state.composerMode,
+          selectedChannelId: conversation.channelId || state.selectedChannelId,
+          isLoading: false,
+        }));
+      } catch (error) {
+        if (requestId !== selectConversationRequestId) return;
+        set({ isLoading: false, error: toErrorMessage(error) });
+        throw error;
+      }
     },
 
     async createConversation(title, options) {

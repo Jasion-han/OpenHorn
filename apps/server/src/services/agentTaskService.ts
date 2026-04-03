@@ -139,6 +139,13 @@ export interface AgentTaskEventRecord {
   createdAt: string;
 }
 
+export interface AgentTaskRuntimeRecord {
+  channelId: string | null;
+  channelName: string | null;
+  modelId: string | null;
+  source: "event" | "task";
+}
+
 export type AgentTaskInsightHighlight =
   | "tool_approval"
   | "plan_approval"
@@ -166,6 +173,7 @@ export interface AgentTaskDetail {
   approvals: AgentApprovalRecord[];
   artifacts: AgentArtifactRecord[];
   events: AgentTaskEventRecord[];
+  runtime?: AgentTaskRuntimeRecord | null;
 }
 
 export interface CreateAgentTaskInput {
@@ -464,6 +472,49 @@ function attachTaskInsight(
       approvals,
       artifacts,
     }),
+  };
+}
+
+function getEventRuntime(event: AgentTaskEventRecord): AgentTaskRuntimeRecord | null {
+  if (event.type !== "execution_event") return null;
+  if (!event.metadata || typeof event.metadata !== "object" || Array.isArray(event.metadata)) {
+    return null;
+  }
+
+  const metadata = event.metadata as Record<string, unknown>;
+  if (metadata.source !== "runtime_selection") return null;
+
+  const modelId = typeof metadata.modelId === "string" ? metadata.modelId : null;
+  const channelId = typeof metadata.channelId === "string" ? metadata.channelId : null;
+  const channelName = typeof metadata.channelName === "string" ? metadata.channelName : null;
+
+  if (!modelId && !channelId && !channelName) {
+    return null;
+  }
+
+  return {
+    channelId,
+    channelName,
+    modelId,
+    source: "event",
+  };
+}
+
+function deriveTaskRuntime(task: AgentTaskRecord, events: AgentTaskEventRecord[]): AgentTaskRuntimeRecord | null {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const runtime = getEventRuntime(events[index]!);
+    if (runtime) return runtime;
+  }
+
+  if (!task.modelId && !task.channelId) {
+    return null;
+  }
+
+  return {
+    channelId: task.channelId ?? null,
+    channelName: null,
+    modelId: task.modelId ?? null,
+    source: "task",
   };
 }
 
@@ -1034,13 +1085,16 @@ export async function getAgentTaskDetail(userId: string, taskId: string): Promis
   const mappedRuns = runs.map(mapRun);
   const mappedApprovals = approvals.map(mapApproval);
   const mappedArtifacts = artifacts.map(mapArtifact);
+  const mappedTask = attachTaskInsight(mapTask(task), mappedRuns, mappedApprovals, mappedArtifacts);
+  const mappedEvents = events.map(mapTaskEvent);
 
   return {
-    task: attachTaskInsight(mapTask(task), mappedRuns, mappedApprovals, mappedArtifacts),
+    task: mappedTask,
     runs: mappedRuns,
     planSteps: planSteps.map(mapPlanStep),
     approvals: mappedApprovals,
     artifacts: mappedArtifacts,
-    events: events.map(mapTaskEvent),
+    events: mappedEvents,
+    runtime: deriveTaskRuntime(mappedTask, mappedEvents),
   };
 }

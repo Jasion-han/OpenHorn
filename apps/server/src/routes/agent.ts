@@ -35,54 +35,202 @@ import {
   updateAgentRunStatus,
   updateAgentTaskStatus,
 } from "../services/agentTaskService";
+import { buildAgentPlan } from "../services/agentPlanBuilder";
 import { generateAutoTitle } from "../services/autoTitleService";
-import { checkChannelAgentCompatibility } from "../services/channelAgentCheckService";
+import { mergeAgentTextOutput } from "../services/agentSdk";
+import {
+  describeAgentRuntimeSelection,
+  getAgentCapabilityModeFromSuccessResult,
+  resolveAgentRuntime,
+} from "../services/channelAgentCheckService";
 import { getResolvedChannelForConversation } from "../services/channelService";
 import { createAgentStreamTimeoutGuard } from "../services/agentStreamTimeouts";
+import { syncTaskBackedMessages } from "../services/messageService";
 import { requireUser, type UserEnv } from "../utils/requestUser";
 import { classifyBashCommandRisk } from "../utils/shellRisk";
 import { createSseStream } from "../utils/sse";
 import { isRecord } from "../utils/typeGuards";
 
-const agent = new Hono<UserEnv>();
+type AgentRouteDeps = {
+  requireUserMiddleware: typeof requireUser;
+  createAdapter: typeof createAdapter;
+  buildAgentRuntimeContext: typeof buildAgentRuntimeContext;
+  createAgentSession: typeof createAgentSession;
+  deleteAgentEvent: typeof deleteAgentEvent;
+  deleteAgentSession: typeof deleteAgentSession;
+  getAgentEvents: typeof getAgentEvents;
+  getAgentSessionById: typeof getAgentSessionById;
+  getAgentSessions: typeof getAgentSessions;
+  renameAgentSession: typeof renameAgentSession;
+  runAgent: typeof runAgent;
+  runAgentWithConfig: typeof runAgentWithConfig;
+  updateAgentSessionChannel: typeof updateAgentSessionChannel;
+  updateAgentSessionStatus: typeof updateAgentSessionStatus;
+  createAgentApprovalRequest: typeof createAgentApprovalRequest;
+  createAgentArtifact: typeof createAgentArtifact;
+  createAgentRun: typeof createAgentRun;
+  createAgentTask: typeof createAgentTask;
+  createAgentTaskEvent: typeof createAgentTaskEvent;
+  getAgentTaskById: typeof getAgentTaskById;
+  getAgentTaskDetail: typeof getAgentTaskDetail;
+  getLatestApprovalForTask: typeof getLatestApprovalForTask;
+  getLatestRunForTask: typeof getLatestRunForTask;
+  listAgentArtifacts: typeof listAgentArtifacts;
+  listAgentTaskEvents: typeof listAgentTaskEvents;
+  listAgentTasks: typeof listAgentTasks;
+  respondToAgentApproval: typeof respondToAgentApproval;
+  setAgentPlanSteps: typeof setAgentPlanSteps;
+  updateAgentPlanStepStatuses: typeof updateAgentPlanStepStatuses;
+  updateAgentTask: typeof updateAgentTask;
+  updateAgentRunStatus: typeof updateAgentRunStatus;
+  updateAgentTaskStatus: typeof updateAgentTaskStatus;
+  generateAutoTitle: typeof generateAutoTitle;
+  resolveAgentRuntime: typeof resolveAgentRuntime;
+  getAgentCapabilityModeFromSuccessResult: typeof getAgentCapabilityModeFromSuccessResult;
+  getResolvedChannelForConversation: typeof getResolvedChannelForConversation;
+  createAgentStreamTimeoutGuard: typeof createAgentStreamTimeoutGuard;
+};
 
-agent.use("*", requireUser);
+const defaultAgentRouteDeps: AgentRouteDeps = {
+  requireUserMiddleware: requireUser,
+  createAdapter,
+  buildAgentRuntimeContext,
+  createAgentSession,
+  deleteAgentEvent,
+  deleteAgentSession,
+  getAgentEvents,
+  getAgentSessionById,
+  getAgentSessions,
+  renameAgentSession,
+  runAgent,
+  runAgentWithConfig,
+  updateAgentSessionChannel,
+  updateAgentSessionStatus,
+  createAgentApprovalRequest,
+  createAgentArtifact,
+  createAgentRun,
+  createAgentTask,
+  createAgentTaskEvent,
+  getAgentTaskById,
+  getAgentTaskDetail,
+  getLatestApprovalForTask,
+  getLatestRunForTask,
+  listAgentArtifacts,
+  listAgentTaskEvents,
+  listAgentTasks,
+  respondToAgentApproval,
+  setAgentPlanSteps,
+  updateAgentPlanStepStatuses,
+  updateAgentTask,
+  updateAgentRunStatus,
+  updateAgentTaskStatus,
+  generateAutoTitle,
+  resolveAgentRuntime,
+  getAgentCapabilityModeFromSuccessResult,
+  getResolvedChannelForConversation,
+  createAgentStreamTimeoutGuard,
+};
 
-function buildPlanFromGoal(goal: string) {
-  const normalized = goal.trim().replace(/\s+/g, " ");
-  const executionTitle =
-    normalized.length > 72 ? `${normalized.slice(0, 69).trim()}...` : normalized;
+export function createAgentRouter(overrides: Partial<AgentRouteDeps> = {}) {
+  const {
+    requireUserMiddleware,
+    createAdapter,
+    buildAgentRuntimeContext,
+    createAgentSession,
+    deleteAgentEvent,
+    deleteAgentSession,
+    getAgentEvents,
+    getAgentSessionById,
+    getAgentSessions,
+    renameAgentSession,
+    runAgent,
+    runAgentWithConfig,
+    updateAgentSessionChannel,
+    updateAgentSessionStatus,
+    createAgentApprovalRequest,
+    createAgentArtifact,
+    createAgentRun,
+    createAgentTask,
+    createAgentTaskEvent,
+    getAgentTaskById,
+    getAgentTaskDetail,
+    getLatestApprovalForTask,
+    getLatestRunForTask,
+    listAgentArtifacts,
+    listAgentTaskEvents,
+    listAgentTasks,
+    respondToAgentApproval,
+    setAgentPlanSteps,
+    updateAgentPlanStepStatuses,
+    updateAgentTask,
+    updateAgentRunStatus,
+    updateAgentTaskStatus,
+    generateAutoTitle,
+    resolveAgentRuntime,
+    getAgentCapabilityModeFromSuccessResult,
+    getResolvedChannelForConversation,
+    createAgentStreamTimeoutGuard,
+  } = { ...defaultAgentRouteDeps, ...overrides };
 
-  return [
-    {
-      title: "Inspect task scope and available context",
-      description: "Review the goal, attachments, and constraints before execution.",
-      status: "ready" as const,
-    },
-    {
-      title: executionTitle || "Execute the requested task",
-      description: "Carry out the task using the approved plan and required tools.",
-      status: "pending" as const,
-    },
-    {
-      title: "Verify outcome and summarize results",
-      description: "Validate the output, note risks, and produce a final result artifact.",
-      status: "pending" as const,
-    },
-  ];
+  const agent = new Hono<UserEnv>();
+
+  agent.use("*", requireUserMiddleware);
+
+  function buildPlanFromTask(task: {
+    goal: string;
+    complexity?: "light" | "standard" | "deep" | null;
+    attachments?: Array<{
+      id?: string;
+      fileName: string;
+      fileType?: string;
+      fileSize?: number;
+    }> | null;
+  }) {
+    return buildAgentPlan({
+      goal: task.goal,
+      complexity: task.complexity ?? "standard",
+      attachments: task.attachments ?? [],
+    });
+  }
+
+function parseTaskComplexity(value: unknown) {
+  return value === "light" || value === "standard" || value === "deep" ? value : undefined;
+}
+
+function parseTaskUxMode(value: unknown) {
+  return value === "direct" || value === "compact" || value === "full" ? value : undefined;
 }
 
 function buildExecutionPrompt(
   goal: string,
   planSteps: Array<{ title: string; description?: string | null }>,
 ) {
+  const normalizedGoal = goal.trim();
   const renderedPlan = planSteps
     .map((step, index) =>
       [`${index + 1}. ${step.title}`, step.description?.trim()].filter(Boolean).join("\n"),
     )
     .join("\n\n");
 
-  return [`Approved task goal:`, goal.trim(), `Approved execution plan:`, renderedPlan]
+  const requiresWorkspaceInspection =
+    /(^|[\s(])(?:readme|repo|repository|codebase|workspace|package\.json|tsconfig|src\/|apps\/|README\.md)(?=$|[\s).,:/])/i.test(
+      normalizedGoal,
+    ) ||
+    /读取|查看|检查|分析|总结|梳理|修改|排查|修复|仓库|代码库|工作区|文件|源码|目录|README/i.test(
+      normalizedGoal,
+    );
+
+  const toolDirective = requiresWorkspaceInspection
+    ? [
+        "Execution requirements:",
+        "- This is a workspace-grounded task.",
+        "- Before answering, inspect the relevant local files or paths with real tools.",
+        "- Do not answer only from prior context or system context when the task asks about README, code, files, or the repository.",
+        "- If a referenced local file cannot be found, say that explicitly after checking.",
+      ].join("\n")
+    : null;
+
+  return [`Approved task goal:`, normalizedGoal, `Approved execution plan:`, renderedPlan, toolDirective]
     .filter(Boolean)
     .join("\n\n");
 }
@@ -235,28 +383,47 @@ function pickBestCitationForGoal(
   citations: Array<{ title: string; url: string; snippet?: string }>,
 ) {
   const normalizedGoal = goal.toLowerCase();
+  const wantsHomepage = /官方首页|官网|首页|homepage|home page|official home/i.test(goal);
+  const wantsDocs = /api|docs|文档|reference|responses|帮助文档|help/i.test(goal);
   return [...citations]
     .map((citation, index) => {
       const title = citation.title.toLowerCase();
       const url = citation.url.toLowerCase();
       let score = 0;
 
-      if (/developers\.openai\.com\/api\/reference/.test(url)) score += 30;
-      else if (/platform\.openai\.com\/docs\/api-reference/.test(url)) score += 28;
-      else if (/developers\.openai\.com\/api\/docs/.test(url)) score += 20;
-      else if (/developers\.openai\.com|platform\.openai\.com/.test(url)) score += 14;
-      else if (/openai\.com/.test(url)) score += 4;
+      if (wantsHomepage) {
+        if (/^https?:\/\/(www\.)?openai\.com\/?$/.test(url)) score += 80;
+        else if (/openai\.com\/(?!blog|index|api|docs|research|careers|newsroom)/.test(url)) score += 24;
+        else if (/openai\.com/.test(url)) score += 8;
+      } else {
+        if (/developers\.openai\.com\/api\/reference/.test(url)) score += 30;
+        else if (/platform\.openai\.com\/docs\/api-reference/.test(url)) score += 28;
+        else if (/developers\.openai\.com\/api\/docs/.test(url)) score += 20;
+        else if (/developers\.openai\.com|platform\.openai\.com/.test(url)) score += 14;
+        else if (/openai\.com/.test(url)) score += 4;
+      }
 
       if (/community\.openai\.com|help\.openai\.com/.test(url)) score -= 30;
       if (/\/index\//.test(url)) score -= 8;
 
-      if (/responses overview/.test(title)) score += 16;
-      if (/responses api/.test(title)) score += 12;
-      if (/responses/.test(title) || /responses/.test(url)) score += 8;
-      if (/api reference/.test(title) || /reference/.test(url)) score += 8;
-      if (/docs/.test(url)) score += 4;
+      if (wantsHomepage) {
+        if (/openai/.test(title)) score += 12;
+        if (/home|homepage|首页|openai/.test(title) && /^https?:\/\/(www\.)?openai\.com\/?$/.test(url)) {
+          score += 20;
+        }
+        if (/docs|reference|api|help|帮助文档/.test(title + url)) score -= 18;
+      } else if (wantsDocs) {
+        if (/responses overview/.test(title)) score += 16;
+        if (/responses api/.test(title)) score += 12;
+        if (/responses/.test(title) || /responses/.test(url)) score += 8;
+        if (/api reference/.test(title) || /reference/.test(url)) score += 8;
+        if (/docs/.test(url)) score += 4;
+      }
+
       if (/openai/.test(normalizedGoal) && /openai/.test(title + url)) score += 2;
-      if (/标题|title/i.test(goal) && /overview|reference|标题|title/i.test(title)) score += 6;
+      if (!wantsHomepage && /标题|title/i.test(goal) && /overview|reference|标题|title/i.test(title)) {
+        score += 6;
+      }
       score -= index * 0.01;
 
       return { citation, score };
@@ -264,10 +431,18 @@ function pickBestCitationForGoal(
     .sort((left, right) => right.score - left.score)[0]?.citation;
 }
 
+function isTitleOnlyGoal(goal: string) {
+  return /(?:只|仅)(?:返回|给出|输出)?标题|只要标题|title only|only return (?:the )?title/i.test(goal);
+}
+
 function buildCitationTitleAnswer(params: {
   goal: string;
   citation: { title: string; url: string; snippet?: string };
 }) {
+  if (isTitleOnlyGoal(params.goal)) {
+    return params.citation.title.trim();
+  }
+
   const summary = buildCleanCitationSummary(params.citation);
 
   return [
@@ -443,9 +618,9 @@ async function waitForApprovalResolution(params: {
   userId: string;
   taskId: string;
   approvalId: string;
-  signal: AbortSignal;
+  signal?: AbortSignal;
 }) {
-  while (!params.signal.aborted) {
+  while (true) {
     const detail = await getAgentTaskDetail(params.userId, params.taskId);
     const approval = detail.approvals.find((item) => item.id === params.approvalId) ?? null;
     if (approval && approval.status !== "pending") {
@@ -453,7 +628,6 @@ async function waitForApprovalResolution(params: {
     }
     await sleep(600);
   }
-  throw new Error("Approval wait aborted");
 }
 
 async function resolveTaskExecutionContext(
@@ -467,31 +641,41 @@ async function resolveTaskExecutionContext(
   }
 
   const latestApproval = await getLatestApprovalForTask(userId, taskId, "plan_approval");
-  if (!latestApproval || latestApproval.status !== "approved") {
-    return { error: "Task plan must be approved before execution.", status: 400 as const };
+  const latestPlanningRun = await getLatestRunForTask(userId, taskId, "planning");
+  const approvedPlanRunId = task.requiresPlanApproval
+    ? latestApproval?.status === "approved"
+      ? latestApproval.runId
+      : null
+    : latestPlanningRun?.id ?? null;
+
+  if (!approvedPlanRunId) {
+    return {
+      error: task.requiresPlanApproval
+        ? "Task plan must be approved before execution."
+        : "Task plan is not ready for execution.",
+      status: 400 as const,
+    };
   }
 
-  const resolvedChannel = await getResolvedChannelForConversation(userId, {
-    channelId: task.channelId,
-    modelId: task.modelId,
-  });
-  if (!resolvedChannel) {
-    return { error: "未配置可用的默认渠道/默认模型。请先在设置中完成配置。", status: 400 as const };
-  }
-
-  const compatibility = await checkChannelAgentCompatibility(
+  const runtimeResolution = await resolveAgentRuntime({
     userId,
-    resolvedChannel.channel.id,
-    resolvedChannel.modelId,
-  );
-  if (compatibility.success === false) {
-    return { error: compatibility.error, status: 400 as const };
+    requestedChannelId: task.channelId,
+    requestedModelId: task.modelId,
+  });
+  if (runtimeResolution.success === false) {
+    return { error: runtimeResolution.error, status: 400 as const };
   }
+  const resolvedChannel = runtimeResolution.resolvedChannel;
+  const compatibility = runtimeResolution.compatibility;
 
   const detail = await getAgentTaskDetail(userId, taskId);
   const approvedPlanSteps = detail.planSteps
-    .filter((step) => step.runId === latestApproval.runId)
+    .filter((step) => step.runId === approvedPlanRunId)
     .sort((left, right) => left.orderIndex - right.orderIndex);
+
+  if (approvedPlanSteps.length === 0) {
+    return { error: "Task plan is not ready for execution.", status: 400 as const };
+  }
 
   if (mode === "retry" && !["failed", "cancelled", "completed"].includes(task.status)) {
     return {
@@ -540,6 +724,8 @@ async function resolveTaskExecutionContext(
     approvedPlanSteps,
     executionPrompt,
     resolvedChannel,
+    compatibility,
+    fallbackUsed: runtimeResolution.fallbackUsed,
   };
 }
 
@@ -550,10 +736,43 @@ async function createTaskExecutionResponse(
 ) {
   const resolved = await resolveTaskExecutionContext(userId, taskId, mode);
   if ("error" in resolved) {
+    if (
+      resolved.status === 400 &&
+      (resolved.error.includes("不兼容") ||
+        resolved.error.includes("超时") ||
+        resolved.error.includes("协议"))
+    ) {
+      const failedAt = new Date();
+      const run = await createAgentRun(userId, taskId, {
+        phase: "execution",
+        status: "failed",
+        error: resolved.error,
+        startedAt: failedAt,
+        completedAt: failedAt,
+      }).catch(() => null);
+
+      await updateAgentTaskStatus(userId, taskId, "failed").catch(() => undefined);
+
+      if (run) {
+        await createAgentTaskEvent(userId, taskId, run.id, {
+          type: "error",
+          content: resolved.error,
+        }).catch(() => undefined);
+        await createAgentTaskEvent(userId, taskId, run.id, {
+          type: "task_status",
+          content: "Task failed before execution could start.",
+          metadata: { status: "failed", mode, stage: "compatibility_check" },
+        }).catch(() => undefined);
+      }
+
+      await syncTaskBackedMessages(userId, taskId).catch(() => undefined);
+    }
+
     return new Response(resolved.error, { status: resolved.status });
   }
 
-  const { task, approvedPlanSteps, executionPrompt, resolvedChannel } = resolved;
+  const { task, approvedPlanSteps, executionPrompt, resolvedChannel, compatibility, fallbackUsed } =
+    resolved;
   const attachmentIds = task.attachments
     .map((attachment) => attachment.id)
     .filter((value): value is string => typeof value === "string" && value.trim().length > 0);
@@ -654,7 +873,6 @@ async function createTaskExecutionResponse(
         userId,
         taskId,
         approvalId: approval.id,
-        signal: options.signal,
       });
 
       if (resolvedApproval.status === "approved") {
@@ -676,11 +894,49 @@ async function createTaskExecutionResponse(
       };
     };
 
+    const runtimeSelectionText = fallbackUsed || !task.channelId || !task.modelId
+      ? describeAgentRuntimeSelection({
+          resolvedChannel,
+          requestedChannelId: task.channelId,
+          requestedModelId: task.modelId,
+        })
+      : null;
+
+    if (runtimeSelectionText) {
+      await createAgentTaskEvent(userId, taskId, run.id, {
+        type: "execution_event",
+        content: runtimeSelectionText,
+        metadata: {
+          eventType: "thought",
+          source: "runtime_selection",
+          channelId: resolvedChannel.channel.id,
+          channelName: resolvedChannel.channel.name ?? null,
+          modelId: resolvedChannel.modelId,
+          fallbackUsed,
+        },
+      });
+      send({
+        type: "execution_event",
+        taskId,
+        runId: run.id,
+        eventType: "thought",
+        content: runtimeSelectionText,
+        metadata: {
+          eventType: "thought",
+          source: "runtime_selection",
+          channelId: resolvedChannel.channel.id,
+          channelName: resolvedChannel.channel.name ?? null,
+          modelId: resolvedChannel.modelId,
+          fallbackUsed,
+        },
+      });
+    }
+
     const runtimeContext = await buildAgentRuntimeContext({
       userId,
       prompt: task.goal,
-      channelId: task.channelId,
-      modelId: task.modelId,
+      channelId: resolvedChannel.channel.id,
+      modelId: resolvedChannel.modelId,
       conversationId: task.conversationId,
     });
 
@@ -792,6 +1048,10 @@ async function createTaskExecutionResponse(
           attachmentIds,
           channelId: runtimeContext.channelId,
           modelId: runtimeContext.modelId,
+          capabilityMode: getAgentCapabilityModeFromSuccessResult(
+            compatibility,
+            resolvedChannel.channel.protocol,
+          ),
           globalSystemPrompt: runtimeContext.globalSystemPrompt,
           liveSystemContext: runtimeContext.liveSystemContext,
           permissionMode: "default",
@@ -802,8 +1062,42 @@ async function createTaskExecutionResponse(
             continue;
           }
 
+          if (event.type === "thought") {
+            const thoughtChunk = event.content ?? "";
+            if (thoughtChunk.trim()) {
+              await createAgentTaskEvent(userId, taskId, run.id, {
+                type: "execution_event",
+                content: thoughtChunk,
+                metadata: { eventType: "thought" },
+              });
+              send({
+                type: "execution_event",
+                taskId,
+                runId: run.id,
+                eventType: "thought",
+                content: thoughtChunk,
+              });
+            }
+            continue;
+          }
+
           if (event.type === "text") {
-            finalText += event.content ?? "";
+            const textChunk = event.content ?? "";
+            finalText = mergeAgentTextOutput(finalText, textChunk);
+            if (textChunk.trim()) {
+              await createAgentTaskEvent(userId, taskId, run.id, {
+                type: "execution_event",
+                content: textChunk,
+                metadata: { eventType: "text" },
+              });
+              send({
+                type: "execution_event",
+                taskId,
+                runId: run.id,
+                eventType: "text",
+                content: textChunk,
+              });
+            }
             continue;
           }
 
@@ -929,6 +1223,7 @@ async function createTaskExecutionResponse(
           completedAt: new Date(),
         });
         await updateAgentTaskStatus(userId, taskId, "failed");
+        await syncTaskBackedMessages(userId, taskId).catch(() => undefined);
         await createAgentTaskEvent(userId, taskId, run.id, {
           type: "task_status",
           content: "Task execution failed.",
@@ -949,6 +1244,7 @@ async function createTaskExecutionResponse(
           completedAt: new Date(),
         });
         await updateAgentTaskStatus(userId, taskId, "completed");
+        await syncTaskBackedMessages(userId, taskId).catch(() => undefined);
         await createAgentTaskEvent(userId, taskId, run.id, {
           type: "task_status",
           content: "Task execution completed.",
@@ -974,6 +1270,7 @@ async function createTaskExecutionResponse(
         completedAt: new Date(),
       }).catch(() => undefined);
       await updateAgentTaskStatus(userId, taskId, "failed").catch(() => undefined);
+      await syncTaskBackedMessages(userId, taskId).catch(() => undefined);
       await createAgentTaskEvent(userId, taskId, run.id, {
         type: "error",
         content: message,
@@ -1083,6 +1380,11 @@ agent.post("/tasks", async (c) => {
       title: typeof body.title === "string" ? body.title : null,
       goal: body.goal,
       attachments,
+      complexity: parseTaskComplexity(body.complexity),
+      uxMode: parseTaskUxMode(body.uxMode),
+      requiresPlanApproval:
+        typeof body.requiresPlanApproval === "boolean" ? body.requiresPlanApproval : undefined,
+      autoStart: typeof body.autoStart === "boolean" ? body.autoStart : undefined,
     });
     return c.json({ task }, 201);
   } catch (error) {
@@ -1112,7 +1414,7 @@ agent.post("/tasks/:id/plan", async (c) => {
     });
 
     const planSteps = await setAgentPlanSteps(user.id, taskId, run.id, {
-      steps: buildPlanFromGoal(task.goal),
+      steps: buildPlanFromTask(task),
     });
 
     for (const step of planSteps) {
@@ -1127,29 +1429,39 @@ agent.post("/tasks/:id/plan", async (c) => {
       });
     }
 
-    const approval = await createAgentApprovalRequest(user.id, taskId, run.id, {
-      type: "plan_approval",
-      title: "Approve task execution",
-      description: "Review the generated plan before the agent starts executing it.",
-      payload: {
-        planStepIds: planSteps.map((step) => step.id),
-        planStepCount: planSteps.length,
-      },
-    });
+    if (task.requiresPlanApproval) {
+      const approval = await createAgentApprovalRequest(user.id, taskId, run.id, {
+        type: "plan_approval",
+        title: "Approve task execution",
+        description: "Review the generated plan before the agent starts executing it.",
+        payload: {
+          planStepIds: planSteps.map((step) => step.id),
+          planStepCount: planSteps.length,
+        },
+      });
 
-    await createAgentTaskEvent(user.id, taskId, run.id, {
-      type: "approval_requested",
-      content: approval.title,
-      metadata: { approvalId: approval.id, approvalType: approval.type },
-    });
+      await createAgentTaskEvent(user.id, taskId, run.id, {
+        type: "approval_requested",
+        content: approval.title,
+        metadata: { approvalId: approval.id, approvalType: approval.type },
+      });
 
-    await updateAgentRunStatus(user.id, run.id, "awaiting_approval");
-    await updateAgentTaskStatus(user.id, taskId, "awaiting_approval");
-    await createAgentTaskEvent(user.id, taskId, run.id, {
-      type: "task_status",
-      content: "Task is awaiting approval.",
-      metadata: { status: "awaiting_approval" },
-    });
+      await updateAgentRunStatus(user.id, run.id, "awaiting_approval");
+      await updateAgentTaskStatus(user.id, taskId, "awaiting_approval");
+      await createAgentTaskEvent(user.id, taskId, run.id, {
+        type: "task_status",
+        content: "Task is awaiting approval.",
+        metadata: { status: "awaiting_approval" },
+      });
+    } else {
+      await updateAgentRunStatus(user.id, run.id, "completed");
+      await updateAgentTaskStatus(user.id, taskId, "draft");
+      await createAgentTaskEvent(user.id, taskId, run.id, {
+        type: "task_status",
+        content: "Task is ready to execute.",
+        metadata: { status: "draft" },
+      });
+    }
 
     const detail = await getAgentTaskDetail(user.id, taskId);
     return c.json(detail);
@@ -1325,21 +1637,13 @@ agent.post("/sessions/:id/run", async (c) => {
 
   // Fail fast before opening the SSE stream when the configured channel/model
   // cannot actually run Claude Agent SDK, regardless of provider naming.
-  const resolvedChannel = await getResolvedChannelForConversation(user.id, {
-    channelId: session.channelId || null,
-    modelId: session.modelId || null,
+  const runtimeResolution = await resolveAgentRuntime({
+    userId: user.id,
+    requestedChannelId: session.channelId || null,
+    requestedModelId: session.modelId || null,
   });
-  if (!resolvedChannel) {
-    return c.text("未配置可用的默认渠道/默认模型。请先在设置中完成配置。", 400);
-  }
-
-  const compatibility = await checkChannelAgentCompatibility(
-    user.id,
-    resolvedChannel.channel.id,
-    resolvedChannel.modelId,
-  );
-  if (compatibility.success === false) {
-    return c.text(compatibility.error, 400);
+  if (runtimeResolution.success === false) {
+    return c.text(runtimeResolution.error, 400);
   }
 
   const stream = createSseStream(async (send, ctx) => {
@@ -1467,5 +1771,10 @@ agent.post("/sessions/:id/auto-title", async (c) => {
     return c.json({ success: false, error: error instanceof Error ? error.message : "Failed" });
   }
 });
+
+  return agent;
+}
+
+const agent = createAgentRouter();
 
 export default agent;

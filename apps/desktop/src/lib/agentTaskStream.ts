@@ -27,6 +27,7 @@ export type AgentTaskStreamEvent =
       content?: string;
       toolName?: string;
       toolInput?: unknown;
+      metadata?: unknown;
     }
   | { type: "artifact_created"; taskId: string; runId: string; artifactType: string }
   | {

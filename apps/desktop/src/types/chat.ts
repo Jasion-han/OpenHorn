@@ -57,6 +57,7 @@ export interface ApiAgentRun {
   summary: string;
   error?: string;
   steps: ApiAgentRunStep[];
+  toolCount?: number;
   legacySessionId?: string;
   taskId?: string;
   complexity?: "light" | "standard" | "deep";
@@ -259,6 +260,13 @@ export interface ApiAgentTaskEvent {
   createdAt: string;
 }
 
+export interface ApiAgentTaskRuntime {
+  channelId: string | null;
+  channelName: string | null;
+  modelId: string | null;
+  source: "event" | "task";
+}
+
 export interface ApiAgentTaskDetail {
   task: ApiAgentTask;
   runs: ApiAgentTaskRun[];
@@ -266,6 +274,7 @@ export interface ApiAgentTaskDetail {
   approvals: ApiAgentApproval[];
   artifacts: ApiAgentArtifact[];
   events: ApiAgentTaskEvent[];
+  runtime?: ApiAgentTaskRuntime | null;
 }
 
 export type ApiSettingsMap = Record<string, string>;

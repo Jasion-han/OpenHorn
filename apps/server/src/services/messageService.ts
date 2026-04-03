@@ -5,11 +5,24 @@ import { db } from "../db";
 import { generateId } from "../utils";
 import { createSseStream } from "../utils/sse";
 import { type AgentRuntimeConfig, runAgentWithConfig } from "./agentService";
+import { mergeAgentTextOutput } from "./agentSdk";
+import type {
+  AgentTaskComplexity,
+  AgentTaskDetail,
+  AgentTaskRecord,
+  AgentTaskUxMode,
+} from "./agentTaskService";
 import { buildAttachmentPayloadFromIds, linkAttachmentsToMessage } from "./attachmentService";
-import { checkChannelAgentCompatibility } from "./channelAgentCheckService";
+import {
+  describeAgentRuntimeSelection,
+  getAgentCapabilityModeFromSuccessResult,
+  resolveAgentRuntime,
+} from "./channelAgentCheckService";
 import { getResolvedChannelForConversation } from "./channelService";
 import { createAgentStreamTimeoutGuard } from "./agentStreamTimeouts";
+import { buildAgentPlan } from "./agentPlanBuilder";
 import { buildLiveContext, type LiveContextResult, toStoredLiveMetadata } from "./liveCapabilities";
+import { mergeSystemPromptParts, RESPONSE_STYLE_GUARDRAILS } from "./responseStyle";
 import { classifyLiveRouteWithModel } from "./liveRouteClassifier";
 import {
   type SearchCitation,
@@ -20,6 +33,14 @@ import { getSettingValues } from "./settingsService";
 
 const GLOBAL_SYSTEM_PROMPT_KEY = "chat.systemPrompt";
 const AGENT_RECENT_CONTEXT_LIMIT = 8;
+const AGENT_DEFAULT_COMPLEXITY_SETTING = "agent.defaultComplexity";
+const AGENT_DEFAULT_UX_MODE_SETTING = "agent.defaultUxMode";
+const AGENT_DEFAULT_REQUIRES_PLAN_APPROVAL_SETTING = "agent.defaultRequiresPlanApproval";
+const AGENT_DEFAULT_AUTO_START_SETTING = "agent.defaultAutoStart";
+
+async function loadAgentTaskService() {
+  return import("./agentTaskService");
+}
 export interface SendMessageInput {
   conversationId: string;
   content: string;
@@ -46,6 +67,7 @@ type AgentRunData = {
   summary: string;
   error?: string;
   steps: AgentRunStep[];
+  toolCount?: number;
   taskId?: string;
   complexity?: "light" | "standard" | "deep";
   uxMode?: "direct" | "compact" | "full";
@@ -77,6 +99,381 @@ type CitationsPayload = {
   type: "citations";
   citations: SearchCitation[];
 };
+
+type AgentTaskDefaults = {
+  complexity: AgentTaskComplexity;
+  uxMode: AgentTaskUxMode;
+  requiresPlanApproval: boolean;
+  autoStart: boolean;
+};
+
+function parseBooleanSetting(value: string | undefined, fallback: boolean) {
+  if (typeof value !== "string") return fallback;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "true") return true;
+  if (normalized === "false") return false;
+  return fallback;
+}
+
+function parseAgentTaskComplexity(
+  value: string | undefined,
+  fallback: AgentTaskComplexity,
+): AgentTaskComplexity {
+  if (value === "light" || value === "standard" || value === "deep") return value;
+  return fallback;
+}
+
+function parseAgentTaskUxMode(
+  value: string | undefined,
+  fallback: AgentTaskUxMode,
+): AgentTaskUxMode {
+  if (value === "direct" || value === "compact" || value === "full") return value;
+  return fallback;
+}
+
+function getAgentTaskDefaults(settings: Record<string, string>): AgentTaskDefaults {
+  return {
+    complexity: parseAgentTaskComplexity(settings[AGENT_DEFAULT_COMPLEXITY_SETTING], "standard"),
+    uxMode: parseAgentTaskUxMode(settings[AGENT_DEFAULT_UX_MODE_SETTING], "compact"),
+    requiresPlanApproval: parseBooleanSetting(
+      settings[AGENT_DEFAULT_REQUIRES_PLAN_APPROVAL_SETTING],
+      false,
+    ),
+    autoStart: parseBooleanSetting(settings[AGENT_DEFAULT_AUTO_START_SETTING], true),
+  };
+}
+
+function buildTaskPlan(task: Pick<AgentTaskRecord, "goal" | "complexity" | "attachments">) {
+  return buildAgentPlan({
+    goal: task.goal,
+    complexity: task.complexity,
+    attachments: task.attachments,
+  });
+}
+
+function buildTaskStatusSummary(status: AgentTaskRecord["status"], uxMode: AgentTaskUxMode) {
+  if (uxMode === "direct") {
+    switch (status) {
+      case "planning":
+        return "正在整理最短执行路径。";
+      case "awaiting_approval":
+        return "任务已暂停，等待你决定是否继续。";
+      case "running":
+        return "正在直接处理这项任务。";
+      case "completed":
+        return "任务已完成。";
+      case "failed":
+        return "任务处理失败，可继续或重试。";
+      case "cancelled":
+        return "任务已取消。";
+      default:
+        return "我先直接处理这项任务。";
+    }
+  }
+
+  if (uxMode === "compact") {
+    switch (status) {
+      case "planning":
+        return "正在整理简要步骤并开始执行。";
+      case "awaiting_approval":
+        return "任务已暂停，等待你批准计划。";
+      case "running":
+        return "正在按简要步骤处理这项任务。";
+      case "completed":
+        return "任务已完成。";
+      case "failed":
+        return "任务处理失败，可以重试或查看过程。";
+      case "cancelled":
+        return "任务已取消。";
+      default:
+        return "我会按简要步骤直接开始处理。";
+    }
+  }
+
+  switch (status) {
+    case "planning":
+      return "正在整理执行路径并开始执行。";
+    case "awaiting_approval":
+      return "任务暂时停下，等待进一步批准。";
+    case "running":
+      return "任务正在执行。";
+    case "completed":
+      return "任务已完成。";
+    case "failed":
+      return "任务执行失败，可继续、重试或重新规划。";
+    case "cancelled":
+      return "任务已取消。";
+    default:
+      return "我会先展开任务并开始执行。";
+  }
+}
+
+function buildTaskMessageSummary(detail: AgentTaskDetail) {
+  return detail.task.insight?.previewText?.trim() || buildTaskStatusSummary(detail.task.status, detail.task.uxMode);
+}
+
+function buildTaskBackedAgentRun(detail: AgentTaskDetail): AgentRunData {
+  const latestRun = detail.runs[0] ?? null;
+  const latestApproval = detail.approvals[0] ?? null;
+  const toolCount = detail.events.filter(
+    (event) =>
+      event.type === "execution_event" &&
+      event.metadata &&
+      typeof event.metadata === "object" &&
+      !Array.isArray(event.metadata) &&
+      (event.metadata as Record<string, unknown>).eventType === "tool_start",
+  ).length;
+
+  return {
+    status:
+      detail.task.status === "awaiting_approval"
+        ? "awaiting_approval"
+        : detail.task.status === "running"
+          ? "running"
+          : detail.task.status === "failed"
+            ? "failed"
+            : detail.task.status === "cancelled"
+              ? "cancelled"
+              : "completed",
+    summary: buildTaskMessageSummary(detail),
+    steps: [],
+    toolCount,
+    taskId: detail.task.id,
+    complexity: detail.task.complexity,
+    uxMode: detail.task.uxMode,
+    requiresPlanApproval: detail.task.requiresPlanApproval,
+    autoStart: detail.task.autoStart,
+    taskStatus: detail.task.status,
+    latestRunId: latestRun?.id ?? null,
+    latestRunPhase: latestRun?.phase ?? null,
+    latestApprovalId: latestApproval?.id ?? null,
+    latestApprovalType: latestApproval?.type ?? null,
+    latestApprovalStatus: latestApproval?.status ?? null,
+  };
+}
+
+function parseAgentRunData(value: string | null | undefined): AgentRunData | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value) as AgentRunData;
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function getTaskFinalResultCitations(detail: AgentTaskDetail) {
+  const finalResult = detail.artifacts.find((artifact) => artifact.type === "final_result") ?? null;
+  if (!finalResult?.metadata || typeof finalResult.metadata !== "object" || Array.isArray(finalResult.metadata)) {
+    return undefined;
+  }
+
+  const citations = (finalResult.metadata as Record<string, unknown>).citations;
+  return Array.isArray(citations) ? citations : undefined;
+}
+
+export async function syncTaskBackedMessages(userId: string, taskId: string): Promise<void> {
+  const { getAgentTaskDetail } = await loadAgentTaskService();
+  const detail = await getAgentTaskDetail(userId, taskId);
+  const conversationId = detail.task.conversationId;
+  if (!conversationId) return;
+
+  const candidateMessages = await db
+    .select({
+      id: messages.id,
+      agentRun: messages.agentRun,
+    })
+    .from(messages)
+    .where(
+      and(
+        eq(messages.conversationId, conversationId),
+        eq(messages.role, "assistant"),
+        eq(messages.mode, "agent"),
+      ),
+    );
+
+  const targetIds = candidateMessages
+    .filter((message) => parseAgentRunData(message.agentRun)?.taskId === taskId)
+    .map((message) => message.id);
+
+  if (targetIds.length === 0) return;
+
+  await db
+    .update(messages)
+    .set({
+      content: buildTaskMessageSummary(detail),
+      agentRun: JSON.stringify(buildTaskBackedAgentRun(detail)),
+      citations: (() => {
+        const citations = getTaskFinalResultCitations(detail);
+        return citations && citations.length > 0 ? JSON.stringify(citations) : null;
+      })(),
+      liveMetadata: null,
+    })
+    .where(inArray(messages.id, targetIds));
+}
+
+async function planTaskForTurn(userId: string, task: AgentTaskRecord) {
+  const {
+    createAgentApprovalRequest,
+    createAgentRun,
+    createAgentTaskEvent,
+    getAgentTaskDetail,
+    setAgentPlanSteps,
+    updateAgentRunStatus,
+    updateAgentTaskStatus,
+  } = await loadAgentTaskService();
+  await updateAgentTaskStatus(userId, task.id, "planning");
+  const run = await createAgentRun(userId, task.id, {
+    phase: "planning",
+    status: "running",
+    startedAt: new Date(),
+  });
+  await createAgentTaskEvent(userId, task.id, run.id, {
+    type: "task_status",
+    content: "Task entered planning.",
+    metadata: { status: "planning" },
+  });
+
+  const planSteps = await setAgentPlanSteps(userId, task.id, run.id, {
+    steps: buildTaskPlan(task),
+  });
+
+  for (const step of planSteps) {
+    await createAgentTaskEvent(userId, task.id, run.id, {
+      type: "plan_step",
+      content: step.title,
+      metadata: {
+        orderIndex: step.orderIndex,
+        description: step.description,
+        status: step.status,
+      },
+    });
+  }
+
+  if (task.requiresPlanApproval) {
+    const approval = await createAgentApprovalRequest(userId, task.id, run.id, {
+      type: "plan_approval",
+      title: "Approve task execution",
+      description: "Review the generated plan before the agent starts executing it.",
+      payload: {
+        planStepIds: planSteps.map((step) => step.id),
+        planStepCount: planSteps.length,
+      },
+    });
+
+    await createAgentTaskEvent(userId, task.id, run.id, {
+      type: "approval_requested",
+      content: approval.title,
+      metadata: { approvalId: approval.id, approvalType: approval.type },
+    });
+    await updateAgentRunStatus(userId, run.id, "awaiting_approval");
+    await updateAgentTaskStatus(userId, task.id, "awaiting_approval");
+    await createAgentTaskEvent(userId, task.id, run.id, {
+      type: "task_status",
+      content: "Task is awaiting approval.",
+      metadata: { status: "awaiting_approval" },
+    });
+  } else {
+    await updateAgentRunStatus(userId, run.id, "completed");
+    await updateAgentTaskStatus(userId, task.id, "draft");
+    await createAgentTaskEvent(userId, task.id, run.id, {
+      type: "task_status",
+      content: "Task is ready to execute.",
+      metadata: { status: "draft" },
+    });
+  }
+
+  return getAgentTaskDetail(userId, task.id);
+}
+
+async function createTaskBackedAgentTurn(params: {
+  userId: string;
+  conversationId: string;
+  conversation: Awaited<ReturnType<typeof getConversationForUser>>;
+  prompt: string;
+  attachmentIds?: string[];
+}) {
+  const { createAgentTask } = await loadAgentTaskService();
+  const settings = await getSettingValues(params.userId, [
+    AGENT_DEFAULT_COMPLEXITY_SETTING,
+    AGENT_DEFAULT_UX_MODE_SETTING,
+    AGENT_DEFAULT_REQUIRES_PLAN_APPROVAL_SETTING,
+    AGENT_DEFAULT_AUTO_START_SETTING,
+  ]);
+  const defaults = getAgentTaskDefaults(settings);
+
+  const task = await createAgentTask(params.userId, {
+    conversationId: params.conversationId,
+    channelId: params.conversation.channelId || null,
+    modelId: params.conversation.modelId || null,
+    title: null,
+    goal: params.prompt,
+    attachments: (params.attachmentIds || []).map((id) => ({
+      id,
+      fileName: "attachment",
+    })),
+    complexity: defaults.complexity,
+    uxMode: defaults.uxMode,
+    requiresPlanApproval: defaults.requiresPlanApproval,
+    autoStart: true,
+  });
+  const detail = await planTaskForTurn(params.userId, task);
+
+  return {
+    detail,
+    content: buildTaskMessageSummary(detail),
+    agentRun: buildTaskBackedAgentRun(detail),
+    modelId: detail.task.modelId,
+  };
+}
+
+async function applyTaskBackedAgentTurnToMessage(params: {
+  userId: string;
+  conversation: Awaited<ReturnType<typeof getConversationForUser>>;
+  conversationId: string;
+  assistantMessageId: string;
+  prompt: string;
+  attachmentIds?: string[];
+  workspaceId?: string | null;
+  contextPaths?: string[];
+}) {
+  const { detail, content, agentRun, modelId } = await createTaskBackedAgentTurn({
+    userId: params.userId,
+    conversationId: params.conversationId,
+    conversation: params.conversation,
+    prompt: params.prompt,
+    attachmentIds: params.attachmentIds,
+  });
+
+  await db
+    .update(messages)
+    .set({
+      content,
+      model: modelId,
+      mode: "agent",
+      workspaceId: params.workspaceId ?? null,
+      contextPaths:
+        params.contextPaths && params.contextPaths.length > 0
+          ? JSON.stringify(params.contextPaths)
+          : null,
+      agentRun: JSON.stringify(agentRun),
+      liveMetadata: null,
+      citations: null,
+    })
+    .where(eq(messages.id, params.assistantMessageId));
+
+  await db
+    .update(conversations)
+    .set({
+      updatedAt: new Date(),
+      workspaceId: params.workspaceId ?? null,
+      lastMode: "agent",
+      runStatus: detail.task.status,
+    })
+    .where(eq(conversations.id, params.conversationId));
+
+  return { detail, content, agentRun, modelId };
+}
 
 function parseJsonArray(value: string | null | undefined): string[] {
   if (!value) return [];
@@ -158,12 +555,7 @@ function buildEffectiveSystemPrompt(
   systemPrompt: string | null | undefined,
   liveContext: LiveContextResult,
 ) {
-  return (
-    [systemPrompt, liveContext.systemContext]
-      .map((value) => value?.trim())
-      .filter((value): value is string => Boolean(value))
-      .join("\n\n") || null
-  );
+  return mergeSystemPromptParts(systemPrompt, RESPONSE_STYLE_GUARDRAILS, liveContext.systemContext);
 }
 
 function buildLiveStatusPayload(liveContext: LiveContextResult): LiveStatusPayload {
@@ -218,6 +610,19 @@ function buildRecentAgentConversationHistory(
     }));
 }
 
+function excludeCurrentPromptFromHistory(
+  history: NonNullable<AgentRuntimeConfig["conversationHistory"]>,
+  prompt: string,
+) {
+  const trimmedPrompt = prompt.trim();
+  if (!trimmedPrompt || history.length === 0) return history;
+  const last = history[history.length - 1];
+  if (last?.role === "user" && last.content === trimmedPrompt) {
+    return history.slice(0, -1);
+  }
+  return history;
+}
+
 async function runAgentAndStream({
   send,
   config,
@@ -239,10 +644,20 @@ async function runAgentAndStream({
         timeoutGuard.markVisibleOutput();
       }
 
+      if (event.type === "thought") {
+        steps.push({
+          type: "tool_result",
+          toolName: "Thinking",
+          content: event.content,
+        });
+        send({ type: "agent_event", event });
+        continue;
+      }
+
       if (event.type === "text") {
         const chunk = event.content || "";
         if (!chunk) continue;
-        responseContent += chunk;
+        responseContent = mergeAgentTextOutput(responseContent, chunk);
         send({ type: "delta", content: chunk });
         continue;
       }
@@ -293,24 +708,35 @@ async function streamConversationAgentReply(params: {
     content: string | null | undefined;
   }>;
 }) {
-  const resolvedChannel = await getResolvedChannelForConversation(params.userId, {
-    channelId: params.channelId ?? null,
-    modelId: params.modelId ?? null,
+  const runtimeResolution = await resolveAgentRuntime({
+    userId: params.userId,
+    requestedChannelId: params.channelId ?? null,
+    requestedModelId: params.modelId ?? null,
   });
-  const effectiveModelId = params.modelId ?? resolvedChannel?.modelId ?? null;
-  const failImmediately = (error: string) => {
+  const resolvedChannel = runtimeResolution.success ? runtimeResolution.resolvedChannel : null;
+  const effectiveModelId = resolvedChannel?.modelId ?? params.modelId ?? null;
+  const failImmediately = (
+    error: string,
+  ): {
+    responseContent: string;
+    agentRun: AgentRunData;
+    modelId: string | null;
+    liveMetadata: null;
+    citations: null;
+  } => {
     params.send({ type: "agent_event", event: { type: "error", content: error } });
     params.send({ type: "delta", content: `Error: ${error}` });
 
     const steps: AgentRunStep[] = [{ type: "error", content: error }];
+    const agentRun: AgentRunData = {
+      status: "failed",
+      summary: buildAgentRunSummary(steps, error),
+      error,
+      steps,
+    };
     return {
       responseContent: `Error: ${error}`,
-      agentRun: {
-        status: "failed" as const,
-        summary: buildAgentRunSummary(steps, error),
-        error,
-        steps,
-      },
+      agentRun,
       modelId: effectiveModelId,
       liveMetadata: null,
       citations: null,
@@ -318,23 +744,24 @@ async function streamConversationAgentReply(params: {
   };
 
   if (!resolvedChannel) {
-    return failImmediately("未配置可用的默认渠道/默认模型。请先在设置中完成配置。");
+    return failImmediately(
+      runtimeResolution.success === false
+        ? runtimeResolution.error
+        : "未配置可用的默认渠道/默认模型。请先在设置中完成配置。",
+    );
   }
+  const successfulResolution = runtimeResolution as Extract<
+    Awaited<ReturnType<typeof resolveAgentRuntime>>,
+    { success: true }
+  >;
 
-  const compatibility = await checkChannelAgentCompatibility(
-    params.userId,
-    resolvedChannel.channel.id,
-    effectiveModelId || resolvedChannel.modelId,
-  );
-  if (compatibility.success === false) {
-    return failImmediately(compatibility.error);
-  }
-
-  const settings = await getSettingValues(params.userId, [
+  const settingsPromise = getSettingValues(params.userId, [
     GLOBAL_SYSTEM_PROMPT_KEY,
     TAVILY_API_KEY_SETTING,
     TAVILY_ENABLED_SETTING,
   ]);
+  const settings = await settingsPromise;
+  const compatibility = successfulResolution.compatibility;
   const classifier = resolvedChannel
     ? (prompt: string) =>
         classifyLiveRouteWithModel({
@@ -359,15 +786,36 @@ async function streamConversationAgentReply(params: {
     params.send(citationsPayload);
   }
 
+  if (successfulResolution.fallbackUsed || !params.channelId || !params.modelId) {
+    params.send({
+      type: "agent_event",
+      event: {
+        type: "thought",
+        content: describeAgentRuntimeSelection({
+          resolvedChannel,
+          requestedChannelId: params.channelId ?? null,
+          requestedModelId: params.modelId ?? null,
+        }),
+      },
+    });
+  }
+
   const { responseContent: streamedContent, agentRun } = await runAgentAndStream({
     send: params.send,
     config: {
       userId: params.userId,
       prompt: params.prompt,
-      conversationHistory: buildRecentAgentConversationHistory(params.conversationHistory || []),
+      conversationHistory: excludeCurrentPromptFromHistory(
+        buildRecentAgentConversationHistory(params.conversationHistory || []),
+        params.prompt,
+      ),
       attachmentIds: params.attachmentIds || [],
       channelId: params.channelId ?? resolvedChannel?.channel.id ?? null,
       modelId: params.modelId ?? resolvedChannel?.modelId ?? null,
+      capabilityMode: getAgentCapabilityModeFromSuccessResult(
+        compatibility,
+        resolvedChannel?.channel.protocol,
+      ),
       globalSystemPrompt: settings[GLOBAL_SYSTEM_PROMPT_KEY] || undefined,
       liveSystemContext: liveContext.systemContext,
       abortController: params.abortController,
@@ -485,7 +933,21 @@ export async function getMessagesForUser(userId: string, conversationId: string)
 export async function getMessagesForUserWithAttachments(userId: string, conversationId: string) {
   // Ownership guard
   await getConversationForUser(userId, conversationId);
-  const result = await getMessages(conversationId);
+  let result = await getMessages(conversationId);
+
+  const taskIds = Array.from(
+    new Set(
+      result
+        .filter((message) => message.role === "assistant" && message.mode === "agent")
+        .map((message) => parseAgentRunData(message.agentRun)?.taskId)
+        .filter((taskId): taskId is string => typeof taskId === "string" && taskId.trim().length > 0),
+    ),
+  );
+
+  if (taskIds.length > 0) {
+    await Promise.allSettled(taskIds.map((taskId) => syncTaskBackedMessages(userId, taskId)));
+    result = await getMessages(conversationId);
+  }
 
   const messageIds = result.map((m) => m.id);
   if (messageIds.length === 0) return result;
@@ -711,43 +1173,14 @@ export async function streamMessage(
         createdAt: assistantCreatedAt,
       });
 
-      const previousMessages = (await getMessages(input.conversationId)).filter(
-        (message) => message.id !== userMessageId,
-      );
-      const { responseContent, agentRun, modelId, liveMetadata, citations } =
-        await streamConversationAgentReply({
-          userId,
-          send,
-          conversationId: input.conversationId,
-          prompt: input.content,
-          attachmentIds: input.attachments || [],
-          channelId: conversation.channelId || null,
-          modelId: conversation.modelId || null,
-          forceWebSearch: conversation.forceWebSearch,
-          abortController: ctx.abortController,
-          conversationHistory: previousMessages,
-        });
-
-      await db
-        .update(messages)
-        .set({
-          content: responseContent,
-          model: modelId,
-          mode: "agent",
-          agentRun: JSON.stringify(agentRun),
-          liveMetadata,
-          citations,
-        })
-        .where(eq(messages.id, assistantMessageId));
-
-      await db
-        .update(conversations)
-        .set({
-          updatedAt: new Date(),
-          lastMode: "agent",
-          runStatus: agentRun.status,
-        })
-        .where(eq(conversations.id, input.conversationId));
+      const { agentRun, modelId } = await applyTaskBackedAgentTurnToMessage({
+        userId,
+        conversation,
+        conversationId: input.conversationId,
+        assistantMessageId,
+        prompt: input.content,
+        attachmentIds: input.attachments || [],
+      });
 
       send({
         type: "done",
@@ -957,54 +1390,16 @@ export async function editUserMessage(
         });
       }
 
-      await db
-        .update(conversations)
-        .set({
-          updatedAt: new Date(),
-          workspaceId,
-          lastMode: "agent",
-          runStatus: "running",
-        })
-        .where(eq(conversations.id, userMsg.conversationId));
-
-      const priorMessages = contextMsgs.slice(0, -1);
-      const { responseContent, agentRun, modelId, liveMetadata, citations } =
-        await streamConversationAgentReply({
-          userId,
-          send,
-          conversationId: userMsg.conversationId,
-          prompt: newContent.trim(),
-          attachmentIds,
-          channelId: conversation.channelId || null,
-          modelId: conversation.modelId || null,
-          forceWebSearch: conversation.forceWebSearch,
-          abortController: ctx.abortController,
-          conversationHistory: priorMessages,
-        });
-
-      await db
-        .update(messages)
-        .set({
-          content: responseContent,
-          model: modelId,
-          mode: "agent",
-          workspaceId,
-          contextPaths: contextPaths.length > 0 ? JSON.stringify(contextPaths) : null,
-          agentRun: JSON.stringify(agentRun),
-          liveMetadata,
-          citations,
-        })
-        .where(eq(messages.id, assistantMessageId));
-
-      await db
-        .update(conversations)
-        .set({
-          updatedAt: new Date(),
-          workspaceId,
-          lastMode: "agent",
-          runStatus: agentRun.status,
-        })
-        .where(eq(conversations.id, userMsg.conversationId));
+      const { agentRun, modelId } = await applyTaskBackedAgentTurnToMessage({
+        userId,
+        conversation,
+        conversationId: userMsg.conversationId,
+        assistantMessageId,
+        prompt: newContent.trim(),
+        attachmentIds,
+        workspaceId,
+        contextPaths,
+      });
 
       send({
         type: "done",
@@ -1164,55 +1559,16 @@ export async function regenerateMessage(
       const workspaceId =
         assistantMsg.workspaceId || userMsg.workspaceId || conversation.workspaceId || null;
 
-      await db
-        .update(conversations)
-        .set({
-          updatedAt: new Date(),
-          workspaceId,
-          lastMode: "agent",
-          runStatus: "running",
-        })
-        .where(eq(conversations.id, assistantMsg.conversationId));
-
-      const userMsgIndex = allMsgs.findIndex((message) => message.id === userMsg?.id);
-      const priorMessages = userMsgIndex > 0 ? allMsgs.slice(0, userMsgIndex) : [];
-      const { responseContent, agentRun, modelId, liveMetadata, citations } =
-        await streamConversationAgentReply({
-          userId,
-          send,
-          conversationId: assistantMsg.conversationId,
-          prompt: userMsg.content,
-          attachmentIds,
-          channelId: conversation.channelId || null,
-          modelId: conversation.modelId || null,
-          forceWebSearch: conversation.forceWebSearch,
-          abortController: ctx.abortController,
-          conversationHistory: priorMessages,
-        });
-
-      await db
-        .update(messages)
-        .set({
-          content: responseContent,
-          model: modelId,
-          mode: "agent",
-          workspaceId,
-          contextPaths: contextPaths.length > 0 ? JSON.stringify(contextPaths) : null,
-          agentRun: JSON.stringify(agentRun),
-          liveMetadata,
-          citations,
-        })
-        .where(eq(messages.id, assistantMessageId));
-
-      await db
-        .update(conversations)
-        .set({
-          updatedAt: new Date(),
-          workspaceId,
-          lastMode: "agent",
-          runStatus: agentRun.status,
-        })
-        .where(eq(conversations.id, assistantMsg.conversationId));
+      const { agentRun, modelId } = await applyTaskBackedAgentTurnToMessage({
+        userId,
+        conversation,
+        conversationId: assistantMsg.conversationId,
+        assistantMessageId,
+        prompt: userMsg.content,
+        attachmentIds,
+        workspaceId,
+        contextPaths,
+      });
 
       send({
         type: "done",

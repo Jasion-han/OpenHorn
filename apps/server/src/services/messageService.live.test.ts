@@ -377,6 +377,7 @@ test("stream agent includes recent conversation context for follow-up turns", as
 
   mock.module("./channelAgentCheckService", () => ({
     checkChannelAgentCompatibility: async () => ({ success: true as const }),
+    getAgentCapabilityModeFromSuccessResult: () => "claude_sdk",
   }));
 
   mock.module("./settingsService", () => ({
@@ -431,6 +432,166 @@ test("stream agent includes recent conversation context for follow-up turns", as
     expect(updatedRows.at(-1)).toMatchObject({
       runStatus: "completed",
     });
+  } finally {
+    mock.restore();
+  }
+});
+
+test("stream agent uses the conversation-selected channel and model", async () => {
+  const conversationTable = {
+    id: "conversation_id",
+    userId: "conversation_user_id",
+    channelId: "conversation_channel_id",
+    modelId: "conversation_model_id",
+    updatedAt: "conversation_updated_at",
+    lastMode: "conversation_last_mode",
+    runStatus: "conversation_run_status",
+  };
+  const messageTable = {
+    id: "message_id",
+    conversationId: "message_conversation_id",
+    createdAt: "message_created_at",
+  };
+  const attachmentTable = {
+    id: "attachment_id",
+    messageId: "attachment_message_id",
+    fileName: "attachment_file_name",
+    fileType: "attachment_file_type",
+    fileSize: "attachment_file_size",
+  };
+
+  const agentConfigs: Array<Record<string, unknown>> = [];
+
+  mock.module("db", () => ({
+    agentSessions: {},
+    agentTasks: {},
+    channelModels: {},
+    channels: {},
+    conversations: conversationTable,
+    messages: messageTable,
+    attachments: attachmentTable,
+    users: {},
+  }));
+
+  mock.module("../db", () => ({
+    db: {
+      select: () => ({
+        from: (table: unknown) => {
+          if (table === conversationTable) {
+            return {
+              where: () => ({
+                limit: async () => [
+                  {
+                    id: "conv-1",
+                    userId: "user-1",
+                    channelId: "channel-openrouter",
+                    modelId: "openrouter/free",
+                    systemPrompt: null,
+                    forceWebSearch: false,
+                    workspaceId: null,
+                  },
+                ],
+              }),
+            };
+          }
+
+          if (table === messageTable) {
+            return {
+              where: () => ({
+                orderBy: async () => [],
+              }),
+            };
+          }
+
+          if (table === attachmentTable) {
+            return {
+              where: async () => [],
+            };
+          }
+
+          throw new Error("Unexpected table in select");
+        },
+      }),
+      insert: () => ({
+        values: async () => {},
+      }),
+      update: () => ({
+        set: () => ({
+          where: async () => ({ rowsAffected: 1 }),
+        }),
+      }),
+    },
+  }));
+
+  mock.module("../utils", () => ({
+    encrypt: (value: string) => value,
+    decrypt: (value: string) => value,
+    generateId: (() => {
+      const ids = ["user-msg-temp", "assistant-msg-temp"];
+      return () => ids.shift() || `generated-${Date.now()}`;
+    })(),
+  }));
+
+  mock.module("./channelService", () => ({
+    getResolvedChannelForConversation: async (_userId: string, conversation: Record<string, unknown>) => ({
+      channel: {
+        id: conversation.channelId,
+        provider: "anthropic",
+        protocol: "anthropic",
+        baseUrl: "https://openrouter.ai/api/v1",
+      },
+      apiKey: "test-key",
+      modelId: conversation.modelId,
+    }),
+    getChannelRuntimeCredentialsById: async () => ({
+      channel: { baseUrl: "https://openrouter.ai/api/v1" },
+      apiKey: "test-key",
+    }),
+  }));
+
+  mock.module("./attachmentService", () => ({
+    buildAttachmentPayloadFromIds: async () => ({ images: [], textContext: "", files: [] }),
+    linkAttachmentsToMessage: async () => {},
+  }));
+
+  mock.module("./channelAgentCheckService", () => ({
+    checkChannelAgentCompatibility: async () => ({
+      success: true as const,
+      mode: "generic_tool_calling" as const,
+    }),
+    getAgentCapabilityModeFromSuccessResult: () => "generic_tool_calling",
+  }));
+
+  mock.module("./settingsService", () => ({
+    getSettingValues: async () => ({ "chat.systemPrompt": "" }),
+  }));
+
+  mock.module("./agentService", () => ({
+    runAgentWithConfig: async function* (config: Record<string, unknown>) {
+      agentConfigs.push(config);
+      yield { type: "text", content: "已完成" };
+    },
+  }));
+
+  try {
+    const { streamMessage } = await import(
+      `./messageService?agent-selected-model=${crypto.randomUUID()}`,
+    );
+    const stream = await streamMessage("user-1", {
+      conversationId: "conv-1",
+      content: "测试当前会话模型",
+      mode: "agent",
+    });
+
+    const payloads = parseSsePayloads(await readStreamText(stream));
+    expect(payloads.at(-1)).toMatchObject({
+      type: "done",
+      model: "openrouter/free",
+    });
+
+    expect(agentConfigs).toHaveLength(1);
+    expect(agentConfigs[0]?.channelId).toBe("channel-openrouter");
+    expect(agentConfigs[0]?.modelId).toBe("openrouter/free");
   } finally {
     mock.restore();
   }
@@ -559,6 +720,7 @@ test("stream agent aborts stalled runs when no visible output arrives", async ()
 
   mock.module("./channelAgentCheckService", () => ({
     checkChannelAgentCompatibility: async () => ({ success: true as const }),
+    getAgentCapabilityModeFromSuccessResult: () => "claude_sdk",
   }));
 
   mock.module("./settingsService", () => ({
@@ -780,6 +942,7 @@ test("stream agent keeps running when meta keepalive arrives before visible outp
 
   mock.module("./channelAgentCheckService", () => ({
     checkChannelAgentCompatibility: async () => ({ success: true as const }),
+    getAgentCapabilityModeFromSuccessResult: () => "claude_sdk",
   }));
 
   mock.module("./settingsService", () => ({
@@ -983,6 +1146,7 @@ test("stream agent fails fast when channel is incompatible with Claude Agent SDK
       error:
         "该渠道支持普通聊天接口，但不兼容 Claude Agent SDK，无法用于 Agent 模式。它仍可用于普通聊天。",
     }),
+    getAgentCapabilityModeFromSuccessResult: () => "claude_sdk",
   }));
 
   mock.module("./attachmentService", () => ({
@@ -1594,6 +1758,7 @@ test("edit agent user message streams the updated reply instead of returning a t
 
   mock.module("./channelAgentCheckService", () => ({
     checkChannelAgentCompatibility: async () => ({ success: true as const }),
+    getAgentCapabilityModeFromSuccessResult: () => "claude_sdk",
   }));
 
   mock.module("./settingsService", () => ({

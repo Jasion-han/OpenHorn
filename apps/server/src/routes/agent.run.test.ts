@@ -71,11 +71,14 @@ test("POST /sessions/:id/run returns compatibility error before starting SSE run
   }));
 
   mock.module("../services/channelAgentCheckService", () => ({
-    checkChannelAgentCompatibility: async () => ({
+    resolveAgentRuntime: async () => ({
       success: false as const,
       error:
         "该渠道支持普通聊天接口，但不兼容 Claude Agent SDK，无法用于 Agent 模式。它仍可用于普通聊天。",
+      attempts: [],
     }),
+    getAgentCapabilityModeFromSuccessResult: () => "claude_sdk",
+    describeAgentRuntimeSelection: () => "Using fallback-model",
   }));
 
   mock.module("../services/autoTitleService", () => ({
