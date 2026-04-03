@@ -39,7 +39,6 @@ import { buildAgentPlan } from "../services/agentPlanBuilder";
 import { generateAutoTitle } from "../services/autoTitleService";
 import { mergeAgentTextOutput } from "../services/agentSdk";
 import {
-  describeAgentRuntimeSelection,
   getAgentCapabilityModeFromSuccessResult,
   resolveAgentRuntime,
 } from "../services/channelAgentCheckService";
@@ -657,11 +656,31 @@ async function resolveTaskExecutionContext(
     };
   }
 
-  const runtimeResolution = await resolveAgentRuntime({
-    userId,
-    requestedChannelId: task.channelId,
-    requestedModelId: task.modelId,
-  });
+  const explicitTaskChannelId = task.channelId?.trim() || null;
+  const explicitTaskModelId = task.modelId?.trim() || null;
+  const directResolvedChannel =
+    explicitTaskChannelId && explicitTaskModelId
+      ? await getResolvedChannelForConversation(userId, {
+          channelId: explicitTaskChannelId,
+          modelId: explicitTaskModelId,
+        })
+      : null;
+
+  const runtimeResolution =
+    directResolvedChannel && directResolvedChannel.channel.protocol === "openai"
+      ? {
+          success: true as const,
+          resolvedChannel: directResolvedChannel,
+          compatibility: { success: true as const, mode: "generic_tool_calling" as const },
+          fallbackUsed: false,
+          attempts: [],
+        }
+      : await resolveAgentRuntime({
+          userId,
+          requestedChannelId: task.channelId,
+          requestedModelId: task.modelId,
+        });
+
   if (runtimeResolution.success === false) {
     return { error: runtimeResolution.error, status: 400 as const };
   }
@@ -771,8 +790,7 @@ async function createTaskExecutionResponse(
     return new Response(resolved.error, { status: resolved.status });
   }
 
-  const { task, approvedPlanSteps, executionPrompt, resolvedChannel, compatibility, fallbackUsed } =
-    resolved;
+  const { task, approvedPlanSteps, executionPrompt, resolvedChannel, compatibility } = resolved;
   const attachmentIds = task.attachments
     .map((attachment) => attachment.id)
     .filter((value): value is string => typeof value === "string" && value.trim().length > 0);
@@ -893,44 +911,6 @@ async function createTaskExecutionResponse(
         interrupt: true,
       };
     };
-
-    const runtimeSelectionText = fallbackUsed || !task.channelId || !task.modelId
-      ? describeAgentRuntimeSelection({
-          resolvedChannel,
-          requestedChannelId: task.channelId,
-          requestedModelId: task.modelId,
-        })
-      : null;
-
-    if (runtimeSelectionText) {
-      await createAgentTaskEvent(userId, taskId, run.id, {
-        type: "execution_event",
-        content: runtimeSelectionText,
-        metadata: {
-          eventType: "thought",
-          source: "runtime_selection",
-          channelId: resolvedChannel.channel.id,
-          channelName: resolvedChannel.channel.name ?? null,
-          modelId: resolvedChannel.modelId,
-          fallbackUsed,
-        },
-      });
-      send({
-        type: "execution_event",
-        taskId,
-        runId: run.id,
-        eventType: "thought",
-        content: runtimeSelectionText,
-        metadata: {
-          eventType: "thought",
-          source: "runtime_selection",
-          channelId: resolvedChannel.channel.id,
-          channelName: resolvedChannel.channel.name ?? null,
-          modelId: resolvedChannel.modelId,
-          fallbackUsed,
-        },
-      });
-    }
 
     const runtimeContext = await buildAgentRuntimeContext({
       userId,
@@ -1081,6 +1061,31 @@ async function createTaskExecutionResponse(
             continue;
           }
 
+          if (event.type === "text_delta") {
+            const textChunk = event.content ?? "";
+            if (textChunk) {
+              send({
+                type: "execution_event",
+                taskId,
+                runId: run.id,
+                eventType: "text_delta",
+                content: textChunk,
+              });
+            }
+            continue;
+          }
+
+          if (event.type === "text_reset") {
+            send({
+              type: "execution_event",
+              taskId,
+              runId: run.id,
+              eventType: "text_reset",
+              content: null,
+            });
+            continue;
+          }
+
           if (event.type === "text") {
             const textChunk = event.content ?? "";
             finalText = mergeAgentTextOutput(finalText, textChunk);
@@ -1090,13 +1095,15 @@ async function createTaskExecutionResponse(
                 content: textChunk,
                 metadata: { eventType: "text" },
               });
-              send({
-                type: "execution_event",
-                taskId,
-                runId: run.id,
-                eventType: "text",
-                content: textChunk,
-              });
+              if (!event.streamed) {
+                send({
+                  type: "execution_event",
+                  taskId,
+                  runId: run.id,
+                  eventType: "text",
+                  content: textChunk,
+                });
+              }
             }
             continue;
           }
@@ -1373,10 +1380,16 @@ agent.post("/tasks", async (c) => {
     : [];
 
   try {
+    const requestedChannelId = typeof body.channelId === "string" ? body.channelId : null;
+    const requestedModelId = typeof body.modelId === "string" ? body.modelId : null;
+    const resolvedChannel = await getResolvedChannelForConversation(user.id, {
+      channelId: requestedChannelId,
+      modelId: requestedModelId,
+    }).catch(() => null);
     const task = await createAgentTask(user.id, {
       conversationId: typeof body.conversationId === "string" ? body.conversationId : null,
-      channelId: typeof body.channelId === "string" ? body.channelId : null,
-      modelId: typeof body.modelId === "string" ? body.modelId : null,
+      channelId: requestedChannelId || resolvedChannel?.channel.id || null,
+      modelId: requestedModelId || resolvedChannel?.modelId || null,
       title: typeof body.title === "string" ? body.title : null,
       goal: body.goal,
       attachments,

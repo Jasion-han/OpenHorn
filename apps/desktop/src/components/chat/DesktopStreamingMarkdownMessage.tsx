@@ -1,16 +1,73 @@
+import { useLayoutEffect, useRef, useState } from "react";
+import { createTextStreamSmoother, type TextStreamSmoother } from "../../lib/textStreamSmoother";
 import { DesktopMarkdownMessage } from "./DesktopMarkdownMessage";
 
 export function DesktopStreamingMarkdownMessage({
   content,
-  tailLength,
+  tailLength: _tailLength,
   pulseKey,
 }: {
   content: string;
   tailLength: number;
   pulseKey: number;
 }) {
-  void tailLength;
-  void pulseKey;
+  const [renderedContent, setRenderedContent] = useState("");
+  const smootherRef = useRef<TextStreamSmoother | null>(null);
+  const targetContentRef = useRef("");
 
-  return <DesktopMarkdownMessage content={content} />;
+  useLayoutEffect(() => {
+    const smoother = createTextStreamSmoother({
+      emit: (text) => {
+        setRenderedContent((current) => current + text);
+      },
+    });
+
+    smootherRef.current = smoother;
+
+    return () => {
+      smoother.cancel();
+      smootherRef.current = null;
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    const nextContent = content || "";
+    const smoother = smootherRef.current;
+    if (!smoother) {
+      targetContentRef.current = nextContent;
+      setRenderedContent(nextContent);
+      return;
+    }
+
+    if (!nextContent) {
+      smoother.cancel();
+      targetContentRef.current = "";
+      setRenderedContent("");
+      return;
+    }
+
+    const currentTarget = targetContentRef.current;
+    if (nextContent === currentTarget) {
+      return;
+    }
+
+    if (!nextContent.startsWith(currentTarget)) {
+      smoother.cancel();
+      targetContentRef.current = "";
+      setRenderedContent("");
+      smoother.push(nextContent);
+      targetContentRef.current = nextContent;
+      return;
+    }
+
+    const delta = nextContent.slice(currentTarget.length);
+    if (!delta) {
+      return;
+    }
+
+    smoother.push(delta);
+    targetContentRef.current = nextContent;
+  }, [content, pulseKey]);
+
+  return <DesktopMarkdownMessage content={renderedContent} />;
 }

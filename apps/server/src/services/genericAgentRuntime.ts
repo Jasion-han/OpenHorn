@@ -1,19 +1,30 @@
 import type { CanUseTool } from "@anthropic-ai/claude-agent-sdk";
 import type { AgentEvent } from "./agentService";
-import { type ToolCallingAdapter } from "../agent-adapters";
+import { supportsStreamingToolCalling, type ToolCallingAdapter } from "../agent-adapters";
 import {
   type GenericAgentConversationMessage,
   type GenericToolCall,
   type GenericToolDefinition,
+  type GenericAgentTurnResult,
 } from "./genericAgentTypes";
 import { executeBashTool, formatBashToolResult } from "./bashToolExecutor";
 
 const DEFAULT_MAX_TURNS = 6;
+const WORKSPACE_INSPECTION_PATTERN =
+  /(^|[\s(])(?:readme|repo|repository|codebase|workspace|package\.json|tsconfig|src\/|apps\/|read README\.md)(?=$|[\s).,:/])/i;
+const WORKSPACE_INSPECTION_ZH_PATTERN =
+  /读取|查看|检查|分析|总结|梳理|修改|排查|修复|仓库|代码库|工作区|文件|源码|目录|README|package\.json/i;
 
 function getBashCommand(input: Record<string, unknown>) {
   if (typeof input.command === "string") return input.command;
   if (typeof input.cmd === "string") return input.cmd;
   return "";
+}
+
+function shouldForceWorkspaceInspection(prompt: string) {
+  return (
+    WORKSPACE_INSPECTION_PATTERN.test(prompt) || WORKSPACE_INSPECTION_ZH_PATTERN.test(prompt)
+  );
 }
 
 export function buildGenericAgentTools(): GenericToolDefinition[] {
@@ -110,18 +121,55 @@ export async function* runGenericAgentRuntime(params: {
 
   const tools = buildGenericAgentTools();
   const maxTurns = params.maxTurns ?? DEFAULT_MAX_TURNS;
+  const forceInitialWorkspaceInspection = shouldForceWorkspaceInspection(params.prompt);
 
   for (let turn = 0; turn < maxTurns; turn += 1) {
     // Emit a keepalive before each model turn so slow but compatible
     // tool-calling providers are not misclassified as stalled immediately.
     yield { type: "meta" };
 
-    const result = await params.adapter.runToolCallingTurn({
-      model: params.model,
-      messages,
-      tools,
-      signal: params.signal,
-    });
+    let result: GenericAgentTurnResult | null = null;
+    let streamedText = false;
+    let sawToolCallDelta = false;
+
+    if (supportsStreamingToolCalling(params.adapter)) {
+      for await (const event of params.adapter.runToolCallingTurnStream({
+        model: params.model,
+        messages,
+        tools,
+        toolChoice: turn === 0 && forceInitialWorkspaceInspection ? { type: "tool", name: "bash" } : "auto",
+        signal: params.signal,
+      })) {
+        if (event.type === "text_delta") {
+          streamedText = true;
+          yield { type: "text_delta", content: event.content };
+          continue;
+        }
+
+        if (event.type === "tool_call_delta") {
+          sawToolCallDelta = true;
+          if (streamedText) {
+            yield { type: "text_reset" };
+            streamedText = false;
+          }
+          continue;
+        }
+
+        result = event.result;
+      }
+    } else {
+      result = await params.adapter.runToolCallingTurn({
+        model: params.model,
+        messages,
+        tools,
+        toolChoice: turn === 0 && forceInitialWorkspaceInspection ? { type: "tool", name: "bash" } : "auto",
+        signal: params.signal,
+      });
+    }
+
+    if (!result) {
+      throw new Error("执行失败：模型未返回有效结果");
+    }
 
     if (result.toolCalls.length > 0) {
       const interimText = result.text.trim();
@@ -155,7 +203,7 @@ export async function* runGenericAgentRuntime(params: {
     }
 
     if (result.text.trim()) {
-      yield { type: "text", content: result.text };
+      yield { type: "text", content: result.text, streamed: streamedText && !sawToolCallDelta };
       return;
     }
 

@@ -432,16 +432,28 @@ function getPendingApproval(detail: ApiAgentTaskDetail): ApiAgentApproval | null
 }
 
 function mergeExecutionEvent(detail: ApiAgentTaskDetail, nextEvent: ApiAgentTaskEvent) {
+  const nextEventType = isRecord(nextEvent.metadata) ? nextEvent.metadata.eventType : null;
+  if (nextEvent.type === "execution_event" && nextEventType === "text_reset") {
+    return {
+      ...detail,
+      events: detail.events.filter((event) => {
+        if (event.type !== "execution_event" || !isRecord(event.metadata)) return true;
+        const eventType = event.metadata.eventType;
+        const isLive = Boolean(event.metadata.live);
+        return !isLive || (eventType !== "text" && eventType !== "text_delta");
+      }),
+    };
+  }
+
   const events = [...detail.events];
   const last = events[events.length - 1];
   const lastEventType = last && isRecord(last.metadata) ? last.metadata.eventType : null;
-  const nextEventType = isRecord(nextEvent.metadata) ? nextEvent.metadata.eventType : null;
 
   if (
     nextEvent.type === "execution_event" &&
-    nextEventType === "text" &&
+    (nextEventType === "text" || nextEventType === "text_delta") &&
     last?.type === "execution_event" &&
-    lastEventType === "text"
+    (lastEventType === "text" || lastEventType === "text_delta")
   ) {
     events[events.length - 1] = {
       ...last,
@@ -580,7 +592,7 @@ function buildExecutionItems(events: ApiAgentTaskEvent[]) {
       continue;
     }
 
-    if (eventType === "text") {
+    if (eventType === "text" || eventType === "text_delta") {
       const text = normalizeProcessText(event.content);
       if (text) {
         items.push({
@@ -865,11 +877,14 @@ function buildStream(
   fallbackContent: string | null | undefined,
 ): StreamItem[] {
   const approval = getPendingApproval(detail);
-  const timelineItems = buildTimelineItems(detail);
+  const finalOutputItems = buildOutputItems(detail, fallbackContent);
+  const hasFinalOutput = finalOutputItems.length > 0;
+  const timelineItems = hasFinalOutput
+    ? buildTimelineItems(detail).filter((item) => item.kind !== "output")
+    : buildTimelineItems(detail);
   const hasTimelineError = timelineItems.some((item) => item.kind === "meta" && item.tone === "danger");
   const statusItems = hasTimelineError ? [] : buildStatusItems(streamError);
   const metaItems = mergeOutputRows([...buildApprovalItems(approval), ...timelineItems, ...statusItems]);
-  const finalOutputItems = buildOutputItems(detail, fallbackContent);
   const shouldAppendOutput = detail.task.status === "completed" || metaItems.length === 0;
   const items = mergeOutputRows([
     ...metaItems,
@@ -1009,6 +1024,17 @@ export function DesktopAgentTaskCard({
 
     store.appendMessageDelta(messageId, nextChunk);
     hasStreamedTextRef.current = true;
+  };
+
+  const resetStreamingText = () => {
+    const store = useChatStore.getState();
+    const currentMessage = store.messages.find((item) => item.id === messageId);
+    store.updateMessage(messageId, {
+      content: "",
+      streamTail: "",
+      streamPulseKey: (currentMessage?.streamPulseKey ?? 0) + 1,
+    });
+    hasStreamedTextRef.current = false;
   };
 
   const loadDetail = async (silent = false) => {
@@ -1162,10 +1188,17 @@ export function DesktopAgentTaskCard({
             if (liveEvent) {
               if (
                 liveEvent.type === "execution_event" &&
-                getExecutionEventType(liveEvent) === "text" &&
+                (getExecutionEventType(liveEvent) === "text" ||
+                  getExecutionEventType(liveEvent) === "text_delta") &&
                 typeof liveEvent.content === "string"
               ) {
                 applyStreamingTextChunk(liveEvent.content, detail);
+              }
+              if (
+                liveEvent.type === "execution_event" &&
+                getExecutionEventType(liveEvent) === "text_reset"
+              ) {
+                resetStreamingText();
               }
               setDetail((current) => (current ? mergeExecutionEvent(current, liveEvent) : current));
               return;

@@ -6,7 +6,6 @@ import { db } from "../db";
 import { generateId } from "../utils";
 import { runClaudeAgentSdk } from "./agentSdk";
 import {
-  describeAgentRuntimeSelection,
   resolveAgentRuntime,
 } from "./channelAgentCheckService";
 import { resolveAgentWorkingDirectory } from "./agentWorkspace";
@@ -34,7 +33,14 @@ function adapterSupportsToolCalling(
 }
 
 async function saveAgentEvent(sessionId: string, event: AgentEvent): Promise<void> {
-  if (event.type === "meta" || event.type === "done") return;
+  if (
+    event.type === "meta" ||
+    event.type === "done" ||
+    event.type === "text_delta" ||
+    event.type === "text_reset"
+  ) {
+    return;
+  }
   try {
     await db.insert(agentEvents).values({
       id: generateId(),
@@ -96,6 +102,8 @@ export interface AgentEvent {
     | "user"
     | "meta"
     | "thought"
+    | "text_delta"
+    | "text_reset"
     | "text"
     | "tool_start"
     | "tool_result"
@@ -341,17 +349,6 @@ export async function* runAgentWithConfig(config: AgentRuntimeConfig): AsyncGene
     }
     const resolvedChannel = runtimeResolution.resolvedChannel;
     const capability = runtimeResolution.compatibility;
-
-    if (runtimeResolution.fallbackUsed || !config.channelId || !config.modelId) {
-      yield await emit({
-        type: "thought",
-        content: describeAgentRuntimeSelection({
-          resolvedChannel,
-          requestedChannelId: config.channelId ?? null,
-          requestedModelId: config.modelId ?? null,
-        }),
-      });
-    }
 
     const combinedSystemPrompt =
       mergeSystemPromptParts(

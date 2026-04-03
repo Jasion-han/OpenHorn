@@ -227,6 +227,62 @@ test("OpenAIAdapter runToolCallingTurn parses structured tool calls", async () =
   }
 });
 
+test("OpenAIAdapter runToolCallingTurn canonicalizes tool aliases against declared tools", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = ((async () =>
+    new Response(
+      JSON.stringify({
+        choices: [
+          {
+            finish_reason: "tool_calls",
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [
+                {
+                  id: "call_1",
+                  type: "function",
+                  function: {
+                    name: "bash_tool",
+                    arguments: "{\"command\":\"pwd\"}",
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      }),
+      {
+        headers: {
+          "Content-Type": "application/json",
+        },
+      },
+    )) as unknown) as typeof fetch;
+
+  try {
+    const adapter = new OpenAIAdapter("test-key", "https://example.com");
+    const result = await adapter.runToolCallingTurn({
+      model: "gpt-test",
+      messages: [{ role: "user", content: "list current directory" }],
+      tools: [
+        {
+          name: "bash",
+          description: "Run a shell command",
+          inputSchema: {
+            type: "object",
+            properties: { command: { type: "string" } },
+            required: ["command"],
+          },
+        },
+      ],
+    });
+
+    expect(result.toolCalls).toEqual([{ id: "call_1", name: "bash", input: { command: "pwd" } }]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("OpenAIAdapter runToolCallingTurn returns final text when no tool call exists", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async () =>

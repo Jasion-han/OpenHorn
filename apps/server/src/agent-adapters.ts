@@ -51,8 +51,17 @@ export interface ToolCallingOptions {
   requestTimeoutMs?: number;
 }
 
+export type ToolCallingStreamEvent =
+  | { type: "text_delta"; content: string }
+  | { type: "tool_call_delta" }
+  | { type: "done"; result: GenericAgentTurnResult };
+
 export interface ToolCallingAdapter extends ProviderAdapter {
   runToolCallingTurn(options: ToolCallingOptions): Promise<GenericAgentTurnResult>;
+}
+
+export interface StreamingToolCallingAdapter extends ToolCallingAdapter {
+  runToolCallingTurnStream(options: ToolCallingOptions): AsyncGenerator<ToolCallingStreamEvent>;
 }
 
 export type AdapterProtocol = "openai" | "anthropic" | "google";
@@ -244,6 +253,111 @@ function splitSystem(messages: ChatMessage[]) {
   return {
     system: systemParts.length > 0 ? systemParts.join("\n\n") : undefined,
     messages: rest,
+  };
+}
+
+function extractOpenAITextContent(rawContent: unknown): string {
+  if (typeof rawContent === "string") {
+    return rawContent;
+  }
+
+  if (!Array.isArray(rawContent)) {
+    return "";
+  }
+
+  return rawContent
+    .filter(
+      (item): item is { type?: string; text?: string } =>
+        isRecord(item) && typeof item.text === "string",
+    )
+    .map((item) => item.text ?? "")
+    .join("");
+}
+
+function normalizeToolNameKey(name: string) {
+  let key = (name || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+  key = key.replace(/^tool/, "");
+  key = key.replace(/tool$/, "");
+  return key;
+}
+
+function canonicalizeToolName(name: string, tools?: GenericToolDefinition[]) {
+  const trimmed = name.trim();
+  if (!trimmed || !tools || tools.length === 0) {
+    return trimmed;
+  }
+
+  const directMatch = tools.find((tool) => tool.name === trimmed);
+  if (directMatch) {
+    return directMatch.name;
+  }
+
+  const normalized = normalizeToolNameKey(trimmed);
+  if (!normalized) {
+    return trimmed;
+  }
+
+  const looseMatch = tools.find((tool) => normalizeToolNameKey(tool.name) === normalized);
+  return looseMatch?.name ?? trimmed;
+}
+
+function parseOpenAIToolCalls(
+  rawToolCalls: unknown,
+  tools?: GenericToolDefinition[],
+): GenericAgentTurnResult["toolCalls"] {
+  if (!Array.isArray(rawToolCalls)) {
+    return [];
+  }
+
+  return rawToolCalls
+    .map((toolCall) => {
+      if (!isRecord(toolCall) || !isRecord(toolCall.function)) {
+        return null;
+      }
+      const id = typeof toolCall.id === "string" ? toolCall.id : crypto.randomUUID();
+      const name =
+        typeof toolCall.function.name === "string"
+          ? canonicalizeToolName(toolCall.function.name, tools)
+          : "";
+      if (!name) return null;
+      const argsRaw =
+        typeof toolCall.function.arguments === "string" ? toolCall.function.arguments : "{}";
+      let input: Record<string, unknown> = {};
+      try {
+        const parsed = JSON.parse(argsRaw) as unknown;
+        if (isRecord(parsed)) {
+          input = parsed;
+        }
+      } catch {
+        input = {};
+      }
+      return { id, name, input };
+    })
+    .filter((toolCall): toolCall is GenericAgentTurnResult["toolCalls"][number] =>
+      Boolean(toolCall),
+    );
+}
+
+function parseOpenAIToolCallingResult(
+  data: unknown,
+  tools?: GenericToolDefinition[],
+): GenericAgentTurnResult {
+  if (!isRecord(data)) {
+    throw new Error("OpenAI API error: Invalid JSON response");
+  }
+
+  const choices = Array.isArray(data.choices) ? data.choices : [];
+  const first = choices[0];
+  const message = isRecord(first) ? first.message : null;
+  if (!isRecord(message)) {
+    throw new Error("OpenAI API error: Missing response message");
+  }
+
+  return {
+    text: extractOpenAITextContent(message.content),
+    toolCalls: parseOpenAIToolCalls(message.tool_calls, tools),
+    finishReason:
+      isRecord(first) && typeof first.finish_reason === "string" ? first.finish_reason : null,
   };
 }
 
@@ -558,6 +672,12 @@ export class OpenAIAdapter implements ProviderAdapter {
               : {}),
           };
         }
+        if (message.role !== "tool") {
+          return {
+            role: "user",
+            content: message.content,
+          };
+        }
         return {
           role: "tool",
           tool_call_id: message.toolCallId,
@@ -618,66 +738,293 @@ export class OpenAIAdapter implements ProviderAdapter {
     }
 
     const data = (await response.json()) as unknown;
-    if (!isRecord(data)) {
-      throw new Error("OpenAI API error: Invalid JSON response");
-    }
-    const choices = Array.isArray(data.choices) ? data.choices : [];
-    const first = choices[0];
-    const message = isRecord(first) ? first.message : null;
-    if (!isRecord(message)) {
-      throw new Error("OpenAI API error: Missing response message");
-    }
+    return parseOpenAIToolCallingResult(data, options.tools);
+  }
 
-    const rawContent = message.content;
-    const text =
-      typeof rawContent === "string"
-        ? rawContent
-        : Array.isArray(rawContent)
-          ? rawContent
-              .filter(
-                (item): item is { type?: string; text?: string } =>
-                  isRecord(item) && typeof item.text === "string",
-              )
-              .map((item) => item.text ?? "")
-              .join("")
-          : "";
-
-    const toolCalls = Array.isArray(message.tool_calls)
-      ? message.tool_calls
-          .map((toolCall) => {
-            if (!isRecord(toolCall) || !isRecord(toolCall.function)) {
-              return null;
+  async *runToolCallingTurnStream(
+    options: ToolCallingOptions,
+  ): AsyncGenerator<ToolCallingStreamEvent> {
+    const url = `${this.baseUrl}/chat/completions`;
+    const body = JSON.stringify({
+      model: options.model,
+      messages: options.messages.map((message) => {
+        if (message.role === "system" || message.role === "user") {
+          return {
+            role: message.role,
+            content: message.content,
+          };
+        }
+        if (message.role === "assistant") {
+          return {
+            role: "assistant",
+            content: message.content || "",
+            ...(message.toolCalls && message.toolCalls.length > 0
+              ? {
+                  tool_calls: message.toolCalls.map((toolCall) => ({
+                    id: toolCall.id,
+                    type: "function",
+                    function: {
+                      name: toolCall.name,
+                      arguments: JSON.stringify(toolCall.input),
+                    },
+                  })),
+                }
+              : {}),
+          };
+        }
+        if (message.role !== "tool") {
+          return {
+            role: "user",
+            content: message.content,
+          };
+        }
+        return {
+          role: "tool",
+          tool_call_id: message.toolCallId,
+          content: message.content,
+        };
+      }),
+      tools: options.tools.map((tool) => ({
+        type: "function",
+        function: {
+          name: tool.name,
+          description: tool.description,
+          parameters: tool.inputSchema,
+        },
+      })),
+      tool_choice:
+        options.toolChoice && options.toolChoice !== "auto"
+          ? {
+              type: "function",
+              function: { name: options.toolChoice.name },
             }
-            const id = typeof toolCall.id === "string" ? toolCall.id : crypto.randomUUID();
-            const name =
-              typeof toolCall.function.name === "string" ? toolCall.function.name.trim() : "";
-            if (!name) return null;
-            const argsRaw =
-              typeof toolCall.function.arguments === "string" ? toolCall.function.arguments : "{}";
-            let input: Record<string, unknown> = {};
-            try {
-              const parsed = JSON.parse(argsRaw) as unknown;
-              if (isRecord(parsed)) {
-                input = parsed;
-              }
-            } catch {
-              input = {};
-            }
-            return { id, name, input };
-          })
-          .filter((toolCall): toolCall is GenericAgentTurnResult["toolCalls"][number] =>
-            Boolean(toolCall),
-          )
-      : [];
+          : "auto",
+      stream: true,
+    });
 
-    const finishReason =
-      isRecord(first) && typeof first.finish_reason === "string" ? first.finish_reason : null;
+    const timeout = createStreamTimeoutSignal({
+      signal: options.signal,
+      totalTimeoutMs: options.requestTimeoutMs ?? DEFAULT_STREAM_TOTAL_TIMEOUT_MS,
+      firstTokenTimeoutMs:
+        Math.min(options.requestTimeoutMs ?? DEFAULT_STREAM_FIRST_TOKEN_TIMEOUT_MS, 30_000) ||
+        DEFAULT_STREAM_FIRST_TOKEN_TIMEOUT_MS,
+    });
+    let response: Response | null = null;
+    try {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "text/event-stream",
+            Authorization: `Bearer ${this.apiKey}`,
+          },
+          body,
+          signal: timeout.signal,
+        });
+        if (response.ok) break;
+        if (!shouldRetryStatus(response.status) || attempt === 1) break;
+        await sleep(500 * (attempt + 1));
+      }
+    } catch (error) {
+      timeout.cleanup();
+      rethrowAbortReason(timeout.signal, error);
+    }
 
-    return {
-      text,
-      toolCalls,
-      finishReason,
+    if (timeout.signal.aborted && timeout.signal.reason instanceof Error) {
+      timeout.cleanup();
+      throw timeout.signal.reason;
+    }
+
+    if (!response || !response.ok) {
+      timeout.cleanup();
+      const detail = response ? await readErrorDetail(response) : "Request failed";
+      const status = response?.status ? ` (${response.status})` : "";
+      throw new Error(`OpenAI API error${status}: ${detail}`);
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) {
+      timeout.cleanup();
+      throw new Error("No response body");
+    }
+
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let sawToolCallDelta = false;
+    let text = "";
+    let finishReason: string | null = null;
+    const toolCallsByIndex = new Map<
+      number,
+      { id?: string; name: string; argumentsText: string }
+    >();
+
+    const emitParsedPayload = function* (payload: string): Generator<ToolCallingStreamEvent> {
+      const parsed = JSON.parse(payload) as unknown;
+      if (!isRecord(parsed)) return;
+      const choice = Array.isArray(parsed.choices) ? parsed.choices[0] : null;
+      if (!isRecord(choice)) return;
+
+      if (typeof choice.finish_reason === "string" && choice.finish_reason.trim()) {
+        finishReason = choice.finish_reason;
+      }
+
+      const delta = isRecord(choice.delta) ? choice.delta : null;
+      if (!delta) return;
+
+      const content = delta.content;
+      if (typeof content === "string" && content.length > 0) {
+        text += content;
+        yield { type: "text_delta", content };
+      }
+
+      const toolCalls = Array.isArray(delta.tool_calls) ? delta.tool_calls : [];
+      for (const toolCall of toolCalls) {
+        if (!isRecord(toolCall)) continue;
+        const index = typeof toolCall.index === "number" ? toolCall.index : 0;
+        const current = toolCallsByIndex.get(index) || {
+          id: undefined,
+          name: "",
+          argumentsText: "",
+        };
+        if (typeof toolCall.id === "string" && toolCall.id.trim()) {
+          current.id = toolCall.id;
+        }
+        const toolFunction = isRecord(toolCall.function) ? toolCall.function : null;
+        if (toolFunction) {
+          if (typeof toolFunction.name === "string" && toolFunction.name.trim()) {
+            current.name += toolFunction.name;
+          }
+          if (typeof toolFunction.arguments === "string" && toolFunction.arguments.length > 0) {
+            current.argumentsText += toolFunction.arguments;
+          }
+        }
+        toolCallsByIndex.set(index, current);
+        if (!sawToolCallDelta) {
+          sawToolCallDelta = true;
+          yield { type: "tool_call_delta" };
+        }
+      }
     };
+
+    const buildResult = (): GenericAgentTurnResult => {
+      const toolCalls = [...toolCallsByIndex.entries()]
+        .sort((left, right) => left[0] - right[0])
+        .map(([, toolCall]) => {
+          const id = toolCall.id || crypto.randomUUID();
+          const name = canonicalizeToolName(toolCall.name, options.tools);
+          if (!name) return null;
+          let input: Record<string, unknown> = {};
+          try {
+            const parsed = JSON.parse(toolCall.argumentsText || "{}") as unknown;
+            if (isRecord(parsed)) {
+              input = parsed;
+            }
+          } catch {
+            input = {};
+          }
+          return { id, name, input };
+        })
+        .filter((toolCall): toolCall is GenericAgentTurnResult["toolCalls"][number] =>
+          Boolean(toolCall),
+        );
+
+      return { text, toolCalls, finishReason };
+    };
+
+    const looksLikeSsePayload = (input: string) => {
+      for (const rawLine of input.split(/\r?\n/)) {
+        const line = rawLine.trim();
+        if (!line) continue;
+        return (
+          line.startsWith(":") ||
+          line.startsWith("data:") ||
+          line.startsWith("event:") ||
+          line.startsWith("id:") ||
+          line.startsWith("retry:")
+        );
+      }
+      return false;
+    };
+
+    const consumeSseBuffer = (flush = false) => {
+      const working = flush && buffer.length > 0 ? `${buffer}\n` : buffer;
+      const lines = working.split("\n");
+      buffer = flush ? "" : lines.pop() || "";
+
+      const payloads: string[] = [];
+      let done = false;
+      for (const rawLine of lines) {
+        const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith(":") || !trimmed.startsWith("data:")) continue;
+        const data = trimmed.slice(5).trimStart();
+        if (data === "[DONE]") {
+          done = true;
+          break;
+        }
+        payloads.push(data);
+      }
+      return { payloads, done };
+    };
+
+    try {
+      const firstRead = await reader.read();
+      if (firstRead.done) {
+        yield { type: "done", result: buildResult() };
+        return;
+      }
+
+      timeout.markChunk();
+      buffer += decoder.decode(firstRead.value, { stream: true });
+
+      if (!looksLikeSsePayload(buffer)) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          timeout.markChunk();
+          buffer += decoder.decode(value, { stream: true });
+        }
+        const raw = buffer.trim();
+        if (!raw) {
+          yield { type: "done", result: buildResult() };
+          return;
+        }
+        yield { type: "done", result: parseOpenAIToolCallingResult(JSON.parse(raw), options.tools) };
+        return;
+      }
+
+      while (true) {
+        const { payloads, done } = consumeSseBuffer();
+        for (const payload of payloads) {
+          for (const event of emitParsedPayload(payload)) {
+            yield event;
+          }
+        }
+        if (done) {
+          yield { type: "done", result: buildResult() };
+          return;
+        }
+
+        const next = await reader.read();
+        if (next.done) {
+          const remaining = consumeSseBuffer(true);
+          for (const payload of remaining.payloads) {
+            for (const event of emitParsedPayload(payload)) {
+              yield event;
+            }
+          }
+          yield { type: "done", result: buildResult() };
+          return;
+        }
+        timeout.markChunk();
+        buffer += decoder.decode(next.value, { stream: true });
+      }
+    } catch (error) {
+      rethrowAbortReason(timeout.signal, error);
+    } finally {
+      timeout.cleanup();
+    }
   }
 }
 
@@ -932,6 +1279,12 @@ export class AnthropicAdapter implements ProviderAdapter {
               content: contentBlocks.length > 0 ? contentBlocks : [{ type: "text", text: " " }],
             };
           }
+          if (message.role !== "tool") {
+            return {
+              role: "user",
+              content: [{ type: "text", text: message.content || " " }],
+            };
+          }
           return {
             role: "user",
             content: [
@@ -1013,7 +1366,8 @@ export class AnthropicAdapter implements ProviderAdapter {
           return null;
         }
         const id = typeof block.id === "string" ? block.id : crypto.randomUUID();
-        const name = typeof block.name === "string" ? block.name.trim() : "";
+        const name =
+          typeof block.name === "string" ? canonicalizeToolName(block.name, options.tools) : "";
         if (!name) return null;
         const input = isRecord(block.input) ? block.input : {};
         return { id, name, input };
@@ -1044,4 +1398,10 @@ export function createAdapter(protocol: string, apiKey: string, baseUrl?: string
 
 export function supportsToolCalling(adapter: ProviderAdapter): adapter is ToolCallingAdapter {
   return typeof (adapter as Partial<ToolCallingAdapter>).runToolCallingTurn === "function";
+}
+
+export function supportsStreamingToolCalling(
+  adapter: ProviderAdapter,
+): adapter is StreamingToolCallingAdapter {
+  return typeof (adapter as Partial<StreamingToolCallingAdapter>).runToolCallingTurnStream === "function";
 }
