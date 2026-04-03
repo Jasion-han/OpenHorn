@@ -23,7 +23,7 @@ test("OpenAIAdapter chat aborts slow requests with a timeout", async () => {
         () => reject(signal.reason ?? new Error("aborted")),
         { once: true },
       );
-    })) as typeof fetch;
+    })) as unknown as typeof fetch;
 
   try {
     const adapter = new OpenAIAdapter("test-key", "https://example.com");
@@ -61,7 +61,7 @@ test("OpenAIAdapter chatStream aborts when streamed output goes idle", async () 
         "Content-Type": "text/event-stream",
       },
     });
-  }) as typeof fetch;
+  }) as unknown as typeof fetch;
 
   try {
     const adapter = new OpenAIAdapter("test-key", "https://example.com");
@@ -108,7 +108,7 @@ test("OpenAIAdapter chatStream parses SSE streams that start with comment lines"
         "Content-Type": "application/json",
       },
     });
-  }) as typeof fetch;
+  }) as unknown as typeof fetch;
 
   try {
     const adapter = new OpenAIAdapter("test-key", "https://example.com");
@@ -148,7 +148,7 @@ test("OpenAIAdapter chatStream aborts when the first streamed chunk never arrive
         "Content-Type": "text/event-stream",
       },
     });
-  }) as typeof fetch;
+  }) as unknown as typeof fetch;
 
   try {
     const adapter = new OpenAIAdapter("test-key", "https://example.com");
@@ -199,7 +199,7 @@ test("OpenAIAdapter runToolCallingTurn parses structured tool calls", async () =
           "Content-Type": "application/json",
         },
       },
-    )) as typeof fetch;
+    )) as unknown as typeof fetch;
 
   try {
     const adapter = new OpenAIAdapter("test-key", "https://example.com");
@@ -303,7 +303,7 @@ test("OpenAIAdapter runToolCallingTurn returns final text when no tool call exis
           "Content-Type": "application/json",
         },
       },
-    )) as typeof fetch;
+    )) as unknown as typeof fetch;
 
   try {
     const adapter = new OpenAIAdapter("test-key", "https://example.com");
@@ -341,7 +341,7 @@ test("AnthropicAdapter runToolCallingTurn parses tool_use blocks", async () => {
           "Content-Type": "application/json",
         },
       },
-    )) as typeof fetch;
+    )) as unknown as typeof fetch;
 
   try {
     const adapter = new AnthropicAdapter("test-key", "https://example.com");
@@ -381,7 +381,7 @@ test("AnthropicAdapter runToolCallingTurn returns final text", async () => {
           "Content-Type": "application/json",
         },
       },
-    )) as typeof fetch;
+    )) as unknown as typeof fetch;
 
   try {
     const adapter = new AnthropicAdapter("test-key", "https://example.com");

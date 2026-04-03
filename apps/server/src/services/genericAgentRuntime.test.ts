@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import type {
   ChatResponse,
+  ToolCallingAdapter,
   StreamingToolCallingAdapter,
   ToolCallingOptions,
   ToolCallingStreamEvent,
@@ -25,7 +26,9 @@ class FakeToolCallingAdapter implements StreamingToolCallingAdapter {
     throw new Error("not used");
   }
 
-  async runToolCallingTurn(_options: ToolCallingOptions) {
+  async runToolCallingTurn(
+    _options: ToolCallingOptions,
+  ): ReturnType<ToolCallingAdapter["runToolCallingTurn"]> {
     this.calls.push(_options);
     const next = this.turns.shift();
     if (!next) {
@@ -38,7 +41,9 @@ class FakeToolCallingAdapter implements StreamingToolCallingAdapter {
     };
   }
 
-  async *runToolCallingTurnStream(_options: ToolCallingOptions) {
+  async *runToolCallingTurnStream(
+    _options: ToolCallingOptions,
+  ): AsyncGenerator<ToolCallingStreamEvent> {
     this.calls.push(_options);
     const next = this.turns.shift();
     if (!next) {
