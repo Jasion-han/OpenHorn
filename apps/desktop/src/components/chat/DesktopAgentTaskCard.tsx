@@ -232,19 +232,9 @@ function describeToolStart(toolName: string | null | undefined, toolInput: ApiAg
 
 function describeToolResult(toolName: string | null | undefined, content: string | null | undefined) {
   const label = actionLabel(toolName);
-  const lines = (content ?? "")
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
-  const exitLine = lines.find((line) => line.startsWith("exit_code:"));
-  const stdoutLine = lines.find((line) => !line.startsWith("stdout:") && !line.startsWith("stderr:"));
-  const detail = summarizeProcessDetail(
-    [exitLine?.replace("exit_code:", "exit"), stdoutLine].filter(Boolean).join(" · ") || content,
-    84,
-  );
   return {
     text: presentActionLabel(label),
-    subtext: detail,
+    subtext: summarizeProcessDetail(content, 84),
   };
 }
 

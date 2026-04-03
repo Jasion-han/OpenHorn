@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { executeBashTool, formatBashToolResult } from "./bashToolExecutor";
+import { executeBashTool, formatBashToolResult, summarizeBashToolResult } from "./bashToolExecutor";
 
 test("executeBashTool runs a successful command", async () => {
   const result = await executeBashTool({
@@ -60,4 +60,30 @@ test("formatBashToolResult truncates oversized stdout blocks", () => {
   expect(formatted).toContain("line-1");
   expect(formatted).toContain("line-80");
   expect(formatted).toContain("lines omitted");
+});
+
+test("summarizeBashToolResult returns ok for successful commands", () => {
+  expect(
+    summarizeBashToolResult({
+      command: "printf 'hello'",
+      cwd: process.cwd(),
+      stdout: "hello",
+      stderr: "",
+      exitCode: 0,
+      success: true,
+    }),
+  ).toBe("ok");
+});
+
+test("summarizeBashToolResult includes exit code and first error line for failures", () => {
+  expect(
+    summarizeBashToolResult({
+      command: "ls missing",
+      cwd: process.cwd(),
+      stdout: "",
+      stderr: "ls: missing: No such file or directory\nmore",
+      exitCode: 1,
+      success: false,
+    }),
+  ).toContain("exit 1");
 });

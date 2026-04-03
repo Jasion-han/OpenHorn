@@ -19,6 +19,12 @@ export type BashToolExecutionResult = {
   success: boolean;
 };
 
+function truncateSingleLine(value: string, maxChars = 120) {
+  const normalized = value.trim().replace(/\s+/g, " ");
+  if (!normalized) return "";
+  return normalized.length > maxChars ? `${normalized.slice(0, maxChars - 3)}...` : normalized;
+}
+
 export async function executeBashTool(params: {
   command: string;
   cwd: string;
@@ -98,4 +104,18 @@ export function formatBashToolResult(result: BashToolExecutionResult) {
     parts.push("(no output)");
   }
   return parts.join("\n\n");
+}
+
+export function summarizeBashToolResult(result: BashToolExecutionResult) {
+  if (result.success) {
+    if (!result.stdout.trim() && !result.stderr.trim()) {
+      return "ok";
+    }
+    return "ok";
+  }
+
+  const stderrLine = truncateSingleLine(result.stderr);
+  const stdoutLine = truncateSingleLine(result.stdout);
+  const detail = stderrLine || stdoutLine;
+  return detail ? `exit ${result.exitCode} · ${detail}` : `exit ${result.exitCode}`;
 }

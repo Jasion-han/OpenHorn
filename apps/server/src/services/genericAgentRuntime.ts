@@ -7,13 +7,25 @@ import {
   type GenericToolDefinition,
   type GenericAgentTurnResult,
 } from "./genericAgentTypes";
-import { executeBashTool, formatBashToolResult } from "./bashToolExecutor";
+import {
+  executeBashTool,
+  formatBashToolResult,
+  summarizeBashToolResult,
+} from "./bashToolExecutor";
 
-const DEFAULT_MAX_TURNS = 6;
+const DEFAULT_MAX_TURNS = 10;
 const WORKSPACE_INSPECTION_PATTERN =
   /(^|[\s(])(?:readme|repo|repository|codebase|workspace|package\.json|tsconfig|src\/|apps\/|read README\.md)(?=$|[\s).,:/])/i;
 const WORKSPACE_INSPECTION_ZH_PATTERN =
   /读取|查看|检查|分析|总结|梳理|修改|排查|修复|仓库|代码库|工作区|文件|源码|目录|README|package\.json/i;
+const GENERIC_AGENT_TOOL_GUARDRAILS = [
+  "Use tools only when they materially help answer the task.",
+  "For simple workspace inspection tasks, prefer 1 to 4 efficient Bash commands total.",
+  "Use plain ASCII shell commands unless a path or file name genuinely requires non-ASCII.",
+  "If a Bash command fails, simplify it and retry. Do not repeat malformed commands.",
+  "When the needed evidence is already gathered, stop using tools and answer directly in the requested format.",
+  "Do not ask the user to paste local files that you can read from the workspace yourself.",
+].join("\n");
 
 function getBashCommand(input: Record<string, unknown>) {
   if (typeof input.command === "string") return input.command;
@@ -25,6 +37,36 @@ function shouldForceWorkspaceInspection(prompt: string) {
   return (
     WORKSPACE_INSPECTION_PATTERN.test(prompt) || WORKSPACE_INSPECTION_ZH_PATTERN.test(prompt)
   );
+}
+
+function collectBootstrapFiles(prompt: string) {
+  const files: string[] = [];
+  const push = (file: string) => {
+    if (!files.includes(file)) files.push(file);
+  };
+
+  if (/\bREADME\.md\b/i.test(prompt) || /\bREADME\b/i.test(prompt)) push("README.md");
+  if (/\bpackage\.json\b/i.test(prompt)) push("package.json");
+  if (/\btsconfig\.json\b/i.test(prompt)) push("tsconfig.json");
+  return files;
+}
+
+function buildBootstrapReadCommand(files: string[]) {
+  if (files.length === 0) return null;
+  return files
+    .map(
+      (file) =>
+        `if [ -f ${JSON.stringify(file)} ]; then printf '===== FILE: ${file} =====\\n'; cat ${JSON.stringify(file)}; printf '\\n'; fi`,
+    )
+    .join("; ");
+}
+
+function isSuspiciousNonAsciiCommand(command: string) {
+  if (!/[^\x00-\x7F]/.test(command)) {
+    return false;
+  }
+
+  return /(^|[\s;|&(<])-[^\x00-\x7F]/.test(command) || /^[\x00-\x7F\s"'`$(){}\[\].,/:;|&<>=_*?!+-]+$/.test(command) === false;
 }
 
 export function buildGenericAgentTools(): GenericToolDefinition[] {
@@ -68,6 +110,22 @@ async function executeToolCall(params: {
     };
   }
 
+  const command = getBashCommand(params.toolCall.input);
+  if (isSuspiciousNonAsciiCommand(command)) {
+    const content =
+      "Malformed bash command rejected: use plain ASCII shell syntax and retry with a simpler command.";
+    return {
+      event: { type: "tool_result", toolName: "Bash", content: "invalid command" },
+      nextMessage: {
+        role: "tool",
+        toolCallId: params.toolCall.id,
+        name: "bash",
+        content,
+        isError: true,
+      },
+    };
+  }
+
   if (params.canUseTool) {
     const decision = await params.canUseTool("Bash", params.toolCall.input, {
       toolUseID: params.toolCall.id,
@@ -83,7 +141,7 @@ async function executeToolCall(params: {
   }
 
   const result = await executeBashTool({
-    command: getBashCommand(params.toolCall.input),
+    command,
     cwd: params.cwd,
   });
   const content = formatBashToolResult(result);
@@ -91,7 +149,7 @@ async function executeToolCall(params: {
     event: {
       type: "tool_result",
       toolName: "Bash",
-      content,
+      content: summarizeBashToolResult(result),
     },
     nextMessage: {
       role: "tool",
@@ -114,14 +172,47 @@ export async function* runGenericAgentRuntime(params: {
   maxTurns?: number;
 }): AsyncGenerator<AgentEvent> {
   const messages: GenericAgentConversationMessage[] = [];
-  if (params.systemPrompt?.trim()) {
-    messages.push({ role: "system", content: params.systemPrompt.trim() });
+  const mergedSystemPrompt = [params.systemPrompt?.trim(), GENERIC_AGENT_TOOL_GUARDRAILS]
+    .filter((value): value is string => Boolean(value))
+    .join("\n\n");
+  if (mergedSystemPrompt) {
+    messages.push({ role: "system", content: mergedSystemPrompt });
   }
   messages.push({ role: "user", content: params.prompt.trim() || " " });
 
   const tools = buildGenericAgentTools();
   const maxTurns = params.maxTurns ?? DEFAULT_MAX_TURNS;
   const forceInitialWorkspaceInspection = shouldForceWorkspaceInspection(params.prompt);
+  const bootstrapFiles = collectBootstrapFiles(params.prompt);
+  const bootstrapCommand = buildBootstrapReadCommand(bootstrapFiles);
+
+  if (bootstrapCommand) {
+    const bootstrapToolCall: GenericToolCall = {
+      id: crypto.randomUUID(),
+      name: "bash",
+      input: { command: bootstrapCommand },
+    };
+    yield {
+      type: "tool_start",
+      toolName: "Bash",
+      toolInput: bootstrapToolCall.input,
+    };
+    const bootstrapResult = await executeToolCall({
+      toolCall: bootstrapToolCall,
+      cwd: params.cwd,
+      canUseTool: params.canUseTool,
+      signal: params.signal,
+    });
+    if (bootstrapResult) {
+      yield bootstrapResult.event;
+      messages.push({
+        role: "assistant",
+        content: "",
+        toolCalls: [bootstrapToolCall],
+      });
+      messages.push(bootstrapResult.nextMessage);
+    }
+  }
 
   for (let turn = 0; turn < maxTurns; turn += 1) {
     // Emit a keepalive before each model turn so slow but compatible
@@ -137,7 +228,10 @@ export async function* runGenericAgentRuntime(params: {
         model: params.model,
         messages,
         tools,
-        toolChoice: turn === 0 && forceInitialWorkspaceInspection ? { type: "tool", name: "bash" } : "auto",
+        toolChoice:
+          turn === 0 && forceInitialWorkspaceInspection && !bootstrapCommand
+            ? { type: "tool", name: "bash" }
+            : "auto",
         signal: params.signal,
       })) {
         if (event.type === "text_delta") {
@@ -162,7 +256,10 @@ export async function* runGenericAgentRuntime(params: {
         model: params.model,
         messages,
         tools,
-        toolChoice: turn === 0 && forceInitialWorkspaceInspection ? { type: "tool", name: "bash" } : "auto",
+        toolChoice:
+          turn === 0 && forceInitialWorkspaceInspection && !bootstrapCommand
+            ? { type: "tool", name: "bash" }
+            : "auto",
         signal: params.signal,
       });
     }

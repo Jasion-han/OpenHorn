@@ -279,7 +279,7 @@ test("runGenericAgentRuntime forces bash tool choice for workspace-grounded firs
     for await (const _event of runGenericAgentRuntime({
       adapter,
       model: "gpt-test",
-      prompt: "Read README.md and summarize the repository.",
+      prompt: "Inspect the repository and summarize the project.",
       cwd: process.cwd(),
       maxTurns: 1,
     })) {
@@ -288,4 +288,35 @@ test("runGenericAgentRuntime forces bash tool choice for workspace-grounded firs
   }).toThrow("超过最大工具调用轮数");
 
   expect(adapter.calls[0]?.toolChoice).toEqual({ type: "tool", name: "bash" });
+});
+
+test("runGenericAgentRuntime bootstraps explicit local file reads before the first model turn", async () => {
+  const adapter = new FakeToolCallingAdapter([
+    {
+      text: "finished",
+      toolCalls: [],
+      finishReason: "stop",
+    },
+  ]);
+
+  const events = [];
+  for await (const event of runGenericAgentRuntime({
+    adapter,
+    model: "gpt-test",
+    prompt: "Read README.md and package.json, then summarize the stack.",
+    cwd: process.cwd(),
+  })) {
+    events.push(event);
+  }
+
+  expect(events[0]).toMatchObject({
+    type: "tool_start",
+    toolName: "Bash",
+  });
+  expect(events[1]).toMatchObject({
+    type: "tool_result",
+    toolName: "Bash",
+    content: "ok",
+  });
+  expect(adapter.calls[0]?.toolChoice).toBe("auto");
 });
