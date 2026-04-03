@@ -14,7 +14,6 @@ import type {
 } from "./agentTaskService";
 import { buildAttachmentPayloadFromIds, linkAttachmentsToMessage } from "./attachmentService";
 import {
-  describeAgentRuntimeSelection,
   getAgentCapabilityModeFromSuccessResult,
   resolveAgentRuntime,
 } from "./channelAgentCheckService";
@@ -394,6 +393,10 @@ async function createTaskBackedAgentTurn(params: {
   attachmentIds?: string[];
 }) {
   const { createAgentTask } = await loadAgentTaskService();
+  const resolvedChannel = await getResolvedChannelForConversation(params.userId, {
+    channelId: params.conversation.channelId || null,
+    modelId: params.conversation.modelId || null,
+  });
   const settings = await getSettingValues(params.userId, [
     AGENT_DEFAULT_COMPLEXITY_SETTING,
     AGENT_DEFAULT_UX_MODE_SETTING,
@@ -404,8 +407,8 @@ async function createTaskBackedAgentTurn(params: {
 
   const task = await createAgentTask(params.userId, {
     conversationId: params.conversationId,
-    channelId: params.conversation.channelId || null,
-    modelId: params.conversation.modelId || null,
+    channelId: params.conversation.channelId || resolvedChannel?.channel.id || null,
+    modelId: params.conversation.modelId || resolvedChannel?.modelId || null,
     title: null,
     goal: params.prompt,
     attachments: (params.attachmentIds || []).map((id) => ({
@@ -784,20 +787,6 @@ async function streamConversationAgentReply(params: {
   const citationsPayload = buildCitationsPayload(liveContext.citations);
   if (citationsPayload) {
     params.send(citationsPayload);
-  }
-
-  if (successfulResolution.fallbackUsed || !params.channelId || !params.modelId) {
-    params.send({
-      type: "agent_event",
-      event: {
-        type: "thought",
-        content: describeAgentRuntimeSelection({
-          resolvedChannel,
-          requestedChannelId: params.channelId ?? null,
-          requestedModelId: params.modelId ?? null,
-        }),
-      },
-    });
   }
 
   const { responseContent: streamedContent, agentRun } = await runAgentAndStream({

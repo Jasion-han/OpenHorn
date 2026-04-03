@@ -36,6 +36,7 @@ import {
   notifyErrorOnce,
   notifySuccess,
 } from "../../lib/notify";
+import { getGlobalDefaultChannel } from "../../lib/defaultChannel";
 import { useAuthStore } from "../../stores/authStore";
 import { BACKEND_UP_EVENT, useBackendStatusStore } from "../../stores/backendStatusStore";
 import { useChatStore } from "../../stores/chatStore";
@@ -211,7 +212,11 @@ export function DesktopLeftSidebar() {
   const handleCreateConversation = async () => {
     setCreating(true);
     try {
-      await createConversation(formatNewConversationTitle());
+      const defaultChannel = getGlobalDefaultChannel(useChatStore.getState().channels);
+      await createConversation(formatNewConversationTitle(), {
+        channelId: defaultChannel?.channelId ?? null,
+        modelId: defaultChannel?.modelId ?? null,
+      });
       setActiveView("chat");
       notifySuccess("已创建", "新会话已创建");
     } catch (error) {

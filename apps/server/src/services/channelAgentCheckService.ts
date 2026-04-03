@@ -141,6 +141,16 @@ function buildModelProbeOrder(
   return ordered;
 }
 
+function hasEnabledModel(
+  channel: Awaited<ReturnType<typeof getChannels>>[number],
+  modelId: string | null,
+) {
+  if (!modelId) return false;
+  const trimmed = modelId.trim();
+  if (!trimmed) return false;
+  return channel.models.some((model) => model.enabled && model.modelId === trimmed);
+}
+
 export function describeAgentRuntimeSelection(params: {
   resolvedChannel: ResolvedChannel;
   requestedChannelId?: string | null;
@@ -469,10 +479,22 @@ export async function resolveAgentRuntime(params: {
       continue;
     }
 
-    const modelOrder = buildModelProbeOrder(
-      channel,
-      channel.id === requestedChannelId ? requestedModelId : null,
-    );
+    const isRequestedChannel = channel.id === requestedChannelId;
+    const strictRequestedModel = isRequestedChannel && requestedModelId !== null;
+    if (strictRequestedModel && !hasEnabledModel(channel, requestedModelId)) {
+      return {
+        success: false,
+        error: "当前会话选择的模型不存在或已被禁用，请重新选择模型。",
+        attempts,
+      };
+    }
+
+    const modelOrder = strictRequestedModel
+      ? [requestedModelId!]
+      : buildModelProbeOrder(
+          channel,
+          isRequestedChannel ? requestedModelId : null,
+        );
     if (modelOrder.length === 0) {
       continue;
     }
