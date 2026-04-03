@@ -1,9 +1,14 @@
 import type { CanUseTool, PermissionMode, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { agentEvents, agentSessions, attachments, conversations } from "db";
 import { and, desc, eq } from "drizzle-orm";
+import { createAdapter } from "../agent-adapters";
 import { db } from "../db";
 import { generateId } from "../utils";
 import { runClaudeAgentSdk } from "./agentSdk";
+import {
+  describeAgentRuntimeSelection,
+  resolveAgentRuntime,
+} from "./channelAgentCheckService";
 import { resolveAgentWorkingDirectory } from "./agentWorkspace";
 import { buildAttachmentPayloadFromIds } from "./attachmentService";
 import {
@@ -16,8 +21,17 @@ import { getResolvedChannelForConversation, getResolvedChannelForUser } from "./
 import { buildLiveContext, type LiveContextResult } from "./liveCapabilities";
 import { classifyLiveRouteWithModel } from "./liveRouteClassifier";
 import { loadEnabledMcpServersForUser } from "./mcpLoader";
+import { mergeSystemPromptParts, RESPONSE_STYLE_GUARDRAILS } from "./responseStyle";
 import { TAVILY_API_KEY_SETTING, TAVILY_ENABLED_SETTING } from "./searchService";
 import { getSettingValues } from "./settingsService";
+import { runGenericAgentRuntime } from "./genericAgentRuntime";
+import type { AgentCapabilityMode } from "./genericAgentTypes";
+
+function adapterSupportsToolCalling(
+  adapter: Awaited<ReturnType<typeof createAdapter>>,
+): adapter is import("../agent-adapters").ToolCallingAdapter {
+  return typeof (adapter as { runToolCallingTurn?: unknown }).runToolCallingTurn === "function";
+}
 
 async function saveAgentEvent(sessionId: string, event: AgentEvent): Promise<void> {
   if (event.type === "meta" || event.type === "done") return;
@@ -78,7 +92,15 @@ export interface CreateAgentSessionInput {
 }
 
 export interface AgentEvent {
-  type: "user" | "meta" | "text" | "tool_start" | "tool_result" | "done" | "error";
+  type:
+    | "user"
+    | "meta"
+    | "thought"
+    | "text"
+    | "tool_start"
+    | "tool_result"
+    | "done"
+    | "error";
   [key: string]: unknown;
   content?: string;
   toolName?: string;
@@ -99,6 +121,7 @@ export interface AgentRuntimeConfig {
   liveSystemContext?: string;
   permissionMode?: PermissionMode;
   canUseTool?: CanUseTool;
+  capabilityMode?: AgentCapabilityMode;
   abortController?: AbortController;
   onEvent?: (event: AgentEvent) => Promise<void> | void;
 }
@@ -119,25 +142,30 @@ export async function buildAgentRuntimeContext(params: {
   conversationId?: string | null;
   forceWebSearch?: boolean | null;
 }): Promise<PreparedAgentRuntimeContext> {
-  const values = await getSettingValues(params.userId, [
+  const valuesPromise = getSettingValues(params.userId, [
     "chat.systemPrompt",
     TAVILY_API_KEY_SETTING,
     TAVILY_ENABLED_SETTING,
   ]);
-  const globalSystemPrompt = values["chat.systemPrompt"] || undefined;
-  let forceWebSearch = params.forceWebSearch;
-  if (forceWebSearch == null && params.conversationId) {
-    const [conversation] = await db
-      .select({ forceWebSearch: conversations.forceWebSearch })
-      .from(conversations)
-      .where(and(eq(conversations.id, params.conversationId), eq(conversations.userId, params.userId)))
-      .limit(1);
-    forceWebSearch = conversation?.forceWebSearch ?? null;
-  }
-  const resolvedChannel = await getResolvedChannelForConversation(params.userId, {
+  const forceWebSearchPromise =
+    params.forceWebSearch != null || !params.conversationId
+      ? Promise.resolve(params.forceWebSearch ?? null)
+      : db
+          .select({ forceWebSearch: conversations.forceWebSearch })
+          .from(conversations)
+          .where(and(eq(conversations.id, params.conversationId), eq(conversations.userId, params.userId)))
+          .limit(1)
+          .then((rows) => rows[0]?.forceWebSearch ?? null);
+  const resolvedChannelPromise = getResolvedChannelForConversation(params.userId, {
     channelId: params.channelId ?? null,
     modelId: params.modelId ?? null,
   });
+  const [values, forceWebSearch, resolvedChannel] = await Promise.all([
+    valuesPromise,
+    forceWebSearchPromise,
+    resolvedChannelPromise,
+  ]);
+  const globalSystemPrompt = values["chat.systemPrompt"] || undefined;
   const classifier = resolvedChannel
     ? (inputPrompt: string) =>
         classifyLiveRouteWithModel({
@@ -266,16 +294,6 @@ export async function* runAgentWithConfig(config: AgentRuntimeConfig): AsyncGene
   const controller = config.abortController || new AbortController();
   const signal = controller.signal;
 
-  const resolvedChannel = await getResolvedChannelForUser(config.userId, config.channelId || null);
-  if (!resolvedChannel) {
-    yield { type: "error", content: "未配置可用的默认渠道/默认模型。请先在设置中完成配置。" };
-    return;
-  }
-
-  if (config.modelId) {
-    resolvedChannel.modelId = config.modelId;
-  }
-
   const emit = async (event: AgentEvent) => {
     if (config.onEvent) {
       await config.onEvent(event);
@@ -284,11 +302,63 @@ export async function* runAgentWithConfig(config: AgentRuntimeConfig): AsyncGene
   };
 
   try {
+    const runtimeResolution = await (
+      config.capabilityMode != null
+        ? (() => {
+            const requestedChannelId = config.channelId || null;
+            return (requestedChannelId
+              ? getResolvedChannelForConversation(config.userId, {
+                  channelId: requestedChannelId,
+                  modelId: config.modelId ?? null,
+                })
+              : getResolvedChannelForUser(config.userId, null)
+            ).then((resolvedChannel) =>
+              resolvedChannel
+                ? {
+                    success: true as const,
+                    resolvedChannel,
+                    compatibility: { success: true as const, mode: config.capabilityMode as AgentCapabilityMode },
+                    fallbackUsed: false,
+                    attempts: [],
+                  }
+                : {
+                    success: false as const,
+                    error: "未配置可用的默认渠道/默认模型。请先在设置中完成配置。",
+                    attempts: [],
+                  },
+            );
+          })()
+        : resolveAgentRuntime({
+            userId: config.userId,
+            requestedChannelId: config.channelId ?? null,
+            requestedModelId: config.modelId ?? null,
+          })
+    );
+
+    if (runtimeResolution.success === false) {
+      yield await emit({ type: "error", content: runtimeResolution.error });
+      return;
+    }
+    const resolvedChannel = runtimeResolution.resolvedChannel;
+    const capability = runtimeResolution.compatibility;
+
+    if (runtimeResolution.fallbackUsed || !config.channelId || !config.modelId) {
+      yield await emit({
+        type: "thought",
+        content: describeAgentRuntimeSelection({
+          resolvedChannel,
+          requestedChannelId: config.channelId ?? null,
+          requestedModelId: config.modelId ?? null,
+        }),
+      });
+    }
+
     const combinedSystemPrompt =
-      [config.globalSystemPrompt, config.liveSystemContext]
-        .map((value) => value?.trim())
-        .filter((value): value is string => Boolean(value))
-        .join("\n\n") || undefined;
+      mergeSystemPromptParts(
+        config.globalSystemPrompt,
+        RESPONSE_STYLE_GUARDRAILS,
+        config.liveSystemContext,
+      ) || undefined;
     const agentWorkingDirectory = resolveAgentWorkingDirectory();
 
     const attachmentPayload = await buildAttachmentPayloadFromIds(config.attachmentIds || []);
@@ -349,17 +419,46 @@ export async function* runAgentWithConfig(config: AgentRuntimeConfig): AsyncGene
           })()
         : finalPrompt;
 
-    for await (const event of runClaudeAgentSdk({
-      apiKey: resolvedChannel.apiKey,
+    if (capability.mode === "claude_sdk") {
+      for await (const event of runClaudeAgentSdk({
+        apiKey: resolvedChannel.apiKey,
+        model: resolvedChannel.modelId,
+        prompt: promptForSdk,
+        systemPrompt: combinedSystemPrompt,
+        cwd: agentWorkingDirectory,
+        baseUrl: resolvedChannel.channel.baseUrl || undefined,
+        mcpServers,
+        permissionMode: config.permissionMode,
+        canUseTool: config.canUseTool,
+        abortController: controller,
+      })) {
+        yield await emit(event);
+      }
+      return;
+    }
+
+    const adapter = createAdapter(
+      resolvedChannel.channel.protocol,
+      resolvedChannel.apiKey,
+      resolvedChannel.channel.baseUrl || undefined,
+    );
+    if (!adapterSupportsToolCalling(adapter)) {
+      yield await emit({
+        type: "error",
+        content:
+          "该渠道支持普通聊天接口，但不兼容当前 Agent 工具运行协议，无法用于 Agent 模式。它仍可用于普通聊天。",
+      });
+      return;
+    }
+
+    for await (const event of runGenericAgentRuntime({
+      adapter,
       model: resolvedChannel.modelId,
-      prompt: promptForSdk,
+      prompt: finalPrompt,
       systemPrompt: combinedSystemPrompt,
       cwd: agentWorkingDirectory,
-      baseUrl: resolvedChannel.channel.baseUrl || undefined,
-      mcpServers,
-      permissionMode: config.permissionMode,
       canUseTool: config.canUseTool,
-      abortController: controller,
+      signal,
     })) {
       yield await emit(event);
     }

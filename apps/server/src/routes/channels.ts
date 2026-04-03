@@ -180,7 +180,9 @@ channels.post("/:id/agent-check", async (c) => {
     const body = (await c.req.json().catch(() => null)) as unknown;
     const modelId = isRecord(body) && typeof body.modelId === "string" ? body.modelId : "";
 
-    const result = await checkChannelAgentCompatibility(user.id, channelId, modelId);
+    const result = await checkChannelAgentCompatibility(user.id, channelId, modelId, {
+      bypassCache: true,
+    });
     return c.json(result);
   } catch (error) {
     return c.json({

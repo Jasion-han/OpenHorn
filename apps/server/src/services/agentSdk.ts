@@ -70,6 +70,7 @@ export async function* runClaudeAgentSdk(options: SdkOptions): AsyncGenerator<Ag
       model: options.model,
       cwd: options.cwd,
       env,
+      tools: { type: "preset", preset: "claude_code" },
       permissionMode: options.permissionMode ?? "bypassPermissions",
       canUseTool: options.canUseTool,
       allowDangerouslySkipPermissions:
@@ -128,15 +129,15 @@ export function convertSdkEvent(message: SdkMessage): AgentEvent | null {
     const subtype = message.subtype as string;
     if (subtype === "task_started") {
       const desc = typeof message.description === "string" ? message.description : "";
-      return desc ? { type: "text", content: desc } : { type: "meta" };
+      return desc ? { type: "thought", content: desc } : { type: "meta" };
     }
     if (subtype === "task_notification") {
       const summary = typeof message.summary === "string" ? message.summary : "";
-      return summary ? { type: "text", content: summary } : { type: "meta" };
+      return summary ? { type: "thought", content: summary } : { type: "meta" };
     }
     if (subtype === "local_command_output") {
       const content = typeof message.content === "string" ? message.content : "";
-      return content ? { type: "text", content } : { type: "meta" };
+      return content ? { type: "thought", content } : { type: "meta" };
     }
     // init/status/task_progress/etc: keepalive only
     return { type: "meta" };
@@ -145,14 +146,17 @@ export function convertSdkEvent(message: SdkMessage): AgentEvent | null {
   if (message.type === "result" && typeof message.subtype === "string") {
     const subtype = message.subtype as string;
     if (subtype === "success") {
-      // The assistant message already emitted the text content; treat result:success
-      // as a completion signal only to avoid duplicating the reply.
-      return { type: "meta" };
+      const result = typeof message.result === "string" ? message.result : "";
+      return result.trim() ? { type: "text", content: result } : { type: "meta" };
     }
     const errors = Array.isArray(message.errors)
       ? message.errors.filter((e) => typeof e === "string")
       : [];
     const stop = typeof message.stop_reason === "string" ? message.stop_reason : null;
+    if (errors.length === 0 && (stop === "end_turn" || stop === "stop")) {
+      const result = typeof message.result === "string" ? message.result : "";
+      return result.trim() ? { type: "text", content: result } : { type: "meta" };
+    }
     const content =
       errors.length > 0
         ? errors.map(normalizeSdkErrorText).join("\n")
@@ -230,6 +234,28 @@ export function convertSdkEvent(message: SdkMessage): AgentEvent | null {
   }
 
   return { type: "meta" };
+}
+
+export function mergeAgentTextOutput(current: string, incoming: string | null | undefined) {
+  const next = incoming ?? "";
+  if (!next) return current;
+  if (!current) return next;
+
+  const currentTrimmed = current.trim();
+  const nextTrimmed = next.trim();
+
+  if (!nextTrimmed) return current;
+  if (!currentTrimmed) return next;
+  if (current === next || currentTrimmed === nextTrimmed) return current;
+  if (current.endsWith(next) || currentTrimmed.endsWith(nextTrimmed)) return current;
+
+  // Some SDK/channel combinations stream partial assistant text and then emit the
+  // full response again in result:success.result. Prefer the fuller version.
+  if (nextTrimmed.startsWith(currentTrimmed)) {
+    return next;
+  }
+
+  return `${current}${next}`;
 }
 
 function normalizeSdkErrorText(text: string) {

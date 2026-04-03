@@ -1,6 +1,6 @@
 import { expect, mock, test } from "bun:test";
 
-async function* gen(...events: Array<{ type?: string; content?: string }>) {
+async function* gen(...events: Array<{ type?: string; content?: string; toolName?: string }>) {
   for (const e of events) {
     yield e;
   }
@@ -10,12 +10,28 @@ async function loadChannelAgentCheckService(suffix: string) {
   return import(`./channelAgentCheckService?${suffix}=${crypto.randomUUID()}`);
 }
 
-test("evaluateAgentProbe: success when first text arrives", async () => {
+test("evaluateAgentProbe: success when bash tool runs and marker text arrives", async () => {
   const { evaluateAgentProbe } = await loadChannelAgentCheckService("evaluate-success");
   const result = await evaluateAgentProbe(
-    gen({ type: "meta" }, { type: "text", content: "OK" }, { type: "done" }),
+    gen(
+      { type: "meta" },
+      { type: "tool_start", toolName: "Bash" },
+      { type: "text", content: "AGENT_TOOL_OK" },
+      { type: "done" },
+    ),
   );
-  expect(result).toEqual({ success: true });
+  expect(result).toEqual({ success: true, mode: "claude_sdk" });
+});
+
+test("evaluateAgentProbe: fail when text arrives without bash tool start", async () => {
+  const { evaluateAgentProbe } = await loadChannelAgentCheckService("evaluate-text-only");
+  const result = await evaluateAgentProbe(
+    gen({ type: "meta" }, { type: "text", content: "AGENT_TOOL_OK" }, { type: "done" }),
+  );
+  expect(result).toEqual({
+    success: false,
+    error: "未检测到真实 Bash 工具调用，当前渠道可能只支持普通对话，不兼容 Agent 工具执行。",
+  });
 });
 
 test("evaluateAgentProbe: fail when error arrives", async () => {
@@ -59,11 +75,12 @@ test("probeClaudeAgentSdkCompatibility: marks init-only timeout as incompatible"
   }
 });
 
-test("probeClaudeAgentSdkCompatibility: succeeds when sdk emits text", async () => {
+test("probeClaudeAgentSdkCompatibility: succeeds when sdk emits bash tool start and marker text", async () => {
   mock.module("./agentSdk", () => ({
     runClaudeAgentSdk: async function* () {
       yield { type: "meta" };
-      yield { type: "text", content: "OK" };
+      yield { type: "tool_start", toolName: "Bash" };
+      yield { type: "text", content: "AGENT_TOOL_OK" };
       yield { type: "done" };
     },
   }));
@@ -77,7 +94,224 @@ test("probeClaudeAgentSdkCompatibility: succeeds when sdk emits text", async () 
       baseUrl: "https://relay.example.com",
       timeoutMs: 10,
     });
-    expect(result).toEqual({ success: true });
+    expect(result).toEqual({ success: true, mode: "claude_sdk" });
+  } finally {
+    mock.restore();
+  }
+});
+
+test("probeGenericToolCallingCompatibility: succeeds when adapter returns a structured tool call", async () => {
+  let receivedToolChoice: unknown = null;
+  let callCount = 0;
+  mock.module("../agent-adapters", () => ({
+    createAdapter: () => ({
+      runToolCallingTurn: async (options: { toolChoice?: unknown }) => {
+        callCount += 1;
+        if (callCount === 1) {
+          receivedToolChoice = options.toolChoice;
+          return {
+            text: "",
+            toolCalls: [
+              {
+                id: "call-1",
+                name: "agent_probe",
+                input: { marker: "AGENT_TOOL_OK" },
+              },
+            ],
+            finishReason: "tool_calls",
+          };
+        }
+        return {
+          text: "AGENT_TOOL_OK",
+          toolCalls: [],
+          finishReason: "stop",
+        };
+      },
+    }),
+    supportsToolCalling: () => true,
+  }));
+
+  try {
+    const { probeGenericToolCallingCompatibility } = await loadChannelAgentCheckService(
+      "generic-success",
+    );
+    const result = await probeGenericToolCallingCompatibility({
+      apiKey: "test-key",
+      modelId: "gpt-5.4",
+      baseUrl: "https://relay.example.com",
+      protocol: "openai",
+    });
+    expect(result).toEqual({ success: true, mode: "generic_tool_calling" });
+    expect(receivedToolChoice).toEqual({ type: "tool", name: "agent_probe" });
+    expect(callCount).toBe(2);
+  } finally {
+    mock.restore();
+  }
+});
+
+test("probeGenericToolCallingCompatibility: fails when no structured tool call is returned", async () => {
+  mock.module("../agent-adapters", () => ({
+    createAdapter: () => ({
+      runToolCallingTurn: async () => ({
+        text: "I cannot use tools.",
+        toolCalls: [],
+        finishReason: "stop",
+      }),
+    }),
+    supportsToolCalling: () => true,
+  }));
+
+  try {
+    const { probeGenericToolCallingCompatibility } = await loadChannelAgentCheckService(
+      "generic-fail",
+    );
+    const result = await probeGenericToolCallingCompatibility({
+      apiKey: "test-key",
+      modelId: "gpt-5.4",
+      baseUrl: "https://relay.example.com",
+      protocol: "openai",
+    });
+    expect(result).toEqual({
+      success: false,
+      error:
+        "该渠道支持普通聊天接口，但不兼容当前 Agent 工具运行协议，无法用于 Agent 模式。它仍可用于普通聊天。",
+    });
+  } finally {
+    mock.restore();
+  }
+});
+
+test("probeGenericToolCallingCompatibility: fails when follow-up turn does not produce final text", async () => {
+  let callCount = 0;
+  mock.module("../agent-adapters", () => ({
+    createAdapter: () => ({
+      runToolCallingTurn: async () => {
+        callCount += 1;
+        if (callCount === 1) {
+          return {
+            text: "",
+            toolCalls: [{ id: "call-1", name: "agent_probe", input: { marker: "AGENT_TOOL_OK" } }],
+            finishReason: "tool_use",
+          };
+        }
+        return {
+          text: "",
+          toolCalls: [],
+          finishReason: "stop",
+        };
+      },
+    }),
+    supportsToolCalling: () => true,
+  }));
+
+  try {
+    const { probeGenericToolCallingCompatibility } = await loadChannelAgentCheckService(
+      "generic-follow-up-fail",
+    );
+    const result = await probeGenericToolCallingCompatibility({
+      apiKey: "test-key",
+      modelId: "gpt-5.4",
+      baseUrl: "https://relay.example.com",
+      protocol: "openai",
+    });
+    expect(result).toEqual({
+      success: false,
+      error:
+        "该渠道支持普通聊天接口，但不兼容当前 Agent 工具运行协议，无法用于 Agent 模式。它仍可用于普通聊天。",
+    });
+  } finally {
+    mock.restore();
+  }
+});
+
+test("checkChannelAgentCompatibility: falls back to generic tool calling for anthropic protocol", async () => {
+  mock.module("./channelService", () => ({
+    getChannelRuntimeCredentialsById: async () => ({
+      channel: { id: "channel-1", baseUrl: "https://relay.example.com", protocol: "anthropic" },
+      apiKey: "test-key",
+    }),
+  }));
+  mock.module("./agentSdk", () => ({
+    runClaudeAgentSdk: async function* () {
+      yield { type: "error", content: "sdk incompatible" };
+    },
+  }));
+  mock.module("../agent-adapters", () => ({
+    createAdapter: () => ({
+      runToolCallingTurn: (() => {
+        let callCount = 0;
+        return async () => {
+          callCount += 1;
+          if (callCount === 1) {
+            return {
+              text: "",
+              toolCalls: [{ id: "call-1", name: "agent_probe", input: { marker: "AGENT_TOOL_OK" } }],
+              finishReason: "tool_use",
+            };
+          }
+          return {
+            text: "AGENT_TOOL_OK",
+            toolCalls: [],
+            finishReason: "stop",
+          };
+        };
+      })(),
+    }),
+    supportsToolCalling: () => true,
+  }));
+
+  try {
+    const { checkChannelAgentCompatibility } = await loadChannelAgentCheckService(
+      "anthropic-fallback",
+    );
+    const result = await checkChannelAgentCompatibility("user-1", "channel-1", "claude-test");
+    expect(result).toEqual({ success: true, mode: "generic_tool_calling" });
+  } finally {
+    mock.restore();
+  }
+});
+
+test("checkChannelAgentCompatibility reuses cached runtime result for repeated checks", async () => {
+  let probeCalls = 0;
+
+  mock.module("./channelService", () => ({
+    getChannelRuntimeCredentialsById: async () => ({
+      channel: { id: "channel-1", baseUrl: "https://relay.example.com", protocol: "openai" },
+      apiKey: "test-key",
+    }),
+  }));
+  mock.module("../agent-adapters", () => ({
+    createAdapter: () => ({
+      runToolCallingTurn: (() => {
+        let turnCount = 0;
+        return async () => {
+          turnCount += 1;
+          if (turnCount % 2 === 1) {
+            probeCalls += 1;
+            return {
+              text: "",
+              toolCalls: [{ id: "call-1", name: "agent_probe", input: { marker: "AGENT_TOOL_OK" } }],
+              finishReason: "tool_use",
+            };
+          }
+          return {
+            text: "AGENT_TOOL_OK",
+            toolCalls: [],
+            finishReason: "stop",
+          };
+        };
+      })(),
+    }),
+  }));
+
+  try {
+    const { checkChannelAgentCompatibility } = await loadChannelAgentCheckService("cache-hit");
+    const first = await checkChannelAgentCompatibility("user-1", "channel-1", "gpt-test");
+    const second = await checkChannelAgentCompatibility("user-1", "channel-1", "gpt-test");
+
+    expect(first).toEqual({ success: true, mode: "generic_tool_calling" });
+    expect(second).toEqual({ success: true, mode: "generic_tool_calling" });
+    expect(probeCalls).toBe(1);
   } finally {
     mock.restore();
   }

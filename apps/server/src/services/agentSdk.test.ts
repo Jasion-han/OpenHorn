@@ -1,5 +1,5 @@
 import { expect, mock, test } from "bun:test";
-import { convertSdkEvent } from "./agentSdk";
+import { convertSdkEvent, mergeAgentTextOutput } from "./agentSdk";
 
 test("convertSdkEvent: rewrites generic network errors to actionable guidance", () => {
   const result = convertSdkEvent({
@@ -48,6 +48,55 @@ test("convertSdkEvent: unknown sdk lifecycle messages count as meta activity", (
   expect(result).toEqual({
     type: "meta",
   });
+});
+
+test("convertSdkEvent: maps result success payload to text output", () => {
+  const result = convertSdkEvent({
+    type: "result",
+    subtype: "success",
+    result: "final answer",
+  });
+
+  expect(result).toEqual({
+    type: "text",
+    content: "final answer",
+  });
+});
+
+test("convertSdkEvent: maps sdk task notifications to thought output", () => {
+  const result = convertSdkEvent({
+    type: "system",
+    subtype: "task_notification",
+    summary: "Checking the workspace",
+  });
+
+  expect(result).toEqual({
+    type: "thought",
+    content: "Checking the workspace",
+  });
+});
+
+test("convertSdkEvent: treats end_turn as a normal completion", () => {
+  const result = convertSdkEvent({
+    type: "result",
+    subtype: "error_during_execution",
+    stop_reason: "end_turn",
+    result: "final answer",
+    errors: [],
+  });
+
+  expect(result).toEqual({
+    type: "text",
+    content: "final answer",
+  });
+});
+
+test("mergeAgentTextOutput: prefers cumulative final result over partial streamed text", () => {
+  expect(mergeAgentTextOutput("Hello", "Hello world")).toBe("Hello world");
+});
+
+test("mergeAgentTextOutput: avoids duplicating identical final text", () => {
+  expect(mergeAgentTextOutput("Hello world", "Hello world")).toBe("Hello world");
 });
 
 test("runClaudeAgentSdk emits heartbeat meta events while waiting for the next sdk message", async () => {

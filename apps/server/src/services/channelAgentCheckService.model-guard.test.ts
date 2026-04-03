@@ -3,7 +3,8 @@ import { expect, mock, test } from "bun:test";
 test("checkChannelAgentCompatibility probes the provided model without name heuristics", async () => {
   mock.module("./agentSdk", () => ({
     runClaudeAgentSdk: async function* () {
-      yield { type: "text", content: "OK" };
+      yield { type: "tool_start", toolName: "Bash" };
+      yield { type: "text", content: "AGENT_TOOL_OK" };
       yield { type: "done" };
     },
   }));
@@ -19,7 +20,7 @@ test("checkChannelAgentCompatibility probes the provided model without name heur
       timeoutMs: 10,
     });
 
-    expect(result).toEqual({ success: true });
+    expect(result).toEqual({ success: true, mode: "claude_sdk" });
   } finally {
     mock.restore();
   }

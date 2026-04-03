@@ -36,6 +36,25 @@ export interface ProviderAdapter {
   chatStream(options: ChatOptions): AsyncGenerator<string>;
 }
 
+import type {
+  GenericAgentConversationMessage,
+  GenericAgentTurnResult,
+  GenericToolDefinition,
+} from "./services/genericAgentTypes";
+
+export interface ToolCallingOptions {
+  model: string;
+  messages: GenericAgentConversationMessage[];
+  tools: GenericToolDefinition[];
+  toolChoice?: "auto" | { type: "tool"; name: string };
+  signal?: AbortSignal;
+  requestTimeoutMs?: number;
+}
+
+export interface ToolCallingAdapter extends ProviderAdapter {
+  runToolCallingTurn(options: ToolCallingOptions): Promise<GenericAgentTurnResult>;
+}
+
 export type AdapterProtocol = "openai" | "anthropic" | "google";
 
 type NonSystemChatMessage = Omit<ChatMessage, "role"> & { role: "user" | "assistant" };
@@ -398,6 +417,46 @@ export class OpenAIAdapter implements ProviderAdapter {
     const decoder = new TextDecoder();
     let buffer = "";
 
+    const looksLikeSsePayload = (text: string) => {
+      for (const rawLine of text.split(/\r?\n/)) {
+        const line = rawLine.trim();
+        if (!line) continue;
+        return (
+          line.startsWith(":") ||
+          line.startsWith("data:") ||
+          line.startsWith("event:") ||
+          line.startsWith("id:") ||
+          line.startsWith("retry:")
+        );
+      }
+      return false;
+    };
+
+    const consumeSseBuffer = (flush = false) => {
+      const working = flush && buffer.length > 0 ? `${buffer}\n` : buffer;
+      const lines = working.split("\n");
+      buffer = flush ? "" : lines.pop() || "";
+
+      const payloads: string[] = [];
+      let done = false;
+
+      for (const rawLine of lines) {
+        const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith(":")) continue;
+        if (!trimmed.startsWith("data:")) continue;
+
+        const data = trimmed.slice(5).trimStart();
+        if (data === "[DONE]") {
+          done = true;
+          break;
+        }
+        payloads.push(data);
+      }
+
+      return { payloads, done };
+    };
+
     // Some proxies incorrectly label streaming responses as application/json.
     // Sniff the first chunk: if it looks like SSE ("data:" lines), parse as stream.
     try {
@@ -408,8 +467,7 @@ export class OpenAIAdapter implements ProviderAdapter {
       const firstChunkText = decoder.decode(firstRead.value, { stream: true });
       buffer += firstChunkText;
 
-      const looksLikeSse =
-        buffer.startsWith("data:") || buffer.includes("\ndata:") || buffer.includes("\r\ndata:");
+      const looksLikeSse = looksLikeSsePayload(buffer);
 
       if (!looksLikeSse) {
         while (true) {
@@ -434,13 +492,22 @@ export class OpenAIAdapter implements ProviderAdapter {
       }
 
       while (true) {
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
+        const { payloads, done: sseDone } = consumeSseBuffer();
+        for (const data of payloads) {
+          try {
+            const parsed = JSON.parse(data);
+            const content = parsed.choices[0]?.delta?.content;
+            if (content) yield content;
+          } catch {
+            // Skip invalid JSON
+          }
+        }
+        if (sseDone) return;
 
-        for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            const data = line.slice(6);
-            if (data === "[DONE]") return;
+        const { done: streamDone, value } = await reader.read();
+        if (streamDone) {
+          const remaining = consumeSseBuffer(true);
+          for (const data of remaining.payloads) {
             try {
               const parsed = JSON.parse(data);
               const content = parsed.choices[0]?.delta?.content;
@@ -449,10 +516,9 @@ export class OpenAIAdapter implements ProviderAdapter {
               // Skip invalid JSON
             }
           }
+          if (remaining.done) return;
+          break;
         }
-
-        const { done, value } = await reader.read();
-        if (done) break;
         timeout.markChunk();
         buffer += decoder.decode(value, { stream: true });
       }
@@ -461,6 +527,157 @@ export class OpenAIAdapter implements ProviderAdapter {
     } finally {
       timeout.cleanup();
     }
+  }
+
+  async runToolCallingTurn(options: ToolCallingOptions): Promise<GenericAgentTurnResult> {
+    const url = `${this.baseUrl}/chat/completions`;
+    const body = JSON.stringify({
+      model: options.model,
+      messages: options.messages.map((message) => {
+        if (message.role === "system" || message.role === "user") {
+          return {
+            role: message.role,
+            content: message.content,
+          };
+        }
+        if (message.role === "assistant") {
+          return {
+            role: "assistant",
+            content: message.content || "",
+            ...(message.toolCalls && message.toolCalls.length > 0
+              ? {
+                  tool_calls: message.toolCalls.map((toolCall) => ({
+                    id: toolCall.id,
+                    type: "function",
+                    function: {
+                      name: toolCall.name,
+                      arguments: JSON.stringify(toolCall.input),
+                    },
+                  })),
+                }
+              : {}),
+          };
+        }
+        return {
+          role: "tool",
+          tool_call_id: message.toolCallId,
+          content: message.content,
+        };
+      }),
+      tools: options.tools.map((tool) => ({
+        type: "function",
+        function: {
+          name: tool.name,
+          description: tool.description,
+          parameters: tool.inputSchema,
+        },
+      })),
+      tool_choice:
+        options.toolChoice && options.toolChoice !== "auto"
+          ? {
+              type: "function",
+              function: { name: options.toolChoice.name },
+            }
+          : "auto",
+    });
+
+    const timeout = createRequestTimeoutSignal(
+      options.signal,
+      options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
+    );
+    let response: Response | null = null;
+    try {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${this.apiKey}`,
+          },
+          body,
+          signal: timeout.signal,
+        });
+        if (response.ok) break;
+        if (!shouldRetryStatus(response.status) || attempt === 1) break;
+        await sleep(500 * (attempt + 1));
+      }
+    } catch (error) {
+      timeout.cleanup();
+      rethrowAbortReason(timeout.signal, error);
+    }
+    timeout.cleanup();
+
+    if (timeout.signal.aborted && timeout.signal.reason instanceof Error) {
+      throw timeout.signal.reason;
+    }
+
+    if (!response || !response.ok) {
+      const detail = response ? await readErrorDetail(response) : "Request failed";
+      const status = response?.status ? ` (${response.status})` : "";
+      throw new Error(`OpenAI API error${status}: ${detail}`);
+    }
+
+    const data = (await response.json()) as unknown;
+    if (!isRecord(data)) {
+      throw new Error("OpenAI API error: Invalid JSON response");
+    }
+    const choices = Array.isArray(data.choices) ? data.choices : [];
+    const first = choices[0];
+    const message = isRecord(first) ? first.message : null;
+    if (!isRecord(message)) {
+      throw new Error("OpenAI API error: Missing response message");
+    }
+
+    const rawContent = message.content;
+    const text =
+      typeof rawContent === "string"
+        ? rawContent
+        : Array.isArray(rawContent)
+          ? rawContent
+              .filter(
+                (item): item is { type?: string; text?: string } =>
+                  isRecord(item) && typeof item.text === "string",
+              )
+              .map((item) => item.text ?? "")
+              .join("")
+          : "";
+
+    const toolCalls = Array.isArray(message.tool_calls)
+      ? message.tool_calls
+          .map((toolCall) => {
+            if (!isRecord(toolCall) || !isRecord(toolCall.function)) {
+              return null;
+            }
+            const id = typeof toolCall.id === "string" ? toolCall.id : crypto.randomUUID();
+            const name =
+              typeof toolCall.function.name === "string" ? toolCall.function.name.trim() : "";
+            if (!name) return null;
+            const argsRaw =
+              typeof toolCall.function.arguments === "string" ? toolCall.function.arguments : "{}";
+            let input: Record<string, unknown> = {};
+            try {
+              const parsed = JSON.parse(argsRaw) as unknown;
+              if (isRecord(parsed)) {
+                input = parsed;
+              }
+            } catch {
+              input = {};
+            }
+            return { id, name, input };
+          })
+          .filter((toolCall): toolCall is GenericAgentTurnResult["toolCalls"][number] =>
+            Boolean(toolCall),
+          )
+      : [];
+
+    const finishReason =
+      isRecord(first) && typeof first.finish_reason === "string" ? first.finish_reason : null;
+
+    return {
+      text,
+      toolCalls,
+      finishReason,
+    };
   }
 }
 
@@ -676,6 +893,141 @@ export class AnthropicAdapter implements ProviderAdapter {
       timeout.cleanup();
     }
   }
+
+  async runToolCallingTurn(options: ToolCallingOptions): Promise<GenericAgentTurnResult> {
+    const url = `${this.baseUrl}/v1/messages`;
+    const systemMessages = options.messages.filter((message) => message.role === "system");
+    const system =
+      systemMessages.length > 0
+        ? systemMessages.map((message) => message.content).join("\n\n")
+        : undefined;
+
+    const body = JSON.stringify({
+      model: options.model,
+      ...(system ? { system } : {}),
+      messages: options.messages
+        .filter((message) => message.role !== "system")
+        .map((message) => {
+          if (message.role === "user") {
+            return {
+              role: "user",
+              content: [{ type: "text", text: message.content || " " }],
+            };
+          }
+          if (message.role === "assistant") {
+            const contentBlocks: Array<Record<string, unknown>> = [];
+            if (message.content) {
+              contentBlocks.push({ type: "text", text: message.content });
+            }
+            for (const toolCall of message.toolCalls || []) {
+              contentBlocks.push({
+                type: "tool_use",
+                id: toolCall.id,
+                name: toolCall.name,
+                input: toolCall.input,
+              });
+            }
+            return {
+              role: "assistant",
+              content: contentBlocks.length > 0 ? contentBlocks : [{ type: "text", text: " " }],
+            };
+          }
+          return {
+            role: "user",
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: message.toolCallId,
+                content: message.content || " ",
+                ...(message.isError ? { is_error: true } : {}),
+              },
+            ],
+          };
+        }),
+      tools: options.tools.map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        input_schema: tool.inputSchema,
+      })),
+      tool_choice:
+        options.toolChoice && options.toolChoice !== "auto"
+          ? { type: "tool", name: options.toolChoice.name }
+          : { type: "auto" },
+      max_tokens: 1024,
+    });
+
+    const timeout = createRequestTimeoutSignal(
+      options.signal,
+      options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
+    );
+    let response: Response | null = null;
+    try {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": this.apiKey,
+            "anthropic-version": "2023-06-01",
+          },
+          body,
+          signal: timeout.signal,
+        });
+        if (response.ok) break;
+        if (!shouldRetryStatus(response.status) || attempt === 1) break;
+        await sleep(500 * (attempt + 1));
+      }
+    } catch (error) {
+      timeout.cleanup();
+      rethrowAbortReason(timeout.signal, error);
+    }
+    timeout.cleanup();
+
+    if (timeout.signal.aborted && timeout.signal.reason instanceof Error) {
+      throw timeout.signal.reason;
+    }
+
+    if (!response || !response.ok) {
+      const detail = response ? await readErrorDetail(response) : "Request failed";
+      const status = response?.status ? ` (${response.status})` : "";
+      throw new Error(`Anthropic API error${status}: ${detail}`);
+    }
+
+    const data = (await response.json()) as unknown;
+    if (!isRecord(data)) {
+      throw new Error("Anthropic API error: Invalid JSON response");
+    }
+
+    const contentBlocks = Array.isArray(data.content) ? data.content : [];
+    const text = contentBlocks
+      .filter(
+        (block): block is { type?: string; text?: string } =>
+          isRecord(block) && block.type === "text" && typeof block.text === "string",
+      )
+      .map((block) => block.text ?? "")
+      .join("");
+
+    const toolCalls = contentBlocks
+      .map((block) => {
+        if (!isRecord(block) || block.type !== "tool_use") {
+          return null;
+        }
+        const id = typeof block.id === "string" ? block.id : crypto.randomUUID();
+        const name = typeof block.name === "string" ? block.name.trim() : "";
+        if (!name) return null;
+        const input = isRecord(block.input) ? block.input : {};
+        return { id, name, input };
+      })
+      .filter((toolCall): toolCall is GenericAgentTurnResult["toolCalls"][number] =>
+        Boolean(toolCall),
+      );
+
+    return {
+      text,
+      toolCalls,
+      finishReason: typeof data.stop_reason === "string" ? data.stop_reason : null,
+    };
+  }
 }
 
 export function createAdapter(protocol: string, apiKey: string, baseUrl?: string): ProviderAdapter {
@@ -688,4 +1040,8 @@ export function createAdapter(protocol: string, apiKey: string, baseUrl?: string
   }
   // Default to OpenAI-compatible (e.g. openai/deepseek/qwen/doubao/others with OpenAI-compatible baseUrl).
   return new OpenAIAdapter(apiKey, baseUrl);
+}
+
+export function supportsToolCalling(adapter: ProviderAdapter): adapter is ToolCallingAdapter {
+  return typeof (adapter as Partial<ToolCallingAdapter>).runToolCallingTurn === "function";
 }

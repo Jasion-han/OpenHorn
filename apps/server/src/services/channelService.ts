@@ -116,8 +116,27 @@ function normalizeBaseUrl(baseUrl: string): string {
 
 function normalizeOpenAICompatibleApiBaseUrl(baseUrl: string): string {
   let url = normalizeBaseUrl(baseUrl);
+  try {
+    const parsed = new URL(url);
+    const hostname = parsed.hostname.toLowerCase();
+    const pathname = parsed.pathname.replace(/\/+$/, "");
+    if (hostname === "openrouter.ai") {
+      if (!pathname || pathname === "/api" || pathname === "/v1" || pathname === "/api/v1") {
+        parsed.pathname = "/api/v1";
+        return normalizeBaseUrl(parsed.toString());
+      }
+    }
+  } catch {
+    // Ignore invalid URLs and fall back to generic normalization below.
+  }
   // Accept users pasting full endpoints; canonicalize to .../v1
-  url = url.replace(/\/(chat\/completions|completions|models)$/, "");
+  for (let i = 0; i < 3; i++) {
+    url = url.replace(/\/(chat\/completions|completions|models)$/, "");
+    url = url.replace(/\/messages(\/v\d+)?$/, "");
+    url = url.replace(/\/v\d+\/messages(\/v\d+)?$/, (match) =>
+      match.replace(/\/messages(\/v\d+)?$/, ""),
+    );
+  }
   if (!url.match(/\/v\d+$/)) {
     url = `${url}/v1`;
   }
@@ -1085,7 +1104,7 @@ export async function getChannelRuntimeCredentialsById(
     row.baseUrl || channel.baseUrl || getDefaultBaseUrl(channel.protocol) || "";
 
   const runtimeBaseUrl =
-    options?.runtime === "agent_sdk"
+    options?.runtime === "agent_sdk" && channel.protocol === "anthropic"
       ? normalizeAgentSdkRuntimeBaseUrl(storedOrDefaultBaseUrl)
       : getRuntimeBaseUrl(channel.protocol, storedOrDefaultBaseUrl);
 

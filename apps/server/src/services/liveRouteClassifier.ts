@@ -1,6 +1,8 @@
 import { createAdapter } from "../agent-adapters";
 import type { LiveRouteType } from "./liveCapabilities";
 
+const LIVE_ROUTE_CLASSIFIER_TIMEOUT_MS = 1_200;
+
 export async function classifyLiveRouteWithModel(params: {
   protocol: "openai" | "anthropic" | "google";
   apiKey: string;
@@ -16,7 +18,8 @@ export async function classifyLiveRouteWithModel(params: {
     const response = await adapter.chat({
       model: params.modelId,
       temperature: 0,
-      maxTokens: 16,
+      maxTokens: 8,
+      requestTimeoutMs: LIVE_ROUTE_CLASSIFIER_TIMEOUT_MS,
       messages: [
         {
           role: "system",

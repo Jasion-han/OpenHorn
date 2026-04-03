@@ -1,19 +1,185 @@
-import { getChannelRuntimeCredentialsById } from "./channelService";
+import { createAdapter } from "../agent-adapters";
+import {
+  getChannelRuntimeCredentialsById,
+  getChannels,
+  type ResolvedChannel,
+} from "./channelService";
 import { runClaudeAgentSdk } from "./agentSdk";
+import type { AgentCapabilityMode } from "./genericAgentTypes";
 
-export type AgentCheckResult = { success: true } | { success: false; error: string };
+function adapterSupportsToolCalling(
+  adapter: Awaited<ReturnType<typeof createAdapter>>,
+): adapter is import("../agent-adapters").ToolCallingAdapter {
+  return typeof (adapter as { runToolCallingTurn?: unknown }).runToolCallingTurn === "function";
+}
+
+export type AgentCheckResult =
+  | { success: true; mode: AgentCapabilityMode }
+  | { success: false; error: string };
+
+export type AgentCheckAttempt = {
+  channelId: string;
+  channelName: string;
+  modelId: string;
+  success: boolean;
+  error?: string;
+};
+
+export type AgentRuntimeResolution =
+  | {
+      success: true;
+      resolvedChannel: ResolvedChannel;
+      compatibility: Extract<AgentCheckResult, { success: true }>;
+      fallbackUsed: boolean;
+      attempts: AgentCheckAttempt[];
+    }
+  | {
+      success: false;
+      error: string;
+      attempts: AgentCheckAttempt[];
+    };
+
+type CachedAgentCheckEntry = {
+  expiresAt: number;
+  result: AgentCheckResult;
+};
+
+export function getAgentCapabilityModeFromSuccessResult(
+  result: { success: true; mode?: AgentCapabilityMode },
+  protocol: string | null | undefined,
+): AgentCapabilityMode {
+  if (result.mode === "claude_sdk" || result.mode === "generic_tool_calling") {
+    return result.mode;
+  }
+  return (protocol || "").trim().toLowerCase() === "openai"
+    ? "generic_tool_calling"
+    : "claude_sdk";
+}
 
 const AGENT_SDK_PROBE_TIMEOUT_MS = 20_000;
-const AGENT_SDK_PROBE_PROMPT = "Do not use any tools. Reply with exactly OK.";
+const AGENT_COMPATIBILITY_SUCCESS_TTL_MS = 5 * 60_000;
+const AGENT_COMPATIBILITY_FAILURE_TTL_MS = 45_000;
+const AGENT_SDK_PROBE_MARKER = "AGENT_TOOL_OK";
+const GENERIC_TOOL_PROBE_NAME = "agent_probe";
+const AGENT_SDK_PROBE_PROMPT = [
+  "Use the Bash tool to run exactly this command: printf 'AGENT_TOOL_OK'",
+  "Do not simulate the command output.",
+  "After the tool finishes, reply with exactly AGENT_TOOL_OK.",
+].join(" ");
 const AGENT_SDK_INCOMPATIBLE_ERROR =
   "该渠道支持普通聊天接口，但不兼容 Claude Agent SDK，无法用于 Agent 模式。它仍可用于普通聊天。";
+const GENERIC_TOOL_INCOMPATIBLE_ERROR =
+  "该渠道支持普通聊天接口，但不兼容当前 Agent 工具运行协议，无法用于 Agent 模式。它仍可用于普通聊天。";
+
+const compatibilityCache = new Map<string, CachedAgentCheckEntry>();
+const compatibilityInFlight = new Map<string, Promise<AgentCheckResult>>();
+
+function getCompatibilityCacheKey(userId: string, channelId: string, modelId: string) {
+  return `${userId}:${channelId}:${modelId.trim()}`;
+}
+
+function readCompatibilityCache(key: string) {
+  const cached = compatibilityCache.get(key);
+  if (!cached) return null;
+  if (cached.expiresAt <= Date.now()) {
+    compatibilityCache.delete(key);
+    return null;
+  }
+  return cached.result;
+}
+
+function writeCompatibilityCache(key: string, result: AgentCheckResult) {
+  compatibilityCache.set(key, {
+    result,
+    expiresAt:
+      Date.now() +
+      (result.success ? AGENT_COMPATIBILITY_SUCCESS_TTL_MS : AGENT_COMPATIBILITY_FAILURE_TTL_MS),
+  });
+}
+
+function buildChannelProbeOrder<T extends { id: string; name: string; enabled: boolean; isDefault: boolean }>(
+  channels: T[],
+  requestedChannelId: string | null,
+) {
+  if (requestedChannelId) {
+    const requested = channels.find((channel) => channel.id === requestedChannelId);
+    return requested ? [requested] : [];
+  }
+
+  return channels
+    .filter((channel) => channel.enabled)
+    .sort((left, right) => {
+      if (left.isDefault !== right.isDefault) return left.isDefault ? -1 : 1;
+      return left.name.localeCompare(right.name);
+    });
+}
+
+function buildModelProbeOrder(
+  channel: Awaited<ReturnType<typeof getChannels>>[number],
+  requestedModelId: string | null,
+) {
+  const enabledModelIds = channel.models
+    .filter((model) => model.enabled)
+    .map((model) => model.modelId)
+    .filter((modelId) => modelId.trim().length > 0);
+
+  const ordered: string[] = [];
+  const push = (modelId: string | null | undefined) => {
+    if (!modelId) return;
+    const trimmed = modelId.trim();
+    if (!trimmed || !enabledModelIds.includes(trimmed) || ordered.includes(trimmed)) return;
+    ordered.push(trimmed);
+  };
+
+  push(requestedModelId);
+  push(channel.defaultModelId || channel.models.find((model) => model.isDefault && model.enabled)?.modelId);
+
+  for (const modelId of enabledModelIds) {
+    push(modelId);
+  }
+
+  return ordered;
+}
+
+export function describeAgentRuntimeSelection(params: {
+  resolvedChannel: ResolvedChannel;
+  requestedChannelId?: string | null;
+  requestedModelId?: string | null;
+}) {
+  const requestedChannelId = params.requestedChannelId?.trim() || null;
+  const requestedModelId = params.requestedModelId?.trim() || null;
+  const changedChannel =
+    requestedChannelId !== null && requestedChannelId !== params.resolvedChannel.channel.id;
+  const changedModel = requestedModelId !== null && requestedModelId !== params.resolvedChannel.modelId;
+
+  if (!changedChannel && !changedModel) {
+    return `Using ${params.resolvedChannel.modelId}`;
+  }
+
+  if (changedChannel) {
+    return `Using ${params.resolvedChannel.modelId} via ${params.resolvedChannel.channel.name}`;
+  }
+
+  return `Using ${params.resolvedChannel.modelId}`;
+}
 
 export async function evaluateAgentProbe(
-  events: AsyncIterable<{ type?: string; content?: string }>,
+  events: AsyncIterable<{ type?: string; content?: string; toolName?: string }>,
 ): Promise<AgentCheckResult> {
+  let sawBashTool = false;
+  let textOutput = "";
+
   for await (const event of events) {
+    if (event?.type === "tool_start" && event.toolName === "Bash") {
+      sawBashTool = true;
+      continue;
+    }
     if (event?.type === "text" && typeof event.content === "string" && event.content.trim()) {
-      return { success: true };
+      textOutput += event.content;
+      if (sawBashTool && textOutput.includes(AGENT_SDK_PROBE_MARKER)) {
+        return { success: true, mode: "claude_sdk" };
+      }
+      continue;
     }
     if (event?.type === "error") {
       return { success: false, error: event.content || "Agent probe failed" };
@@ -23,7 +189,10 @@ export async function evaluateAgentProbe(
     }
   }
 
-  return { success: false, error: "未获得任何输出，当前渠道可能不兼容 Agent 运行。" };
+  return {
+    success: false,
+    error: "未检测到真实 Bash 工具调用，当前渠道可能只支持普通对话，不兼容 Agent 工具执行。",
+  };
 }
 
 export async function probeClaudeAgentSdkCompatibility(params: {
@@ -56,14 +225,14 @@ export async function probeClaudeAgentSdkCompatibility(params: {
     );
 
     if (result.success) {
-      return result;
+      return { success: true, mode: "claude_sdk" };
     }
     const probeError = (result as { success: false; error: string }).error;
 
     return {
       success: false,
       error:
-        probeError === "未获得任何输出，当前渠道可能不兼容 Agent 运行。"
+        probeError === "未检测到真实 Bash 工具调用，当前渠道可能只支持普通对话，不兼容 Agent 工具执行。"
           ? AGENT_SDK_INCOMPATIBLE_ERROR
           : probeError,
     };
@@ -81,12 +250,109 @@ export async function probeClaudeAgentSdkCompatibility(params: {
   }
 }
 
+export async function probeGenericToolCallingCompatibility(params: {
+  apiKey: string;
+  modelId: string;
+  baseUrl: string;
+  protocol: string;
+}): Promise<AgentCheckResult> {
+  const adapter = createAdapter(params.protocol, params.apiKey, params.baseUrl);
+  if (!adapterSupportsToolCalling(adapter)) {
+    return { success: false, error: GENERIC_TOOL_INCOMPATIBLE_ERROR };
+  }
+
+  try {
+    const result = await adapter.runToolCallingTurn({
+      model: params.modelId,
+      messages: [
+        {
+          role: "user",
+          content:
+            "Call the agent_probe tool exactly once with marker AGENT_TOOL_OK. Do not answer directly. After the tool result arrives, reply with exactly AGENT_TOOL_OK.",
+        },
+      ],
+      tools: [
+        {
+          name: GENERIC_TOOL_PROBE_NAME,
+          description: "Probe tool used to verify structured tool calling support.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              marker: { type: "string" },
+            },
+            required: ["marker"],
+            additionalProperties: false,
+          },
+        },
+      ],
+      toolChoice: { type: "tool", name: GENERIC_TOOL_PROBE_NAME },
+      requestTimeoutMs: AGENT_SDK_PROBE_TIMEOUT_MS,
+    });
+
+    const matchedCall = result.toolCalls.find(
+      (toolCall) =>
+        toolCall.name === GENERIC_TOOL_PROBE_NAME && toolCall.input.marker === AGENT_SDK_PROBE_MARKER,
+    );
+    if (!matchedCall) {
+      return { success: false, error: GENERIC_TOOL_INCOMPATIBLE_ERROR };
+    }
+
+    const followUp = await adapter.runToolCallingTurn({
+      model: params.modelId,
+      messages: [
+        {
+          role: "user",
+          content:
+            "Call the agent_probe tool exactly once with marker AGENT_TOOL_OK. Do not answer directly. After the tool result arrives, reply with exactly AGENT_TOOL_OK.",
+        },
+        {
+          role: "assistant",
+          content: result.text,
+          toolCalls: result.toolCalls,
+        },
+        {
+          role: "tool",
+          toolCallId: matchedCall.id,
+          name: GENERIC_TOOL_PROBE_NAME,
+          content: AGENT_SDK_PROBE_MARKER,
+        },
+      ],
+      tools: [
+        {
+          name: GENERIC_TOOL_PROBE_NAME,
+          description: "Probe tool used to verify structured tool calling support.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              marker: { type: "string" },
+            },
+            required: ["marker"],
+            additionalProperties: false,
+          },
+        },
+      ],
+      requestTimeoutMs: AGENT_SDK_PROBE_TIMEOUT_MS,
+    });
+
+    if (followUp.toolCalls.length > 0 || !followUp.text.includes(AGENT_SDK_PROBE_MARKER)) {
+      return { success: false, error: GENERIC_TOOL_INCOMPATIBLE_ERROR };
+    }
+    return { success: true, mode: "generic_tool_calling" };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : GENERIC_TOOL_INCOMPATIBLE_ERROR,
+    };
+  }
+}
+
 export async function checkChannelAgentCompatibility(
   userId: string,
   channelId: string,
   modelId: string,
   options?: {
     sdkTimeoutMs?: number;
+    bypassCache?: boolean;
   },
 ): Promise<AgentCheckResult> {
   const trimmedModelId = modelId.trim();
@@ -94,18 +360,163 @@ export async function checkChannelAgentCompatibility(
     return { success: false, error: "modelId is required" };
   }
 
-  const { channel, apiKey } = await getChannelRuntimeCredentialsById(userId, channelId, {
-    runtime: "agent_sdk",
-  });
-  const baseUrl = channel.baseUrl;
-  if (!baseUrl) {
-    return { success: false, error: "Base URL is required" };
+  const cacheKey = getCompatibilityCacheKey(userId, channelId, trimmedModelId);
+  if (!options?.bypassCache) {
+    const cached = readCompatibilityCache(cacheKey);
+    if (cached) return cached;
+
+    const inFlight = compatibilityInFlight.get(cacheKey);
+    if (inFlight) {
+      return inFlight;
+    }
   }
 
-  return probeClaudeAgentSdkCompatibility({
-    apiKey,
-    modelId: trimmedModelId,
-    baseUrl,
-    timeoutMs: options?.sdkTimeoutMs,
-  });
+  const probePromise = (async (): Promise<AgentCheckResult> => {
+    const { channel, apiKey } = await getChannelRuntimeCredentialsById(userId, channelId, {
+      runtime: "agent_sdk",
+    });
+    const baseUrl = channel.baseUrl;
+    if (!baseUrl) {
+      return { success: false, error: "Base URL is required" };
+    }
+
+    const protocol = (channel.protocol || "").trim().toLowerCase();
+    if (protocol === "openai") {
+      return probeGenericToolCallingCompatibility({
+        apiKey,
+        modelId: trimmedModelId,
+        baseUrl,
+        protocol,
+      });
+    }
+
+    if (protocol === "anthropic") {
+      const claudeSdkResult = await probeClaudeAgentSdkCompatibility({
+        apiKey,
+        modelId: trimmedModelId,
+        baseUrl,
+        timeoutMs: options?.sdkTimeoutMs,
+      });
+      if (claudeSdkResult.success) {
+        return claudeSdkResult;
+      }
+
+      const genericResult = await probeGenericToolCallingCompatibility({
+        apiKey,
+        modelId: trimmedModelId,
+        baseUrl,
+        protocol,
+      });
+      if (genericResult.success) {
+        return genericResult;
+      }
+
+      return claudeSdkResult;
+    }
+
+    return probeClaudeAgentSdkCompatibility({
+      apiKey,
+      modelId: trimmedModelId,
+      baseUrl,
+      timeoutMs: options?.sdkTimeoutMs,
+    });
+  })();
+
+  if (options?.bypassCache) {
+    return probePromise;
+  }
+
+  compatibilityInFlight.set(cacheKey, probePromise);
+  try {
+    const result = await probePromise;
+    writeCompatibilityCache(cacheKey, result);
+    return result;
+  } finally {
+    compatibilityInFlight.delete(cacheKey);
+  }
+}
+
+export async function resolveAgentRuntime(params: {
+  userId: string;
+  requestedChannelId?: string | null;
+  requestedModelId?: string | null;
+  sdkTimeoutMs?: number;
+  bypassCache?: boolean;
+}): Promise<AgentRuntimeResolution> {
+  const channels = await getChannels(params.userId);
+  const requestedChannelId = params.requestedChannelId?.trim() || null;
+  const requestedModelId = params.requestedModelId?.trim() || null;
+  const channelOrder = buildChannelProbeOrder(channels, requestedChannelId).filter(
+    (channel) => channel.enabled && channel.hasApiKey,
+  );
+
+  if (channelOrder.length === 0) {
+    return {
+      success: false,
+      error: "未配置可用的默认渠道/默认模型。请先在设置中完成配置。",
+      attempts: [],
+    };
+  }
+
+  const attempts: AgentCheckAttempt[] = [];
+  let lastError = "未找到可用于 Agent 模式的模型。";
+
+  for (const channel of channelOrder) {
+    const runtimeChannel = await getChannelRuntimeCredentialsById(params.userId, channel.id, {
+      runtime: "agent_sdk",
+    }).catch(() => null);
+    if (!runtimeChannel) {
+      continue;
+    }
+
+    const modelOrder = buildModelProbeOrder(
+      channel,
+      channel.id === requestedChannelId ? requestedModelId : null,
+    );
+    if (modelOrder.length === 0) {
+      continue;
+    }
+
+    for (const modelId of modelOrder) {
+      const compatibility = await checkChannelAgentCompatibility(params.userId, channel.id, modelId, {
+        sdkTimeoutMs: params.sdkTimeoutMs,
+        bypassCache: params.bypassCache,
+      });
+      if (compatibility.success) {
+        attempts.push({
+          channelId: channel.id,
+          channelName: channel.name,
+          modelId,
+          success: true,
+        });
+        return {
+          success: true,
+          resolvedChannel: {
+            ...runtimeChannel,
+            modelId,
+          },
+          compatibility,
+          fallbackUsed:
+            (requestedChannelId !== null && requestedChannelId !== channel.id) ||
+            (requestedModelId !== null && requestedModelId !== modelId),
+          attempts,
+        };
+      }
+
+      attempts.push({
+        channelId: channel.id,
+        channelName: channel.name,
+        modelId,
+        success: false,
+        error: (compatibility as Extract<AgentCheckResult, { success: false }>).error,
+      });
+      lastError = (compatibility as Extract<AgentCheckResult, { success: false }>).error;
+    }
+  }
+
+  return {
+    success: false,
+    error: lastError,
+    attempts,
+  };
 }
