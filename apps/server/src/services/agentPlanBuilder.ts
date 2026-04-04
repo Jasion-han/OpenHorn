@@ -28,6 +28,13 @@ function hasKeyword(goal: string, pattern: RegExp) {
   return pattern.test(goal);
 }
 
+function hasCurrentExternalSignal(goal: string) {
+  return hasKeyword(
+    goal,
+    /(\bcurrent\s+(?:news|events?|status|state|pricing|price|market|weather|version|versions|api|docs?|documentation|information|info|date|time|conditions?|situation|affairs)\b|当前(?:价格|汇率|股价|行情|版本|天气|新闻|局势|政策|情况|信息|日期|时间))/i,
+  );
+}
+
 function detectSignals(goal: string, attachments: AgentTaskAttachment[]) {
   const normalized = goal.toLowerCase();
   const hasAttachments = attachments.length > 0;
@@ -37,11 +44,11 @@ function detectSignals(goal: string, attachments: AgentTaskAttachment[]) {
   );
   const research = hasKeyword(
     normalized,
-    /(\b(?:research|investigate|lookup|search|survey|compare|benchmark|analy[sz]e|audit|cite|sources|latest|current|recent|today|news)\b|look up|调研|研究|搜索|联网|最新|对比|检索|资料|来源)/i,
+    /(\b(?:research|investigate|lookup|search|survey|compare|benchmark|analy[sz]e|audit|cite|sources)\b|look up|调研|研究|搜索|联网|对比|检索|资料|来源)/i,
   );
   const code = hasKeyword(
     normalized,
-    /(\b(?:code|repo|repository|workspace|app|server|desktop|web|bug|fix|implement|refactor|debug|trace|test|tests|build|compile)\b|开发|代码|仓库|工作区|修复|实现|调试|排查|测试|构建)/i,
+    /(\b(?:code|repo|repository|workspace|readme|package\.json|tsconfig(?:\.json)?|app|server|desktop|web|bug|fix|implement|refactor|debug|trace|test|tests|build|compile|stack)\b|开发|代码|仓库|工作区|修复|实现|调试|排查|测试|构建)/i,
   );
   const writing = hasKeyword(
     normalized,
@@ -49,7 +56,7 @@ function detectSignals(goal: string, attachments: AgentTaskAttachment[]) {
   );
   const latest = hasKeyword(
     normalized,
-    /(latest|current|today|recent|news|now|up-to-date|实时|最新|今天|最近|当前)/i,
+    /(\blatest\b|\brecent\b|\btoday\b|\bnews\b|\bnow\b|up-to-date|实时|最新|今天|最近)/i,
   );
 
   return {
@@ -58,7 +65,7 @@ function detectSignals(goal: string, attachments: AgentTaskAttachment[]) {
     research,
     code,
     writing,
-    latest,
+    latest: latest || hasCurrentExternalSignal(normalized),
   };
 }
 

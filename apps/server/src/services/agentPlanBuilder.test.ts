@@ -26,6 +26,17 @@ test("buildAgentPlan adds current-information and verification steps for researc
   expect(plan.some((step) => step.title === "Verify evidence and resolve gaps")).toBe(true);
 });
 
+test("buildAgentPlan does not treat current workspace phrasing as external-latest research", () => {
+  const plan = buildAgentPlan({
+    goal: "Read README.md and package.json, then summarize the current project stack in 3 concise bullets.",
+    complexity: "light",
+  });
+
+  expect(plan.some((step) => step.title === "Collect current external information")).toBe(false);
+  expect(plan.some((step) => step.title === "Gather supporting information and evidence")).toBe(false);
+  expect(plan.some((step) => step.title === "Inspect the workspace and affected code paths")).toBe(true);
+});
+
 test("buildAgentPlan adds attachment context for file-backed tasks", () => {
   const plan = buildAgentPlan({
     goal: "Review the attached PDF and extract the main risks.",

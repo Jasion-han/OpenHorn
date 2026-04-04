@@ -262,14 +262,6 @@ function getTaskStatusValue(event: ApiAgentTaskEvent) {
   return typeof event.metadata.status === "string" ? event.metadata.status : null;
 }
 
-function getPlanStepMeta(event: ApiAgentTaskEvent) {
-  if (!isRecord(event.metadata)) return { status: null, description: null };
-  return {
-    status: typeof event.metadata.status === "string" ? event.metadata.status : null,
-    description: typeof event.metadata.description === "string" ? event.metadata.description : null,
-  };
-}
-
 function getApprovalEventMeta(event: ApiAgentTaskEvent) {
   if (!isRecord(event.metadata)) return { type: null, status: null };
   return {
@@ -628,30 +620,6 @@ function buildTimelineItems(detail: ApiAgentTaskDetail): StreamItem[] {
 
     if (event.type === "execution_event") {
       items.push(...buildExecutionItems([event]));
-      continue;
-    }
-
-    if (event.type === "plan_step") {
-      const meta = getPlanStepMeta(event);
-      if (meta.status === "pending") {
-        continue;
-      }
-
-      const planStepText = normalizeProcessText(event.content) || "Planned step";
-
-      items.push({
-        id: event.id,
-        kind: "meta",
-        label: "thinking",
-        text: planStepText,
-        tone:
-          meta.status === "completed"
-            ? "success"
-            : meta.status === "failed"
-              ? "danger"
-              : "default",
-        mergeKey: `plan-step-${planStepText.toLowerCase()}`,
-      });
       continue;
     }
 
