@@ -153,6 +153,9 @@ export function convertSdkEvent(message: SdkMessage): AgentEvent | null {
       ? message.errors.filter((e) => typeof e === "string")
       : [];
     const stop = typeof message.stop_reason === "string" ? message.stop_reason : null;
+    if (errors.length === 0 && stop === "tool_use") {
+      return { type: "meta" };
+    }
     if (errors.length === 0 && (stop === "end_turn" || stop === "stop")) {
       const result = typeof message.result === "string" ? message.result : "";
       return result.trim() ? { type: "text", content: result } : { type: "meta" };

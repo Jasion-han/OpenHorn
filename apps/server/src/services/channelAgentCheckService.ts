@@ -97,6 +97,16 @@ function writeCompatibilityCache(key: string, result: AgentCheckResult) {
   });
 }
 
+function shouldRetryGenericProbeWithoutForcedToolChoice(error: unknown) {
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error || "").toLowerCase();
+  if (!message.includes("tool_choice")) return false;
+  return (
+    message.includes("does not support being set to required") ||
+    message.includes("does not support being set to required or object") ||
+    message.includes("thinking mode")
+  );
+}
+
 function buildChannelProbeOrder<T extends { id: string; name: string; enabled: boolean; isDefault: boolean }>(
   channels: T[],
   requestedChannelId: string | null,
@@ -272,32 +282,43 @@ export async function probeGenericToolCallingCompatibility(params: {
   }
 
   try {
-    const result = await adapter.runToolCallingTurn({
-      model: params.modelId,
-      messages: [
-        {
-          role: "user",
-          content:
-            "Call the agent_probe tool exactly once with marker AGENT_TOOL_OK. Do not answer directly. After the tool result arrives, reply with exactly AGENT_TOOL_OK.",
-        },
-      ],
-      tools: [
-        {
-          name: GENERIC_TOOL_PROBE_NAME,
-          description: "Probe tool used to verify structured tool calling support.",
-          inputSchema: {
-            type: "object",
-            properties: {
-              marker: { type: "string" },
-            },
-            required: ["marker"],
-            additionalProperties: false,
+    const runInitialTurn = async (forceToolChoice: boolean) =>
+      adapter.runToolCallingTurn({
+        model: params.modelId,
+        messages: [
+          {
+            role: "user",
+            content:
+              "Call the agent_probe tool exactly once with marker AGENT_TOOL_OK. Do not answer directly. After the tool result arrives, reply with exactly AGENT_TOOL_OK.",
           },
-        },
-      ],
-      toolChoice: { type: "tool", name: GENERIC_TOOL_PROBE_NAME },
-      requestTimeoutMs: AGENT_SDK_PROBE_TIMEOUT_MS,
-    });
+        ],
+        tools: [
+          {
+            name: GENERIC_TOOL_PROBE_NAME,
+            description: "Probe tool used to verify structured tool calling support.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                marker: { type: "string" },
+              },
+              required: ["marker"],
+              additionalProperties: false,
+            },
+          },
+        ],
+        ...(forceToolChoice ? { toolChoice: { type: "tool" as const, name: GENERIC_TOOL_PROBE_NAME } } : {}),
+        requestTimeoutMs: AGENT_SDK_PROBE_TIMEOUT_MS,
+      });
+
+    let result;
+    try {
+      result = await runInitialTurn(true);
+    } catch (error) {
+      if (!shouldRetryGenericProbeWithoutForcedToolChoice(error)) {
+        throw error;
+      }
+      result = await runInitialTurn(false);
+    }
 
     const matchedCall = result.toolCalls.find(
       (toolCall) =>

@@ -149,6 +149,63 @@ test("probeGenericToolCallingCompatibility: succeeds when adapter returns a stru
   }
 });
 
+test("probeGenericToolCallingCompatibility: retries without forced tool_choice when provider rejects required mode", async () => {
+  let callCount = 0;
+  const seenToolChoices: unknown[] = [];
+  mock.module("../agent-adapters", () => ({
+    createAdapter: () => ({
+      runToolCallingTurn: async (options: { toolChoice?: unknown }) => {
+        callCount += 1;
+        seenToolChoices.push(options.toolChoice);
+        if (callCount === 1) {
+          throw new Error(
+            "Anthropic API error (400): tool_choice does not support being set to required or object in thinking mode",
+          );
+        }
+        if (callCount === 2) {
+          return {
+            text: "",
+            toolCalls: [
+              {
+                id: "call-1",
+                name: "agent_probe",
+                input: { marker: "AGENT_TOOL_OK" },
+              },
+            ],
+            finishReason: "tool_use",
+          };
+        }
+        return {
+          text: "AGENT_TOOL_OK",
+          toolCalls: [],
+          finishReason: "stop",
+        };
+      },
+    }),
+    supportsToolCalling: () => true,
+  }));
+
+  try {
+    const { probeGenericToolCallingCompatibility } = await loadChannelAgentCheckService(
+      "generic-tool-choice-fallback",
+    );
+    const result = await probeGenericToolCallingCompatibility({
+      apiKey: "test-key",
+      modelId: "qwen3.5-plus",
+      baseUrl: "https://relay.example.com",
+      protocol: "anthropic",
+    });
+    expect(result).toEqual({ success: true, mode: "generic_tool_calling" });
+    expect(seenToolChoices).toEqual([
+      { type: "tool", name: "agent_probe" },
+      undefined,
+      undefined,
+    ]);
+  } finally {
+    mock.restore();
+  }
+});
+
 test("probeGenericToolCallingCompatibility: fails when no structured tool call is returned", async () => {
   mock.module("../agent-adapters", () => ({
     createAdapter: () => ({

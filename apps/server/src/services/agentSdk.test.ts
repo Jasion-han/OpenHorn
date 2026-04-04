@@ -91,6 +91,19 @@ test("convertSdkEvent: treats end_turn as a normal completion", () => {
   });
 });
 
+test("convertSdkEvent: treats tool_use as meta activity instead of failure", () => {
+  const result = convertSdkEvent({
+    type: "result",
+    subtype: "error_during_execution",
+    stop_reason: "tool_use",
+    errors: [],
+  });
+
+  expect(result).toEqual({
+    type: "meta",
+  });
+});
+
 test("mergeAgentTextOutput: prefers cumulative final result over partial streamed text", () => {
   expect(mergeAgentTextOutput("Hello", "Hello world")).toBe("Hello world");
 });
