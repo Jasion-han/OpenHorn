@@ -314,9 +314,11 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
         const sync = await api.channels.fetchModels(channel.id);
         const syncOutcome = applyFetchModelsOutcome(channel.id, sync);
         await onSaved(channel.id, {
-          kind: syncOutcome.warn ? "warn" : "success",
+          kind: syncOutcome.ok ? (syncOutcome.warn ? "warn" : "success") : "warn",
           title: "渠道已创建",
-          message: syncOutcome.warn
+          message: !syncOutcome.ok
+            ? "渠道已保存，但模型同步失败。请看列表中的提示并继续处理。"
+            : syncOutcome.warn
             ? "渠道已保存，模型同步结果请看列表中的提示。"
             : "渠道已保存，并已同步模型列表。",
         });
@@ -364,9 +366,11 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
       const sync = await api.channels.fetchModels(activeChannel.id);
       const syncOutcome = applyFetchModelsOutcome(activeChannel.id, sync);
       await onSaved(activeChannel.id, {
-        kind: syncOutcome.warn ? "warn" : "success",
+        kind: syncOutcome.ok ? (syncOutcome.warn ? "warn" : "success") : "warn",
         title: "渠道已保存",
-        message: syncOutcome.warn
+        message: !syncOutcome.ok
+          ? "已保存渠道，但模型同步失败。请看列表中的提示并继续处理。"
+          : syncOutcome.warn
           ? "已保存渠道，模型同步结果请看列表中的提示。"
           : "已保存渠道，并已同步模型列表。",
       });

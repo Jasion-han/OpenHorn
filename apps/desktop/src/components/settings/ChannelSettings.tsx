@@ -8,6 +8,7 @@ import {
   Plus,
   RefreshCw,
   Trash2,
+  X,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -62,6 +63,7 @@ export function ChannelSettings() {
   const [agentCheckOpen, setAgentCheckOpen] = useState(false);
   const [agentCheckChannelId, setAgentCheckChannelId] = useState<string | null>(null);
   const [agentCheckModelId, setAgentCheckModelId] = useState("");
+  const [draftModelIdByChannel, setDraftModelIdByChannel] = useState<Record<string, string>>({});
   const [channelNotice, setChannelNotice] = useState<
     Record<string, { kind: "error" | "warn"; title?: string; message: string }>
   >({});
@@ -161,6 +163,14 @@ export function ChannelSettings() {
 
   const toggleExpanded = (channelId: string) => {
     setExpandedChannelId((current) => (current === channelId ? null : channelId));
+  };
+
+  const dismissChannelNotice = (channelId: string) => {
+    setChannelNotice((prev) => {
+      if (!prev[channelId]) return prev;
+      const { [channelId]: _removed, ...rest } = prev;
+      return rest;
+    });
   };
 
   const handleDelete = async (channelId: string) => {
@@ -276,6 +286,55 @@ export function ChannelSettings() {
       await loadChannelList({ preserveExpanded: true });
       setExpandedChannelId(channel.id);
       notifySuccess("已更新", "默认模型已更新。");
+    });
+  };
+
+  const handleAddModel = async (channel: Channel) => {
+    const modelId = (draftModelIdByChannel[channel.id] || "").trim();
+    if (!modelId) {
+      notifyError("缺少 modelId", "请输入要添加的 modelId。");
+      return;
+    }
+    if (channel.models.some((model) => model.modelId === modelId)) {
+      notifyWarning("模型已存在", `${modelId} 已在当前渠道中。`);
+      return;
+    }
+
+    await runChannelAction(`add-model:${channel.id}`, async () => {
+      const nextModels = channel.models.concat({
+        id: `draft:${modelId}`,
+        channelId: channel.id,
+        modelId,
+        displayName: modelId,
+        enabled: true,
+        isDefault: channel.models.every((model) => !model.isDefault),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      await updateModels(channel, nextModels);
+      setDraftModelIdByChannel((prev) => ({ ...prev, [channel.id]: "" }));
+      notifySuccess("已添加", `${modelId} 已加入当前渠道。`);
+    });
+  };
+
+  const handleRemoveModel = async (channel: Channel, modelId: string) => {
+    await runChannelAction(`remove-model:${channel.id}:${modelId}`, async () => {
+      const remainingModels = channel.models.filter((model) => model.modelId !== modelId);
+      if (remainingModels.length === channel.models.length) {
+        return;
+      }
+
+      const preservedDefaultModelId =
+        remainingModels.find((model) => model.isDefault && model.enabled)?.modelId ||
+        remainingModels.find((model) => model.enabled)?.modelId ||
+        null;
+      const nextModels = remainingModels.map((model) => ({
+        ...model,
+        isDefault: preservedDefaultModelId ? model.modelId === preservedDefaultModelId : false,
+      }));
+
+      await updateModels(channel, nextModels);
+      notifySuccess("已移除", `${modelId} 已从当前渠道移除。`);
     });
   };
 
@@ -454,25 +513,75 @@ export function ChannelSettings() {
                         : "border-orange-200 bg-orange-50 dark:border-orange-900/70 dark:bg-orange-950/40",
                     )}
                   >
-                    <p className="text-sm font-semibold">{notice.title || "需要处理"}</p>
-                    <p className="mt-1 text-sm whitespace-pre-wrap text-muted-foreground">
-                      {notice.message}
-                    </p>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold">{notice.title || "需要处理"}</p>
+                        <p className="mt-1 text-sm whitespace-pre-wrap text-muted-foreground">
+                          {notice.message}
+                        </p>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        className="shrink-0"
+                        onClick={() => dismissChannelNotice(channel.id)}
+                        aria-label="关闭提示"
+                        title="关闭提示"
+                      >
+                        <X size={14} />
+                      </Button>
+                    </div>
                   </div>
                 )}
 
                 {isExpanded && (
                   <div className="flex flex-col gap-2">
-                    <div className="flex items-center justify-between">
-                      <p className="text-sm font-medium">模型</p>
-                      <p className="text-xs text-muted-foreground">
-                        已同步 {channel.models.length} 个
-                      </p>
+                    <div className="flex flex-col gap-2 rounded-lg border border-dashed border-border/60 p-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-medium">模型</p>
+                          <p className="text-xs text-muted-foreground">
+                            已同步 {channel.models.length} 个，可手动补充 modelId
+                          </p>
+                        </div>
+                        <div className="flex w-full max-w-md items-center gap-2">
+                          <Input
+                            placeholder="手动添加 modelId，例如：qwen3.5-plus"
+                            value={draftModelIdByChannel[channel.id] || ""}
+                            onChange={(event) =>
+                              setDraftModelIdByChannel((prev) => ({
+                                ...prev,
+                                [channel.id]: event.target.value,
+                              }))
+                            }
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") {
+                                event.preventDefault();
+                                void handleAddModel(channel);
+                              }
+                            }}
+                          />
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => void handleAddModel(channel)}
+                            disabled={busyKey === `add-model:${channel.id}`}
+                          >
+                            添加
+                          </Button>
+                        </div>
+                      </div>
+                      {channel.baseUrl?.includes("coding.dashscope.aliyuncs.com") && (
+                        <p className="text-xs text-muted-foreground">
+                          百炼/Coding Plan 不支持接口查询模型列表，可直接手动添加，例如：
+                          qwen3.5-plus、qwen3-coder-next、glm-5、kimi-k2.5。
+                        </p>
+                      )}
                     </div>
 
                     {channel.models.length === 0 ? (
                       <div className="rounded-lg border border-dashed border-border/60 px-3 py-4 text-sm text-muted-foreground">
-                        当前还没有模型。请先同步模型列表。
+                        当前还没有模型。该渠道如果不支持同步，可直接在上方手动添加 modelId。
                       </div>
                     ) : (
                       <ScrollArea className="max-h-[320px]">
@@ -510,6 +619,15 @@ export function ChannelSettings() {
                                   disabled={busyKey === `default-model:${channel.id}:${model.modelId}`}
                                 >
                                   {model.isDefault ? "默认" : "设为默认"}
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="text-destructive"
+                                  onClick={() => void handleRemoveModel(channel, model.modelId)}
+                                  disabled={busyKey === `remove-model:${channel.id}:${model.modelId}`}
+                                >
+                                  移除
                                 </Button>
                               </div>
                             </div>

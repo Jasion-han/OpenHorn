@@ -114,6 +114,18 @@ function normalizeBaseUrl(baseUrl: string): string {
   return baseUrl.trim().replace(/\/+$/, "");
 }
 
+function isDashScopeCodingBaseUrl(baseUrl: string): boolean {
+  try {
+    return new URL(normalizeBaseUrl(baseUrl)).hostname.toLowerCase() === "coding.dashscope.aliyuncs.com";
+  } catch {
+    return false;
+  }
+}
+
+function getManualModelSetupMessage() {
+  return "该渠道不支持通过接口查询模型列表。渠道已保存，请在桌面端渠道详情里手动添加 modelId，并设为默认模型后再使用。";
+}
+
 function normalizeOpenAICompatibleApiBaseUrl(baseUrl: string): string {
   let url = normalizeBaseUrl(baseUrl);
   try {
@@ -374,6 +386,10 @@ async function fetchOpenAICompatibleModels(baseUrl: string, apiKey: string) {
     },
   });
 
+  if (response.status === 404 && isDashScopeCodingBaseUrl(baseUrl)) {
+    return [];
+  }
+
   if (!response.ok) {
     const text = await response.text().catch(() => "");
     throw new Error(
@@ -398,6 +414,10 @@ async function fetchAnthropicModels(baseUrl: string, apiKey: string) {
       "anthropic-version": "2023-06-01",
     },
   });
+
+  if (response.status === 404 && isDashScopeCodingBaseUrl(baseUrl)) {
+    return [];
+  }
 
   if (!response.ok) {
     const text = await response.text().catch(() => "");
@@ -468,6 +488,31 @@ async function testOpenAICompatibleChannel(baseUrl: string, apiKey: string) {
     headers: {
       Authorization: `Bearer ${apiKey}`,
     },
+  });
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(
+      summarizeProviderError(text, {
+        status: response.status,
+        fallback: `Request failed (${response.status})`,
+      }),
+    );
+  }
+}
+
+async function probeOpenAICompatibleModel(baseUrl: string, apiKey: string, modelId: string) {
+  const response = await fetch(`${normalizeOpenAICompatibleApiBaseUrl(baseUrl)}/chat/completions`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      model: modelId,
+      messages: [{ role: "user", content: "hi" }],
+      max_tokens: 1,
+    }),
   });
 
   if (!response.ok) {
@@ -860,9 +905,11 @@ export async function fetchChannelModels(
       success: true,
       // If user has enabled models but hasn't picked a default, warn (no auto fallback).
       error:
-        enabledModels.length > 0 && !defaultModel
-          ? "已同步模型列表，但未设置默认模型。请在该渠道下选择一个启用的默认模型（用于 Chat/Agent）。"
-          : undefined,
+        models.length === 0 && isDashScopeCodingBaseUrl(baseUrl)
+          ? getManualModelSetupMessage()
+          : enabledModels.length > 0 && !defaultModel
+            ? "已同步模型列表，但未设置默认模型。请在该渠道下选择一个启用的默认模型（用于 Chat/Agent）。"
+            : undefined,
       models: updatedModels,
     };
   } catch (error) {
@@ -931,7 +978,22 @@ export async function testChannel(userId: string, channelId: string): Promise<Ch
     } else if (protocol === "google") {
       await testGoogleChannel(baseUrl, apiKey);
     } else {
-      await testOpenAICompatibleChannel(baseUrl, apiKey);
+      const modelId = resolveModelIdFromChannelItem(channel, null);
+      if (modelId) {
+        await probeOpenAICompatibleModel(baseUrl, apiKey, modelId);
+      } else {
+        try {
+          await testOpenAICompatibleChannel(baseUrl, apiKey);
+        } catch (error) {
+          if (isDashScopeCodingBaseUrl(baseUrl)) {
+            return {
+              success: false,
+              error: `${getManualModelSetupMessage()} 添加完成后，再测试连接。`,
+            };
+          }
+          throw error;
+        }
+      }
     }
 
     return { success: true };
