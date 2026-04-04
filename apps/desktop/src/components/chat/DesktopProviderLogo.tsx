@@ -1,4 +1,11 @@
+import { useEffect, useState } from "react";
 import { cn } from "ui";
+import chatgptLogo from "../../../public/provider-logos/chatgpt.svg";
+import claudeLogo from "../../../public/provider-logos/claude.png";
+import deepseekLogo from "../../../public/provider-logos/deepseek.ico";
+import doubaoLogo from "../../../public/provider-logos/doubao.png";
+import geminiLogo from "../../../public/provider-logos/gemini.png";
+import qwenLogo from "../../../public/provider-logos/qwen.png";
 
 type ProviderLogoProps = {
   provider: string | null | undefined;
@@ -13,12 +20,12 @@ type ProviderLogoSpec = {
 };
 
 const PROVIDER_LOGOS: Record<string, ProviderLogoSpec> = {
-  openai: { src: "/provider-logos/chatgpt.svg", label: "GPT", className: "dark:invert" },
-  anthropic: { src: "/provider-logos/claude.png", label: "Claude" },
-  deepseek: { src: "/provider-logos/deepseek.ico", label: "DeepSeek" },
-  google: { src: "/provider-logos/gemini.png", label: "Gemini" },
-  qwen: { src: "/provider-logos/qwen.png", label: "Qwen" },
-  doubao: { src: "/provider-logos/doubao.png", label: "豆包" },
+  openai: { src: chatgptLogo, label: "GPT", className: "dark:invert" },
+  anthropic: { src: claudeLogo, label: "Claude" },
+  deepseek: { src: deepseekLogo, label: "DeepSeek" },
+  google: { src: geminiLogo, label: "Gemini" },
+  qwen: { src: qwenLogo, label: "Qwen" },
+  doubao: { src: doubaoLogo, label: "豆包" },
 };
 
 function normalizeProvider(provider: string) {
@@ -45,8 +52,16 @@ function normalizeProvider(provider: string) {
 export function DesktopProviderLogo({ provider, className, title }: ProviderLogoProps) {
   const normalized = provider ? normalizeProvider(provider) : "";
   const spec = normalized ? PROVIDER_LOGOS[normalized] : undefined;
+  const [imageFailed, setImageFailed] = useState(false);
 
-  if (spec) {
+  useEffect(() => {
+    setImageFailed(false);
+  }, [spec?.src]);
+
+  const fallbackTitle = title || provider || "Unknown provider";
+  const initial = normalized ? normalized.slice(0, 1).toUpperCase() : "?";
+
+  if (spec && !imageFailed) {
     return (
       <img
         src={spec.src}
@@ -58,16 +73,16 @@ export function DesktopProviderLogo({ provider, className, title }: ProviderLogo
           className,
         )}
         draggable={false}
+        onError={() => setImageFailed(true)}
       />
     );
   }
 
-  const initial = normalized ? normalized.slice(0, 1).toUpperCase() : "?";
   return (
     <span
       role="img"
-      aria-label={provider || "Unknown provider"}
-      title={title || provider || "Unknown provider"}
+      aria-label={fallbackTitle}
+      title={fallbackTitle}
       className={cn(
         "inline-flex size-4 shrink-0 items-center justify-center rounded-sm bg-muted text-[10px] font-medium text-muted-foreground",
         className,
