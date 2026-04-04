@@ -1,5 +1,9 @@
 import { expect, test } from "bun:test";
-import { AnthropicAdapter, OpenAIAdapter } from "./agent-adapters";
+import {
+  AnthropicAdapter,
+  OpenAIAdapter,
+  resolveToolCallingStreamFirstTokenTimeoutMs,
+} from "./agent-adapters";
 
 type FetchInput = Parameters<typeof fetch>[0];
 type FetchInit = Parameters<typeof fetch>[1];
@@ -167,6 +171,12 @@ test("OpenAIAdapter chatStream aborts when the first streamed chunk never arrive
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("resolveToolCallingStreamFirstTokenTimeoutMs uses a longer default for agent tool calling", () => {
+  expect(resolveToolCallingStreamFirstTokenTimeoutMs()).toBe(90_000);
+  expect(resolveToolCallingStreamFirstTokenTimeoutMs(15_000)).toBe(15_000);
+  expect(resolveToolCallingStreamFirstTokenTimeoutMs(120_000)).toBe(90_000);
 });
 
 test("OpenAIAdapter runToolCallingTurn parses structured tool calls", async () => {
