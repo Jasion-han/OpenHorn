@@ -320,3 +320,48 @@ test("runGenericAgentRuntime bootstraps explicit local file reads before the fir
   });
   expect(adapter.calls[0]?.toolChoice).toBe("auto");
 });
+
+test("runGenericAgentRuntime bootstraps pwd from wrapped execution instructions without falling back to README", async () => {
+  const adapter = new FakeToolCallingAdapter([
+    {
+      text: "finished",
+      toolCalls: [],
+      finishReason: "stop",
+    },
+  ]);
+
+  const prompt = [
+    "Approved task goal:",
+    "Run pwd and reply with exactly one bullet containing the workspace path.",
+    "Approved execution plan:",
+    "1. Inspect the workspace and affected code paths",
+    "Check the relevant files, dependencies, and constraints in the current workspace before making changes.",
+    "Execution requirements:",
+    "- This is a workspace-grounded task.",
+    "- Do not answer only from prior context or system context when the task asks about README, code, files, or the repository.",
+  ].join("\n\n");
+
+  const events = [];
+  for await (const event of runGenericAgentRuntime({
+    adapter,
+    model: "gpt-test",
+    prompt,
+    cwd: process.cwd(),
+  })) {
+    events.push(event);
+  }
+
+  expect(events[0]).toMatchObject({
+    type: "tool_start",
+    toolName: "Bash",
+    toolInput: { command: "pwd" },
+  });
+  expect(events[1]).toMatchObject({
+    type: "tool_result",
+    toolName: "Bash",
+    content: "ok",
+  });
+  expect(events[2]).toEqual({ type: "meta" });
+  expect(events[3]).toEqual({ type: "text", content: "finished", streamed: false });
+  expect(adapter.calls[0]?.toolChoice).toBe("auto");
+});

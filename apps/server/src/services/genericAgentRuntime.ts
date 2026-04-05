@@ -27,6 +27,23 @@ const GENERIC_AGENT_TOOL_GUARDRAILS = [
   "Do not ask the user to paste local files that you can read from the workspace yourself.",
 ].join("\n");
 
+function extractPrimaryTaskPrompt(prompt: string) {
+  const normalized = prompt.trim();
+  if (!normalized) return "";
+
+  const goalMarker = "Approved task goal:";
+  const planMarker = "Approved execution plan:";
+  const goalIndex = normalized.indexOf(goalMarker);
+  const planIndex = normalized.indexOf(planMarker);
+
+  if (goalIndex === -1 || planIndex === -1 || planIndex <= goalIndex) {
+    return normalized;
+  }
+
+  const goal = normalized.slice(goalIndex + goalMarker.length, planIndex).trim();
+  return goal || normalized;
+}
+
 function getBashCommand(input: Record<string, unknown>) {
   if (typeof input.command === "string") return input.command;
   if (typeof input.cmd === "string") return input.cmd;
@@ -59,6 +76,24 @@ function buildBootstrapReadCommand(files: string[]) {
         `if [ -f ${JSON.stringify(file)} ]; then printf '===== FILE: ${file} =====\\n'; cat ${JSON.stringify(file)}; printf '\\n'; fi`,
     )
     .join("; ");
+}
+
+function buildBootstrapWorkspaceCommand(prompt: string) {
+  const normalized = prompt.trim();
+  if (!normalized) return null;
+
+  if (
+    /\bpwd\b/i.test(normalized) ||
+    /\bworkspace path\b/i.test(normalized) ||
+    /\bcurrent working directory\b/i.test(normalized) ||
+    /\bworking directory\b/i.test(normalized) ||
+    /\bcurrent directory\b/i.test(normalized) ||
+    /工作区路径|当前工作目录|当前目录|项目路径/.test(normalized)
+  ) {
+    return "pwd";
+  }
+
+  return null;
 }
 
 function isSuspiciousNonAsciiCommand(command: string) {
@@ -182,9 +217,11 @@ export async function* runGenericAgentRuntime(params: {
 
   const tools = buildGenericAgentTools();
   const maxTurns = params.maxTurns ?? DEFAULT_MAX_TURNS;
-  const forceInitialWorkspaceInspection = shouldForceWorkspaceInspection(params.prompt);
-  const bootstrapFiles = collectBootstrapFiles(params.prompt);
-  const bootstrapCommand = buildBootstrapReadCommand(bootstrapFiles);
+  const taskPrompt = extractPrimaryTaskPrompt(params.prompt);
+  const forceInitialWorkspaceInspection = shouldForceWorkspaceInspection(taskPrompt);
+  const bootstrapFiles = collectBootstrapFiles(taskPrompt);
+  const bootstrapCommand =
+    buildBootstrapReadCommand(bootstrapFiles) || buildBootstrapWorkspaceCommand(taskPrompt);
 
   if (bootstrapCommand) {
     const bootstrapToolCall: GenericToolCall = {
