@@ -206,6 +206,55 @@ test("probeGenericToolCallingCompatibility: retries without forced tool_choice w
   }
 });
 
+test("probeGenericToolCallingCompatibility: retries once after a transient timeout", async () => {
+  let callCount = 0;
+  mock.module("../agent-adapters", () => ({
+    createAdapter: () => ({
+      runToolCallingTurn: async () => {
+        callCount += 1;
+        if (callCount === 1) {
+          throw new Error("模型响应超时（20s）已停止。");
+        }
+        if (callCount === 2) {
+          return {
+            text: "",
+            toolCalls: [
+              {
+                id: "call-1",
+                name: "agent_probe",
+                input: { marker: "AGENT_TOOL_OK" },
+              },
+            ],
+            finishReason: "tool_use",
+          };
+        }
+        return {
+          text: "AGENT_TOOL_OK",
+          toolCalls: [],
+          finishReason: "stop",
+        };
+      },
+    }),
+    supportsToolCalling: () => true,
+  }));
+
+  try {
+    const { probeGenericToolCallingCompatibility } = await loadChannelAgentCheckService(
+      "generic-timeout-retry",
+    );
+    const result = await probeGenericToolCallingCompatibility({
+      apiKey: "test-key",
+      modelId: "qwen3.5-plus",
+      baseUrl: "https://relay.example.com",
+      protocol: "anthropic",
+    });
+    expect(result).toEqual({ success: true, mode: "generic_tool_calling" });
+    expect(callCount).toBe(3);
+  } finally {
+    mock.restore();
+  }
+});
+
 test("probeGenericToolCallingCompatibility: fails when no structured tool call is returned", async () => {
   mock.module("../agent-adapters", () => ({
     createAdapter: () => ({

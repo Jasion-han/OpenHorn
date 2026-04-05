@@ -57,7 +57,9 @@ export function getAgentCapabilityModeFromSuccessResult(
 }
 
 const AGENT_SDK_PROBE_TIMEOUT_MS = 20_000;
-const AGENT_COMPATIBILITY_SUCCESS_TTL_MS = 5 * 60_000;
+const GENERIC_TOOL_PROBE_TIMEOUT_MS = 45_000;
+const GENERIC_TOOL_PROBE_MAX_ATTEMPTS = 2;
+const AGENT_COMPATIBILITY_SUCCESS_TTL_MS = 60 * 60_000;
 const AGENT_COMPATIBILITY_FAILURE_TTL_MS = 45_000;
 const AGENT_SDK_PROBE_MARKER = "AGENT_TOOL_OK";
 const GENERIC_TOOL_PROBE_NAME = "agent_probe";
@@ -104,6 +106,15 @@ function shouldRetryGenericProbeWithoutForcedToolChoice(error: unknown) {
     message.includes("does not support being set to required") ||
     message.includes("does not support being set to required or object") ||
     message.includes("thinking mode")
+  );
+}
+
+function shouldRetryGenericProbeAfterFailure(error: string) {
+  const normalized = error.toLowerCase();
+  return (
+    normalized.includes("timeout") ||
+    normalized.includes("超时") ||
+    /provider api error \((429|502|503|504)\)/i.test(error)
   );
 }
 
@@ -275,21 +286,83 @@ export async function probeGenericToolCallingCompatibility(params: {
   modelId: string;
   baseUrl: string;
   protocol: string;
+  requestTimeoutMs?: number;
+  maxAttempts?: number;
 }): Promise<AgentCheckResult> {
   const adapter = createAdapter(params.protocol, params.apiKey, params.baseUrl);
   if (!adapterSupportsToolCalling(adapter)) {
     return { success: false, error: GENERIC_TOOL_INCOMPATIBLE_ERROR };
   }
 
-  try {
-    const runInitialTurn = async (forceToolChoice: boolean) =>
-      adapter.runToolCallingTurn({
+  const requestTimeoutMs = params.requestTimeoutMs ?? GENERIC_TOOL_PROBE_TIMEOUT_MS;
+  const maxAttempts = Math.max(1, params.maxAttempts ?? GENERIC_TOOL_PROBE_MAX_ATTEMPTS);
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    try {
+      const runInitialTurn = async (forceToolChoice: boolean) =>
+        adapter.runToolCallingTurn({
+          model: params.modelId,
+          messages: [
+            {
+              role: "user",
+              content:
+                "Call the agent_probe tool exactly once with marker AGENT_TOOL_OK. Do not answer directly. After the tool result arrives, reply with exactly AGENT_TOOL_OK.",
+            },
+          ],
+          tools: [
+            {
+              name: GENERIC_TOOL_PROBE_NAME,
+              description: "Probe tool used to verify structured tool calling support.",
+              inputSchema: {
+                type: "object",
+                properties: {
+                  marker: { type: "string" },
+                },
+                required: ["marker"],
+                additionalProperties: false,
+              },
+            },
+          ],
+          ...(forceToolChoice ? { toolChoice: { type: "tool" as const, name: GENERIC_TOOL_PROBE_NAME } } : {}),
+          requestTimeoutMs,
+        });
+
+      let result;
+      try {
+        result = await runInitialTurn(true);
+      } catch (error) {
+        if (!shouldRetryGenericProbeWithoutForcedToolChoice(error)) {
+          throw error;
+        }
+        result = await runInitialTurn(false);
+      }
+
+      const matchedCall = result.toolCalls.find(
+        (toolCall) =>
+          toolCall.name === GENERIC_TOOL_PROBE_NAME && toolCall.input.marker === AGENT_SDK_PROBE_MARKER,
+      );
+      if (!matchedCall) {
+        return { success: false, error: GENERIC_TOOL_INCOMPATIBLE_ERROR };
+      }
+
+      const followUp = await adapter.runToolCallingTurn({
         model: params.modelId,
         messages: [
           {
             role: "user",
             content:
               "Call the agent_probe tool exactly once with marker AGENT_TOOL_OK. Do not answer directly. After the tool result arrives, reply with exactly AGENT_TOOL_OK.",
+          },
+          {
+            role: "assistant",
+            content: result.text,
+            toolCalls: result.toolCalls,
+          },
+          {
+            role: "tool",
+            toolCallId: matchedCall.id,
+            name: GENERIC_TOOL_PROBE_NAME,
+            content: AGENT_SDK_PROBE_MARKER,
           },
         ],
         tools: [
@@ -306,75 +379,25 @@ export async function probeGenericToolCallingCompatibility(params: {
             },
           },
         ],
-        ...(forceToolChoice ? { toolChoice: { type: "tool" as const, name: GENERIC_TOOL_PROBE_NAME } } : {}),
-        requestTimeoutMs: AGENT_SDK_PROBE_TIMEOUT_MS,
+        requestTimeoutMs,
       });
 
-    let result;
-    try {
-      result = await runInitialTurn(true);
-    } catch (error) {
-      if (!shouldRetryGenericProbeWithoutForcedToolChoice(error)) {
-        throw error;
+      if (followUp.toolCalls.length > 0 || !followUp.text.includes(AGENT_SDK_PROBE_MARKER)) {
+        return { success: false, error: GENERIC_TOOL_INCOMPATIBLE_ERROR };
       }
-      result = await runInitialTurn(false);
+      return { success: true, mode: "generic_tool_calling" };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : GENERIC_TOOL_INCOMPATIBLE_ERROR;
+      if (attempt >= maxAttempts - 1 || !shouldRetryGenericProbeAfterFailure(message)) {
+        return {
+          success: false,
+          error: message,
+        };
+      }
     }
-
-    const matchedCall = result.toolCalls.find(
-      (toolCall) =>
-        toolCall.name === GENERIC_TOOL_PROBE_NAME && toolCall.input.marker === AGENT_SDK_PROBE_MARKER,
-    );
-    if (!matchedCall) {
-      return { success: false, error: GENERIC_TOOL_INCOMPATIBLE_ERROR };
-    }
-
-    const followUp = await adapter.runToolCallingTurn({
-      model: params.modelId,
-      messages: [
-        {
-          role: "user",
-          content:
-            "Call the agent_probe tool exactly once with marker AGENT_TOOL_OK. Do not answer directly. After the tool result arrives, reply with exactly AGENT_TOOL_OK.",
-        },
-        {
-          role: "assistant",
-          content: result.text,
-          toolCalls: result.toolCalls,
-        },
-        {
-          role: "tool",
-          toolCallId: matchedCall.id,
-          name: GENERIC_TOOL_PROBE_NAME,
-          content: AGENT_SDK_PROBE_MARKER,
-        },
-      ],
-      tools: [
-        {
-          name: GENERIC_TOOL_PROBE_NAME,
-          description: "Probe tool used to verify structured tool calling support.",
-          inputSchema: {
-            type: "object",
-            properties: {
-              marker: { type: "string" },
-            },
-            required: ["marker"],
-            additionalProperties: false,
-          },
-        },
-      ],
-      requestTimeoutMs: AGENT_SDK_PROBE_TIMEOUT_MS,
-    });
-
-    if (followUp.toolCalls.length > 0 || !followUp.text.includes(AGENT_SDK_PROBE_MARKER)) {
-      return { success: false, error: GENERIC_TOOL_INCOMPATIBLE_ERROR };
-    }
-    return { success: true, mode: "generic_tool_calling" };
-  } catch (error) {
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : GENERIC_TOOL_INCOMPATIBLE_ERROR,
-    };
   }
+
+  return { success: false, error: GENERIC_TOOL_INCOMPATIBLE_ERROR };
 }
 
 export async function checkChannelAgentCompatibility(
