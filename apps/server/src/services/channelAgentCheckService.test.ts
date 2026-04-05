@@ -159,7 +159,7 @@ test("probeGenericToolCallingCompatibility: retries without forced tool_choice w
         seenToolChoices.push(options.toolChoice);
         if (callCount === 1) {
           throw new Error(
-            "Anthropic API error (400): tool_choice does not support being set to required or object in thinking mode",
+            "Provider API error (400): tool_choice does not support being set to required or object in thinking mode",
           );
         }
         if (callCount === 2) {

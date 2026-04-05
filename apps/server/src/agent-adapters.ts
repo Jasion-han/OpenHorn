@@ -210,18 +210,19 @@ function rethrowAbortReason(signal: AbortSignal, error: unknown): never {
 
 async function readErrorDetail(response: Response): Promise<string> {
   const contentType = response.headers.get("content-type") || "";
+  const extractJsonErrorMessage = (data: unknown) => {
+    if (!isRecord(data)) return null;
+    const err = data.error;
+    if (isRecord(err) && typeof err.message === "string") return err.message;
+    if (typeof data.message === "string") return data.message;
+    if (typeof data.error === "string") return data.error;
+    if (typeof data.detail === "string") return data.detail;
+    return null;
+  };
   try {
     if (contentType.includes("application/json")) {
       const data = (await response.json().catch(() => null)) as unknown;
-      const msg = (() => {
-        if (!isRecord(data)) return null;
-        const err = data.error;
-        if (isRecord(err) && typeof err.message === "string") return err.message;
-        if (typeof data.message === "string") return data.message;
-        if (typeof data.error === "string") return data.error;
-        if (typeof data.detail === "string") return data.detail;
-        return null;
-      })();
+      const msg = extractJsonErrorMessage(data);
       if (typeof msg === "string" && msg.trim()) return msg.trim().slice(0, 800);
       return JSON.stringify(data).slice(0, 800);
     }
@@ -229,7 +230,33 @@ async function readErrorDetail(response: Response): Promise<string> {
     // ignore
   }
   const text = await response.text().catch(() => "");
+  const normalizedText = text.trim();
+  if (normalizedText.startsWith("{") || normalizedText.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(normalizedText) as unknown;
+      const msg = extractJsonErrorMessage(parsed);
+      if (typeof msg === "string" && msg.trim()) return msg.trim().slice(0, 800);
+      return JSON.stringify(parsed).slice(0, 800);
+    } catch {
+      // ignore invalid JSON-like text
+    }
+  }
   return (text || response.statusText || "Request failed").toString().slice(0, 800);
+}
+
+function formatProviderApiError(status: number | undefined, detail: string) {
+  const suffix = status ? ` (${status})` : "";
+  return `Provider API error${suffix}: ${detail}`;
+}
+
+function shouldRetryWithoutForcedToolChoice(detail: string) {
+  const normalized = detail.toLowerCase();
+  return (
+    normalized.includes("tool_choice") &&
+    (normalized.includes("does not support being set to required") ||
+      normalized.includes("does not support being set to required or object") ||
+      normalized.includes("thinking mode"))
+  );
 }
 
 function asTextContent(content: ChatMessage["content"]): string {
@@ -1103,13 +1130,18 @@ export class AnthropicAdapter implements ProviderAdapter {
 
     if (!response || !response.ok) {
       const detail = response ? await readErrorDetail(response) : "Request failed";
-      const status = response?.status ? ` (${response.status})` : "";
-      throw new Error(`Anthropic API error${status}: ${detail}`);
+      if (options.toolChoice && options.toolChoice !== "auto" && shouldRetryWithoutForcedToolChoice(detail)) {
+        return this.runToolCallingTurn({
+          ...options,
+          toolChoice: "auto",
+        });
+      }
+      throw new Error(formatProviderApiError(response?.status, detail));
     }
 
     const data = (await response.json()) as unknown;
     if (!isRecord(data)) {
-      throw new Error("Anthropic API error: Invalid JSON response");
+      throw new Error("Provider API error: Invalid JSON response");
     }
     const id = typeof data.id === "string" ? data.id : "";
     const model = typeof data.model === "string" ? data.model : options.model;
@@ -1117,7 +1149,7 @@ export class AnthropicAdapter implements ProviderAdapter {
     const first = blocks[0];
     const content = isRecord(first) && typeof first.text === "string" ? first.text : null;
     if (!content) {
-      throw new Error("Anthropic API error: Missing response content");
+      throw new Error("Provider API error: Missing response content");
     }
     const usageRaw = isRecord(data.usage) ? data.usage : null;
     const promptTokens = usageRaw ? toFiniteNumber(usageRaw.input_tokens) : null;
@@ -1200,8 +1232,14 @@ export class AnthropicAdapter implements ProviderAdapter {
     if (!response || !response.ok) {
       timeout.cleanup();
       const detail = response ? await readErrorDetail(response) : "Request failed";
-      const status = response?.status ? ` (${response.status})` : "";
-      throw new Error(`Anthropic API error${status}: ${detail}`);
+      if (options.toolChoice && options.toolChoice !== "auto" && shouldRetryWithoutForcedToolChoice(detail)) {
+        yield* this.runToolCallingTurnStream({
+          ...options,
+          toolChoice: "auto",
+        });
+        return;
+      }
+      throw new Error(formatProviderApiError(response?.status, detail));
     }
 
     const reader = response.body?.getReader();
@@ -1349,13 +1387,18 @@ export class AnthropicAdapter implements ProviderAdapter {
 
     if (!response || !response.ok) {
       const detail = response ? await readErrorDetail(response) : "Request failed";
-      const status = response?.status ? ` (${response.status})` : "";
-      throw new Error(`Anthropic API error${status}: ${detail}`);
+      if (options.toolChoice && options.toolChoice !== "auto" && shouldRetryWithoutForcedToolChoice(detail)) {
+        return this.runToolCallingTurn({
+          ...options,
+          toolChoice: "auto",
+        });
+      }
+      throw new Error(formatProviderApiError(response?.status, detail));
     }
 
     const data = (await response.json()) as unknown;
     if (!isRecord(data)) {
-      throw new Error("Anthropic API error: Invalid JSON response");
+      throw new Error("Provider API error: Invalid JSON response");
     }
 
     const contentBlocks = Array.isArray(data.content) ? data.content : [];

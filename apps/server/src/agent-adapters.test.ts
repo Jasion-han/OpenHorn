@@ -408,3 +408,76 @@ test("AnthropicAdapter runToolCallingTurn returns final text", async () => {
     globalThis.fetch = originalFetch;
   }
 });
+
+test("AnthropicAdapter runToolCallingTurn retries with auto tool choice when forced mode is rejected", async () => {
+  const originalFetch = globalThis.fetch;
+  const requests: string[] = [];
+  let callCount = 0;
+
+  globalThis.fetch = (async (_: FetchInput, init?: FetchInit) => {
+    callCount += 1;
+    requests.push(String(init?.body ?? ""));
+
+    if (callCount === 1) {
+      return new Response(
+        JSON.stringify({
+          error: {
+            message: "tool_choice does not support being set to required or object in thinking mode",
+          },
+        }),
+        {
+          status: 400,
+          headers: {
+            "Content-Type": "application/json",
+          },
+        },
+      );
+    }
+
+    return new Response(
+      JSON.stringify({
+        content: [
+          {
+            type: "tool_use",
+            id: "call_1",
+            name: "bash",
+            input: { command: "pwd" },
+          },
+        ],
+        stop_reason: "tool_use",
+      }),
+      {
+        headers: {
+          "Content-Type": "application/json",
+        },
+      },
+    );
+  }) as unknown as typeof fetch;
+
+  try {
+    const adapter = new AnthropicAdapter("test-key", "https://example.com");
+    const result = await adapter.runToolCallingTurn({
+      model: "claude-test",
+      messages: [{ role: "user", content: "run pwd" }],
+      tools: [
+        {
+          name: "bash",
+          description: "Run bash",
+          inputSchema: {
+            type: "object",
+            properties: { command: { type: "string" } },
+            required: ["command"],
+          },
+        },
+      ],
+      toolChoice: { type: "tool", name: "bash" },
+    });
+
+    expect(callCount).toBe(2);
+    expect(requests[0]).toContain('"tool_choice":{"type":"tool","name":"bash"}');
+    expect(requests[1]).toContain('"tool_choice":{"type":"auto"}');
+    expect(result.toolCalls).toEqual([{ id: "call_1", name: "bash", input: { command: "pwd" } }]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
