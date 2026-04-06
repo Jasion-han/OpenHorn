@@ -2,6 +2,7 @@ import { expect, mock, test } from "bun:test";
 
 test("POST /sessions/:id/run returns compatibility error before starting SSE run", async () => {
   let runAgentCalled = false;
+  const runtimeCalls: Array<Record<string, unknown>> = [];
 
   mock.module("../services/authService", () => ({
     verifyToken: async () => ({ userId: "user-1" }),
@@ -71,12 +72,15 @@ test("POST /sessions/:id/run returns compatibility error before starting SSE run
   }));
 
   mock.module("../services/channelAgentCheckService", () => ({
-    resolveAgentRuntime: async () => ({
-      success: false as const,
-      error:
-        "该渠道支持普通聊天接口，但不兼容 Claude Agent SDK，无法用于 Agent 模式。它仍可用于普通聊天。",
-      attempts: [],
-    }),
+    resolveAgentRuntime: async (params: Record<string, unknown>) => {
+      runtimeCalls.push(params);
+      return {
+        success: false as const,
+        error:
+          "该渠道支持普通聊天接口，但不兼容 Claude Agent SDK，无法用于 Agent 模式。它仍可用于普通聊天。",
+        attempts: [],
+      };
+    },
     getAgentCapabilityModeFromSuccessResult: () => "claude_sdk",
     describeAgentRuntimeSelection: () => "Using fallback-model",
   }));
@@ -102,6 +106,14 @@ test("POST /sessions/:id/run returns compatibility error before starting SSE run
       "该渠道支持普通聊天接口，但不兼容 Claude Agent SDK，无法用于 Agent 模式。它仍可用于普通聊天。",
     );
     expect(runAgentCalled).toBe(false);
+    expect(runtimeCalls).toEqual([
+      {
+        userId: "user-1",
+        requestedChannelId: "channel-1",
+        requestedModelId: "gpt-5.4",
+        bypassCache: true,
+      },
+    ]);
   } finally {
     mock.restore();
   }

@@ -715,6 +715,7 @@ async function streamConversationAgentReply(params: {
     userId: params.userId,
     requestedChannelId: params.channelId ?? null,
     requestedModelId: params.modelId ?? null,
+    bypassCache: true,
   });
   const resolvedChannel = runtimeResolution.success ? runtimeResolution.resolvedChannel : null;
   const effectiveModelId = resolvedChannel?.modelId ?? params.modelId ?? null;

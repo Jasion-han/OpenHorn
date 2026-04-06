@@ -340,6 +340,7 @@ export async function* runAgentWithConfig(config: AgentRuntimeConfig): AsyncGene
             userId: config.userId,
             requestedChannelId: config.channelId ?? null,
             requestedModelId: config.modelId ?? null,
+            bypassCache: true,
           })
     );
 

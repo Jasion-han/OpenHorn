@@ -679,6 +679,7 @@ async function resolveTaskExecutionContext(
           userId,
           requestedChannelId: task.channelId,
           requestedModelId: task.modelId,
+          bypassCache: true,
         });
 
   if (runtimeResolution.success === false) {
@@ -755,11 +756,15 @@ async function createTaskExecutionResponse(
 ) {
   const resolved = await resolveTaskExecutionContext(userId, taskId, mode);
   if ("error" in resolved) {
+    const normalizedError = resolved.error.toLowerCase();
     if (
       resolved.status === 400 &&
       (resolved.error.includes("不兼容") ||
         resolved.error.includes("超时") ||
-        resolved.error.includes("协议"))
+        resolved.error.includes("协议") ||
+        normalizedError.includes("incompatible") ||
+        normalizedError.includes("timeout") ||
+        normalizedError.includes("protocol"))
     ) {
       const failedAt = new Date();
       const run = await createAgentRun(userId, taskId, {
@@ -1654,6 +1659,7 @@ agent.post("/sessions/:id/run", async (c) => {
     userId: user.id,
     requestedChannelId: session.channelId || null,
     requestedModelId: session.modelId || null,
+    bypassCache: true,
   });
   if (runtimeResolution.success === false) {
     return c.text(runtimeResolution.error, 400);
