@@ -324,6 +324,9 @@ function isLowSignalFallbackOutput(text: string | null | undefined) {
   if (!normalized) return true;
 
   return (
+    normalized === "Thinking" ||
+    normalized === "Working" ||
+    normalized === "Error" ||
     normalized === "Agent 正在执行" ||
     normalized === "我先直接处理这项任务。" ||
     normalized === "正在整理最短执行路径。" ||
@@ -714,8 +717,17 @@ function buildStatusItems(streamError: string | null): StreamItem[] {
   return items;
 }
 
+function isTerminalTaskStatus(status: ApiAgentTaskDetail["task"]["status"]) {
+  return status === "completed" || status === "failed" || status === "cancelled";
+}
+
 function appendCurrentProcessItem(items: StreamItem[], detail: ApiAgentTaskDetail) {
   if (!["planning", "running", "awaiting_approval"].includes(detail.task.status)) {
+    return items;
+  }
+
+  const hasLiveOutput = items.some((item) => item.kind === "output");
+  if (hasLiveOutput) {
     return items;
   }
 
@@ -773,7 +785,7 @@ function normalizeHistoricalMetaItems(items: StreamItem[], detail: ApiAgentTaskD
 }
 
 function buildOutputItems(detail: ApiAgentTaskDetail, fallbackContent: string | null | undefined): StreamItem[] {
-  const isTerminal = ["completed", "failed", "cancelled"].includes(detail.task.status);
+  const isTerminal = isTerminalTaskStatus(detail.task.status);
   const executionText = detail.events
     .filter((event) => event.type === "execution_event" && getExecutionEventType(event) === "text")
     .map((event) => event.content ?? "")
@@ -814,6 +826,9 @@ function buildOutputItems(detail: ApiAgentTaskDetail, fallbackContent: string | 
   if (
     !fallback ||
     fallback === taskStatusSummary(detail.task.status) ||
+    fallback === "Thinking" ||
+    fallback === "Working" ||
+    fallback === "Error" ||
     fallback === "Agent 正在执行" ||
     fallback.startsWith("Execution completed.")
   ) {
@@ -1193,6 +1208,7 @@ export function DesktopAgentTaskCard({
     () => (detail ? buildStream(detail, streamError, fallbackContent) : []),
     [detail, fallbackContent, streamError],
   );
+  const isTerminal = detail ? isTerminalTaskStatus(detail.task.status) : false;
   const processItems = stream.filter((item) => item.kind === "meta");
   const outputItems = stream.filter((item) => item.kind === "output");
   const toolCount =
@@ -1207,7 +1223,8 @@ export function DesktopAgentTaskCard({
   const hasProcess = processItems.length > 0;
   const canCollapseProcess = detail?.task.status === "completed" && hasProcess;
   const showProcess = hasProcess && (!canCollapseProcess || isProcessExpanded);
-  const processToggleLabel = toolCount > 0 ? `Process · ${toolCount} tools` : "Process";
+  const processToggleLabel =
+    toolCount > 0 ? `Process · ${toolCount} ${toolCount === 1 ? "tool" : "tools"}` : "Process";
 
   if (isLoading && !detail) {
     if (shouldRenderLoadingFallback) {
@@ -1287,8 +1304,9 @@ export function DesktopAgentTaskCard({
           <div
             key={item.id}
             className={cn(
-              "text-sm leading-6 text-foreground",
-              (showProcess || canCollapseProcess) && "pt-1",
+              "text-sm leading-6",
+              isTerminal ? "text-foreground" : "text-foreground/58",
+              isTerminal && (showProcess || canCollapseProcess) && "pt-1",
             )}
           >
             {item.streaming ? (

@@ -518,7 +518,7 @@ function MessageBubble({
       />
     ) : message.mode === "agent" && isMessageStreaming ? (
       <section className="mt-0.5 px-1 pt-0 pb-1">
-        <DesktopAgentTaskMetaLine text="Thinking through the task" active />
+        <DesktopAgentTaskMetaLine text={message.agentRun?.summary?.trim() || "Thinking"} active />
       </section>
     ) : (
       <AgentRunPanel run={message.agentRun} />
@@ -910,7 +910,7 @@ export function DesktopChatArea() {
           mode === "agent"
             ? {
                 status: "partial",
-                summary: "Agent 正在执行",
+                summary: "Thinking",
                 steps: [],
               }
             : undefined,
@@ -1051,7 +1051,7 @@ export function DesktopChatArea() {
         assistantMessage.mode === "agent"
           ? {
               status: "partial",
-              summary: "Agent 正在执行",
+              summary: "Thinking",
               steps: [],
             }
           : undefined,
@@ -1140,7 +1140,7 @@ export function DesktopChatArea() {
           existingAssistantMessage.mode === "agent"
             ? {
                 status: "partial",
-                summary: "Agent 正在执行",
+                summary: "Thinking",
                 steps: [],
               }
             : undefined,
@@ -1154,12 +1154,12 @@ export function DesktopChatArea() {
         mode: userMessage.mode,
         agentRun:
           userMessage.mode === "agent"
-            ? {
-                status: "partial",
-                summary: "Agent 正在执行",
-                steps: [],
-              }
-            : undefined,
+          ? {
+              status: "partial",
+              summary: "Thinking",
+              steps: [],
+            }
+          : undefined,
         createdAt: new Date(),
       });
     }

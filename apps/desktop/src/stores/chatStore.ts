@@ -40,7 +40,7 @@ function createDraftMessage(input: {
 function createPartialAgentRun(): ApiAgentRun {
   return {
     status: "partial",
-    summary: "Agent 正在执行",
+    summary: "Thinking",
     steps: [],
   };
 }
@@ -61,7 +61,7 @@ function applyAgentEventToRun(
   if (event.type === "tool_start" || event.type === "tool_result") {
     return {
       ...base,
-      summary: "Agent 正在执行",
+      summary: "Working",
       steps: [
         ...base.steps,
         {
@@ -79,7 +79,7 @@ function applyAgentEventToRun(
     return {
       ...base,
       status: "failed",
-      summary: "Agent 执行失败",
+      summary: "Error",
       error: message,
       steps: [...base.steps, { type: "error", content: message }],
     };
@@ -505,7 +505,7 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
                   ? {
                       ...message.agentRun,
                       status: "failed",
-                      summary: "Agent 执行失败",
+                      summary: "Error",
                       error,
                     }
                   : message.agentRun,
