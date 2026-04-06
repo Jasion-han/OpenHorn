@@ -924,7 +924,7 @@ export function DesktopAgentTaskMetaLine({
           }}
         />
         <span className="min-w-0">
-          <span className="mr-2 opacity-24">{active ? ">" : "·"}</span>
+          <span className={cn("mr-2", active ? "opacity-38" : "opacity-24")}>·</span>
           <span style={active ? getActiveMetaTextStyle() : undefined}>
             {text}
           </span>
@@ -1223,6 +1223,10 @@ export function DesktopAgentTaskCard({
   const hasProcess = processItems.length > 0;
   const canCollapseProcess = detail?.task.status === "completed" && hasProcess;
   const showProcess = hasProcess && (!canCollapseProcess || isProcessExpanded);
+  const fallbackProcessText =
+    detail && !showProcess && outputItems.length === 0 && !isTerminal
+      ? message?.agentRun?.summary?.trim() || describeTaskStatus(detail.task.status).text
+      : null;
   const processToggleLabel =
     toolCount > 0 ? `Process · ${toolCount} ${toolCount === 1 ? "tool" : "tools"}` : "Process";
 
@@ -1300,6 +1304,7 @@ export function DesktopAgentTaskCard({
             ))}
           </div>
         ) : null}
+        {fallbackProcessText ? <DesktopAgentTaskMetaLine text={fallbackProcessText} active /> : null}
         {outputItems.map((item) => (
           <div
             key={item.id}
