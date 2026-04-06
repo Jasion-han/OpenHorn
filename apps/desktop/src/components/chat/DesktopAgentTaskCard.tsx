@@ -240,6 +240,8 @@ function describeToolResult(toolName: string | null | undefined, content: string
 
 function describeTaskStatus(status: ApiAgentTaskDetail["task"]["status"]) {
   switch (status) {
+    case "draft":
+      return { text: "Thinking", tone: "default" as const };
     case "planning":
       return { text: "Thinking", tone: "default" as const };
     case "awaiting_approval":
@@ -302,6 +304,8 @@ function describeApprovalResolution(event: ApiAgentTaskEvent) {
 
 function taskStatusSummary(status: ApiAgentTaskDetail["task"]["status"]) {
   switch (status) {
+    case "draft":
+      return "thinking";
     case "planning":
       return "building plan";
     case "awaiting_approval":
@@ -361,6 +365,10 @@ function buildTaskMessageSummary(detail: ApiAgentTaskDetail) {
     finalResultCitations,
   ).trim();
   if (detail.task.status === "completed" && finalResult) return finalResult;
+
+  if (detail.task.status === "draft" && detail.task.autoStart) {
+    return "Thinking";
+  }
 
   const preview = sanitizeDisplayContent(
     detail.task.insight?.previewText ?? "",
@@ -722,7 +730,11 @@ function isTerminalTaskStatus(status: ApiAgentTaskDetail["task"]["status"]) {
 }
 
 function appendCurrentProcessItem(items: StreamItem[], detail: ApiAgentTaskDetail) {
-  if (!["planning", "running", "awaiting_approval"].includes(detail.task.status)) {
+  if (!["draft", "planning", "running", "awaiting_approval"].includes(detail.task.status)) {
+    return items;
+  }
+
+  if (detail.task.status === "draft" && !detail.task.autoStart) {
     return items;
   }
 
