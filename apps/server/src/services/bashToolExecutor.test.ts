@@ -62,7 +62,7 @@ test("formatBashToolResult truncates oversized stdout blocks", () => {
   expect(formatted).toContain("lines omitted");
 });
 
-test("summarizeBashToolResult returns ok for successful commands", () => {
+test("summarizeBashToolResult returns stdout summary for successful commands", () => {
   expect(
     summarizeBashToolResult({
       command: "printf 'hello'",
@@ -72,7 +72,20 @@ test("summarizeBashToolResult returns ok for successful commands", () => {
       exitCode: 0,
       success: true,
     }),
-  ).toBe("ok");
+  ).toBe("hello");
+});
+
+test("summarizeBashToolResult returns no-output marker when successful command prints nothing", () => {
+  expect(
+    summarizeBashToolResult({
+      command: "true",
+      cwd: process.cwd(),
+      stdout: "",
+      stderr: "",
+      exitCode: 0,
+      success: true,
+    }),
+  ).toBe("(no output)");
 });
 
 test("summarizeBashToolResult includes exit code and first error line for failures", () => {

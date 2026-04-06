@@ -25,6 +25,16 @@ function truncateSingleLine(value: string, maxChars = 120) {
   return normalized.length > maxChars ? `${normalized.slice(0, maxChars - 3)}...` : normalized;
 }
 
+function summarizeOutputLines(value: string, maxLines = 2) {
+  const lines = value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, maxLines)
+    .map((line) => truncateSingleLine(line, 96));
+  return lines;
+}
+
 export async function executeBashTool(params: {
   command: string;
   cwd: string;
@@ -108,10 +118,14 @@ export function formatBashToolResult(result: BashToolExecutionResult) {
 
 export function summarizeBashToolResult(result: BashToolExecutionResult) {
   if (result.success) {
-    if (!result.stdout.trim() && !result.stderr.trim()) {
-      return "ok";
+    const lines = [
+      ...summarizeOutputLines(result.stdout),
+      ...summarizeOutputLines(result.stderr),
+    ].slice(0, 2);
+    if (lines.length > 0) {
+      return lines.join(" · ");
     }
-    return "ok";
+    return "(no output)";
   }
 
   const stderrLine = truncateSingleLine(result.stderr);

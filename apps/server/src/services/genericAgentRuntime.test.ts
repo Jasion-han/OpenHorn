@@ -316,8 +316,9 @@ test("runGenericAgentRuntime bootstraps explicit local file reads before the fir
   expect(events[1]).toMatchObject({
     type: "tool_result",
     toolName: "Bash",
-    content: "ok",
+    content: expect.any(String),
   });
+  expect((events[1] as { content?: string }).content).not.toBe("ok");
   expect(adapter.calls[0]?.toolChoice).toBe("auto");
 });
 
@@ -359,7 +360,7 @@ test("runGenericAgentRuntime bootstraps pwd from wrapped execution instructions 
   expect(events[1]).toMatchObject({
     type: "tool_result",
     toolName: "Bash",
-    content: "ok",
+    content: process.cwd(),
   });
   expect(events[2]).toEqual({ type: "meta" });
   expect(events[3]).toEqual({ type: "text", content: "finished", streamed: false });
