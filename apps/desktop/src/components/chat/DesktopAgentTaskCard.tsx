@@ -66,6 +66,70 @@ function getTaskFinalResultCitations(detail: ApiAgentTaskDetail) {
   return getArtifactCitations(getTaskFinalResultArtifact(detail));
 }
 
+function translateAgentSystemText(content: string) {
+  const trimmed = content.trim();
+  if (!trimmed) return trimmed;
+
+  const normalizedExecution = trimmed
+    .replace(/^执行失败：\s*/, "Execution failed: ")
+    .replace("模型未返回有效结果", "model returned no valid result")
+    .replace("模型未返回最终结果", "model returned no final result")
+    .replace("超过最大工具调用轮数", "exceeded the maximum tool-call rounds")
+    .replace("当前渠道可能不兼容 Claude Agent SDK。", "the current channel may be incompatible with Claude Agent SDK.")
+    .replace("当前渠道或模型可能不兼容 Claude Agent SDK。", "the current channel or model may be incompatible with Claude Agent SDK.");
+  if (normalizedExecution !== trimmed) return normalizedExecution;
+
+  const compatibilityMatch = trimmed.match(
+    /^该渠道支持普通聊天接口，但不兼容(.+?)，无法用于 Agent 模式。它仍可用于普通聊天。$/,
+  );
+  if (compatibilityMatch) {
+    const target =
+      compatibilityMatch[1] === "当前 Agent 工具运行协议"
+        ? "the current Agent tool-calling protocol"
+        : compatibilityMatch[1];
+    return `This channel supports regular chat but is incompatible with ${target}. It can still be used in chat mode.`;
+  }
+
+  const firstOutputTimeoutMatch = trimmed.match(
+    /^模型长时间无响应（(\d+)s）已停止。可能当前渠道不兼容 Agent 运行协议，请检查 Base URL、模型和鉴权配置。$/,
+  );
+  if (firstOutputTimeoutMatch) {
+    return `Model produced no output for ${firstOutputTimeoutMatch[1]}s and was stopped. The current channel may be incompatible with the Agent protocol. Check the Base URL, model, and API key.`;
+  }
+
+  const idleTimeoutMatch = trimmed.match(
+    /^运行过程中长时间无响应（(\d+)s）已停止。请检查渠道配置或减少任务复杂度后重试。$/,
+  );
+  if (idleTimeoutMatch) {
+    return `The run produced no activity for ${idleTimeoutMatch[1]}s and was stopped. Check the channel configuration or reduce task complexity and retry.`;
+  }
+
+  const totalTimeoutMatch = trimmed.match(
+    /^运行总时长超时（(\d+)s）已停止。请检查渠道配置或拆分任务后重试。$/,
+  );
+  if (totalTimeoutMatch) {
+    return `The run exceeded the total time limit (${totalTimeoutMatch[1]}s) and was stopped. Check the channel configuration or split the task and retry.`;
+  }
+
+  if (trimmed === "未配置可用的默认渠道/默认模型。请先在设置中完成配置。") {
+    return "No default channel or model is configured. Configure one in Settings first.";
+  }
+
+  if (trimmed === "网络错误：当前渠道可能不兼容 Claude Agent SDK。请检查 Base URL、模型和鉴权配置。") {
+    return "Network error: the current channel may be incompatible with Claude Agent SDK. Check the Base URL, model, and API key.";
+  }
+
+  if (trimmed === "请求无效：当前渠道或模型可能不兼容 Claude Agent SDK。") {
+    return "Invalid request: the current channel or model may be incompatible with Claude Agent SDK.";
+  }
+
+  if (trimmed === "未检测到真实 Bash 工具调用，当前渠道可能只支持普通对话，不兼容 Agent 工具执行。") {
+    return "No real Bash tool call was detected. The current channel may support plain chat only and be incompatible with Agent tool execution.";
+  }
+
+  return trimmed;
+}
+
 function getToolApprovalPayload(payload: unknown): ToolApprovalPayload | null {
   if (!isRecord(payload)) return null;
   return {
@@ -183,13 +247,17 @@ function summarizeToolInput(toolInput: ApiAgentTaskEvent["toolInput"]) {
 }
 
 function summarizeProcessDetail(content: string | null | undefined, limit = 96) {
-  const normalized = (content ?? "").trim().replace(/\s+/g, " ");
+  const normalized = translateAgentSystemText(content ?? "")
+    .trim()
+    .replace(/\s+/g, " ");
   if (!normalized) return null;
   return normalized.length > limit ? `${normalized.slice(0, limit - 3)}...` : normalized;
 }
 
 function normalizeProcessText(content: string | null | undefined) {
-  const normalized = sanitizeDisplayContent(content ?? "").trim().replace(/\s+/g, " ");
+  const normalized = translateAgentSystemText(sanitizeDisplayContent(content ?? ""))
+    .trim()
+    .replace(/\s+/g, " ");
   return normalized || null;
 }
 
@@ -373,9 +441,10 @@ function buildTaskMessageSummary(detail: ApiAgentTaskDetail) {
   const preview = sanitizeDisplayContent(
     detail.task.insight?.previewText ?? "",
     finalResultCitations,
-  ).trim();
+  )
+    .trim();
 
-  return preview || taskStatusSummary(detail.task.status);
+  return translateAgentSystemText(preview) || taskStatusSummary(detail.task.status);
 }
 
 function isLowSignalTaskSummary(text: string | null | undefined, detail: ApiAgentTaskDetail) {
