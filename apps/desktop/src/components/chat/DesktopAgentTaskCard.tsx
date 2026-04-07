@@ -142,6 +142,17 @@ function getTaskFinalResultCitations(detail: ApiAgentTaskDetail) {
   return getArtifactCitations(getTaskFinalResultArtifact(detail));
 }
 
+const LEGACY_AGENT_TEXT_EXACT: Record<string, string> = {
+  "No default channel or model is configured. Configure one in Settings first.":
+    "未配置可用的默认渠道/默认模型。请先在设置中完成配置。",
+  "Network error: the current channel may be incompatible with Claude Agent SDK. Check the Base URL, model, and API key.":
+    "网络错误：当前渠道可能不兼容 Claude Agent SDK。请检查 Base URL、模型和鉴权配置。",
+  "Invalid request: the current channel or model may be incompatible with Claude Agent SDK.":
+    "请求无效：当前渠道或模型可能不兼容 Claude Agent SDK。",
+  "No real Bash tool call was detected. The current channel may support plain chat only and be incompatible with Agent tool execution.":
+    "未检测到真实 Bash 工具调用，当前渠道可能只支持普通对话，不兼容 Agent 工具执行。",
+};
+
 function translateAgentSystemText(content: string) {
   const trimmed = content.trim();
   if (!trimmed) return trimmed;
@@ -162,10 +173,10 @@ function translateAgentSystemText(content: string) {
       );
   }
 
-  const compatibilityMatch = trimmed.match(
-    /^This channel supports regular chat but is incompatible with (.+?)\. It can still be used in chat mode\.$/,
+  const compatibilityMatch = /^This channel supports regular chat but is incompatible with (.+?)\. It can still be used in chat mode\.$/.exec(
+    trimmed,
   );
-  if (compatibilityMatch) {
+  if (compatibilityMatch?.[1]) {
     const target =
       compatibilityMatch[1] === "the current Agent tool-calling protocol"
         ? "当前 Agent 工具运行协议"
@@ -173,48 +184,28 @@ function translateAgentSystemText(content: string) {
     return `该渠道支持普通聊天接口，但不兼容 ${target}，无法用于 Agent 模式。它仍可用于普通聊天。`;
   }
 
-  const firstOutputTimeoutMatch = trimmed.match(
-    /^Model produced no output for (\d+)s and was stopped\. The current channel may be incompatible with the Agent protocol\. Check the Base URL, model, and API key\.$/,
+  const firstOutputTimeoutMatch = /^Model produced no output for (\d+)s and was stopped\. The current channel may be incompatible with the Agent protocol\. Check the Base URL, model, and API key\.$/.exec(
+    trimmed,
   );
-  if (firstOutputTimeoutMatch) {
+  if (firstOutputTimeoutMatch?.[1]) {
     return `模型长时间无响应（${firstOutputTimeoutMatch[1]}s）已停止。可能当前渠道不兼容 Agent 运行协议，请检查 Base URL、模型和鉴权配置。`;
   }
 
-  const idleTimeoutMatch = trimmed.match(
-    /^The run produced no activity for (\d+)s and was stopped\. Check the channel configuration or reduce task complexity and retry\.$/,
+  const idleTimeoutMatch = /^The run produced no activity for (\d+)s and was stopped\. Check the channel configuration or reduce task complexity and retry\.$/.exec(
+    trimmed,
   );
-  if (idleTimeoutMatch) {
+  if (idleTimeoutMatch?.[1]) {
     return `运行过程中长时间无响应（${idleTimeoutMatch[1]}s）已停止。请检查渠道配置或减少任务复杂度后重试。`;
   }
 
-  const totalTimeoutMatch = trimmed.match(
-    /^The run exceeded the total time limit \((\d+)s\) and was stopped\. Check the channel configuration or split the task and retry\.$/,
+  const totalTimeoutMatch = /^The run exceeded the total time limit \((\d+)s\) and was stopped\. Check the channel configuration or split the task and retry\.$/.exec(
+    trimmed,
   );
-  if (totalTimeoutMatch) {
+  if (totalTimeoutMatch?.[1]) {
     return `运行总时长超时（${totalTimeoutMatch[1]}s）已停止。请检查渠道配置或拆分任务后重试。`;
   }
 
-  if (trimmed === "No default channel or model is configured. Configure one in Settings first.") {
-    return "未配置可用的默认渠道/默认模型。请先在设置中完成配置。";
-  }
-
-  if (
-    trimmed ===
-    "Network error: the current channel may be incompatible with Claude Agent SDK. Check the Base URL, model, and API key."
-  ) {
-    return "网络错误：当前渠道可能不兼容 Claude Agent SDK。请检查 Base URL、模型和鉴权配置。";
-  }
-
-  if (trimmed === "Invalid request: the current channel or model may be incompatible with Claude Agent SDK.") {
-    return "请求无效：当前渠道或模型可能不兼容 Claude Agent SDK。";
-  }
-
-  if (
-    trimmed ===
-    "No real Bash tool call was detected. The current channel may support plain chat only and be incompatible with Agent tool execution."
-  ) {
-    return "未检测到真实 Bash 工具调用，当前渠道可能只支持普通对话，不兼容 Agent 工具执行。";
-  }
+  if (LEGACY_AGENT_TEXT_EXACT[trimmed]) return LEGACY_AGENT_TEXT_EXACT[trimmed];
 
   return trimmed;
 }
@@ -425,15 +416,14 @@ function describeTaskStatus(status: ApiAgentTaskDetail["task"]["status"]) {
 }
 
 function getTaskStatusValue(event: ApiAgentTaskEvent) {
-  if (!isRecord(event.metadata)) return null;
-  return typeof event.metadata.status === "string" ? event.metadata.status : null;
+  return getEventMetadata(event).status ?? null;
 }
 
 function getApprovalEventMeta(event: ApiAgentTaskEvent) {
-  if (!isRecord(event.metadata)) return { type: null, status: null };
+  const metadata = getEventMetadata(event);
   return {
-    type: typeof event.metadata.approvalType === "string" ? event.metadata.approvalType : null,
-    status: typeof event.metadata.status === "string" ? event.metadata.status : null,
+    type: metadata.approvalType ?? null,
+    status: metadata.status ?? null,
   };
 }
 
@@ -541,7 +531,7 @@ function buildTaskMessageSummary(detail: ApiAgentTaskDetail) {
   )
     .trim();
 
-  return translateAgentSystemText(preview) || taskStatusSummary(detail.task.status);
+  return normalizeAgentDisplayText(preview) || taskStatusSummary(detail.task.status);
 }
 
 function isLowSignalTaskSummary(text: string | null | undefined, detail: ApiAgentTaskDetail) {
@@ -889,7 +879,7 @@ function buildStatusItems(streamError: string | null): StreamItem[] {
       id: "stream-error",
       kind: "meta",
       label: "error",
-      text: streamError,
+      text: normalizeAgentDisplayText(streamError) || streamError,
       tone: "danger",
     });
   }
