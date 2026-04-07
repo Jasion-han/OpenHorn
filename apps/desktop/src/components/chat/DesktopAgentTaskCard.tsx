@@ -9,6 +9,7 @@ import type {
   ApiAgentApproval,
   ApiAgentArtifact,
   ApiAgentRun,
+  ApiProviderErrorKind,
   ApiAgentTaskDetail,
   ApiAgentTaskEvent,
   ApiCitation,
@@ -42,6 +43,17 @@ type StreamItem = {
   streaming?: boolean;
 };
 
+type AgentEventMetadata = {
+  eventType?: string | null;
+  status?: string | null;
+  stage?: string | null;
+  errorCode?: ApiProviderErrorKind;
+  retryable?: boolean;
+  rawError?: string | null;
+  approvalType?: string | null;
+  live?: boolean;
+};
+
 function extractErrorMessage(error: unknown, fallback = "task failed") {
   if (typeof error === "string") return error.trim() || fallback;
   if (error instanceof Error) return error.message.trim() || fallback;
@@ -50,6 +62,70 @@ function extractErrorMessage(error: unknown, fallback = "task failed") {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function getEventMetadata(event: ApiAgentTaskEvent): AgentEventMetadata {
+  if (!isRecord(event.metadata)) return {};
+  return {
+    eventType: typeof event.metadata.eventType === "string" ? event.metadata.eventType : null,
+    status: typeof event.metadata.status === "string" ? event.metadata.status : null,
+    stage: typeof event.metadata.stage === "string" ? event.metadata.stage : null,
+    errorCode: typeof event.metadata.errorCode === "string" ? (event.metadata.errorCode as ApiProviderErrorKind) : undefined,
+    retryable: typeof event.metadata.retryable === "boolean" ? event.metadata.retryable : undefined,
+    rawError: typeof event.metadata.rawError === "string" ? event.metadata.rawError : null,
+    approvalType: typeof event.metadata.approvalType === "string" ? event.metadata.approvalType : null,
+    live: Boolean(event.metadata.live),
+  };
+}
+
+function isLikelyRawProviderError(text: string) {
+  const lower = text.trim().toLowerCase();
+  if (!lower) return false;
+  return (
+    lower.startsWith("provider api error") ||
+    lower.includes("ssl handshake failed") ||
+    lower.includes("hour allocated quota exceeded") ||
+    lower.includes("token quota is not enough") ||
+    lower.includes("no cookie available") ||
+    lower.includes("bad gateway") ||
+    lower.includes("gateway timeout") ||
+    lower.includes("service unavailable") ||
+    lower.includes("invalid api key")
+  );
+}
+
+function formatStructuredAgentError(
+  errorCode: ApiProviderErrorKind | undefined,
+  retryable?: boolean,
+) {
+  if (!errorCode) return null;
+
+  const base =
+    errorCode === "quota_exhausted"
+      ? "配额不足或触发限流"
+      : errorCode === "ssl_handshake_failed"
+        ? "TLS/SSL 握手失败"
+        : errorCode === "gateway_failed"
+          ? "上游网关异常"
+          : errorCode === "auth_failed"
+            ? "鉴权失败"
+            : errorCode === "timeout"
+              ? "连接或响应超时"
+              : errorCode === "protocol_incompatible"
+                ? "当前渠道不兼容 Agent 运行协议"
+                : errorCode === "model_not_found"
+                  ? "模型不存在、不可用或已被禁用"
+                  : errorCode === "server_failed"
+                    ? "上游服务异常"
+                    : errorCode === "network_failed"
+                      ? "网络连接失败"
+                      : errorCode === "request_failed"
+                        ? "请求失败"
+                        : null;
+
+  if (!base) return null;
+  if (!retryable) return base;
+  return `${base}，可稍后重试`;
 }
 
 function getArtifactCitations(artifact: ApiAgentArtifact | null | undefined): ApiCitation[] | undefined {
@@ -143,6 +219,17 @@ function translateAgentSystemText(content: string) {
   return trimmed;
 }
 
+function normalizeAgentDisplayText(content: string | null | undefined, metadata?: AgentEventMetadata) {
+  const translated = translateAgentSystemText(sanitizeDisplayContent(content ?? ""))
+    .trim()
+    .replace(/\s+/g, " ");
+  const structured = formatStructuredAgentError(metadata?.errorCode, metadata?.retryable);
+  if (structured && (!translated || isLikelyRawProviderError(translated))) {
+    return structured;
+  }
+  return translated || structured || null;
+}
+
 function getToolApprovalPayload(payload: unknown): ToolApprovalPayload | null {
   if (!isRecord(payload)) return null;
   return {
@@ -214,7 +301,7 @@ function summarizeApprovalToolInput(toolInput: Record<string, unknown> | undefin
 }
 
 function getExecutionEventType(event: ApiAgentTaskEvent) {
-  return isRecord(event.metadata) ? event.metadata.eventType : null;
+  return getEventMetadata(event).eventType ?? null;
 }
 
 function summarizeToolInput(toolInput: ApiAgentTaskEvent["toolInput"]) {
@@ -260,17 +347,13 @@ function summarizeToolInput(toolInput: ApiAgentTaskEvent["toolInput"]) {
 }
 
 function summarizeProcessDetail(content: string | null | undefined, limit = 96) {
-  const normalized = translateAgentSystemText(content ?? "")
-    .trim()
-    .replace(/\s+/g, " ");
+  const normalized = normalizeAgentDisplayText(content);
   if (!normalized) return null;
   return normalized.length > limit ? `${normalized.slice(0, limit - 3)}...` : normalized;
 }
 
-function normalizeProcessText(content: string | null | undefined) {
-  const normalized = translateAgentSystemText(sanitizeDisplayContent(content ?? ""))
-    .trim()
-    .replace(/\s+/g, " ");
+function normalizeProcessText(content: string | null | undefined, metadata?: AgentEventMetadata) {
+  const normalized = normalizeAgentDisplayText(content, metadata);
   return normalized || null;
 }
 
@@ -612,10 +695,11 @@ function buildExecutionItems(events: ApiAgentTaskEvent[]) {
 
   for (const event of events) {
     if (event.type === "error") {
+      const metadata = getEventMetadata(event);
       items.push({
         id: event.id,
         kind: "meta",
-        text: summarizeProcessDetail(event.content) || "Stopped after an error",
+        text: summarizeProcessDetail(normalizeProcessText(event.content, metadata)) || "执行过程中发生错误",
         tone: "danger",
       });
       continue;
@@ -625,7 +709,7 @@ function buildExecutionItems(events: ApiAgentTaskEvent[]) {
 
     const eventType = getExecutionEventType(event);
     if (eventType === "thought") {
-      const text = normalizeProcessText(event.content);
+      const text = normalizeProcessText(event.content, getEventMetadata(event));
       if (text) {
         items.push({
           id: event.id,
@@ -672,7 +756,7 @@ function buildExecutionItems(events: ApiAgentTaskEvent[]) {
     }
 
     if (eventType === "text" || eventType === "text_delta") {
-      const text = normalizeProcessText(event.content);
+      const text = normalizeProcessText(event.content, getEventMetadata(event));
       if (text) {
         items.push({
           id: event.id,
@@ -704,11 +788,12 @@ function buildTimelineItems(detail: ApiAgentTaskDetail): StreamItem[] {
         !(statusValue === "failed" && hasExplicitErrorEvent)
       ) {
         const status = describeTaskStatus(statusValue as ApiAgentTaskDetail["task"]["status"]);
+        const metadata = getEventMetadata(event);
         items.push({
           id: event.id,
           kind: "meta",
           label: statusValue === "failed" || statusValue === "cancelled" ? "error" : "thinking",
-          text: status.text,
+          text: formatStructuredAgentError(metadata.errorCode, metadata.retryable) || status.text,
           tone: status.tone,
         });
       }
@@ -746,11 +831,12 @@ function buildTimelineItems(detail: ApiAgentTaskDetail): StreamItem[] {
     }
 
     if (event.type === "error") {
+      const metadata = getEventMetadata(event);
       items.push({
         id: event.id,
         kind: "meta",
         label: "error",
-        text: summarizeProcessDetail(event.content) || "Stopped after an error",
+        text: summarizeProcessDetail(normalizeProcessText(event.content, metadata)) || "执行过程中发生错误",
         tone: "danger",
       });
     }

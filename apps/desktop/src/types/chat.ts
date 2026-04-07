@@ -1,5 +1,18 @@
 export type ChatMode = "chat" | "agent";
 
+export type ApiProviderErrorKind =
+  | "quota_exhausted"
+  | "ssl_handshake_failed"
+  | "gateway_failed"
+  | "auth_failed"
+  | "timeout"
+  | "protocol_incompatible"
+  | "model_not_found"
+  | "request_failed"
+  | "server_failed"
+  | "network_failed"
+  | "unknown";
+
 export interface ApiChannelModel {
   id: string;
   channelId: string;
@@ -258,6 +271,14 @@ export interface ApiAgentTaskEvent {
   toolInput: unknown;
   metadata: unknown;
   createdAt: string;
+}
+
+export interface ApiAgentCheckResult {
+  success: boolean;
+  error?: string;
+  errorCode?: ApiProviderErrorKind;
+  retryable?: boolean;
+  rawError?: string;
 }
 
 export interface ApiAgentTaskRuntime {

@@ -38,7 +38,7 @@ import {
 import { notifyError, notifySuccess, notifyWarning } from "../../lib/notify";
 import { createServerApi } from "../../lib/serverApi";
 import { useChatStore } from "../../stores/chatStore";
-import type { Channel, ChannelModel } from "../../types/chat";
+import type { ApiAgentCheckResult, Channel, ChannelModel } from "../../types/chat";
 import { DesktopProviderLogo } from "../chat/DesktopProviderLogo";
 import { ChannelEditorModal, type SettingsNotice } from "./ChannelEditorModal";
 
@@ -49,6 +49,33 @@ function sortChannels(a: Channel, b: Channel) {
   if (a.isDefault !== b.isDefault) return a.isDefault ? -1 : 1;
   if (a.enabled !== b.enabled) return a.enabled ? -1 : 1;
   return a.name.localeCompare(b.name);
+}
+
+function getAgentCheckErrorTitle(result: ApiAgentCheckResult) {
+  switch (result.errorCode) {
+    case "model_not_found":
+      return "模型不可用";
+    case "auth_failed":
+      return "鉴权失败";
+    case "quota_exhausted":
+      return "配额不足";
+    case "ssl_handshake_failed":
+      return "SSL 握手失败";
+    case "gateway_failed":
+      return "网关异常";
+    case "timeout":
+      return "请求超时";
+    case "protocol_incompatible":
+      return "协议不兼容";
+    default:
+      return "Agent 检查失败";
+  }
+}
+
+function formatAgentCheckErrorMessage(result: ApiAgentCheckResult) {
+  const base = (result.error || "当前配置不能用于 Agent。").trim();
+  if (!result.retryable) return base;
+  return base.includes("请稍后重试") ? base : `${base} 可稍后重试。`;
 }
 
 export function ChannelSettings() {
@@ -235,15 +262,17 @@ export function ChannelSettings() {
         });
         notifySuccess("Agent 可用", `模型 ${trimmed} 已通过 Agent 兼容性检查。`);
       } else {
+        const title = getAgentCheckErrorTitle(result);
+        const message = formatAgentCheckErrorMessage(result);
         setChannelNotice((prev) => ({
           ...prev,
           [channelId]: {
             kind: "error",
-            title: "Agent 检查失败",
-            message: result.error || "当前配置不能用于 Agent。",
+            title,
+            message,
           },
         }));
-        notifyError("Agent 检查失败", result.error || "当前配置不能用于 Agent。");
+        notifyError(title, message);
       }
       closeAgentCheck();
     });

@@ -1,5 +1,6 @@
 import type {
   ApiAgentApprovalStatus,
+  ApiAgentCheckResult,
   ApiChannel,
   ApiChannelModel,
   ApiConversation,
@@ -86,7 +87,7 @@ export interface ServerApi {
     ) => Promise<{ models: ApiChannelModel[] }>;
     setDefault: (id: string) => Promise<{ success: boolean }>;
     setDefaultModel: (id: string, modelId: string) => Promise<{ success: boolean }>;
-    agentCheck: (id: string, data: { modelId: string }) => Promise<{ success: boolean; error?: string }>;
+    agentCheck: (id: string, data: { modelId: string }) => Promise<ApiAgentCheckResult>;
   };
   settings: {
     get: (keys: string[]) => Promise<{ settings: ApiSettingsMap }>;
