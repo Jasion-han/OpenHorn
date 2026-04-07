@@ -1130,6 +1130,7 @@ export function DesktopAgentTaskCard({
   const [busyAction, setBusyAction] = useState<"execute" | "retry" | "continue" | null>(null);
   const [streamError, setStreamError] = useState<string | null>(null);
   const [isProcessExpanded, setIsProcessExpanded] = useState(false);
+  const [isExecutionStreaming, setIsExecutionStreaming] = useState(false);
   const hasStreamedTextRef = useRef(false);
   const message = useChatStore((state) => state.messages.find((item) => item.id === messageId));
 
@@ -1206,7 +1207,11 @@ export function DesktopAgentTaskCard({
   }, [taskId]);
 
   useEffect(() => {
-    if (!detail || (detail.task.status !== "running" && detail.task.status !== "awaiting_approval")) {
+    if (
+      !detail ||
+      isExecutionStreaming ||
+      (detail.task.status !== "running" && detail.task.status !== "awaiting_approval")
+    ) {
       return;
     }
 
@@ -1217,10 +1222,15 @@ export function DesktopAgentTaskCard({
     return () => {
       window.clearInterval(timer);
     };
-  }, [detail?.task.status, taskId]);
+  }, [detail?.task.status, isExecutionStreaming, taskId]);
 
   useEffect(() => {
-    if (!detail || detail.task.status !== "draft" || !autoExecutingTaskIds.has(detail.task.id)) {
+    if (
+      !detail ||
+      isExecutionStreaming ||
+      detail.task.status !== "draft" ||
+      !autoExecutingTaskIds.has(detail.task.id)
+    ) {
       return;
     }
 
@@ -1231,7 +1241,7 @@ export function DesktopAgentTaskCard({
     return () => {
       window.clearInterval(timer);
     };
-  }, [detail?.task.id, detail?.task.status, taskId]);
+  }, [detail?.task.id, detail?.task.status, isExecutionStreaming, taskId]);
 
   useEffect(() => {
     if (detail && detail.task.status !== "draft") {
@@ -1263,7 +1273,9 @@ export function DesktopAgentTaskCard({
   ) => {
     if (!detail) return;
     setBusyAction(action);
+    setIsExecutionStreaming(true);
     setStreamError(null);
+    let refreshedAfterDone = false;
 
     try {
       await streamAgentTaskExecution(
@@ -1279,14 +1291,6 @@ export function DesktopAgentTaskCard({
                     }
                   : current,
               );
-              if (
-                event.status === "awaiting_approval" ||
-                event.status === "completed" ||
-                event.status === "failed"
-              ) {
-                const refreshed = await loadDetail(true);
-                if (refreshed) setDetail(refreshed);
-              }
               return;
             }
 
@@ -1352,7 +1356,11 @@ export function DesktopAgentTaskCard({
             }
 
             if (event.type === "done") {
-              await loadDetail(true);
+              const refreshed = await loadDetail(true);
+              if (refreshed) {
+                setDetail(refreshed);
+              }
+              refreshedAfterDone = true;
             }
           },
           onError: (message) => {
@@ -1365,8 +1373,10 @@ export function DesktopAgentTaskCard({
         },
       );
 
-      const refreshed = await loadDetail(true);
-      if (refreshed) setDetail(refreshed);
+      if (!refreshedAfterDone) {
+        const refreshed = await loadDetail(true);
+        if (refreshed) setDetail(refreshed);
+      }
     } catch (error) {
       const message = extractErrorMessage(error);
       setStreamError(message);
@@ -1374,6 +1384,7 @@ export function DesktopAgentTaskCard({
       const refreshed = await loadDetail(true);
       if (refreshed) setDetail(refreshed);
     } finally {
+      setIsExecutionStreaming(false);
       setBusyAction(null);
     }
   };
