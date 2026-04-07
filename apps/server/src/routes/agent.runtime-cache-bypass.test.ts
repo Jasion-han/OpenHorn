@@ -313,3 +313,156 @@ test("task execute preserves live search failure instead of falling back to mode
   expect(runStatuses).toContain("failed");
   expect(taskStatuses).toContain("failed");
 });
+
+test("task execute persists pre-execution runtime resolution failures as failed runs", async () => {
+  const createdRuns: Array<Record<string, unknown>> = [];
+  const createdEvents: Array<Record<string, unknown>> = [];
+  const taskStatuses: string[] = [];
+  let runAgentCalled = false;
+
+  const task = {
+    id: "task-1",
+    userId: "user-1",
+    conversationId: "conv-1",
+    channelId: "channel-1",
+    modelId: "qwen3.5-plus",
+    title: "Quota limited task",
+    goal: "Use the selected channel to finish the task.",
+    attachments: [],
+    complexity: "standard" as const,
+    uxMode: "compact" as const,
+    requiresPlanApproval: true,
+    autoStart: true,
+    status: "draft" as const,
+    insight: null,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  const agent = createAgentRouter({
+    requireUserMiddleware: async (c, next) => {
+      c.set("user", { id: "user-1" } as never);
+      await next();
+    },
+    getAgentTaskById: async () => task,
+    getLatestApprovalForTask: async () => ({
+      id: "approval-1",
+      runId: "plan-run-1",
+      status: "approved",
+    }),
+    getLatestRunForTask: async (_userId: string, _taskId: string, phase?: string) =>
+      phase === "planning"
+        ? {
+            id: "plan-run-1",
+            taskId: "task-1",
+            phase: "planning",
+            status: "completed",
+          }
+        : null,
+    getResolvedChannelForConversation: async () => ({
+      channel: {
+        id: "channel-1",
+        name: "Qwen Relay",
+        provider: "anthropic",
+        protocol: "anthropic",
+        baseUrl: "https://coding.dashscope.aliyuncs.com/apps/anthropic",
+      },
+      modelId: "qwen3.5-plus",
+      apiKey: "test-key",
+    }),
+    resolveAgentRuntime: async () => ({
+      success: false as const,
+      error: "Provider API error (429): hour allocated quota exceeded.",
+      attempts: [],
+    }),
+    getAgentTaskDetail: async () => ({
+      task,
+      runs: [],
+      planSteps: [
+        {
+          id: "step-1",
+          taskId: "task-1",
+          runId: "plan-run-1",
+          orderIndex: 0,
+          title: "Inspect the current task",
+          description: "Use the selected channel and model to run the task.",
+          status: "pending",
+        },
+      ],
+      approvals: [],
+      artifacts: [],
+      events: [],
+      runtime: null,
+    }),
+    createAgentRun: async (_userId: string, taskId: string, input: Record<string, unknown>) => {
+      const run = {
+        id: `${String(input.phase)}-run-${createdRuns.length + 1}`,
+        taskId,
+        phase: input.phase,
+        status: input.status ?? "running",
+        error: input.error ?? null,
+      };
+      createdRuns.push(run);
+      return run;
+    },
+    createAgentTaskEvent: async (_userId: string, taskId: string, runId: string, input: Record<string, unknown>) => {
+      const event = { taskId, runId, ...input };
+      createdEvents.push(event);
+      return event;
+    },
+    updateAgentTaskStatus: async (_userId: string, _taskId: string, status: string) => {
+      taskStatuses.push(status);
+      return task;
+    },
+    updateAgentRunStatus: async () => null,
+    updateAgentPlanStepStatuses: async () => [],
+    createAgentArtifact: async () => null,
+    buildAgentRuntimeContext: async () => ({
+      channelId: "channel-1",
+      modelId: "qwen3.5-plus",
+      globalSystemPrompt: undefined,
+      liveSystemContext: undefined,
+      liveContext: { status: "offline", route: "direct_model", source: { type: "none" } },
+    }),
+    getAgentCapabilityModeFromSuccessResult: () => "generic_tool_calling",
+    runAgentWithConfig: async function* () {
+      runAgentCalled = true;
+      yield { type: "text", content: "should not run" };
+    },
+    createAgentStreamTimeoutGuard: () => ({
+      markVisibleOutput() {},
+      markActivity() {},
+      cleanup() {},
+    }),
+  });
+
+  const response = await agent.request("/tasks/task-1/execute", { method: "POST" });
+  expect(response.status).toBe(400);
+  expect(await response.text()).toBe("Provider API error (429): hour allocated quota exceeded.");
+  expect(runAgentCalled).toBe(false);
+  expect(createdRuns).toEqual([
+    {
+      id: "execution-run-1",
+      taskId: "task-1",
+      phase: "execution",
+      status: "failed",
+      error: "Provider API error (429): hour allocated quota exceeded.",
+    },
+  ]);
+  expect(taskStatuses).toContain("failed");
+  expect(
+    createdEvents.some(
+      (event) => event.type === "error" && event.content === "Provider API error (429): hour allocated quota exceeded.",
+    ),
+  ).toBe(true);
+  expect(
+    createdEvents.some(
+      (event) =>
+        event.type === "task_status" &&
+        event.metadata &&
+        typeof event.metadata === "object" &&
+        (event.metadata as { status?: string; stage?: string }).status === "failed" &&
+        (event.metadata as { status?: string; stage?: string }).stage === "runtime_resolution",
+    ),
+  ).toBe(true);
+});

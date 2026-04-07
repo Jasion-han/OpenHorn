@@ -692,7 +692,12 @@ async function resolveTaskExecutionContext(
         });
 
   if (runtimeResolution.success === false) {
-    return { error: runtimeResolution.error, status: 400 as const };
+    return {
+      error: runtimeResolution.error,
+      status: 400 as const,
+      persistAsFailedRun: true as const,
+      failureStage: "runtime_resolution" as const,
+    };
   }
   const resolvedChannel = runtimeResolution.resolvedChannel;
   const compatibility = runtimeResolution.compatibility;
@@ -758,6 +763,15 @@ async function resolveTaskExecutionContext(
   };
 }
 
+function shouldPersistExecutionStartFailure(
+  resolved: Awaited<ReturnType<typeof resolveTaskExecutionContext>>,
+): resolved is Extract<
+  Awaited<ReturnType<typeof resolveTaskExecutionContext>>,
+  { error: string; status: 400; persistAsFailedRun: true }
+> {
+  return "error" in resolved && resolved.status === 400 && resolved.persistAsFailedRun === true;
+}
+
 async function createTaskExecutionResponse(
   userId: string,
   taskId: string,
@@ -765,16 +779,7 @@ async function createTaskExecutionResponse(
 ) {
   const resolved = await resolveTaskExecutionContext(userId, taskId, mode);
   if ("error" in resolved) {
-    const normalizedError = resolved.error.toLowerCase();
-    if (
-      resolved.status === 400 &&
-      (resolved.error.includes("不兼容") ||
-        resolved.error.includes("超时") ||
-        resolved.error.includes("协议") ||
-        normalizedError.includes("incompatible") ||
-        normalizedError.includes("timeout") ||
-        normalizedError.includes("protocol"))
-    ) {
+    if (shouldPersistExecutionStartFailure(resolved)) {
       const failedAt = new Date();
       const run = await createAgentRun(userId, taskId, {
         phase: "execution",
@@ -794,7 +799,7 @@ async function createTaskExecutionResponse(
         await createAgentTaskEvent(userId, taskId, run.id, {
           type: "task_status",
           content: "Task failed before execution could start.",
-          metadata: { status: "failed", mode, stage: "compatibility_check" },
+          metadata: { status: "failed", mode, stage: resolved.failureStage },
         }).catch(() => undefined);
       }
 
