@@ -373,6 +373,9 @@ test("task execute persists pre-execution runtime resolution failures as failed 
     resolveAgentRuntime: async () => ({
       success: false as const,
       error: "Provider API error (429): hour allocated quota exceeded.",
+      errorCode: "quota_exhausted" as const,
+      retryable: true,
+      rawError: "Provider API error (429): hour allocated quota exceeded.",
       attempts: [],
     }),
     getAgentTaskDetail: async () => ({
@@ -462,7 +465,24 @@ test("task execute persists pre-execution runtime resolution failures as failed 
         event.metadata &&
         typeof event.metadata === "object" &&
         (event.metadata as { status?: string; stage?: string }).status === "failed" &&
-        (event.metadata as { status?: string; stage?: string }).stage === "runtime_resolution",
+        (event.metadata as { status?: string; stage?: string; errorCode?: string; retryable?: boolean }).stage ===
+          "runtime_resolution" &&
+        (
+          event.metadata as {
+            status?: string;
+            stage?: string;
+            errorCode?: string;
+            retryable?: boolean;
+          }
+        ).errorCode === "quota_exhausted" &&
+        (
+          event.metadata as {
+            status?: string;
+            stage?: string;
+            errorCode?: string;
+            retryable?: boolean;
+          }
+        ).retryable === true,
     ),
   ).toBe(true);
 });

@@ -13,6 +13,7 @@ import {
   updateChannel,
   updateChannelModels,
 } from "../services/channelService";
+import { classifyProviderError } from "../services/providerErrorSummary";
 import { requireUser, type UserEnv } from "../utils/requestUser";
 import { isRecord } from "../utils/typeGuards";
 
@@ -185,9 +186,14 @@ channels.post("/:id/agent-check", async (c) => {
     });
     return c.json(result);
   } catch (error) {
+    const message = error instanceof Error ? error.message : "Agent check failed";
+    const classified = classifyProviderError(message);
     return c.json({
       success: false,
-      error: error instanceof Error ? error.message : "Agent check failed",
+      error: classified.userMessage,
+      errorCode: classified.kind,
+      retryable: classified.retryable,
+      rawError: classified.raw,
     });
   }
 });

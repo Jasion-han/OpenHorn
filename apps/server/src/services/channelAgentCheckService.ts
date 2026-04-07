@@ -6,6 +6,7 @@ import {
 } from "./channelService";
 import { runClaudeAgentSdk } from "./agentSdk";
 import type { AgentCapabilityMode } from "./genericAgentTypes";
+import { classifyProviderError, type ProviderErrorKind } from "./providerErrorSummary";
 
 function adapterSupportsToolCalling(
   adapter: Awaited<ReturnType<typeof createAdapter>>,
@@ -15,7 +16,13 @@ function adapterSupportsToolCalling(
 
 export type AgentCheckResult =
   | { success: true; mode: AgentCapabilityMode }
-  | { success: false; error: string };
+  | {
+      success: false;
+      error: string;
+      errorCode?: ProviderErrorKind;
+      retryable?: boolean;
+      rawError?: string;
+    };
 
 export type AgentCheckAttempt = {
   channelId: string;
@@ -23,6 +30,7 @@ export type AgentCheckAttempt = {
   modelId: string;
   success: boolean;
   error?: string;
+  errorCode?: ProviderErrorKind;
 };
 
 export type AgentRuntimeResolution =
@@ -36,6 +44,9 @@ export type AgentRuntimeResolution =
   | {
       success: false;
       error: string;
+      errorCode?: ProviderErrorKind;
+      retryable?: boolean;
+      rawError?: string;
       attempts: AgentCheckAttempt[];
     };
 
@@ -94,6 +105,17 @@ function pickAnthropicCompatibilityFailure(
     return sdkResult;
   }
   return sdkResult;
+}
+
+function normalizeAgentCheckFailure(error: string): Extract<AgentCheckResult, { success: false }> {
+  const classified = classifyProviderError(error);
+  return {
+    success: false,
+    error: classified.userMessage,
+    errorCode: classified.kind,
+    retryable: classified.retryable,
+    rawError: classified.raw,
+  };
 }
 
 function getCompatibilityCacheKey(userId: string, channelId: string, modelId: string) {
@@ -431,7 +453,13 @@ export async function checkChannelAgentCompatibility(
 ): Promise<AgentCheckResult> {
   const trimmedModelId = modelId.trim();
   if (!trimmedModelId) {
-    return { success: false, error: "modelId is required" };
+    return {
+      success: false,
+      error: "缺少模型标识，请重新选择模型。",
+      errorCode: "request_failed",
+      retryable: false,
+      rawError: "modelId is required",
+    };
   }
 
   const cacheKey = getCompatibilityCacheKey(userId, channelId, trimmedModelId);
@@ -451,17 +479,24 @@ export async function checkChannelAgentCompatibility(
     });
     const baseUrl = channel.baseUrl;
     if (!baseUrl) {
-      return { success: false, error: "Base URL is required" };
+      return {
+        success: false,
+        error: "缺少 Base URL，请检查渠道配置。",
+        errorCode: "request_failed",
+        retryable: false,
+        rawError: "Base URL is required",
+      };
     }
 
     const protocol = (channel.protocol || "").trim().toLowerCase();
     if (protocol === "openai") {
-      return probeGenericToolCallingCompatibility({
+      const result = await probeGenericToolCallingCompatibility({
         apiKey,
         modelId: trimmedModelId,
         baseUrl,
         protocol,
       });
+      return result.success ? result : normalizeAgentCheckFailure(result.error);
     }
 
     if (protocol === "anthropic") {
@@ -485,18 +520,21 @@ export async function checkChannelAgentCompatibility(
         return genericResult;
       }
 
-      return pickAnthropicCompatibilityFailure(
-        claudeSdkResult,
-        genericResult as Extract<AgentCheckResult, { success: false }>,
+      return normalizeAgentCheckFailure(
+        pickAnthropicCompatibilityFailure(
+          claudeSdkResult,
+          genericResult as Extract<AgentCheckResult, { success: false }>,
+        ).error,
       );
     }
 
-    return probeClaudeAgentSdkCompatibility({
+    const result = await probeClaudeAgentSdkCompatibility({
       apiKey,
       modelId: trimmedModelId,
       baseUrl,
       timeoutMs: options?.sdkTimeoutMs,
     });
+    return result.success ? result : normalizeAgentCheckFailure(result.error);
   })();
 
   if (options?.bypassCache) {
@@ -531,12 +569,16 @@ export async function resolveAgentRuntime(params: {
     return {
       success: false,
       error: "未配置可用的默认渠道/默认模型。请先在设置中完成配置。",
+      errorCode: "request_failed",
+      retryable: false,
+      rawError: "No default channel or model is configured. Configure one in Settings first.",
       attempts: [],
     };
   }
 
   const attempts: AgentCheckAttempt[] = [];
   let lastError = "未找到可用于 Agent 模式的模型。";
+  let lastFailure: Extract<AgentCheckResult, { success: false }> | null = null;
 
   for (const channel of channelOrder) {
     const runtimeChannel = await getChannelRuntimeCredentialsById(params.userId, channel.id, {
@@ -552,6 +594,9 @@ export async function resolveAgentRuntime(params: {
       return {
         success: false,
         error: "当前会话选择的模型不存在或已被禁用，请重新选择模型。",
+        errorCode: "model_not_found",
+        retryable: false,
+        rawError: requestedModelId,
         attempts,
       };
     }
@@ -598,14 +643,19 @@ export async function resolveAgentRuntime(params: {
         modelId,
         success: false,
         error: (compatibility as Extract<AgentCheckResult, { success: false }>).error,
+        errorCode: (compatibility as Extract<AgentCheckResult, { success: false }>).errorCode,
       });
-      lastError = (compatibility as Extract<AgentCheckResult, { success: false }>).error;
+      lastFailure = compatibility as Extract<AgentCheckResult, { success: false }>;
+      lastError = lastFailure.error;
     }
   }
 
   return {
     success: false,
     error: lastError,
+    errorCode: lastFailure?.errorCode,
+    retryable: lastFailure?.retryable,
+    rawError: lastFailure?.rawError,
     attempts,
   };
 }

@@ -417,7 +417,10 @@ test("checkChannelAgentCompatibility returns the real generic fallback error for
     });
     expect(result).toEqual({
       success: false,
-      error: "Provider API error (429): hour allocated quota exceeded.",
+      error: "配额不足或触发限流：小时配额已耗尽。",
+      errorCode: "quota_exhausted",
+      retryable: true,
+      rawError: "Provider API error (429): hour allocated quota exceeded.",
     });
   } finally {
     mock.restore();

@@ -697,6 +697,9 @@ async function resolveTaskExecutionContext(
       status: 400 as const,
       persistAsFailedRun: true as const,
       failureStage: "runtime_resolution" as const,
+      errorCode: runtimeResolution.errorCode,
+      retryable: runtimeResolution.retryable,
+      rawError: runtimeResolution.rawError,
     };
   }
   const resolvedChannel = runtimeResolution.resolvedChannel;
@@ -799,7 +802,14 @@ async function createTaskExecutionResponse(
         await createAgentTaskEvent(userId, taskId, run.id, {
           type: "task_status",
           content: "Task failed before execution could start.",
-          metadata: { status: "failed", mode, stage: resolved.failureStage },
+          metadata: {
+            status: "failed",
+            mode,
+            stage: resolved.failureStage,
+            errorCode: resolved.errorCode,
+            retryable: resolved.retryable,
+            rawError: resolved.rawError,
+          },
         }).catch(() => undefined);
       }
 
