@@ -332,6 +332,7 @@ test("probeGenericToolCallingCompatibility: fails when follow-up turn does not p
 
 test("checkChannelAgentCompatibility: falls back to generic tool calling for anthropic protocol", async () => {
   mock.module("./channelService", () => ({
+    getChannels: async () => [],
     getChannelRuntimeCredentialsById: async () => ({
       channel: { id: "channel-1", baseUrl: "https://relay.example.com", protocol: "anthropic" },
       apiKey: "test-key",
@@ -339,7 +340,11 @@ test("checkChannelAgentCompatibility: falls back to generic tool calling for ant
   }));
   mock.module("./agentSdk", () => ({
     runClaudeAgentSdk: async function* () {
-      yield { type: "error", content: "sdk incompatible" };
+      yield {
+        type: "error",
+        content:
+          "该渠道支持普通聊天接口，但不兼容 Claude Agent SDK，无法用于 Agent 模式。它仍可用于普通聊天。",
+      };
     },
   }));
   mock.module("../agent-adapters", () => ({
@@ -377,10 +382,53 @@ test("checkChannelAgentCompatibility: falls back to generic tool calling for ant
   }
 });
 
+test("checkChannelAgentCompatibility returns the real generic fallback error for anthropic protocol", async () => {
+  mock.module("./channelService", () => ({
+    getChannels: async () => [],
+    getChannelRuntimeCredentialsById: async () => ({
+      channel: { id: "channel-1", baseUrl: "https://relay.example.com", protocol: "anthropic" },
+      apiKey: "test-key",
+    }),
+  }));
+  mock.module("./agentSdk", () => ({
+    runClaudeAgentSdk: async function* () {
+      yield {
+        type: "error",
+        content:
+          "该渠道支持普通聊天接口，但不兼容 Claude Agent SDK，无法用于 Agent 模式。它仍可用于普通聊天。",
+      };
+    },
+  }));
+  mock.module("../agent-adapters", () => ({
+    createAdapter: () => ({
+      runToolCallingTurn: async () => {
+        throw new Error("Provider API error (429): hour allocated quota exceeded.");
+      },
+    }),
+    supportsToolCalling: () => true,
+  }));
+
+  try {
+    const { checkChannelAgentCompatibility } = await loadChannelAgentCheckService(
+      "anthropic-fallback-real-error",
+    );
+    const result = await checkChannelAgentCompatibility("user-1", "channel-1", "claude-test", {
+      bypassCache: true,
+    });
+    expect(result).toEqual({
+      success: false,
+      error: "Provider API error (429): hour allocated quota exceeded.",
+    });
+  } finally {
+    mock.restore();
+  }
+});
+
 test("checkChannelAgentCompatibility reuses cached runtime result for repeated checks", async () => {
   let probeCalls = 0;
 
   mock.module("./channelService", () => ({
+    getChannels: async () => [],
     getChannelRuntimeCredentialsById: async () => ({
       channel: { id: "channel-1", baseUrl: "https://relay.example.com", protocol: "openai" },
       apiKey: "test-key",

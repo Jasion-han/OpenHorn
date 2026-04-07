@@ -76,6 +76,26 @@ const GENERIC_TOOL_INCOMPATIBLE_ERROR =
 const compatibilityCache = new Map<string, CachedAgentCheckEntry>();
 const compatibilityInFlight = new Map<string, Promise<AgentCheckResult>>();
 
+function isCompatibilityPlaceholderError(error: string) {
+  return error === AGENT_SDK_INCOMPATIBLE_ERROR || error === GENERIC_TOOL_INCOMPATIBLE_ERROR;
+}
+
+function pickAnthropicCompatibilityFailure(
+  sdkResult: Extract<AgentCheckResult, { success: false }>,
+  genericResult: Extract<AgentCheckResult, { success: false }>,
+): Extract<AgentCheckResult, { success: false }> {
+  const sdkIsPlaceholder = isCompatibilityPlaceholderError(sdkResult.error);
+  const genericIsPlaceholder = isCompatibilityPlaceholderError(genericResult.error);
+
+  if (sdkIsPlaceholder && !genericIsPlaceholder) {
+    return genericResult;
+  }
+  if (!sdkIsPlaceholder && genericIsPlaceholder) {
+    return sdkResult;
+  }
+  return sdkResult;
+}
+
 function getCompatibilityCacheKey(userId: string, channelId: string, modelId: string) {
   return `${userId}:${channelId}:${modelId.trim()}`;
 }
@@ -465,7 +485,10 @@ export async function checkChannelAgentCompatibility(
         return genericResult;
       }
 
-      return claudeSdkResult;
+      return pickAnthropicCompatibilityFailure(
+        claudeSdkResult,
+        genericResult as Extract<AgentCheckResult, { success: false }>,
+      );
     }
 
     return probeClaudeAgentSdkCompatibility({

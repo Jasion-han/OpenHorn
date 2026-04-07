@@ -61,6 +61,7 @@ test("POST /sessions/:id/run returns compatibility error before starting SSE run
   }));
 
   mock.module("../services/channelService", () => ({
+    getChannels: async () => [],
     getResolvedChannelForConversation: async () => ({
       channel: { id: "channel-1", provider: "openai" },
       modelId: "gpt-5.4",
