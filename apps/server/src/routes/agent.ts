@@ -265,6 +265,15 @@ function buildLiveSearchSummary(params: {
   return `${prefix}${sourceTitles.join("、")} 等来源。`;
 }
 
+function buildLiveSearchFailureMessage(params: {
+  route: "web_search" | "research";
+  userLabel?: string;
+}) {
+  const label = params.userLabel?.trim();
+  if (label) return label;
+  return params.route === "research" ? "在线研究失败，任务已停止" : "实时搜索失败，任务已停止";
+}
+
 function normalizeCitationSnippetText(value: string) {
   return value
     .replace(/\r\n/g, "\n")
@@ -926,16 +935,21 @@ async function createTaskExecutionResponse(
     });
 
     try {
-      if (
-        runtimeContext.liveContext?.status === "live" &&
+      const liveSearchRoute =
+        runtimeContext.liveContext &&
         (runtimeContext.liveContext.route === "web_search" ||
           runtimeContext.liveContext.route === "research")
-      ) {
+          ? runtimeContext.liveContext.route
+          : null;
+      const liveSearchFailedBeforeExecution =
+        Boolean(liveSearchRoute) && runtimeContext.liveContext?.status === "offline";
+
+      if (liveSearchRoute) {
         toolStarts += 1;
         await createAgentTaskEvent(userId, taskId, run.id, {
           type: "execution_event",
           content: null,
-          toolName: runtimeContext.liveContext.route,
+          toolName: liveSearchRoute,
           toolInput: { query: task.goal },
           metadata: { eventType: "tool_start", source: "live_context" },
         });
@@ -944,31 +958,50 @@ async function createTaskExecutionResponse(
           taskId,
           runId: run.id,
           eventType: "tool_start",
-          toolName: runtimeContext.liveContext.route,
+          toolName: liveSearchRoute,
           toolInput: { query: task.goal },
           content: null,
         });
 
-        toolResults += 1;
-        const summary = buildLiveSearchSummary({
-          route: runtimeContext.liveContext.route,
-          prompt: task.goal,
-          citations: runtimeContext.liveContext.citations,
-        });
-        await createAgentTaskEvent(userId, taskId, run.id, {
-          type: "execution_event",
-          content: summary,
-          toolName: runtimeContext.liveContext.route,
-          metadata: { eventType: "tool_result", source: "live_context" },
-        });
-        send({
-          type: "execution_event",
-          taskId,
-          runId: run.id,
-          eventType: "tool_result",
-          toolName: runtimeContext.liveContext.route,
-          content: summary,
-        });
+        if (runtimeContext.liveContext?.status === "live") {
+          toolResults += 1;
+          const summary = buildLiveSearchSummary({
+            route: liveSearchRoute,
+            prompt: task.goal,
+            citations: runtimeContext.liveContext.citations,
+          });
+          await createAgentTaskEvent(userId, taskId, run.id, {
+            type: "execution_event",
+            content: summary,
+            toolName: liveSearchRoute,
+            metadata: { eventType: "tool_result", source: "live_context" },
+          });
+          send({
+            type: "execution_event",
+            taskId,
+            runId: run.id,
+            eventType: "tool_result",
+            toolName: liveSearchRoute,
+            content: summary,
+          });
+        } else {
+          hadError = true;
+          errorText = buildLiveSearchFailureMessage({
+            route: liveSearchRoute,
+            userLabel: runtimeContext.liveContext?.userLabel,
+          });
+          await createAgentTaskEvent(userId, taskId, run.id, {
+            type: "error",
+            content: errorText,
+            metadata: { source: "live_context", toolName: liveSearchRoute },
+          });
+          send({
+            type: "error",
+            taskId,
+            runId: run.id,
+            content: errorText,
+          });
+        }
       }
 
       const shouldUseDirectLiveAnswer =
@@ -978,7 +1011,9 @@ async function createTaskExecutionResponse(
         task.complexity !== "deep" &&
         attachmentIds.length === 0;
 
-      if (shouldUseDirectLiveAnswer) {
+      if (liveSearchFailedBeforeExecution) {
+        finalText = "";
+      } else if (shouldUseDirectLiveAnswer) {
         const directCitations = runtimeContext.liveContext?.citations || [];
         const shouldUseCitationTitleAnswer =
           /标题|title/i.test(task.goal) && directCitations.length > 0;

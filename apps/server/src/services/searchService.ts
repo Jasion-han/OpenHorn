@@ -44,6 +44,38 @@ const DEFAULT_FETCH: FetchFn = fetch;
 const DEFAULT_SEARCH_TIMEOUT_MS = 4_000;
 const DEFAULT_RESEARCH_TIMEOUT_MS = 5_000;
 
+function getSearchRouteName(route: BuildSearchContextInput["route"]) {
+  return route === "research" ? "在线研究" : "实时搜索";
+}
+
+function buildFailureLabel(
+  route: BuildSearchContextInput["route"],
+  reason:
+    | "disabled"
+    | "not_configured"
+    | "timeout"
+    | "upstream_error"
+    | "no_results"
+    | "failed",
+  detail?: string,
+) {
+  const name = getSearchRouteName(route);
+  switch (reason) {
+    case "disabled":
+      return `${name}已关闭，任务无法继续`;
+    case "not_configured":
+      return `${name}未配置，任务无法继续`;
+    case "timeout":
+      return `${name}超时，任务已停止`;
+    case "upstream_error":
+      return detail ? `${name}失败（${detail}），任务已停止` : `${name}失败，任务已停止`;
+    case "no_results":
+      return `${name}未返回可用来源，任务已停止`;
+    default:
+      return `${name}失败，任务已停止`;
+  }
+}
+
 function isTavilyEnabled(input: BuildSearchContextInput) {
   const raw = input.userSettings?.[TAVILY_ENABLED_SETTING];
   if (raw == null) return true;
@@ -150,7 +182,7 @@ export async function buildSearchContext(
 ): Promise<SearchContextResult> {
   if (!isTavilyEnabled(input)) {
     return buildOfflineResult(
-      "实时搜索已关闭，本轮为离线回答",
+      buildFailureLabel(input.route, "disabled"),
       "Live search is disabled for this user. Do not claim you searched the web or cite sources. State that the answer may be outdated.",
     );
   }
@@ -158,7 +190,7 @@ export async function buildSearchContext(
   const apiKey = pickApiKey(input);
   if (!apiKey) {
     return buildOfflineResult(
-      "实时搜索未配置，本轮为离线回答",
+      buildFailureLabel(input.route, "not_configured"),
       "Live search is not configured. Do not claim you searched the web or cite sources. State that the answer may be outdated.",
     );
   }
@@ -190,7 +222,7 @@ export async function buildSearchContext(
 
     if (!response.ok) {
       return buildOfflineResult(
-        "",
+        buildFailureLabel(input.route, "upstream_error", `HTTP ${response.status}`),
         "Live search failed. Do not claim you searched the web or cite sources. State that the answer may be outdated.",
         { degradedToDirectModel: true },
       );
@@ -200,7 +232,7 @@ export async function buildSearchContext(
     const citations = normalizeCitations(data.results);
     if (citations.length === 0) {
       return buildOfflineResult(
-        "",
+        buildFailureLabel(input.route, "no_results"),
         "Live search returned no usable sources. Do not claim you searched the web or cite sources. State that the answer may be outdated.",
         { degradedToDirectModel: true },
       );
@@ -214,9 +246,10 @@ export async function buildSearchContext(
       provider: "tavily",
     };
   } catch (error) {
+    const isTimeout = error instanceof Error && error.name === "TimeoutError";
     return buildOfflineResult(
-      "",
-      error instanceof Error && error.name === "TimeoutError"
+      buildFailureLabel(input.route, isTimeout ? "timeout" : "failed"),
+      isTimeout
         ? "Live search timed out. Do not claim you searched the web or cite sources. Answer directly and state that the answer may be outdated."
         : "Live search failed. Do not claim you searched the web or cite sources. State that the answer may be outdated.",
       { degradedToDirectModel: true },

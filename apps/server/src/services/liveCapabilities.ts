@@ -518,15 +518,6 @@ export async function buildLiveContext(input: BuildLiveContextInput): Promise<Li
       fetchImpl: input.fetchImpl,
     });
 
-    if (searchContext.status === "offline" && searchContext.degradedToDirectModel) {
-      return {
-        status: "offline",
-        route: "direct_model",
-        source: { type: "none" },
-        systemContext: searchContext.systemContext,
-      };
-    }
-
     return {
       status: searchContext.status,
       route: route.type,

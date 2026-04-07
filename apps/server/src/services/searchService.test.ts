@@ -19,7 +19,7 @@ test("buildSearchContext prefers user tavily key over env key", async () => {
 
   expect(result.status).toBe("offline");
   expect(result.degradedToDirectModel).toBe(true);
-  expect(result.label).toBe("");
+  expect(result.label).toBe("实时搜索未返回可用来源，任务已停止");
 });
 
 test("buildSearchContext uses env key when user key is absent", async () => {
@@ -52,7 +52,7 @@ test("buildSearchContext returns offline when no key exists", async () => {
   });
 
   expect(result.status).toBe("offline");
-  expect(result.label).toContain("未配置");
+  expect(result.label).toBe("在线研究未配置，任务无法继续");
   expect(result.citations).toEqual([]);
 });
 
@@ -65,7 +65,7 @@ test("buildSearchContext returns offline when disabled", async () => {
   });
 
   expect(result.status).toBe("offline");
-  expect(result.label).toContain("已关闭");
+  expect(result.label).toBe("实时搜索已关闭，任务无法继续");
   expect(result.citations).toEqual([]);
 });
 
@@ -97,7 +97,7 @@ test("buildSearchContext narrows OpenAI official-doc queries to official domains
   });
 });
 
-test("buildSearchContext aborts slow web search and degrades to direct model", async () => {
+test("buildSearchContext aborts slow web search and keeps a user-facing timeout label", async () => {
   const result = await buildSearchContext({
     route: "web_search",
     prompt: "最近 AI 圈有什么新闻",
@@ -114,7 +114,7 @@ test("buildSearchContext aborts slow web search and degrades to direct model", a
 
   expect(result.status).toBe("offline");
   expect(result.degradedToDirectModel).toBe(true);
-  expect(result.label).toBe("");
+  expect(result.label).toBe("实时搜索超时，任务已停止");
   expect(result.citations).toEqual([]);
   expect(result.systemContext).toContain("timed out");
 });

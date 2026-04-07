@@ -97,7 +97,7 @@ test("buildLiveContext uses tavily for web search when a key is available", asyn
   expect(result.systemContext).toContain("AI Roundup");
 });
 
-test("buildLiveContext degrades slow web search routes to direct_model", async () => {
+test("buildLiveContext keeps web search route when live search times out", async () => {
   const result = await buildLiveContext({
     prompt: "最近 AI 圈有什么新闻",
     tavilyEnvKey: "env-key",
@@ -111,10 +111,10 @@ test("buildLiveContext degrades slow web search routes to direct_model", async (
   });
 
   expect(result.status).toBe("offline");
-  expect(result.route).toBe("direct_model");
+  expect(result.route).toBe("web_search");
   expect(result.source.type).toBe("none");
-  expect(result.userLabel).toBeUndefined();
-  expect(result.citations).toBeUndefined();
+  expect(result.userLabel).toBe("实时搜索超时，任务已停止");
+  expect(result.citations).toEqual([]);
 });
 
 test("buildLiveContext keeps web search routing for lookup prompts that also ask for a summary", async () => {
@@ -276,7 +276,7 @@ test("buildLiveContext prefers research for named tool comparison lookups when a
   expect(classifierCalled).toBe(false);
   expect(result.route).toBe("research");
   expect(result.status).toBe("offline");
-  expect(result.userLabel).toContain("实时搜索未配置");
+  expect(result.userLabel).toContain("在线研究未配置");
 });
 
 test("buildLiveContext routes current interview-practice comparisons to research", async () => {
@@ -295,5 +295,5 @@ test("buildLiveContext routes current interview-practice comparisons to research
   expect(classifierCalled).toBe(false);
   expect(result.route).toBe("research");
   expect(result.status).toBe("offline");
-  expect(result.userLabel).toContain("实时搜索未配置");
+  expect(result.userLabel).toContain("在线研究未配置");
 });
