@@ -23,3 +23,10 @@ serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
 tauri = { version = "2.10.3", features = [] }
 tauri-plugin-log = "2"
+# For spawning the OpenHorn sidecar binary as a Tauri sidecar process
+# and for the workspace picker dialog.
+tauri-plugin-shell = "2"
+tauri-plugin-dialog = "2"
+# Cryptographically random handshake token for the sidecar handshake.
+# rand::rngs::OsRng is backed by the platform CSPRNG on all OSes.
+rand = "0.8"

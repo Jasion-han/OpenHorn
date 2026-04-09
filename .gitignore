@@ -19,6 +19,10 @@ docs/plans/
 data/
 apps/server/data/
 
+# Tauri sidecar binaries (compiled per-host by pnpm --filter sidecar
+# compile:tauri:host; regenerated as part of tauri build)
+apps/desktop/src-tauri/binaries/
+
 # Local AI tools / assistants metadata (machine-specific)
 .adal/
 .agent/

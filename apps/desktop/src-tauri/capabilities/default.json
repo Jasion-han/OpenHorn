@@ -1,7 +1,21 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "enables the default permissions",
+  "description": "Baseline permissions plus sidecar/dialog access for the desktop agent runtime",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": [
+    "core:default",
+    "dialog:allow-open",
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        {
+          "name": "openhorn-sidecar",
+          "sidecar": true,
+          "args": []
+        }
+      ]
+    },
+    "shell:allow-kill"
+  ]
 }
