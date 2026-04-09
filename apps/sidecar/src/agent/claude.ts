@@ -107,6 +107,37 @@ export async function checkSdkFsToolPath(
   }
 }
 
+/**
+ * Extracts the bare hostname (without scheme / port / path) from a URL,
+ * returning null if the input doesn't parse. Used to build a minimal
+ * sandbox network allow-list — we don't want to grant `*.anthropic.com`
+ * across the board, only the specific host the user configured.
+ *
+ * Exported for testing.
+ */
+export function extractHostname(url: string | undefined): string | null {
+  if (!url) return null;
+  try {
+    return new URL(url).hostname || null;
+  } catch {
+    return null;
+  }
+}
+
+export const DEFAULT_ANTHROPIC_HOST = "api.anthropic.com";
+
+/**
+ * Builds the sandbox network allow-list from an optional user-provided
+ * baseUrl. Always includes the default Anthropic host as a fallback so
+ * SDK requests still work even if the user clears their custom relay.
+ *
+ * Exported for testing.
+ */
+export function buildNetworkAllowedDomains(baseUrl: string | undefined): string[] {
+  const userHost = extractHostname(baseUrl);
+  return Array.from(new Set([userHost ?? DEFAULT_ANTHROPIC_HOST, DEFAULT_ANTHROPIC_HOST]));
+}
+
 export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> {
   const sdk = await import("@anthropic-ai/claude-agent-sdk");
 
@@ -120,6 +151,11 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
   };
   if (input.apiKey) childEnv.ANTHROPIC_API_KEY = input.apiKey;
   if (input.baseUrl) childEnv.ANTHROPIC_BASE_URL = input.baseUrl;
+
+  // Build the sandbox network allow-list: just the Anthropic API host
+  // (or the user's custom relay host), nothing else. This is what stops
+  // a tool call from exfiltrating data to attacker.example.com.
+  const networkAllowedDomains = buildNetworkAllowedDomains(input.baseUrl);
 
   const hooks: Partial<Record<string, HookCallbackMatcher[]>> = {
     PreToolUse: [
@@ -154,6 +190,36 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
       executable: "bun",
       tools: ["Read", "Grep", "Glob", "Write", "Edit", "Bash"],
       permissionMode: "default",
+      // Hand bash isolation to the SDK's built-in sandbox.
+      //
+      //   - macOS: SDK uses sandbox-exec with a generated SBPL profile.
+      //   - Linux: SDK uses bwrap with bind-mounts and --unshare-net.
+      //
+      // Without this every Bash command would still be the user's own
+      // shell with full host access. With this:
+      //
+      //   - filesystem.allowWrite limits Bash + SDK write surface to
+      //     the chosen workspace root.
+      //   - network.allowedDomains pins outbound traffic to the
+      //     Anthropic API host (or the user's custom relay), so a
+      //     compromised tool call cannot POST data to a third party.
+      //   - allowUnsandboxedCommands=false disables the SDK's escape
+      //     hatch (`dangerouslyDisableSandbox`) so a model cannot
+      //     trick its way out.
+      //   - autoAllowBashIfSandboxed=true keeps approval focused on
+      //     "did the user actually consent" rather than gating every
+      //     command — the OS sandbox is the real wall.
+      sandbox: {
+        enabled: true,
+        autoAllowBashIfSandboxed: true,
+        allowUnsandboxedCommands: false,
+        filesystem: {
+          allowWrite: [input.cwd],
+        },
+        network: {
+          allowedDomains: networkAllowedDomains,
+        },
+      },
       canUseTool: async (
         toolName: string,
         toolInput: Record<string, unknown>,
