@@ -1519,10 +1519,20 @@ export function DesktopChatArea() {
           sidecarRuntimeAvailable={sidecarRuntimeAvailable}
           sidecarRuntimeEnabled={sidecarRuntimeEnabled}
           sidecarRuntimeDisabledReason={sidecarRuntimeDisabledReason}
-          onToggleSidecarRuntime={() => {
-            if (!sidecarRuntimeAvailable) return;
-            setSidecarRuntimeEnabled((value) => !value);
-          }}
+          onToggleSidecarRuntime={
+            // Mirror the DesktopSidecarWorkspaceBadge visibility rule:
+            // when the host cannot host the sidecar at all, hide the
+            // toggle entirely instead of rendering a permanently-
+            // disabled button. Every other status (starting, error,
+            // ready-without-workspace) still renders the toggle with
+            // an explanatory disabled tooltip.
+            sidecarStatus === "unsupported"
+              ? undefined
+              : () => {
+                  if (!sidecarRuntimeAvailable) return;
+                  setSidecarRuntimeEnabled((value) => !value);
+                }
+          }
           onInputFocus={handleInputFocus}
           streaming={isStreaming}
           canSubmit={canSend}
