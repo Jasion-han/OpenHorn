@@ -5,6 +5,7 @@ import {
   normalizeAgentDisplayText,
 } from "../../lib/agentErrorDisplay";
 import { getAgentRuntimeIssueLabel } from "../../lib/i18n/agent";
+import { respondAgentApproval } from "../../lib/agentTaskActions";
 import { streamAgentTaskExecution, type AgentTaskStreamEvent } from "../../lib/agentTaskStream";
 import { resolveAgentDisplayOutput } from "../../lib/agentOutput";
 import { sanitizeDisplayContent } from "../../lib/citations";
@@ -20,6 +21,8 @@ import type {
   ApiAgentTaskEvent,
   ApiCitation,
 } from "../../types/chat";
+import { DesktopAgentPlanPanel } from "./DesktopAgentPlanPanel";
+import { DesktopAgentToolApprovalPanel } from "./DesktopAgentToolApprovalPanel";
 import { DesktopCitationList } from "./DesktopCitationList";
 import { DesktopMarkdownMessage } from "./DesktopMarkdownMessage";
 import { DesktopStreamingMarkdownMessage } from "./DesktopStreamingMarkdownMessage";
@@ -993,6 +996,8 @@ export function DesktopAgentTaskCard({
   } | null>(null);
   const [isProcessExpanded, setIsProcessExpanded] = useState(false);
   const [isExecutionStreaming, setIsExecutionStreaming] = useState(false);
+  const [approvalSubmitting, setApprovalSubmitting] = useState(false);
+  const [approvalError, setApprovalError] = useState<string | null>(null);
   const [liveOutputText, setLiveOutputText] = useState("");
   const [liveOutputPulseKey, setLiveOutputPulseKey] = useState(0);
   const [liveOutputCitations, setLiveOutputCitations] = useState<ApiCitation[] | undefined>(undefined);
@@ -1382,10 +1387,66 @@ export function DesktopAgentTaskCard({
     }
   };
 
+  const handleApprovalResponse = async (
+    approval: ApiAgentApproval,
+    status: "approved" | "rejected",
+  ) => {
+    if (approvalSubmitting) return;
+    setApprovalSubmitting(true);
+    setApprovalError(null);
+
+    const result = await respondAgentApproval({
+      api: {
+        respondApproval: (id, data) => api.agentTasks.respondApproval(id, data),
+        cancel: (id) => api.agentTasks.cancel(id),
+      },
+      approvalId: approval.id,
+      approvalType: approval.type,
+      status,
+      onPlanApprovalAccepted: async () => {
+        // Server resets the task to "draft" after a plan is approved.
+        // Kick off the next execution run so the user does not have to.
+        const executionTaskId = detailRef.current?.task.id ?? taskId;
+        await runExecutionAction(
+          "execute",
+          () => api.agentTasks.execute(executionTaskId),
+          executionTaskId,
+        );
+      },
+    });
+
+    setApprovalSubmitting(false);
+    if (result.ok) {
+      // Pick up server-side state changes (status, plan step transitions,
+      // approval row resolution).
+      const refreshed = await loadDetail(true);
+      if (refreshed) setDetail(refreshed);
+    } else {
+      setApprovalError(result.error);
+      notifyError("Approval failed", result.error);
+    }
+  };
+
   const stream = useMemo(
     () => (detail ? buildStream(detail, streamError, fallbackContent) : []),
     [detail, fallbackContent, streamError],
   );
+  const pendingPlanApproval = useMemo(() => {
+    if (!detail) return null;
+    return (
+      detail.approvals.find(
+        (approval) => approval.status === "pending" && approval.type === "plan_approval",
+      ) ?? null
+    );
+  }, [detail]);
+  const pendingToolApproval = useMemo(() => {
+    if (!detail) return null;
+    return (
+      detail.approvals.find(
+        (approval) => approval.status === "pending" && approval.type === "tool_approval",
+      ) ?? null
+    );
+  }, [detail]);
   const isTerminal = detail ? isTerminalTaskStatus(detail.task.status) : false;
   const processItems = stream.filter((item) => item.kind === "meta");
   const outputItems = stream.filter((item) => item.kind === "output");
@@ -1465,6 +1526,37 @@ export function DesktopAgentTaskCard({
         }
       `}</style>
       <div className="space-y-2.5">
+        {pendingPlanApproval ? (
+          <DesktopAgentPlanPanel
+            planSteps={detail.planSteps}
+            pendingApproval={pendingPlanApproval}
+            submitting={approvalSubmitting}
+            submitError={approvalError}
+            onApprove={(approvalId) => {
+              const target = detail.approvals.find((item) => item.id === approvalId);
+              if (target) void handleApprovalResponse(target, "approved");
+            }}
+            onReject={(approvalId) => {
+              const target = detail.approvals.find((item) => item.id === approvalId);
+              if (target) void handleApprovalResponse(target, "rejected");
+            }}
+          />
+        ) : null}
+        {pendingToolApproval ? (
+          <DesktopAgentToolApprovalPanel
+            approval={pendingToolApproval}
+            submitting={approvalSubmitting}
+            submitError={approvalError}
+            onApprove={(approvalId) => {
+              const target = detail.approvals.find((item) => item.id === approvalId);
+              if (target) void handleApprovalResponse(target, "approved");
+            }}
+            onReject={(approvalId) => {
+              const target = detail.approvals.find((item) => item.id === approvalId);
+              if (target) void handleApprovalResponse(target, "rejected");
+            }}
+          />
+        ) : null}
         {canCollapseProcess ? (
           <button
             type="button"

@@ -85,6 +85,23 @@ export const agentActionLabels = {
 export type AgentActionKey = keyof typeof agentActionLabels;
 
 /**
+ * Short panel headings and inline hints. These are user-facing copy that
+ * does not map to a backend enum, so they live here rather than being
+ * inlined as string literals across components.
+ */
+export const agentPanelLabels = {
+  planApprovalHeading: "以下是 Agent 准备执行的计划",
+  planApprovalHint: "通过即开始执行；拒绝后任务回到草稿。",
+  toolApprovalHeading: "Agent 想要执行以下操作",
+  toolApprovalHint: "通过即继续执行；拒绝则当前任务停止。",
+  planSectionHeading: "执行计划",
+  approvalSubmitting: "提交中...",
+  approvalSubmitFailed: "提交失败",
+} as const;
+
+export type AgentPanelLabelKey = keyof typeof agentPanelLabels;
+
+/**
  * Runtime-agnostic categories used when the server is unable to produce a
  * structured errorCode but the frontend still needs to tell the user
  * something. These keys must map 1:1 to fields the server already emits.

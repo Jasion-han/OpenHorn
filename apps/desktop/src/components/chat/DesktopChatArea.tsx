@@ -6,7 +6,8 @@ import { getDesktopBackendBase } from "../../lib/backendBase";
 import { sanitizeDisplayContent } from "../../lib/citations";
 import { getEffectiveModelForConversation } from "../../lib/effectiveModel";
 import { notifyWarning } from "../../lib/notify";
-import { readErrorMessage } from "../../lib/serverApi";
+import { cancelAgentTask } from "../../lib/agentTaskActions";
+import { createServerApi, readErrorMessage } from "../../lib/serverApi";
 import { readSseStream } from "../../lib/sse";
 import { useChatStore } from "../../stores/chatStore";
 import type { ApiAgentRun, ChatStreamEvent, Message, MessageAttachmentMeta } from "../../types/chat";
@@ -21,6 +22,7 @@ import { DesktopStreamingMarkdownMessage } from "./DesktopStreamingMarkdownMessa
 
 const PAGE_PAD = "16px";
 const COMPOSER_PAD_BOTTOM = "env(safe-area-inset-bottom, 0px)";
+const desktopServerApi = createServerApi();
 const PLACEHOLDERS = [
   "Start with a spark — I will shape the rest.",
   "What should we build, refine, or rethink today?",
@@ -1221,7 +1223,37 @@ export function DesktopChatArea() {
   };
 
   const handleStop = async () => {
-    abortStreaming();
+    // If the active stream belongs to a task-backed agent run, ask the
+    // server to actually cancel the task before tearing down the local
+    // SSE connection. Without this the task keeps running on the server
+    // even though the desktop UI looks stopped.
+    const streamingMessage = streamingAssistantId
+      ? useChatStore
+          .getState()
+          .messages.find((message) => message.id === streamingAssistantId)
+      : null;
+    const activeTaskId = streamingMessage?.agentRun?.taskId ?? null;
+
+    if (activeTaskId) {
+      const result = await cancelAgentTask({
+        api: {
+          respondApproval: (id, data) =>
+            desktopServerApi.agentTasks.respondApproval(id, data),
+          cancel: (id) => desktopServerApi.agentTasks.cancel(id),
+        },
+        taskId: activeTaskId,
+        onLocalAbort: () => abortStreaming(),
+      });
+      if (!result.ok) {
+        // The local abort already happened in onLocalAbort; just surface
+        // the cancel failure so the user knows the task may still be
+        // running on the server.
+        setError(result.error);
+      }
+    } else {
+      abortStreaming();
+    }
+
     setLoading(false);
     setStreaming(false);
     setStreamingAssistantId(null);

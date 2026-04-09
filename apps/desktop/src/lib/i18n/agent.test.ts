@@ -3,6 +3,7 @@ import {
   agentApprovalStatusLabels,
   agentApprovalTypeLabels,
   agentErrorLabels,
+  agentPanelLabels,
   agentPlanStepStatusLabels,
   agentRuntimeIssueLabels,
   agentStatusLabels,
@@ -112,6 +113,23 @@ describe("agent i18n dictionary", () => {
     ] as const;
     for (const action of actions) {
       const label = getAgentActionLabel(action);
+      expect(typeof label).toBe("string");
+      expect(label.length > 0).toBe(true);
+    }
+  });
+
+  test("panel label dictionary entries are non-empty strings", () => {
+    const keys: Array<keyof typeof agentPanelLabels> = [
+      "planApprovalHeading",
+      "planApprovalHint",
+      "toolApprovalHeading",
+      "toolApprovalHint",
+      "planSectionHeading",
+      "approvalSubmitting",
+      "approvalSubmitFailed",
+    ];
+    for (const key of keys) {
+      const label = agentPanelLabels[key];
       expect(typeof label).toBe("string");
       expect(label.length > 0).toBe(true);
     }
