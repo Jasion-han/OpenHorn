@@ -352,6 +352,20 @@ export interface MessageAttachmentMeta {
   previewUrl?: string;
 }
 
+/**
+ * Which runtime is actually executing an assistant message.
+ *
+ * - "server"  → OpenHorn server ran the task via /agent/tasks/*
+ *               (the default) or via /messages/stream for chat mode
+ * - "sidecar" → local sidecar process ran the task directly on the
+ *               user's workspace. The server has no knowledge of
+ *               this run, so task-card polling endpoints will not
+ *               find it. Renderers that need to branch off this
+ *               should check runtimeKind instead of sniffing the
+ *               agentRun shape.
+ */
+export type AgentRuntimeKind = "server" | "sidecar";
+
 export interface Message {
   id: string;
   conversationId: string;
@@ -368,6 +382,12 @@ export interface Message {
   citations?: ApiCitation[];
   streamTail?: string;
   streamPulseKey?: number;
+  /**
+   * Which runtime executed this assistant message. Absent (undefined)
+   * is equivalent to "server" for backward compatibility with
+   * messages persisted before the sidecar runtime existed.
+   */
+  runtimeKind?: AgentRuntimeKind;
   createdAt: Date;
 }
 

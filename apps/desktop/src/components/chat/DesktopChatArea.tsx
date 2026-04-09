@@ -8,8 +8,10 @@ import { getEffectiveModelForConversation } from "../../lib/effectiveModel";
 import { notifyWarning } from "../../lib/notify";
 import { cancelAgentTask } from "../../lib/agentTaskActions";
 import { createServerApi, readErrorMessage } from "../../lib/serverApi";
+import { useSidecarAgentRun } from "../../hooks/useSidecarAgentRun";
 import { readSseStream } from "../../lib/sse";
 import { useChatStore } from "../../stores/chatStore";
+import { useSidecarStore } from "../../stores/sidecarStore";
 import type { ApiAgentRun, ChatStreamEvent, Message, MessageAttachmentMeta } from "../../types/chat";
 import { DesktopCitationList } from "./DesktopCitationList";
 import { DesktopAgentTaskCard, DesktopAgentTaskMetaLine } from "./DesktopAgentTaskCard";
@@ -18,6 +20,7 @@ import { DesktopComposer } from "./DesktopComposer";
 import { DesktopMarkdownMessage } from "./DesktopMarkdownMessage";
 import { DesktopMessageAttachments } from "./DesktopMessageAttachments";
 import { DesktopModelPickerModal } from "./DesktopModelPickerModal";
+import { DesktopSidecarRuntimePanel } from "./DesktopSidecarRuntimePanel";
 import { DesktopStreamingMarkdownMessage } from "./DesktopStreamingMarkdownMessage";
 
 const PAGE_PAD = "16px";
@@ -668,6 +671,30 @@ export function DesktopChatArea() {
   );
   const messageAnchorRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const [streamingAssistantId, setStreamingAssistantId] = useState<string | null>(null);
+  const [sidecarRuntimeEnabled, setSidecarRuntimeEnabled] = useState(false);
+  const sidecarRun = useSidecarAgentRun();
+  const sidecarStatus = useSidecarStore((state) => state.status);
+  const sidecarWorkspaceRoot = useSidecarStore((state) => state.workspaceRoot);
+  const sidecarLastError = useSidecarStore((state) => state.lastError);
+  const sidecarRuntimeAvailable =
+    sidecarStatus === "ready" && Boolean(sidecarWorkspaceRoot);
+  const sidecarRuntimeDisabledReason = sidecarRuntimeAvailable
+    ? null
+    : sidecarStatus === "unsupported"
+      ? "当前环境不支持本地运行"
+      : sidecarStatus === "error"
+        ? sidecarLastError ?? "本地 Agent 运行异常"
+        : sidecarStatus !== "ready"
+          ? "本地 Agent 运行尚未就绪"
+          : "请先在顶部选择工作目录";
+  // When the sidecar flips out of "ready" (or loses its workspace root),
+  // silently switch the composer back to the server runtime. This
+  // prevents the user from sending a message that would be dropped.
+  useEffect(() => {
+    if (sidecarRuntimeEnabled && !sidecarRuntimeAvailable) {
+      setSidecarRuntimeEnabled(false);
+    }
+  }, [sidecarRuntimeEnabled, sidecarRuntimeAvailable]);
   const effectiveModel = getEffectiveModelForConversation(channels, currentConversation);
   const agentModeSupported = effectiveModel.ok;
   const agentModeDisabledReason = effectiveModel.ok
@@ -892,6 +919,8 @@ export function DesktopChatArea() {
       }>
       | undefined;
 
+    const useSidecarRuntime =
+      mode === "agent" && sidecarRuntimeEnabled && sidecarRuntimeAvailable;
     try {
       addMessage({
         id: userMessageId,
@@ -908,6 +937,7 @@ export function DesktopChatArea() {
         role: "assistant",
         content: "",
         mode,
+        runtimeKind: useSidecarRuntime ? "sidecar" : "server",
         agentRun:
           mode === "agent"
             ? {
@@ -925,6 +955,39 @@ export function DesktopChatArea() {
       setStreamingAssistantId(assistantMessageId);
       setError(null);
       queueMicrotask(() => inputRef.current?.focus());
+
+      if (useSidecarRuntime) {
+        if (files.length > 0) {
+          notifyWarning(
+            "本地运行暂不支持附件",
+            "本次运行将忽略已添加的附件；如需使用附件请关闭本地运行。",
+          );
+        }
+        if (!currentConversation.channelId) {
+          throw new Error("当前会话没有绑定渠道，无法本地运行");
+        }
+        if (!effectiveModel.ok) {
+          throw new Error("未找到可用模型，无法本地运行");
+        }
+        await sidecarRun.startRun({
+          conversationId,
+          channelId: currentConversation.channelId,
+          modelId: effectiveModel.modelId,
+          assistantMessageId,
+          prompt: effectiveContent,
+        });
+
+        setStreaming(false);
+        setStreamingAssistantId(null);
+        // Sidecar runs do not know about the server's messages table,
+        // so we do not reload messages here. The chatStore already
+        // holds the assistant message; events stream in through
+        // sidecarRun and sidecarRun will flip isBusy when done.
+        setLoading(false);
+        setIsUploading(false);
+        queueMicrotask(() => inputRef.current?.focus());
+        return;
+      }
 
       if (files.length > 0) {
         setIsUploading(true);
@@ -1406,6 +1469,18 @@ export function DesktopChatArea() {
           paddingBottom: COMPOSER_PAD_BOTTOM,
         }}
       >
+        <DesktopSidecarRuntimePanel
+          pendingApproval={sidecarRun.pendingApproval}
+          lastError={sidecarRun.lastError}
+          isBusy={sidecarRun.isBusy && !sidecarRun.pendingApproval}
+          lastFinishedRunId={sidecarRun.lastFinishedRunId}
+          isRollingBack={sidecarRun.isRollingBack}
+          rollbackError={sidecarRun.rollbackError}
+          onApprove={(toolUseId) => void sidecarRun.respondToApproval(toolUseId, true)}
+          onReject={(toolUseId) => void sidecarRun.respondToApproval(toolUseId, false)}
+          onCancel={() => void sidecarRun.cancel()}
+          onRollback={() => void sidecarRun.rollbackLast()}
+        />
         <DesktopComposer
           value={input}
           onChange={setInput}
@@ -1441,6 +1516,13 @@ export function DesktopChatArea() {
           onOpenModelPicker={() => setModelPickerOpen(true)}
           forceWebSearch={forceWebSearch}
           onToggleWebSearch={() => void handleToggleWebSearch()}
+          sidecarRuntimeAvailable={sidecarRuntimeAvailable}
+          sidecarRuntimeEnabled={sidecarRuntimeEnabled}
+          sidecarRuntimeDisabledReason={sidecarRuntimeDisabledReason}
+          onToggleSidecarRuntime={() => {
+            if (!sidecarRuntimeAvailable) return;
+            setSidecarRuntimeEnabled((value) => !value);
+          }}
           onInputFocus={handleInputFocus}
           streaming={isStreaming}
           canSubmit={canSend}

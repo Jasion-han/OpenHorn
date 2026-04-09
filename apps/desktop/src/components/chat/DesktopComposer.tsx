@@ -1,4 +1,4 @@
-import { ChevronDown, CornerDownLeft, Globe, Paperclip, Square } from "lucide-react";
+import { ChevronDown, CornerDownLeft, FolderCog, Globe, Paperclip, Square } from "lucide-react";
 import type {
   ClipboardEvent,
   DragEvent,
@@ -37,6 +37,10 @@ export function DesktopComposer({
   onOpenModelPicker,
   forceWebSearch,
   onToggleWebSearch,
+  sidecarRuntimeAvailable,
+  sidecarRuntimeEnabled,
+  sidecarRuntimeDisabledReason,
+  onToggleSidecarRuntime,
   onInputFocus,
   streaming,
   canSubmit,
@@ -62,6 +66,13 @@ export function DesktopComposer({
   onOpenModelPicker?: () => void;
   forceWebSearch: boolean;
   onToggleWebSearch: () => void;
+  /** True when the sidecar is ready AND a workspace has been picked. */
+  sidecarRuntimeAvailable?: boolean;
+  /** True when the user has opted this composer into running on the sidecar. */
+  sidecarRuntimeEnabled?: boolean;
+  /** Explanation to show as a tooltip when the switch is visible but disabled. */
+  sidecarRuntimeDisabledReason?: string | null;
+  onToggleSidecarRuntime?: () => void;
   onInputFocus?: () => void;
   streaming: boolean;
   canSubmit: boolean;
@@ -313,6 +324,43 @@ export function DesktopComposer({
                 </p>
               </TooltipContent>
             </Tooltip>
+
+            {mode === "agent" && onToggleSidecarRuntime ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    data-testid="composer-sidecar-toggle"
+                    onClick={() => {
+                      if (!sidecarRuntimeAvailable) return;
+                      onToggleSidecarRuntime();
+                    }}
+                    disabled={disabled || streaming || !sidecarRuntimeAvailable}
+                    className={cn(
+                      "flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors",
+                      sidecarRuntimeEnabled && sidecarRuntimeAvailable
+                        ? "bg-blue-400/20 text-blue-500 hover:bg-blue-400/30"
+                        : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                      (disabled || streaming || !sidecarRuntimeAvailable) &&
+                        "pointer-events-none opacity-60",
+                    )}
+                    aria-label="Run locally on sidecar"
+                  >
+                    <FolderCog className="size-3.5" />
+                    <span>本地运行</span>
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top">
+                  <p>
+                    {!sidecarRuntimeAvailable
+                      ? sidecarRuntimeDisabledReason || "本地运行尚未就绪"
+                      : sidecarRuntimeEnabled
+                        ? "在本地工作目录运行 Agent：已开启"
+                        : "在本地工作目录运行 Agent：已关闭"}
+                  </p>
+                </TooltipContent>
+              </Tooltip>
+            ) : null}
           </div>
 
           <div className="flex items-center gap-1.5">
