@@ -16,9 +16,18 @@ type ConnectionState = {
   workspaceRoot: string | null;
   pendingApprovals: Map<string, (allow: boolean) => void>;
   agentRuns: Map<string, { abortController: AbortController }>;
+  /**
+   * Run IDs that this connection has executed (whether currently running
+   * or already finalized). checkpoint.rollback is gated on this set so
+   * one connection can't roll back another connection's runs even if it
+   * happens to know the runId.
+   */
+  ownedRunIds: Set<string>;
+  lastActivityAt: number;
 };
 
 const wsStates = new WeakMap<import("bun").ServerWebSocket<unknown>, ConnectionState>();
+const activeConnections = new Set<import("bun").ServerWebSocket<unknown>>();
 
 function getEnv(name: string): string | null {
   const v = process.env[name];
@@ -31,8 +40,35 @@ if (!HANDSHAKE_TOKEN) {
   process.exit(1);
 }
 
-const HOST = getEnv("OPENHORN_HOST") ?? "127.0.0.1";
+// Loopback-only. We refuse to listen on a non-loopback interface even
+// if OPENHORN_HOST is misconfigured. The handshake token is the second
+// line of defense, but exposing the WebSocket on 0.0.0.0 would let any
+// other user on the same machine try to brute-force the token, and
+// would let any program on a shared LAN attempt connections too.
+const REQUESTED_HOST = getEnv("OPENHORN_HOST") ?? "127.0.0.1";
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "localhost"]);
+if (!LOOPBACK_HOSTS.has(REQUESTED_HOST)) {
+  console.error(
+    `OPENHORN_HOST must be a loopback address (127.0.0.1, ::1, localhost); got ${REQUESTED_HOST}`,
+  );
+  process.exit(1);
+}
+const HOST = REQUESTED_HOST;
 const PORT = Number.parseInt(getEnv("OPENHORN_PORT") ?? "0", 10);
+
+// Allow-list of Origin headers we will accept on the WebSocket upgrade.
+// This is the third defense layer, on top of loopback-only listen +
+// handshake token: it stops a malicious web page in another tab from
+// even reaching the upgrade flow.
+const ALLOWED_ORIGINS = new Set([
+  "tauri://localhost",
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+]);
+
+const MAX_CONCURRENT_CONNECTIONS = 1;
+const IDLE_TIMEOUT_MS = 5 * 60 * 1000;
+const IDLE_CHECK_INTERVAL_MS = 30 * 1000;
 
 function decodeMessage(message: unknown): string {
   if (typeof message === "string") return message;
@@ -45,6 +81,23 @@ const server = Bun.serve({
   hostname: HOST,
   port: Number.isFinite(PORT) ? PORT : 0,
   fetch(req, server) {
+    // Origin check: refuse the upgrade unless the request comes from a
+    // known desktop renderer or our local dev server. The token check
+    // happens after the upgrade, but enforcing Origin first stops
+    // browser-side attackers from even establishing a socket.
+    const origin = req.headers.get("origin");
+    const originIsAllowed = origin === null || ALLOWED_ORIGINS.has(origin);
+    if (!originIsAllowed) {
+      return new Response("Forbidden", { status: 403 });
+    }
+
+    // Single-connection limit: OpenHorn ships one desktop client per
+    // sidecar process. Refusing additional sockets makes credential
+    // leakage and resource exhaustion far harder.
+    if (activeConnections.size >= MAX_CONCURRENT_CONNECTIONS) {
+      return new Response("Too many connections", { status: 429 });
+    }
+
     if (server.upgrade(req)) return;
     return new Response("OpenHorn sidecar", { status: 200 });
   },
@@ -55,10 +108,28 @@ const server = Bun.serve({
         workspaceRoot: null,
         pendingApprovals: new Map(),
         agentRuns: new Map(),
+        ownedRunIds: new Set(),
+        lastActivityAt: Date.now(),
       });
+      activeConnections.add(ws);
       ws.send(JSON.stringify(buildEvent("server.ready")));
     },
+    close(ws) {
+      const state = wsStates.get(ws);
+      if (state) {
+        for (const run of state.agentRuns.values()) {
+          run.abortController.abort();
+        }
+        state.pendingApprovals.clear();
+        state.agentRuns.clear();
+      }
+      activeConnections.delete(ws);
+    },
     message(ws, message) {
+      const state = wsStates.get(ws);
+      if (state) {
+        state.lastActivityAt = Date.now();
+      }
       const raw = decodeMessage(message);
       let request: WsRequest;
       try {
@@ -80,6 +151,24 @@ const server = Bun.serve({
     },
   },
 });
+
+// Idle reaper: periodically close any connection that has been silent
+// for longer than IDLE_TIMEOUT_MS. This prevents an abandoned client
+// from holding the single allowed connection slot indefinitely.
+setInterval(() => {
+  const now = Date.now();
+  for (const ws of activeConnections) {
+    const state = wsStates.get(ws);
+    if (!state) continue;
+    if (now - state.lastActivityAt > IDLE_TIMEOUT_MS) {
+      try {
+        ws.close(1000, "Idle timeout");
+      } catch {
+        // ignore
+      }
+    }
+  }
+}, IDLE_CHECK_INTERVAL_MS).unref();
 
 async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: WsRequest) {
   const state = wsStates.get(ws);
@@ -164,6 +253,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
         const checkpoint = await createCheckpointSession(state.workspaceRoot);
         const runId = checkpoint.runId;
         state.agentRuns.set(runId, { abortController });
+        state.ownedRunIds.add(runId);
 
         ws.send(JSON.stringify(buildOkResponse(request.requestId, { runId })));
 
@@ -208,6 +298,18 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
       case "checkpoint.rollback": {
         if (!state.workspaceRoot) throw new Error("Workspace not set");
         const { runId } = params as { runId: string };
+        // Authorization: this connection must have actually executed the
+        // run it's trying to roll back. Without this check any authed
+        // connection that guesses or learns a runId could revert another
+        // session's work.
+        if (!state.ownedRunIds.has(runId)) {
+          ws.send(
+            JSON.stringify(
+              buildErrorResponse(request.requestId, "Unknown runId for this session"),
+            ),
+          );
+          return;
+        }
         const result = await rollbackCheckpoint(state.workspaceRoot, runId);
         ws.send(JSON.stringify(buildOkResponse(request.requestId, result)));
         return;

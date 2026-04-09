@@ -4,6 +4,7 @@ import {
   assertExistingPathInsideWorkspace,
   ensureParentDirExists,
   resolvePathInsideWorkspace,
+  resolveWritePathInsideWorkspace,
 } from "./workspace";
 
 export type FsEntry = {
@@ -85,7 +86,12 @@ export async function fsWriteText(input: {
   filePath: string;
   content: string;
 }): Promise<{ ok: true }> {
-  const resolved = resolvePathInsideWorkspace({
+  // Use the write-aware resolver: it lexically rejects "../" and absolute
+  // paths, then realpaths the existing file (or its deepest existing
+  // ancestor) to ensure no symlink in the chain points outside the
+  // workspace. Without this, planting a symlink inside the workspace
+  // would let a write escape to anywhere on disk.
+  const resolved = await resolveWritePathInsideWorkspace({
     workspaceRoot: input.workspaceRoot,
     targetPath: input.filePath,
   });
