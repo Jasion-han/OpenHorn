@@ -1,6 +1,7 @@
 import { attachments, conversations, messages } from "db";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { type ChatContentPart, type ChatMessage, createAdapter } from "../agent-adapters";
+import { buildTaskMessageSummary } from "./agentTaskMessage";
 import { db } from "../db";
 import { generateId } from "../utils";
 import { createSseStream } from "../utils/sse";
@@ -148,67 +149,6 @@ function buildTaskPlan(task: Pick<AgentTaskRecord, "goal" | "complexity" | "atta
     complexity: task.complexity,
     attachments: task.attachments,
   });
-}
-
-function buildTaskStatusSummary(status: AgentTaskRecord["status"], uxMode: AgentTaskUxMode) {
-  if (uxMode === "direct") {
-    switch (status) {
-      case "planning":
-        return "正在整理最短执行路径。";
-      case "awaiting_approval":
-        return "任务已暂停，等待你决定是否继续。";
-      case "running":
-        return "正在直接处理这项任务。";
-      case "completed":
-        return "任务已完成。";
-      case "failed":
-        return "任务处理失败，可继续或重试。";
-      case "cancelled":
-        return "任务已取消。";
-      default:
-        return "我先直接处理这项任务。";
-    }
-  }
-
-  if (uxMode === "compact") {
-    switch (status) {
-      case "planning":
-        return "正在整理简要步骤并开始执行。";
-      case "awaiting_approval":
-        return "任务已暂停，等待你批准计划。";
-      case "running":
-        return "正在按简要步骤处理这项任务。";
-      case "completed":
-        return "任务已完成。";
-      case "failed":
-        return "任务处理失败，可以重试或查看过程。";
-      case "cancelled":
-        return "任务已取消。";
-      default:
-        return "我会按简要步骤直接开始处理。";
-    }
-  }
-
-  switch (status) {
-    case "planning":
-      return "正在整理执行路径并开始执行。";
-    case "awaiting_approval":
-      return "任务暂时停下，等待进一步批准。";
-    case "running":
-      return "任务正在执行。";
-    case "completed":
-      return "任务已完成。";
-    case "failed":
-      return "任务执行失败，可继续、重试或重新规划。";
-    case "cancelled":
-      return "任务已取消。";
-    default:
-      return "我会先展开任务并开始执行。";
-  }
-}
-
-function buildTaskMessageSummary(detail: AgentTaskDetail) {
-  return detail.task.insight?.previewText?.trim() || buildTaskStatusSummary(detail.task.status, detail.task.uxMode);
 }
 
 function buildTaskBackedAgentRun(detail: AgentTaskDetail): AgentRunData {

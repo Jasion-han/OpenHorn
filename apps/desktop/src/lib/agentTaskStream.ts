@@ -37,14 +37,20 @@ export type AgentTaskStreamEvent =
       content: string;
       citations?: ApiCitation[];
     }
-  | { type: "error"; taskId?: string; runId?: string; content: string }
+  | {
+      type: "error";
+      taskId?: string;
+      runId?: string;
+      content: string;
+      metadata?: unknown;
+    }
   | { type: "done"; taskId: string; runId: string };
 
 export async function streamAgentTaskExecution(
   taskId: string,
   handlers: {
     onEvent: (event: AgentTaskStreamEvent) => void | Promise<void>;
-    onError: (message: string) => void;
+    onError: (message: string, metadata?: unknown) => void;
   },
   options?: {
     signal?: AbortSignal;
@@ -67,7 +73,7 @@ export async function streamAgentTaskExecution(
 
   await readTypedSseStream<AgentTaskStreamEvent>(response, async (event) => {
     if (event.type === "error") {
-      handlers.onError(event.content || "Task execution failed");
+      handlers.onError(event.content || "Task execution failed", event.metadata);
       return;
     }
 

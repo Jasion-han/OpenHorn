@@ -274,6 +274,15 @@ function buildLiveSearchFailureMessage(params: {
   return params.route === "research" ? "在线研究失败，任务已停止" : "实时搜索失败，任务已停止";
 }
 
+/**
+ * Returns the structured runtime issue key the desktop client uses to look
+ * up a localized message for an upstream live-search failure. The key has a
+ * 1:1 mapping to entries in `apps/desktop/src/lib/i18n/agent.ts`.
+ */
+function getLiveSearchRuntimeIssue(route: "web_search" | "research"): string {
+  return route === "research" ? "research_failed" : "live_search_failed";
+}
+
 function normalizeCitationSnippetText(value: string) {
   return value
     .replace(/\r\n/g, "\n")
@@ -1005,16 +1014,26 @@ async function createTaskExecutionResponse(
             route: liveSearchRoute,
             userLabel: runtimeContext.liveContext?.userLabel,
           });
+          const runtimeIssue = getLiveSearchRuntimeIssue(liveSearchRoute);
           await createAgentTaskEvent(userId, taskId, run.id, {
             type: "error",
             content: errorText,
-            metadata: { source: "live_context", toolName: liveSearchRoute },
+            metadata: {
+              source: "live_context",
+              toolName: liveSearchRoute,
+              runtimeIssue,
+            },
           });
           send({
             type: "error",
             taskId,
             runId: run.id,
             content: errorText,
+            metadata: {
+              source: "live_context",
+              toolName: liveSearchRoute,
+              runtimeIssue,
+            },
           });
         }
       }

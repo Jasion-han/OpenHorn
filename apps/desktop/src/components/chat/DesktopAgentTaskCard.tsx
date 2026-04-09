@@ -1,6 +1,12 @@
 import { type CSSProperties, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "ui";
+import {
+  formatStructuredAgentError,
+  normalizeAgentDisplayText,
+} from "../../lib/agentErrorDisplay";
+import { getAgentRuntimeIssueLabel } from "../../lib/i18n/agent";
 import { streamAgentTaskExecution, type AgentTaskStreamEvent } from "../../lib/agentTaskStream";
+import { resolveAgentDisplayOutput } from "../../lib/agentOutput";
 import { sanitizeDisplayContent } from "../../lib/citations";
 import { notifyError } from "../../lib/notify";
 import { createServerApi } from "../../lib/serverApi";
@@ -78,56 +84,6 @@ function getEventMetadata(event: ApiAgentTaskEvent): AgentEventMetadata {
   };
 }
 
-function isLikelyRawProviderError(text: string) {
-  const lower = text.trim().toLowerCase();
-  if (!lower) return false;
-  return (
-    lower.startsWith("provider api error") ||
-    lower.includes("ssl handshake failed") ||
-    lower.includes("hour allocated quota exceeded") ||
-    lower.includes("token quota is not enough") ||
-    lower.includes("no cookie available") ||
-    lower.includes("bad gateway") ||
-    lower.includes("gateway timeout") ||
-    lower.includes("service unavailable") ||
-    lower.includes("invalid api key")
-  );
-}
-
-function formatStructuredAgentError(
-  errorCode: ApiProviderErrorKind | undefined,
-  retryable?: boolean,
-) {
-  if (!errorCode) return null;
-
-  const base =
-    errorCode === "quota_exhausted"
-      ? "配额不足或触发限流"
-      : errorCode === "ssl_handshake_failed"
-        ? "TLS/SSL 握手失败"
-        : errorCode === "gateway_failed"
-          ? "上游网关异常"
-          : errorCode === "auth_failed"
-            ? "鉴权失败"
-            : errorCode === "timeout"
-              ? "连接或响应超时"
-              : errorCode === "protocol_incompatible"
-                ? "当前渠道不兼容 Agent 运行协议"
-                : errorCode === "model_not_found"
-                  ? "模型不存在、不可用或已被禁用"
-                  : errorCode === "server_failed"
-                    ? "上游服务异常"
-                    : errorCode === "network_failed"
-                      ? "网络连接失败"
-                      : errorCode === "request_failed"
-                        ? "请求失败"
-                        : null;
-
-  if (!base) return null;
-  if (!retryable) return base;
-  return `${base}，可稍后重试`;
-}
-
 function getArtifactCitations(artifact: ApiAgentArtifact | null | undefined): ApiCitation[] | undefined {
   if (!artifact || !isRecord(artifact.metadata)) return undefined;
   const citations = artifact.metadata.citations;
@@ -142,84 +98,6 @@ function getTaskFinalResultCitations(detail: ApiAgentTaskDetail) {
   return getArtifactCitations(getTaskFinalResultArtifact(detail));
 }
 
-const LEGACY_AGENT_TEXT_EXACT: Record<string, string> = {
-  "No default channel or model is configured. Configure one in Settings first.":
-    "未配置可用的默认渠道/默认模型。请先在设置中完成配置。",
-  "Network error: the current channel may be incompatible with Claude Agent SDK. Check the Base URL, model, and API key.":
-    "网络错误：当前渠道可能不兼容 Claude Agent SDK。请检查 Base URL、模型和鉴权配置。",
-  "Invalid request: the current channel or model may be incompatible with Claude Agent SDK.":
-    "请求无效：当前渠道或模型可能不兼容 Claude Agent SDK。",
-  "No real Bash tool call was detected. The current channel may support plain chat only and be incompatible with Agent tool execution.":
-    "未检测到真实 Bash 工具调用，当前渠道可能只支持普通对话，不兼容 Agent 工具执行。",
-};
-
-function translateAgentSystemText(content: string) {
-  const trimmed = content.trim();
-  if (!trimmed) return trimmed;
-
-  if (trimmed.startsWith("Execution failed: ")) {
-    return trimmed
-      .replace(/^Execution failed:\s*/, "执行失败：")
-      .replace("model returned no valid result", "模型未返回有效结果")
-      .replace("model returned no final result", "模型未返回最终结果")
-      .replace("exceeded the maximum tool-call rounds", "超过最大工具调用轮数")
-      .replace(
-        "the current channel may be incompatible with Claude Agent SDK.",
-        "当前渠道可能不兼容 Claude Agent SDK。",
-      )
-      .replace(
-        "the current channel or model may be incompatible with Claude Agent SDK.",
-        "当前渠道或模型可能不兼容 Claude Agent SDK。",
-      );
-  }
-
-  const compatibilityMatch = /^This channel supports regular chat but is incompatible with (.+?)\. It can still be used in chat mode\.$/.exec(
-    trimmed,
-  );
-  if (compatibilityMatch?.[1]) {
-    const target =
-      compatibilityMatch[1] === "the current Agent tool-calling protocol"
-        ? "当前 Agent 工具运行协议"
-        : compatibilityMatch[1];
-    return `该渠道支持普通聊天接口，但不兼容 ${target}，无法用于 Agent 模式。它仍可用于普通聊天。`;
-  }
-
-  const firstOutputTimeoutMatch = /^Model produced no output for (\d+)s and was stopped\. The current channel may be incompatible with the Agent protocol\. Check the Base URL, model, and API key\.$/.exec(
-    trimmed,
-  );
-  if (firstOutputTimeoutMatch?.[1]) {
-    return `模型长时间无响应（${firstOutputTimeoutMatch[1]}s）已停止。可能当前渠道不兼容 Agent 运行协议，请检查 Base URL、模型和鉴权配置。`;
-  }
-
-  const idleTimeoutMatch = /^The run produced no activity for (\d+)s and was stopped\. Check the channel configuration or reduce task complexity and retry\.$/.exec(
-    trimmed,
-  );
-  if (idleTimeoutMatch?.[1]) {
-    return `运行过程中长时间无响应（${idleTimeoutMatch[1]}s）已停止。请检查渠道配置或减少任务复杂度后重试。`;
-  }
-
-  const totalTimeoutMatch = /^The run exceeded the total time limit \((\d+)s\) and was stopped\. Check the channel configuration or split the task and retry\.$/.exec(
-    trimmed,
-  );
-  if (totalTimeoutMatch?.[1]) {
-    return `运行总时长超时（${totalTimeoutMatch[1]}s）已停止。请检查渠道配置或拆分任务后重试。`;
-  }
-
-  if (LEGACY_AGENT_TEXT_EXACT[trimmed]) return LEGACY_AGENT_TEXT_EXACT[trimmed];
-
-  return trimmed;
-}
-
-function normalizeAgentDisplayText(content: string | null | undefined, metadata?: AgentEventMetadata) {
-  const translated = translateAgentSystemText(sanitizeDisplayContent(content ?? ""))
-    .trim()
-    .replace(/\s+/g, " ");
-  const structured = formatStructuredAgentError(metadata?.errorCode, metadata?.retryable);
-  if (structured && (!translated || isLikelyRawProviderError(translated))) {
-    return structured;
-  }
-  return translated || structured || null;
-}
 
 function getToolApprovalPayload(payload: unknown): ToolApprovalPayload | null {
   if (!isRecord(payload)) return null;
@@ -457,62 +335,18 @@ function describeApprovalResolution(event: ApiAgentTaskEvent) {
   };
 }
 
-function taskStatusSummary(status: ApiAgentTaskDetail["task"]["status"]) {
-  switch (status) {
-    case "draft":
-      return "thinking";
-    case "planning":
-      return "building plan";
-    case "awaiting_approval":
-      return "paused";
-    case "running":
-      return "working";
-    case "completed":
-      return "done";
-    case "failed":
-      return "blocked on error";
-    case "cancelled":
-      return "stopped";
-    default:
-      return "ready";
-  }
-}
-
-function isLowSignalFallbackOutput(text: string | null | undefined) {
-  const normalized = sanitizeDisplayContent(text ?? "").trim();
-  if (!normalized) return true;
-
-  return (
-    normalized === "Thinking" ||
-    normalized === "Working" ||
-    normalized === "Error" ||
-    normalized === "Agent 正在执行" ||
-    normalized === "我先直接处理这项任务。" ||
-    normalized === "正在整理最短执行路径。" ||
-    normalized === "正在直接处理这项任务。" ||
-    normalized === "任务已完成。" ||
-    normalized === "任务处理失败，可继续或重试。" ||
-    normalized === "任务已取消。" ||
-    normalized === "正在整理简要步骤并开始执行。" ||
-    normalized === "正在按简要步骤处理这项任务。" ||
-    normalized === "任务处理失败，可以重试或查看过程。" ||
-    normalized === "我会按简要步骤直接开始处理。" ||
-    normalized === "正在整理执行路径并开始执行。" ||
-    normalized === "任务暂时停下，等待进一步批准。" ||
-    normalized === "任务正在执行。" ||
-    normalized === "任务执行失败，可继续、重试或重新规划。" ||
-    normalized === "我会先展开任务并开始执行。" ||
-    normalized === "building plan" ||
-    normalized === "paused" ||
-    normalized === "working" ||
-    normalized === "done" ||
-    normalized === "blocked on error" ||
-    normalized === "stopped" ||
-    normalized === "ready" ||
-    normalized.startsWith("Execution completed.")
-  );
-}
-
+/**
+ * Returns the *real* user-visible summary for this task, or an empty string
+ * when no real content is available yet.
+ *
+ * Real sources, in priority order:
+ *   1. final_result artifact content (when the task has completed)
+ *   2. server-provided insight.previewText
+ *
+ * When neither is available we return "" — the caller is expected to render
+ * structured task state (status badge, plan steps, approval panel) instead
+ * of inventing a placeholder string.
+ */
 function buildTaskMessageSummary(detail: ApiAgentTaskDetail) {
   const finalResultCitations = getTaskFinalResultCitations(detail);
   const finalResult = sanitizeDisplayContent(
@@ -521,28 +355,12 @@ function buildTaskMessageSummary(detail: ApiAgentTaskDetail) {
   ).trim();
   if (detail.task.status === "completed" && finalResult) return finalResult;
 
-  if (detail.task.status === "draft" && detail.task.autoStart) {
-    return "Thinking";
-  }
-
   const preview = sanitizeDisplayContent(
     detail.task.insight?.previewText ?? "",
     finalResultCitations,
-  )
-    .trim();
+  ).trim();
 
-  return normalizeAgentDisplayText(preview) || taskStatusSummary(detail.task.status);
-}
-
-function isLowSignalTaskSummary(text: string | null | undefined, detail: ApiAgentTaskDetail) {
-  const normalized = (text ?? "").trim();
-  if (!normalized) return true;
-  return (
-    normalized === taskStatusSummary(detail.task.status) ||
-    normalized === "ready" ||
-    normalized === "working" ||
-    normalized.startsWith("Execution completed.")
-  );
+  return preview;
 }
 
 function buildTaskBackedAgentRun(detail: ApiAgentTaskDetail): ApiAgentRun {
@@ -574,6 +392,19 @@ function buildTaskBackedAgentRun(detail: ApiAgentTaskDetail): ApiAgentRun {
     latestApprovalType: latestApproval?.type ?? null,
     latestApprovalStatus: latestApproval?.status ?? null,
   };
+}
+
+function isDraftAutoStartRun(run: ApiAgentRun | null | undefined, taskId: string) {
+  return Boolean(run?.taskId === taskId && run.autoStart && run.taskStatus === "draft");
+}
+
+/**
+ * True when the message currently has no real assistant text. We treat this
+ * as "the streaming layer should freely overwrite content with the next real
+ * chunk", because there is nothing real to preserve.
+ */
+function hasRealMessageContent(text: string | null | undefined) {
+  return (text ?? "").trim().length > 0;
 }
 
 function getPendingApproval(detail: ApiAgentTaskDetail): ApiAgentApproval | null {
@@ -686,10 +517,14 @@ function buildExecutionItems(events: ApiAgentTaskEvent[]) {
   for (const event of events) {
     if (event.type === "error") {
       const metadata = getEventMetadata(event);
+      const text = summarizeProcessDetail(normalizeProcessText(event.content, metadata));
+      // Drop the row entirely when neither raw content nor a structured
+      // errorCode is available — never invent a placeholder string.
+      if (!text) continue;
       items.push({
         id: event.id,
         kind: "meta",
-        text: summarizeProcessDetail(normalizeProcessText(event.content, metadata)) || "执行过程中发生错误",
+        text,
         tone: "danger",
       });
       continue;
@@ -822,11 +657,14 @@ function buildTimelineItems(detail: ApiAgentTaskDetail): StreamItem[] {
 
     if (event.type === "error") {
       const metadata = getEventMetadata(event);
+      const text = summarizeProcessDetail(normalizeProcessText(event.content, metadata));
+      // Same policy as buildExecutionItems: skip rather than fabricate.
+      if (!text) continue;
       items.push({
         id: event.id,
         kind: "meta",
         label: "error",
-        text: summarizeProcessDetail(normalizeProcessText(event.content, metadata)) || "执行过程中发生错误",
+        text,
         tone: "danger",
       });
     }
@@ -871,24 +709,52 @@ function buildApprovalItems(approval: ApiAgentApproval | null): StreamItem[] {
   ];
 }
 
-function buildStatusItems(streamError: string | null): StreamItem[] {
+function buildStatusItems(
+  streamError: { message: string; runtimeIssue?: string | null } | null,
+): StreamItem[] {
   const items: StreamItem[] = [];
 
-  if (streamError) {
-    items.push({
-      id: "stream-error",
-      kind: "meta",
-      label: "error",
-      text: normalizeAgentDisplayText(streamError) || streamError,
-      tone: "danger",
-    });
-  }
+  if (!streamError) return items;
+
+  // Priority order:
+  //   1. Server-supplied structured runtime issue (live_search_failed, etc.)
+  //      → look up the localized label from the i18n dictionary.
+  //   2. Otherwise, run the raw message through normalizeAgentDisplayText,
+  //      which will trim/sanitize and (when applicable) translate via the
+  //      structured errorCode dictionary.
+  //   3. Final fallback: the raw message string as-is. We never invent a
+  //      Chinese placeholder.
+  const runtimeIssueLabel = getAgentRuntimeIssueLabel(streamError.runtimeIssue);
+  const text =
+    runtimeIssueLabel ||
+    normalizeAgentDisplayText(streamError.message) ||
+    streamError.message;
+
+  items.push({
+    id: "stream-error",
+    kind: "meta",
+    label: "error",
+    text,
+    tone: "danger",
+  });
 
   return items;
 }
 
 function isTerminalTaskStatus(status: ApiAgentTaskDetail["task"]["status"]) {
   return status === "completed" || status === "failed" || status === "cancelled";
+}
+
+function mergeAgentOutputSnapshot(current: string, incoming: string) {
+  const base = current.trim();
+  const next = incoming.trim();
+
+  if (!next) return current;
+  if (!base) return incoming;
+  if (incoming === current) return current;
+  if (incoming.startsWith(current)) return incoming;
+  if (current.startsWith(incoming)) return current;
+  return incoming;
 }
 
 function appendCurrentProcessItem(items: StreamItem[], detail: ApiAgentTaskDetail) {
@@ -996,18 +862,11 @@ function buildOutputItems(detail: ApiAgentTaskDetail, fallbackContent: string | 
 
   if (!isTerminal) return [];
 
+  // Terminal state with no real artifact and no real execution text. Only
+  // surface the fallback caller passed in if it carries actual content; we
+  // never invent a placeholder string here.
   const fallback = sanitizeDisplayContent(fallbackContent ?? "").trim();
-  if (
-    !fallback ||
-    fallback === taskStatusSummary(detail.task.status) ||
-    fallback === "Thinking" ||
-    fallback === "Working" ||
-    fallback === "Error" ||
-    fallback === "Agent 正在执行" ||
-    fallback.startsWith("Execution completed.")
-  ) {
-    return [];
-  }
+  if (!fallback) return [];
 
   return [
     {
@@ -1020,7 +879,7 @@ function buildOutputItems(detail: ApiAgentTaskDetail, fallbackContent: string | 
 
 function buildStream(
   detail: ApiAgentTaskDetail,
-  streamError: string | null,
+  streamError: { message: string; runtimeIssue?: string | null } | null,
   fallbackContent: string | null | undefined,
 ): StreamItem[] {
   const approval = getPendingApproval(detail);
@@ -1128,19 +987,43 @@ export function DesktopAgentTaskCard({
   const [detail, setDetail] = useState<ApiAgentTaskDetail | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [busyAction, setBusyAction] = useState<"execute" | "retry" | "continue" | null>(null);
-  const [streamError, setStreamError] = useState<string | null>(null);
+  const [streamError, setStreamError] = useState<{
+    message: string;
+    runtimeIssue?: string | null;
+  } | null>(null);
   const [isProcessExpanded, setIsProcessExpanded] = useState(false);
   const [isExecutionStreaming, setIsExecutionStreaming] = useState(false);
+  const [liveOutputText, setLiveOutputText] = useState("");
+  const [liveOutputPulseKey, setLiveOutputPulseKey] = useState(0);
+  const [liveOutputCitations, setLiveOutputCitations] = useState<ApiCitation[] | undefined>(undefined);
   const hasStreamedTextRef = useRef(false);
+  const detailRef = useRef<ApiAgentTaskDetail | null>(null);
+  const liveOutputTextRef = useRef("");
   const message = useChatStore((state) => state.messages.find((item) => item.id === messageId));
+  const canAutoExecuteFromMessage = isDraftAutoStartRun(message?.agentRun, taskId);
 
   const syncMessage = (nextDetail: ApiAgentTaskDetail) => {
     const currentMessage = useChatStore.getState().messages.find((message) => message.id === messageId);
     const nextSummary = buildTaskMessageSummary(nextDetail);
-    const content =
-      isLowSignalTaskSummary(nextSummary, nextDetail) && !isLowSignalTaskSummary(currentMessage?.content, nextDetail)
-        ? currentMessage?.content ?? nextSummary
-        : nextSummary;
+    const currentContent = currentMessage?.content ?? "";
+    const isTerminal = isTerminalTaskStatus(nextDetail.task.status);
+
+    // Decision rules (no string-equality heuristics):
+    //   1. If the task has reached a terminal state, always trust the latest
+    //      summary from the task detail — this is the canonical final output.
+    //   2. While still running, if we already have real content (either from
+    //      a live stream or a previous detail), keep it instead of letting
+    //      a momentarily-empty summary blank out the bubble.
+    //   3. Otherwise, take whatever the new summary is (may be empty — the
+    //      UI will fall back to structured task state).
+    let content: string;
+    if (isTerminal) {
+      content = nextSummary;
+    } else if (hasRealMessageContent(currentContent) && !nextSummary) {
+      content = currentContent;
+    } else {
+      content = nextSummary;
+    }
 
     useChatStore.getState().updateMessage(messageId, {
       content,
@@ -1149,20 +1032,66 @@ export function DesktopAgentTaskCard({
     });
   };
 
-  const applyStreamingTextChunk = (chunk: string, currentDetail: ApiAgentTaskDetail) => {
+  const setLiveOutputSnapshot = (nextText: string, citations?: ApiCitation[]) => {
+    liveOutputTextRef.current = nextText;
+    setLiveOutputText(nextText);
+    setLiveOutputPulseKey((current) => current + 1);
+    if (citations) {
+      setLiveOutputCitations(citations);
+    }
+  };
+
+  const appendLiveOutputDelta = (chunk: string) => {
+    const nextChunk = chunk ?? "";
+    if (!nextChunk) return;
+
+    const nextText = `${liveOutputTextRef.current}${nextChunk}`;
+    setLiveOutputSnapshot(nextText);
+  };
+
+  const mergeLiveOutputSnapshot = (text: string, citations?: ApiCitation[]) => {
+    const merged = mergeAgentOutputSnapshot(liveOutputTextRef.current, text);
+    if (merged === liveOutputTextRef.current) {
+      if (citations) {
+        setLiveOutputCitations(citations);
+      }
+      return;
+    }
+    setLiveOutputSnapshot(merged, citations);
+  };
+
+  const applyStreamingTextChunk = (
+    chunk: string,
+    _currentDetail: ApiAgentTaskDetail | null,
+    mode: "delta" | "snapshot" = "delta",
+  ) => {
     const nextChunk = chunk ?? "";
     if (!nextChunk) return;
 
     const store = useChatStore.getState();
     const currentMessage = store.messages.find((item) => item.id === messageId);
-    const nextPulseKey = (currentMessage?.streamPulseKey ?? 0) + 1;
-    const nextTail = Array.from(nextChunk).slice(-18).join("");
+    // Replace whenever we have not yet appended any real streaming text, or
+    // when the current message has no real content to preserve. There is no
+    // longer any "low signal" placeholder to detect — server-side fabricated
+    // summaries have been removed.
     const shouldReplace =
-      !hasStreamedTextRef.current || isLowSignalTaskSummary(currentMessage?.content, currentDetail);
+      !hasStreamedTextRef.current || !hasRealMessageContent(currentMessage?.content);
+    const nextText =
+      mode === "delta"
+        ? `${currentMessage?.content ?? ""}${nextChunk}`
+        : mergeAgentOutputSnapshot(currentMessage?.content ?? "", nextChunk);
+    const nextPulseKey = (currentMessage?.streamPulseKey ?? 0) + 1;
+    const nextTail = Array.from(nextText).slice(-18).join("");
+
+    if (mode === "delta") {
+      appendLiveOutputDelta(nextChunk);
+    } else {
+      mergeLiveOutputSnapshot(nextChunk);
+    }
 
     if (shouldReplace) {
       store.updateMessage(messageId, {
-        content: nextChunk,
+        content: mode === "delta" ? nextChunk : nextText,
         streamTail: nextTail,
         streamPulseKey: nextPulseKey,
       });
@@ -1170,11 +1099,23 @@ export function DesktopAgentTaskCard({
       return;
     }
 
-    store.appendMessageDelta(messageId, nextChunk);
+    if (mode === "delta") {
+      store.appendMessageDelta(messageId, nextChunk);
+    } else {
+      store.updateMessage(messageId, {
+        content: nextText,
+        streamTail: nextTail,
+        streamPulseKey: nextPulseKey,
+      });
+    }
     hasStreamedTextRef.current = true;
   };
 
   const resetStreamingText = () => {
+    liveOutputTextRef.current = "";
+    setLiveOutputText("");
+    setLiveOutputPulseKey((current) => current + 1);
+    setLiveOutputCitations(undefined);
     const store = useChatStore.getState();
     const currentMessage = store.messages.find((item) => item.id === messageId);
     store.updateMessage(messageId, {
@@ -1189,6 +1130,7 @@ export function DesktopAgentTaskCard({
     if (!silent) setIsLoading(true);
     try {
       const nextDetail = await api.agentTasks.get(taskId);
+      detailRef.current = nextDetail;
       setDetail(nextDetail);
       syncMessage(nextDetail);
       return nextDetail;
@@ -1205,6 +1147,19 @@ export function DesktopAgentTaskCard({
   useEffect(() => {
     void loadDetail();
   }, [taskId]);
+
+  useEffect(() => {
+    liveOutputTextRef.current = "";
+    setLiveOutputText("");
+    setLiveOutputPulseKey(0);
+    setLiveOutputCitations(undefined);
+    hasStreamedTextRef.current = false;
+    detailRef.current = null;
+  }, [taskId]);
+
+  useEffect(() => {
+    detailRef.current = detail;
+  }, [detail]);
 
   useEffect(() => {
     if (
@@ -1226,10 +1181,9 @@ export function DesktopAgentTaskCard({
 
   useEffect(() => {
     if (
-      !detail ||
       isExecutionStreaming ||
-      detail.task.status !== "draft" ||
-      !autoExecutingTaskIds.has(detail.task.id)
+      !autoExecutingTaskIds.has(detail?.task.id ?? taskId) ||
+      (detail ? detail.task.status !== "draft" : false)
     ) {
       return;
     }
@@ -1246,8 +1200,18 @@ export function DesktopAgentTaskCard({
   useEffect(() => {
     if (detail && detail.task.status !== "draft") {
       autoExecutingTaskIds.delete(detail.task.id);
+      return;
     }
-  }, [detail?.task.id, detail?.task.status]);
+
+    if (
+      !detail &&
+      message?.agentRun?.taskId === taskId &&
+      message.agentRun.taskStatus &&
+      message.agentRun.taskStatus !== "draft"
+    ) {
+      autoExecutingTaskIds.delete(taskId);
+    }
+  }, [detail?.task.id, detail?.task.status, message?.agentRun?.taskId, message?.agentRun?.taskStatus, taskId]);
 
   useEffect(() => {
     if (!detail) return;
@@ -1261,17 +1225,31 @@ export function DesktopAgentTaskCard({
   }, [detail?.task.id, detail?.task.status]);
 
   useEffect(() => {
-    if (!detail || !detail.task.autoStart || detail.task.status !== "draft") return;
-    if (autoExecutingTaskIds.has(detail.task.id) || busyAction !== null) return;
-    autoExecutingTaskIds.add(detail.task.id);
-    void runExecutionAction("execute", () => api.agentTasks.execute(detail.task.id));
-  }, [detail, busyAction]);
+    const canAutoExecuteFromDetail = Boolean(
+      detail && detail.task.autoStart && detail.task.status === "draft",
+    );
+    const executionTaskId = detail?.task.id ?? (canAutoExecuteFromMessage ? taskId : null);
+
+    if (!executionTaskId || (!canAutoExecuteFromDetail && !canAutoExecuteFromMessage)) return;
+    if (autoExecutingTaskIds.has(executionTaskId) || busyAction !== null || isExecutionStreaming) return;
+
+    autoExecutingTaskIds.add(executionTaskId);
+    void runExecutionAction("execute", () => api.agentTasks.execute(executionTaskId), executionTaskId);
+  }, [
+    detail?.task.id,
+    detail?.task.autoStart,
+    detail?.task.status,
+    canAutoExecuteFromMessage,
+    busyAction,
+    isExecutionStreaming,
+    taskId,
+  ]);
 
   const runExecutionAction = async (
     action: "execute" | "retry" | "continue",
     responseFactory: () => Promise<Response>,
+    executionTaskId = detailRef.current?.task.id ?? taskId,
   ) => {
-    if (!detail) return;
     setBusyAction(action);
     setIsExecutionStreaming(true);
     setStreamError(null);
@@ -1279,7 +1257,7 @@ export function DesktopAgentTaskCard({
 
     try {
       await streamAgentTaskExecution(
-        detail.task.id,
+        executionTaskId,
         {
           onEvent: async (event) => {
             if (event.type === "task_status") {
@@ -1309,8 +1287,11 @@ export function DesktopAgentTaskCard({
             }
 
             if (event.type === "final_result") {
-              useChatStore.getState().updateMessage(messageId, {
-                content: event.content,
+              mergeLiveOutputSnapshot(event.content, event.citations);
+              const store = useChatStore.getState();
+              const currentMessage = store.messages.find((item) => item.id === messageId);
+              store.updateMessage(messageId, {
+                content: mergeAgentOutputSnapshot(currentMessage?.content ?? "", event.content),
                 citations: event.citations,
               });
               hasStreamedTextRef.current = true;
@@ -1335,15 +1316,20 @@ export function DesktopAgentTaskCard({
               return;
             }
 
-            const liveEvent = toLiveEvent(detail.task.id, event);
+            const liveEvent = toLiveEvent(executionTaskId, event);
             if (liveEvent) {
+              const currentDetail = detailRef.current;
               if (
                 liveEvent.type === "execution_event" &&
                 (getExecutionEventType(liveEvent) === "text" ||
                   getExecutionEventType(liveEvent) === "text_delta") &&
                 typeof liveEvent.content === "string"
               ) {
-                applyStreamingTextChunk(liveEvent.content, detail);
+                applyStreamingTextChunk(
+                  liveEvent.content,
+                  currentDetail,
+                  getExecutionEventType(liveEvent) === "text_delta" ? "delta" : "snapshot",
+                );
               }
               if (
                 liveEvent.type === "execution_event" &&
@@ -1363,8 +1349,15 @@ export function DesktopAgentTaskCard({
               refreshedAfterDone = true;
             }
           },
-          onError: (message) => {
-            setStreamError(extractErrorMessage(message));
+          onError: (message, metadata) => {
+            const runtimeIssue =
+              isRecord(metadata) && typeof metadata.runtimeIssue === "string"
+                ? metadata.runtimeIssue
+                : null;
+            setStreamError({
+              message: extractErrorMessage(message),
+              runtimeIssue,
+            });
           },
         },
         {
@@ -1379,7 +1372,7 @@ export function DesktopAgentTaskCard({
       }
     } catch (error) {
       const message = extractErrorMessage(error);
-      setStreamError(message);
+      setStreamError({ message });
       notifyError("Run failed", message);
       const refreshed = await loadDetail(true);
       if (refreshed) setDetail(refreshed);
@@ -1403,7 +1396,7 @@ export function DesktopAgentTaskCard({
     ).length ?? 0;
   const finalCitations = detail ? getTaskFinalResultCitations(detail) : undefined;
   const loadingFallbackContent = sanitizeDisplayContent(message?.content ?? fallbackContent ?? "").trim();
-  const shouldRenderLoadingFallback = !isLowSignalFallbackOutput(loadingFallbackContent);
+  const shouldRenderLoadingFallback = hasRealMessageContent(loadingFallbackContent);
   const loadingTaskStatus = message?.agentRun?.taskStatus;
   const hasProcess = processItems.length > 0;
   const canCollapseProcess = detail?.task.status === "completed" && hasProcess;
@@ -1414,6 +1407,18 @@ export function DesktopAgentTaskCard({
       : null;
   const processToggleLabel =
     toolCount > 0 ? `Process · ${toolCount} ${toolCount === 1 ? "tool" : "tools"}` : "Process";
+  const detailOutputText = outputItems.map((item) => item.text).join("\n\n").trim();
+  const displayOutput = resolveAgentDisplayOutput({
+    liveOutputText,
+    messageContent: message?.content,
+    detailOutputText,
+    fallbackContent,
+    liveOutputCitations,
+    messageCitations: message?.citations,
+    finalCitations,
+    isTerminal,
+    isExecutionStreaming,
+  });
 
   if (isLoading && !detail) {
     if (shouldRenderLoadingFallback) {
@@ -1490,29 +1495,30 @@ export function DesktopAgentTaskCard({
           </div>
         ) : null}
         {fallbackProcessText ? <DesktopAgentTaskMetaLine text={fallbackProcessText} active /> : null}
-        {outputItems.map((item) => (
+        {displayOutput ? (
           <div
-            key={item.id}
+            key={`agent-output-${detail.task.id}`}
             className={cn(
               "text-sm leading-6",
               isTerminal ? "text-foreground" : "text-foreground/58",
               isTerminal && (showProcess || canCollapseProcess) && "pt-1",
             )}
           >
-            {item.streaming ? (
+            {displayOutput.streaming ? (
               <DesktopStreamingMarkdownMessage
-                content={item.text}
-                tailLength={message?.streamTail?.length ?? 0}
-                pulseKey={message?.streamPulseKey ?? 0}
+                content={displayOutput.text}
+                tailLength={Array.from(liveOutputText || displayOutput.text).length}
+                pulseKey={liveOutputPulseKey}
               />
             ) : (
-              <DesktopMarkdownMessage content={item.text} />
+              <DesktopMarkdownMessage content={displayOutput.text} />
             )}
-            {item.id === `final-output-${detail.task.id}` ? (
-              <DesktopCitationList citations={finalCitations} content={item.text} />
-            ) : null}
+            <DesktopCitationList
+              citations={displayOutput.citations}
+              content={displayOutput.text}
+            />
           </div>
-        ))}
+        ) : null}
       </div>
     </section>
   );
