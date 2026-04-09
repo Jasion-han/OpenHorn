@@ -6,6 +6,7 @@ import {
   fetchChannelModels,
   getChannelById,
   getChannels,
+  getResolvedChannelById,
   listChannelModels,
   setDefaultChannel,
   setDefaultChannelModel,
@@ -39,6 +40,50 @@ channels.get("/:id", async (c) => {
   }
 
   return c.json({ channel });
+});
+
+/**
+ * Returns the decrypted credentials for a channel the caller owns.
+ *
+ * This is the one endpoint that exposes the plaintext apiKey on the
+ * wire; every other route only returns `hasApiKey: boolean`. Callers
+ * (currently: the desktop sidecar runtime) need the real value so the
+ * sidecar can hand it to the Claude SDK.
+ *
+ * Security posture:
+ *   - requireUser middleware already guarantees we have an authed user
+ *   - getResolvedChannelById reads the channel scoped to userId, so
+ *     a user cannot pull another user's credentials by guessing ids
+ *   - we log the fetch for audit
+ *   - the response is never cached anywhere on the server side
+ */
+channels.get("/:id/credentials", async (c) => {
+  const user = c.get("user");
+  const channelId = c.req.param("id");
+
+  const resolved = await getResolvedChannelById(user.id, channelId);
+  if (!resolved) {
+    return c.json({ error: "Channel not found" }, 404);
+  }
+
+  console.log(
+    JSON.stringify({
+      event: "channel.credentials.fetch",
+      userId: user.id,
+      channelId,
+      modelId: resolved.modelId,
+      at: new Date().toISOString(),
+    }),
+  );
+
+  return c.json({
+    credentials: {
+      apiKey: resolved.apiKey,
+      baseUrl: resolved.channel.baseUrl ?? null,
+      modelId: resolved.modelId,
+      protocol: resolved.channel.protocol,
+    },
+  });
 });
 
 channels.post("/", async (c) => {

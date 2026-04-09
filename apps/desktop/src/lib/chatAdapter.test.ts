@@ -262,6 +262,14 @@ function createStubServerApi() {
       setDefault: async () => ({ success: true }),
       setDefaultModel: async () => ({ success: true }),
       agentCheck: async () => ({ success: true }),
+      getCredentials: async () => ({
+        credentials: {
+          apiKey: "sk-test",
+          baseUrl: null,
+          modelId: "claude-3-5-sonnet",
+          protocol: "anthropic" as const,
+        },
+      }),
     },
     settings: {
       get: async () => ({

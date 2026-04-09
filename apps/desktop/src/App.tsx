@@ -6,9 +6,11 @@ import { DesktopShellLayout } from "./components/app/DesktopShellLayout";
 import { DesktopChatArea } from "./components/chat/DesktopChatArea";
 import { ThemeListener } from "./components/theme/ThemeListener";
 import { UNAUTHORIZED_EVENT } from "./lib/serverApi";
+import { getTauriSidecarPlatform } from "./lib/tauriBridge";
 import { useAuthStore } from "./stores/authStore";
 import { useChatStore } from "./stores/chatStore";
 import { useDesktopShellStore } from "./stores/desktopShellStore";
+import { useSidecarStore } from "./stores/sidecarStore";
 
 export function App() {
   const activeView = useDesktopShellStore((state) => state.activeView);
@@ -33,6 +35,33 @@ export function App() {
       window.removeEventListener(UNAUTHORIZED_EVENT, handleUnauthorized);
     };
   }, [bootstrapAuth, logout, resetChat, setActiveView]);
+
+  // Sidecar bootstrap. We attach the platform bridge once per app mount.
+  // When running under plain Vite (no Tauri runtime) getTauriSidecarPlatform
+  // returns null and the store parks in "unsupported". When running under
+  // Tauri we kick off start() which spawns the sidecar binary and
+  // performs the WS handshake in the background. The component does not
+  // block on the result — the sidecar runtime is opt-in for individual
+  // agent tasks (see the Composer "run locally" switch).
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      const platform = await getTauriSidecarPlatform();
+      if (cancelled) return;
+      useSidecarStore.getState().attachPlatform(
+        platform,
+        platform === null ? "sidecar runtime requires the desktop shell" : undefined,
+      );
+      if (platform !== null) {
+        void useSidecarStore.getState().start();
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return (
     <TooltipProvider delayDuration={200}>

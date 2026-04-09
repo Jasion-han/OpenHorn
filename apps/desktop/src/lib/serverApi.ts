@@ -88,6 +88,19 @@ export interface ServerApi {
     setDefault: (id: string) => Promise<{ success: boolean }>;
     setDefaultModel: (id: string, modelId: string) => Promise<{ success: boolean }>;
     agentCheck: (id: string, data: { modelId: string }) => Promise<ApiAgentCheckResult>;
+    /**
+     * Fetches the decrypted credentials for a channel the current user
+     * owns. Used by the sidecar runtime bootstrapping path to hand the
+     * apiKey to the local Claude Agent SDK.
+     */
+    getCredentials: (id: string) => Promise<{
+      credentials: {
+        apiKey: string;
+        baseUrl: string | null;
+        modelId: string;
+        protocol: "openai" | "anthropic" | "google";
+      };
+    }>;
   };
   settings: {
     get: (keys: string[]) => Promise<{ settings: ApiSettingsMap }>;
@@ -408,6 +421,8 @@ export function createServerApi(options?: { baseUrl?: string; fetch?: FetchLike 
           method: "POST",
           body: JSON.stringify(data),
         }),
+      getCredentials: (id) =>
+        fetchJson(fetchImpl, baseUrl, `/channels/${encodeURIComponent(id)}/credentials`),
     },
 
     settings: {

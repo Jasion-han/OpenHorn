@@ -1,0 +1,244 @@
+import { create } from "zustand";
+import { SidecarClient, type SidecarEndpoint } from "../lib/sidecarClient";
+
+/**
+ * State machine for the sidecar runtime lifecycle.
+ *
+ *   idle        → the user has not yet started the sidecar
+ *   starting    → Tauri start_sidecar IPC is in progress
+ *   connecting  → the binary is running; we are handshaking the WS
+ *   ready       → handshake succeeded; the sidecar is usable
+ *   unsupported → the host platform cannot run the sidecar (e.g. running
+ *                 inside a non-Tauri browser, or the binary is missing)
+ *   error       → a previous start / connect / handshake attempt failed;
+ *                 see `lastError` for the reason
+ */
+export type SidecarStatus =
+  | "idle"
+  | "starting"
+  | "connecting"
+  | "ready"
+  | "unsupported"
+  | "error";
+
+/**
+ * Platform bridge the store needs to reach Tauri IPC. Defined as an
+ * interface so unit tests can inject a deterministic fake instead of
+ * poking at the real @tauri-apps/api/core.
+ */
+export interface SidecarPlatform {
+  startSidecar: () => Promise<SidecarEndpoint>;
+  stopSidecar: () => Promise<void>;
+  pickWorkspaceDir: () => Promise<string | null>;
+}
+
+/**
+ * ClientFactory is the seam for tests to hand back a pre-wired
+ * SidecarClient rather than constructing a real WebSocket.
+ */
+export type SidecarClientFactory = (endpoint: SidecarEndpoint) => SidecarClient;
+
+const defaultClientFactory: SidecarClientFactory = (endpoint) =>
+  new SidecarClient({ endpoint });
+
+export interface SidecarState {
+  status: SidecarStatus;
+  endpoint: SidecarEndpoint | null;
+  client: SidecarClient | null;
+  workspaceRoot: string | null;
+  lastError: string | null;
+
+  /**
+   * Attaches a platform bridge. Call this once from App bootstrap
+   * (after dynamically importing @tauri-apps/api) so the rest of the
+   * app can keep referring to the singleton store.
+   */
+  attachPlatform: (platform: SidecarPlatform | null, reason?: string) => void;
+  start: () => Promise<void>;
+  stop: () => Promise<void>;
+  pickAndSetWorkspace: () => Promise<string | null>;
+  setWorkspace: (root: string) => Promise<void>;
+  markUnsupported: (reason: string) => void;
+  reset: () => void;
+}
+
+const INITIAL_STATE: Pick<
+  SidecarState,
+  "status" | "endpoint" | "client" | "workspaceRoot" | "lastError"
+> = {
+  status: "idle",
+  endpoint: null,
+  client: null,
+  workspaceRoot: null,
+  lastError: null,
+};
+
+function toErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === "string" && error.trim()) return error.trim();
+  return "sidecar error";
+}
+
+export interface CreateSidecarStoreOptions {
+  /**
+   * Platform bridge. Pass `null` to indicate the host cannot run the
+   * sidecar (non-Tauri environment). In that case `start()` transitions
+   * to "unsupported" instead of attempting to spawn anything.
+   */
+  platform: SidecarPlatform | null;
+  createClient?: SidecarClientFactory;
+  /**
+   * Human-readable reason to show when platform is null.
+   */
+  unsupportedReason?: string;
+}
+
+export function createDesktopSidecarStore(options: CreateSidecarStoreOptions) {
+  // `platform` is mutable so App bootstrap can swap in the real Tauri
+  // bridge after dynamically importing @tauri-apps/api. The store is
+  // constructed at module load time with platform=null and the bridge
+  // calls `attachPlatform` once it's resolved.
+  let platform: SidecarPlatform | null = options.platform;
+  const createClient = options.createClient ?? defaultClientFactory;
+  let unsupportedReason =
+    options.unsupportedReason ??
+    "sidecar runtime is only available inside the desktop shell";
+
+  return create<SidecarState>((set, get) => ({
+    ...INITIAL_STATE,
+
+    attachPlatform(nextPlatform, reason) {
+      platform = nextPlatform;
+      if (reason) unsupportedReason = reason;
+      // If we previously flipped to "unsupported" because no platform
+      // was attached, give the caller an "idle" slot back when they
+      // attach a real platform.
+      if (nextPlatform !== null && get().status === "unsupported") {
+        set({ status: "idle", lastError: null });
+      }
+      if (nextPlatform === null && get().status !== "unsupported") {
+        set({ status: "unsupported", lastError: unsupportedReason });
+      }
+    },
+
+    async start() {
+      const current = get().status;
+      // Idempotent: if the sidecar is already ready, do nothing.
+      if (current === "ready") return;
+      // Refuse to race two start calls.
+      if (current === "starting" || current === "connecting") return;
+      // Refuse to start when the host doesn't support the sidecar.
+      if (current === "unsupported") return;
+      if (platform === null) {
+        set({ status: "unsupported", lastError: unsupportedReason });
+        return;
+      }
+
+      set({ status: "starting", lastError: null });
+
+      let endpoint: SidecarEndpoint;
+      try {
+        endpoint = await platform.startSidecar();
+      } catch (error) {
+        set({ status: "error", lastError: toErrorMessage(error) });
+        return;
+      }
+
+      set({ status: "connecting", endpoint });
+      const client = createClient(endpoint);
+      try {
+        await client.connect();
+      } catch (error) {
+        // Spawned but could not handshake: leave the child alone and
+        // surface the error. A follow-up start() call will try again.
+        set({
+          status: "error",
+          lastError: toErrorMessage(error),
+          endpoint,
+          client: null,
+        });
+        return;
+      }
+
+      set({ status: "ready", client });
+    },
+
+    async stop() {
+      const { client } = get();
+      if (client) {
+        try {
+          await client.close();
+        } catch {
+          // best effort
+        }
+      }
+      if (platform === null) {
+        // Nothing to stop at the platform level; just drop local state.
+        set({ ...INITIAL_STATE });
+        return;
+      }
+      try {
+        await platform.stopSidecar();
+      } catch (error) {
+        // Even if stop IPC fails, drop the local handle so the next
+        // start() builds a fresh one.
+        set({
+          ...INITIAL_STATE,
+          status: "error",
+          lastError: toErrorMessage(error),
+        });
+        return;
+      }
+      set({ ...INITIAL_STATE });
+    },
+
+    async pickAndSetWorkspace() {
+      if (platform === null) {
+        set({ lastError: unsupportedReason });
+        return null;
+      }
+      let root: string | null;
+      try {
+        root = await platform.pickWorkspaceDir();
+      } catch (error) {
+        set({ lastError: toErrorMessage(error) });
+        return null;
+      }
+      if (!root) return null;
+      await get().setWorkspace(root);
+      return root;
+    },
+
+    async setWorkspace(root) {
+      const { client, status } = get();
+      if (status !== "ready" || !client) {
+        set({ lastError: "sidecar not ready" });
+        return;
+      }
+      try {
+        const result = await client.setWorkspace(root);
+        set({ workspaceRoot: result.workspaceRoot, lastError: null });
+      } catch (error) {
+        set({ lastError: toErrorMessage(error) });
+      }
+    },
+
+    markUnsupported(reason) {
+      set({ status: "unsupported", lastError: reason });
+    },
+
+    reset() {
+      set({ ...INITIAL_STATE });
+    },
+  }));
+}
+
+/**
+ * Default global sidecar store. Starts with no platform attached; the
+ * App component's bootstrap effect calls `attachPlatform` once the
+ * Tauri bridge is resolved. Outside of Tauri (e.g. `pnpm dev:ui` in a
+ * plain browser), the bootstrap leaves platform as null which parks
+ * the store in the `unsupported` status — UI components can key off
+ * that to disable the "run locally" switch.
+ */
+export const useSidecarStore = createDesktopSidecarStore({ platform: null });
