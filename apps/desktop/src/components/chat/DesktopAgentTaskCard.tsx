@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "ui";
 import { respondAgentApproval } from "../../lib/agentTaskActions";
 import { streamAgentTaskExecution, type AgentTaskStreamEvent } from "../../lib/agentTaskStream";
@@ -6,6 +6,7 @@ import { resolveAgentDisplayOutput } from "../../lib/agentOutput";
 import { sanitizeDisplayContent } from "../../lib/citations";
 import { notifyError } from "../../lib/notify";
 import { createServerApi } from "../../lib/serverApi";
+import { useAgentTaskPolling } from "../../hooks/useAgentTaskPolling";
 import { useChatStore } from "../../stores/chatStore";
 import type {
   ApiAgentApproval,
@@ -37,7 +38,6 @@ import { DesktopStreamingMarkdownMessage } from "./DesktopStreamingMarkdownMessa
 export { DesktopAgentTaskMetaLine } from "./DesktopAgentTaskMetaLine";
 
 const api = createServerApi();
-const autoExecutingTaskIds = new Set<string>();
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -231,57 +231,36 @@ export function DesktopAgentTaskCard({
     detailRef.current = detail;
   }, [detail]);
 
-  useEffect(() => {
-    if (
-      !detail ||
-      isExecutionStreaming ||
-      (detail.task.status !== "running" && detail.task.status !== "awaiting_approval")
-    ) {
-      return;
-    }
-
-    const timer = window.setInterval(() => {
-      void loadDetail(true);
-    }, 4000);
-
-    return () => {
-      window.clearInterval(timer);
-    };
-  }, [detail?.task.status, isExecutionStreaming, taskId]);
-
-  useEffect(() => {
-    if (
-      isExecutionStreaming ||
-      !autoExecutingTaskIds.has(detail?.task.id ?? taskId) ||
-      (detail ? detail.task.status !== "draft" : false)
-    ) {
-      return;
-    }
-
-    const timer = window.setInterval(() => {
-      void loadDetail(true);
-    }, 1500);
-
-    return () => {
-      window.clearInterval(timer);
-    };
-  }, [detail?.task.id, detail?.task.status, isExecutionStreaming, taskId]);
-
-  useEffect(() => {
-    if (detail && detail.task.status !== "draft") {
-      autoExecutingTaskIds.delete(detail.task.id);
-      return;
-    }
-
-    if (
-      !detail &&
-      message?.agentRun?.taskId === taskId &&
-      message.agentRun.taskStatus &&
-      message.agentRun.taskStatus !== "draft"
-    ) {
-      autoExecutingTaskIds.delete(taskId);
-    }
-  }, [detail?.task.id, detail?.task.status, message?.agentRun?.taskId, message?.agentRun?.taskStatus, taskId]);
+  // Polling + auto-execute are centralised in a single hook so the
+  // mutual-exclusion rules (stream running → skip polling; draft +
+  // autoStart → fast poll then fire once) live in one place instead
+  // of being spread across five useEffects that can drift apart.
+  const runExecutionActionRef = useRef<
+    (action: "execute" | "retry" | "continue", factory: () => Promise<Response>, id?: string) => Promise<void>
+  >(undefined as unknown as (action: "execute" | "retry" | "continue", factory: () => Promise<Response>, id?: string) => Promise<void>);
+  // runExecutionActionRef is assigned right after runExecutionAction
+  // is defined (see below). We use a ref so the polling hook's
+  // onAutoExecute callback stays stable across renders.
+  const handleAutoExecute = useCallback(
+    (executionTaskId: string) => {
+      void runExecutionActionRef.current?.(
+        "execute",
+        () => api.agentTasks.execute(executionTaskId),
+        executionTaskId,
+      );
+    },
+    [],
+  );
+  const loadDetailSilent = useCallback(() => loadDetail(true) as unknown as Promise<void>, [taskId]);
+  useAgentTaskPolling({
+    taskId,
+    detail,
+    isExecutionStreaming,
+    busyAction,
+    canAutoExecuteFromMessage,
+    loadDetail: loadDetailSilent,
+    onAutoExecute: handleAutoExecute,
+  });
 
   useEffect(() => {
     if (!detail) return;
@@ -293,27 +272,6 @@ export function DesktopAgentTaskCard({
 
     setIsProcessExpanded(true);
   }, [detail?.task.id, detail?.task.status]);
-
-  useEffect(() => {
-    const canAutoExecuteFromDetail = Boolean(
-      detail && detail.task.autoStart && detail.task.status === "draft",
-    );
-    const executionTaskId = detail?.task.id ?? (canAutoExecuteFromMessage ? taskId : null);
-
-    if (!executionTaskId || (!canAutoExecuteFromDetail && !canAutoExecuteFromMessage)) return;
-    if (autoExecutingTaskIds.has(executionTaskId) || busyAction !== null || isExecutionStreaming) return;
-
-    autoExecutingTaskIds.add(executionTaskId);
-    void runExecutionAction("execute", () => api.agentTasks.execute(executionTaskId), executionTaskId);
-  }, [
-    detail?.task.id,
-    detail?.task.autoStart,
-    detail?.task.status,
-    canAutoExecuteFromMessage,
-    busyAction,
-    isExecutionStreaming,
-    taskId,
-  ]);
 
   const runExecutionAction = async (
     action: "execute" | "retry" | "continue",
@@ -451,6 +409,7 @@ export function DesktopAgentTaskCard({
       setBusyAction(null);
     }
   };
+  runExecutionActionRef.current = runExecutionAction;
 
   const handleApprovalResponse = async (
     approval: ApiAgentApproval,
