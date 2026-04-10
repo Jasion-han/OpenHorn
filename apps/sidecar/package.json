@@ -13,7 +13,8 @@
     "compile:tauri:linux-x64": "bun build src/index.ts --compile --target=bun-linux-x64 --outfile ../desktop/src-tauri/binaries/openhorn-sidecar-x86_64-unknown-linux-gnu",
     "compile:tauri:linux-arm64": "bun build src/index.ts --compile --target=bun-linux-arm64 --outfile ../desktop/src-tauri/binaries/openhorn-sidecar-aarch64-unknown-linux-gnu",
     "compile:tauri:host": "bash scripts/compile-tauri-host.sh",
-    "test": "bun test"
+    "test": "bun test",
+    "e2e:smoke": "bun run scripts/e2e-smoke.ts"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.2.71",

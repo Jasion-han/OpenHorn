@@ -326,40 +326,56 @@ export function DesktopComposer({
             </Tooltip>
 
             {mode === "agent" && onToggleSidecarRuntime ? (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    data-testid="composer-sidecar-toggle"
-                    onClick={() => {
-                      if (!sidecarRuntimeAvailable) return;
-                      onToggleSidecarRuntime();
-                    }}
-                    disabled={disabled || streaming || !sidecarRuntimeAvailable}
-                    className={cn(
-                      "flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors",
-                      sidecarRuntimeEnabled && sidecarRuntimeAvailable
-                        ? "bg-blue-400/20 text-blue-500 hover:bg-blue-400/30"
-                        : "text-muted-foreground hover:bg-accent hover:text-foreground",
-                      (disabled || streaming || !sidecarRuntimeAvailable) &&
-                        "pointer-events-none opacity-60",
-                    )}
-                    aria-label="Run locally on sidecar"
-                  >
-                    <FolderCog className="size-3.5" />
-                    <span>本地运行</span>
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="top">
-                  <p>
-                    {!sidecarRuntimeAvailable
-                      ? sidecarRuntimeDisabledReason || "本地运行尚未就绪"
-                      : sidecarRuntimeEnabled
-                        ? "在本地工作目录运行 Agent：已开启"
-                        : "在本地工作目录运行 Agent：已关闭"}
-                  </p>
-                </TooltipContent>
-              </Tooltip>
+              (() => {
+                const sidecarToggleDisabled =
+                  disabled || streaming || !sidecarRuntimeAvailable;
+                // IMPORTANT: we deliberately avoid the native `disabled`
+                // attribute here. Radix's Tooltip attaches hover /
+                // focus listeners to the trigger, but HTML <button
+                // disabled> swallows mouse events — which means the
+                // tooltip explaining *why* the button is disabled
+                // would never show, leaving the user staring at a
+                // greyed-out control with no feedback. We reproduce
+                // the "disabled" behaviour with aria-disabled + style
+                // + an onClick early-return instead, so the tooltip
+                // still fires on hover / focus.
+                return (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        data-testid="composer-sidecar-toggle"
+                        onClick={() => {
+                          if (sidecarToggleDisabled) return;
+                          onToggleSidecarRuntime();
+                        }}
+                        aria-disabled={sidecarToggleDisabled || undefined}
+                        className={cn(
+                          "flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors",
+                          sidecarRuntimeEnabled && sidecarRuntimeAvailable
+                            ? "bg-blue-400/20 text-blue-500 hover:bg-blue-400/30"
+                            : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                          sidecarToggleDisabled &&
+                            "cursor-not-allowed opacity-60 hover:bg-transparent hover:text-muted-foreground",
+                        )}
+                        aria-label="Run locally on sidecar"
+                      >
+                        <FolderCog className="size-3.5" />
+                        <span>本地运行</span>
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">
+                      <p>
+                        {!sidecarRuntimeAvailable
+                          ? sidecarRuntimeDisabledReason || "本地运行尚未就绪"
+                          : sidecarRuntimeEnabled
+                            ? "在本地工作目录运行 Agent：已开启"
+                            : "在本地工作目录运行 Agent：已关闭"}
+                      </p>
+                    </TooltipContent>
+                  </Tooltip>
+                );
+              })()
             ) : null}
           </div>
 

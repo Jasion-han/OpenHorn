@@ -1,3 +1,6 @@
+use std::env;
+use std::fs;
+use std::path::PathBuf;
 use std::sync::Mutex;
 
 use rand::rngs::OsRng;
@@ -66,6 +69,58 @@ impl std::fmt::Display for SidecarError {
 impl From<SidecarError> for String {
     fn from(err: SidecarError) -> String {
         err.to_string()
+    }
+}
+
+/// Path where we persist the currently-running sidecar's endpoint so
+/// out-of-band tooling (tests, diagnostics, the agent running inside
+/// Claude Code) can discover host/port/token without driving the
+/// Tauri webview.
+///
+/// The file is intentionally scoped to the user's TMPDIR — not the
+/// workspace — because the handshake token in it is sensitive.
+///
+/// Format: `{"host":"127.0.0.1","port":56667,"token":"…","pid":86863}`
+fn endpoint_file_path() -> PathBuf {
+    let tmp = env::temp_dir();
+    tmp.join("openhorn-sidecar-endpoint.json")
+}
+
+fn write_endpoint_file(endpoint: &SidecarEndpoint) {
+    let path = endpoint_file_path();
+    // Intentionally use a simple JSON object rather than pulling in
+    // serde_json::to_string(&endpoint) since we also want to embed the
+    // current process pid for easy lookup.
+    let body = format!(
+        r#"{{"host":"{}","port":{},"token":"{}","pid":{}}}"#,
+        endpoint.host,
+        endpoint.port,
+        endpoint.token,
+        std::process::id(),
+    );
+    if let Err(e) = fs::write(&path, body) {
+        log::warn!("failed to write sidecar endpoint file at {path:?}: {e}");
+    } else {
+        // Lock down permissions: owner read/write only. On unix this
+        // matters because /tmp is world-readable. On windows fs::set_permissions
+        // cannot drop read access for "other" with the std API so we
+        // just rely on the TMPDIR being per-user.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
+        }
+    }
+}
+
+fn remove_endpoint_file() {
+    let path = endpoint_file_path();
+    match fs::remove_file(&path) {
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => {
+            log::warn!("failed to remove sidecar endpoint file at {path:?}: {e}");
+        }
     }
 }
 
@@ -159,6 +214,13 @@ fn start_sidecar_internal<R: tauri::Runtime>(
         token,
     };
 
+    // Persist the endpoint to TMPDIR so out-of-band diagnostic tooling
+    // (the sidecar E2E smoke script, agents iterating on the code,
+    // `curl` debugging sessions) can discover host/port/token without
+    // needing to drive the Tauri webview. The file is chmod 600 on
+    // unix; it's cleaned up on stop_sidecar and on window-close.
+    write_endpoint_file(&endpoint);
+
     *guard = Some(RunningSidecar {
         child,
         endpoint: endpoint.clone(),
@@ -204,6 +266,10 @@ fn stop_sidecar(state: State<'_, SidecarState>) -> Result<(), String> {
             .kill()
             .map_err(|e| format!("sidecar kill failed: {e}"))?;
     }
+    // Drop the endpoint file after the child is gone, whether or not
+    // anything was actually running — a stale file is worse than a
+    // missing one.
+    remove_endpoint_file();
     Ok(())
 }
 
@@ -261,6 +327,7 @@ pub fn run() {
                         }
                     }
                 }
+                remove_endpoint_file();
             }
         })
         .invoke_handler(tauri::generate_handler![
