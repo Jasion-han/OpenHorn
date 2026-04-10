@@ -66,7 +66,10 @@ const ALLOWED_ORIGINS = new Set([
   "http://127.0.0.1:5173",
 ]);
 
-const MAX_CONCURRENT_CONNECTIONS = 1;
+// Allow 2 concurrent connections: one for the desktop webview and one
+// for diagnostic tooling (E2E smoke tests, developer CLI, etc.). The
+// real access gate is the handshake token, not the connection count.
+const MAX_CONCURRENT_CONNECTIONS = 2;
 const IDLE_TIMEOUT_MS = 5 * 60 * 1000;
 const IDLE_CHECK_INTERVAL_MS = 30 * 1000;
 
