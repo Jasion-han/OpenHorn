@@ -735,11 +735,25 @@ async function streamConversationAgentReply(params: {
           prompt,
         })
     : undefined;
+  // When the user's prompt clearly targets the local workspace (mentions
+  // "仓库", "repo", "项目", etc.), suppress live web search even if
+  // forceWebSearch is on. The route classifier sometimes mis-classifies
+  // these as needing web_search because topic keywords look research-y,
+  // causing the agent to waste time fetching irrelevant web results
+  // instead of inspecting the workspace directly.
+  const promptTargetsWorkspace =
+    /(仓库|代码库|工作区|项目|源码|目录|repo|repository|codebase|workspace|readme|package\.json|tsconfig|src\/|apps\/)/i.test(
+      params.prompt,
+    );
   const liveContext = await buildLiveContext({
     prompt: params.prompt,
     userSettings: settings,
     tavilyEnvKey: process.env.TAVILY_API_KEY ?? null,
-    forceWebSearch: params.forceWebSearch == null ? true : Boolean(params.forceWebSearch),
+    forceWebSearch: promptTargetsWorkspace
+      ? false
+      : params.forceWebSearch == null
+        ? true
+        : Boolean(params.forceWebSearch),
     classifier,
   });
 

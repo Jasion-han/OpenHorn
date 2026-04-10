@@ -281,10 +281,7 @@ export async function* runGenericAgentRuntime(params: {
         model: params.model,
         messages,
         tools,
-        toolChoice:
-          turn === 0 && forceInitialWorkspaceInspection && !bootstrapCommand
-            ? { type: "tool", name: "bash" }
-            : "auto",
+        toolChoice: "auto",
         signal: params.signal,
       })) {
         if (event.type === "text_delta") {
@@ -309,10 +306,7 @@ export async function* runGenericAgentRuntime(params: {
         model: params.model,
         messages,
         tools,
-        toolChoice:
-          turn === 0 && forceInitialWorkspaceInspection && !bootstrapCommand
-            ? { type: "tool", name: "bash" }
-            : "auto",
+        toolChoice: "auto",
         signal: params.signal,
       });
     }

@@ -430,6 +430,16 @@ export function routeLiveQuery(prompt: string): LiveRoute {
     return { type: "structured_live", needsCitation: false };
   }
 
+  // When the prompt clearly refers to a local codebase / workspace,
+  // do NOT escalate to research or web_search even if the prompt
+  // contains words like "分析" that normally trigger research mode.
+  // The user wants the agent to inspect local files, not fetch web pages.
+  if (
+    /(仓库|代码库|工作区|项目|源码|目录|repo|repository|codebase|workspace|readme|package\.json|tsconfig|src\/|apps\/)/i.test(text)
+  ) {
+    return { type: "direct_model", needsCitation: false };
+  }
+
   if (
     policy === "always_research" ||
     /比较|分析|调研|汇总|整理.*最近|research|survey/i.test(text)
@@ -475,6 +485,7 @@ export async function buildLiveContext(input: BuildLiveContextInput): Promise<Li
     route.type === "direct_model" &&
     !isCurrentWorkspaceQuestion &&
     allowSemanticWebRouting &&
+    input.forceWebSearch !== false &&
     input.classifier
   ) {
     const classified = await input.classifier(input.prompt);

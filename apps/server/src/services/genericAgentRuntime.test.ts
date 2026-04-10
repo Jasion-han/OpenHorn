@@ -269,7 +269,7 @@ test("runGenericAgentRuntime stops after max turn budget", async () => {
   }).toThrow("exceeded the maximum tool-call rounds");
 });
 
-test("runGenericAgentRuntime forces bash tool choice for workspace-grounded first turns", async () => {
+test("runGenericAgentRuntime uses auto tool choice (compatible with all providers)", async () => {
   const adapter = new FakeToolCallingAdapter([
     {
       text: "",
@@ -290,7 +290,11 @@ test("runGenericAgentRuntime forces bash tool choice for workspace-grounded firs
     }
   }).toThrow("exceeded the maximum tool-call rounds");
 
-  expect(adapter.calls[0]?.toolChoice).toEqual({ type: "tool", name: "bash" });
+  // Forced tool choice was removed because many OpenAI-compatible
+  // providers (openrouter, dashscope, etc.) reject non-auto values.
+  // The workspace inspection hint is now conveyed through the system
+  // prompt instead.
+  expect(adapter.calls[0]?.toolChoice).toBe("auto");
 });
 
 test("runGenericAgentRuntime bootstraps explicit local file reads before the first model turn", async () => {
