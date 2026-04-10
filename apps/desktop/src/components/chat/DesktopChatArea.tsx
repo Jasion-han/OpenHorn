@@ -695,6 +695,11 @@ export function DesktopChatArea() {
       setSidecarRuntimeEnabled(false);
     }
   }, [sidecarRuntimeEnabled, sidecarRuntimeAvailable]);
+  // Per-task agent overrides: these are ephemeral state that resets
+  // when the user sends or switches conversations. They override the
+  // stored defaults for just the next agent message.
+  const [agentOverrideDeep, setAgentOverrideDeep] = useState(false);
+  const [agentOverridePlanApproval, setAgentOverridePlanApproval] = useState(false);
   const effectiveModel = getEffectiveModelForConversation(channels, currentConversation);
   const agentModeSupported = effectiveModel.ok;
   const agentModeDisabledReason = effectiveModel.ok
@@ -1018,12 +1023,32 @@ export function DesktopChatArea() {
         setPendingAttachments([]);
       }
 
+      // Build per-message agent overrides from the composer switches.
+      // Only included when the user explicitly toggled something away
+      // from the defaults — otherwise we leave them absent so the
+      // server uses the stored defaults.
+      const agentOverrides =
+        mode === "agent" && (agentOverrideDeep || agentOverridePlanApproval)
+          ? {
+              ...(agentOverrideDeep ? { complexity: "deep" as const } : {}),
+              ...(agentOverridePlanApproval
+                ? { requiresPlanApproval: true }
+                : {}),
+            }
+          : undefined;
+
+      // Reset the per-task overrides after we've captured them so the
+      // next message starts from the stored defaults again.
+      setAgentOverrideDeep(false);
+      setAgentOverridePlanApproval(false);
+
       const { response } = await sendMessage({
         content: effectiveContent,
         attachments: attachmentIds,
         attachmentsMeta:
           attachmentsMeta || (localAttachmentMeta.length > 0 ? localAttachmentMeta : undefined),
         mode,
+        agentOverrides,
         existingMessageIds: {
           userMessageId,
           assistantMessageId,
@@ -1533,6 +1558,10 @@ export function DesktopChatArea() {
                   setSidecarRuntimeEnabled((value) => !value);
                 }
           }
+          agentOverrideDeep={agentOverrideDeep}
+          onToggleAgentOverrideDeep={() => setAgentOverrideDeep((v) => !v)}
+          agentOverridePlanApproval={agentOverridePlanApproval}
+          onToggleAgentOverridePlanApproval={() => setAgentOverridePlanApproval((v) => !v)}
           onInputFocus={handleInputFocus}
           streaming={isStreaming}
           canSubmit={canSend}

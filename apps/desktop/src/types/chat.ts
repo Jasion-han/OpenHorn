@@ -423,4 +423,13 @@ export interface SendMessageInput {
   content: string;
   attachments?: string[];
   mode?: ChatMode;
+  /**
+   * Per-message overrides for agent task creation, passed through to
+   * the server's /messages/stream endpoint. Only used when mode is
+   * "agent". Absent fields fall back to the user's stored defaults.
+   */
+  agentOverrides?: {
+    complexity?: "light" | "standard" | "deep";
+    requiresPlanApproval?: boolean;
+  };
 }

@@ -214,19 +214,23 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
       }
 
       const requestId = ++selectConversationRequestId;
-      set({ isLoading: true, error: null });
+      set((state) => ({
+        currentConversation: conversation,
+        messages: [],
+        composerMode: conversation.lastMode || state.composerMode,
+        selectedChannelId: conversation.channelId || state.selectedChannelId,
+        isLoading: true,
+        error: null,
+      }));
 
       try {
         const messages = await adapter.loadMessages(conversation.id);
         if (requestId !== selectConversationRequestId) return;
 
-        set((state) => ({
-          currentConversation: conversation,
+        set({
           messages,
-          composerMode: conversation.lastMode || state.composerMode,
-          selectedChannelId: conversation.channelId || state.selectedChannelId,
           isLoading: false,
-        }));
+        });
       } catch (error) {
         if (requestId !== selectConversationRequestId) return;
         set({ isLoading: false, error: toErrorMessage(error) });
@@ -391,6 +395,7 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
           content: input.content,
           attachments: input.attachments,
           mode,
+          agentOverrides: input.agentOverrides,
         });
 
         return { userMessageId, assistantMessageId, response };

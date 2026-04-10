@@ -53,6 +53,16 @@ export interface StreamMessageInput {
   content: string;
   attachments?: string[];
   mode?: "chat" | "agent";
+  /**
+   * Per-message overrides for agent task creation. When present, these
+   * take priority over the user's stored AgentSettings defaults. This
+   * lets the desktop Composer provide ephemeral per-task controls
+   * ("计划审批" / "深度思考") without altering the global defaults.
+   */
+  agentOverrides?: {
+    complexity?: "light" | "standard" | "deep";
+    requiresPlanApproval?: boolean;
+  };
 }
 
 type AgentRunStep = {
@@ -331,6 +341,7 @@ async function createTaskBackedAgentTurn(params: {
   conversation: Awaited<ReturnType<typeof getConversationForUser>>;
   prompt: string;
   attachmentIds?: string[];
+  agentOverrides?: StreamMessageInput["agentOverrides"];
 }) {
   const { createAgentTask } = await loadAgentTaskService();
   const resolvedChannel = await getResolvedChannelForConversation(params.userId, {
@@ -345,6 +356,12 @@ async function createTaskBackedAgentTurn(params: {
   ]);
   const defaults = getAgentTaskDefaults(settings);
 
+  // Per-message overrides (from the Composer's per-task switches)
+  // take precedence over the user's stored defaults.
+  const complexity = params.agentOverrides?.complexity ?? defaults.complexity;
+  const requiresPlanApproval =
+    params.agentOverrides?.requiresPlanApproval ?? defaults.requiresPlanApproval;
+
   const task = await createAgentTask(params.userId, {
     conversationId: params.conversationId,
     channelId: params.conversation.channelId || resolvedChannel?.channel.id || null,
@@ -355,9 +372,9 @@ async function createTaskBackedAgentTurn(params: {
       id,
       fileName: "attachment",
     })),
-    complexity: defaults.complexity,
+    complexity,
     uxMode: defaults.uxMode,
-    requiresPlanApproval: defaults.requiresPlanApproval,
+    requiresPlanApproval,
     autoStart: true,
   });
   const detail = await planTaskForTurn(params.userId, task);
@@ -379,6 +396,7 @@ async function applyTaskBackedAgentTurnToMessage(params: {
   attachmentIds?: string[];
   workspaceId?: string | null;
   contextPaths?: string[];
+  agentOverrides?: StreamMessageInput["agentOverrides"];
 }) {
   const { detail, content, agentRun, modelId } = await createTaskBackedAgentTurn({
     userId: params.userId,
@@ -386,6 +404,7 @@ async function applyTaskBackedAgentTurnToMessage(params: {
     conversation: params.conversation,
     prompt: params.prompt,
     attachmentIds: params.attachmentIds,
+    agentOverrides: params.agentOverrides,
   });
 
   await db
@@ -1110,6 +1129,7 @@ export async function streamMessage(
         assistantMessageId,
         prompt: input.content,
         attachmentIds: input.attachments || [],
+        agentOverrides: input.agentOverrides,
       });
 
       send({

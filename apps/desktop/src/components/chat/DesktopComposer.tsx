@@ -1,4 +1,4 @@
-import { ChevronDown, CornerDownLeft, FolderCog, Globe, Paperclip, Square } from "lucide-react";
+import { Brain, ChevronDown, ClipboardCheck, CornerDownLeft, FolderCog, Globe, Paperclip, Square } from "lucide-react";
 import type {
   ClipboardEvent,
   DragEvent,
@@ -41,6 +41,10 @@ export function DesktopComposer({
   sidecarRuntimeEnabled,
   sidecarRuntimeDisabledReason,
   onToggleSidecarRuntime,
+  agentOverrideDeep,
+  onToggleAgentOverrideDeep,
+  agentOverridePlanApproval,
+  onToggleAgentOverridePlanApproval,
   onInputFocus,
   streaming,
   canSubmit,
@@ -73,6 +77,12 @@ export function DesktopComposer({
   /** Explanation to show as a tooltip when the switch is visible but disabled. */
   sidecarRuntimeDisabledReason?: string | null;
   onToggleSidecarRuntime?: () => void;
+  /** Per-task "深度思考" toggle (complexity deep vs default). */
+  agentOverrideDeep?: boolean;
+  onToggleAgentOverrideDeep?: () => void;
+  /** Per-task "计划审批" toggle (requiresPlanApproval). */
+  agentOverridePlanApproval?: boolean;
+  onToggleAgentOverridePlanApproval?: () => void;
   onInputFocus?: () => void;
   streaming: boolean;
   canSubmit: boolean;
@@ -376,6 +386,68 @@ export function DesktopComposer({
                   </Tooltip>
                 );
               })()
+            ) : null}
+
+            {mode === "agent" && onToggleAgentOverridePlanApproval ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    data-testid="composer-plan-approval-toggle"
+                    onClick={onToggleAgentOverridePlanApproval}
+                    disabled={disabled || streaming}
+                    className={cn(
+                      "flex items-center gap-1 rounded-md px-2 py-1 text-xs transition-colors",
+                      agentOverridePlanApproval
+                        ? "bg-amber-400/20 text-amber-600 hover:bg-amber-400/30"
+                        : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                      (disabled || streaming) && "pointer-events-none opacity-60",
+                    )}
+                    aria-label="Plan approval"
+                  >
+                    <ClipboardCheck className="size-3.5" />
+                    <span>计划审批</span>
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top">
+                  <p>
+                    {agentOverridePlanApproval
+                      ? "本次任务需要计划审批：已开启"
+                      : "本次任务需要计划审批：已关闭（使用默认设置）"}
+                  </p>
+                </TooltipContent>
+              </Tooltip>
+            ) : null}
+
+            {mode === "agent" && onToggleAgentOverrideDeep ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    data-testid="composer-deep-thinking-toggle"
+                    onClick={onToggleAgentOverrideDeep}
+                    disabled={disabled || streaming}
+                    className={cn(
+                      "flex items-center gap-1 rounded-md px-2 py-1 text-xs transition-colors",
+                      agentOverrideDeep
+                        ? "bg-violet-400/20 text-violet-600 hover:bg-violet-400/30"
+                        : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                      (disabled || streaming) && "pointer-events-none opacity-60",
+                    )}
+                    aria-label="Deep thinking"
+                  >
+                    <Brain className="size-3.5" />
+                    <span>深度思考</span>
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top">
+                  <p>
+                    {agentOverrideDeep
+                      ? "本次任务深度思考：已开启（使用 deep 复杂度）"
+                      : "本次任务深度思考：已关闭（使用默认复杂度）"}
+                  </p>
+                </TooltipContent>
+              </Tooltip>
             ) : null}
           </div>
 
