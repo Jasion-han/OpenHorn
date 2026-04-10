@@ -1371,7 +1371,8 @@ async function createTaskExecutionResponse(
 
 agent.get("/tasks", async (c) => {
   const user = c.get("user");
-  const tasks = await listAgentTasks(user.id);
+  const conversationId = c.req.query("conversationId") || undefined;
+  const tasks = await listAgentTasks(user.id, { conversationId });
   return c.json({ tasks });
 });
 

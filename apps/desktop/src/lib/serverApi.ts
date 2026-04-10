@@ -4,6 +4,7 @@ import type {
   ApiChannel,
   ApiChannelModel,
   ApiConversation,
+  ApiAgentTask,
   ApiAgentTaskDetail,
   ApiMessage,
   ApiSettingsMap,
@@ -126,6 +127,9 @@ export interface ServerApi {
     testServer: (id: string) => Promise<{ success: boolean; error?: string }>;
   };
   agentTasks: {
+    list: (filter?: {
+      conversationId?: string;
+    }) => Promise<{ tasks: ApiAgentTask[] }>;
     create: (data: {
       conversationId?: string | null;
       channelId?: string | null;
@@ -460,6 +464,12 @@ export function createServerApi(options?: { baseUrl?: string; fetch?: FetchLike 
     },
 
     agentTasks: {
+      list: (filter) => {
+        const params = new URLSearchParams();
+        if (filter?.conversationId) params.set("conversationId", filter.conversationId);
+        const qs = params.toString();
+        return fetchJson(fetchImpl, baseUrl, `/agent/tasks${qs ? `?${qs}` : ""}`);
+      },
       create: (data) =>
         fetchJson(fetchImpl, baseUrl, "/agent/tasks", {
           method: "POST",

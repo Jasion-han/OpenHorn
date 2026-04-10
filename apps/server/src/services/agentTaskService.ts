@@ -602,11 +602,18 @@ export async function createAgentTask(userId: string, input: CreateAgentTaskInpu
   return mapTask((await assertTaskRow(userId, id)) as typeof agentTasks.$inferSelect);
 }
 
-export async function listAgentTasks(userId: string) {
+export async function listAgentTasks(
+  userId: string,
+  filter?: { conversationId?: string },
+) {
+  const conditions = [eq(agentTasks.userId, userId)];
+  if (filter?.conversationId) {
+    conditions.push(eq(agentTasks.conversationId, filter.conversationId));
+  }
   const rows = await db
     .select()
     .from(agentTasks)
-    .where(eq(agentTasks.userId, userId))
+    .where(and(...conditions))
     .orderBy(desc(agentTasks.updatedAt));
   if (rows.length === 0) {
     return [] as AgentTaskRecord[];

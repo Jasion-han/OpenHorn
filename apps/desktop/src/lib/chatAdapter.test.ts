@@ -287,6 +287,7 @@ function createStubServerApi() {
       testServer: async () => ({ success: true }),
     },
     agentTasks: {
+      list: async () => ({ tasks: [] }),
       create: async () => ({
         task: emptyTaskDetail.task,
       }),
