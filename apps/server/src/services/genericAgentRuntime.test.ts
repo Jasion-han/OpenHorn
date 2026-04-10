@@ -105,7 +105,8 @@ test("runGenericAgentRuntime executes tool call then returns final text", async 
     toolName: "Bash",
   });
   expect(events[3]).toEqual({ type: "meta" });
-  expect(events[4]).toEqual({ type: "text", content: "finished", streamed: false });
+  expect(events[4]).toEqual({ type: "text_delta", content: "finished" });
+  expect(events[5]).toEqual({ type: "text", content: "finished", streamed: true });
 });
 
 test("runGenericAgentRuntime emits interim text before executing tool calls", async () => {
@@ -143,7 +144,8 @@ test("runGenericAgentRuntime emits interim text before executing tool calls", as
     toolName: "Bash",
   });
   expect(events[4]).toEqual({ type: "meta" });
-  expect(events[5]).toEqual({ type: "text", content: "finished", streamed: false });
+  expect(events[5]).toEqual({ type: "text_delta", content: "finished" });
+  expect(events[6]).toEqual({ type: "text", content: "finished", streamed: true });
 });
 
 test("runGenericAgentRuntime returns direct final answer when no tool call exists", async () => {
@@ -167,7 +169,8 @@ test("runGenericAgentRuntime returns direct final answer when no tool call exist
 
   expect(events).toEqual([
     { type: "meta" },
-    { type: "text", content: "done directly", streamed: false },
+    { type: "text_delta", content: "done directly" },
+    { type: "text", content: "done directly", streamed: true },
   ]);
 });
 
@@ -263,7 +266,7 @@ test("runGenericAgentRuntime stops after max turn budget", async () => {
     })) {
       // consume
     }
-  }).toThrow("超过最大工具调用轮数");
+  }).toThrow("exceeded the maximum tool-call rounds");
 });
 
 test("runGenericAgentRuntime forces bash tool choice for workspace-grounded first turns", async () => {
@@ -285,7 +288,7 @@ test("runGenericAgentRuntime forces bash tool choice for workspace-grounded firs
     })) {
       // consume
     }
-  }).toThrow("超过最大工具调用轮数");
+  }).toThrow("exceeded the maximum tool-call rounds");
 
   expect(adapter.calls[0]?.toolChoice).toEqual({ type: "tool", name: "bash" });
 });
@@ -363,6 +366,7 @@ test("runGenericAgentRuntime bootstraps pwd from wrapped execution instructions 
     content: process.cwd(),
   });
   expect(events[2]).toEqual({ type: "meta" });
-  expect(events[3]).toEqual({ type: "text", content: "finished", streamed: false });
+  expect(events[3]).toEqual({ type: "text_delta", content: "finished" });
+  expect(events[4]).toEqual({ type: "text", content: "finished", streamed: true });
   expect(adapter.calls[0]?.toolChoice).toBe("auto");
 });

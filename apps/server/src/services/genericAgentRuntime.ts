@@ -14,6 +14,8 @@ import {
 } from "./bashToolExecutor";
 
 const DEFAULT_MAX_TURNS = 10;
+const SYNTHETIC_TEXT_STREAM_CHUNK_SIZE = 18;
+const SYNTHETIC_TEXT_STREAM_DELAY_MS = 14;
 const WORKSPACE_INSPECTION_PATTERN =
   /(^|[\s(])(?:readme|repo|repository|codebase|workspace|package\.json|tsconfig|src\/|apps\/|read README\.md)(?=$|[\s).,:/])/i;
 const WORKSPACE_INSPECTION_ZH_PATTERN =
@@ -102,6 +104,20 @@ function isSuspiciousNonAsciiCommand(command: string) {
   }
 
   return /(^|[\s;|&(<])-[^\x00-\x7F]/.test(command) || /^[\x00-\x7F\s"'`$(){}\[\].,/:;|&<>=_*?!+-]+$/.test(command) === false;
+}
+
+async function* replayTextAsSyntheticStream(text: string): AsyncGenerator<AgentEvent> {
+  const segments = Array.from(text);
+  for (let index = 0; index < segments.length; index += SYNTHETIC_TEXT_STREAM_CHUNK_SIZE) {
+    const content = segments
+      .slice(index, index + SYNTHETIC_TEXT_STREAM_CHUNK_SIZE)
+      .join("");
+    if (!content) continue;
+    yield { type: "text_delta", content };
+    if (index + SYNTHETIC_TEXT_STREAM_CHUNK_SIZE < segments.length) {
+      await new Promise((resolve) => setTimeout(resolve, SYNTHETIC_TEXT_STREAM_DELAY_MS));
+    }
+  }
 }
 
 export function buildGenericAgentTools(): GenericToolDefinition[] {
@@ -302,7 +318,7 @@ export async function* runGenericAgentRuntime(params: {
     }
 
     if (!result) {
-      throw new Error("执行失败：模型未返回有效结果");
+      throw new Error("Execution failed: model returned no valid result");
     }
 
     if (result.toolCalls.length > 0) {
@@ -337,16 +353,22 @@ export async function* runGenericAgentRuntime(params: {
     }
 
     if (result.text.trim()) {
+      if (!streamedText) {
+        for await (const syntheticEvent of replayTextAsSyntheticStream(result.text)) {
+          yield syntheticEvent;
+        }
+        streamedText = true;
+      }
       yield { type: "text", content: result.text, streamed: streamedText && !sawToolCallDelta };
       return;
     }
 
     throw new Error(
       result.finishReason
-        ? `执行失败：${result.finishReason}`
-        : "执行失败：模型未返回最终结果",
+        ? `Execution failed: model returned no valid result (finish_reason: ${result.finishReason})`
+        : "Execution failed: model returned no final result",
     );
   }
 
-  throw new Error("执行失败：超过最大工具调用轮数");
+  throw new Error("Execution failed: exceeded the maximum tool-call rounds");
 }

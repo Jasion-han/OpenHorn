@@ -959,8 +959,19 @@ async function createTaskExecutionResponse(
     });
 
     try {
+      // Skip live search when the task goal clearly targets the local
+      // workspace (mentions "仓库", "repo", "README", "package.json",
+      // etc.). The live route classifier sometimes mis-classifies
+      // workspace questions as needing web_search because the topic
+      // keywords (e.g. "前端框架") look research-y. For these tasks
+      // the agent should inspect the workspace, not the internet.
+      const goalLooksLikeWorkspaceTask =
+        /(仓库|代码库|工作区|项目|源码|目录|repo|repository|codebase|workspace|readme|package\.json|tsconfig|src\/|apps\/)/i.test(
+          task.goal,
+        );
       const liveSearchRoute =
         runtimeContext.liveContext &&
+        !goalLooksLikeWorkspaceTask &&
         (runtimeContext.liveContext.route === "web_search" ||
           runtimeContext.liveContext.route === "research")
           ? runtimeContext.liveContext.route
