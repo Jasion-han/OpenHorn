@@ -13,7 +13,7 @@ import {
   summarizeBashToolResult,
 } from "./bashToolExecutor";
 
-const DEFAULT_MAX_TURNS = 10;
+const DEFAULT_MAX_TURNS = 200;
 const SYNTHETIC_TEXT_STREAM_CHUNK_SIZE = 18;
 const SYNTHETIC_TEXT_STREAM_DELAY_MS = 14;
 const WORKSPACE_INSPECTION_PATTERN =
@@ -292,10 +292,9 @@ export async function* runGenericAgentRuntime(params: {
 
         if (event.type === "tool_call_delta") {
           sawToolCallDelta = true;
-          if (streamedText) {
-            yield { type: "text_reset" };
-            streamedText = false;
-          }
+          // Don't emit text_reset — let the streamed text stay visible
+          // until the tool_start event replaces it. This avoids the flash
+          // where text appears then immediately vanishes.
           continue;
         }
 
@@ -317,7 +316,9 @@ export async function* runGenericAgentRuntime(params: {
 
     if (result.toolCalls.length > 0) {
       const interimText = result.text.trim();
-      if (interimText) {
+      // Only emit thought if the text was NOT already streamed via
+      // text_delta events — avoids duplicating content the user already saw.
+      if (interimText && !streamedText) {
         yield { type: "thought", content: interimText };
       }
 
@@ -353,7 +354,12 @@ export async function* runGenericAgentRuntime(params: {
         }
         streamedText = true;
       }
-      yield { type: "text", content: result.text, streamed: streamedText && !sawToolCallDelta };
+      yield {
+        type: "text",
+        content: result.text,
+        streamed: streamedText && !sawToolCallDelta,
+        final: true,
+      };
       return;
     }
 

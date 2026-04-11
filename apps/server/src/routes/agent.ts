@@ -845,6 +845,7 @@ async function createTaskExecutionResponse(
     let toolResults = 0;
     let hadError = false;
     let errorText: string | null = null;
+    let pendingThoughtText = "";
 
     await updateAgentTaskStatus(userId, taskId, "running");
     await createAgentTaskEvent(userId, taskId, run.id, {
@@ -1129,9 +1130,29 @@ async function createTaskExecutionResponse(
             continue;
           }
 
+          // Accumulate text_delta into a pending thought. When a tool_start
+          // arrives we flush the accumulated text as a persisted thought event
+          // so it survives detail reloads and shows in the correct timeline
+          // position (before the tool call, not after).
+          if (event.type === "text_delta") {
+            const textChunk = event.content ?? "";
+            if (textChunk) {
+              pendingThoughtText += textChunk;
+              send({
+                type: "execution_event",
+                taskId,
+                runId: run.id,
+                eventType: "text_delta",
+                content: textChunk,
+              });
+            }
+            continue;
+          }
+
           if (event.type === "thought") {
             const thoughtChunk = event.content ?? "";
             if (thoughtChunk.trim()) {
+              pendingThoughtText = "";
               await createAgentTaskEvent(userId, taskId, run.id, {
                 type: "execution_event",
                 content: thoughtChunk,
@@ -1148,29 +1169,25 @@ async function createTaskExecutionResponse(
             continue;
           }
 
-          if (event.type === "text_delta") {
-            const textChunk = event.content ?? "";
-            if (textChunk) {
-              send({
-                type: "execution_event",
-                taskId,
-                runId: run.id,
-                eventType: "text_delta",
-                content: textChunk,
-              });
-            }
+          if (event.type === "text_reset") {
             continue;
           }
 
-          if (event.type === "text_reset") {
+          // Flush accumulated text_delta as a thought before tool calls
+          if (event.type === "tool_start" && pendingThoughtText.trim()) {
+            await createAgentTaskEvent(userId, taskId, run.id, {
+              type: "execution_event",
+              content: pendingThoughtText.trim(),
+              metadata: { eventType: "thought" },
+            });
             send({
               type: "execution_event",
               taskId,
               runId: run.id,
-              eventType: "text_reset",
-              content: null,
+              eventType: "thought",
+              content: pendingThoughtText.trim(),
             });
-            continue;
+            pendingThoughtText = "";
           }
 
           if (event.type === "text") {
@@ -1180,17 +1197,18 @@ async function createTaskExecutionResponse(
               await createAgentTaskEvent(userId, taskId, run.id, {
                 type: "execution_event",
                 content: textChunk,
-                metadata: { eventType: "text" },
+                metadata: { eventType: "text", final: Boolean(event.final) },
               });
-              if (!event.streamed) {
-                send({
-                  type: "execution_event",
-                  taskId,
-                  runId: run.id,
-                  eventType: "text",
-                  content: textChunk,
-                });
-              }
+              // Always send the text event so the client can commit
+              // streamed text_delta content to message.content.
+              send({
+                type: "execution_event",
+                taskId,
+                runId: run.id,
+                eventType: "text",
+                content: textChunk,
+                metadata: { final: Boolean(event.final) },
+              });
             }
             continue;
           }

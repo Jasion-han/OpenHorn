@@ -347,25 +347,23 @@ export function DesktopAgentTaskCard({
 
             const liveEvent = toLiveEvent(executionTaskId, event);
             if (liveEvent) {
-              const currentDetail = detailRef.current;
+              const eventType = getExecutionEventType(liveEvent);
+
+              // Final text event: commit accumulated text to message.content
+              // so it appears in the message bubble (not just the timeline).
               if (
-                liveEvent.type === "execution_event" &&
-                (getExecutionEventType(liveEvent) === "text" ||
-                  getExecutionEventType(liveEvent) === "text_delta") &&
-                typeof liveEvent.content === "string"
+                eventType === "text" &&
+                isRecord(liveEvent.metadata) &&
+                liveEvent.metadata.final === true
               ) {
-                applyStreamingTextChunk(
-                  liveEvent.content,
-                  currentDetail,
-                  getExecutionEventType(liveEvent) === "text_delta" ? "delta" : "snapshot",
-                );
+                const finalContent = typeof liveEvent.content === "string" ? liveEvent.content : "";
+                if (finalContent.trim()) {
+                  const store = useChatStore.getState();
+                  store.updateMessage(messageId, { content: finalContent });
+                  hasStreamedTextRef.current = true;
+                }
               }
-              if (
-                liveEvent.type === "execution_event" &&
-                getExecutionEventType(liveEvent) === "text_reset"
-              ) {
-                resetStreamingText();
-              }
+
               setDetail((current) => (current ? mergeExecutionEvent(current, liveEvent) : current));
               return;
             }

@@ -106,7 +106,7 @@ test("runGenericAgentRuntime executes tool call then returns final text", async 
   });
   expect(events[3]).toEqual({ type: "meta" });
   expect(events[4]).toEqual({ type: "text_delta", content: "finished" });
-  expect(events[5]).toEqual({ type: "text", content: "finished", streamed: true });
+  expect(events[5]).toEqual({ type: "text", content: "finished", streamed: true, final: true });
 });
 
 test("runGenericAgentRuntime emits interim text before executing tool calls", async () => {
@@ -145,7 +145,7 @@ test("runGenericAgentRuntime emits interim text before executing tool calls", as
   });
   expect(events[4]).toEqual({ type: "meta" });
   expect(events[5]).toEqual({ type: "text_delta", content: "finished" });
-  expect(events[6]).toEqual({ type: "text", content: "finished", streamed: true });
+  expect(events[6]).toEqual({ type: "text", content: "finished", streamed: true, final: true });
 });
 
 test("runGenericAgentRuntime returns direct final answer when no tool call exists", async () => {
@@ -170,7 +170,7 @@ test("runGenericAgentRuntime returns direct final answer when no tool call exist
   expect(events).toEqual([
     { type: "meta" },
     { type: "text_delta", content: "done directly" },
-    { type: "text", content: "done directly", streamed: true },
+    { type: "text", content: "done directly", streamed: true, final: true },
   ]);
 });
 
@@ -201,11 +201,11 @@ test("runGenericAgentRuntime streams direct final text when adapter supports it"
     { type: "meta" },
     { type: "text_delta", content: "done " },
     { type: "text_delta", content: "directly" },
-    { type: "text", content: "done directly", streamed: true },
+    { type: "text", content: "done directly", streamed: true, final: true },
   ]);
 });
 
-test("runGenericAgentRuntime resets provisional streamed text when tool calls start", async () => {
+test("runGenericAgentRuntime keeps streamed text visible when tool calls start", async () => {
   const adapter = new FakeToolCallingAdapter([
     {
       text: "Checking now",
@@ -237,9 +237,9 @@ test("runGenericAgentRuntime resets provisional streamed text when tool calls st
   expect(events[0]).toEqual({ type: "meta" });
   expect(events[1]).toEqual({ type: "text_delta", content: "Checking " });
   expect(events[2]).toEqual({ type: "text_delta", content: "now" });
-  expect(events[3]).toEqual({ type: "text_reset" });
-  expect(events[4]).toEqual({ type: "thought", content: "Checking now" });
-  expect(events[5]).toMatchObject({ type: "tool_start", toolName: "Bash" });
+  // No text_reset — streamed text stays visible.
+  // No duplicate thought — text was already streamed via text_delta.
+  expect(events[3]).toMatchObject({ type: "tool_start", toolName: "Bash" });
 });
 
 test("runGenericAgentRuntime stops after max turn budget", async () => {
@@ -371,6 +371,6 @@ test("runGenericAgentRuntime bootstraps pwd from wrapped execution instructions 
   });
   expect(events[2]).toEqual({ type: "meta" });
   expect(events[3]).toEqual({ type: "text_delta", content: "finished" });
-  expect(events[4]).toEqual({ type: "text", content: "finished", streamed: true });
+  expect(events[4]).toEqual({ type: "text", content: "finished", streamed: true, final: true });
   expect(adapter.calls[0]?.toolChoice).toBe("auto");
 });

@@ -165,13 +165,12 @@ export function mergeOutputRows(items: StreamItem[]) {
 
 export function buildExecutionItems(events: ApiAgentTaskEvent[]) {
   const items: StreamItem[] = [];
+  let thoughtGroupCounter = 0;
 
   for (const event of events) {
     if (event.type === "error") {
       const metadata = getEventMetadata(event);
       const text = summarizeProcessDetail(normalizeProcessText(event.content, metadata));
-      // Drop the row entirely when neither raw content nor a structured
-      // errorCode is available — never invent a placeholder string.
       if (!text) continue;
       items.push({
         id: event.id,
@@ -185,6 +184,36 @@ export function buildExecutionItems(events: ApiAgentTaskEvent[]) {
     if (event.type !== "execution_event") continue;
 
     const eventType = getExecutionEventType(event);
+
+    // text_reset is a no-op in the timeline.
+    if (eventType === "text_reset") {
+      continue;
+    }
+
+    // text_delta: merge consecutive deltas into a single thought row so the
+    // user can see what the model is thinking between tool calls. A new
+    // thought group starts after any non-text_delta event.
+    if (eventType === "text_delta") {
+      const text = normalizeProcessText(event.content, getEventMetadata(event));
+      if (text) {
+        const last = items.length > 0 ? items[items.length - 1] : null;
+        if (last && last.mergeKey?.startsWith("streamed-thought-")) {
+          items[items.length - 1] = { ...last, text: `${last.text}${text}` };
+        } else {
+          thoughtGroupCounter++;
+          items.push({
+            id: event.id,
+            kind: "meta",
+            label: "thinking",
+            text,
+            tone: "default",
+            mergeKey: `streamed-thought-${thoughtGroupCounter}`,
+          });
+        }
+      }
+      continue;
+    }
+
     if (eventType === "thought") {
       const text = normalizeProcessText(event.content, getEventMetadata(event));
       if (text) {
@@ -232,7 +261,8 @@ export function buildExecutionItems(events: ApiAgentTaskEvent[]) {
       continue;
     }
 
-    if (eventType === "text" || eventType === "text_delta") {
+    // Final text output from the model
+    if (eventType === "text") {
       const text = normalizeProcessText(event.content, getEventMetadata(event));
       if (text) {
         items.push({
@@ -256,7 +286,25 @@ export function buildTimelineItems(detail: ApiAgentTaskDetail): StreamItem[] {
   );
   const hasExplicitErrorEvent = events.some((event) => event.type === "error");
 
+  // Collect consecutive execution_events and pass them as a batch to
+  // buildExecutionItems so that text_delta merging works across events.
+  const flushExecBatch = (batch: ApiAgentTaskEvent[]) => {
+    if (batch.length > 0) {
+      items.push(...buildExecutionItems(batch));
+      batch.length = 0;
+    }
+  };
+  const execBatch: ApiAgentTaskEvent[] = [];
+
   for (const event of events) {
+    if (event.type === "execution_event") {
+      execBatch.push(event);
+      continue;
+    }
+
+    // Non-execution event: flush any pending execution batch first.
+    flushExecBatch(execBatch);
+
     if (event.type === "task_status") {
       const statusValue = getTaskStatusValue(event);
       if (
@@ -274,11 +322,6 @@ export function buildTimelineItems(detail: ApiAgentTaskDetail): StreamItem[] {
           tone: status.tone,
         });
       }
-      continue;
-    }
-
-    if (event.type === "execution_event") {
-      items.push(...buildExecutionItems([event]));
       continue;
     }
 
@@ -321,6 +364,9 @@ export function buildTimelineItems(detail: ApiAgentTaskDetail): StreamItem[] {
       });
     }
   }
+
+  // Flush any remaining execution events.
+  flushExecBatch(execBatch);
 
   return mergeOutputRows(items);
 }
@@ -679,17 +725,17 @@ export function buildStream(
   fallbackContent: string | null | undefined,
 ): StreamItem[] {
   const approval = getPendingApproval(detail);
+  const allTimelineItems = buildTimelineItems(detail);
+  // Keep output items out of the Process panel — they belong in the message body.
+  const timelineItems = allTimelineItems.filter((item) => item.kind !== "output");
   const finalOutputItems = buildOutputItems(detail, fallbackContent);
-  const hasFinalOutput = finalOutputItems.length > 0;
-  const timelineItems = hasFinalOutput
-    ? buildTimelineItems(detail).filter((item) => item.kind !== "output")
-    : buildTimelineItems(detail);
   const hasTimelineError = timelineItems.some((item) => item.kind === "meta" && item.tone === "danger");
   const statusItems = hasTimelineError ? [] : buildStatusItems(streamError);
-  const metaItems = mergeOutputRows([...buildApprovalItems(approval), ...timelineItems, ...statusItems]);
-  const shouldAppendOutput = detail.task.status === "completed" || metaItems.length === 0;
+  const shouldAppendOutput = detail.task.status === "completed" || timelineItems.length === 0;
   const items = mergeOutputRows([
-    ...metaItems,
+    ...buildApprovalItems(approval),
+    ...timelineItems,
+    ...statusItems,
     ...(shouldAppendOutput && finalOutputItems.length > 0 ? finalOutputItems : []),
   ]);
 
