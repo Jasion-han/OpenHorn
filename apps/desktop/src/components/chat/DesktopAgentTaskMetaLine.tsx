@@ -30,18 +30,12 @@ export function DesktopAgentTaskMetaLine({
           }}
         />
         <span className="min-w-0">
-          <span className={cn("mr-2", active ? "opacity-38" : "opacity-24")}>·</span>
+          <span className="mr-0" />
           <span style={active ? getActiveMetaTextStyle() : undefined}>
             {text}
           </span>
           {subtext ? <span className="text-foreground opacity-32"> · {subtext}</span> : null}
-          {active ? (
-            <span
-              aria-hidden="true"
-              className="ml-2 inline-block h-[0.9em] w-px bg-current align-middle"
-              style={{ animation: "agentMetaCursorPulse 1.05s ease-in-out infinite" }}
-            />
-          ) : null}
+          {null}
         </span>
       </span>
     </div>

@@ -317,13 +317,26 @@ export function DesktopAgentTaskCard({
 
             if (event.type === "final_result") {
               mergeLiveOutputSnapshot(event.content, event.citations);
+              // Simulate streaming: write final content progressively so the
+              // user sees text appear gradually instead of one big block.
+              const fullText = event.content ?? "";
+              const chars = Array.from(fullText);
+              const CHUNK = 12;
               const store = useChatStore.getState();
-              const currentMessage = store.messages.find((item) => item.id === messageId);
-              store.updateMessage(messageId, {
-                content: mergeAgentOutputSnapshot(currentMessage?.content ?? "", event.content),
-                citations: event.citations,
-              });
+              store.updateMessage(messageId, { content: "", citations: event.citations });
               hasStreamedTextRef.current = true;
+              let written = 0;
+              const writeNext = () => {
+                if (written >= chars.length) return;
+                const end = Math.min(written + CHUNK, chars.length);
+                const slice = chars.slice(0, end).join("");
+                written = end;
+                useChatStore.getState().updateMessage(messageId, { content: slice });
+                if (written < chars.length) {
+                  requestAnimationFrame(writeNext);
+                }
+              };
+              writeNext();
               setDetail((current) => {
                 if (!current) return current;
                 const artifact: ApiAgentArtifact = {
@@ -337,8 +350,24 @@ export function DesktopAgentTaskCard({
                   createdAt: new Date().toISOString(),
                   updatedAt: new Date().toISOString(),
                 };
+                // Strip trailing text_delta events so the Process panel
+                // thought disappears instantly when the final result arrives.
+                const cleanedEvents = [...current.events];
+                while (cleanedEvents.length > 0) {
+                  const last = cleanedEvents[cleanedEvents.length - 1];
+                  if (
+                    last.type === "execution_event" &&
+                    isRecord(last.metadata) &&
+                    last.metadata.eventType === "text_delta"
+                  ) {
+                    cleanedEvents.pop();
+                  } else {
+                    break;
+                  }
+                }
                 return {
                   ...current,
+                  events: cleanedEvents,
                   artifacts: [artifact, ...current.artifacts.filter((item) => item.id !== artifact.id)],
                 };
               });
@@ -347,23 +376,6 @@ export function DesktopAgentTaskCard({
 
             const liveEvent = toLiveEvent(executionTaskId, event);
             if (liveEvent) {
-              const eventType = getExecutionEventType(liveEvent);
-
-              // Final text event: commit accumulated text to message.content
-              // so it appears in the message bubble (not just the timeline).
-              if (
-                eventType === "text" &&
-                isRecord(liveEvent.metadata) &&
-                liveEvent.metadata.final === true
-              ) {
-                const finalContent = typeof liveEvent.content === "string" ? liveEvent.content : "";
-                if (finalContent.trim()) {
-                  const store = useChatStore.getState();
-                  store.updateMessage(messageId, { content: finalContent });
-                  hasStreamedTextRef.current = true;
-                }
-              }
-
               setDetail((current) => (current ? mergeExecutionEvent(current, liveEvent) : current));
               return;
             }
@@ -543,10 +555,9 @@ export function DesktopAgentTaskCard({
   return (
     <section className="mt-0 px-1 pt-0 pb-1">
       <style>{`
-        @keyframes agentMetaTextFlow {
-          0% { background-position: 130% 50%; text-shadow: 0 0 0 rgba(15,23,42,0); }
-          50% { text-shadow: 0 0 8px rgba(15,23,42,0.08); }
-          100% { background-position: -30% 50%; text-shadow: 0 0 0 rgba(15,23,42,0); }
+        @keyframes agentMetaTextPulse {
+          0%, 100% { opacity: 0.45; }
+          50% { opacity: 0.85; }
         }
         @keyframes agentMetaDotPulse {
           0%, 100% { transform: scale(0.9); opacity: 0.35; }

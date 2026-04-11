@@ -217,15 +217,11 @@ export function toneClassName(tone: StreamTone = "default") {
 }
 
 export function getActiveMetaTextStyle(): CSSProperties {
+  // Use simple opacity pulse instead of hardcoded gradient colors
+  // so it works correctly in both light and dark themes.
   return {
-    backgroundImage:
-      "linear-gradient(90deg, rgba(15,23,42,0.26) 0%, rgba(15,23,42,0.52) 24%, rgba(15,23,42,0.82) 48%, rgba(15,23,42,0.48) 72%, rgba(15,23,42,0.26) 100%)",
-    backgroundSize: "220% 100%",
-    backgroundClip: "text",
-    WebkitBackgroundClip: "text",
-    color: "transparent",
-    WebkitTextFillColor: "transparent",
-    animation: "agentMetaTextFlow 2.35s linear infinite",
+    opacity: 0.7,
+    animation: "agentMetaTextPulse 1.8s ease-in-out infinite",
   };
 }
 

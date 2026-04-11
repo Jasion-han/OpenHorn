@@ -276,6 +276,25 @@ export function buildExecutionItems(events: ApiAgentTaskEvent[]) {
     }
   }
 
+  // If the last streamed-thought group is immediately followed by a final
+  // text event, remove it — the final output will appear in the message body,
+  // not the Process panel, so showing it as a thought is redundant.
+  const hasFinalText = events.some(
+    (e) =>
+      e.type === "execution_event" &&
+      getExecutionEventType(e) === "text" &&
+      isRecord(e.metadata) &&
+      e.metadata.final === true,
+  );
+  if (hasFinalText) {
+    while (
+      items.length > 0 &&
+      items[items.length - 1].mergeKey?.startsWith("streamed-thought-")
+    ) {
+      items.pop();
+    }
+  }
+
   return mergeOutputRows(items);
 }
 

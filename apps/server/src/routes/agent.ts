@@ -1130,10 +1130,10 @@ async function createTaskExecutionResponse(
             continue;
           }
 
-          // Accumulate text_delta into a pending thought. When a tool_start
-          // arrives we flush the accumulated text as a persisted thought event
-          // so it survives detail reloads and shows in the correct timeline
-          // position (before the tool call, not after).
+          // Accumulate text_delta and also send it to the client for live
+          // streaming display. It will be flushed as a persisted thought
+          // before tool_start, or discarded on the final turn (where
+          // final_result carries the complete content instead).
           if (event.type === "text_delta") {
             const textChunk = event.content ?? "";
             if (textChunk) {
@@ -1191,6 +1191,9 @@ async function createTaskExecutionResponse(
           }
 
           if (event.type === "text") {
+            // Discard accumulated text_delta for the final turn — the
+            // final_result artifact will carry the complete content.
+            pendingThoughtText = "";
             const textChunk = event.content ?? "";
             finalText = mergeAgentTextOutput(finalText, textChunk);
             if (textChunk.trim()) {
@@ -1198,16 +1201,6 @@ async function createTaskExecutionResponse(
                 type: "execution_event",
                 content: textChunk,
                 metadata: { eventType: "text", final: Boolean(event.final) },
-              });
-              // Always send the text event so the client can commit
-              // streamed text_delta content to message.content.
-              send({
-                type: "execution_event",
-                taskId,
-                runId: run.id,
-                eventType: "text",
-                content: textChunk,
-                metadata: { final: Boolean(event.final) },
               });
             }
             continue;
@@ -1310,6 +1303,16 @@ async function createTaskExecutionResponse(
           taskId,
           runId: run.id,
           artifactType: "final_result",
+        });
+        // Clear any trailing text_delta from the client's detail before
+        // the final result arrives, preventing a brief flash of the final
+        // text appearing as a thought in the Process panel.
+        send({
+          type: "execution_event",
+          taskId,
+          runId: run.id,
+          eventType: "text_reset",
+          content: null,
         });
         send({
           type: "final_result",
