@@ -54,7 +54,7 @@ function formatNewConversationTitle() {
   return `新会话 ${mm}-${dd} ${hh}:${min}`;
 }
 
-function groupByUpdatedAt(
+function groupByCreatedAt(
   items: Conversation[],
 ): Array<{ label: DateGroup; items: Conversation[] }> {
   const now = new Date();
@@ -66,16 +66,17 @@ function groupByUpdatedAt(
   const earlier: Conversation[] = [];
 
   for (const item of items) {
-    const ts = item.updatedAt.getTime();
+    const ts = item.createdAt.getTime();
     if (ts >= todayStart) today.push(item);
     else if (ts >= yesterdayStart) yesterday.push(item);
     else earlier.push(item);
   }
 
+  const desc = (a: Conversation, b: Conversation) => b.createdAt.getTime() - a.createdAt.getTime();
   const groups: Array<{ label: DateGroup; items: Conversation[] }> = [];
-  if (today.length) groups.push({ label: "今天", items: today });
-  if (yesterday.length) groups.push({ label: "昨天", items: yesterday });
-  if (earlier.length) groups.push({ label: "更早", items: earlier });
+  if (today.length) groups.push({ label: "今天", items: today.sort(desc) });
+  if (yesterday.length) groups.push({ label: "昨天", items: yesterday.sort(desc) });
+  if (earlier.length) groups.push({ label: "更早", items: earlier.sort(desc) });
   return groups;
 }
 
@@ -290,7 +291,7 @@ export function DesktopLeftSidebar() {
 
   const pinned = filteredConversations.filter((conversation) => conversation.isPinned);
   const rest = filteredConversations.filter((conversation) => !conversation.isPinned);
-  const groups = groupByUpdatedAt(rest);
+  const groups = groupByCreatedAt(rest);
 
   return (
     <div className="flex h-full min-h-0 flex-col">

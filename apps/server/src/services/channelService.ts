@@ -111,7 +111,12 @@ function getDefaultBaseUrl(protocol: ChannelProtocol): string {
 }
 
 function normalizeBaseUrl(baseUrl: string): string {
-  return baseUrl.trim().replace(/\/+$/, "");
+  let url = baseUrl.trim().replace(/\/+$/, "");
+  // Auto-prepend https:// when the user omits the protocol
+  if (url && !/^https?:\/\//i.test(url)) {
+    url = `https://${url}`;
+  }
+  return url;
 }
 
 function isDashScopeCodingBaseUrl(baseUrl: string): boolean {

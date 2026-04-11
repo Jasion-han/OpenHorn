@@ -22,7 +22,6 @@ import {
   DialogHeader,
   DialogTitle,
   Input,
-  ScrollArea,
   Select,
   SelectContent,
   SelectItem,
@@ -613,8 +612,8 @@ export function ChannelSettings() {
                         当前还没有模型。该渠道如果不支持同步，可直接在上方手动添加 modelId。
                       </div>
                     ) : (
-                      <ScrollArea className="max-h-[320px]">
-                        <div className="flex flex-col gap-2 pr-3">
+                      <div className="max-h-[400px] overflow-y-auto rounded-md">
+                        <div className="flex flex-col gap-2 pr-1">
                           {channel.models.map((model) => (
                             <div
                               key={model.id}
@@ -662,7 +661,7 @@ export function ChannelSettings() {
                             </div>
                           ))}
                         </div>
-                      </ScrollArea>
+                      </div>
                     )}
                   </div>
                 )}

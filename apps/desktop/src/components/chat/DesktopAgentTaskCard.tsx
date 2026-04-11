@@ -12,6 +12,7 @@ import type {
   ApiAgentApproval,
   ApiAgentArtifact,
   ApiAgentTaskDetail,
+  ApiAgentTaskStatus,
   ApiCitation,
 } from "../../types/chat";
 import {
@@ -403,7 +404,16 @@ export function DesktopAgentTaskCard({
       setStreamError({ message });
       notifyError("Run failed", message);
       const refreshed = await loadDetail(true);
-      if (refreshed) setDetail(refreshed);
+      if (refreshed) {
+        // If the server-side task is still running (e.g. the SSE connection
+        // dropped but the server hasn't timed out yet), mark it as failed
+        // locally so the UI doesn't stay stuck on "Working".
+        const nonTerminal = ["draft", "planned", "running", "pending_approval"];
+        if (nonTerminal.includes(refreshed.task.status)) {
+          refreshed.task.status = "failed" as ApiAgentTaskStatus;
+        }
+        setDetail(refreshed);
+      }
     } finally {
       setIsExecutionStreaming(false);
       setBusyAction(null);
