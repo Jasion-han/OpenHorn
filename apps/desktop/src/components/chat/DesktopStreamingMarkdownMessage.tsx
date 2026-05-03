@@ -18,7 +18,7 @@ export function DesktopStreamingMarkdownMessage({
   useLayoutEffect(() => {
     const smoother = createTextStreamSmoother({
       emit: (text) => {
-        setRenderedContent((current) => current + text);
+        setRenderedContent(text);
       },
     });
 
@@ -51,21 +51,16 @@ export function DesktopStreamingMarkdownMessage({
       return;
     }
 
-    if (!nextContent.startsWith(currentTarget)) {
-      smoother.cancel();
-      targetContentRef.current = "";
-      setRenderedContent("");
-      smoother.push(nextContent);
-      targetContentRef.current = nextContent;
-      return;
+    if (nextContent.startsWith(currentTarget)) {
+      const delta = nextContent.slice(currentTarget.length);
+      if (!delta) {
+        return;
+      }
+      smoother.push(delta);
+    } else {
+      smoother.replace(nextContent);
     }
 
-    const delta = nextContent.slice(currentTarget.length);
-    if (!delta) {
-      return;
-    }
-
-    smoother.push(delta);
     targetContentRef.current = nextContent;
   }, [content, pulseKey]);
 

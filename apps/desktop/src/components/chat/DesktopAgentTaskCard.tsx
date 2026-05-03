@@ -317,26 +317,15 @@ export function DesktopAgentTaskCard({
 
             if (event.type === "final_result") {
               mergeLiveOutputSnapshot(event.content, event.citations);
-              // Simulate streaming: write final content progressively so the
-              // user sees text appear gradually instead of one big block.
-              const fullText = event.content ?? "";
-              const chars = Array.from(fullText);
-              const CHUNK = 12;
               const store = useChatStore.getState();
-              store.updateMessage(messageId, { content: "", citations: event.citations });
+              store.updateMessage(messageId, {
+                content: event.content ?? "",
+                citations: event.citations,
+              });
               hasStreamedTextRef.current = true;
-              let written = 0;
-              const writeNext = () => {
-                if (written >= chars.length) return;
-                const end = Math.min(written + CHUNK, chars.length);
-                const slice = chars.slice(0, end).join("");
-                written = end;
-                useChatStore.getState().updateMessage(messageId, { content: slice });
-                if (written < chars.length) {
-                  requestAnimationFrame(writeNext);
-                }
-              };
-              writeNext();
+              // Collapse Process panel immediately when the final result
+              // arrives — don't wait for the task_status:completed event.
+              setIsProcessExpanded(false);
               setDetail((current) => {
                 if (!current) return current;
                 const artifact: ApiAgentArtifact = {
@@ -376,6 +365,30 @@ export function DesktopAgentTaskCard({
 
             const liveEvent = toLiveEvent(executionTaskId, event);
             if (liveEvent) {
+              const eventType = getExecutionEventType(liveEvent);
+
+              // text_output_start: server confirmed this is the final turn.
+              // Collapse Process before text_delta chunks arrive.
+              if (eventType === "text_output_start") {
+                setIsProcessExpanded(false);
+                return;
+              }
+
+              // text_delta: stream into message.content for live display.
+              // Only arrives after text_output_start (final turn confirmed),
+              // so no risk of showing interim thinking in the bubble.
+              if (eventType === "text_delta" && typeof liveEvent.content === "string") {
+                applyStreamingTextChunk(liveEvent.content, detailRef.current, "delta");
+                return;
+              }
+
+              // tool_start: clear any residual streamed text.
+              if (eventType === "tool_start" && hasStreamedTextRef.current) {
+                resetStreamingText();
+              }
+
+              // All other events (thought, tool_start, tool_result, etc.)
+              // go into detail.events for the Process panel.
               setDetail((current) => (current ? mergeExecutionEvent(current, liveEvent) : current));
               return;
             }
@@ -555,17 +568,13 @@ export function DesktopAgentTaskCard({
   return (
     <section className="mt-0 px-1 pt-0 pb-1">
       <style>{`
-        @keyframes agentMetaTextPulse {
-          0%, 100% { opacity: 0.45; }
-          50% { opacity: 0.85; }
+        @keyframes agentMetaTextShimmer {
+          0% { background-position: 130% 50%; }
+          100% { background-position: -30% 50%; }
         }
         @keyframes agentMetaDotPulse {
           0%, 100% { transform: scale(0.9); opacity: 0.35; }
           50% { transform: scale(1.05); opacity: 0.78; }
-        }
-        @keyframes agentMetaCursorPulse {
-          0%, 100% { opacity: 0.18; transform: scaleY(0.92); }
-          50% { opacity: 0.55; transform: scaleY(1); }
         }
       `}</style>
       <div className="space-y-2.5">

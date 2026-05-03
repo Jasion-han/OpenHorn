@@ -131,6 +131,91 @@ describe("desktop chat store", () => {
     expect(store.getState().messages[0]?.content).toBe("你好");
   });
 
+  test("switches current conversation immediately before messages finish loading", async () => {
+    let resolveMessages!: (messages: Message[]) => void;
+    let hasDeferredResolver = false;
+    const { adapter } = createStubAdapter();
+    const store = createDesktopChatStore({
+      ...adapter,
+      listConversations: async () =>
+        [
+          {
+            id: "conv-1",
+            title: "桌面聊天",
+            channelId: "channel-1",
+            contextLength: 4096,
+            defaultMode: "agent",
+            lastMode: "agent",
+            isPinned: false,
+            forceWebSearch: true,
+            createdAt: new Date("2026-03-20T10:00:00.000Z"),
+            updatedAt: new Date("2026-03-20T10:00:00.000Z"),
+          },
+          {
+            id: "conv-2",
+            title: "第二个会话",
+            channelId: "channel-1",
+            contextLength: 4096,
+            defaultMode: "agent",
+            lastMode: "agent",
+            isPinned: false,
+            forceWebSearch: true,
+            createdAt: new Date("2026-03-21T10:00:00.000Z"),
+            updatedAt: new Date("2026-03-21T10:00:00.000Z"),
+          },
+        ] satisfies Conversation[],
+      loadMessages: async (conversationId) => {
+        if (conversationId === "conv-1") {
+          return [
+            {
+              id: "msg-1",
+              conversationId: "conv-1",
+              role: "assistant",
+              content: "你好",
+              mode: "agent",
+              createdAt: new Date("2026-03-20T10:01:00.000Z"),
+            },
+          ] satisfies Message[];
+        }
+
+        return await new Promise<Message[]>((resolve) => {
+          resolveMessages = resolve;
+          hasDeferredResolver = true;
+        });
+      },
+    });
+
+    await store.getState().loadConversations();
+    await store.getState().selectConversation("conv-1");
+
+    const pendingSelection = store.getState().selectConversation("conv-2");
+
+    expect(store.getState().currentConversation?.id).toBe("conv-2");
+    expect(store.getState().messages).toEqual([]);
+    expect(store.getState().isLoading).toBe(true);
+
+    if (!hasDeferredResolver) {
+      throw new Error("Expected deferred message resolver to be available");
+    }
+
+    resolveMessages([
+      {
+        id: "msg-2",
+        conversationId: "conv-2",
+        role: "assistant",
+        content: "第二条消息",
+        mode: "agent",
+        createdAt: new Date("2026-03-21T10:01:00.000Z"),
+      },
+    ]);
+
+    await pendingSelection;
+
+    expect(store.getState().currentConversation?.id).toBe("conv-2");
+    expect(store.getState().messages).toHaveLength(1);
+    expect(store.getState().messages[0]?.content).toBe("第二条消息");
+  });
+
   test("adds optimistic assistant placeholder while streaming", async () => {
     const { adapter, getSendInput } = createStubAdapter();
     const store = createDesktopChatStore(adapter);
