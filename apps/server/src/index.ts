@@ -9,6 +9,7 @@ import channelRoutes from "./routes/channels";
 import conversationRoutes from "./routes/conversations";
 import mcpRoutes from "./routes/mcp";
 import messageRoutes from "./routes/messages";
+import credentialRoutes from "./routes/credentials";
 import settingsRoutes from "./routes/settings";
 
 await bootstrapDatabase();
@@ -54,9 +55,10 @@ app.route("/messages", messageRoutes);
 app.route("/attachments", attachmentRoutes);
 app.route("/agent", agentRoutes);
 app.route("/mcp", mcpRoutes);
+app.route("/credentials", credentialRoutes);
 app.route("/settings", settingsRoutes);
 
-const port = parseInt(process.env.PORT || "3000", 10);
+const port = parseInt(process.env.PORT || "3002", 10);
 
 console.log(`Server running on http://localhost:${port}`);
 

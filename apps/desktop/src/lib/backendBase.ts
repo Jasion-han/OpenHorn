@@ -1,4 +1,4 @@
-export const DEFAULT_DESKTOP_BACKEND_BASE = "http://localhost:3000";
+export const DEFAULT_DESKTOP_BACKEND_BASE = "http://localhost:3002";
 
 function getEnvBase() {
   return (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env
@@ -12,7 +12,7 @@ export function getDesktopBackendBase(): string {
   }
 
   if (typeof window !== "undefined" && window.location.hostname === "127.0.0.1") {
-    return "http://127.0.0.1:3000";
+    return "http://127.0.0.1:3002";
   }
 
   return DEFAULT_DESKTOP_BACKEND_BASE;

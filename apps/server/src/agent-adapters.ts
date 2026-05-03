@@ -397,13 +397,20 @@ function parseOpenAIToolCallingResult(
   };
 }
 
+function normalizeBaseUrl(url: string): string {
+  let u = url.replace(/\/+$/, "");
+  if (u.endsWith("/v1")) u = u.slice(0, -3);
+  return u;
+}
+
 export class OpenAIAdapter implements ProviderAdapter {
   private apiKey: string;
   private baseUrl: string;
 
   constructor(apiKey: string, baseUrl?: string) {
     this.apiKey = apiKey;
-    this.baseUrl = baseUrl || "https://api.openai.com/v1";
+    const raw = baseUrl || "https://api.openai.com/v1";
+    this.baseUrl = normalizeBaseUrl(raw) + "/v1";
   }
 
   async chat(options: ChatOptions): Promise<ChatResponse> {
@@ -1068,7 +1075,8 @@ export class AnthropicAdapter implements ProviderAdapter {
 
   constructor(apiKey: string, baseUrl?: string) {
     this.apiKey = apiKey;
-    this.baseUrl = baseUrl || "https://api.anthropic.com";
+    const raw = baseUrl || "https://api.anthropic.com";
+    this.baseUrl = raw.replace(/\/+$/, "").replace(/\/v1$/, "");
   }
 
   async chat(options: ChatOptions): Promise<ChatResponse> {
@@ -1094,7 +1102,7 @@ export class AnthropicAdapter implements ProviderAdapter {
         };
       }),
       temperature: options.temperature,
-      max_tokens: options.maxTokens || 1024,
+      max_tokens: options.maxTokens || 4096,
     });
 
     const timeout = createRequestTimeoutSignal(
@@ -1192,7 +1200,7 @@ export class AnthropicAdapter implements ProviderAdapter {
         };
       }),
       temperature: options.temperature,
-      max_tokens: options.maxTokens || 1024,
+      max_tokens: options.maxTokens || 4096,
       stream: true,
     });
 
@@ -1351,7 +1359,7 @@ export class AnthropicAdapter implements ProviderAdapter {
         options.toolChoice && options.toolChoice !== "auto"
           ? { type: "tool", name: options.toolChoice.name }
           : { type: "auto" },
-      max_tokens: 1024,
+      max_tokens: 4096,
     });
 
     const timeout = createRequestTimeoutSignal(
