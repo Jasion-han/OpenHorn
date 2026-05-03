@@ -860,6 +860,13 @@ export async function fetchChannelModels(
   }
 
   try {
+    if (apiKey.startsWith("__cli_oauth__")) {
+      return {
+        success: false,
+        error: "CLI OAuth 渠道不支持自动模型同步，请使用手动添加 modelId 功能。",
+        models: [],
+      };
+    }
     const models = await fetchProviderModels(protocol, baseUrl, apiKey);
     const existingModels = await listChannelModels(userId, channelId);
     const existingByModelId = new Map(existingModels.map((model) => [model.modelId, model]));
@@ -948,8 +955,40 @@ export async function testChannel(userId: string, channelId: string): Promise<Ch
     const channel = await getOwnedChannelItem(userId, channelId);
     const row = await getOwnedChannelRow(userId, channelId);
     const protocol = normalizeProtocol(row.protocol, channel.provider);
-    const apiKey = decrypt(row.apiKey);
+    let apiKey = decrypt(row.apiKey);
     const baseUrl = row.baseUrl || getDefaultBaseUrl(protocol);
+
+    if (apiKey.startsWith("__cli_oauth__:")) {
+      const { runClaudeAgentSdk } = await import("./agentSdk");
+      const modelId = resolveModelIdFromChannelItem(channel, null);
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 15000);
+        for await (const event of runClaudeAgentSdk({
+          apiKey: "",
+          model: modelId || "claude-sonnet-4-6",
+          prompt: "Say 'ok' and nothing else.",
+          maxTurns: 1,
+          abortController: controller,
+        })) {
+          if (event.type === "text" || event.type === "done") {
+            clearTimeout(timeout);
+            return { success: true };
+          }
+          if (event.type === "error") {
+            clearTimeout(timeout);
+            return { success: false, error: event.content || "SDK 连接失败" };
+          }
+        }
+        clearTimeout(timeout);
+        return { success: true };
+      } catch (err) {
+        return {
+          success: false,
+          error: err instanceof Error ? err.message : "CLI OAuth 连接测试失败",
+        };
+      }
+    }
 
     if (!baseUrl) {
       return { success: false, error: "Base URL is required" };
@@ -1033,9 +1072,17 @@ export async function getResolvedChannelForUser(
     baseUrl: getRuntimeBaseUrl(targetChannel.protocol, row.baseUrl || targetChannel.baseUrl),
   };
 
+  let apiKey = decrypt(row.apiKey);
+  if (apiKey.startsWith("__cli_oauth__:")) {
+    const sourceId = apiKey.slice("__cli_oauth__:".length);
+    const { resolveCliOAuthApiKey } = await import("./credentialDetectionService");
+    const resolved = await resolveCliOAuthApiKey(sourceId);
+    if (resolved) apiKey = resolved;
+  }
+
   return {
     channel: channelWithRuntimeBaseUrl,
-    apiKey: decrypt(row.apiKey),
+    apiKey,
     modelId,
   };
 }
@@ -1084,9 +1131,17 @@ export async function getResolvedChannelForConversation(
       baseUrl: getRuntimeBaseUrl(targetChannel.protocol, row.baseUrl || targetChannel.baseUrl),
     };
 
+    let apiKey2 = decrypt(row.apiKey);
+    if (apiKey2.startsWith("__cli_oauth__:")) {
+      const sourceId2 = apiKey2.slice("__cli_oauth__:".length);
+      const { resolveCliOAuthApiKey } = await import("./credentialDetectionService");
+      const resolved2 = await resolveCliOAuthApiKey(sourceId2);
+      if (resolved2) apiKey2 = resolved2;
+    }
+
     return {
       channel: channelWithRuntimeBaseUrl,
-      apiKey: decrypt(row.apiKey),
+      apiKey: apiKey2,
       modelId,
     };
   }
@@ -1180,8 +1235,21 @@ export async function getChannelRuntimeCredentialsById(
     baseUrl: runtimeBaseUrl,
   };
 
+  let apiKey = decrypt(row.apiKey);
+
+  if (apiKey.startsWith("__cli_oauth__:")) {
+    if (options?.runtime === "agent_sdk") {
+      apiKey = "";
+    } else {
+      const sourceId = apiKey.slice("__cli_oauth__:".length);
+      const { resolveCliOAuthApiKey } = await import("./credentialDetectionService");
+      const resolved = await resolveCliOAuthApiKey(sourceId);
+      if (resolved) apiKey = resolved;
+    }
+  }
+
   return {
     channel: channelWithRuntimeBaseUrl,
-    apiKey: decrypt(row.apiKey),
+    apiKey,
   };
 }

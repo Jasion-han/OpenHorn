@@ -149,8 +149,9 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
   const childEnv: Record<string, string | undefined> = {
     ...process.env,
   };
-  if (input.apiKey) childEnv.ANTHROPIC_API_KEY = input.apiKey;
-  if (input.baseUrl) childEnv.ANTHROPIC_BASE_URL = input.baseUrl;
+  const isCliOAuth = input.apiKey?.startsWith("__cli_oauth__");
+  if (input.apiKey && !isCliOAuth) childEnv.ANTHROPIC_API_KEY = input.apiKey;
+  if (input.baseUrl && !isCliOAuth) childEnv.ANTHROPIC_BASE_URL = input.baseUrl;
 
   // Build the sandbox network allow-list: just the Anthropic API host
   // (or the user's custom relay host), nothing else. This is what stops

@@ -500,6 +500,9 @@ export async function checkChannelAgentCompatibility(
     }
 
     if (protocol === "anthropic") {
+      if (!apiKey || apiKey.startsWith("__cli_oauth__")) {
+        return { success: true, mode: "claude_sdk" as AgentCapabilityMode };
+      }
       const claudeSdkResult = await probeClaudeAgentSdkCompatibility({
         apiKey,
         modelId: trimmedModelId,
