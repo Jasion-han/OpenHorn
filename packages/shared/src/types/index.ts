@@ -75,3 +75,22 @@ export interface User {
   createdAt: Date;
   updatedAt: Date;
 }
+
+export type CredentialProvider = "openai" | "anthropic" | "google";
+export type CredentialSourceType = "env_var" | "cli_oauth" | "manual";
+export type CredentialStatus = "available" | "expired" | "error";
+
+export interface CredentialSource {
+  id: string;
+  provider: CredentialProvider;
+  sourceType: CredentialSourceType;
+  sourceName: string;
+  status: CredentialStatus;
+  error?: string;
+}
+
+export interface ProviderPreset {
+  protocol: ChannelProtocol;
+  baseUrl: string;
+  name: string;
+}
