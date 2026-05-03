@@ -627,6 +627,8 @@ async function syncExecutionPlanSteps(params: {
   }
 }
 
+const SYNTHETIC_TEXT_STREAM_CHUNK_SIZE = 18;
+
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -1130,21 +1132,12 @@ async function createTaskExecutionResponse(
             continue;
           }
 
-          // Accumulate text_delta and also send it to the client for live
-          // streaming display. It will be flushed as a persisted thought
-          // before tool_start, or discarded on the final turn (where
-          // final_result carries the complete content instead).
+          // Buffer text_delta — do NOT send to client yet.
+          // Decision happens when tool_start (interim) or text (final) arrives.
           if (event.type === "text_delta") {
             const textChunk = event.content ?? "";
             if (textChunk) {
               pendingThoughtText += textChunk;
-              send({
-                type: "execution_event",
-                taskId,
-                runId: run.id,
-                eventType: "text_delta",
-                content: textChunk,
-              });
             }
             continue;
           }
@@ -1170,6 +1163,9 @@ async function createTaskExecutionResponse(
           }
 
           if (event.type === "text_reset") {
+            // text_reset signals that the buffered text was interim thinking.
+            // Do NOT clear pendingThoughtText here — it will be flushed as a
+            // thought when tool_start arrives.
             continue;
           }
 
@@ -1191,8 +1187,37 @@ async function createTaskExecutionResponse(
           }
 
           if (event.type === "text") {
-            // Discard accumulated text_delta for the final turn — the
-            // final_result artifact will carry the complete content.
+            // Final turn confirmed. Collapse Process, then flush buffered
+            // text as streaming text_delta chunks for live display.
+            send({
+              type: "execution_event",
+              taskId,
+              runId: run.id,
+              eventType: "text_output_start",
+              content: null,
+            });
+            // Give the client a render frame to collapse Process before
+            // the first text_delta chunk arrives.
+            await sleep(50);
+            if (pendingThoughtText.trim()) {
+              const fullText = pendingThoughtText.trim();
+              const segments = Array.from(fullText);
+              for (let i = 0; i < segments.length; i += SYNTHETIC_TEXT_STREAM_CHUNK_SIZE) {
+                const chunk = segments.slice(i, i + SYNTHETIC_TEXT_STREAM_CHUNK_SIZE).join("");
+                if (chunk) {
+                  send({
+                    type: "execution_event",
+                    taskId,
+                    runId: run.id,
+                    eventType: "text_delta",
+                    content: chunk,
+                  });
+                }
+                if (i + SYNTHETIC_TEXT_STREAM_CHUNK_SIZE < segments.length) {
+                  await sleep(14);
+                }
+              }
+            }
             pendingThoughtText = "";
             const textChunk = event.content ?? "";
             finalText = mergeAgentTextOutput(finalText, textChunk);
@@ -1303,16 +1328,6 @@ async function createTaskExecutionResponse(
           taskId,
           runId: run.id,
           artifactType: "final_result",
-        });
-        // Clear any trailing text_delta from the client's detail before
-        // the final result arrives, preventing a brief flash of the final
-        // text appearing as a thought in the Process panel.
-        send({
-          type: "execution_event",
-          taskId,
-          runId: run.id,
-          eventType: "text_reset",
-          content: null,
         });
         send({
           type: "final_result",
