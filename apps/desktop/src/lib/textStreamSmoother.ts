@@ -1,5 +1,6 @@
 export type TextStreamSmoother = {
   push: (chunk: string) => void;
+  replace: (text: string) => void;
   flushNow: () => void;
   finish: () => Promise<void>;
   cancel: (opts?: { flush?: boolean }) => void;
@@ -20,6 +21,7 @@ export type TextStreamSmootherConfig = {
   streamyChunkMax: number;
   streamyInterarrivalMaxMs: number;
   streamyChunksToPassthrough: number;
+  instantTextMaxChars: number;
 };
 
 const DEFAULT_CONFIG: TextStreamSmootherConfig = {
@@ -37,6 +39,7 @@ const DEFAULT_CONFIG: TextStreamSmootherConfig = {
   streamyChunkMax: 12,
   streamyInterarrivalMaxMs: 90,
   streamyChunksToPassthrough: 5,
+  instantTextMaxChars: 10,
 };
 
 function defaultNow() {
@@ -51,6 +54,118 @@ function nextTick(cb: () => void, delayMs: number) {
   return () => clearTimeout(id);
 }
 
+type Segment = { index: number; segment: string };
+type SegmenterLike = { segment: (input: string) => Iterable<Segment> };
+type SegmenterCtorLike = new (
+  locales?: string | string[],
+  options?: { granularity?: string },
+) => SegmenterLike;
+
+function createSegmenter() {
+  const intl = (globalThis as { Intl?: unknown }).Intl;
+  if (!intl || typeof intl !== "object") return null;
+  const maybe = (intl as { Segmenter?: unknown }).Segmenter;
+  if (typeof maybe !== "function") return null;
+  const SegmenterCtor = maybe as unknown as SegmenterCtorLike;
+  return new SegmenterCtor(undefined, { granularity: "grapheme" });
+}
+
+const SEGMENTER = createSegmenter();
+
+function takeGraphemes(text: string, count: number) {
+  if (count <= 0 || text.length === 0) return { head: "", rest: text };
+  if (!SEGMENTER) {
+    const chars = Array.from(text);
+    return {
+      head: chars.slice(0, count).join(""),
+      rest: chars.slice(count).join(""),
+    };
+  }
+
+  let currentCount = 0;
+  let endIndex = 0;
+  for (const segment of SEGMENTER.segment(text)) {
+    endIndex = segment.index + segment.segment.length;
+    currentCount += 1;
+    if (currentCount >= count) break;
+  }
+
+  return { head: text.slice(0, endIndex), rest: text.slice(endIndex) };
+}
+
+function longestCommonPrefix(a: string, b: string) {
+  const aChars = Array.from(a);
+  const bChars = Array.from(b);
+  const length = Math.min(aChars.length, bChars.length);
+  let index = 0;
+  while (index < length && aChars[index] === bChars[index]) index += 1;
+  return aChars.slice(0, index).join("");
+}
+
+const isAsciiWordChar = (ch: string) => /[A-Za-z0-9_]/.test(ch);
+const isPunctuation = (ch: string) => /[，。！？、；：,.!?:;…]/.test(ch);
+const isOpeningPunct = (ch: string) => /[（([【“‘]/.test(ch);
+
+function takeNextSlice(text: string, maxChars: number, config: TextStreamSmootherConfig) {
+  if (!text) return { out: "", rest: "" };
+
+  const first = text[0] || "";
+  if (first && isAsciiWordChar(first)) {
+    let index = 0;
+    while (index < text.length && isAsciiWordChar(text[index] || "")) index += 1;
+    const cappedLength = Math.max(maxChars, config.maxAsciiWordCharsPerTick);
+    let out = text.slice(0, Math.min(index, cappedLength));
+    let rest = text.slice(out.length);
+    if (rest) {
+      const next = takeGraphemes(rest, 1).head;
+      if (next && isPunctuation(next)) {
+        out += next;
+        rest = rest.slice(next.length);
+      }
+    }
+    return { out, rest };
+  }
+
+  const targetChars = Math.max(config.minCharsPerTick, maxChars);
+  if (targetChars === 3) {
+    const two = takeGraphemes(text, 2);
+    const next = two.rest ? takeGraphemes(two.rest, 1).head : "";
+    if (next && isPunctuation(next)) {
+      return { out: two.head + next, rest: two.rest.slice(next.length) };
+    }
+  }
+
+  let { head, rest } = takeGraphemes(text, targetChars);
+
+  if (rest) {
+    const nextChar = takeGraphemes(rest, 1).head;
+    if (nextChar && isPunctuation(nextChar)) {
+      head += nextChar;
+      rest = rest.slice(nextChar.length);
+    }
+  }
+
+  if (head) {
+    const lastChar = Array.from(head).slice(-1)[0] || "";
+    if (lastChar && isOpeningPunct(lastChar) && rest) {
+      const one = takeGraphemes(rest, 1).head;
+      if (one) {
+        head += one;
+        rest = rest.slice(one.length);
+      }
+    }
+  }
+
+  if (head && Array.from(head).length < config.minCharsPerTick && rest) {
+    const need = config.minCharsPerTick - Array.from(head).length;
+    const more = takeGraphemes(rest, need);
+    head += more.head;
+    rest = more.rest;
+  }
+
+  return { out: head, rest };
+}
+
 export function createTextStreamSmoother(opts: {
   emit: (text: string) => void;
   now?: () => number;
@@ -61,7 +176,8 @@ export function createTextStreamSmoother(opts: {
   const config: TextStreamSmootherConfig = { ...DEFAULT_CONFIG, ...(opts.config || {}) };
 
   let mode: "passthrough" | "smooth" = "smooth";
-  let buffer = "";
+  let targetText = "";
+  let renderedText = "";
   let emittedChars = 0;
   let firstPushAt: number | null = null;
   let lastPushAt: number | null = null;
@@ -76,135 +192,43 @@ export function createTextStreamSmoother(opts: {
     cancelFrame = null;
   };
 
-  type Segment = { index: number; segment: string };
-  type SegmenterLike = { segment: (input: string) => Iterable<Segment> };
-  type SegmenterCtorLike = new (
-    locales?: string | string[],
-    options?: { granularity?: string },
-  ) => SegmenterLike;
-
-  const intl = (globalThis as { Intl?: unknown }).Intl;
-  const SegmenterCtor = (() => {
-    if (!intl || typeof intl !== "object") return undefined;
-    const maybe = (intl as { Segmenter?: unknown }).Segmenter;
-    return typeof maybe === "function" ? (maybe as unknown as SegmenterCtorLike) : undefined;
-  })();
-
-  const segmenter: SegmenterLike | null = SegmenterCtor
-    ? new SegmenterCtor(undefined, { granularity: "grapheme" })
-    : null;
-
-  const takeGraphemes = (text: string, count: number) => {
-    if (count <= 0 || text.length === 0) return { head: "", rest: text };
-    if (!segmenter) {
-      const chars = Array.from(text);
-      return {
-        head: chars.slice(0, count).join(""),
-        rest: chars.slice(count).join(""),
-      };
-    }
-
-    let currentCount = 0;
-    let endIndex = 0;
-    for (const segment of segmenter.segment(text)) {
-      endIndex = segment.index + segment.segment.length;
-      currentCount += 1;
-      if (currentCount >= count) break;
-    }
-
-    return { head: text.slice(0, endIndex), rest: text.slice(endIndex) };
+  const resolveIfDone = () => {
+    if (renderedText !== targetText || !resolveFinish) return;
+    const done = resolveFinish;
+    resolveFinish = null;
+    finishing = false;
+    finishPromise = null;
+    done();
   };
 
-  const isAsciiWordChar = (ch: string) => /[A-Za-z0-9_]/.test(ch);
-  const isPunctuation = (ch: string) => /[，。！？、；：,.!?:;…]/.test(ch);
-  const isOpeningPunct = (ch: string) => /[（([【“‘]/.test(ch);
-
-  const takeNextSlice = (text: string, maxChars: number) => {
-    if (!text) return { out: "", rest: "" };
-
-    const first = text[0] || "";
-    if (first && isAsciiWordChar(first)) {
-      let index = 0;
-      while (index < text.length && isAsciiWordChar(text[index] || "")) index += 1;
-      const cappedLength = Math.max(maxChars, config.maxAsciiWordCharsPerTick);
-      let out = text.slice(0, Math.min(index, cappedLength));
-      let rest = text.slice(out.length);
-      if (rest) {
-        const next = takeGraphemes(rest, 1).head;
-        if (next && isPunctuation(next)) {
-          out += next;
-          rest = rest.slice(next.length);
-        }
-      }
-      return { out, rest };
-    }
-
-    const targetChars = Math.max(config.minCharsPerTick, maxChars);
-    if (targetChars === 3) {
-      const two = takeGraphemes(text, 2);
-      const next = two.rest ? takeGraphemes(two.rest, 1).head : "";
-      if (next && isPunctuation(next)) {
-        return { out: two.head + next, rest: two.rest.slice(next.length) };
-      }
-    }
-
-    let { head, rest } = takeGraphemes(text, targetChars);
-
-    if (rest) {
-      const nextChar = takeGraphemes(rest, 1).head;
-      if (nextChar && isPunctuation(nextChar)) {
-        head += nextChar;
-        rest = rest.slice(nextChar.length);
-      }
-    }
-
-    if (head) {
-      const lastChar = Array.from(head).slice(-1)[0] || "";
-      if (lastChar && isOpeningPunct(lastChar) && rest) {
-        const one = takeGraphemes(rest, 1).head;
-        if (one) {
-          head += one;
-          rest = rest.slice(one.length);
-        }
-      }
-    }
-
-    if (head && Array.from(head).length < config.minCharsPerTick && rest) {
-      const need = config.minCharsPerTick - Array.from(head).length;
-      const more = takeGraphemes(rest, need);
-      head += more.head;
-      rest = more.rest;
-    }
-
-    return { out: head, rest };
+  const emitRendered = () => {
+    emittedChars = renderedText.length;
+    emit(renderedText);
+    resolveIfDone();
   };
+
+  const remainingText = () =>
+    targetText.startsWith(renderedText) ? targetText.slice(renderedText.length) : "";
 
   const pump = () => {
     cancelFrame = null;
-    if (buffer.length === 0) {
-      if (finishing && resolveFinish) {
-        const done = resolveFinish;
-        resolveFinish = null;
-        finishing = false;
-        finishPromise = null;
-        done();
-      }
+    const remaining = remainingText();
+    if (!remaining) {
+      resolveIfDone();
       return;
     }
 
     const fast =
-      buffer.length >= config.fastBacklogChars || emittedChars >= config.fastAfterEmittedChars;
+      remaining.length >= config.fastBacklogChars || emittedChars >= config.fastAfterEmittedChars;
     const maxChars = finishing
       ? config.maxCharsPerTickFinish
       : fast
         ? config.maxCharsPerTickFast
         : config.maxCharsPerTick;
-    const { out, rest } = takeNextSlice(buffer, maxChars);
-    buffer = rest;
-
+    const { out } = takeNextSlice(remaining, maxChars, config);
     if (out) {
-      emittedChars += out.length;
-      emit(out);
+      renderedText += out;
+      emitRendered();
     }
 
     const delay = finishing
@@ -216,17 +240,67 @@ export function createTextStreamSmoother(opts: {
   };
 
   const startPump = () => {
-    if (cancelFrame || buffer.length === 0) return;
+    if (cancelFrame || renderedText === targetText) {
+      resolveIfDone();
+      return;
+    }
     cancelFrame = nextTick(pump, 0);
   };
 
   const flushNow = () => {
     stopPump();
-    if (!buffer) return;
-    const next = buffer;
-    buffer = "";
-    emittedChars += next.length;
-    emit(next);
+    if (renderedText === targetText) {
+      resolveIfDone();
+      return;
+    }
+    renderedText = targetText;
+    emitRendered();
+  };
+
+  const replace = (text: string) => {
+    const nextText = text || "";
+    if (nextText === targetText) return;
+
+    targetText = nextText;
+
+    if (!targetText) {
+      stopPump();
+      renderedText = "";
+      emitRendered();
+      return;
+    }
+
+    if (mode === "passthrough") {
+      stopPump();
+      renderedText = targetText;
+      emitRendered();
+      return;
+    }
+
+    if (targetText.length <= config.instantTextMaxChars) {
+      stopPump();
+      renderedText = targetText;
+      emitRendered();
+      return;
+    }
+
+    if (!targetText.startsWith(renderedText)) {
+      const prefix = longestCommonPrefix(renderedText, targetText);
+      if (prefix !== renderedText) {
+        renderedText = prefix;
+        emitRendered();
+      }
+    }
+
+    if (!renderedText) {
+      const firstBurst = takeGraphemes(targetText, config.firstBurstChars);
+      if (firstBurst.head) {
+        renderedText = firstBurst.head;
+        emitRendered();
+      }
+    }
+
+    startPump();
   };
 
   const push = (chunk: string) => {
@@ -247,34 +321,22 @@ export function createTextStreamSmoother(opts: {
     lastPushAt = ts;
 
     if (mode === "passthrough") {
+      targetText += chunk;
+      renderedText = targetText;
       stopPump();
-      emit(chunk);
-      emittedChars += chunk.length;
+      emitRendered();
       return;
     }
 
-    if (emittedChars === 0 && buffer.length === 0) {
-      const firstBurst = takeGraphemes(chunk, config.firstBurstChars);
-      if (firstBurst.head) {
-        emit(firstBurst.head);
-        emittedChars += firstBurst.head.length;
-      }
-      buffer += firstBurst.rest;
-      startPump();
-      return;
-    }
-
-    buffer += chunk;
-    startPump();
+    replace(targetText + chunk);
   };
 
   const finish = async () => {
     if (mode === "passthrough") return;
     if (finishPromise) return finishPromise;
+    if (renderedText === targetText) return;
 
     finishing = true;
-    if (buffer.length === 0) return;
-
     finishPromise = new Promise<void>((resolve) => {
       resolveFinish = resolve;
       startPump();
@@ -286,14 +348,15 @@ export function createTextStreamSmoother(opts: {
   const cancel = (opts?: { flush?: boolean }) => {
     if (opts?.flush) {
       flushNow();
-    } else {
-      buffer = "";
     }
     stopPump();
+    if (!opts?.flush) {
+      targetText = renderedText;
+    }
     finishing = false;
     finishPromise = null;
     resolveFinish = null;
   };
 
-  return { push, flushNow, finish, cancel };
+  return { push, replace, flushNow, finish, cancel };
 }
