@@ -10,6 +10,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import { DesktopCredentialSourcesPanel } from "./DesktopCredentialSourcesPanel";
 import { useEffect, useMemo, useState } from "react";
 import {
   Badge,
@@ -367,6 +368,11 @@ export function ChannelSettings() {
   };
 
   return (
+    <>
+    <SettingsSection title="认证来源" description="自动检测本地 AI 工具认证，可用于快速创建渠道。">
+      <DesktopCredentialSourcesPanel />
+    </SettingsSection>
+
     <SettingsSection
       title="渠道配置"
       description="全局用户级配置，对话与 Agent 共用。"
@@ -761,5 +767,6 @@ export function ChannelSettings() {
         </DialogContent>
       </Dialog>
     </SettingsSection>
+    </>
   );
 }

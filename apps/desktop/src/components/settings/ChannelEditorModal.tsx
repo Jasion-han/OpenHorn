@@ -1,5 +1,5 @@
 import { Plus, Search, Wand2 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Badge,
   Button,
@@ -14,6 +14,7 @@ import {
   ScrollArea,
   cn,
 } from "ui";
+import { getCredentialKey, listCredentialSources } from "../../lib/credentialApi";
 import { createServerApi } from "../../lib/serverApi";
 import type { Channel } from "../../types/chat";
 import { DesktopProviderLogo } from "../chat/DesktopProviderLogo";
@@ -140,6 +141,7 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
   const [baseUrl, setBaseUrl] = useState<string>(CHANNEL_PROTOCOLS.openai.baseUrl);
   const [enabled, setEnabled] = useState(true);
   const [apiKey, setApiKey] = useState("");
+  const [envKeySources, setEnvKeySources] = useState<Array<{ id: string; provider: string; sourceName: string }>>([]);
   const [saving, setSaving] = useState(false);
   const [formNotice, setFormNotice] = useState<SettingsNotice | null>(null);
 
@@ -199,8 +201,22 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
     return channels[0]?.id || null;
   };
 
+  const loadEnvSources = useCallback(async () => {
+    try {
+      const all = await listCredentialSources();
+      setEnvKeySources(
+        all
+          .filter((s) => s.sourceType === "env_var" && s.status === "available")
+          .map((s) => ({ id: s.id, provider: s.provider, sourceName: s.sourceName })),
+      );
+    } catch {
+      setEnvKeySources([]);
+    }
+  }, []);
+
   useEffect(() => {
     if (!opened) return;
+    loadEnvSources();
 
     setQuery("");
 
@@ -572,6 +588,35 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
                     <p className="text-xs text-muted-foreground">
                       出于安全原因，不会展示已保存的明文 Key。输入新 Key 才会更新。
                     </p>
+                  )}
+                  {envKeySources.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 pt-1">
+                      {envKeySources
+                        .filter((s) => {
+                          const prot = inferProtocolFromProvider(provider, baseUrl);
+                          if (prot === "anthropic") return s.provider === "anthropic";
+                          if (prot === "google") return s.provider === "google";
+                          return s.provider === "openai";
+                        })
+                        .map((s) => (
+                          <button
+                            key={s.id}
+                            type="button"
+                            className="rounded border border-green-300 bg-green-50 px-2 py-0.5 text-xs text-green-700 hover:bg-green-100 dark:border-green-700 dark:bg-green-900/30 dark:text-green-300 dark:hover:bg-green-900/50"
+                            onClick={async () => {
+                              try {
+                                const key = await getCredentialKey(s.id);
+                                setApiKey(key);
+                                setFormNotice({ kind: "success", title: "已填入", message: `已使用 ${s.sourceName} 的 API Key` });
+                              } catch (err) {
+                                setFormNotice({ kind: "error", title: "获取失败", message: err instanceof Error ? err.message : "未知错误" });
+                              }
+                            }}
+                          >
+                            从 {s.sourceName} 填入
+                          </button>
+                        ))}
+                    </div>
                   )}
                 </div>
 
