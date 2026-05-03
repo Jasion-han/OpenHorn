@@ -29,6 +29,7 @@ apps/desktop/src-tauri/binaries/
 .agents/
 .augment/
 .claude/
+.codex/
 .codebuddy/
 .commandcode/
 .continue/
@@ -46,11 +47,19 @@ apps/desktop/src-tauri/binaries/
 .neovate/
 .openhands/
 .pi/
+.playwright-cli/
+.playwright-mcp/
 .pochi/
 .qoder/
 .qwen/
 .roo/
 .trae/
+.trellis/
 .vibe/
 .windsurf/
 .zencoder/
+
+# AI framework generated files
+AGENTS.md
+skills/
+skills-lock.json
