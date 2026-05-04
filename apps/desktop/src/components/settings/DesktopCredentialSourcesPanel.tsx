@@ -31,12 +31,24 @@ export function DesktopCredentialSourcesPanel() {
   const [testResults, setTestResults] = useState<
     Record<string, { success: boolean; error?: string }>
   >({});
+  const [existingCliSourceIds, setExistingCliSourceIds] = useState<Set<string>>(new Set());
 
   const scan = useCallback(async () => {
     setLoading(true);
     try {
-      const result = await listCredentialSources();
+      const [result, { channels }] = await Promise.all([
+        listCredentialSources(),
+        createServerApi().channels.list(),
+      ]);
       setSources(result);
+      const channelNames = new Set(channels.map((ch) => ch.name));
+      const cliIds = new Set<string>();
+      for (const s of result) {
+        if (s.sourceType === "cli_oauth" && channelNames.has(s.sourceName)) {
+          cliIds.add(s.id);
+        }
+      }
+      setExistingCliSourceIds(cliIds);
     } catch {
       setSources([]);
     } finally {
@@ -147,6 +159,7 @@ export function DesktopCredentialSourcesPanel() {
           </h4>
           {cliSources.map((source) => {
             const creating = testing === `create-${source.id}`;
+            const alreadyCreated = existingCliSourceIds.has(source.id) || testResults[`create-${source.id}`]?.success;
             return (
               <div
                 key={source.id}
@@ -167,40 +180,46 @@ export function DesktopCredentialSourcesPanel() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  {testResults[`create-${source.id}`] && (
-                    <span className={`text-xs ${testResults[`create-${source.id}`].success ? "text-green-600 dark:text-green-400" : "text-red-500"}`}>
-                      {testResults[`create-${source.id}`].success ? "✓ 渠道已创建" : testResults[`create-${source.id}`].error}
+                  {!alreadyCreated && testResults[`create-${source.id}`]?.success === false && (
+                    <span className="text-xs text-red-500">
+                      {testResults[`create-${source.id}`].error}
                     </span>
                   )}
-                  <button
-                    type="button"
-                    disabled={creating}
-                    className="rounded-md bg-blue-500 px-2.5 py-1 text-xs text-white hover:bg-blue-600 disabled:opacity-50"
-                    onClick={async () => {
-                      setTesting(`create-${source.id}`);
-                      try {
-                        const api = createServerApi();
-                        const protocol = source.provider === "anthropic" ? "anthropic" : "openai";
-                        await api.channels.create({
-                          name: `${source.sourceName} (CLI)`,
-                          provider: source.provider,
-                          protocol,
-                          apiKey: `__cli_oauth__:${source.id}`,
-                          baseUrl: source.provider === "anthropic" ? "https://api.anthropic.com" : "https://api.openai.com/v1",
-                        });
-                        setTestResults((prev) => ({ ...prev, [`create-${source.id}`]: { success: true } }));
-                      } catch (err) {
-                        setTestResults((prev) => ({
-                          ...prev,
-                          [`create-${source.id}`]: { success: false, error: err instanceof Error ? err.message : "创建失败" },
-                        }));
-                      } finally {
-                        setTesting(null);
-                      }
-                    }}
-                  >
-                    {creating ? "创建中..." : "一键创建渠道"}
-                  </button>
+                  {alreadyCreated ? (
+                    <span className="rounded-md bg-neutral-100 px-2.5 py-1 text-xs text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400">
+                      渠道已创建
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={creating}
+                      className="rounded-md bg-blue-500 px-2.5 py-1 text-xs text-white hover:bg-blue-600 disabled:opacity-50"
+                      onClick={async () => {
+                        setTesting(`create-${source.id}`);
+                        try {
+                          const api = createServerApi();
+                          const protocol = source.provider === "anthropic" ? "anthropic" : "openai";
+                          await api.channels.create({
+                            name: source.sourceName,
+                            provider: source.provider,
+                            protocol,
+                            apiKey: `__cli_oauth__:${source.id}`,
+                            baseUrl: source.provider === "anthropic" ? "https://api.anthropic.com" : "https://api.openai.com/v1",
+                          });
+                          setTestResults((prev) => ({ ...prev, [`create-${source.id}`]: { success: true } }));
+                        } catch (err) {
+                          setTestResults((prev) => ({
+                            ...prev,
+                            [`create-${source.id}`]: { success: false, error: err instanceof Error ? err.message : "创建失败" },
+                          }));
+                        } finally {
+                          setTesting(null);
+                        }
+                      }}
+                    >
+                      {creating ? "创建中..." : "一键创建渠道"}
+                    </button>
+                  )}
                 </div>
               </div>
             );

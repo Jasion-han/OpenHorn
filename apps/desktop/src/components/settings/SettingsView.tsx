@@ -1,4 +1,4 @@
-import { Bot, Palette, Radio, Settings } from "lucide-react";
+import { Bot, KeyRound, Palette, Radio, Settings } from "lucide-react";
 import type { ReactNode } from "react";
 import { useMemo } from "react";
 import { cn, ScrollArea } from "ui";
@@ -9,11 +9,13 @@ import {
 import { AgentSettings } from "./AgentSettings";
 import { AppearanceSettings } from "./AppearanceSettings";
 import { ChannelSettings } from "./ChannelSettings";
+import { DesktopCredentialSourcesPanel } from "./DesktopCredentialSourcesPanel";
 import { GeneralSettings } from "./GeneralSettings";
 
 const TABS: Array<{ id: SettingsTab; label: string; icon: ReactNode }> = [
   { id: "general", label: "通用", icon: <Settings size={16} /> },
   { id: "channels", label: "渠道", icon: <Radio size={16} /> },
+  { id: "credentials", label: "认证来源", icon: <KeyRound size={16} /> },
   { id: "agent", label: "Agent", icon: <Bot size={16} /> },
   { id: "appearance", label: "外观", icon: <Palette size={16} /> },
 ];
@@ -28,6 +30,8 @@ export function SettingsView({ initialTab = "channels" }: { initialTab?: Setting
         return <GeneralSettings />;
       case "channels":
         return <ChannelSettings />;
+      case "credentials":
+        return <DesktopCredentialSourcesPanel />;
       case "agent":
         return <AgentSettings />;
       case "appearance":

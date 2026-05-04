@@ -112,7 +112,7 @@ function detectClaudeCode(): CredentialSource | null {
       "cli-claude-code",
       "anthropic",
       "cli_oauth",
-      "Claude Code Keychain",
+      "Claude Code",
       "available",
     );
   } catch {
