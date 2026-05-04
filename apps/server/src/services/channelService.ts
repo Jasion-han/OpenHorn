@@ -1238,7 +1238,7 @@ export async function getChannelRuntimeCredentialsById(
   let apiKey = decrypt(row.apiKey);
 
   if (apiKey.startsWith("__cli_oauth__:")) {
-    if (options?.runtime === "agent_sdk") {
+    if (options?.runtime === "agent_sdk" && channel.protocol === "anthropic") {
       apiKey = "";
     } else {
       const sourceId = apiKey.slice("__cli_oauth__:".length);
