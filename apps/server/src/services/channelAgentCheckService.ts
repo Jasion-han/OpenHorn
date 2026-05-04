@@ -474,7 +474,7 @@ export async function checkChannelAgentCompatibility(
   }
 
   const probePromise = (async (): Promise<AgentCheckResult> => {
-    const { channel, apiKey } = await getChannelRuntimeCredentialsById(userId, channelId, {
+    const { channel, apiKey, isCliOAuth } = await getChannelRuntimeCredentialsById(userId, channelId, {
       runtime: "agent_sdk",
     });
     const baseUrl = channel.baseUrl;
@@ -490,6 +490,9 @@ export async function checkChannelAgentCompatibility(
 
     const protocol = (channel.protocol || "").trim().toLowerCase();
     if (protocol === "openai") {
+      if (isCliOAuth) {
+        return { success: true, mode: "generic_tool_calling" as AgentCapabilityMode };
+      }
       const result = await probeGenericToolCallingCompatibility({
         apiKey,
         modelId: trimmedModelId,
@@ -500,7 +503,7 @@ export async function checkChannelAgentCompatibility(
     }
 
     if (protocol === "anthropic") {
-      if (!apiKey || apiKey.startsWith("__cli_oauth__")) {
+      if (!apiKey || isCliOAuth) {
         return { success: true, mode: "claude_sdk" as AgentCapabilityMode };
       }
       const claudeSdkResult = await probeClaudeAgentSdkCompatibility({

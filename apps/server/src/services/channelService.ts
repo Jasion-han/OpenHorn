@@ -1218,6 +1218,7 @@ export async function getChannelRuntimeCredentialsById(
 ): Promise<{
   channel: ChannelItem;
   apiKey: string;
+  isCliOAuth: boolean;
 }> {
   const channel = await getOwnedChannelItem(userId, channelId);
   const row = await getOwnedChannelRow(userId, channelId);
@@ -1236,8 +1237,9 @@ export async function getChannelRuntimeCredentialsById(
   };
 
   let apiKey = decrypt(row.apiKey);
+  const isCliOAuth = apiKey.startsWith("__cli_oauth__:");
 
-  if (apiKey.startsWith("__cli_oauth__:")) {
+  if (isCliOAuth) {
     if (options?.runtime === "agent_sdk" && channel.protocol === "anthropic") {
       apiKey = "";
     } else {
@@ -1251,5 +1253,6 @@ export async function getChannelRuntimeCredentialsById(
   return {
     channel: channelWithRuntimeBaseUrl,
     apiKey,
+    isCliOAuth,
   };
 }
