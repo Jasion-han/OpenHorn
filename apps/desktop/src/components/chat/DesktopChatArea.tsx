@@ -695,6 +695,25 @@ export function DesktopChatArea() {
       setSidecarRuntimeEnabled(false);
     }
   }, [sidecarRuntimeEnabled, sidecarRuntimeAvailable]);
+
+  const prevSidecarBusyRef = useRef(false);
+  useEffect(() => {
+    const wasBusy = prevSidecarBusyRef.current;
+    prevSidecarBusyRef.current = sidecarRun.isBusy;
+    if (wasBusy && !sidecarRun.isBusy) {
+      const conv = useChatStore.getState().currentConversation;
+      if (conv && /^新会话 \d{2}-\d{2} \d{2}:\d{2}$/.test(conv.title)) {
+        const firstUserMsg = useChatStore
+          .getState()
+          .messages.find((m) => m.conversationId === conv.id && m.role === "user");
+        const seed = firstUserMsg?.content || "";
+        if (seed) {
+          void autoTitleConversation(conv.id, seed).catch(() => {});
+        }
+      }
+    }
+  }, [sidecarRun.isBusy, autoTitleConversation]);
+
   // Per-task agent overrides: these are ephemeral state that resets
   // when the user sends or switches conversations. They override the
   // stored defaults for just the next agent message.
