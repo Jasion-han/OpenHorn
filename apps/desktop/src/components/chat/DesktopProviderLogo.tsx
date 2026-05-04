@@ -5,6 +5,9 @@ import claudeLogo from "../../../public/provider-logos/claude.png";
 import deepseekLogo from "../../../public/provider-logos/deepseek.ico";
 import doubaoLogo from "../../../public/provider-logos/doubao.png";
 import geminiLogo from "../../../public/provider-logos/gemini.png";
+import glmLogo from "../../../public/provider-logos/glm.ico";
+import kimiLogo from "../../../public/provider-logos/kimi.ico";
+import minimaxLogo from "../../../public/provider-logos/minimax.ico";
 import qwenLogo from "../../../public/provider-logos/qwen.png";
 
 type ProviderLogoProps = {
@@ -24,6 +27,9 @@ const PROVIDER_LOGOS: Record<string, ProviderLogoSpec> = {
   anthropic: { src: claudeLogo, label: "Claude" },
   deepseek: { src: deepseekLogo, label: "DeepSeek" },
   google: { src: geminiLogo, label: "Gemini" },
+  kimi: { src: kimiLogo, label: "Kimi" },
+  glm: { src: glmLogo, label: "GLM" },
+  minimax: { src: minimaxLogo, label: "MiniMax" },
   qwen: { src: qwenLogo, label: "Qwen" },
   doubao: { src: doubaoLogo, label: "豆包" },
 };
@@ -44,6 +50,14 @@ function normalizeProvider(provider: string) {
 
   if (value === "bytedance" || value === "volcengine" || value === "ark") {
     return "doubao";
+  }
+
+  if (value === "moonshot") {
+    return "kimi";
+  }
+
+  if (value === "zhipu" || value === "chatglm" || value === "bigmodel") {
+    return "glm";
   }
 
   return value;

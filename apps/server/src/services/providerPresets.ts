@@ -41,10 +41,10 @@ export const PROVIDER_PRESETS: Record<string, ProviderPreset> = {
     baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
     name: "豆包 (字节)",
   },
-  ollama: {
+  minimax: {
     protocol: "openai",
-    baseUrl: "http://localhost:11434/v1",
-    name: "Ollama (本地)",
+    baseUrl: "https://api.minimax.chat/v1",
+    name: "MiniMax",
   },
   custom: {
     protocol: "openai",

@@ -54,16 +54,46 @@ const COMMON_PROVIDER_PRESETS = [
     baseUrl: "https://api.anthropic.com",
   },
   {
+    value: "google",
+    label: "Google",
+    protocol: "google" as const,
+    baseUrl: "https://generativelanguage.googleapis.com",
+  },
+  {
     value: "deepseek",
     label: "DeepSeek",
     protocol: "openai" as const,
     baseUrl: "https://api.deepseek.com/v1",
   },
   {
-    value: "google",
-    label: "Google",
-    protocol: "google" as const,
-    baseUrl: "https://generativelanguage.googleapis.com",
+    value: "qwen",
+    label: "通义千问",
+    protocol: "openai" as const,
+    baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+  },
+  {
+    value: "kimi",
+    label: "Kimi",
+    protocol: "openai" as const,
+    baseUrl: "https://api.moonshot.cn/v1",
+  },
+  {
+    value: "glm",
+    label: "GLM",
+    protocol: "openai" as const,
+    baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+  },
+  {
+    value: "doubao",
+    label: "豆包",
+    protocol: "openai" as const,
+    baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
+  },
+  {
+    value: "minimax",
+    label: "MiniMax",
+    protocol: "openai" as const,
+    baseUrl: "https://api.minimax.chat/v1",
   },
 ] as const;
 
@@ -141,7 +171,9 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
   const [baseUrl, setBaseUrl] = useState<string>(CHANNEL_PROTOCOLS.openai.baseUrl);
   const [enabled, setEnabled] = useState(true);
   const [apiKey, setApiKey] = useState("");
-  const [envKeySources, setEnvKeySources] = useState<Array<{ id: string; provider: string; sourceName: string }>>([]);
+  const [envKeySources, setEnvKeySources] = useState<
+    Array<{ id: string; provider: string; sourceName: string }>
+  >([]);
   const [saving, setSaving] = useState(false);
   const [formNotice, setFormNotice] = useState<SettingsNotice | null>(null);
 
@@ -188,7 +220,11 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
     setProvider(channel.provider || "");
     setBaseUrl(
       channel.baseUrl ||
-        getDefaultBaseUrlForProvider(channel.provider, channel.baseUrl, channel.protocol || "openai"),
+        getDefaultBaseUrlForProvider(
+          channel.provider,
+          channel.baseUrl,
+          channel.protocol || "openai",
+        ),
     );
     setEnabled(Boolean(channel.enabled));
     setApiKey(channel.hasApiKey ? API_KEY_MASK : "");
@@ -335,8 +371,8 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
           message: !syncOutcome.ok
             ? "渠道已保存，但模型同步失败。请看列表中的提示并继续处理。"
             : syncOutcome.warn
-            ? "渠道已保存，模型同步结果请看列表中的提示。"
-            : "渠道已保存，并已同步模型列表。",
+              ? "渠道已保存，模型同步结果请看列表中的提示。"
+              : "渠道已保存，并已同步模型列表。",
         });
         onClose();
         return;
@@ -365,7 +401,9 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
           activeChannel.protocol,
         );
       }
-      if (normalizeCompareBaseUrl(trimmedBaseUrl) !== normalizeCompareBaseUrl(activeChannel.baseUrl)) {
+      if (
+        normalizeCompareBaseUrl(trimmedBaseUrl) !== normalizeCompareBaseUrl(activeChannel.baseUrl)
+      ) {
         payload.baseUrl = trimmedBaseUrl;
       }
       if (Boolean(enabled) !== Boolean(activeChannel.enabled)) {
@@ -387,8 +425,8 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
         message: !syncOutcome.ok
           ? "已保存渠道，但模型同步失败。请看列表中的提示并继续处理。"
           : syncOutcome.warn
-          ? "已保存渠道，模型同步结果请看列表中的提示。"
-          : "已保存渠道，并已同步模型列表。",
+            ? "已保存渠道，模型同步结果请看列表中的提示。"
+            : "已保存渠道，并已同步模型列表。",
       });
       onClose();
     } catch (error) {
@@ -449,7 +487,9 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
                         !channel.enabled && "opacity-70",
                       )}
                     >
-                      <p className="truncate text-sm font-semibold">{channel.name || "未命名渠道"}</p>
+                      <p className="truncate text-sm font-semibold">
+                        {channel.name || "未命名渠道"}
+                      </p>
                       <div className="mt-0.5 flex items-center gap-1">
                         <Badge
                           variant="secondary"
@@ -494,7 +534,9 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
               {!isCreate && (
                 <div className="flex shrink-0 items-center gap-1.5">
                   {activeChannel?.isDefault && <Badge variant="outline">默认</Badge>}
-                  {activeChannel && !activeChannel.enabled && <Badge variant="secondary">已禁用</Badge>}
+                  {activeChannel && !activeChannel.enabled && (
+                    <Badge variant="secondary">已禁用</Badge>
+                  )}
                 </div>
               )}
             </div>
@@ -607,9 +649,17 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
                               try {
                                 const key = await getCredentialKey(s.id);
                                 setApiKey(key);
-                                setFormNotice({ kind: "success", title: "已填入", message: `已使用 ${s.sourceName} 的 API Key` });
+                                setFormNotice({
+                                  kind: "success",
+                                  title: "已填入",
+                                  message: `已使用 ${s.sourceName} 的 API Key`,
+                                });
                               } catch (err) {
-                                setFormNotice({ kind: "error", title: "获取失败", message: err instanceof Error ? err.message : "未知错误" });
+                                setFormNotice({
+                                  kind: "error",
+                                  title: "获取失败",
+                                  message: err instanceof Error ? err.message : "未知错误",
+                                });
                               }
                             }}
                           >
