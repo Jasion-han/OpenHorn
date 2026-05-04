@@ -149,8 +149,7 @@ function createStreamTimeoutSignal(options?: {
   idleTimeoutMs?: number;
   totalTimeoutMs?: number;
 }) {
-  const firstTokenTimeoutMs =
-    options?.firstTokenTimeoutMs ?? DEFAULT_STREAM_FIRST_TOKEN_TIMEOUT_MS;
+  const firstTokenTimeoutMs = options?.firstTokenTimeoutMs ?? DEFAULT_STREAM_FIRST_TOKEN_TIMEOUT_MS;
   const idleTimeoutMs = options?.idleTimeoutMs ?? DEFAULT_STREAM_IDLE_TIMEOUT_MS;
   const totalTimeoutMs = options?.totalTimeoutMs ?? DEFAULT_STREAM_TOTAL_TIMEOUT_MS;
   const { controller, cleanup: cleanupLinkedSignal } = linkAbortSignal(options?.signal);
@@ -160,7 +159,9 @@ function createStreamTimeoutSignal(options?: {
   const firstTokenTimer = setTimeout(() => {
     if (!controller.signal.aborted) {
       controller.abort(
-        createTimeoutError(`模型首个响应超时（${Math.round(firstTokenTimeoutMs / 1000)}s）已停止。`),
+        createTimeoutError(
+          `模型首个响应超时（${Math.round(firstTokenTimeoutMs / 1000)}s）已停止。`,
+        ),
       );
     }
   }, firstTokenTimeoutMs);
@@ -185,7 +186,9 @@ function createStreamTimeoutSignal(options?: {
       idleTimer = setTimeout(() => {
         if (!controller.signal.aborted) {
           controller.abort(
-            createTimeoutError(`模型流式输出空闲超时（${Math.round(idleTimeoutMs / 1000)}s）已停止。`),
+            createTimeoutError(
+              `模型流式输出空闲超时（${Math.round(idleTimeoutMs / 1000)}s）已停止。`,
+            ),
           );
         }
       }, idleTimeoutMs);
@@ -205,7 +208,7 @@ function rethrowAbortReason(signal: AbortSignal, error: unknown): never {
   if (signal.aborted && signal.reason instanceof Error) {
     throw signal.reason;
   }
-  throw (error instanceof Error ? error : new Error(String(error)));
+  throw error instanceof Error ? error : new Error(String(error));
 }
 
 async function readErrorDetail(response: Response): Promise<string> {
@@ -311,7 +314,10 @@ function extractOpenAITextContent(rawContent: unknown): string {
 }
 
 function normalizeToolNameKey(name: string) {
-  let key = (name || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+  let key = (name || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
   key = key.replace(/^tool/, "");
   key = key.replace(/tool$/, "");
   return key;
@@ -1031,7 +1037,10 @@ export class OpenAIAdapter implements ProviderAdapter {
           yield { type: "done", result: buildResult() };
           return;
         }
-        yield { type: "done", result: parseOpenAIToolCallingResult(JSON.parse(raw), options.tools) };
+        yield {
+          type: "done",
+          result: parseOpenAIToolCallingResult(JSON.parse(raw), options.tools),
+        };
         return;
       }
 
@@ -1138,7 +1147,11 @@ export class AnthropicAdapter implements ProviderAdapter {
 
     if (!response || !response.ok) {
       const detail = response ? await readErrorDetail(response) : "Request failed";
-      if (options.toolChoice && options.toolChoice !== "auto" && shouldRetryWithoutForcedToolChoice(detail)) {
+      if (
+        options.toolChoice &&
+        options.toolChoice !== "auto" &&
+        shouldRetryWithoutForcedToolChoice(detail)
+      ) {
         return this.runToolCallingTurn({
           ...options,
           toolChoice: "auto",
@@ -1240,7 +1253,11 @@ export class AnthropicAdapter implements ProviderAdapter {
     if (!response || !response.ok) {
       timeout.cleanup();
       const detail = response ? await readErrorDetail(response) : "Request failed";
-      if (options.toolChoice && options.toolChoice !== "auto" && shouldRetryWithoutForcedToolChoice(detail)) {
+      if (
+        options.toolChoice &&
+        options.toolChoice !== "auto" &&
+        shouldRetryWithoutForcedToolChoice(detail)
+      ) {
         yield* this.runToolCallingTurnStream({
           ...options,
           toolChoice: "auto",
@@ -1395,7 +1412,11 @@ export class AnthropicAdapter implements ProviderAdapter {
 
     if (!response || !response.ok) {
       const detail = response ? await readErrorDetail(response) : "Request failed";
-      if (options.toolChoice && options.toolChoice !== "auto" && shouldRetryWithoutForcedToolChoice(detail)) {
+      if (
+        options.toolChoice &&
+        options.toolChoice !== "auto" &&
+        shouldRetryWithoutForcedToolChoice(detail)
+      ) {
         return this.runToolCallingTurn({
           ...options,
           toolChoice: "auto",
@@ -1442,13 +1463,359 @@ export class AnthropicAdapter implements ProviderAdapter {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Google Gemini Adapter
+// ---------------------------------------------------------------------------
+
+function buildGeminiContents(messages: ChatMessage[]) {
+  const contents: Array<{ role: string; parts: Array<Record<string, unknown>> }> = [];
+  for (const m of messages) {
+    if (m.role === "system") continue;
+    const role = m.role === "assistant" ? "model" : "user";
+    const parts: Array<Record<string, unknown>> = [];
+    if (typeof m.content === "string") {
+      parts.push({ text: m.content || " " });
+    } else {
+      for (const p of m.content) {
+        if (p.type === "text") {
+          parts.push({ text: p.text || " " });
+        } else {
+          parts.push({
+            inlineData: { mimeType: p.mediaType, data: p.dataBase64 },
+          });
+        }
+      }
+    }
+    if (parts.length === 0) parts.push({ text: " " });
+    contents.push({ role, parts });
+  }
+  return contents;
+}
+
+function buildGeminiToolCallingContents(messages: GenericAgentConversationMessage[]) {
+  const contents: Array<{ role: string; parts: Array<Record<string, unknown>> }> = [];
+  for (const m of messages) {
+    if (m.role === "system") continue;
+    if (m.role === "user") {
+      contents.push({ role: "user", parts: [{ text: m.content || " " }] });
+    } else if (m.role === "assistant") {
+      const parts: Array<Record<string, unknown>> = [];
+      if (m.content) parts.push({ text: m.content });
+      for (const tc of m.toolCalls || []) {
+        parts.push({ functionCall: { name: tc.name, args: tc.input } });
+      }
+      if (parts.length === 0) parts.push({ text: " " });
+      contents.push({ role: "model", parts });
+    } else if (m.role === "tool") {
+      contents.push({
+        role: "user",
+        parts: [
+          {
+            functionResponse: {
+              name: m.name,
+              response: { content: m.content },
+            },
+          },
+        ],
+      });
+    }
+  }
+  return contents;
+}
+
+function extractGeminiSystemInstruction(
+  messages: ChatMessage[] | GenericAgentConversationMessage[],
+) {
+  const parts: string[] = [];
+  for (const m of messages) {
+    if (m.role === "system") {
+      const text = typeof m.content === "string" ? m.content : "";
+      if (text.trim()) parts.push(text.trim());
+    }
+  }
+  return parts.length > 0 ? { parts: parts.map((t) => ({ text: t })) } : undefined;
+}
+
+export class GoogleAdapter implements ToolCallingAdapter {
+  private apiKey: string;
+  private baseUrl: string;
+
+  constructor(apiKey: string, baseUrl?: string) {
+    this.apiKey = apiKey;
+    const raw = baseUrl || "https://generativelanguage.googleapis.com";
+    this.baseUrl = raw.replace(/\/+$/, "");
+  }
+
+  private modelUrl(model: string, method: string) {
+    return `${this.baseUrl}/v1beta/models/${model}:${method}?key=${this.apiKey}`;
+  }
+
+  async chat(options: ChatOptions): Promise<ChatResponse> {
+    const url = this.modelUrl(options.model, "generateContent");
+    const systemInstruction = extractGeminiSystemInstruction(options.messages);
+    const body = JSON.stringify({
+      ...(systemInstruction ? { systemInstruction } : {}),
+      contents: buildGeminiContents(options.messages),
+      generationConfig: {
+        ...(options.temperature != null ? { temperature: options.temperature } : {}),
+        ...(options.maxTokens ? { maxOutputTokens: options.maxTokens } : {}),
+      },
+    });
+
+    const timeout = createRequestTimeoutSignal(
+      options.signal,
+      options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
+    );
+    let response: Response | null = null;
+    try {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        response = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body,
+          signal: timeout.signal,
+        });
+        if (response.ok) break;
+        if (!shouldRetryStatus(response.status) || attempt === 1) break;
+        await sleep(500 * (attempt + 1));
+      }
+    } catch (error) {
+      timeout.cleanup();
+      rethrowAbortReason(timeout.signal, error);
+    }
+    timeout.cleanup();
+
+    if (!response || !response.ok) {
+      const detail = response ? await readErrorDetail(response) : "Request failed";
+      throw new Error(formatProviderApiError(response?.status, detail));
+    }
+
+    const data = (await response.json()) as unknown;
+    if (!isRecord(data)) {
+      throw new Error("Gemini API error: Invalid JSON response");
+    }
+
+    const candidates = Array.isArray(data.candidates) ? data.candidates : [];
+    const first = candidates[0];
+    const content =
+      isRecord(first) && isRecord(first.content) && Array.isArray(first.content.parts)
+        ? (first.content.parts as Array<Record<string, unknown>>)
+            .filter((p) => typeof p.text === "string")
+            .map((p) => p.text as string)
+            .join("")
+        : "";
+
+    if (!content) {
+      throw new Error("Gemini API error: Missing response content");
+    }
+
+    const usageRaw = isRecord(data.usageMetadata) ? data.usageMetadata : null;
+    const promptTokens = usageRaw ? toFiniteNumber(usageRaw.promptTokenCount) : null;
+    const completionTokens = usageRaw ? toFiniteNumber(usageRaw.candidatesTokenCount) : null;
+
+    return {
+      id: "",
+      model: options.model,
+      content,
+      usage:
+        promptTokens !== null && completionTokens !== null
+          ? { promptTokens, completionTokens, totalTokens: promptTokens + completionTokens }
+          : undefined,
+    };
+  }
+
+  async *chatStream(options: ChatOptions): AsyncGenerator<string> {
+    const url = `${this.modelUrl(options.model, "streamGenerateContent")}&alt=sse`;
+    const systemInstruction = extractGeminiSystemInstruction(options.messages);
+    const body = JSON.stringify({
+      ...(systemInstruction ? { systemInstruction } : {}),
+      contents: buildGeminiContents(options.messages),
+      generationConfig: {
+        ...(options.temperature != null ? { temperature: options.temperature } : {}),
+        ...(options.maxTokens ? { maxOutputTokens: options.maxTokens } : {}),
+      },
+    });
+
+    const timeout = createStreamTimeoutSignal({
+      signal: options.signal,
+      firstTokenTimeoutMs: options.streamFirstTokenTimeoutMs,
+      idleTimeoutMs: options.streamIdleTimeoutMs,
+      totalTimeoutMs: options.streamTotalTimeoutMs,
+    });
+    let response: Response | null = null;
+    try {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        response = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body,
+          signal: timeout.signal,
+        });
+        if (response.ok) break;
+        if (!shouldRetryStatus(response.status) || attempt === 1) break;
+        await sleep(500 * (attempt + 1));
+      }
+    } catch (error) {
+      timeout.cleanup();
+      rethrowAbortReason(timeout.signal, error);
+    }
+
+    if (!response || !response.ok) {
+      timeout.cleanup();
+      const detail = response ? await readErrorDetail(response) : "Request failed";
+      throw new Error(formatProviderApiError(response?.status, detail));
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) {
+      timeout.cleanup();
+      throw new Error("No response body");
+    }
+
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        timeout.markChunk();
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            const raw = line.slice(6);
+            if (raw === "[DONE]") return;
+            try {
+              const parsed = JSON.parse(raw);
+              if (isRecord(parsed)) {
+                const candidates = Array.isArray(parsed.candidates) ? parsed.candidates : [];
+                const first = candidates[0];
+                if (
+                  isRecord(first) &&
+                  isRecord(first.content) &&
+                  Array.isArray(first.content.parts)
+                ) {
+                  for (const part of first.content.parts as Array<Record<string, unknown>>) {
+                    if (typeof part.text === "string" && part.text.length > 0) {
+                      yield part.text;
+                    }
+                  }
+                }
+              }
+            } catch {
+              // Skip invalid JSON
+            }
+          }
+        }
+      }
+    } catch (error) {
+      rethrowAbortReason(timeout.signal, error);
+    } finally {
+      timeout.cleanup();
+    }
+  }
+
+  async runToolCallingTurn(options: ToolCallingOptions): Promise<GenericAgentTurnResult> {
+    const url = this.modelUrl(options.model, "generateContent");
+    const systemInstruction = extractGeminiSystemInstruction(options.messages);
+    const tools = [
+      {
+        functionDeclarations: options.tools.map((t) => ({
+          name: t.name,
+          description: t.description,
+          parameters: t.inputSchema,
+        })),
+      },
+    ];
+
+    const body = JSON.stringify({
+      ...(systemInstruction ? { systemInstruction } : {}),
+      contents: buildGeminiToolCallingContents(options.messages),
+      tools,
+      toolConfig:
+        options.toolChoice && options.toolChoice !== "auto"
+          ? {
+              functionCallingConfig: {
+                mode: "ANY",
+                allowedFunctionNames: [options.toolChoice.name],
+              },
+            }
+          : { functionCallingConfig: { mode: "AUTO" } },
+    });
+
+    const timeout = createRequestTimeoutSignal(
+      options.signal,
+      options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
+    );
+    let response: Response | null = null;
+    try {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        response = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body,
+          signal: timeout.signal,
+        });
+        if (response.ok) break;
+        if (!shouldRetryStatus(response.status) || attempt === 1) break;
+        await sleep(500 * (attempt + 1));
+      }
+    } catch (error) {
+      timeout.cleanup();
+      rethrowAbortReason(timeout.signal, error);
+    }
+    timeout.cleanup();
+
+    if (!response || !response.ok) {
+      const detail = response ? await readErrorDetail(response) : "Request failed";
+      throw new Error(formatProviderApiError(response?.status, detail));
+    }
+
+    const data = (await response.json()) as unknown;
+    if (!isRecord(data)) {
+      throw new Error("Gemini API error: Invalid JSON response");
+    }
+
+    const candidates = Array.isArray(data.candidates) ? data.candidates : [];
+    const first = candidates[0];
+    const parts =
+      isRecord(first) && isRecord(first.content) && Array.isArray(first.content.parts)
+        ? (first.content.parts as Array<Record<string, unknown>>)
+        : [];
+
+    const text = parts
+      .filter((p) => typeof p.text === "string")
+      .map((p) => p.text as string)
+      .join("");
+
+    const toolCalls: GenericAgentTurnResult["toolCalls"] = [];
+    for (const p of parts) {
+      if (!isRecord(p.functionCall)) continue;
+      const fc = p.functionCall as Record<string, unknown>;
+      const name = typeof fc.name === "string" ? canonicalizeToolName(fc.name, options.tools) : "";
+      if (!name) continue;
+      const input = isRecord(fc.args) ? (fc.args as Record<string, unknown>) : {};
+      toolCalls.push({ id: crypto.randomUUID(), name, input });
+    }
+
+    const finishReason =
+      isRecord(first) && typeof first.finishReason === "string" ? first.finishReason : null;
+
+    return { text, toolCalls, finishReason };
+  }
+}
+
 export function createAdapter(protocol: string, apiKey: string, baseUrl?: string): ProviderAdapter {
   const normalized = (protocol || "").trim().toLowerCase() as AdapterProtocol | string;
   if (normalized === "anthropic") {
     return new AnthropicAdapter(apiKey, baseUrl);
   }
   if (normalized === "google") {
-    throw new Error("Unsupported provider: google");
+    return new GoogleAdapter(apiKey, baseUrl);
   }
   // Default to OpenAI-compatible (e.g. openai/deepseek/qwen/doubao/others with OpenAI-compatible baseUrl).
   return new OpenAIAdapter(apiKey, baseUrl);
@@ -1461,5 +1828,7 @@ export function supportsToolCalling(adapter: ProviderAdapter): adapter is ToolCa
 export function supportsStreamingToolCalling(
   adapter: ProviderAdapter,
 ): adapter is StreamingToolCallingAdapter {
-  return typeof (adapter as Partial<StreamingToolCallingAdapter>).runToolCallingTurnStream === "function";
+  return (
+    typeof (adapter as Partial<StreamingToolCallingAdapter>).runToolCallingTurnStream === "function"
+  );
 }
