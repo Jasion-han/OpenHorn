@@ -138,12 +138,12 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
       return;
     }
 
-    // Sidecar runs currently target the Claude Agent SDK only; other
-    // protocols would need a different SDK path and are rejected up
-    // front so the user gets a clear message.
-    if (credentials.protocol !== "anthropic") {
+    if (
+      credentials.protocol !== "anthropic" &&
+      credentials.protocol !== "openai"
+    ) {
       setIsBusy(false);
-      const message = `本地运行仅支持 Anthropic 协议的渠道，当前渠道协议：${credentials.protocol}`;
+      const message = `本地运行暂不支持该协议：${credentials.protocol}`;
       setLastError(message);
       useChatStore.getState().applyStreamEvent(input.assistantMessageId, {
         type: "error",
@@ -159,6 +159,7 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
         apiKey: credentials.apiKey,
         model: input.modelId || credentials.modelId,
         baseUrl: credentials.baseUrl ?? undefined,
+        protocol: credentials.protocol,
         onEvent: (event) => {
           // Sidecar events use the same AgentTaskStreamEvent shape as
           // server SSE events, and applyStreamEvent already knows how
@@ -190,6 +191,23 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
               type: "done",
               messageId: input.assistantMessageId,
             });
+            const assistantMsg = useChatStore
+              .getState()
+              .messages.find((m) => m.id === input.assistantMessageId);
+            const assistantContent = assistantMsg?.content || "";
+            if (assistantContent) {
+              void api.messages
+                .syncSidecar({
+                  conversationId: input.conversationId,
+                  userContent: input.prompt,
+                  assistantContent,
+                  model: input.modelId || credentials.modelId,
+                })
+                .catch(() => {});
+            }
+            if (credentials.protocol !== "anthropic") {
+              setLastFinishedRunId(null);
+            }
             syncRun(null);
             setIsBusy(false);
           }

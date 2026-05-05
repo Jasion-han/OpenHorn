@@ -5,7 +5,7 @@ import { uploadAttachments } from "../../lib/attachments";
 import { getDesktopBackendBase } from "../../lib/backendBase";
 import { sanitizeDisplayContent } from "../../lib/citations";
 import { getEffectiveModelForConversation } from "../../lib/effectiveModel";
-import { notifyWarning } from "../../lib/notify";
+import { notifyError, notifyWarning } from "../../lib/notify";
 import { cancelAgentTask } from "../../lib/agentTaskActions";
 import { createServerApi, readErrorMessage } from "../../lib/serverApi";
 import { useSidecarAgentRun } from "../../hooks/useSidecarAgentRun";
@@ -943,8 +943,29 @@ export function DesktopChatArea() {
       }>
       | undefined;
 
+    let forceCliOAuthSidecar = false;
+    if (mode === "agent" && currentConversation.channelId) {
+      try {
+        const { credentials } = await createServerApi().channels.getCredentials(
+          currentConversation.channelId,
+        );
+        if (credentials.isCliOAuth && credentials.protocol !== "anthropic") {
+          if (!sidecarRuntimeAvailable) {
+            notifyError(
+              "需要启用本地运行",
+              "Codex CLI 渠道必须通过本地运行模式使用。请先选择工作目录以启用本地运行。",
+            );
+            return;
+          }
+          forceCliOAuthSidecar = true;
+        }
+      } catch {
+        // Credential check failed — let the normal flow handle it
+      }
+    }
+
     const useSidecarRuntime =
-      mode === "agent" && sidecarRuntimeEnabled && sidecarRuntimeAvailable;
+      mode === "agent" && (forceCliOAuthSidecar || (sidecarRuntimeEnabled && sidecarRuntimeAvailable));
     try {
       addMessage({
         id: userMessageId,
@@ -1003,10 +1024,6 @@ export function DesktopChatArea() {
 
         setStreaming(false);
         setStreamingAssistantId(null);
-        // Sidecar runs do not know about the server's messages table,
-        // so we do not reload messages here. The chatStore already
-        // holds the assistant message; events stream in through
-        // sidecarRun and sidecarRun will flip isBusy when done.
         setLoading(false);
         setIsUploading(false);
         queueMicrotask(() => inputRef.current?.focus());
