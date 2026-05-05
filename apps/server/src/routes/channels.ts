@@ -5,6 +5,7 @@ import {
   deleteChannel,
   fetchChannelModels,
   getChannelById,
+  getChannelRuntimeCredentialsById,
   getChannels,
   getResolvedChannelById,
   listChannelModels,
@@ -61,29 +62,26 @@ channels.get("/:id/credentials", async (c) => {
   const user = c.get("user");
   const channelId = c.req.param("id");
 
-  const resolved = await getResolvedChannelById(user.id, channelId);
-  if (!resolved) {
+  try {
+    const { channel, apiKey, isCliOAuth } = await getChannelRuntimeCredentialsById(
+      user.id,
+      channelId,
+    );
+    const resolved = await getResolvedChannelById(user.id, channelId);
+    const modelId = resolved?.modelId ?? null;
+
+    return c.json({
+      credentials: {
+        apiKey,
+        baseUrl: channel.baseUrl ?? null,
+        modelId,
+        protocol: channel.protocol,
+        isCliOAuth,
+      },
+    });
+  } catch {
     return c.json({ error: "Channel not found" }, 404);
   }
-
-  console.log(
-    JSON.stringify({
-      event: "channel.credentials.fetch",
-      userId: user.id,
-      channelId,
-      modelId: resolved.modelId,
-      at: new Date().toISOString(),
-    }),
-  );
-
-  return c.json({
-    credentials: {
-      apiKey: resolved.apiKey,
-      baseUrl: resolved.channel.baseUrl ?? null,
-      modelId: resolved.modelId,
-      protocol: resolved.channel.protocol,
-    },
-  });
 });
 
 channels.post("/", async (c) => {

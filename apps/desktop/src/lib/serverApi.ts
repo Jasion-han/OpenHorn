@@ -44,6 +44,12 @@ export interface ServerApi {
       options?: { signal?: AbortSignal },
     ) => Promise<Response>;
     edit: (id: string, content: string, options?: { signal?: AbortSignal }) => Promise<Response>;
+    syncSidecar: (data: {
+      conversationId: string;
+      userContent: string;
+      assistantContent: string;
+      model?: string;
+    }) => Promise<{ userMessageId: string; assistantMessageId: string }>;
   };
   channels: {
     list: () => Promise<{ channels: ApiChannel[] }>;
@@ -100,6 +106,7 @@ export interface ServerApi {
         baseUrl: string | null;
         modelId: string;
         protocol: "openai" | "anthropic" | "google";
+        isCliOAuth?: boolean;
       };
     }>;
   };
@@ -373,6 +380,11 @@ export function createServerApi(options?: { baseUrl?: string; fetch?: FetchLike 
           body: JSON.stringify({ content }),
         });
       },
+      syncSidecar: (data) =>
+        fetchJson(fetchImpl, baseUrl, "/messages/sync-sidecar", {
+          method: "POST",
+          body: JSON.stringify(data),
+        }),
     },
 
     channels: {

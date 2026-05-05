@@ -1618,3 +1618,53 @@ export async function regenerateMessage(
     send({ type: "done", messageId: assistantMessageId, model: resolvedChannel.modelId });
   });
 }
+
+export async function syncSidecarMessages(
+  userId: string,
+  input: {
+    conversationId: string;
+    userContent: string;
+    assistantContent: string;
+    model?: string;
+    mode?: string;
+  },
+) {
+  const conversation = await db.query.conversations.findFirst({
+    where: and(
+      eq(conversations.id, input.conversationId),
+      eq(conversations.userId, userId),
+    ),
+  });
+  if (!conversation) throw new Error("Conversation not found");
+
+  const now = new Date();
+  const userMessageId = generateId();
+  const assistantMessageId = generateId();
+
+  await db.insert(messages).values({
+    id: userMessageId,
+    conversationId: input.conversationId,
+    role: "user",
+    content: input.userContent,
+    mode: input.mode || "agent",
+    attachments: null,
+    agentRun: null,
+    createdAt: now,
+  });
+
+  await db.insert(messages).values({
+    id: assistantMessageId,
+    conversationId: input.conversationId,
+    role: "assistant",
+    content: input.assistantContent,
+    model: input.model || null,
+    mode: input.mode || "agent",
+    attachments: null,
+    agentRun: null,
+    liveMetadata: null,
+    citations: null,
+    createdAt: new Date(now.getTime() + 1),
+  });
+
+  return { userMessageId, assistantMessageId };
+}

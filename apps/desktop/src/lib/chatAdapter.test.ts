@@ -167,6 +167,7 @@ function createStubServerApi() {
         editedContent = content;
         return new Response("ok", { status: 200 });
       },
+      syncSidecar: async () => ({ userMessageId: "u1", assistantMessageId: "a1" }),
     },
     channels: {
       list: async () => ({

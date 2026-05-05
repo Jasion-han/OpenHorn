@@ -6,6 +6,7 @@ import {
   regenerateMessage,
   sendMessage,
   streamMessage,
+  syncSidecarMessages,
 } from "../services/messageService";
 import { requireUser, type UserEnv } from "../utils/requestUser";
 
@@ -137,6 +138,23 @@ messages.post("/:id/edit", async (c) => {
     });
   } catch (error) {
     return c.json({ error: error instanceof Error ? error.message : "Failed" }, 400);
+  }
+});
+
+messages.post("/sync-sidecar", async (c) => {
+  const user = c.get("user");
+  try {
+    const body = await c.req.json();
+    if (!body?.conversationId || !body?.userContent) {
+      return c.json({ error: "conversationId and userContent are required" }, 400);
+    }
+    const result = await syncSidecarMessages(user.id, body);
+    return c.json(result);
+  } catch (error) {
+    return c.json(
+      { error: error instanceof Error ? error.message : "Failed to sync" },
+      400,
+    );
   }
 });
 
