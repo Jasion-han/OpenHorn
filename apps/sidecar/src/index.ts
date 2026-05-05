@@ -1,4 +1,5 @@
 import { runClaudeAgent } from "./agent/claude";
+import { runCodexAgent } from "./agent/codex";
 import { createCheckpointSession, rollbackCheckpoint } from "./checkpoints";
 import { fsList, fsReadText, fsWriteText } from "./fs";
 import {
@@ -245,14 +246,39 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
       }
       case "agent.run": {
         if (!state.workspaceRoot) throw new Error("Workspace not set");
-        const { prompt, apiKey, model, baseUrl } = params as {
+        const { prompt, apiKey, model, baseUrl, protocol } = params as {
           prompt: string;
           apiKey: string;
           model: string;
           baseUrl?: string;
+          protocol?: string;
         };
 
         const abortController = new AbortController();
+        const useCodex = protocol === "codex_cli" || protocol === "openai";
+
+        if (useCodex) {
+          const runId = `codex-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+          state.agentRuns.set(runId, { abortController });
+          state.ownedRunIds.add(runId);
+
+          ws.send(JSON.stringify(buildOkResponse(request.requestId, { runId })));
+
+          void runCodexAgent({
+            model,
+            prompt,
+            cwd: state.workspaceRoot,
+            abortController,
+            onEvent: (event) => {
+              ws.send(JSON.stringify(buildEvent("agent.event", { runId, event })));
+            },
+          }).finally(() => {
+            state.agentRuns.delete(runId);
+          });
+
+          return;
+        }
+
         const checkpoint = await createCheckpointSession(state.workspaceRoot);
         const runId = checkpoint.runId;
         state.agentRuns.set(runId, { abortController });

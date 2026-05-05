@@ -63,9 +63,10 @@ export const ApprovalsRespondParamsSchema = z.object({
 
 export const AgentRunParamsSchema = z.object({
   prompt: z.string().min(1),
-  apiKey: z.string().min(1),
+  apiKey: z.string(),
   model: z.string().min(1),
   baseUrl: z.string().optional(),
+  protocol: z.enum(["anthropic", "openai", "codex_cli"]).optional(),
 });
 
 export const AgentCancelParamsSchema = z.object({
