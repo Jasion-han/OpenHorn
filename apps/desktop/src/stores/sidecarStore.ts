@@ -162,14 +162,25 @@ export function createDesktopSidecarStore(options: CreateSidecarStoreOptions) {
         return;
       }
 
+      client.onDisconnect = () => {
+        const current = get().status;
+        if (current === "ready") {
+          set({ status: "error", client: null, lastError: "sidecar 连接断开，正在重连..." });
+          setTimeout(() => {
+            if (get().status === "error") {
+              void get().start();
+            }
+          }, 1000);
+        }
+      };
+
       set({ status: "ready", client });
 
       try {
         const saved = localStorage.getItem(WORKSPACE_STORAGE_KEY);
-        if (saved) {
-          const result = await client.setWorkspace(saved);
-          set({ workspaceRoot: result.workspaceRoot });
-        }
+        const targetDir = saved || "/tmp";
+        const result = await client.setWorkspace(targetDir);
+        set({ workspaceRoot: result.workspaceRoot });
       } catch {}
     },
 

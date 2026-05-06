@@ -595,7 +595,7 @@ function MessageBubble({
                 ) : (
                   <DesktopMarkdownMessage content={displayContent} />
                 )
-              ) : isMessageStreaming ? (
+              ) : isMessageStreaming && !isFlatAgentAssistant ? (
                 <TypingIndicator />
               ) : null}
             </div>
@@ -952,12 +952,19 @@ export function DesktopChatArea() {
           currentConversation.channelId,
         );
         if (credentials.isCliOAuth && credentials.protocol !== "anthropic") {
-          if (!sidecarRuntimeAvailable) {
-            notifyError(
-              "需要启用本地运行",
-              "Codex CLI 渠道必须通过本地运行模式使用。请先选择工作目录以启用本地运行。",
-            );
-            return;
+          const sidecar = useSidecarStore.getState();
+          if (sidecar.status !== "ready") {
+            if (sidecar.status === "idle" || sidecar.status === "error") {
+              await sidecar.start();
+            }
+            const retried = useSidecarStore.getState();
+            if (retried.status !== "ready") {
+              notifyError(
+                "需要启用本地运行",
+                "Codex CLI 渠道需要本地运行环境。请确认桌面端已启动。",
+              );
+              return;
+            }
           }
           forceCliOAuthSidecar = true;
         }

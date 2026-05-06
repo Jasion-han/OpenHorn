@@ -200,6 +200,7 @@ export class SidecarClient {
   private closeResolve: (() => void) | null = null;
   private readonly endpoint: SidecarEndpoint;
   private readonly createSocket: SidecarWebSocketFactory;
+  onDisconnect: (() => void) | null = null;
 
   constructor(options: SidecarClientOptions) {
     this.endpoint = options.endpoint;
@@ -422,7 +423,6 @@ export class SidecarClient {
 
   private handleSocketClose() {
     this.socket = null;
-    // Any in-flight runs get a final error so the UI doesn't hang.
     for (const handlers of this.runHandlers.values()) {
       handlers.onError("sidecar connection closed");
     }
@@ -435,6 +435,7 @@ export class SidecarClient {
       this.closeResolve();
       this.closeResolve = null;
     }
+    this.onDisconnect?.();
   }
 }
 
