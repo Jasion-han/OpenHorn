@@ -521,7 +521,7 @@ function MessageBubble({
         taskId={message.agentRun.taskId}
         fallbackContent={message.content || message.agentRun.summary}
       />
-    ) : message.mode === "agent" && isMessageStreaming ? (
+    ) : message.mode === "agent" && isMessageStreaming && !hasAssistantText ? (
       <section className="mt-0.5 px-1 pt-0 pb-1">
         <DesktopAgentTaskMetaLine text={message.agentRun?.summary?.trim() || "Thinking"} active />
       </section>
@@ -701,6 +701,8 @@ export function DesktopChatArea() {
     const wasBusy = prevSidecarBusyRef.current;
     prevSidecarBusyRef.current = sidecarRun.isBusy;
     if (wasBusy && !sidecarRun.isBusy) {
+      setStreaming(false);
+      setStreamingAssistantId(null);
       const conv = useChatStore.getState().currentConversation;
       if (conv && /^新会话 \d{2}-\d{2} \d{2}:\d{2}$/.test(conv.title)) {
         const firstUserMsg = useChatStore
@@ -1022,8 +1024,10 @@ export function DesktopChatArea() {
           prompt: effectiveContent,
         });
 
-        setStreaming(false);
-        setStreamingAssistantId(null);
+        if (!forceCliOAuthSidecar) {
+          setStreaming(false);
+          setStreamingAssistantId(null);
+        }
         setLoading(false);
         setIsUploading(false);
         queueMicrotask(() => inputRef.current?.focus());
@@ -1533,7 +1537,7 @@ export function DesktopChatArea() {
         <DesktopSidecarRuntimePanel
           pendingApproval={sidecarRun.pendingApproval}
           lastError={sidecarRun.lastError}
-          isBusy={sidecarRun.isBusy && !sidecarRun.pendingApproval}
+          isBusy={sidecarRun.isBusy && !sidecarRun.pendingApproval && !isStreaming}
           lastFinishedRunId={sidecarRun.lastFinishedRunId}
           isRollingBack={sidecarRun.isRollingBack}
           rollbackError={sidecarRun.rollbackError}
