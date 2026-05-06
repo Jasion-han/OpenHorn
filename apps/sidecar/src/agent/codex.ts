@@ -40,20 +40,9 @@ function mapCodexEvent(msg: JsonRpcMessage): AgentEvent | null {
     if (delta) return { type: "text", content: delta };
   }
 
-  if (method === "item/reasoning/summaryTextDelta" || method === "item/reasoning/textDelta") {
-    const delta = typeof params.delta === "string" ? params.delta : "";
-    if (delta) return { type: "tool_start", toolName: "thinking", toolInput: { content: delta } };
-  }
-
   if (method === "item/started") {
     const item = (params.item ?? {}) as Record<string, unknown>;
     const itemType = typeof item.type === "string" ? item.type : "";
-    if (itemType === "reasoning") {
-      return { type: "tool_start", toolName: "thinking" };
-    }
-    if (itemType === "agentMessage") {
-      return { type: "tool_start", toolName: "responding" };
-    }
     if (itemType === "commandExecution") {
       const call = (item.call ?? item) as Record<string, unknown>;
       return {
@@ -93,13 +82,6 @@ function mapCodexEvent(msg: JsonRpcMessage): AgentEvent | null {
       return { type: "error", content: message };
     }
     return { type: "done" };
-  }
-
-  if (method === "thread/status/changed") {
-    const status = (params.status ?? {}) as Record<string, unknown>;
-    if (status.type === "idle") {
-      return { type: "done" };
-    }
   }
 
   return null;
@@ -187,13 +169,18 @@ export async function runCodexAgent(input: RunCodexAgentInput): Promise<void> {
         return;
       }
 
+      if (msg.method === "turn/started") {
+        threadStarted = true;
+      }
       const event = mapCodexEvent(msg);
       if (event) {
-        if (event.type === "done" || event.type === "error") {
+        if ((event.type === "done" || event.type === "error") && threadStarted) {
           finish(event.type === "error" ? event : undefined);
           return;
         }
-        onEvent(event);
+        if (event.type !== "done") {
+          onEvent(event);
+        }
       }
     });
 
