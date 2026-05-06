@@ -62,6 +62,8 @@ export interface SidecarState {
   reset: () => void;
 }
 
+const WORKSPACE_STORAGE_KEY = "openhorn.sidecar.workspaceRoot";
+
 const INITIAL_STATE: Pick<
   SidecarState,
   "status" | "endpoint" | "client" | "workspaceRoot" | "lastError"
@@ -161,6 +163,14 @@ export function createDesktopSidecarStore(options: CreateSidecarStoreOptions) {
       }
 
       set({ status: "ready", client });
+
+      try {
+        const saved = localStorage.getItem(WORKSPACE_STORAGE_KEY);
+        if (saved) {
+          const result = await client.setWorkspace(saved);
+          set({ workspaceRoot: result.workspaceRoot });
+        }
+      } catch {}
     },
 
     async stop() {
@@ -218,6 +228,9 @@ export function createDesktopSidecarStore(options: CreateSidecarStoreOptions) {
       try {
         const result = await client.setWorkspace(root);
         set({ workspaceRoot: result.workspaceRoot, lastError: null });
+        try {
+          localStorage.setItem(WORKSPACE_STORAGE_KEY, result.workspaceRoot);
+        } catch {}
       } catch (error) {
         set({ lastError: toErrorMessage(error) });
       }
