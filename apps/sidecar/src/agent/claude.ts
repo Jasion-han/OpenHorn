@@ -22,6 +22,7 @@ export type RunClaudeAgentInput = {
   cwd: string;
   abortController: AbortController;
   checkpoint: CheckpointSession;
+  sdkSessionId?: string;
   requestApproval: (input: {
     toolUseId: string;
     toolName: string;
@@ -31,6 +32,7 @@ export type RunClaudeAgentInput = {
   }) => Promise<boolean>;
   onEvent: (event: AgentEvent) => void;
   onCheckpointReady: (runId: string) => void;
+  onSdkSessionId: (sessionId: string) => void;
 };
 
 function extractTargetFilePath(toolName: string, toolInput: unknown): string | null {
@@ -181,89 +183,77 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
     ],
   };
 
+  const queryOptions: Record<string, unknown> = {
+    abortController: input.abortController,
+    cwd: input.cwd,
+    env: childEnv,
+    model: input.model,
+    executable: "bun",
+    tools: ["Read", "Grep", "Glob", "Write", "Edit", "Bash"],
+    permissionMode: "default",
+    sandbox: {
+      enabled: true,
+      autoAllowBashIfSandboxed: true,
+      allowUnsandboxedCommands: false,
+      filesystem: {
+        allowWrite: [input.cwd],
+      },
+      network: {
+        allowedDomains: networkAllowedDomains,
+      },
+    },
+    canUseTool: async (
+      toolName: string,
+      toolInput: Record<string, unknown>,
+      options: CanUseToolOptions,
+    ) => {
+      if (toolName === "Bash") {
+        const cmd = typeof toolInput.command === "string" ? toolInput.command : "";
+        const risk = classifyBashCommandRisk(cmd);
+        if (risk.level === "allow") {
+          return { behavior: "allow" } as const;
+        }
+        const allow = await input.requestApproval({
+          toolUseId: options.toolUseID,
+          toolName,
+          toolInput,
+          decisionReason: risk.reason || options.decisionReason,
+          blockedPath: options.blockedPath,
+        });
+        return allow
+          ? ({ behavior: "allow" } as const)
+          : ({ behavior: "deny", message: "User denied command" } as const);
+      }
+
+      const fsDeny = await checkSdkFsToolPath(toolName, toolInput, input.cwd);
+      if (fsDeny !== null) {
+        return { behavior: "deny", message: fsDeny } as const;
+      }
+
+      if (options?.blockedPath) {
+        return { behavior: "deny", message: `Blocked path: ${options.blockedPath}` } as const;
+      }
+
+      return { behavior: "allow" } as const;
+    },
+    hooks,
+  };
+
+  if (input.sdkSessionId) {
+    queryOptions.resume = input.sdkSessionId;
+  }
+
   const query = sdk.query({
     prompt: input.prompt,
-    options: {
-      abortController: input.abortController,
-      cwd: input.cwd,
-      env: childEnv,
-      model: input.model,
-      executable: "bun",
-      tools: ["Read", "Grep", "Glob", "Write", "Edit", "Bash"],
-      permissionMode: "default",
-      // Hand bash isolation to the SDK's built-in sandbox.
-      //
-      //   - macOS: SDK uses sandbox-exec with a generated SBPL profile.
-      //   - Linux: SDK uses bwrap with bind-mounts and --unshare-net.
-      //
-      // Without this every Bash command would still be the user's own
-      // shell with full host access. With this:
-      //
-      //   - filesystem.allowWrite limits Bash + SDK write surface to
-      //     the chosen workspace root.
-      //   - network.allowedDomains pins outbound traffic to the
-      //     Anthropic API host (or the user's custom relay), so a
-      //     compromised tool call cannot POST data to a third party.
-      //   - allowUnsandboxedCommands=false disables the SDK's escape
-      //     hatch (`dangerouslyDisableSandbox`) so a model cannot
-      //     trick its way out.
-      //   - autoAllowBashIfSandboxed=true keeps approval focused on
-      //     "did the user actually consent" rather than gating every
-      //     command — the OS sandbox is the real wall.
-      sandbox: {
-        enabled: true,
-        autoAllowBashIfSandboxed: true,
-        allowUnsandboxedCommands: false,
-        filesystem: {
-          allowWrite: [input.cwd],
-        },
-        network: {
-          allowedDomains: networkAllowedDomains,
-        },
-      },
-      canUseTool: async (
-        toolName: string,
-        toolInput: Record<string, unknown>,
-        options: CanUseToolOptions,
-      ) => {
-        if (toolName === "Bash") {
-          const cmd = typeof toolInput.command === "string" ? toolInput.command : "";
-          const risk = classifyBashCommandRisk(cmd);
-          if (risk.level === "allow") {
-            return { behavior: "allow" } as const;
-          }
-          const allow = await input.requestApproval({
-            toolUseId: options.toolUseID,
-            toolName,
-            toolInput,
-            decisionReason: risk.reason || options.decisionReason,
-            blockedPath: options.blockedPath,
-          });
-          return allow
-            ? ({ behavior: "allow" } as const)
-            : ({ behavior: "deny", message: "User denied command" } as const);
-        }
-
-        // SDK fs tools (Read/Write/Edit) bypass the sidecar's fs.* RPCs
-        // and read/write the host filesystem directly. We re-apply the
-        // workspace boundary check here so a model that names an
-        // arbitrary path can't escape via Read or Write.
-        const fsDeny = await checkSdkFsToolPath(toolName, toolInput, input.cwd);
-        if (fsDeny !== null) {
-          return { behavior: "deny", message: fsDeny } as const;
-        }
-
-        if (options?.blockedPath) {
-          return { behavior: "deny", message: `Blocked path: ${options.blockedPath}` } as const;
-        }
-
-        return { behavior: "allow" } as const;
-      },
-      hooks,
-    },
+    options: queryOptions as Parameters<typeof sdk.query>[0]["options"],
   });
 
+  let capturedSessionId: string | null = null;
   for await (const message of query as AsyncIterable<SdkMessage>) {
+    if (!capturedSessionId && message.type === "system" && typeof message.session_id === "string") {
+      capturedSessionId = message.session_id;
+      input.onSdkSessionId(capturedSessionId);
+    }
     const event = convertSdkEvent(message);
     if (event) input.onEvent(event);
   }

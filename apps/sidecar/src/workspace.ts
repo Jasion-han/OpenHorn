@@ -56,7 +56,6 @@ export function getForbiddenWorkspaceRoots(homeDirOverride?: string): string[] {
       "Library/Application Support",
       "Desktop",
       "Documents",
-      "Downloads",
       "Pictures",
       "Music",
       "Movies",

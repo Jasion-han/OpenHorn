@@ -65,10 +65,12 @@ export interface SidecarRunAgentInput {
   model: string;
   baseUrl?: string;
   protocol?: string;
+  sdkSessionId?: string;
   onEvent: (event: AgentTaskStreamEvent) => void | Promise<void>;
   onApproval: (request: SidecarApprovalRequest) => void | Promise<void>;
   onError: (message: string) => void;
   onDone: (runId: string) => void;
+  onSdkSessionId?: (sessionId: string) => void;
 }
 
 interface PendingRequest {
@@ -194,6 +196,7 @@ export class SidecarClient {
       onApproval: (request: SidecarApprovalRequest) => void | Promise<void>;
       onError: (message: string) => void;
       onDone: (runId: string) => void;
+      onSdkSessionId?: (sessionId: string) => void;
     }
   >();
   private closePromise: Promise<void> | null = null;
@@ -270,7 +273,7 @@ export class SidecarClient {
    * callbacks fire asynchronously until the run terminates.
    */
   async runAgent(input: SidecarRunAgentInput): Promise<string> {
-    const { prompt, apiKey, model, baseUrl, protocol, onEvent, onApproval, onError, onDone } =
+    const { prompt, apiKey, model, baseUrl, protocol, sdkSessionId, onEvent, onApproval, onError, onDone, onSdkSessionId } =
       input;
     const result = (await this.request("agent.run", {
       prompt,
@@ -278,9 +281,10 @@ export class SidecarClient {
       model,
       ...(baseUrl ? { baseUrl } : {}),
       ...(protocol ? { protocol } : {}),
+      ...(sdkSessionId ? { sdkSessionId } : {}),
     })) as { runId: string };
     const runId = result.runId;
-    this.runHandlers.set(runId, { onEvent, onApproval, onError, onDone });
+    this.runHandlers.set(runId, { onEvent, onApproval, onError, onDone, onSdkSessionId });
     return runId;
   }
 
@@ -406,8 +410,18 @@ export class SidecarClient {
       return;
     }
 
+    if (event.event === "agent.session") {
+      if (!isRecord(event.data)) return;
+      const runId = typeof event.data.runId === "string" ? event.data.runId : null;
+      if (!runId) return;
+      const handlers = this.runHandlers.get(runId);
+      if (!handlers?.onSdkSessionId) return;
+      const sessionId = typeof event.data.sdkSessionId === "string" ? event.data.sdkSessionId : null;
+      if (sessionId) handlers.onSdkSessionId(sessionId);
+      return;
+    }
+
     if (event.event === "checkpoint.ready") {
-      // No-op for now; surfaced through `runAgent` done handler instead.
       return;
     }
 

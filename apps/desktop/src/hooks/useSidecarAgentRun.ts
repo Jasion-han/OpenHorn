@@ -24,6 +24,7 @@ export interface SidecarAgentRunInput {
   modelId: string;
   assistantMessageId: string;
   prompt: string;
+  sdkSessionId?: string;
 }
 
 export interface SidecarAgentRunApi {
@@ -31,15 +32,10 @@ export interface SidecarAgentRunApi {
   pendingApproval: SidecarApprovalRequest | null;
   lastError: string | null;
   isBusy: boolean;
-  /**
-   * The runId of the most recently finished sidecar run (done /
-   * error / cancel). We keep it around so the user can still trigger
-   * a checkpoint rollback after the run has terminated. Cleared when
-   * a new run starts or when the rollback has been performed.
-   */
   lastFinishedRunId: string | null;
   isRollingBack: boolean;
   rollbackError: string | null;
+  sdkSessionId: string | null;
 
   /**
    * Kicks off a sidecar agent run bound to the given assistant message.
@@ -82,6 +78,7 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
   const [lastFinishedRunId, setLastFinishedRunId] = useState<string | null>(null);
   const [isRollingBack, setIsRollingBack] = useState(false);
   const [rollbackError, setRollbackError] = useState<string | null>(null);
+  const [sdkSessionId, setSdkSessionId] = useState<string | null>(null);
   const runRef = useRef<ActiveSidecarRun | null>(null);
 
   const syncRun = (run: ActiveSidecarRun | null) => {
@@ -160,6 +157,10 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
         model: input.modelId || credentials.modelId,
         baseUrl: credentials.baseUrl ?? undefined,
         protocol: credentials.protocol,
+        sdkSessionId: input.sdkSessionId ?? sdkSessionId ?? undefined,
+        onSdkSessionId: (sessionId) => {
+          setSdkSessionId(sessionId);
+        },
         onEvent: (event) => {
           // Sidecar events use the same AgentTaskStreamEvent shape as
           // server SSE events, and applyStreamEvent already knows how
@@ -310,6 +311,7 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
     lastFinishedRunId,
     isRollingBack,
     rollbackError,
+    sdkSessionId,
     startRun,
     respondToApproval,
     cancel,
