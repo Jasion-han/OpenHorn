@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import {
-  cancelAgentTask,
   respondAgentApproval,
   type AgentTaskActionApi,
 } from "./agentTaskActions";
@@ -10,10 +9,6 @@ function makeRecordingApi(overrides: Partial<AgentTaskActionApi> = {}) {
   const api: AgentTaskActionApi = {
     respondApproval: async (...args) => {
       calls.push({ method: "respondApproval", args });
-      return { ok: true };
-    },
-    cancel: async (...args) => {
-      calls.push({ method: "cancel", args });
       return { ok: true };
     },
     ...overrides,
@@ -130,44 +125,3 @@ describe("respondAgentApproval", () => {
   });
 });
 
-describe("cancelAgentTask", () => {
-  test("invokes onLocalAbort before calling api.cancel", async () => {
-    const order: string[] = [];
-    const { api } = makeRecordingApi({
-      cancel: async () => {
-        order.push("cancel");
-      },
-    });
-
-    const result = await cancelAgentTask({
-      api,
-      taskId: "task-1",
-      onLocalAbort: () => {
-        order.push("abort");
-      },
-    });
-
-    expect(result).toEqual({ ok: true });
-    expect(order).toEqual(["abort", "cancel"]);
-  });
-
-  test("still aborts locally even if api.cancel rejects", async () => {
-    let aborted = false;
-    const { api } = makeRecordingApi({
-      cancel: async () => {
-        throw new Error("server unreachable");
-      },
-    });
-
-    const result = await cancelAgentTask({
-      api,
-      taskId: "task-2",
-      onLocalAbort: () => {
-        aborted = true;
-      },
-    });
-
-    expect(aborted).toBe(true);
-    expect(result).toEqual({ ok: false, error: "server unreachable" });
-  });
-});

@@ -455,7 +455,6 @@ export function DesktopAgentTaskCard({
     const result = await respondAgentApproval({
       api: {
         respondApproval: (id, data) => api.agentTasks.respondApproval(id, data),
-        cancel: (id) => api.agentTasks.cancel(id),
       },
       approvalId: approval.id,
       approvalType: approval.type,

@@ -138,25 +138,7 @@ export interface ServerApi {
     list: (filter?: {
       conversationId?: string;
     }) => Promise<{ tasks: ApiAgentTask[] }>;
-    create: (data: {
-      conversationId?: string | null;
-      channelId?: string | null;
-      modelId?: string | null;
-      title?: string | null;
-      goal: string;
-      attachments?: Array<{
-        id?: string;
-        fileName: string;
-        fileType?: string;
-        fileSize?: number;
-      }>;
-      complexity?: "light" | "standard" | "deep";
-      uxMode?: "direct" | "compact" | "full";
-      requiresPlanApproval?: boolean;
-      autoStart?: boolean;
-    }) => Promise<{ task: ApiAgentTaskDetail["task"] }>;
     get: (id: string) => Promise<ApiAgentTaskDetail>;
-    plan: (id: string) => Promise<ApiAgentTaskDetail>;
     execute: (id: string, options?: { signal?: AbortSignal }) => Promise<Response>;
     retry: (id: string, options?: { signal?: AbortSignal }) => Promise<Response>;
     continue: (id: string, options?: { signal?: AbortSignal }) => Promise<Response>;
@@ -483,16 +465,7 @@ export function createServerApi(options?: { baseUrl?: string; fetch?: FetchLike 
         const qs = params.toString();
         return fetchJson(fetchImpl, baseUrl, `/agent/tasks${qs ? `?${qs}` : ""}`);
       },
-      create: (data) =>
-        fetchJson(fetchImpl, baseUrl, "/agent/tasks", {
-          method: "POST",
-          body: JSON.stringify(data),
-        }),
       get: (id) => fetchJson(fetchImpl, baseUrl, `/agent/tasks/${encodeURIComponent(id)}`),
-      plan: (id) =>
-        fetchJson(fetchImpl, baseUrl, `/agent/tasks/${encodeURIComponent(id)}/plan`, {
-          method: "POST",
-        }),
       execute: (id, options) =>
         requestWithBackendStatus(fetchImpl, `${baseUrl}/agent/tasks/${encodeURIComponent(id)}/execute`, {
           method: "POST",

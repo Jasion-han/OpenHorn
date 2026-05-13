@@ -2,10 +2,10 @@ import type { ApiAgentApprovalStatus, ApiAgentApprovalType } from "../types/chat
 
 /**
  * Pure-function layer for the desktop agent task action buttons
- * (approval, retry, continue, cancel). Components dispatch through
- * these helpers so the actual API client can be injected for tests
- * and so the side-effect ordering is captured in one place rather
- * than scattered across button onClick handlers.
+ * (approval responses). Components dispatch through these helpers so
+ * the actual API client can be injected for tests and so the
+ * side-effect ordering is captured in one place rather than scattered
+ * across button onClick handlers.
  */
 
 export interface AgentTaskActionApi {
@@ -16,7 +16,6 @@ export interface AgentTaskActionApi {
       response?: unknown;
     },
   ) => Promise<unknown>;
-  cancel: (taskId: string) => Promise<unknown>;
 }
 
 export interface RespondApprovalInput {
@@ -58,28 +57,6 @@ export async function respondAgentApproval(
     }
   }
 
-  return { ok: true };
-}
-
-export interface CancelTaskInput {
-  api: AgentTaskActionApi;
-  taskId: string;
-  /**
-   * Called *before* the cancel request hits the server, so the desktop UI
-   * can stop the local SSE stream regardless of cancel success.
-   */
-  onLocalAbort?: () => void;
-}
-
-export async function cancelAgentTask(
-  input: CancelTaskInput,
-): Promise<RespondApprovalResult> {
-  input.onLocalAbort?.();
-  try {
-    await input.api.cancel(input.taskId);
-  } catch (error) {
-    return { ok: false, error: extractErrorMessage(error) };
-  }
   return { ok: true };
 }
 
