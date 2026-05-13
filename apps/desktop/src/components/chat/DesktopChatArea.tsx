@@ -1385,6 +1385,9 @@ export function DesktopChatArea() {
   };
 
   const handleStop = async () => {
+    if (sidecarRun.isBusy) {
+      await sidecarRun.cancel();
+    }
     abortStreaming();
 
     setLoading(false);
