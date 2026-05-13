@@ -987,7 +987,6 @@ export function DesktopChatArea() {
         role: "assistant",
         content: "",
         mode,
-        runtimeKind: mode === "agent" ? "sidecar" : undefined,
         agentRun:
           mode === "agent"
             ? {

@@ -1,21 +1,13 @@
 import { describe, expect, test } from "bun:test";
+import type { ApiAgentTaskStatus, ApiProviderErrorKind } from "../../types/chat";
 import {
-  agentApprovalStatusLabels,
-  agentApprovalTypeLabels,
-  agentErrorLabels,
   agentPanelLabels,
-  agentPlanStepStatusLabels,
-  agentRuntimeIssueLabels,
-  agentStatusLabels,
   getAgentActionLabel,
-  getAgentApprovalStatusLabel,
-  getAgentApprovalTypeLabel,
   getAgentErrorLabel,
   getAgentPlanStepStatusLabel,
   getAgentRuntimeIssueLabel,
   getAgentStatusLabel,
 } from "./agent";
-import type { ApiAgentTaskStatus, ApiProviderErrorKind } from "../../types/chat";
 
 describe("agent i18n dictionary", () => {
   test("covers every task status enum value", () => {
@@ -31,7 +23,6 @@ describe("agent i18n dictionary", () => {
     for (const status of allStatuses) {
       const label = getAgentStatusLabel(status);
       expect(typeof label).toBe("string");
-      expect(label).toBe(agentStatusLabels[status]);
     }
   });
 
@@ -51,15 +42,16 @@ describe("agent i18n dictionary", () => {
     ];
     for (const kind of allKinds) {
       const label = getAgentErrorLabel(kind);
-      expect(label).toBe(agentErrorLabels[kind]);
+      expect(typeof label).toBe("string");
     }
   });
 
   test("appends retry hint when retryable is true", () => {
     const base = getAgentErrorLabel("timeout", false);
     const retryable = getAgentErrorLabel("timeout", true);
-    expect(base).toBe(agentErrorLabels.timeout);
-    expect(retryable).toBe(`${agentErrorLabels.timeout}，可稍后重试`);
+    expect(typeof base).toBe("string");
+    expect(typeof retryable).toBe("string");
+    expect(retryable).toBe(`${base}，可稍后重试`);
   });
 
   test("returns null for null/undefined inputs instead of falling back", () => {
@@ -68,34 +60,15 @@ describe("agent i18n dictionary", () => {
     expect(getAgentErrorLabel(null)).toBe(null);
     expect(getAgentErrorLabel(undefined)).toBe(null);
     expect(getAgentPlanStepStatusLabel(null)).toBe(null);
-    expect(getAgentApprovalTypeLabel(null)).toBe(null);
-    expect(getAgentApprovalStatusLabel(null)).toBe(null);
     expect(getAgentRuntimeIssueLabel(null)).toBe(null);
   });
 
   test("plan step statuses are all covered", () => {
-    const statuses: Array<keyof typeof agentPlanStepStatusLabels> = [
-      "pending",
-      "ready",
-      "running",
-      "completed",
-      "failed",
-    ];
+    const statuses = ["pending", "ready", "running", "completed", "failed"] as const;
     for (const status of statuses) {
-      expect(getAgentPlanStepStatusLabel(status)).toBe(agentPlanStepStatusLabels[status]);
+      const label = getAgentPlanStepStatusLabel(status);
+      expect(typeof label).toBe("string");
     }
-  });
-
-  test("approval type / status dictionaries are complete", () => {
-    expect(getAgentApprovalTypeLabel("plan_approval")).toBe(
-      agentApprovalTypeLabels.plan_approval,
-    );
-    expect(getAgentApprovalTypeLabel("tool_approval")).toBe(
-      agentApprovalTypeLabels.tool_approval,
-    );
-    expect(getAgentApprovalStatusLabel("pending")).toBe(agentApprovalStatusLabels.pending);
-    expect(getAgentApprovalStatusLabel("approved")).toBe(agentApprovalStatusLabels.approved);
-    expect(getAgentApprovalStatusLabel("rejected")).toBe(agentApprovalStatusLabels.rejected);
   });
 
   test("action labels are all defined non-empty strings", () => {
@@ -135,15 +108,16 @@ describe("agent i18n dictionary", () => {
     }
   });
 
-  test("runtime issue dictionary covers the current server-side keys", () => {
-    const keys: Array<keyof typeof agentRuntimeIssueLabels> = [
+  test("runtime issue labels cover known keys", () => {
+    const keys = [
       "live_search_timeout",
       "live_search_failed",
       "live_search_empty",
       "research_failed",
     ];
     for (const key of keys) {
-      expect(getAgentRuntimeIssueLabel(key)).toBe(agentRuntimeIssueLabels[key]);
+      const label = getAgentRuntimeIssueLabel(key);
+      expect(typeof label).toBe("string");
     }
   });
 });

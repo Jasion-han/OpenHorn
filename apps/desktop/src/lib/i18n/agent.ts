@@ -18,15 +18,9 @@
  *      status badges, error messages, action buttons, and empty states.
  */
 
-import type {
-  ApiAgentApprovalStatus,
-  ApiAgentApprovalType,
-  ApiAgentPlanStep,
-  ApiAgentTaskStatus,
-  ApiProviderErrorKind,
-} from "../../types/chat";
+import type { ApiAgentPlanStep, ApiAgentTaskStatus, ApiProviderErrorKind } from "../../types/chat";
 
-export const agentStatusLabels: Record<ApiAgentTaskStatus, string> = {
+const agentStatusLabels: Record<ApiAgentTaskStatus, string> = {
   draft: "待启动",
   planning: "规划中",
   awaiting_approval: "等待你的确认",
@@ -36,7 +30,7 @@ export const agentStatusLabels: Record<ApiAgentTaskStatus, string> = {
   cancelled: "已停止",
 };
 
-export const agentPlanStepStatusLabels: Record<ApiAgentPlanStep["status"], string> = {
+const agentPlanStepStatusLabels: Record<ApiAgentPlanStep["status"], string> = {
   pending: "待执行",
   ready: "待执行",
   running: "执行中",
@@ -44,18 +38,7 @@ export const agentPlanStepStatusLabels: Record<ApiAgentPlanStep["status"], strin
   failed: "失败",
 };
 
-export const agentApprovalTypeLabels: Record<ApiAgentApprovalType, string> = {
-  plan_approval: "计划审批",
-  tool_approval: "工具审批",
-};
-
-export const agentApprovalStatusLabels: Record<ApiAgentApprovalStatus, string> = {
-  pending: "等待确认",
-  approved: "已通过",
-  rejected: "已拒绝",
-};
-
-export const agentErrorLabels: Record<ApiProviderErrorKind, string> = {
+const agentErrorLabels: Record<ApiProviderErrorKind, string> = {
   quota_exhausted: "配额不足或触发限流",
   ssl_handshake_failed: "TLS/SSL 握手失败",
   gateway_failed: "上游网关异常",
@@ -69,7 +52,7 @@ export const agentErrorLabels: Record<ApiProviderErrorKind, string> = {
   unknown: "发生未知错误",
 };
 
-export const agentActionLabels = {
+const agentActionLabels = {
   approve: "通过",
   reject: "拒绝",
   allow: "允许",
@@ -82,7 +65,7 @@ export const agentActionLabels = {
   viewDetails: "查看详情",
 } as const;
 
-export type AgentActionKey = keyof typeof agentActionLabels;
+type AgentActionKey = keyof typeof agentActionLabels;
 
 /**
  * Short panel headings and inline hints. These are user-facing copy that
@@ -99,21 +82,19 @@ export const agentPanelLabels = {
   approvalSubmitFailed: "提交失败",
 } as const;
 
-export type AgentPanelLabelKey = keyof typeof agentPanelLabels;
-
 /**
  * Runtime-agnostic categories used when the server is unable to produce a
  * structured errorCode but the frontend still needs to tell the user
  * something. These keys must map 1:1 to fields the server already emits.
  */
-export const agentRuntimeIssueLabels = {
+const agentRuntimeIssueLabels = {
   live_search_timeout: "实时搜索超时，任务已停止",
   live_search_failed: "实时搜索失败，任务已停止",
   live_search_empty: "实时搜索未返回可用来源，任务已停止",
   research_failed: "在线研究失败，任务已停止",
 } as const;
 
-export type AgentRuntimeIssueKey = keyof typeof agentRuntimeIssueLabels;
+type AgentRuntimeIssueKey = keyof typeof agentRuntimeIssueLabels;
 
 export function getAgentStatusLabel(status: ApiAgentTaskStatus | null | undefined): string | null {
   if (!status) return null;
@@ -125,20 +106,6 @@ export function getAgentPlanStepStatusLabel(
 ): string | null {
   if (!status) return null;
   return agentPlanStepStatusLabels[status] ?? null;
-}
-
-export function getAgentApprovalTypeLabel(
-  type: ApiAgentApprovalType | null | undefined,
-): string | null {
-  if (!type) return null;
-  return agentApprovalTypeLabels[type] ?? null;
-}
-
-export function getAgentApprovalStatusLabel(
-  status: ApiAgentApprovalStatus | null | undefined,
-): string | null {
-  if (!status) return null;
-  return agentApprovalStatusLabels[status] ?? null;
 }
 
 export function getAgentErrorLabel(
@@ -155,11 +122,9 @@ export function getAgentActionLabel(action: AgentActionKey): string {
   return agentActionLabels[action];
 }
 
-export function getAgentRuntimeIssueLabel(
-  key: string | null | undefined,
-): string | null {
+export function getAgentRuntimeIssueLabel(key: string | null | undefined): string | null {
   if (!key) return null;
-  if ((Object.prototype.hasOwnProperty.call(agentRuntimeIssueLabels, key))) {
+  if (Object.hasOwn(agentRuntimeIssueLabels, key)) {
     return agentRuntimeIssueLabels[key as AgentRuntimeIssueKey];
   }
   return null;
