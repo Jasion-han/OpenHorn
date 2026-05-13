@@ -133,6 +133,40 @@ function LiveStatusBadge({
   );
 }
 
+function CollapsibleBlock({ children, maxLines = 3 }: { children: React.ReactNode; maxLines?: number }) {
+  const [expanded, setExpanded] = useState(false);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [isOverflowing, setIsOverflowing] = useState(false);
+
+  useEffect(() => {
+    const el = contentRef.current;
+    if (!el || maxLines <= 0) return;
+    setIsOverflowing(el.scrollHeight > maxLines * 24);
+  });
+
+  if (maxLines <= 0) return <>{children}</>;
+  return (
+    <div className="relative">
+      <div
+        ref={contentRef}
+        className={cn(!expanded && isOverflowing && "overflow-hidden")}
+        style={!expanded && isOverflowing ? { maxHeight: `${maxLines * 1.5}rem` } : undefined}
+      >
+        {children}
+      </div>
+      {isOverflowing && (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="mt-0.5 text-xs text-muted-foreground/60 hover:text-muted-foreground"
+        >
+          {expanded ? "··· 收起" : "··· 展开"}
+        </button>
+      )}
+    </div>
+  );
+}
+
 function AgentRunPanel({ run }: { run?: ApiAgentRun }) {
   if (!run) return null;
   const toolCount = run.steps.filter((step) => step.type === "tool_start").length;
@@ -250,7 +284,7 @@ function AgentRunPanel({ run }: { run?: ApiAgentRun }) {
   })();
 
   return (
-    <details className="mt-2 text-sm">
+    <details className="mt-2 text-sm" open={run.status === "running" || run.status === "partial" || undefined}>
       <style>{`
         @keyframes agentMetaTextFlow {
           0% { background-position: 130% 50%; text-shadow: 0 0 0 rgba(15,23,42,0); }
@@ -275,28 +309,27 @@ function AgentRunPanel({ run }: { run?: ApiAgentRun }) {
         )}
         {run.steps.map((step, stepIndex) => {
           if (step.type === "text") {
+            const isLastText = !run.steps.slice(stepIndex + 1).some((s) => s.type === "tool_start");
+            if (isLastText && run.status === "completed") return null;
             const raw = (step.content ?? "").trim();
             if (!raw) return null;
-            const truncated = raw.length > 100 ? `${raw.slice(0, 100)}...` : raw;
             return (
-              <div
-                key={`text-${stepIndex}`}
-                className="py-0.5 text-sm leading-6 text-muted-foreground/50"
-              >
-                <span className="relative flex items-start gap-2">
+              <div key={`text-${stepIndex}`}>
+                <span className="relative flex items-start gap-2 py-0.5 text-sm leading-6 text-muted-foreground/50">
                   <span
                     aria-hidden="true"
                     className="mt-[8px] h-1.5 w-1.5 shrink-0 rounded-full bg-current"
                     style={{ opacity: 0.2 }}
                   />
-                  <span className="min-w-0 italic">{truncated}</span>
+                  <span className="min-w-0 italic">{raw}</span>
                 </span>
               </div>
             );
           }
 
-          const stepKey = `${step.type}-${step.toolName || ""}-${step.content || ""}-${JSON.stringify(step.toolInput ?? null)}`;
-          const isActive = activeStartKey === stepKey;
+          const stepKey = `${step.type}-${step.toolName || ""}-${stepIndex}`;
+          const isActive = activeStartKey !== null && step.type === "tool_start" &&
+            `${step.type}-${step.toolName || ""}-${step.content || ""}-${JSON.stringify(step.toolInput ?? null)}` === activeStartKey;
           const label = step.type === "error" ? "Error" : presentToolLabel(step.toolName);
           const detail =
             step.type === "tool_start"
@@ -304,6 +337,8 @@ function AgentRunPanel({ run }: { run?: ApiAgentRun }) {
               : step.type === "tool_result"
                 ? summarizeToolResult(step.content)
                 : step.content?.trim() || summarizeToolInput(step.toolInput);
+
+          if (step.type === "tool_result" && !detail) return null;
 
           const text =
             step.type === "tool_result"
@@ -315,13 +350,14 @@ function AgentRunPanel({ run }: { run?: ApiAgentRun }) {
           if (!text && !detail) return null;
 
           return (
-            <DesktopAgentTaskMetaLine
-              key={stepKey}
-              text={text ?? detail ?? "Tool"}
-              subtext={detail}
-              active={isActive}
-              tone={step.type === "tool_result" ? "success" : step.type === "error" ? "danger" : "default"}
-            />
+            <CollapsibleBlock key={stepKey} maxLines={step.type === "tool_start" ? 2 : 0}>
+              <DesktopAgentTaskMetaLine
+                text={text ?? detail ?? "Tool"}
+                subtext={detail}
+                active={isActive}
+                tone={step.type === "tool_result" ? "success" : step.type === "error" ? "danger" : "default"}
+              />
+            </CollapsibleBlock>
           );
         })}
       </div>
@@ -543,7 +579,7 @@ function MessageBubble({
         taskId={message.agentRun.taskId}
         fallbackContent={message.content || message.agentRun.summary}
       />
-    ) : message.mode === "agent" && isMessageStreaming && !hasAssistantText ? (
+    ) : message.mode === "agent" && isMessageStreaming && !hasAssistantText && !(message.agentRun?.steps?.length) ? (
       <section className="mt-0.5 px-1 pt-0 pb-1">
         <DesktopAgentTaskMetaLine text={message.agentRun?.summary?.trim() || "Thinking"} active />
       </section>
@@ -834,8 +870,7 @@ export function DesktopChatArea() {
     if (
       !userMessage ||
       userMessage.role !== "user" ||
-      userMessage.id.startsWith("draft-") ||
-      userMessage.id.startsWith("temp-")
+      userMessage.id.startsWith("draft-")
     ) {
       return null;
     }
@@ -843,8 +878,7 @@ export function DesktopChatArea() {
       assistantMessage &&
       (assistantMessage.role !== "assistant" ||
         assistantMessage.mode !== userMessage.mode ||
-        assistantMessage.id.startsWith("draft-") ||
-        assistantMessage.id.startsWith("temp-"))
+        assistantMessage.id.startsWith("draft-"))
     ) {
       return null;
     }
@@ -1053,10 +1087,6 @@ export function DesktopChatArea() {
           prompt: effectiveContent,
         });
 
-        if (!forceCliOAuthSidecar) {
-          setStreaming(false);
-          setStreamingAssistantId(null);
-        }
         setLoading(false);
         setIsUploading(false);
         queueMicrotask(() => inputRef.current?.focus());
