@@ -1080,12 +1080,21 @@ export function DesktopChatArea() {
         if (!effectiveModel.ok) {
           throw new Error("未找到可用模型，无法本地运行");
         }
+        const historyMsgs = useChatStore.getState().messages
+          .filter((m) => m.conversationId === conversationId && !m.id.startsWith("draft-"))
+          .filter((m) => m.id !== userMessageId && m.id !== assistantMessageId);
+        const historyPrefix = historyMsgs.length > 0
+          ? historyMsgs
+              .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${(m.content || "").trim()}`)
+              .filter((s) => s.length > 6)
+              .join("\n\n") + "\n\n---\n\n"
+          : "";
         await sidecarRun.startRun({
           conversationId,
           channelId: currentConversation.channelId,
           modelId: effectiveModel.modelId,
           assistantMessageId,
-          prompt: effectiveContent,
+          prompt: historyPrefix ? `${historyPrefix}User: ${effectiveContent}` : effectiveContent,
         });
 
         setLoading(false);
