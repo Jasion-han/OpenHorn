@@ -1256,7 +1256,7 @@ export function DesktopChatArea() {
           : undefined,
     });
 
-    const isSidecarRetry = messageId.startsWith("temp-") && sidecarRuntimeEnabled && sidecarRuntimeAvailable && currentConversation.channelId && effectiveModel.ok;
+    const isSidecarRetry = (assistantMessage?.runtimeKind === "sidecar" || messageId.startsWith("temp-")) && currentConversation.channelId && effectiveModel.ok;
 
     try {
       if (isSidecarRetry && userMessage) {
@@ -1384,9 +1384,9 @@ export function DesktopChatArea() {
       });
     }
 
-    const isSidecarMessage = userMessage.id.startsWith("temp-");
+    const existingIsSidecar = existingAssistantMessage?.runtimeKind === "sidecar" || userMessage.id.startsWith("temp-");
     const useSidecarForEdit =
-      isSidecarMessage && sidecarRuntimeEnabled && sidecarRuntimeAvailable && currentConversation.channelId && effectiveModel.ok;
+      existingIsSidecar && currentConversation.channelId && effectiveModel.ok;
 
     try {
       if (useSidecarForEdit) {
