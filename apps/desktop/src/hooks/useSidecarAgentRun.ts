@@ -164,7 +164,6 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
           setSdkSessionId(sessionId);
         },
         onEvent: (() => {
-          let hadToolCall = false;
           return (event: import("../lib/agentTaskStream").AgentTaskStreamEvent) => {
           if (event.type === "execution_event" && event.eventType === "final_text" && event.content) {
             useChatStore.getState().applyStreamEvent(input.assistantMessageId, {
@@ -181,9 +180,6 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
             return;
           }
           if (event.type === "execution_event") {
-            if (event.eventType === "tool_start") {
-              hadToolCall = true;
-            }
             useChatStore.getState().applyStreamEvent(input.assistantMessageId, {
               type: "agent_event",
               event: {
