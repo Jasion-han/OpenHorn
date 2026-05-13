@@ -65,6 +65,7 @@ export interface SidecarRunAgentInput {
   model: string;
   baseUrl?: string;
   protocol?: string;
+  isCliOAuth?: boolean;
   sdkSessionId?: string;
   onEvent: (event: AgentTaskStreamEvent) => void | Promise<void>;
   onApproval: (request: SidecarApprovalRequest) => void | Promise<void>;
@@ -273,7 +274,7 @@ export class SidecarClient {
    * callbacks fire asynchronously until the run terminates.
    */
   async runAgent(input: SidecarRunAgentInput): Promise<string> {
-    const { prompt, apiKey, model, baseUrl, protocol, sdkSessionId, onEvent, onApproval, onError, onDone, onSdkSessionId } =
+    const { prompt, apiKey, model, baseUrl, protocol, isCliOAuth, sdkSessionId, onEvent, onApproval, onError, onDone, onSdkSessionId } =
       input;
     const result = (await this.request("agent.run", {
       prompt,
@@ -281,6 +282,7 @@ export class SidecarClient {
       model,
       ...(baseUrl ? { baseUrl } : {}),
       ...(protocol ? { protocol } : {}),
+      ...(isCliOAuth ? { isCliOAuth } : {}),
       ...(sdkSessionId ? { sdkSessionId } : {}),
     })) as { runId: string };
     const runId = result.runId;

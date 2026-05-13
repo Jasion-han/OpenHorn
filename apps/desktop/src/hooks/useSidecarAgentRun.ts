@@ -120,6 +120,7 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
       baseUrl: string | null;
       modelId: string;
       protocol: "openai" | "anthropic" | "google";
+      isCliOAuth?: boolean;
     };
     try {
       const result = await api.channels.getCredentials(input.channelId);
@@ -157,25 +158,32 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
         model: input.modelId || credentials.modelId,
         baseUrl: credentials.baseUrl ?? undefined,
         protocol: credentials.protocol,
+        isCliOAuth: credentials.isCliOAuth ?? false,
         sdkSessionId: input.sdkSessionId ?? sdkSessionId ?? undefined,
         onSdkSessionId: (sessionId) => {
           setSdkSessionId(sessionId);
         },
-        onEvent: (event) => {
-          // Sidecar events use the same AgentTaskStreamEvent shape as
-          // server SSE events, and applyStreamEvent already knows how
-          // to map execution_event / done / error into the message.
-          // We wrap them in the chatStore's expected `agent_event`
-          // envelope for execution_event, plus direct delta handling
-          // for text.
+        onEvent: (() => {
+          let lastText = "";
+          let hadToolCall = false;
+          return (event: import("../lib/agentTaskStream").AgentTaskStreamEvent) => {
           if (event.type === "execution_event" && event.eventType === "text" && event.content) {
+            if (hadToolCall) {
+              lastText = event.content;
+            } else {
+              lastText += event.content;
+            }
             useChatStore.getState().applyStreamEvent(input.assistantMessageId, {
-              type: "delta",
-              content: event.content,
+              type: "agent_event",
+              event: { type: "text", content: event.content },
             });
             return;
           }
           if (event.type === "execution_event") {
+            if (event.eventType === "tool_start") {
+              hadToolCall = true;
+              lastText = "";
+            }
             useChatStore.getState().applyStreamEvent(input.assistantMessageId, {
               type: "agent_event",
               event: {
@@ -188,6 +196,12 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
             return;
           }
           if (event.type === "done") {
+            if (lastText) {
+              useChatStore.getState().applyStreamEvent(input.assistantMessageId, {
+                type: "delta",
+                content: lastText,
+              });
+            }
             useChatStore.getState().applyStreamEvent(input.assistantMessageId, {
               type: "done",
               messageId: input.assistantMessageId,
@@ -218,7 +232,8 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
               message: event.content || "本地运行出错",
             });
           }
-        },
+        };
+        })(),
         onApproval: (request) => {
           setPendingApproval(request);
         },

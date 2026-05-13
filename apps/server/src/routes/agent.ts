@@ -1187,8 +1187,21 @@ async function createTaskExecutionResponse(
           }
 
           if (event.type === "text") {
-            // Final turn confirmed. Collapse Process, then flush buffered
-            // text as streaming text_delta chunks for live display.
+            if (pendingThoughtText.trim()) {
+              await createAgentTaskEvent(userId, taskId, run.id, {
+                type: "execution_event",
+                content: pendingThoughtText.trim(),
+                metadata: { eventType: "thought" },
+              });
+              send({
+                type: "execution_event",
+                taskId,
+                runId: run.id,
+                eventType: "thought",
+                content: pendingThoughtText.trim(),
+              });
+              pendingThoughtText = "";
+            }
             send({
               type: "execution_event",
               taskId,
@@ -1196,29 +1209,7 @@ async function createTaskExecutionResponse(
               eventType: "text_output_start",
               content: null,
             });
-            // Give the client a render frame to collapse Process before
-            // the first text_delta chunk arrives.
             await sleep(50);
-            if (pendingThoughtText.trim()) {
-              const fullText = pendingThoughtText.trim();
-              const segments = Array.from(fullText);
-              for (let i = 0; i < segments.length; i += SYNTHETIC_TEXT_STREAM_CHUNK_SIZE) {
-                const chunk = segments.slice(i, i + SYNTHETIC_TEXT_STREAM_CHUNK_SIZE).join("");
-                if (chunk) {
-                  send({
-                    type: "execution_event",
-                    taskId,
-                    runId: run.id,
-                    eventType: "text_delta",
-                    content: chunk,
-                  });
-                }
-                if (i + SYNTHETIC_TEXT_STREAM_CHUNK_SIZE < segments.length) {
-                  await sleep(14);
-                }
-              }
-            }
-            pendingThoughtText = "";
             const textChunk = event.content ?? "";
             finalText = mergeAgentTextOutput(finalText, textChunk);
             if (textChunk.trim()) {

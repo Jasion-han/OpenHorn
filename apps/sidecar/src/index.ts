@@ -1,5 +1,6 @@
 import { runClaudeAgent } from "./agent/claude";
 import { runCodexAgent } from "./agent/codex";
+import { runDirectAgent } from "./agent/direct";
 import { createCheckpointSession, rollbackCheckpoint } from "./checkpoints";
 import { fsList, fsReadText, fsWriteText } from "./fs";
 import {
@@ -246,12 +247,13 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
       }
       case "agent.run": {
         if (!state.workspaceRoot) throw new Error("Workspace not set");
-        const { prompt, apiKey, model, baseUrl, protocol, sdkSessionId } = params as {
+        const { prompt, apiKey, model, baseUrl, protocol, isCliOAuth, sdkSessionId } = params as {
           prompt: string;
           apiKey: string;
           model: string;
           baseUrl?: string;
           protocol?: string;
+          isCliOAuth?: boolean;
           sdkSessionId?: string;
         };
 
@@ -283,37 +285,22 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
           return;
         }
 
-        const checkpoint = await createCheckpointSession(state.workspaceRoot);
-        const runId = checkpoint.runId;
+        const runId = `direct-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         state.agentRuns.set(runId, { abortController });
         state.ownedRunIds.add(runId);
 
         ws.send(JSON.stringify(buildOkResponse(request.requestId, { runId })));
 
-        void runClaudeAgent({
+        void runDirectAgent({
           apiKey,
           baseUrl,
           model,
           prompt,
+          protocol,
           cwd: state.workspaceRoot,
           abortController,
-          checkpoint,
-          sdkSessionId,
-          requestApproval: async (input) => {
-            ws.send(JSON.stringify(buildEvent("approval.request", { runId, ...input })));
-            const decision = await new Promise<boolean>((resolve) => {
-              state.pendingApprovals.set(input.toolUseId, resolve);
-            });
-            return decision;
-          },
           onEvent: (event) => {
             ws.send(JSON.stringify(buildEvent("agent.event", { runId, event })));
-          },
-          onCheckpointReady: (readyRunId) => {
-            ws.send(JSON.stringify(buildEvent("checkpoint.ready", { runId: readyRunId })));
-          },
-          onSdkSessionId: (sessionId) => {
-            ws.send(JSON.stringify(buildEvent("agent.session", { runId, sdkSessionId: sessionId })));
           },
         }).catch((err) => {
           const msg = err instanceof Error ? err.message : "Claude agent crashed";
