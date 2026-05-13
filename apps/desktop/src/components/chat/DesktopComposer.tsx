@@ -1,4 +1,4 @@
-import { Brain, ChevronDown, ClipboardCheck, CornerDownLeft, FolderCog, Globe, Paperclip, Square } from "lucide-react";
+import { ChevronDown, CornerDownLeft, Globe, Paperclip, Square } from "lucide-react";
 import type {
   ClipboardEvent,
   DragEvent,
@@ -37,14 +37,6 @@ export function DesktopComposer({
   onOpenModelPicker,
   forceWebSearch,
   onToggleWebSearch,
-  sidecarRuntimeAvailable,
-  sidecarRuntimeEnabled,
-  sidecarRuntimeDisabledReason,
-  onToggleSidecarRuntime,
-  agentOverrideDeep,
-  onToggleAgentOverrideDeep,
-  agentOverridePlanApproval,
-  onToggleAgentOverridePlanApproval,
   onInputFocus,
   streaming,
   canSubmit,
@@ -70,19 +62,6 @@ export function DesktopComposer({
   onOpenModelPicker?: () => void;
   forceWebSearch: boolean;
   onToggleWebSearch: () => void;
-  /** True when the sidecar is ready AND a workspace has been picked. */
-  sidecarRuntimeAvailable?: boolean;
-  /** True when the user has opted this composer into running on the sidecar. */
-  sidecarRuntimeEnabled?: boolean;
-  /** Explanation to show as a tooltip when the switch is visible but disabled. */
-  sidecarRuntimeDisabledReason?: string | null;
-  onToggleSidecarRuntime?: () => void;
-  /** Per-task "深度思考" toggle (complexity deep vs default). */
-  agentOverrideDeep?: boolean;
-  onToggleAgentOverrideDeep?: () => void;
-  /** Per-task "计划审批" toggle (requiresPlanApproval). */
-  agentOverridePlanApproval?: boolean;
-  onToggleAgentOverridePlanApproval?: () => void;
   onInputFocus?: () => void;
   streaming: boolean;
   canSubmit: boolean;
@@ -334,121 +313,6 @@ export function DesktopComposer({
                 </p>
               </TooltipContent>
             </Tooltip>
-
-            {mode === "agent" && onToggleSidecarRuntime ? (
-              (() => {
-                const sidecarToggleDisabled =
-                  disabled || streaming || !sidecarRuntimeAvailable;
-                // IMPORTANT: we deliberately avoid the native `disabled`
-                // attribute here. Radix's Tooltip attaches hover /
-                // focus listeners to the trigger, but HTML <button
-                // disabled> swallows mouse events — which means the
-                // tooltip explaining *why* the button is disabled
-                // would never show, leaving the user staring at a
-                // greyed-out control with no feedback. We reproduce
-                // the "disabled" behaviour with aria-disabled + style
-                // + an onClick early-return instead, so the tooltip
-                // still fires on hover / focus.
-                return (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        data-testid="composer-sidecar-toggle"
-                        onClick={() => {
-                          if (sidecarToggleDisabled) return;
-                          onToggleSidecarRuntime();
-                        }}
-                        aria-disabled={sidecarToggleDisabled || undefined}
-                        className={cn(
-                          "flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors",
-                          sidecarRuntimeEnabled && sidecarRuntimeAvailable
-                            ? "bg-blue-400/20 text-blue-500 hover:bg-blue-400/30"
-                            : "text-muted-foreground hover:bg-accent hover:text-foreground",
-                          sidecarToggleDisabled &&
-                            "cursor-not-allowed opacity-60 hover:bg-transparent hover:text-muted-foreground",
-                        )}
-                        aria-label="Run locally on sidecar"
-                      >
-                        <FolderCog className="size-3.5" />
-                        <span>本地运行</span>
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="top">
-                      <p>
-                        {!sidecarRuntimeAvailable
-                          ? sidecarRuntimeDisabledReason || "本地运行尚未就绪"
-                          : sidecarRuntimeEnabled
-                            ? "在本地工作目录运行 Agent：已开启"
-                            : "在本地工作目录运行 Agent：已关闭"}
-                      </p>
-                    </TooltipContent>
-                  </Tooltip>
-                );
-              })()
-            ) : null}
-
-            {mode === "agent" && onToggleAgentOverridePlanApproval ? (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    data-testid="composer-plan-approval-toggle"
-                    onClick={onToggleAgentOverridePlanApproval}
-                    disabled={disabled || streaming}
-                    className={cn(
-                      "flex items-center gap-1 rounded-md px-2 py-1 text-xs transition-colors",
-                      agentOverridePlanApproval
-                        ? "bg-amber-400/20 text-amber-600 hover:bg-amber-400/30"
-                        : "text-muted-foreground hover:bg-accent hover:text-foreground",
-                      (disabled || streaming) && "pointer-events-none opacity-60",
-                    )}
-                    aria-label="Plan approval"
-                  >
-                    <ClipboardCheck className="size-3.5" />
-                    <span>计划审批</span>
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="top">
-                  <p>
-                    {agentOverridePlanApproval
-                      ? "本次任务需要计划审批：已开启"
-                      : "本次任务需要计划审批：已关闭（使用默认设置）"}
-                  </p>
-                </TooltipContent>
-              </Tooltip>
-            ) : null}
-
-            {mode === "agent" && onToggleAgentOverrideDeep ? (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    data-testid="composer-deep-thinking-toggle"
-                    onClick={onToggleAgentOverrideDeep}
-                    disabled={disabled || streaming}
-                    className={cn(
-                      "flex items-center gap-1 rounded-md px-2 py-1 text-xs transition-colors",
-                      agentOverrideDeep
-                        ? "bg-violet-400/20 text-violet-600 hover:bg-violet-400/30"
-                        : "text-muted-foreground hover:bg-accent hover:text-foreground",
-                      (disabled || streaming) && "pointer-events-none opacity-60",
-                    )}
-                    aria-label="Deep thinking"
-                  >
-                    <Brain className="size-3.5" />
-                    <span>深度思考</span>
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="top">
-                  <p>
-                    {agentOverrideDeep
-                      ? "本次任务深度思考：已开启（使用 deep 复杂度）"
-                      : "本次任务深度思考：已关闭（使用默认复杂度）"}
-                  </p>
-                </TooltipContent>
-              </Tooltip>
-            ) : null}
           </div>
 
           <div className="flex items-center gap-1.5">

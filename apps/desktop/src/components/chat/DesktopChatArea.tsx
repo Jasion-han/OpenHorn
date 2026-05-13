@@ -5,7 +5,7 @@ import { uploadAttachments } from "../../lib/attachments";
 import { getDesktopBackendBase } from "../../lib/backendBase";
 import { sanitizeDisplayContent } from "../../lib/citations";
 import { getEffectiveModelForConversation } from "../../lib/effectiveModel";
-import { notifyError, notifyWarning } from "../../lib/notify";
+import { notifyWarning } from "../../lib/notify";
 import { cancelAgentTask } from "../../lib/agentTaskActions";
 import { createServerApi, readErrorMessage } from "../../lib/serverApi";
 import { useSidecarAgentRun } from "../../hooks/useSidecarAgentRun";
@@ -729,31 +729,7 @@ export function DesktopChatArea() {
   );
   const messageAnchorRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const [streamingAssistantId, setStreamingAssistantId] = useState<string | null>(null);
-  const [sidecarRuntimeEnabled, setSidecarRuntimeEnabled] = useState(false);
   const sidecarRun = useSidecarAgentRun();
-  const sidecarStatus = useSidecarStore((state) => state.status);
-  const sidecarWorkspaceRoot = useSidecarStore((state) => state.workspaceRoot);
-  const sidecarLastError = useSidecarStore((state) => state.lastError);
-  const sidecarRuntimeAvailable =
-    sidecarStatus === "ready" && Boolean(sidecarWorkspaceRoot);
-  const sidecarRuntimeDisabledReason = sidecarRuntimeAvailable
-    ? null
-    : sidecarStatus === "unsupported"
-      ? "当前环境不支持本地运行"
-      : sidecarStatus === "error"
-        ? sidecarLastError ?? "本地 Agent 运行异常"
-        : sidecarStatus !== "ready"
-          ? "本地 Agent 运行尚未就绪"
-          : "请先在顶部选择工作目录";
-  // When the sidecar flips out of "ready" (or loses its workspace root),
-  // silently switch the composer back to the server runtime. This
-  // prevents the user from sending a message that would be dropped.
-  useEffect(() => {
-    if (sidecarRuntimeEnabled && !sidecarRuntimeAvailable) {
-      setSidecarRuntimeEnabled(false);
-    }
-  }, [sidecarRuntimeEnabled, sidecarRuntimeAvailable]);
-
   const prevSidecarBusyRef = useRef(false);
   useEffect(() => {
     const wasBusy = prevSidecarBusyRef.current;
@@ -774,11 +750,6 @@ export function DesktopChatArea() {
     }
   }, [sidecarRun.isBusy, autoTitleConversation]);
 
-  // Per-task agent overrides: these are ephemeral state that resets
-  // when the user sends or switches conversations. They override the
-  // stored defaults for just the next agent message.
-  const [agentOverrideDeep, setAgentOverrideDeep] = useState(false);
-  const [agentOverridePlanApproval, setAgentOverridePlanApproval] = useState(false);
   const effectiveModel = getEffectiveModelForConversation(channels, currentConversation);
   const agentModeSupported = effectiveModel.ok;
   const agentModeDisabledReason = effectiveModel.ok
@@ -1002,36 +973,6 @@ export function DesktopChatArea() {
       }>
       | undefined;
 
-    let forceCliOAuthSidecar = false;
-    if (mode === "agent" && currentConversation.channelId) {
-      try {
-        const { credentials } = await createServerApi().channels.getCredentials(
-          currentConversation.channelId,
-        );
-        if (credentials.isCliOAuth && credentials.protocol !== "anthropic") {
-          const sidecar = useSidecarStore.getState();
-          if (sidecar.status !== "ready") {
-            if (sidecar.status === "idle" || sidecar.status === "error") {
-              await sidecar.start();
-            }
-            const retried = useSidecarStore.getState();
-            if (retried.status !== "ready") {
-              notifyError(
-                "需要启用本地运行",
-                "Codex CLI 渠道需要本地运行环境。请确认桌面端已启动。",
-              );
-              return;
-            }
-          }
-          forceCliOAuthSidecar = true;
-        }
-      } catch {
-        // Credential check failed — let the normal flow handle it
-      }
-    }
-
-    const useSidecarRuntime =
-      mode === "agent" && (forceCliOAuthSidecar || (sidecarRuntimeEnabled && sidecarRuntimeAvailable));
     try {
       addMessage({
         id: userMessageId,
@@ -1048,7 +989,7 @@ export function DesktopChatArea() {
         role: "assistant",
         content: "",
         mode,
-        runtimeKind: useSidecarRuntime ? "sidecar" : "server",
+        runtimeKind: mode === "agent" ? "sidecar" : undefined,
         agentRun:
           mode === "agent"
             ? {
@@ -1067,7 +1008,11 @@ export function DesktopChatArea() {
       setError(null);
       queueMicrotask(() => inputRef.current?.focus());
 
-      if (useSidecarRuntime) {
+      if (mode === "agent") {
+        const sidecar = useSidecarStore.getState();
+        if (sidecar.status !== "ready" || !sidecar.workspaceRoot) {
+          throw new Error("Agent 模式需要本地运行环境。请确认工作目录已选择且 sidecar 已就绪。");
+        }
         if (files.length > 0) {
           notifyWarning(
             "本地运行暂不支持附件",
@@ -1132,32 +1077,12 @@ export function DesktopChatArea() {
         setPendingAttachments([]);
       }
 
-      // Build per-message agent overrides from the composer switches.
-      // Only included when the user explicitly toggled something away
-      // from the defaults — otherwise we leave them absent so the
-      // server uses the stored defaults.
-      const agentOverrides =
-        mode === "agent" && (agentOverrideDeep || agentOverridePlanApproval)
-          ? {
-              ...(agentOverrideDeep ? { complexity: "deep" as const } : {}),
-              ...(agentOverridePlanApproval
-                ? { requiresPlanApproval: true }
-                : {}),
-            }
-          : undefined;
-
-      // Reset the per-task overrides after we've captured them so the
-      // next message starts from the stored defaults again.
-      setAgentOverrideDeep(false);
-      setAgentOverridePlanApproval(false);
-
       const { response } = await sendMessage({
         content: effectiveContent,
         attachments: attachmentIds,
         attachmentsMeta:
           attachmentsMeta || (localAttachmentMeta.length > 0 ? localAttachmentMeta : undefined),
         mode,
-        agentOverrides,
         existingMessageIds: {
           userMessageId,
           assistantMessageId,
@@ -1256,7 +1181,7 @@ export function DesktopChatArea() {
           : undefined,
     });
 
-    const isSidecarRetry = (assistantMessage?.runtimeKind === "sidecar" || messageId.startsWith("temp-")) && currentConversation.channelId && effectiveModel.ok;
+    const isSidecarRetry = assistantMessage?.mode === "agent" && currentConversation.channelId && effectiveModel.ok;
 
     try {
       if (isSidecarRetry && userMessage) {
@@ -1384,9 +1309,8 @@ export function DesktopChatArea() {
       });
     }
 
-    const existingIsSidecar = existingAssistantMessage?.runtimeKind === "sidecar" || userMessage.id.startsWith("temp-");
     const useSidecarForEdit =
-      existingIsSidecar && currentConversation.channelId && effectiveModel.ok;
+      existingAssistantMessage?.mode === "agent" && currentConversation.channelId && effectiveModel.ok;
 
     try {
       if (useSidecarForEdit) {
@@ -1694,27 +1618,6 @@ export function DesktopChatArea() {
           onOpenModelPicker={() => setModelPickerOpen(true)}
           forceWebSearch={forceWebSearch}
           onToggleWebSearch={() => void handleToggleWebSearch()}
-          sidecarRuntimeAvailable={sidecarRuntimeAvailable}
-          sidecarRuntimeEnabled={sidecarRuntimeEnabled}
-          sidecarRuntimeDisabledReason={sidecarRuntimeDisabledReason}
-          onToggleSidecarRuntime={
-            // Mirror the DesktopSidecarWorkspaceBadge visibility rule:
-            // when the host cannot host the sidecar at all, hide the
-            // toggle entirely instead of rendering a permanently-
-            // disabled button. Every other status (starting, error,
-            // ready-without-workspace) still renders the toggle with
-            // an explanatory disabled tooltip.
-            sidecarStatus === "unsupported"
-              ? undefined
-              : () => {
-                  if (!sidecarRuntimeAvailable) return;
-                  setSidecarRuntimeEnabled((value) => !value);
-                }
-          }
-          agentOverrideDeep={agentOverrideDeep}
-          onToggleAgentOverrideDeep={() => setAgentOverrideDeep((v) => !v)}
-          agentOverridePlanApproval={agentOverridePlanApproval}
-          onToggleAgentOverridePlanApproval={() => setAgentOverridePlanApproval((v) => !v)}
           onInputFocus={handleInputFocus}
           streaming={isStreaming}
           canSubmit={canSend}

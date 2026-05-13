@@ -412,7 +412,6 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
           content: input.content,
           attachments: input.attachments,
           mode,
-          agentOverrides: input.agentOverrides,
         });
 
         return { userMessageId, assistantMessageId, response };
