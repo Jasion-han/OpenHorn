@@ -1363,13 +1363,36 @@ export function DesktopChatArea() {
       });
     }
 
-    try {
-      const response = await editUserMessage(userMessage.id, nextContent);
-      await consumeStreamingResponse(assistantMessageId, response);
+    const isSidecarMessage = userMessage.id.startsWith("temp-");
+    const useSidecarForEdit =
+      isSidecarMessage && sidecarRuntimeEnabled && sidecarRuntimeAvailable && currentConversation.channelId && effectiveModel.ok;
 
-      setStreaming(false);
-      setStreamingAssistantId(null);
-      await Promise.all([loadMessages(currentConversation.id), loadConversations()]);
+    try {
+      if (useSidecarForEdit) {
+        const historyMsgs = useChatStore.getState().messages
+          .filter((m) => m.conversationId === currentConversation.id && !m.id.startsWith("draft-"))
+          .filter((m) => m.id !== userMessage.id && m.id !== assistantMessageId);
+        const historyPrefix = historyMsgs.length > 0
+          ? historyMsgs
+              .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${(m.content || "").trim()}`)
+              .filter((s) => s.length > 6)
+              .join("\n\n") + "\n\n---\n\n"
+          : "";
+        await sidecarRun.startRun({
+          conversationId: currentConversation.id,
+          channelId: currentConversation.channelId!,
+          modelId: effectiveModel.ok ? effectiveModel.modelId : "",
+          assistantMessageId,
+          prompt: historyPrefix ? `${historyPrefix}User: ${nextContent}` : nextContent,
+        });
+        setLoading(false);
+      } else {
+        const response = await editUserMessage(userMessage.id, nextContent);
+        await consumeStreamingResponse(assistantMessageId, response);
+        setStreaming(false);
+        setStreamingAssistantId(null);
+        await Promise.all([loadMessages(currentConversation.id), loadConversations()]);
+      }
     } catch (error) {
       setLoading(false);
       setStreaming(false);
