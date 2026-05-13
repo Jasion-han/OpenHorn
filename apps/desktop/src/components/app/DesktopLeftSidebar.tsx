@@ -299,7 +299,6 @@ export function DesktopLeftSidebar() {
         <div className="min-w-0">
           <div className="truncate text-sm font-semibold leading-5">OpenHorn</div>
           <div className="flex items-center gap-2">
-            <span className="text-[11px] text-muted-foreground">Local</span>
             {backend.status === "down" && <Badge variant="destructive">offline</Badge>}
             {backend.status === "down" && (
               <Button
