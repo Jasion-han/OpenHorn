@@ -1,5 +1,8 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createInterface } from "node:readline";
+import { mkdirSync, symlinkSync, writeFileSync, existsSync } from "node:fs";
+import { join } from "node:path";
+import { homedir, tmpdir } from "node:os";
 import type { AgentEvent } from "./events";
 
 export type RunCodexAgentInput = {
@@ -97,13 +100,25 @@ export async function runCodexAgent(input: RunCodexAgentInput): Promise<void> {
     return;
   }
 
+  const sidecarCodexHome = join(tmpdir(), "openhorn-codex-sidecar");
+  if (!existsSync(sidecarCodexHome)) mkdirSync(sidecarCodexHome, { recursive: true });
+  const authSrc = join(homedir(), ".codex", "auth.json");
+  const authDst = join(sidecarCodexHome, "auth.json");
+  if (existsSync(authSrc) && !existsSync(authDst)) {
+    try { symlinkSync(authSrc, authDst); } catch {}
+  }
+  const cfgPath = join(sidecarCodexHome, "config.toml");
+  if (!existsSync(cfgPath)) {
+    writeFileSync(cfgPath, 'approval_policy = "never"\nsandbox_mode = "danger-full-access"\n[mcp_servers]\n');
+  }
+
   const proc = spawn(
     codexPath,
-    ["app-server", "--listen", "stdio://", "-c", "mcp_servers={}", "-c", "notify=[]"],
+    ["app-server", "--listen", "stdio://"],
     {
       cwd,
       stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env },
+      env: { ...process.env, CODEX_HOME: sidecarCodexHome },
     },
   );
 

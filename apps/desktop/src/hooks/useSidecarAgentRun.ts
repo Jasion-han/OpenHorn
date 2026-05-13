@@ -164,25 +164,17 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
           setSdkSessionId(sessionId);
         },
         onEvent: (() => {
-          let lastText = "";
-          let hadToolCall = false;
           return (event: import("../lib/agentTaskStream").AgentTaskStreamEvent) => {
           if (event.type === "execution_event" && event.eventType === "text" && event.content) {
-            if (hadToolCall) {
-              lastText = event.content;
-            } else {
-              lastText += event.content;
-            }
             useChatStore.getState().applyStreamEvent(input.assistantMessageId, {
-              type: "agent_event",
-              event: { type: "text", content: event.content },
+              type: "delta",
+              content: event.content,
             });
             return;
           }
           if (event.type === "execution_event") {
             if (event.eventType === "tool_start") {
-              hadToolCall = true;
-              lastText = "";
+              useChatStore.getState().updateMessage(input.assistantMessageId, { content: "" });
             }
             useChatStore.getState().applyStreamEvent(input.assistantMessageId, {
               type: "agent_event",
@@ -196,12 +188,6 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
             return;
           }
           if (event.type === "done") {
-            if (lastText) {
-              useChatStore.getState().applyStreamEvent(input.assistantMessageId, {
-                type: "delta",
-                content: lastText,
-              });
-            }
             useChatStore.getState().applyStreamEvent(input.assistantMessageId, {
               type: "done",
               messageId: input.assistantMessageId,
