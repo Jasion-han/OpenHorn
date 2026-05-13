@@ -1256,26 +1256,47 @@ export function DesktopChatArea() {
           : undefined,
     });
 
+    const isSidecarRetry = messageId.startsWith("temp-") && sidecarRuntimeEnabled && sidecarRuntimeAvailable && currentConversation.channelId && effectiveModel.ok;
+
     try {
-      const response = await regenerateMessage(
-        messageId,
-        userMessage && !userMessage.id.startsWith("draft-")
-          ? {
-              userMessageId: userMessage.id,
-              userContent: userMessage.content,
-            }
-          : undefined,
-      );
+      if (isSidecarRetry && userMessage) {
+        const historyMsgs = useChatStore.getState().messages
+          .filter((m) => m.conversationId === currentConversation.id && !m.id.startsWith("draft-"))
+          .filter((m) => m.id !== userMessage.id && m.id !== messageId);
+        const historyPrefix = historyMsgs.length > 0
+          ? historyMsgs
+              .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${(m.content || "").trim()}`)
+              .filter((s) => s.length > 6)
+              .join("\n\n") + "\n\n---\n\n"
+          : "";
+        await sidecarRun.startRun({
+          conversationId: currentConversation.id,
+          channelId: currentConversation.channelId!,
+          modelId: effectiveModel.ok ? effectiveModel.modelId : "",
+          assistantMessageId: messageId,
+          prompt: historyPrefix ? `${historyPrefix}User: ${userMessage.content}` : userMessage.content,
+        });
+        setLoading(false);
+      } else {
+        const response = await regenerateMessage(
+          messageId,
+          userMessage && !userMessage.id.startsWith("draft-")
+            ? {
+                userMessageId: userMessage.id,
+                userContent: userMessage.content,
+              }
+            : undefined,
+        );
 
-      if (!response.ok) {
-        throw new Error(await readErrorMessage(response, "Failed to regenerate message"));
+        if (!response.ok) {
+          throw new Error(await readErrorMessage(response, "Failed to regenerate message"));
+        }
+
+        await consumeStreamingResponse(messageId, response);
+        setStreaming(false);
+        setStreamingAssistantId(null);
+        await Promise.all([loadMessages(currentConversation.id), loadConversations()]);
       }
-
-      await consumeStreamingResponse(messageId, response);
-
-      setStreaming(false);
-      setStreamingAssistantId(null);
-      await Promise.all([loadMessages(currentConversation.id), loadConversations()]);
     } catch (error) {
       setLoading(false);
       setStreaming(false);
