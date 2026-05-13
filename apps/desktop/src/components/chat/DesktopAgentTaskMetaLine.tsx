@@ -1,6 +1,9 @@
 import { cn } from "ui";
-import type { StreamTone } from "../../lib/agentTaskStreamBuilder";
-import { toneClassName, getActiveMetaTextStyle } from "../../lib/agentTaskPresenter";
+import {
+  getActiveMetaTextStyle,
+  type StreamTone,
+  toneClassName,
+} from "../../lib/agentTaskPresenter";
 
 export function DesktopAgentTaskMetaLine({
   text,
@@ -14,12 +17,7 @@ export function DesktopAgentTaskMetaLine({
   subtext?: string | null;
 }) {
   return (
-    <div
-      className={cn(
-        "py-0.5 text-sm leading-6",
-        toneClassName(tone),
-      )}
-    >
+    <div className={cn("py-0.5 text-sm leading-6", toneClassName(tone))}>
       {active && (
         <style>{`
           @keyframes agentMetaTextShimmer {
@@ -43,9 +41,7 @@ export function DesktopAgentTaskMetaLine({
         />
         <span className="min-w-0">
           <span className="mr-0" />
-          <span style={active ? getActiveMetaTextStyle() : undefined}>
-            {text}
-          </span>
+          <span style={active ? getActiveMetaTextStyle() : undefined}>{text}</span>
           {subtext ? <span className="text-foreground opacity-32"> · {subtext}</span> : null}
           {null}
         </span>
