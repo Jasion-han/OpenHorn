@@ -1,5 +1,6 @@
 export type AgentEvent =
   | { type: "text"; content: string }
+  | { type: "final_text"; content: string }
   | { type: "tool_start"; toolName?: string; toolInput?: unknown }
   | { type: "tool_result"; content?: string }
   | { type: "user_message"; userMessageId: string }

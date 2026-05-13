@@ -350,7 +350,7 @@ function AgentRunPanel({ run }: { run?: ApiAgentRun }) {
           if (!text && !detail) return null;
 
           return (
-            <CollapsibleBlock key={stepKey} maxLines={step.type === "tool_start" ? 2 : 0}>
+            <CollapsibleBlock key={stepKey} maxLines={step.type === "tool_start" ? 3 : 0}>
               <DesktopAgentTaskMetaLine
                 text={text ?? detail ?? "Tool"}
                 subtext={detail}

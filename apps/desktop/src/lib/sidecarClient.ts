@@ -104,7 +104,7 @@ type SidecarIncoming = SidecarIncomingResponse | SidecarIncomingEvent;
 
 /** Sidecar AgentEvent — see apps/sidecar/src/agent/events.ts. */
 interface SidecarAgentEvent {
-  type: "text" | "tool_start" | "tool_result" | "user_message" | "done" | "error";
+  type: "text" | "final_text" | "tool_start" | "tool_result" | "user_message" | "done" | "error";
   content?: string;
   toolName?: string;
   toolInput?: unknown;
@@ -146,6 +146,14 @@ export function projectSidecarAgentEvent(
         taskId: runId,
         runId,
         eventType: "text",
+        content: typeof event.content === "string" ? event.content : "",
+      };
+    case "final_text":
+      return {
+        type: "execution_event",
+        taskId: runId,
+        runId,
+        eventType: "final_text",
         content: typeof event.content === "string" ? event.content : "",
       };
     case "tool_start":

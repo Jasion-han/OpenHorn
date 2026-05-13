@@ -164,11 +164,16 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
           setSdkSessionId(sessionId);
         },
         onEvent: (() => {
-          let lastTextSegment = "";
           let hadToolCall = false;
           return (event: import("../lib/agentTaskStream").AgentTaskStreamEvent) => {
+          if (event.type === "execution_event" && event.eventType === "final_text" && event.content) {
+            useChatStore.getState().applyStreamEvent(input.assistantMessageId, {
+              type: "delta",
+              content: event.content,
+            });
+            return;
+          }
           if (event.type === "execution_event" && event.eventType === "text" && event.content) {
-            lastTextSegment += event.content;
             useChatStore.getState().applyStreamEvent(input.assistantMessageId, {
               type: "agent_event",
               event: { type: "text", content: event.content },
@@ -178,7 +183,6 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
           if (event.type === "execution_event") {
             if (event.eventType === "tool_start") {
               hadToolCall = true;
-              lastTextSegment = "";
             }
             useChatStore.getState().applyStreamEvent(input.assistantMessageId, {
               type: "agent_event",
@@ -192,13 +196,6 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
             return;
           }
           if (event.type === "done") {
-            if (lastTextSegment) {
-              useChatStore.getState().applyStreamEvent(input.assistantMessageId, {
-                type: "delta",
-                content: lastTextSegment,
-              });
-              lastTextSegment = "";
-            }
             useChatStore.getState().applyStreamEvent(input.assistantMessageId, {
               type: "done",
               messageId: input.assistantMessageId,

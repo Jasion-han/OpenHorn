@@ -145,10 +145,15 @@ export async function runCodexAgent(input: RunCodexAgentInput): Promise<void> {
     let initialized = false;
     let threadStarted = false;
     let done = false;
+    let pendingText = "";
 
     const finish = (event?: AgentEvent) => {
       if (done) return;
       done = true;
+      if (pendingText) {
+        onEvent({ type: "final_text", content: pendingText });
+        pendingText = "";
+      }
       if (event) onEvent(event);
       onEvent({ type: "done" });
       cleanup();
@@ -197,7 +202,19 @@ export async function runCodexAgent(input: RunCodexAgentInput): Promise<void> {
           finish(event.type === "error" ? event : undefined);
           return;
         }
-        if (event.type !== "done") {
+        if (event.type === "text") {
+          pendingText += event.content;
+        } else if (event.type === "tool_start") {
+          if (pendingText) {
+            onEvent({ type: "text", content: pendingText });
+            pendingText = "";
+          }
+          onEvent(event);
+        } else if (event.type !== "done") {
+          if (event.type === "tool_result" && pendingText) {
+            onEvent({ type: "text", content: pendingText });
+            pendingText = "";
+          }
           onEvent(event);
         }
       }
