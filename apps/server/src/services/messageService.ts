@@ -1627,6 +1627,7 @@ export async function syncSidecarMessages(
     assistantContent: string;
     model?: string;
     mode?: string;
+    agentRun?: unknown;
   },
 ) {
   const conversation = await db.query.conversations.findFirst({
@@ -1660,7 +1661,7 @@ export async function syncSidecarMessages(
     model: input.model || null,
     mode: input.mode || "agent",
     attachments: null,
-    agentRun: null,
+    agentRun: input.agentRun ? JSON.stringify(input.agentRun) : null,
     liveMetadata: null,
     citations: null,
     createdAt: new Date(now.getTime() + 1),

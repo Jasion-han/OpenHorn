@@ -49,6 +49,7 @@ export interface ServerApi {
       userContent: string;
       assistantContent: string;
       model?: string;
+      agentRun?: unknown;
     }) => Promise<{ userMessageId: string; assistantMessageId: string }>;
   };
   channels: {

@@ -211,6 +211,7 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
                   userContent: input.prompt,
                   assistantContent,
                   model: input.modelId || credentials.modelId,
+                  agentRun: assistantMsg?.agentRun ?? undefined,
                 })
                 .catch(() => {});
             }
