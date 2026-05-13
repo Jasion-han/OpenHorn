@@ -2,7 +2,6 @@ import { PanelLeft, PanelLeftClose } from "lucide-react";
 import { Button } from "ui";
 import { useDesktopShellStore } from "../../stores/desktopShellStore";
 import type { Conversation } from "../../types/chat";
-import { DesktopAgentTaskHistoryButton } from "./DesktopAgentTaskHistory";
 import { DesktopSidecarWorkspaceBadge } from "./DesktopSidecarWorkspaceBadge";
 
 export function DesktopChatHeader({ conversation }: { conversation: Conversation | null }) {
@@ -40,7 +39,6 @@ export function DesktopChatHeader({ conversation }: { conversation: Conversation
         <p className="truncate font-semibold">{conversation.title}</p>
       </div>
       <div className="flex shrink-0 items-center gap-2">
-        <DesktopAgentTaskHistoryButton conversationId={conversation.id} />
         <DesktopSidecarWorkspaceBadge />
       </div>
     </div>

@@ -11,11 +11,6 @@ import {
   DialogTitle,
   Input,
   Label,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
   SettingsCard,
   SettingsSection,
   Switch,
@@ -40,13 +35,6 @@ type MCPServer = {
 
 const TAVILY_API_KEY_SETTING = "liveSearch.tavilyApiKey";
 const TAVILY_ENABLED_SETTING = "liveSearch.tavilyEnabled";
-const AGENT_DEFAULT_COMPLEXITY_SETTING = "agent.defaultComplexity";
-const AGENT_DEFAULT_UX_MODE_SETTING = "agent.defaultUxMode";
-const AGENT_DEFAULT_REQUIRES_PLAN_APPROVAL_SETTING = "agent.defaultRequiresPlanApproval";
-const AGENT_DEFAULT_AUTO_START_SETTING = "agent.defaultAutoStart";
-
-type AgentDefaultComplexity = "light" | "standard" | "deep";
-type AgentDefaultUxMode = "direct" | "compact" | "full";
 
 function mapChannel(channel: ApiChannel): Channel {
   return {
@@ -76,22 +64,6 @@ function mapChannel(channel: ApiChannel): Channel {
   };
 }
 
-function parseAgentDefaultComplexity(value: string | undefined): AgentDefaultComplexity {
-  return value === "light" || value === "deep" || value === "standard" ? value : "standard";
-}
-
-function parseAgentDefaultUxMode(value: string | undefined): AgentDefaultUxMode {
-  return value === "direct" || value === "full" || value === "compact" ? value : "compact";
-}
-
-function parseBooleanSetting(value: string | undefined, fallback: boolean) {
-  if (typeof value !== "string") return fallback;
-  const normalized = value.trim().toLowerCase();
-  if (normalized === "true") return true;
-  if (normalized === "false") return false;
-  return fallback;
-}
-
 export function AgentSettings() {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [mcpServers, setMcpServers] = useState<MCPServer[]>([]);
@@ -102,19 +74,6 @@ export function AgentSettings() {
   const [savingTavilyApiKey, setSavingTavilyApiKey] = useState(false);
   const [tavilyEnabled, setTavilyEnabled] = useState(true);
   const [savingTavilyEnabled, setSavingTavilyEnabled] = useState(false);
-  const [agentDefaultComplexity, setAgentDefaultComplexity] =
-    useState<AgentDefaultComplexity>("standard");
-  const [savedAgentDefaultComplexity, setSavedAgentDefaultComplexity] =
-    useState<AgentDefaultComplexity>("standard");
-  const [agentDefaultUxMode, setAgentDefaultUxMode] = useState<AgentDefaultUxMode>("compact");
-  const [savedAgentDefaultUxMode, setSavedAgentDefaultUxMode] =
-    useState<AgentDefaultUxMode>("compact");
-  const [agentDefaultPlanApproval, setAgentDefaultPlanApproval] = useState(false);
-  const [savedAgentDefaultPlanApproval, setSavedAgentDefaultPlanApproval] = useState(false);
-  const [agentDefaultAutoStart, setAgentDefaultAutoStart] = useState(true);
-  const [savedAgentDefaultAutoStart, setSavedAgentDefaultAutoStart] = useState(true);
-  const [savingAgentDefaults, setSavingAgentDefaults] = useState(false);
-
   const [mcpModalOpen, setMcpModalOpen] = useState(false);
   const [mcpName, setMcpName] = useState("");
   const [mcpType, setMcpType] = useState("stdio");
@@ -129,14 +88,7 @@ export function AgentSettings() {
       const [{ channels }, { servers }, { settings }] = await Promise.all([
         api.channels.list(),
         api.mcp.listServers(),
-        api.settings.get([
-          TAVILY_API_KEY_SETTING,
-          TAVILY_ENABLED_SETTING,
-          AGENT_DEFAULT_COMPLEXITY_SETTING,
-          AGENT_DEFAULT_UX_MODE_SETTING,
-          AGENT_DEFAULT_REQUIRES_PLAN_APPROVAL_SETTING,
-          AGENT_DEFAULT_AUTO_START_SETTING,
-        ]),
+        api.settings.get([TAVILY_API_KEY_SETTING, TAVILY_ENABLED_SETTING]),
       ]);
 
       setChannels(channels.map(mapChannel));
@@ -149,21 +101,6 @@ export function AgentSettings() {
       setTavilyEnabled(
         enabledRaw == null ? true : String(enabledRaw).trim().toLowerCase() !== "false",
       );
-      const nextComplexity = parseAgentDefaultComplexity(settings[AGENT_DEFAULT_COMPLEXITY_SETTING]);
-      const nextUxMode = parseAgentDefaultUxMode(settings[AGENT_DEFAULT_UX_MODE_SETTING]);
-      const nextPlanApproval = parseBooleanSetting(
-        settings[AGENT_DEFAULT_REQUIRES_PLAN_APPROVAL_SETTING],
-        false,
-      );
-      const nextAutoStart = parseBooleanSetting(settings[AGENT_DEFAULT_AUTO_START_SETTING], true);
-      setAgentDefaultComplexity(nextComplexity);
-      setSavedAgentDefaultComplexity(nextComplexity);
-      setAgentDefaultUxMode(nextUxMode);
-      setSavedAgentDefaultUxMode(nextUxMode);
-      setAgentDefaultPlanApproval(nextPlanApproval);
-      setSavedAgentDefaultPlanApproval(nextPlanApproval);
-      setAgentDefaultAutoStart(nextAutoStart);
-      setSavedAgentDefaultAutoStart(nextAutoStart);
     } catch (error) {
       notifyError("加载失败", error instanceof Error ? error.message : "无法加载 Agent 设置。");
     } finally {
@@ -216,30 +153,6 @@ export function AgentSettings() {
       notifyError("更新失败", error instanceof Error ? error.message : "无法更新 Tavily 状态。");
     } finally {
       setSavingTavilyEnabled(false);
-    }
-  };
-
-  const handleSaveAgentDefaults = async () => {
-    setSavingAgentDefaults(true);
-    try {
-      await Promise.all([
-        api.settings.set(AGENT_DEFAULT_COMPLEXITY_SETTING, agentDefaultComplexity),
-        api.settings.set(AGENT_DEFAULT_UX_MODE_SETTING, agentDefaultUxMode),
-        api.settings.set(
-          AGENT_DEFAULT_REQUIRES_PLAN_APPROVAL_SETTING,
-          agentDefaultPlanApproval ? "true" : "false",
-        ),
-        api.settings.set(AGENT_DEFAULT_AUTO_START_SETTING, agentDefaultAutoStart ? "true" : "false"),
-      ]);
-      setSavedAgentDefaultComplexity(agentDefaultComplexity);
-      setSavedAgentDefaultUxMode(agentDefaultUxMode);
-      setSavedAgentDefaultPlanApproval(agentDefaultPlanApproval);
-      setSavedAgentDefaultAutoStart(agentDefaultAutoStart);
-      notifySuccess("已保存", "Agent 默认执行行为已更新。");
-    } catch (error) {
-      notifyError("保存失败", error instanceof Error ? error.message : "无法保存 Agent 默认行为。");
-    } finally {
-      setSavingAgentDefaults(false);
     }
   };
 
@@ -341,108 +254,6 @@ export function AgentSettings() {
                   未设置默认渠道，请在左侧切换到「渠道」进行配置。
                 </p>
               )}
-            </div>
-          </div>
-        </SettingsCard>
-      </SettingsSection>
-
-      <SettingsSection
-        title="Agent 默认执行行为"
-        description="控制新建 Agent 任务的默认呈现方式与自动化程度。这里的设置会直接影响最新一轮对话的 task-backed agent 流程。"
-      >
-        <SettingsCard divided={false} className="p-4">
-          <div className="flex flex-col gap-4">
-            <div className="grid gap-3 md:grid-cols-2">
-              <div className="flex flex-col gap-1.5">
-                <Label>默认执行模式</Label>
-                <Select
-                  value={agentDefaultUxMode}
-                  onValueChange={(value) => setAgentDefaultUxMode(value as AgentDefaultUxMode)}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="direct">Direct</SelectItem>
-                    <SelectItem value="compact">Compact</SelectItem>
-                    <SelectItem value="full">Full</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="flex flex-col gap-1.5">
-                <Label>默认推理深度</Label>
-                <Select
-                  value={agentDefaultComplexity}
-                  onValueChange={(value) =>
-                    setAgentDefaultComplexity(value as AgentDefaultComplexity)
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="light">Light</SelectItem>
-                    <SelectItem value="standard">Standard</SelectItem>
-                    <SelectItem value="deep">Deep</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between rounded-xl border border-border/50 bg-background/60 p-3">
-              <div>
-                <p className="text-sm font-medium">默认需要计划审批</p>
-                <p className="text-xs text-muted-foreground">
-                  开启后，Agent 会先生成计划并等待你批准，再继续执行。
-                </p>
-              </div>
-              <Switch
-                checked={agentDefaultPlanApproval}
-                onCheckedChange={setAgentDefaultPlanApproval}
-                disabled={savingAgentDefaults}
-              />
-            </div>
-
-            <div className="flex items-center justify-between rounded-xl border border-border/50 bg-background/60 p-3">
-              <div>
-                <p className="text-sm font-medium">默认自动开始执行</p>
-                <p className="text-xs text-muted-foreground">
-                  在不需要计划审批时，规划完成后自动进入执行阶段。
-                </p>
-              </div>
-              <Switch
-                checked={agentDefaultAutoStart}
-                onCheckedChange={setAgentDefaultAutoStart}
-                disabled={savingAgentDefaults}
-              />
-            </div>
-
-            <div className="flex justify-end gap-2">
-              <Button
-                variant="ghost"
-                onClick={() => {
-                  setAgentDefaultComplexity(savedAgentDefaultComplexity);
-                  setAgentDefaultUxMode(savedAgentDefaultUxMode);
-                  setAgentDefaultPlanApproval(savedAgentDefaultPlanApproval);
-                  setAgentDefaultAutoStart(savedAgentDefaultAutoStart);
-                }}
-                disabled={savingAgentDefaults}
-              >
-                取消
-              </Button>
-              <Button
-                onClick={() => void handleSaveAgentDefaults()}
-                disabled={
-                  savingAgentDefaults ||
-                  (agentDefaultComplexity === savedAgentDefaultComplexity &&
-                    agentDefaultUxMode === savedAgentDefaultUxMode &&
-                    agentDefaultPlanApproval === savedAgentDefaultPlanApproval &&
-                    agentDefaultAutoStart === savedAgentDefaultAutoStart)
-                }
-              >
-                保存
-              </Button>
             </div>
           </div>
         </SettingsCard>
