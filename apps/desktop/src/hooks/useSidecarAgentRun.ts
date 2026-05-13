@@ -165,6 +165,7 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
         },
         onEvent: (() => {
           let lastTextSegment = "";
+          let hadToolCall = false;
           return (event: import("../lib/agentTaskStream").AgentTaskStreamEvent) => {
           if (event.type === "execution_event" && event.eventType === "text" && event.content) {
             lastTextSegment += event.content;
@@ -176,6 +177,7 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
           }
           if (event.type === "execution_event") {
             if (event.eventType === "tool_start") {
+              hadToolCall = true;
               lastTextSegment = "";
             }
             useChatStore.getState().applyStreamEvent(input.assistantMessageId, {
