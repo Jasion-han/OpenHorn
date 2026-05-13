@@ -13,7 +13,7 @@ import { useChatStore } from "../../stores/chatStore";
 import { useSidecarStore } from "../../stores/sidecarStore";
 import type { ApiAgentRun, ChatStreamEvent, Message, MessageAttachmentMeta } from "../../types/chat";
 import { DesktopCitationList } from "./DesktopCitationList";
-import { DesktopAgentTaskCard, DesktopAgentTaskMetaLine } from "./DesktopAgentTaskCard";
+import { DesktopAgentTaskMetaLine } from "./DesktopAgentTaskMetaLine";
 import { DesktopChatHeader } from "./DesktopChatHeader";
 import { DesktopComposer } from "./DesktopComposer";
 import { DesktopMarkdownMessage } from "./DesktopMarkdownMessage";
@@ -552,13 +552,7 @@ function MessageBubble({
   userMaxWidth: string;
 }) {
   const isAssistant = message.role === "assistant";
-  const isTaskStreaming =
-    isAssistant &&
-    Boolean(message.agentRun?.taskId) &&
-    !["completed", "failed", "cancelled"].includes(
-      message.agentRun?.taskStatus ?? message.agentRun?.status ?? "",
-    );
-  const isMessageStreaming = isStreaming || isTaskStreaming;
+  const isMessageStreaming = isStreaming;
   const label = message.mode === "agent" ? "Agent" : "Chat";
   const badgeIcon = message.mode === "agent" ? <Bot size={12} /> : <MessageSquare size={12} />;
   const displayContent = isAssistant
@@ -568,16 +562,9 @@ function MessageBubble({
   const isAssistantPlaceholder = isAssistant && isMessageStreaming && !hasAssistantText;
   const streamTailLength =
     isAssistant && isMessageStreaming && hasAssistantText ? (message.streamTail || "").length : 0;
-  const isAgentTaskMessage = isAssistant && Boolean(message.agentRun?.taskId);
   const isFlatAgentAssistant = isAssistant && message.mode === "agent";
   const processPanel = isAssistant ? (
-    message.agentRun?.taskId ? (
-      <DesktopAgentTaskCard
-        messageId={message.id}
-        taskId={message.agentRun.taskId}
-        fallbackContent={message.content || message.agentRun.summary}
-      />
-    ) : message.mode === "agent" && isMessageStreaming && !hasAssistantText && !(message.agentRun?.steps?.length) ? (
+    message.mode === "agent" && isMessageStreaming && !hasAssistantText && !(message.agentRun?.steps?.length) ? (
       <section className="mt-0.5 px-1 pt-0 pb-1">
         <DesktopAgentTaskMetaLine text={message.agentRun?.summary?.trim() || "Thinking"} active />
       </section>
@@ -625,7 +612,7 @@ function MessageBubble({
 
         {processPanel}
 
-        {isAssistant && !isAgentTaskMessage ? (
+        {isAssistant ? (
           <div className={cn("min-w-0 max-w-full", processPanel && "mt-3")}>
             <LiveStatusBadge
               status={message.liveStatus}
@@ -1431,14 +1418,8 @@ export function DesktopChatArea() {
       )}
     >
       {(() => {
-        const isTaskStreaming =
-          message.role === "assistant" &&
-          Boolean(message.agentRun?.taskId) &&
-          !["completed", "failed", "cancelled"].includes(
-            message.agentRun?.taskStatus ?? message.agentRun?.status ?? "",
-          );
         const isMessageStreaming =
-          Boolean(isStreaming && streamingAssistantId && message.id === streamingAssistantId) || isTaskStreaming;
+          Boolean(isStreaming && streamingAssistantId && message.id === streamingAssistantId);
 
         return (
           <MessageBubble

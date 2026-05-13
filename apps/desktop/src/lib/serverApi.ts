@@ -1,11 +1,8 @@
 import type {
-  ApiAgentApprovalStatus,
   ApiAgentCheckResult,
   ApiChannel,
   ApiChannelModel,
   ApiConversation,
-  ApiAgentTask,
-  ApiAgentTaskDetail,
   ApiMessage,
   ApiSettingsMap,
   CreateConversationInput,
@@ -133,22 +130,6 @@ export interface ServerApi {
     ) => Promise<{ success: boolean }>;
     deleteServer: (id: string) => Promise<{ success: boolean }>;
     testServer: (id: string) => Promise<{ success: boolean; error?: string }>;
-  };
-  agentTasks: {
-    list: (filter?: {
-      conversationId?: string;
-    }) => Promise<{ tasks: ApiAgentTask[] }>;
-    get: (id: string) => Promise<ApiAgentTaskDetail>;
-    execute: (id: string, options?: { signal?: AbortSignal }) => Promise<Response>;
-    retry: (id: string, options?: { signal?: AbortSignal }) => Promise<Response>;
-    continue: (id: string, options?: { signal?: AbortSignal }) => Promise<Response>;
-    respondApproval: (
-      id: string,
-      data: {
-        status: Exclude<ApiAgentApprovalStatus, "pending">;
-        response?: unknown;
-      },
-    ) => Promise<ApiAgentTaskDetail>;
   };
 }
 
@@ -457,37 +438,5 @@ export function createServerApi(options?: { baseUrl?: string; fetch?: FetchLike 
         }),
     },
 
-    agentTasks: {
-      list: (filter) => {
-        const params = new URLSearchParams();
-        if (filter?.conversationId) params.set("conversationId", filter.conversationId);
-        const qs = params.toString();
-        return fetchJson(fetchImpl, baseUrl, `/agent/tasks${qs ? `?${qs}` : ""}`);
-      },
-      get: (id) => fetchJson(fetchImpl, baseUrl, `/agent/tasks/${encodeURIComponent(id)}`),
-      execute: (id, options) =>
-        requestWithBackendStatus(fetchImpl, `${baseUrl}/agent/tasks/${encodeURIComponent(id)}/execute`, {
-          method: "POST",
-          credentials: "include",
-          signal: options?.signal,
-        }),
-      retry: (id, options) =>
-        requestWithBackendStatus(fetchImpl, `${baseUrl}/agent/tasks/${encodeURIComponent(id)}/retry`, {
-          method: "POST",
-          credentials: "include",
-          signal: options?.signal,
-        }),
-      continue: (id, options) =>
-        requestWithBackendStatus(fetchImpl, `${baseUrl}/agent/tasks/${encodeURIComponent(id)}/continue`, {
-          method: "POST",
-          credentials: "include",
-          signal: options?.signal,
-        }),
-      respondApproval: (id, data) =>
-        fetchJson(fetchImpl, baseUrl, `/agent/approvals/${encodeURIComponent(id)}/respond`, {
-          method: "POST",
-          body: JSON.stringify(data),
-        }),
-    },
   };
 }
