@@ -293,7 +293,6 @@ function createStubServerApi() {
       execute: async () => new Response("ok", { status: 200 }),
       retry: async () => new Response("ok", { status: 200 }),
       continue: async () => new Response("ok", { status: 200 }),
-      cancel: async () => emptyTaskDetail,
       respondApproval: async () => emptyTaskDetail,
     },
   };

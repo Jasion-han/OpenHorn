@@ -142,7 +142,6 @@ export interface ServerApi {
     execute: (id: string, options?: { signal?: AbortSignal }) => Promise<Response>;
     retry: (id: string, options?: { signal?: AbortSignal }) => Promise<Response>;
     continue: (id: string, options?: { signal?: AbortSignal }) => Promise<Response>;
-    cancel: (id: string) => Promise<ApiAgentTaskDetail>;
     respondApproval: (
       id: string,
       data: {
@@ -483,10 +482,6 @@ export function createServerApi(options?: { baseUrl?: string; fetch?: FetchLike 
           method: "POST",
           credentials: "include",
           signal: options?.signal,
-        }),
-      cancel: (id) =>
-        fetchJson(fetchImpl, baseUrl, `/agent/tasks/${encodeURIComponent(id)}/cancel`, {
-          method: "POST",
         }),
       respondApproval: (id, data) =>
         fetchJson(fetchImpl, baseUrl, `/agent/approvals/${encodeURIComponent(id)}/respond`, {
