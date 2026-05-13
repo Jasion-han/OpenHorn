@@ -147,11 +147,18 @@ export async function runCodexAgent(input: RunCodexAgentInput): Promise<void> {
     let done = false;
     let pendingText = "";
 
-    const finish = (event?: AgentEvent) => {
+    const finish = async (event?: AgentEvent) => {
       if (done) return;
       done = true;
       if (pendingText) {
-        onEvent({ type: "final_text", content: pendingText });
+        const chars = Array.from(pendingText);
+        const chunkSize = 8;
+        for (let i = 0; i < chars.length; i += chunkSize) {
+          onEvent({ type: "final_text", content: chars.slice(i, i + chunkSize).join("") });
+          if (i + chunkSize < chars.length) {
+            await new Promise((r) => setTimeout(r, 15));
+          }
+        }
         pendingText = "";
       }
       if (event) onEvent(event);
@@ -207,14 +214,10 @@ export async function runCodexAgent(input: RunCodexAgentInput): Promise<void> {
         } else if (event.type === "tool_start") {
           if (pendingText) {
             onEvent({ type: "text", content: pendingText });
-            pendingText = "";
           }
+          pendingText = "";
           onEvent(event);
         } else if (event.type !== "done") {
-          if (event.type === "tool_result" && pendingText) {
-            onEvent({ type: "text", content: pendingText });
-            pendingText = "";
-          }
           onEvent(event);
         }
       }

@@ -798,6 +798,7 @@ export function DesktopChatArea() {
 
   useEffect(() => {
     pendingScrollTargetRef.current = { type: "bottom" };
+    queueMicrotask(() => inputRef.current?.focus());
   }, [currentConversation?.id]);
 
   useLayoutEffect(() => {
