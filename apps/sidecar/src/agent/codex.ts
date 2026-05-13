@@ -97,11 +97,15 @@ export async function runCodexAgent(input: RunCodexAgentInput): Promise<void> {
     return;
   }
 
-  const proc = spawn(codexPath, ["app-server", "--listen", "stdio://"], {
-    cwd,
-    stdio: ["pipe", "pipe", "pipe"],
-    env: { ...process.env },
-  });
+  const proc = spawn(
+    codexPath,
+    ["app-server", "--listen", "stdio://", "-c", "mcp_servers={}", "-c", "notify=[]"],
+    {
+      cwd,
+      stdio: ["pipe", "pipe", "pipe"],
+      env: { ...process.env },
+    },
+  );
 
   const cleanup = () => {
     try {

@@ -136,7 +136,8 @@ function LiveStatusBadge({
 function AgentRunPanel({ run }: { run?: ApiAgentRun }) {
   if (!run) return null;
   const toolCount = run.steps.filter((step) => step.type === "tool_start").length;
-  const shouldRender = Boolean(run.error) || toolCount > 0;
+  const hasThinking = run.steps.some((step) => step.type === "text");
+  const shouldRender = Boolean(run.error) || toolCount > 0 || hasThinking;
   if (!shouldRender) return null;
 
   const presentToolLabel = (toolName: string | null | undefined) => {
@@ -272,7 +273,28 @@ function AgentRunPanel({ run }: { run?: ApiAgentRun }) {
         {run.error && (
           <DesktopAgentTaskMetaLine text={run.error} tone="danger" />
         )}
-        {run.steps.map((step) => {
+        {run.steps.map((step, stepIndex) => {
+          if (step.type === "text") {
+            const raw = (step.content ?? "").trim();
+            if (!raw) return null;
+            const truncated = raw.length > 100 ? `${raw.slice(0, 100)}...` : raw;
+            return (
+              <div
+                key={`text-${stepIndex}`}
+                className="py-0.5 text-sm leading-6 text-muted-foreground/50"
+              >
+                <span className="relative flex items-start gap-2">
+                  <span
+                    aria-hidden="true"
+                    className="mt-[8px] h-1.5 w-1.5 shrink-0 rounded-full bg-current"
+                    style={{ opacity: 0.2 }}
+                  />
+                  <span className="min-w-0 italic">{truncated}</span>
+                </span>
+              </div>
+            );
+          }
+
           const stepKey = `${step.type}-${step.toolName || ""}-${step.content || ""}-${JSON.stringify(step.toolInput ?? null)}`;
           const isActive = activeStartKey === stepKey;
           const label = step.type === "error" ? "Error" : presentToolLabel(step.toolName);

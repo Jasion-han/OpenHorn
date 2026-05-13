@@ -74,6 +74,23 @@ function applyAgentEventToRun(
     };
   }
 
+  if (event.type === "text") {
+    const content = event.content ?? "";
+    const lastStep = base.steps[base.steps.length - 1];
+    if (lastStep && lastStep.type === "text") {
+      const updatedSteps = [...base.steps];
+      updatedSteps[updatedSteps.length - 1] = {
+        ...lastStep,
+        content: (lastStep.content ?? "") + content,
+      };
+      return { ...base, steps: updatedSteps };
+    }
+    return {
+      ...base,
+      steps: [...base.steps, { type: "text", content }],
+    };
+  }
+
   if (event.type === "error") {
     const message = event.content || "Agent error";
     return {

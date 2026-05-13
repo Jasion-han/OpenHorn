@@ -59,7 +59,7 @@ export interface ApiConversation {
 }
 
 export interface ApiAgentRunStep {
-  type: "tool_start" | "tool_result" | "error";
+  type: "tool_start" | "tool_result" | "error" | "text";
   toolName?: string;
   content?: string;
   toolInput?: unknown;
