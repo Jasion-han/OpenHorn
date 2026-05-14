@@ -728,6 +728,7 @@ export function DesktopChatArea() {
           void autoTitleConversation(conv.id, seed).catch(() => {});
         }
       }
+      void loadConversations();
     }
   }, [sidecarRun.isBusy, autoTitleConversation]);
 
