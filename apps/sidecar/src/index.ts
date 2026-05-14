@@ -285,6 +285,46 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
           return;
         }
 
+        if (protocol === "anthropic") {
+          const runId = `claude-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+          state.agentRuns.set(runId, { abortController });
+          state.ownedRunIds.add(runId);
+          ws.send(JSON.stringify(buildOkResponse(request.requestId, { runId })));
+
+          const checkpoint = await createCheckpointSession(runId, state.workspaceRoot);
+          void runClaudeAgent({
+            apiKey,
+            baseUrl,
+            model,
+            prompt,
+            cwd: state.workspaceRoot,
+            abortController,
+            checkpoint,
+            sdkSessionId,
+            requestApproval: async (approvalInput) => {
+              const { toolUseId } = approvalInput;
+              return new Promise<boolean>((resolve) => {
+                state.pendingApprovals.set(toolUseId, resolve);
+                ws.send(JSON.stringify(buildEvent("approval.request", { runId, ...approvalInput })));
+              });
+            },
+            onEvent: (event) => {
+              ws.send(JSON.stringify(buildEvent("agent.event", { runId, event })));
+            },
+            onCheckpointReady: () => {},
+            onSdkSessionId: (sid) => {
+              ws.send(JSON.stringify(buildEvent("agent.session", { runId, sessionId: sid })));
+            },
+          }).catch((err) => {
+            const msg = err instanceof Error ? err.message : "Claude agent crashed";
+            ws.send(JSON.stringify(buildEvent("agent.event", { runId, event: { type: "error", content: msg } })));
+          }).finally(() => {
+            state.agentRuns.delete(runId);
+          });
+
+          return;
+        }
+
         const runId = `direct-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         state.agentRuns.set(runId, { abortController });
         state.ownedRunIds.add(runId);
@@ -303,7 +343,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
             ws.send(JSON.stringify(buildEvent("agent.event", { runId, event })));
           },
         }).catch((err) => {
-          const msg = err instanceof Error ? err.message : "Claude agent crashed";
+          const msg = err instanceof Error ? err.message : "Direct agent crashed";
           ws.send(JSON.stringify(buildEvent("agent.event", { runId, event: { type: "error", content: msg } })));
         }).finally(() => {
           state.agentRuns.delete(runId);

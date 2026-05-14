@@ -68,5 +68,10 @@ export function convertSdkEvent(message: SdkMessage): AgentEvent | null {
     };
   }
 
+  if (message.type === "result") {
+    const result = typeof message.result === "string" ? message.result : "";
+    if (result) return { type: "final_text", content: result };
+  }
+
   return null;
 }

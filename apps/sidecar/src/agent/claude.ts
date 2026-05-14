@@ -140,6 +140,15 @@ export function buildNetworkAllowedDomains(baseUrl: string | undefined): string[
   return Array.from(new Set([userHost ?? DEFAULT_ANTHROPIC_HOST, DEFAULT_ANTHROPIC_HOST]));
 }
 
+async function findClaudeBinary(): Promise<string> {
+  const { execSync } = await import("node:child_process");
+  try {
+    return execSync("which claude", { timeout: 5000 }).toString().trim();
+  } catch {
+    return "claude";
+  }
+}
+
 let cachedSdk: typeof import("@anthropic-ai/claude-agent-sdk") | null = null;
 async function getSdk() {
   if (!cachedSdk) cachedSdk = await import("@anthropic-ai/claude-agent-sdk");
@@ -159,6 +168,11 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
   const childEnv: Record<string, string | undefined> = {
     ...process.env,
   };
+  for (const key of Object.keys(childEnv)) {
+    if (key.startsWith("CLAUDE") || key === "AI_AGENT" || key.startsWith("CODEX_COMPANION") || key.startsWith("TRELLIS_")) {
+      delete childEnv[key];
+    }
+  }
   const isCliOAuth = input.apiKey?.startsWith("__cli_oauth__");
   if (input.apiKey && !isCliOAuth) childEnv.ANTHROPIC_API_KEY = input.apiKey;
   if (input.baseUrl && !isCliOAuth) childEnv.ANTHROPIC_BASE_URL = input.baseUrl;
@@ -191,9 +205,10 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
     cwd: input.cwd,
     env: childEnv,
     model: input.model,
-    executable: "bun",
+    pathToClaudeCodeExecutable: await findClaudeBinary(),
     tools: ["Read", "Grep", "Glob", "Write", "Edit", "Bash"],
-    permissionMode: "default",
+    permissionMode: "bypassPermissions",
+    allowDangerouslySkipPermissions: true,
     promptSuggestions: false,
     includePartialMessages: true,
     canUseTool: async (
