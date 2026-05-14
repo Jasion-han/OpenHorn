@@ -158,10 +158,12 @@ export function DesktopModelPickerModal(props: {
           continue;
         }
         if (!item.value.result.success) {
-          failed.push({
-            name: item.value.channel.name,
-            error: item.value.result.error || "同步失败",
-          });
+          const err = item.value.result.error || "同步失败";
+          if (err.includes("CLI OAuth") || err.includes("cli_oauth")) {
+            successCount += 1;
+            continue;
+          }
+          failed.push({ name: item.value.channel.name, error: err });
           continue;
         }
         successCount += 1;
