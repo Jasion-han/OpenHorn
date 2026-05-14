@@ -19,24 +19,24 @@ export function convertSdkEvent(message: SdkMessage): AgentEvent | null {
   }
 
   if (message.type === "assistant" && message.message && typeof message.message === "object") {
-    const content =
-      (message.message as { content?: Array<{ type?: string; text?: string }> }).content || [];
-    const text = content
+    const msg = message.message as { content?: Array<{ type?: string; text?: string }> };
+    const hasToolUse = (msg.content || []).some((item) => item.type === "tool_use");
+    const text = (msg.content || [])
       .filter((item) => item.type === "text" && typeof item.text === "string")
       .map((item) => item.text)
       .join("");
-    if (text) return { type: "text", content: text };
+    if (text) return { type: hasToolUse ? "text" : "final_text", content: text };
   }
 
   if (message.type === "stream_event" && message.event && typeof message.event === "object") {
     const event = message.event as { type?: string; delta?: { text?: string } };
     if (event.type === "content_block_delta" && event.delta?.text) {
-      return { type: "text", content: event.delta.text };
+      return { type: "final_text", content: event.delta.text };
     }
   }
 
   if (message.type === "text" && typeof message.text === "string") {
-    return { type: "text", content: message.text };
+    return { type: "final_text", content: message.text };
   }
 
   if (message.type === "tool_start") {
@@ -69,8 +69,7 @@ export function convertSdkEvent(message: SdkMessage): AgentEvent | null {
   }
 
   if (message.type === "result") {
-    const result = typeof message.result === "string" ? message.result : "";
-    if (result) return { type: "final_text", content: result };
+    return null;
   }
 
   return null;
