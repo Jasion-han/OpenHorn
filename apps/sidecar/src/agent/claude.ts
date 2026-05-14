@@ -207,7 +207,7 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
     env: childEnv,
     model: input.model,
     pathToClaudeCodeExecutable: await findClaudeBinary(),
-    tools: ["Read", "Grep", "Glob", "Write", "Edit", "Bash"],
+    tools: ["Read", "Grep", "Glob", "Write", "Edit", "Bash", "WebFetch", "WebSearch"],
     permissionMode: "bypassPermissions",
     allowDangerouslySkipPermissions: true,
     promptSuggestions: false,
