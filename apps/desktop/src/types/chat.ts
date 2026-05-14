@@ -132,27 +132,6 @@ export interface ApiMessage {
   createdAt: string;
 }
 
-export type ApiAgentTaskStatus =
-  | "draft"
-  | "planning"
-  | "awaiting_approval"
-  | "running"
-  | "completed"
-  | "failed"
-  | "cancelled";
-
-export interface ApiAgentPlanStep {
-  id: string;
-  taskId: string;
-  runId: string;
-  orderIndex: number;
-  title: string;
-  description: string | null;
-  status: "pending" | "ready" | "running" | "completed" | "failed";
-  createdAt: string;
-  updatedAt: string;
-}
-
 export interface ApiAgentCheckResult {
   success: boolean;
   error?: string;
