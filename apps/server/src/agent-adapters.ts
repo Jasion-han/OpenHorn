@@ -1081,11 +1081,15 @@ export class OpenAIAdapter implements ProviderAdapter {
 export class AnthropicAdapter implements ProviderAdapter {
   private apiKey: string;
   private baseUrl: string;
+  private authHeader: Record<string, string>;
 
   constructor(apiKey: string, baseUrl?: string) {
     this.apiKey = apiKey;
     const raw = baseUrl || "https://api.anthropic.com";
     this.baseUrl = raw.replace(/\/+$/, "").replace(/\/v1$/, "");
+    this.authHeader = apiKey.startsWith("sk-ant-oat")
+      ? { Authorization: `Bearer ${apiKey}` }
+      : { "x-api-key": apiKey };
   }
 
   async chat(options: ChatOptions): Promise<ChatResponse> {
@@ -1125,7 +1129,7 @@ export class AnthropicAdapter implements ProviderAdapter {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "x-api-key": this.apiKey,
+            ...this.authHeader,
             "anthropic-version": "2023-06-01",
           },
           body,
@@ -1230,7 +1234,7 @@ export class AnthropicAdapter implements ProviderAdapter {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "x-api-key": this.apiKey,
+            ...this.authHeader,
             "anthropic-version": "2023-06-01",
           },
           body,
@@ -1390,7 +1394,7 @@ export class AnthropicAdapter implements ProviderAdapter {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "x-api-key": this.apiKey,
+            ...this.authHeader,
             "anthropic-version": "2023-06-01",
           },
           body,
