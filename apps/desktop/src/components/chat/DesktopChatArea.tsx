@@ -595,16 +595,12 @@ function MessageBubble({
             : "border border-border/50 bg-foreground/[0.06]",
         )}
       >
-        <div
-          className={cn(
-            "flex items-center gap-1 text-[11px] leading-none font-medium",
-            isAssistant ? "mb-1.5" : "mb-1",
-            isAssistant ? "text-muted-foreground" : "text-foreground/60",
-          )}
-        >
-          {badgeIcon}
-          <span>{label}</span>
-        </div>
+        {isAssistant && (
+          <div className="mb-1.5 flex items-center gap-1 text-[11px] leading-none font-medium text-muted-foreground">
+            {badgeIcon}
+            <span>{label}</span>
+          </div>
+        )}
 
         {!isAssistant && message.attachmentsMeta && message.attachmentsMeta.length > 0 && (
           <DesktopMessageAttachments attachments={message.attachmentsMeta} />
