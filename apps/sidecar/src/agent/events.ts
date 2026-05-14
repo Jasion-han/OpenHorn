@@ -21,11 +21,14 @@ export function convertSdkEvent(message: SdkMessage): AgentEvent | null {
   if (message.type === "assistant" && message.message && typeof message.message === "object") {
     const msg = message.message as { content?: Array<{ type?: string; text?: string }> };
     const hasToolUse = (msg.content || []).some((item) => item.type === "tool_use");
-    const text = (msg.content || [])
-      .filter((item) => item.type === "text" && typeof item.text === "string")
-      .map((item) => item.text)
-      .join("");
-    if (text) return { type: hasToolUse ? "text" : "final_text", content: text };
+    if (hasToolUse) {
+      const text = (msg.content || [])
+        .filter((item) => item.type === "text" && typeof item.text === "string")
+        .map((item) => item.text)
+        .join("");
+      if (text) return { type: "text", content: text };
+    }
+    return null;
   }
 
   if (message.type === "stream_event" && message.event && typeof message.event === "object") {
