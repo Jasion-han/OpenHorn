@@ -67,6 +67,7 @@ export interface SidecarRunAgentInput {
   protocol?: string;
   isCliOAuth?: boolean;
   sdkSessionId?: string;
+  conversationHistory?: Array<{ role: "user" | "assistant"; content: string }>;
   onEvent: (event: AgentTaskStreamEvent) => void | Promise<void>;
   onApproval: (request: SidecarApprovalRequest) => void | Promise<void>;
   onError: (message: string) => void;
@@ -282,8 +283,10 @@ export class SidecarClient {
    * callbacks fire asynchronously until the run terminates.
    */
   async runAgent(input: SidecarRunAgentInput): Promise<string> {
-    const { prompt, apiKey, model, baseUrl, protocol, isCliOAuth, sdkSessionId, onEvent, onApproval, onError, onDone, onSdkSessionId } =
-      input;
+    const {
+      prompt, apiKey, model, baseUrl, protocol, isCliOAuth, sdkSessionId,
+      conversationHistory, onEvent, onApproval, onError, onDone, onSdkSessionId,
+    } = input;
     const result = (await this.request("agent.run", {
       prompt,
       apiKey,
@@ -292,6 +295,9 @@ export class SidecarClient {
       ...(protocol ? { protocol } : {}),
       ...(isCliOAuth ? { isCliOAuth } : {}),
       ...(sdkSessionId ? { sdkSessionId } : {}),
+      ...(conversationHistory && conversationHistory.length > 0
+        ? { conversationHistory }
+        : {}),
     })) as { runId: string };
     const runId = result.runId;
     this.runHandlers.set(runId, { onEvent, onApproval, onError, onDone, onSdkSessionId });

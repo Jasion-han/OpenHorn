@@ -23,6 +23,7 @@ export type RunClaudeAgentInput = {
   abortController: AbortController;
   checkpoint: CheckpointSession;
   sdkSessionId?: string;
+  conversationHistory?: Array<{ role: "user" | "assistant"; content: string }>;
   requestApproval: (input: {
     toolUseId: string;
     toolName: string;
@@ -252,8 +253,20 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
     queryOptions.resume = input.sdkSessionId;
   }
 
+  // Claude Agent SDK only accepts a single prompt string. When we have
+  // conversation history we prepend it as structured context so the
+  // agent understands the prior turns without polluting the user's
+  // visible message in the UI.
+  let effectivePrompt = input.prompt;
+  if (input.conversationHistory && input.conversationHistory.length > 0) {
+    const historyBlock = input.conversationHistory
+      .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
+      .join("\n\n");
+    effectivePrompt = `${historyBlock}\n\n---\n\nUser: ${input.prompt}`;
+  }
+
   const query = sdk.query({
-    prompt: input.prompt,
+    prompt: effectivePrompt,
     options: queryOptions as Parameters<typeof sdk.query>[0]["options"],
   });
 

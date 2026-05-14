@@ -25,6 +25,7 @@ export interface SidecarAgentRunInput {
   assistantMessageId: string;
   prompt: string;
   sdkSessionId?: string;
+  conversationHistory?: Array<{ role: "user" | "assistant"; content: string }>;
 }
 
 export interface SidecarAgentRunApi {
@@ -160,6 +161,7 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
         protocol: credentials.protocol,
         isCliOAuth: credentials.isCliOAuth ?? false,
         sdkSessionId: input.sdkSessionId ?? sdkSessionId ?? undefined,
+        conversationHistory: input.conversationHistory,
         onSdkSessionId: (sessionId) => {
           setSdkSessionId(sessionId);
         },

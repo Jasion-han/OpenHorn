@@ -247,7 +247,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
       }
       case "agent.run": {
         if (!state.workspaceRoot) throw new Error("Workspace not set");
-        const { prompt, apiKey, model, baseUrl, protocol, isCliOAuth, sdkSessionId } = params as {
+        const { prompt, apiKey, model, baseUrl, protocol, isCliOAuth, sdkSessionId, conversationHistory } = params as {
           prompt: string;
           apiKey: string;
           model: string;
@@ -255,6 +255,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
           protocol?: string;
           isCliOAuth?: boolean;
           sdkSessionId?: string;
+          conversationHistory?: Array<{ role: "user" | "assistant"; content: string }>;
         };
 
         const abortController = new AbortController();
@@ -291,7 +292,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
           state.ownedRunIds.add(runId);
           ws.send(JSON.stringify(buildOkResponse(request.requestId, { runId })));
 
-          const checkpoint = await createCheckpointSession(runId, state.workspaceRoot);
+          const checkpoint = await createCheckpointSession(state.workspaceRoot);
           void runClaudeAgent({
             apiKey,
             baseUrl,
@@ -301,6 +302,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
             abortController,
             checkpoint,
             sdkSessionId,
+            conversationHistory,
             requestApproval: async (approvalInput) => {
               const { toolUseId } = approvalInput;
               return new Promise<boolean>((resolve) => {
@@ -339,6 +341,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
           protocol,
           cwd: state.workspaceRoot,
           abortController,
+          conversationHistory,
           onEvent: (event) => {
             ws.send(JSON.stringify(buildEvent("agent.event", { runId, event })));
           },

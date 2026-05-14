@@ -1012,18 +1012,21 @@ export function DesktopChatArea() {
         const historyMsgs = useChatStore.getState().messages
           .filter((m) => m.conversationId === conversationId && !m.id.startsWith("draft-"))
           .filter((m) => m.id !== userMessageId && m.id !== assistantMessageId);
-        const historyPrefix = historyMsgs.length > 0
-          ? historyMsgs
-              .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${(m.content || "").trim()}`)
-              .filter((s) => s.length > 6)
-              .join("\n\n") + "\n\n---\n\n"
-          : "";
+        const conversationHistory: Array<{ role: "user" | "assistant"; content: string }> = [];
+        for (const m of historyMsgs) {
+          const text = (m.content || "").trim();
+          if (!text) continue;
+          if (m.role === "user" || m.role === "assistant") {
+            conversationHistory.push({ role: m.role, content: text });
+          }
+        }
         await sidecarRun.startRun({
           conversationId,
           channelId: currentConversation.channelId,
           modelId: effectiveModel.modelId,
           assistantMessageId,
-          prompt: historyPrefix ? `${historyPrefix}User: ${effectiveContent}` : effectiveContent,
+          prompt: effectiveContent,
+          conversationHistory: conversationHistory.length > 0 ? conversationHistory : undefined,
         });
 
         setLoading(false);
@@ -1172,18 +1175,21 @@ export function DesktopChatArea() {
         const historyMsgs = useChatStore.getState().messages
           .filter((m) => m.conversationId === currentConversation.id && !m.id.startsWith("draft-"))
           .filter((m) => m.id !== userMessage.id && m.id !== messageId);
-        const historyPrefix = historyMsgs.length > 0
-          ? historyMsgs
-              .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${(m.content || "").trim()}`)
-              .filter((s) => s.length > 6)
-              .join("\n\n") + "\n\n---\n\n"
-          : "";
+        const conversationHistory: Array<{ role: "user" | "assistant"; content: string }> = [];
+        for (const m of historyMsgs) {
+          const text = (m.content || "").trim();
+          if (!text) continue;
+          if (m.role === "user" || m.role === "assistant") {
+            conversationHistory.push({ role: m.role, content: text });
+          }
+        }
         await sidecarRun.startRun({
           conversationId: currentConversation.id,
           channelId: currentConversation.channelId!,
           modelId: effectiveModel.ok ? effectiveModel.modelId : "",
           assistantMessageId: messageId,
-          prompt: historyPrefix ? `${historyPrefix}User: ${userMessage.content}` : userMessage.content,
+          prompt: userMessage.content,
+          conversationHistory: conversationHistory.length > 0 ? conversationHistory : undefined,
         });
         setLoading(false);
       } else {
@@ -1301,18 +1307,21 @@ export function DesktopChatArea() {
         const historyMsgs = useChatStore.getState().messages
           .filter((m) => m.conversationId === currentConversation.id && !m.id.startsWith("draft-"))
           .filter((m) => m.id !== userMessage.id && m.id !== assistantMessageId);
-        const historyPrefix = historyMsgs.length > 0
-          ? historyMsgs
-              .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${(m.content || "").trim()}`)
-              .filter((s) => s.length > 6)
-              .join("\n\n") + "\n\n---\n\n"
-          : "";
+        const conversationHistory: Array<{ role: "user" | "assistant"; content: string }> = [];
+        for (const m of historyMsgs) {
+          const text = (m.content || "").trim();
+          if (!text) continue;
+          if (m.role === "user" || m.role === "assistant") {
+            conversationHistory.push({ role: m.role, content: text });
+          }
+        }
         await sidecarRun.startRun({
           conversationId: currentConversation.id,
           channelId: currentConversation.channelId!,
           modelId: effectiveModel.ok ? effectiveModel.modelId : "",
           assistantMessageId,
-          prompt: historyPrefix ? `${historyPrefix}User: ${nextContent}` : nextContent,
+          prompt: nextContent,
+          conversationHistory: conversationHistory.length > 0 ? conversationHistory : undefined,
         });
         setLoading(false);
       } else {
@@ -1527,13 +1536,9 @@ export function DesktopChatArea() {
           pendingApproval={sidecarRun.pendingApproval}
           lastError={sidecarRun.lastError}
           isBusy={sidecarRun.isBusy && !sidecarRun.pendingApproval && !isStreaming}
-          lastFinishedRunId={sidecarRun.lastFinishedRunId}
-          isRollingBack={sidecarRun.isRollingBack}
-          rollbackError={sidecarRun.rollbackError}
           onApprove={(toolUseId) => void sidecarRun.respondToApproval(toolUseId, true)}
           onReject={(toolUseId) => void sidecarRun.respondToApproval(toolUseId, false)}
           onCancel={() => void sidecarRun.cancel()}
-          onRollback={() => void sidecarRun.rollbackLast()}
         />
         <DesktopComposer
           value={input}

@@ -17,27 +17,18 @@ export function DesktopSidecarRuntimePanel({
   pendingApproval,
   lastError,
   isBusy,
-  lastFinishedRunId,
-  isRollingBack,
-  rollbackError,
   onApprove,
   onReject,
   onCancel,
-  onRollback,
 }: {
   pendingApproval: SidecarApprovalRequest | null;
   lastError: string | null;
   isBusy: boolean;
-  lastFinishedRunId?: string | null;
-  isRollingBack?: boolean;
-  rollbackError?: string | null;
   onApprove: (toolUseId: string) => void;
   onReject: (toolUseId: string) => void;
   onCancel: () => void;
-  onRollback?: () => void;
 }) {
-  const hasFinishedRunToRollback = Boolean(lastFinishedRunId);
-  if (!pendingApproval && !lastError && !isBusy && !hasFinishedRunToRollback) return null;
+  if (!pendingApproval && !lastError && !isBusy) return null;
 
   return (
     <div
@@ -75,31 +66,6 @@ export function DesktopSidecarRuntimePanel({
           >
             {getAgentActionLabel("stop")}
           </button>
-        </div>
-      ) : hasFinishedRunToRollback ? (
-        <div className="flex flex-col gap-1.5 text-xs">
-          <div className="flex items-center justify-between gap-3">
-            <span className="text-foreground/70">本次本地运行已完成。</span>
-            <button
-              type="button"
-              data-testid="sidecar-rollback"
-              onClick={() => onRollback?.()}
-              disabled={isRollingBack}
-              className={cn(
-                "rounded-md border px-2 py-0.5 text-xs font-medium",
-                "border-border/60 text-foreground/75 hover:bg-foreground/5",
-                "disabled:opacity-60 disabled:cursor-not-allowed",
-              )}
-            >
-              {isRollingBack ? "回滚中..." : getAgentActionLabel("rollback")}
-            </button>
-          </div>
-          <p className="text-foreground/50">
-            回滚仅恢复由 Agent 工具（Write/Edit）改动的文件；通过 Bash 做出的改动不会被回滚。
-          </p>
-          {rollbackError ? (
-            <p className="text-destructive/80">回滚失败：{rollbackError}</p>
-          ) : null}
         </div>
       ) : null}
     </div>
