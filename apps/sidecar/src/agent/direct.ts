@@ -126,11 +126,15 @@ async function runAnthropicAgent(input: RunDirectAgentInput): Promise<void> {
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     if (input.abortController.signal.aborted) break;
 
+    const isOAuthToken = input.apiKey.startsWith("sk-ant-oat");
+    const authHeaders: Record<string, string> = isOAuthToken
+      ? { Authorization: `Bearer ${input.apiKey}` }
+      : { "x-api-key": input.apiKey };
     const response = await fetch(`${baseUrl}/v1/messages`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-api-key": input.apiKey,
+        ...authHeaders,
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
