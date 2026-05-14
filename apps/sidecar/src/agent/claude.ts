@@ -174,9 +174,9 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
       delete childEnv[key];
     }
   }
-  const isCliOAuth = input.apiKey?.startsWith("__cli_oauth__");
-  if (input.apiKey && !isCliOAuth) childEnv.ANTHROPIC_API_KEY = input.apiKey;
-  if (input.baseUrl && !isCliOAuth) childEnv.ANTHROPIC_BASE_URL = input.baseUrl;
+  const isOAuthToken = input.apiKey?.startsWith("sk-ant-oat") || input.apiKey?.startsWith("__cli_oauth__");
+  if (input.apiKey && !isOAuthToken) childEnv.ANTHROPIC_API_KEY = input.apiKey;
+  if (input.baseUrl && !isOAuthToken) childEnv.ANTHROPIC_BASE_URL = input.baseUrl;
 
   const hooks: Partial<Record<string, HookCallbackMatcher[]>> = {
     PreToolUse: [
