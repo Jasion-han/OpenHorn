@@ -493,6 +493,7 @@ export function DesktopLeftSidebar() {
               取消
             </Button>
             <Button
+              autoFocus
               variant="destructive"
               onClick={() => {
                 const target = pendingDelete;
