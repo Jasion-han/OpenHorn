@@ -493,7 +493,7 @@ export function DesktopLeftSidebar() {
               取消
             </Button>
             <Button
-              autoFocus
+              ref={(el) => { queueMicrotask(() => el?.focus()); }}
               variant="destructive"
               onClick={() => {
                 const target = pendingDelete;
