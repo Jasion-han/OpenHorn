@@ -247,110 +247,108 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
       }
       case "agent.run": {
         if (!state.workspaceRoot) throw new Error("Workspace not set");
-        const { prompt, apiKey, model, baseUrl, protocol, isCliOAuth, sdkSessionId, conversationHistory } = params as {
-          prompt: string;
-          apiKey: string;
-          model: string;
-          baseUrl?: string;
-          protocol?: string;
-          isCliOAuth?: boolean;
-          sdkSessionId?: string;
-          conversationHistory?: Array<{ role: "user" | "assistant"; content: string }>;
-        };
+        const { prompt, apiKey, model, baseUrl, protocol, sdkSessionId, conversationHistory } =
+          params as {
+            prompt: string;
+            apiKey: string;
+            model: string;
+            baseUrl?: string;
+            protocol?: string;
+            sdkSessionId?: string;
+            conversationHistory?: Array<{ role: "user" | "assistant"; content: string }>;
+          };
 
         const abortController = new AbortController();
-        const useCodex = protocol === "codex_cli";
 
-        if (useCodex) {
-          const runId = `codex-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        // Common setup shared by all agent routes: generate a run ID,
+        // register it, send the OK response, and return helpers for the
+        // shared onEvent / catch / finally patterns.
+        const initRun = (prefix: string) => {
+          const runId = `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
           state.agentRuns.set(runId, { abortController });
           state.ownedRunIds.add(runId);
-
           ws.send(JSON.stringify(buildOkResponse(request.requestId, { runId })));
+          const onEvent = (event: import("./agent/events").AgentEvent) => {
+            ws.send(JSON.stringify(buildEvent("agent.event", { runId, event })));
+          };
+          const guard = (label: string, promise: Promise<void>) => {
+            void promise
+              .catch((err) => {
+                const msg = err instanceof Error ? err.message : `${label} crashed`;
+                onEvent({ type: "error", content: msg });
+              })
+              .finally(() => {
+                state.agentRuns.delete(runId);
+              });
+          };
+          return { runId, onEvent, guard };
+        };
 
-          void runCodexAgent({
-            model,
-            prompt,
-            cwd: state.workspaceRoot,
-            abortController,
-            onEvent: (event) => {
-              ws.send(JSON.stringify(buildEvent("agent.event", { runId, event })));
-            },
-          }).catch((err) => {
-            const msg = err instanceof Error ? err.message : "Codex agent crashed";
-            ws.send(JSON.stringify(buildEvent("agent.event", { runId, event: { type: "error", content: msg } })));
-          }).finally(() => {
-            state.agentRuns.delete(runId);
-          });
-
+        if (protocol === "codex_cli") {
+          const { onEvent, guard } = initRun("codex");
+          guard(
+            "Codex agent",
+            runCodexAgent({
+              model,
+              prompt,
+              cwd: state.workspaceRoot,
+              abortController,
+              onEvent,
+            }),
+          );
           return;
         }
 
         if (protocol === "anthropic") {
-          const runId = `claude-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-          state.agentRuns.set(runId, { abortController });
-          state.ownedRunIds.add(runId);
-          ws.send(JSON.stringify(buildOkResponse(request.requestId, { runId })));
-
+          const { runId, onEvent, guard } = initRun("claude");
           const checkpoint = await createCheckpointSession(state.workspaceRoot);
-          void runClaudeAgent({
-            apiKey,
-            baseUrl,
-            model,
-            prompt,
-            cwd: state.workspaceRoot,
-            abortController,
-            checkpoint,
-            sdkSessionId,
-            conversationHistory,
-            requestApproval: async (approvalInput) => {
-              const { toolUseId } = approvalInput;
-              return new Promise<boolean>((resolve) => {
-                state.pendingApprovals.set(toolUseId, resolve);
-                ws.send(JSON.stringify(buildEvent("approval.request", { runId, ...approvalInput })));
-              });
-            },
-            onEvent: (event) => {
-              ws.send(JSON.stringify(buildEvent("agent.event", { runId, event })));
-            },
-            onCheckpointReady: () => {},
-            onSdkSessionId: (sid) => {
-              ws.send(JSON.stringify(buildEvent("agent.session", { runId, sdkSessionId: sid })));
-            },
-          }).catch((err) => {
-            const msg = err instanceof Error ? err.message : "Claude agent crashed";
-            ws.send(JSON.stringify(buildEvent("agent.event", { runId, event: { type: "error", content: msg } })));
-          }).finally(() => {
-            state.agentRuns.delete(runId);
-          });
-
+          guard(
+            "Claude agent",
+            runClaudeAgent({
+              apiKey,
+              baseUrl,
+              model,
+              prompt,
+              cwd: state.workspaceRoot,
+              abortController,
+              checkpoint,
+              sdkSessionId,
+              conversationHistory,
+              requestApproval: async (approvalInput) => {
+                const { toolUseId } = approvalInput;
+                return new Promise<boolean>((resolve) => {
+                  state.pendingApprovals.set(toolUseId, resolve);
+                  ws.send(
+                    JSON.stringify(buildEvent("approval.request", { runId, ...approvalInput })),
+                  );
+                });
+              },
+              onEvent,
+              onCheckpointReady: () => {},
+              onSdkSessionId: (sid) => {
+                ws.send(JSON.stringify(buildEvent("agent.session", { runId, sdkSessionId: sid })));
+              },
+            }),
+          );
           return;
         }
 
-        const runId = `direct-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        state.agentRuns.set(runId, { abortController });
-        state.ownedRunIds.add(runId);
-
-        ws.send(JSON.stringify(buildOkResponse(request.requestId, { runId })));
-
-        void runDirectAgent({
-          apiKey,
-          baseUrl,
-          model,
-          prompt,
-          protocol,
-          cwd: state.workspaceRoot,
-          abortController,
-          conversationHistory,
-          onEvent: (event) => {
-            ws.send(JSON.stringify(buildEvent("agent.event", { runId, event })));
-          },
-        }).catch((err) => {
-          const msg = err instanceof Error ? err.message : "Direct agent crashed";
-          ws.send(JSON.stringify(buildEvent("agent.event", { runId, event: { type: "error", content: msg } })));
-        }).finally(() => {
-          state.agentRuns.delete(runId);
-        });
+        {
+          const { onEvent, guard } = initRun("direct");
+          guard(
+            "Direct agent",
+            runDirectAgent({
+              apiKey,
+              baseUrl,
+              model,
+              prompt,
+              cwd: state.workspaceRoot,
+              abortController,
+              conversationHistory,
+              onEvent,
+            }),
+          );
+        }
 
         return;
       }
@@ -374,9 +372,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
         // session's work.
         if (!state.ownedRunIds.has(runId)) {
           ws.send(
-            JSON.stringify(
-              buildErrorResponse(request.requestId, "Unknown runId for this session"),
-            ),
+            JSON.stringify(buildErrorResponse(request.requestId, "Unknown runId for this session")),
           );
           return;
         }

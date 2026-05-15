@@ -67,7 +67,6 @@ export const AgentRunParamsSchema = z.object({
   model: z.string().min(1),
   baseUrl: z.string().optional(),
   protocol: z.enum(["anthropic", "openai", "codex_cli"]).optional(),
-  isCliOAuth: z.boolean().optional(),
   sdkSessionId: z.string().optional(),
   conversationHistory: z
     .array(z.object({ role: z.enum(["user", "assistant"]), content: z.string() }))

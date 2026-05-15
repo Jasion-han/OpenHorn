@@ -65,7 +65,6 @@ export interface SidecarRunAgentInput {
   model: string;
   baseUrl?: string;
   protocol?: string;
-  isCliOAuth?: boolean;
   sdkSessionId?: string;
   conversationHistory?: Array<{ role: "user" | "assistant"; content: string }>;
   onEvent: (event: AgentTaskStreamEvent) => void | Promise<void>;
@@ -133,10 +132,7 @@ function generateRequestId(): string {
  *
  * Exported for unit testing.
  */
-export function projectSidecarAgentEvent(
-  runId: string,
-  raw: unknown,
-): AgentTaskStreamEvent | null {
+export function projectSidecarAgentEvent(runId: string, raw: unknown): AgentTaskStreamEvent | null {
   if (!isRecord(raw)) return null;
   const event = raw as unknown as SidecarAgentEvent;
 
@@ -284,8 +280,18 @@ export class SidecarClient {
    */
   async runAgent(input: SidecarRunAgentInput): Promise<string> {
     const {
-      prompt, apiKey, model, baseUrl, protocol, isCliOAuth, sdkSessionId,
-      conversationHistory, onEvent, onApproval, onError, onDone, onSdkSessionId,
+      prompt,
+      apiKey,
+      model,
+      baseUrl,
+      protocol,
+      sdkSessionId,
+      conversationHistory,
+      onEvent,
+      onApproval,
+      onError,
+      onDone,
+      onSdkSessionId,
     } = input;
     const result = (await this.request("agent.run", {
       prompt,
@@ -293,11 +299,8 @@ export class SidecarClient {
       model,
       ...(baseUrl ? { baseUrl } : {}),
       ...(protocol ? { protocol } : {}),
-      ...(isCliOAuth ? { isCliOAuth } : {}),
       ...(sdkSessionId ? { sdkSessionId } : {}),
-      ...(conversationHistory && conversationHistory.length > 0
-        ? { conversationHistory }
-        : {}),
+      ...(conversationHistory && conversationHistory.length > 0 ? { conversationHistory } : {}),
     })) as { runId: string };
     const runId = result.runId;
     this.runHandlers.set(runId, { onEvent, onApproval, onError, onDone, onSdkSessionId });
@@ -432,7 +435,8 @@ export class SidecarClient {
       if (!runId) return;
       const handlers = this.runHandlers.get(runId);
       if (!handlers?.onSdkSessionId) return;
-      const sessionId = typeof event.data.sdkSessionId === "string" ? event.data.sdkSessionId : null;
+      const sessionId =
+        typeof event.data.sdkSessionId === "string" ? event.data.sdkSessionId : null;
       if (sessionId) handlers.onSdkSessionId(sessionId);
       return;
     }
@@ -442,9 +446,10 @@ export class SidecarClient {
     }
 
     if (event.event === "protocol.error") {
-      const message = isRecord(event.data) && typeof event.data.error === "string"
-        ? event.data.error
-        : "sidecar protocol error";
+      const message =
+        isRecord(event.data) && typeof event.data.error === "string"
+          ? event.data.error
+          : "sidecar protocol error";
       for (const handlers of this.runHandlers.values()) {
         handlers.onError(message);
       }

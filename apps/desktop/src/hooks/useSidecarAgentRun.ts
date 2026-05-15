@@ -51,10 +51,7 @@ export interface SidecarAgentRunApi {
    * Responds to a pending sidecar approval. Returns the same approval
    * so callers can log / inspect it if needed.
    */
-  respondToApproval: (
-    approvalId: string,
-    allow: boolean,
-  ) => Promise<void>;
+  respondToApproval: (approvalId: string, allow: boolean) => Promise<void>;
 
   /** Cancels the current sidecar run if any. */
   cancel: () => Promise<void>;
@@ -121,7 +118,6 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
       baseUrl: string | null;
       modelId: string;
       protocol: "openai" | "anthropic" | "google";
-      isCliOAuth?: boolean;
     };
     try {
       const result = await api.channels.getCredentials(input.channelId);
@@ -137,10 +133,7 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
       return;
     }
 
-    if (
-      credentials.protocol !== "anthropic" &&
-      credentials.protocol !== "openai"
-    ) {
+    if (credentials.protocol !== "anthropic" && credentials.protocol !== "openai") {
       setIsBusy(false);
       const message = `本地运行暂不支持该协议：${credentials.protocol}`;
       setLastError(message);
@@ -159,7 +152,6 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
         model: input.modelId || credentials.modelId,
         baseUrl: credentials.baseUrl ?? undefined,
         protocol: credentials.protocol,
-        isCliOAuth: credentials.isCliOAuth ?? false,
         sdkSessionId: input.sdkSessionId ?? sdkSessionId ?? undefined,
         conversationHistory: input.conversationHistory,
         onSdkSessionId: (sessionId) => {
@@ -167,65 +159,69 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
         },
         onEvent: (() => {
           return (event: import("../lib/agentTaskStream").AgentTaskStreamEvent) => {
-          if (event.type === "execution_event" && event.eventType === "final_text" && event.content) {
-            useChatStore.getState().applyStreamEvent(input.assistantMessageId, {
-              type: "delta",
-              content: event.content,
-            });
-            return;
-          }
-          if (event.type === "execution_event" && event.eventType === "text" && event.content) {
-            useChatStore.getState().applyStreamEvent(input.assistantMessageId, {
-              type: "agent_event",
-              event: { type: "text", content: event.content },
-            });
-            return;
-          }
-          if (event.type === "execution_event") {
-            useChatStore.getState().applyStreamEvent(input.assistantMessageId, {
-              type: "agent_event",
-              event: {
-                type: event.eventType ?? "",
+            if (
+              event.type === "execution_event" &&
+              event.eventType === "final_text" &&
+              event.content
+            ) {
+              useChatStore.getState().applyStreamEvent(input.assistantMessageId, {
+                type: "delta",
                 content: event.content,
-                toolName: event.toolName,
-                toolInput: event.toolInput,
-              },
-            });
-            return;
-          }
-          if (event.type === "done") {
-            useChatStore.getState().applyStreamEvent(input.assistantMessageId, {
-              type: "done",
-              messageId: input.assistantMessageId,
-            });
-            const assistantMsg = useChatStore
-              .getState()
-              .messages.find((m) => m.id === input.assistantMessageId);
-            const assistantContent = assistantMsg?.content || "";
-            if (assistantContent) {
-              void api.messages
-                .syncSidecar({
-                  conversationId: input.conversationId,
-                  userContent: input.prompt,
-                  assistantContent,
-                  model: input.modelId || credentials.modelId,
-                  agentRun: assistantMsg?.agentRun ?? undefined,
-                })
-                .catch(() => {});
+              });
+              return;
             }
-            if (credentials.protocol !== "anthropic") {
-              setLastFinishedRunId(null);
+            if (event.type === "execution_event" && event.eventType === "text" && event.content) {
+              useChatStore.getState().applyStreamEvent(input.assistantMessageId, {
+                type: "agent_event",
+                event: { type: "text", content: event.content },
+              });
+              return;
             }
-            syncRun(null);
-            setIsBusy(false);
-          }
-          if (event.type === "error") {
-            useChatStore.getState().applyStreamEvent(input.assistantMessageId, {
-              type: "error",
-              message: event.content || "本地运行出错",
-            });
-          }
-        };
+            if (event.type === "execution_event") {
+              useChatStore.getState().applyStreamEvent(input.assistantMessageId, {
+                type: "agent_event",
+                event: {
+                  type: event.eventType ?? "",
+                  content: event.content,
+                  toolName: event.toolName,
+                  toolInput: event.toolInput,
+                },
+              });
+              return;
+            }
+            if (event.type === "done") {
+              useChatStore.getState().applyStreamEvent(input.assistantMessageId, {
+                type: "done",
+                messageId: input.assistantMessageId,
+              });
+              const assistantMsg = useChatStore
+                .getState()
+                .messages.find((m) => m.id === input.assistantMessageId);
+              const assistantContent = assistantMsg?.content || "";
+              if (assistantContent) {
+                void api.messages
+                  .syncSidecar({
+                    conversationId: input.conversationId,
+                    userContent: input.prompt,
+                    assistantContent,
+                    model: input.modelId || credentials.modelId,
+                    agentRun: assistantMsg?.agentRun ?? undefined,
+                  })
+                  .catch(() => {});
+              }
+              if (credentials.protocol !== "anthropic") {
+                setLastFinishedRunId(null);
+              }
+              syncRun(null);
+              setIsBusy(false);
+            }
+            if (event.type === "error") {
+              useChatStore.getState().applyStreamEvent(input.assistantMessageId, {
+                type: "error",
+                message: event.content || "本地运行出错",
+              });
+            }
+          };
         })(),
         onApproval: (request) => {
           setPendingApproval(request);

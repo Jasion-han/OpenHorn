@@ -23,7 +23,6 @@ export type RunDirectAgentInput = {
   prompt: string;
   cwd: string;
   abortController: AbortController;
-  protocol?: string;
   conversationHistory?: Array<{ role: "user" | "assistant"; content: string }>;
   onEvent: (event: AgentEvent) => void;
 };
@@ -408,23 +407,8 @@ function buildTools(cwd: string): AgentTool<TSchema>[] {
 // ---------------------------------------------------------------------------
 
 function buildModel(input: RunDirectAgentInput): Model<Api> {
-  if (input.protocol === "anthropic") {
-    const baseUrl = (input.baseUrl || "https://api.anthropic.com").replace(/\/$/, "");
-    return {
-      id: input.model,
-      name: input.model,
-      api: "anthropic-messages",
-      provider: "anthropic",
-      baseUrl,
-      reasoning: false,
-      input: ["text"],
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-      contextWindow: 200_000,
-      maxTokens: 8192,
-    };
-  }
-
-  // Default: OpenAI-compatible completions
+  // direct.ts only handles non-Anthropic protocols (OpenAI-compatible).
+  // Anthropic models are routed to claude.ts by index.ts.
   const baseUrl = (input.baseUrl || "https://api.openai.com/v1").replace(/\/$/, "");
   return {
     id: input.model,
