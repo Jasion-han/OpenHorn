@@ -1,5 +1,5 @@
-import { exec } from "node:child_process";
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { exec, execFile } from "node:child_process";
+import { mkdir, readdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   Agent,
@@ -36,8 +36,64 @@ function insideWorkspace(resolved: string, cwd: string): boolean {
   return resolved === cwd || resolved.startsWith(cwd + path.sep);
 }
 
+/**
+ * Resolve a workspace-relative path for a *read* operation, following symlinks.
+ * Returns the resolved path if safe, or throws if the real path escapes the workspace.
+ */
+async function resolveReadPath(cwd: string, filePath: string): Promise<string> {
+  const resolved = path.resolve(cwd, filePath);
+  if (!insideWorkspace(resolved, cwd)) throw new Error("path outside workspace");
+  try {
+    const real = await realpath(resolved);
+    if (!insideWorkspace(real, cwd)) throw new Error("path outside workspace (symlink escape)");
+  } catch (err) {
+    // ENOENT is fine for read — the caller will get a normal "file not found" from readFile
+    if ((err as NodeJS.ErrnoException)?.code !== "ENOENT") throw err;
+  }
+  return resolved;
+}
+
+/**
+ * Resolve a workspace-relative path for a *write* operation, following symlinks
+ * on the deepest existing ancestor. Mirrors the security model in workspace.ts
+ * `resolveWritePathInsideWorkspace`.
+ */
+async function resolveWritePath(cwd: string, filePath: string): Promise<string> {
+  const resolved = path.resolve(cwd, filePath);
+  if (!insideWorkspace(resolved, cwd)) throw new Error("path outside workspace");
+
+  // If the target already exists, realpath it directly
+  try {
+    const s = await stat(resolved);
+    if (s) {
+      const real = await realpath(resolved);
+      if (!insideWorkspace(real, cwd)) throw new Error("path outside workspace (symlink escape)");
+      return resolved;
+    }
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException)?.code !== "ENOENT") throw err;
+  }
+
+  // Walk up to the deepest existing ancestor and realpath it
+  let ancestor = path.dirname(resolved);
+  while (true) {
+    try {
+      const realAncestor = await realpath(ancestor);
+      if (!insideWorkspace(realAncestor, cwd)) {
+        throw new Error("path outside workspace (symlink escape)");
+      }
+      return resolved;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException)?.code !== "ENOENT") throw err;
+      const next = path.dirname(ancestor);
+      if (next === ancestor) throw new Error("unable to resolve ancestor");
+      ancestor = next;
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
-// Tool execution (unchanged from the original hand-written implementation)
+// Tool execution
 // ---------------------------------------------------------------------------
 
 async function executeTool(
@@ -62,9 +118,8 @@ async function executeTool(
 
   if (name === "read_file") {
     const filePath = typeof input.path === "string" ? input.path : "";
-    const resolved = path.resolve(cwd, filePath);
-    if (!insideWorkspace(resolved, cwd)) return "Error: path outside workspace";
     try {
+      const resolved = await resolveReadPath(cwd, filePath);
       const content = await readFile(resolved, "utf-8");
       return content.length > 50_000 ? `${content.slice(0, 50_000)}\n...(truncated)` : content;
     } catch (err) {
@@ -74,9 +129,8 @@ async function executeTool(
 
   if (name === "list_dir") {
     const dirPath = typeof input.path === "string" ? input.path : ".";
-    const resolved = path.resolve(cwd, dirPath);
-    if (!insideWorkspace(resolved, cwd)) return "Error: path outside workspace";
     try {
+      const resolved = await resolveReadPath(cwd, dirPath);
       const entries = await readdir(resolved, { withFileTypes: true });
       return entries
         .map((e) => `${e.isDirectory() ? "\u{1F4C1}" : "\u{1F4C4}"} ${e.name}`)
@@ -89,9 +143,8 @@ async function executeTool(
   if (name === "write_file") {
     const filePath = typeof input.path === "string" ? input.path : "";
     const content = typeof input.content === "string" ? input.content : "";
-    const resolved = path.resolve(cwd, filePath);
-    if (!insideWorkspace(resolved, cwd)) return "Error: path outside workspace";
     try {
+      const resolved = await resolveWritePath(cwd, filePath);
       await mkdir(path.dirname(resolved), { recursive: true });
       await writeFile(resolved, content, "utf-8");
       return `File written: ${filePath}`;
@@ -104,9 +157,8 @@ async function executeTool(
     const filePath = typeof input.path === "string" ? input.path : "";
     const oldStr = typeof input.old_string === "string" ? input.old_string : "";
     const newStr = typeof input.new_string === "string" ? input.new_string : "";
-    const resolved = path.resolve(cwd, filePath);
-    if (!insideWorkspace(resolved, cwd)) return "Error: path outside workspace";
     try {
+      const resolved = await resolveWritePath(cwd, filePath);
       const content = await readFile(resolved, "utf-8");
       if (!content.includes(oldStr)) return "Error: old_string not found in file";
       const updated = content.replace(oldStr, newStr);
@@ -123,17 +175,17 @@ async function executeTool(
     const include = typeof input.include === "string" ? input.include : "";
     const resolved = path.resolve(cwd, searchPath);
     if (!insideWorkspace(resolved, cwd)) return "Error: path outside workspace";
-    const includeArg = include ? ` --include=${JSON.stringify(include)}` : "";
+    // Use execFile with explicit args array to avoid shell injection.
+    // grep is invoked directly (no shell), so $() / backticks are harmless.
+    const args = ["-rn"];
+    if (include) args.push(`--include=${include}`);
+    args.push("--", pattern, searchPath);
     return new Promise((resolve) => {
-      exec(
-        `grep -rn${includeArg} -- ${JSON.stringify(pattern)} ${JSON.stringify(searchPath)}`,
-        { cwd, timeout: 15_000, maxBuffer: 1024 * 1024 },
-        (_err, stdout) => {
-          const out = (stdout || "").trim();
-          if (!out) resolve("No matches found");
-          else resolve(out.length > 10_000 ? `${out.slice(0, 10_000)}\n...(truncated)` : out);
-        },
-      );
+      execFile("grep", args, { cwd, timeout: 15_000, maxBuffer: 1024 * 1024 }, (_err, stdout) => {
+        const out = (stdout || "").trim();
+        if (!out) resolve("No matches found");
+        else resolve(out.length > 10_000 ? `${out.slice(0, 10_000)}\n...(truncated)` : out);
+      });
     });
   }
 
@@ -143,16 +195,29 @@ async function executeTool(
     const dirPattern = pattern.includes("/") ? path.dirname(pattern) : ".";
     const resolvedDir = path.resolve(cwd, dirPattern);
     if (!insideWorkspace(resolvedDir, cwd)) return "Error: path outside workspace";
+    // Use execFile with explicit args to avoid shell injection via crafted patterns.
+    const args = [
+      dirPattern,
+      "-name",
+      namePattern,
+      "-not",
+      "-path",
+      "*/node_modules/*",
+      "-not",
+      "-path",
+      "*/.git/*",
+    ];
     return new Promise((resolve) => {
-      exec(
-        `find ${JSON.stringify(dirPattern)} -name ${JSON.stringify(namePattern)} -not -path "*/node_modules/*" -not -path "*/.git/*" | sort | head -200`,
-        { cwd, timeout: 15_000, maxBuffer: 1024 * 1024 },
-        (_err, stdout) => {
-          const out = (stdout || "").trim();
-          if (!out) resolve("No matches found");
-          else resolve(out);
-        },
-      );
+      execFile("find", args, { cwd, timeout: 15_000, maxBuffer: 1024 * 1024 }, (_err, stdout) => {
+        const out = (stdout || "").trim();
+        if (!out) {
+          resolve("No matches found");
+        } else {
+          // Sort and limit results (replaces piped `| sort | head -200`)
+          const lines = out.split("\n").sort();
+          resolve(lines.slice(0, 200).join("\n"));
+        }
+      });
     });
   }
 
