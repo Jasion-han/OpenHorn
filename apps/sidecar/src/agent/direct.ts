@@ -28,8 +28,30 @@ const SYSTEM_PROMPT = [
 ].join(" ");
 
 // ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+/** Maximum number of agent turns before forced stop (prevents infinite loops). */
+const MAX_TURNS = 30;
+
+/** Max characters returned from a single tool output for bash/read/grep etc. */
+const MAX_READ_CHARS = 50_000;
+const MAX_GREP_CHARS = 10_000;
+const MAX_LIST_DIR_ENTRIES = 1_000;
+const BASH_MAX_BUFFER = 1024 * 1024;
+const BASH_TIMEOUT_MS = 30_000;
+const SUBPROCESS_TIMEOUT_MS = 15_000;
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/** Reject paths containing null bytes which can bypass validation on some systems. */
+function ensureNoNullBytes(input: string): void {
+  if (input.includes("\0")) {
+    throw new Error("Invalid path: null bytes are not allowed");
+  }
+}
 
 /** Check that `resolved` is equal to or inside `cwd`. Prevents prefix-collision escapes. */
 function insideWorkspace(resolved: string, cwd: string): boolean {
@@ -41,6 +63,7 @@ function insideWorkspace(resolved: string, cwd: string): boolean {
  * Returns the resolved path if safe, or throws if the real path escapes the workspace.
  */
 async function resolveReadPath(cwd: string, filePath: string): Promise<string> {
+  ensureNoNullBytes(filePath);
   const resolved = path.resolve(cwd, filePath);
   if (!insideWorkspace(resolved, cwd)) throw new Error("path outside workspace");
   try {
@@ -59,6 +82,7 @@ async function resolveReadPath(cwd: string, filePath: string): Promise<string> {
  * `resolveWritePathInsideWorkspace`.
  */
 async function resolveWritePath(cwd: string, filePath: string): Promise<string> {
+  ensureNoNullBytes(filePath);
   const resolved = path.resolve(cwd, filePath);
   if (!insideWorkspace(resolved, cwd)) throw new Error("path outside workspace");
 
@@ -102,26 +126,34 @@ async function executeTool(
   cwd: string,
 ): Promise<string> {
   if (name === "bash") {
-    const command = typeof input.command === "string" ? input.command : "";
+    const command = typeof input.command === "string" ? input.command.trim() : "";
+    if (!command) return "Error: command is empty";
     return new Promise((resolve) => {
-      exec(command, { cwd, timeout: 30_000, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
-        const out = (stdout || "").trim();
-        const errOut = (stderr || "").trim();
-        if (err && !out && !errOut) {
-          resolve(`Error: ${err.message}`);
-        } else {
-          resolve([out, errOut].filter(Boolean).join("\n") || "(no output)");
-        }
-      });
+      exec(
+        command,
+        { cwd, timeout: BASH_TIMEOUT_MS, maxBuffer: BASH_MAX_BUFFER },
+        (err, stdout, stderr) => {
+          const out = (stdout || "").trim();
+          const errOut = (stderr || "").trim();
+          if (err && !out && !errOut) {
+            resolve(`Error: ${err.message}`);
+          } else {
+            resolve([out, errOut].filter(Boolean).join("\n") || "(no output)");
+          }
+        },
+      );
     });
   }
 
   if (name === "read_file") {
-    const filePath = typeof input.path === "string" ? input.path : "";
+    const filePath = typeof input.path === "string" ? input.path.trim() : "";
+    if (!filePath) return "Error: path is required";
     try {
       const resolved = await resolveReadPath(cwd, filePath);
       const content = await readFile(resolved, "utf-8");
-      return content.length > 50_000 ? `${content.slice(0, 50_000)}\n...(truncated)` : content;
+      return content.length > MAX_READ_CHARS
+        ? `${content.slice(0, MAX_READ_CHARS)}\n...(truncated)`
+        : content;
     } catch (err) {
       return `Error: ${err instanceof Error ? err.message : "read failed"}`;
     }
@@ -132,16 +164,21 @@ async function executeTool(
     try {
       const resolved = await resolveReadPath(cwd, dirPath);
       const entries = await readdir(resolved, { withFileTypes: true });
-      return entries
-        .map((e) => `${e.isDirectory() ? "\u{1F4C1}" : "\u{1F4C4}"} ${e.name}`)
-        .join("\n");
+      const lines = entries
+        .slice(0, MAX_LIST_DIR_ENTRIES)
+        .map((e) => `${e.isDirectory() ? "\u{1F4C1}" : "\u{1F4C4}"} ${e.name}`);
+      if (entries.length > MAX_LIST_DIR_ENTRIES) {
+        lines.push(`...(${entries.length - MAX_LIST_DIR_ENTRIES} more entries omitted)`);
+      }
+      return lines.join("\n");
     } catch (err) {
       return `Error: ${err instanceof Error ? err.message : "list failed"}`;
     }
   }
 
   if (name === "write_file") {
-    const filePath = typeof input.path === "string" ? input.path : "";
+    const filePath = typeof input.path === "string" ? input.path.trim() : "";
+    if (!filePath) return "Error: path is required";
     const content = typeof input.content === "string" ? input.content : "";
     try {
       const resolved = await resolveWritePath(cwd, filePath);
@@ -154,9 +191,11 @@ async function executeTool(
   }
 
   if (name === "edit_file") {
-    const filePath = typeof input.path === "string" ? input.path : "";
+    const filePath = typeof input.path === "string" ? input.path.trim() : "";
+    if (!filePath) return "Error: path is required";
     const oldStr = typeof input.old_string === "string" ? input.old_string : "";
     const newStr = typeof input.new_string === "string" ? input.new_string : "";
+    if (!oldStr) return "Error: old_string must not be empty";
     try {
       const resolved = await resolveWritePath(cwd, filePath);
       const content = await readFile(resolved, "utf-8");
@@ -171,30 +210,48 @@ async function executeTool(
 
   if (name === "grep") {
     const pattern = typeof input.pattern === "string" ? input.pattern : "";
+    if (!pattern) return "Error: pattern is required";
     const searchPath = typeof input.path === "string" ? input.path : ".";
     const include = typeof input.include === "string" ? input.include : "";
-    const resolved = path.resolve(cwd, searchPath);
-    if (!insideWorkspace(resolved, cwd)) return "Error: path outside workspace";
+    try {
+      await resolveReadPath(cwd, searchPath);
+    } catch {
+      return "Error: path outside workspace or not found";
+    }
     // Use execFile with explicit args array to avoid shell injection.
     // grep is invoked directly (no shell), so $() / backticks are harmless.
     const args = ["-rn"];
     if (include) args.push(`--include=${include}`);
     args.push("--", pattern, searchPath);
     return new Promise((resolve) => {
-      execFile("grep", args, { cwd, timeout: 15_000, maxBuffer: 1024 * 1024 }, (_err, stdout) => {
-        const out = (stdout || "").trim();
-        if (!out) resolve("No matches found");
-        else resolve(out.length > 10_000 ? `${out.slice(0, 10_000)}\n...(truncated)` : out);
-      });
+      execFile(
+        "grep",
+        args,
+        { cwd, timeout: SUBPROCESS_TIMEOUT_MS, maxBuffer: BASH_MAX_BUFFER },
+        (_err, stdout) => {
+          const out = (stdout || "").trim();
+          if (!out) resolve("No matches found");
+          else
+            resolve(
+              out.length > MAX_GREP_CHARS
+                ? `${out.slice(0, MAX_GREP_CHARS)}\n...(truncated)`
+                : out,
+            );
+        },
+      );
     });
   }
 
   if (name === "glob") {
     const pattern = typeof input.pattern === "string" ? input.pattern : "";
+    if (!pattern) return "Error: pattern is required";
     const namePattern = pattern.includes("/") ? path.basename(pattern) : pattern;
     const dirPattern = pattern.includes("/") ? path.dirname(pattern) : ".";
-    const resolvedDir = path.resolve(cwd, dirPattern);
-    if (!insideWorkspace(resolvedDir, cwd)) return "Error: path outside workspace";
+    try {
+      await resolveReadPath(cwd, dirPattern);
+    } catch {
+      return "Error: path outside workspace or not found";
+    }
     // Use execFile with explicit args to avoid shell injection via crafted patterns.
     const args = [
       dirPattern,
@@ -208,26 +265,32 @@ async function executeTool(
       "*/.git/*",
     ];
     return new Promise((resolve) => {
-      execFile("find", args, { cwd, timeout: 15_000, maxBuffer: 1024 * 1024 }, (_err, stdout) => {
-        const out = (stdout || "").trim();
-        if (!out) {
-          resolve("No matches found");
-        } else {
-          // Sort and limit results (replaces piped `| sort | head -200`)
-          const lines = out.split("\n").sort();
-          resolve(lines.slice(0, 200).join("\n"));
-        }
-      });
+      execFile(
+        "find",
+        args,
+        { cwd, timeout: SUBPROCESS_TIMEOUT_MS, maxBuffer: BASH_MAX_BUFFER },
+        (_err, stdout) => {
+          const out = (stdout || "").trim();
+          if (!out) {
+            resolve("No matches found");
+          } else {
+            // Sort and limit results (replaces piped `| sort | head -200`)
+            const lines = out.split("\n").sort();
+            resolve(lines.slice(0, 200).join("\n"));
+          }
+        },
+      );
     });
   }
 
   if (name === "web_search") {
-    const query = typeof input.query === "string" ? input.query : "";
+    const query = typeof input.query === "string" ? input.query.trim() : "";
+    if (!query) return "Error: query is required";
     try {
       const url =
         "https://api.duckduckgo.com/?format=json&no_html=1&skip_disambig=1&q=" +
         encodeURIComponent(query);
-      const response = await fetch(url, { signal: AbortSignal.timeout(15_000) });
+      const response = await fetch(url, { signal: AbortSignal.timeout(SUBPROCESS_TIMEOUT_MS) });
       const data = (await response.json()) as {
         AbstractText?: string;
         RelatedTopics?: Array<{ Text?: string; FirstURL?: string }>;
@@ -315,7 +378,7 @@ function buildTools(cwd: string): AgentTool<TSchema>[] {
     makeAgentTool(
       "edit_file",
       "Edit File",
-      "Edit a file by replacing an exact string match. Use this for precise modifications.",
+      "Edit a file by replacing the first occurrence of an exact string match. Use this for precise modifications. If the string appears multiple times, only the first match is replaced.",
       Type.Object({
         path: Type.String({ description: "File path relative to workspace root" }),
         old_string: Type.String({ description: "The exact string to find and replace" }),
@@ -419,6 +482,7 @@ export async function runDirectAgent(input: RunDirectAgentInput): Promise<void> 
     effectivePrompt = `${historyBlock}\n\n---\n\nUser: ${input.prompt}`;
   }
 
+  let turnCount = 0;
   const agent = new Agent({
     initialState: {
       model,
@@ -433,6 +497,16 @@ export async function runDirectAgent(input: RunDirectAgentInput): Promise<void> 
   // Map pi-agent-core events to our AgentEvent format
   agent.subscribe((event: PiAgentEvent) => {
     switch (event.type) {
+      case "turn_end":
+        turnCount++;
+        if (turnCount >= MAX_TURNS) {
+          input.onEvent({
+            type: "error",
+            content: `Agent stopped: reached maximum of ${MAX_TURNS} turns`,
+          });
+          agent.abort();
+        }
+        break;
       case "message_update": {
         // Extract text deltas from the assistant message event stream
         const ame = event.assistantMessageEvent;
