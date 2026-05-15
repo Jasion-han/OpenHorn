@@ -278,8 +278,14 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
       capturedSessionId = message.session_id;
       input.onSdkSessionId(capturedSessionId);
     }
-    const event = convertSdkEvent(message);
-    if (event) input.onEvent(event);
+    const events = convertSdkEvent(message);
+    if (events) {
+      if (Array.isArray(events)) {
+        for (const e of events) input.onEvent(e);
+      } else {
+        input.onEvent(events);
+      }
+    }
   }
 
   await finalizeCheckpoint(input.checkpoint);

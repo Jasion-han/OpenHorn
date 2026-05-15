@@ -12,21 +12,32 @@ type SdkMessage = {
   [key: string]: unknown;
 };
 
-export function convertSdkEvent(message: SdkMessage): AgentEvent | null {
+export function convertSdkEvent(message: SdkMessage): AgentEvent | AgentEvent[] | null {
   if (message.type === "user") {
     const uuid = typeof message.uuid === "string" ? message.uuid : null;
     if (uuid) return { type: "user_message", userMessageId: uuid };
   }
 
   if (message.type === "assistant" && message.message && typeof message.message === "object") {
-    const msg = message.message as { content?: Array<{ type?: string; text?: string }> };
+    const msg = message.message as {
+      content?: Array<{ type?: string; text?: string; name?: string; input?: unknown }>;
+    };
     const hasToolUse = (msg.content || []).some((item) => item.type === "tool_use");
     if (hasToolUse) {
-      const text = (msg.content || [])
-        .filter((item) => item.type === "text" && typeof item.text === "string")
-        .map((item) => item.text)
-        .join("");
-      if (text) return { type: "text", content: text };
+      const events: AgentEvent[] = [];
+      for (const block of msg.content || []) {
+        if (block.type === "text" && block.text) {
+          events.push({ type: "text", content: block.text });
+        }
+        if (block.type === "tool_use") {
+          events.push({
+            type: "tool_start",
+            toolName: typeof block.name === "string" ? block.name : undefined,
+            toolInput: block.input,
+          });
+        }
+      }
+      return events.length > 0 ? events : null;
     }
     return null;
   }
