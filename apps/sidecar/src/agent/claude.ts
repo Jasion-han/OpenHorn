@@ -47,8 +47,6 @@ function extractTargetFilePath(toolName: string, toolInput: unknown): string | n
   return null;
 }
 
-// toWorkspaceRelative is now imported from ../workspace
-
 /**
  * Returns null if the SDK fs tool target is safely inside the workspace,
  * or a deny reason otherwise. Bash is handled separately and is not
