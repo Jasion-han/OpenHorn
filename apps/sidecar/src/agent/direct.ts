@@ -133,7 +133,7 @@ async function executeTool(
   }
 
   if (name === "list_dir") {
-    const dirPath = typeof input.path === "string" ? input.path : ".";
+    const dirPath = typeof input.path === "string" ? input.path.trim() || "." : ".";
     try {
       const resolved = await resolveReadPath(cwd, dirPath);
       const entries = await readdir(resolved, { withFileTypes: true });
@@ -217,7 +217,14 @@ async function executeTool(
     const pattern = typeof input.pattern === "string" ? input.pattern : "";
     if (!pattern) return "Error: pattern is required";
     const namePattern = pattern.includes("/") ? path.basename(pattern) : pattern;
-    const dirPattern = pattern.includes("/") ? path.dirname(pattern) : ".";
+    // Strip "**" segments from dir — `find` already recurses; "**" is shell glob
+    // syntax that find would treat as a literal directory name.
+    const rawDir = pattern.includes("/") ? path.dirname(pattern) : ".";
+    const dirPattern =
+      rawDir
+        .split("/")
+        .filter((seg) => seg !== "**")
+        .join("/") || ".";
     try {
       await resolveReadPath(cwd, dirPattern);
     } catch {
