@@ -198,3 +198,24 @@ export async function resolveWritePathInsideWorkspace(input: {
 export async function ensureParentDirExists(filePath: string) {
   await mkdir(path.dirname(filePath), { recursive: true });
 }
+
+/**
+ * Converts an absolute-or-relative path into a workspace-relative form.
+ *
+ * The `resolvePathInsideWorkspace` / `resolveWritePathInsideWorkspace`
+ * helpers reject absolute paths outright, but tool-calling models
+ * frequently emit absolute paths that happen to live inside the workspace.
+ * Call this function first to normalise the input.
+ */
+export function toWorkspaceRelative(workspaceRoot: string, candidate: string): string {
+  if (candidate.startsWith("/")) {
+    const rootWithSep = workspaceRoot.endsWith("/") ? workspaceRoot : `${workspaceRoot}/`;
+    if (candidate === workspaceRoot) return ".";
+    if (candidate.startsWith(rootWithSep)) {
+      return candidate.slice(rootWithSep.length);
+    }
+    // Outside workspace — leave absolute so the downstream resolver throws.
+    return candidate;
+  }
+  return candidate;
+}

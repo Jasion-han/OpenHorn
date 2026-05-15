@@ -1,5 +1,5 @@
 import { exec, execFile } from "node:child_process";
-import { mkdir, readdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
+import { readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   Agent,
@@ -7,6 +7,13 @@ import {
   type AgentEvent as PiAgentEvent,
 } from "@earendil-works/pi-agent-core";
 import { type Api, type Model, streamSimple, type TSchema, Type } from "@earendil-works/pi-ai";
+import {
+  assertExistingPathInsideWorkspace,
+  ensureParentDirExists,
+  resolvePathInsideWorkspace,
+  resolveWritePathInsideWorkspace,
+  toWorkspaceRelative,
+} from "../workspace";
 import type { AgentEvent } from "./events";
 
 export type RunDirectAgentInput = {
@@ -43,77 +50,43 @@ const BASH_TIMEOUT_MS = 30_000;
 const SUBPROCESS_TIMEOUT_MS = 15_000;
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Helpers — path validation delegates to the shared workspace module
 // ---------------------------------------------------------------------------
 
-/** Reject paths containing null bytes which can bypass validation on some systems. */
-function ensureNoNullBytes(input: string): void {
-  if (input.includes("\0")) {
-    throw new Error("Invalid path: null bytes are not allowed");
-  }
-}
-
-/** Check that `resolved` is equal to or inside `cwd`. Prevents prefix-collision escapes. */
-function insideWorkspace(resolved: string, cwd: string): boolean {
-  return resolved === cwd || resolved.startsWith(cwd + path.sep);
-}
-
 /**
- * Resolve a workspace-relative path for a *read* operation, following symlinks.
- * Returns the resolved path if safe, or throws if the real path escapes the workspace.
+ * Resolve a workspace-relative (or absolute-inside-workspace) path for a
+ * *read* operation. For existing paths the realpath is checked; ENOENT is
+ * tolerated so the caller gets a normal "file not found" from readFile.
  */
 async function resolveReadPath(cwd: string, filePath: string): Promise<string> {
-  ensureNoNullBytes(filePath);
-  const resolved = path.resolve(cwd, filePath);
-  if (!insideWorkspace(resolved, cwd)) throw new Error("path outside workspace");
+  const relative = toWorkspaceRelative(cwd, filePath);
+  const resolved = resolvePathInsideWorkspace({
+    workspaceRoot: cwd,
+    targetPath: relative,
+  });
   try {
-    const real = await realpath(resolved);
-    if (!insideWorkspace(real, cwd)) throw new Error("path outside workspace (symlink escape)");
+    await assertExistingPathInsideWorkspace({
+      workspaceRoot: cwd,
+      resolvedPath: resolved,
+    });
   } catch (err) {
-    // ENOENT is fine for read — the caller will get a normal "file not found" from readFile
+    // ENOENT is fine for read — the caller will get a normal "file not found"
     if ((err as NodeJS.ErrnoException)?.code !== "ENOENT") throw err;
   }
   return resolved;
 }
 
 /**
- * Resolve a workspace-relative path for a *write* operation, following symlinks
- * on the deepest existing ancestor. Mirrors the security model in workspace.ts
- * `resolveWritePathInsideWorkspace`.
+ * Resolve a workspace-relative (or absolute-inside-workspace) path for a
+ * *write* operation.  Delegates to the battle-tested
+ * `resolveWritePathInsideWorkspace` in workspace.ts.
  */
 async function resolveWritePath(cwd: string, filePath: string): Promise<string> {
-  ensureNoNullBytes(filePath);
-  const resolved = path.resolve(cwd, filePath);
-  if (!insideWorkspace(resolved, cwd)) throw new Error("path outside workspace");
-
-  // If the target already exists, realpath it directly
-  try {
-    const s = await stat(resolved);
-    if (s) {
-      const real = await realpath(resolved);
-      if (!insideWorkspace(real, cwd)) throw new Error("path outside workspace (symlink escape)");
-      return resolved;
-    }
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException)?.code !== "ENOENT") throw err;
-  }
-
-  // Walk up to the deepest existing ancestor and realpath it
-  let ancestor = path.dirname(resolved);
-  while (true) {
-    try {
-      const realAncestor = await realpath(ancestor);
-      if (!insideWorkspace(realAncestor, cwd)) {
-        throw new Error("path outside workspace (symlink escape)");
-      }
-      return resolved;
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException)?.code !== "ENOENT") throw err;
-      const next = path.dirname(ancestor);
-      if (next === ancestor) throw new Error("unable to resolve ancestor");
-      ancestor = next;
-    }
-  }
+  const relative = toWorkspaceRelative(cwd, filePath);
+  return resolveWritePathInsideWorkspace({
+    workspaceRoot: cwd,
+    targetPath: relative,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -182,7 +155,7 @@ async function executeTool(
     const content = typeof input.content === "string" ? input.content : "";
     try {
       const resolved = await resolveWritePath(cwd, filePath);
-      await mkdir(path.dirname(resolved), { recursive: true });
+      await ensureParentDirExists(resolved);
       await writeFile(resolved, content, "utf-8");
       return `File written: ${filePath}`;
     } catch (err) {

@@ -4,6 +4,7 @@ import { classifyBashCommandRisk } from "../shell-risk";
 import {
   resolvePathInsideWorkspace,
   resolveWritePathInsideWorkspace,
+  toWorkspaceRelative,
 } from "../workspace";
 import { type AgentEvent, convertSdkEvent } from "./events";
 
@@ -46,29 +47,7 @@ function extractTargetFilePath(toolName: string, toolInput: unknown): string | n
   return null;
 }
 
-/**
- * Returns the workspace-relative form of an absolute or relative path the
- * SDK passes us. SDK fs tools (Read/Write/Edit) tend to send absolute
- * paths because the model is told to use the workspace cwd, but we
- * normalize defensively.
- */
-function toWorkspaceRelative(workspaceRoot: string, candidate: string): string {
-  if (candidate.startsWith("/")) {
-    // Absolute path: convert to relative to workspace root. The
-    // resolvePath* helpers reject absolutes outright, but if the
-    // absolute path happens to live inside the workspace we still want
-    // to allow it after normalization.
-    const rootWithSep = workspaceRoot.endsWith("/") ? workspaceRoot : `${workspaceRoot}/`;
-    if (candidate === workspaceRoot) return ".";
-    if (candidate.startsWith(rootWithSep)) {
-      return candidate.slice(rootWithSep.length);
-    }
-    // Outside workspace; leaving it absolute will make resolvePath* throw,
-    // which is exactly what we want.
-    return candidate;
-  }
-  return candidate;
-}
+// toWorkspaceRelative is now imported from ../workspace
 
 /**
  * Returns null if the SDK fs tool target is safely inside the workspace,
