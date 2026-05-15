@@ -259,7 +259,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
         };
 
         const abortController = new AbortController();
-        const useCodex = protocol === "codex_cli" || protocol === "openai" || isCliOAuth === true;
+        const useCodex = protocol === "codex_cli";
 
         if (useCodex) {
           const runId = `codex-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
