@@ -80,8 +80,8 @@ export function GeneralSettings() {
       </SettingsSection>
 
       <SettingsSection
-        title="全局系统提示词"
-        description="对所有对话与 Agent 会话生效，优先级低于对话级提示词。"
+        title="Custom Instructions"
+        description="对所有对话与 Agent 会话生效，用于设置你的个人偏好与回答风格。"
       >
         <SettingsCard divided={false} className="p-4">
           <div className="mb-3 flex items-start justify-between">
@@ -91,13 +91,13 @@ export function GeneralSettings() {
               </div>
               <div>
                 <div className="flex items-center gap-2">
-                  <p className="font-bold">全局系统提示词</p>
+                  <p className="font-bold">Custom Instructions</p>
                   {savedPrompt && !editing && (
                     <Badge variant="secondary">{savedPrompt.length} 字符</Badge>
                   )}
                 </div>
                 <p className="mt-0.5 text-xs text-muted-foreground">
-                  用于约束模型回答风格、语言与偏好。
+                  自定义 AI 的回答方式、语言与行为偏好。
                 </p>
               </div>
             </div>
