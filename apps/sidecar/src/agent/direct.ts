@@ -28,6 +28,15 @@ const SYSTEM_PROMPT = [
 ].join(" ");
 
 // ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** Check that `resolved` is equal to or inside `cwd`. Prevents prefix-collision escapes. */
+function insideWorkspace(resolved: string, cwd: string): boolean {
+  return resolved === cwd || resolved.startsWith(cwd + path.sep);
+}
+
+// ---------------------------------------------------------------------------
 // Tool execution (unchanged from the original hand-written implementation)
 // ---------------------------------------------------------------------------
 
@@ -54,7 +63,7 @@ async function executeTool(
   if (name === "read_file") {
     const filePath = typeof input.path === "string" ? input.path : "";
     const resolved = path.resolve(cwd, filePath);
-    if (!resolved.startsWith(cwd)) return "Error: path outside workspace";
+    if (!insideWorkspace(resolved, cwd)) return "Error: path outside workspace";
     try {
       const content = await readFile(resolved, "utf-8");
       return content.length > 50_000 ? `${content.slice(0, 50_000)}\n...(truncated)` : content;
@@ -66,7 +75,7 @@ async function executeTool(
   if (name === "list_dir") {
     const dirPath = typeof input.path === "string" ? input.path : ".";
     const resolved = path.resolve(cwd, dirPath);
-    if (!resolved.startsWith(cwd)) return "Error: path outside workspace";
+    if (!insideWorkspace(resolved, cwd)) return "Error: path outside workspace";
     try {
       const entries = await readdir(resolved, { withFileTypes: true });
       return entries
@@ -81,7 +90,7 @@ async function executeTool(
     const filePath = typeof input.path === "string" ? input.path : "";
     const content = typeof input.content === "string" ? input.content : "";
     const resolved = path.resolve(cwd, filePath);
-    if (!resolved.startsWith(cwd)) return "Error: path outside workspace";
+    if (!insideWorkspace(resolved, cwd)) return "Error: path outside workspace";
     try {
       await mkdir(path.dirname(resolved), { recursive: true });
       await writeFile(resolved, content, "utf-8");
@@ -96,7 +105,7 @@ async function executeTool(
     const oldStr = typeof input.old_string === "string" ? input.old_string : "";
     const newStr = typeof input.new_string === "string" ? input.new_string : "";
     const resolved = path.resolve(cwd, filePath);
-    if (!resolved.startsWith(cwd)) return "Error: path outside workspace";
+    if (!insideWorkspace(resolved, cwd)) return "Error: path outside workspace";
     try {
       const content = await readFile(resolved, "utf-8");
       if (!content.includes(oldStr)) return "Error: old_string not found in file";
@@ -113,7 +122,7 @@ async function executeTool(
     const searchPath = typeof input.path === "string" ? input.path : ".";
     const include = typeof input.include === "string" ? input.include : "";
     const resolved = path.resolve(cwd, searchPath);
-    if (!resolved.startsWith(cwd)) return "Error: path outside workspace";
+    if (!insideWorkspace(resolved, cwd)) return "Error: path outside workspace";
     const includeArg = include ? ` --include=${JSON.stringify(include)}` : "";
     return new Promise((resolve) => {
       exec(
@@ -132,6 +141,8 @@ async function executeTool(
     const pattern = typeof input.pattern === "string" ? input.pattern : "";
     const namePattern = pattern.includes("/") ? path.basename(pattern) : pattern;
     const dirPattern = pattern.includes("/") ? path.dirname(pattern) : ".";
+    const resolvedDir = path.resolve(cwd, dirPattern);
+    if (!insideWorkspace(resolvedDir, cwd)) return "Error: path outside workspace";
     return new Promise((resolve) => {
       exec(
         `find ${JSON.stringify(dirPattern)} -name ${JSON.stringify(namePattern)} -not -path "*/node_modules/*" -not -path "*/.git/*" | sort | head -200`,
@@ -151,7 +162,7 @@ async function executeTool(
       const url =
         "https://api.duckduckgo.com/?format=json&no_html=1&skip_disambig=1&q=" +
         encodeURIComponent(query);
-      const response = await fetch(url);
+      const response = await fetch(url, { signal: AbortSignal.timeout(15_000) });
       const data = (await response.json()) as {
         AbstractText?: string;
         RelatedTopics?: Array<{ Text?: string; FirstURL?: string }>;
@@ -411,7 +422,11 @@ export async function runDirectAgent(input: RunDirectAgentInput): Promise<void> 
 
   // Wire up external abort to the agent
   const onAbort = () => agent.abort();
-  input.abortController.signal.addEventListener("abort", onAbort, { once: true });
+  if (input.abortController.signal.aborted) {
+    agent.abort();
+  } else {
+    input.abortController.signal.addEventListener("abort", onAbort, { once: true });
+  }
 
   try {
     await agent.prompt(effectivePrompt);
