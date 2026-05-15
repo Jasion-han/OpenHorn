@@ -1,5 +1,5 @@
 import { Bot, KeyRound, Palette, Radio, Settings } from "lucide-react";
-import type { ReactNode } from "react";
+import { type ReactNode, useEffect, useRef } from "react";
 import { useMemo } from "react";
 import { cn, ScrollArea } from "ui";
 import {
@@ -40,6 +40,11 @@ export function SettingsView({ initialTab = "channels" }: { initialTab?: Setting
   }, [activeTab]);
 
   const resolvedTab = TABS.some((tab) => tab.id === activeTab) ? activeTab : initialTab;
+  const containerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const viewport = containerRef.current?.querySelector("[data-radix-scroll-area-viewport]");
+    if (viewport) viewport.scrollTop = 0;
+  }, [activeTab]);
 
   return (
     <div className="h-full min-h-0">
@@ -68,9 +73,11 @@ export function SettingsView({ initialTab = "channels" }: { initialTab?: Setting
           </nav>
         </div>
 
-        <ScrollArea className="flex-1 min-h-0 pt-8">
-          <div className="px-6 pb-8">{content}</div>
-        </ScrollArea>
+        <div ref={containerRef} className="flex-1 min-h-0">
+          <ScrollArea className="h-full pt-8">
+            <div className="px-6 pb-8">{content}</div>
+          </ScrollArea>
+        </div>
       </div>
     </div>
   );
