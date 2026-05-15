@@ -258,14 +258,26 @@ async function buildWeatherContext(prompt: string): Promise<IntentContextResult>
 // Public API
 // ---------------------------------------------------------------------------
 
-export async function buildIntentContext(prompt: string): Promise<IntentContextResult> {
+export interface IntentContextOptions {
+  webSearchEnabled?: boolean;
+}
+
+export async function buildIntentContext(
+  prompt: string,
+  options?: IntentContextOptions,
+): Promise<IntentContextResult> {
   const route = classifyIntent(prompt);
 
   if (route === "local_time") {
+    // Time is computed locally, no network needed
     return buildTimeContext();
   }
 
   if (route === "weather") {
+    // Weather fetches from Open-Meteo API; skip when web search is disabled
+    if (options?.webSearchEnabled === false) {
+      return { route: "none", context: null };
+    }
     return buildWeatherContext(prompt);
   }
 

@@ -26,6 +26,7 @@ export type RunClaudeAgentInput = {
   checkpoint: CheckpointSession;
   sdkSessionId?: string;
   systemPrompt?: string;
+  webSearchEnabled?: boolean;
   conversationHistory?: Array<{ role: "user" | "assistant"; content: string }>;
   requestApproval: (input: {
     toolUseId: string;
@@ -181,9 +182,17 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
   };
 
   // Merge user system prompt with intent context (time / weather)
-  const intentResult = await buildIntentContext(input.prompt);
+  const intentResult = await buildIntentContext(input.prompt, {
+    webSearchEnabled: input.webSearchEnabled,
+  });
   const finalSystemPrompt =
     [input.systemPrompt, intentResult.context].filter(Boolean).join("\n\n") || undefined;
+
+  // Build tools list, conditionally including web tools
+  const sdkTools: string[] = ["Read", "Grep", "Glob", "Write", "Edit", "Bash"];
+  if (input.webSearchEnabled !== false) {
+    sdkTools.push("WebFetch", "WebSearch");
+  }
 
   const queryOptions: Record<string, unknown> = {
     abortController: input.abortController,
@@ -191,7 +200,7 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
     env: childEnv,
     model: input.model,
     pathToClaudeCodeExecutable: await findClaudeBinary(),
-    tools: ["Read", "Grep", "Glob", "Write", "Edit", "Bash", "WebFetch", "WebSearch"],
+    tools: sdkTools,
     permissionMode: "bypassPermissions",
     allowDangerouslySkipPermissions: true,
     promptSuggestions: false,

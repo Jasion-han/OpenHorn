@@ -27,6 +27,8 @@ export interface SidecarAgentRunInput {
   sdkSessionId?: string;
   permissionMode?: "default" | "full-access";
   systemPrompt?: string;
+  webSearchEnabled?: boolean;
+  tavilyApiKey?: string;
   conversationHistory?: Array<{ role: "user" | "assistant"; content: string }>;
 }
 
@@ -153,6 +155,8 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
         sdkSessionId: input.sdkSessionId ?? sdkSessionId ?? undefined,
         permissionMode: input.permissionMode,
         systemPrompt: input.systemPrompt,
+        webSearchEnabled: input.webSearchEnabled,
+        tavilyApiKey: input.tavilyApiKey,
         conversationHistory: input.conversationHistory,
         onSdkSessionId: (sessionId) => {
           setSdkSessionId(sessionId);

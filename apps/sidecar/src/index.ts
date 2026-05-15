@@ -257,6 +257,8 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
           permissionMode,
           systemPrompt,
           conversationHistory,
+          webSearchEnabled,
+          tavilyApiKey,
         } = params as {
           prompt: string;
           apiKey: string;
@@ -267,6 +269,8 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
           permissionMode?: "default" | "full-access";
           systemPrompt?: string;
           conversationHistory?: Array<{ role: "user" | "assistant"; content: string }>;
+          webSearchEnabled?: boolean;
+          tavilyApiKey?: string;
         };
 
         const abortController = new AbortController();
@@ -325,6 +329,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
               checkpoint,
               sdkSessionId,
               systemPrompt,
+              webSearchEnabled,
               conversationHistory,
               requestApproval: async (approvalInput) => {
                 const { toolUseId } = approvalInput;
@@ -359,6 +364,8 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
               conversationHistory,
               permissionMode,
               systemPrompt,
+              webSearchEnabled,
+              tavilyApiKey,
               requestApproval: async (approvalInput) => {
                 const approvalId = `approval-${Date.now()}`;
                 return new Promise<boolean>((resolve) => {

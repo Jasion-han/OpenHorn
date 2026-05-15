@@ -73,6 +73,8 @@ export const AgentRunParamsSchema = z.object({
   conversationHistory: z
     .array(z.object({ role: z.enum(["user", "assistant"]), content: z.string() }))
     .optional(),
+  webSearchEnabled: z.boolean().optional(),
+  tavilyApiKey: z.string().optional(),
 });
 
 export const AgentCancelParamsSchema = z.object({

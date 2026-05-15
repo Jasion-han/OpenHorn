@@ -1032,6 +1032,15 @@ export function DesktopChatArea() {
           }
         }
         const globalSystemPrompt = await fetchGlobalSystemPrompt();
+        let tavilyApiKey: string | undefined;
+        if (forceWebSearch) {
+          try {
+            const { settings } = await chatAreaApi.settings.get(["liveSearch.tavilyApiKey"]);
+            tavilyApiKey = settings["liveSearch.tavilyApiKey"] || undefined;
+          } catch {
+            // ignore
+          }
+        }
         await sidecarRun.startRun({
           conversationId,
           channelId: currentConversation.channelId,
@@ -1040,6 +1049,8 @@ export function DesktopChatArea() {
           prompt: effectiveContent,
           permissionMode: fullAccessEnabled ? "full-access" : "default",
           systemPrompt: globalSystemPrompt,
+          webSearchEnabled: forceWebSearch,
+          tavilyApiKey,
           conversationHistory: conversationHistory.length > 0 ? conversationHistory : undefined,
         });
 
@@ -1198,6 +1209,15 @@ export function DesktopChatArea() {
           }
         }
         const retrySystemPrompt = await fetchGlobalSystemPrompt();
+        let retryTavilyApiKey: string | undefined;
+        if (forceWebSearch) {
+          try {
+            const { settings } = await chatAreaApi.settings.get(["liveSearch.tavilyApiKey"]);
+            retryTavilyApiKey = settings["liveSearch.tavilyApiKey"] || undefined;
+          } catch {
+            // ignore
+          }
+        }
         await sidecarRun.startRun({
           conversationId: currentConversation.id,
           channelId: currentConversation.channelId!,
@@ -1206,6 +1226,8 @@ export function DesktopChatArea() {
           prompt: userMessage.content,
           permissionMode: fullAccessEnabled ? "full-access" : "default",
           systemPrompt: retrySystemPrompt,
+          webSearchEnabled: forceWebSearch,
+          tavilyApiKey: retryTavilyApiKey,
           conversationHistory: conversationHistory.length > 0 ? conversationHistory : undefined,
         });
         setLoading(false);
@@ -1333,6 +1355,15 @@ export function DesktopChatArea() {
           }
         }
         const editSystemPrompt = await fetchGlobalSystemPrompt();
+        let editTavilyApiKey: string | undefined;
+        if (forceWebSearch) {
+          try {
+            const { settings } = await chatAreaApi.settings.get(["liveSearch.tavilyApiKey"]);
+            editTavilyApiKey = settings["liveSearch.tavilyApiKey"] || undefined;
+          } catch {
+            // ignore
+          }
+        }
         await sidecarRun.startRun({
           conversationId: currentConversation.id,
           channelId: currentConversation.channelId!,
@@ -1341,6 +1372,8 @@ export function DesktopChatArea() {
           prompt: nextContent,
           permissionMode: fullAccessEnabled ? "full-access" : "default",
           systemPrompt: editSystemPrompt,
+          webSearchEnabled: forceWebSearch,
+          tavilyApiKey: editTavilyApiKey,
           conversationHistory: conversationHistory.length > 0 ? conversationHistory : undefined,
         });
         setLoading(false);

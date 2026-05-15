@@ -68,6 +68,8 @@ export interface SidecarRunAgentInput {
   sdkSessionId?: string;
   permissionMode?: "default" | "full-access";
   systemPrompt?: string;
+  webSearchEnabled?: boolean;
+  tavilyApiKey?: string;
   conversationHistory?: Array<{ role: "user" | "assistant"; content: string }>;
   onEvent: (event: AgentTaskStreamEvent) => void | Promise<void>;
   onApproval: (request: SidecarApprovalRequest) => void | Promise<void>;
@@ -290,6 +292,8 @@ export class SidecarClient {
       sdkSessionId,
       permissionMode,
       systemPrompt,
+      webSearchEnabled,
+      tavilyApiKey,
       conversationHistory,
       onEvent,
       onApproval,
@@ -306,6 +310,8 @@ export class SidecarClient {
       ...(sdkSessionId ? { sdkSessionId } : {}),
       ...(permissionMode ? { permissionMode } : {}),
       ...(systemPrompt ? { systemPrompt } : {}),
+      ...(webSearchEnabled !== undefined ? { webSearchEnabled } : {}),
+      ...(tavilyApiKey ? { tavilyApiKey } : {}),
       ...(conversationHistory && conversationHistory.length > 0 ? { conversationHistory } : {}),
     })) as { runId: string };
     const runId = result.runId;

@@ -20,6 +20,8 @@ export type RunDirectAgentInput = {
   conversationHistory?: Array<{ role: "user" | "assistant"; content: string }>;
   permissionMode?: "default" | "full-access";
   systemPrompt?: string;
+  webSearchEnabled?: boolean;
+  tavilyApiKey?: string;
   requestApproval?: (input: {
     toolName: string;
     toolInput: Record<string, unknown>;
@@ -67,6 +69,7 @@ const SUBPROCESS_TIMEOUT_MS = 15_000;
 
 interface ExecuteToolOptions {
   permissionMode?: "default" | "full-access";
+  tavilyApiKey?: string;
   requestApproval?: (input: {
     toolName: string;
     toolInput: Record<string, unknown>;
@@ -251,25 +254,74 @@ async function executeTool(
   if (name === "web_search") {
     const query = typeof input.query === "string" ? input.query.trim() : "";
     if (!query) return "Error: query is required";
+
+    const tavilyKey = options?.tavilyApiKey;
+    if (!tavilyKey) {
+      return "Error: web search is not configured. Please set a Tavily API Key in Agent settings.";
+    }
+
     try {
-      const url =
-        "https://api.duckduckgo.com/?format=json&no_html=1&skip_disambig=1&q=" +
-        encodeURIComponent(query);
-      const response = await fetch(url, { signal: AbortSignal.timeout(SUBPROCESS_TIMEOUT_MS) });
-      const data = (await response.json()) as {
-        AbstractText?: string;
-        RelatedTopics?: Array<{ Text?: string; FirstURL?: string }>;
+      const resp = await fetch("https://api.tavily.com/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          api_key: tavilyKey,
+          query,
+          max_results: 5,
+          include_answer: true,
+        }),
+        signal: AbortSignal.timeout(SUBPROCESS_TIMEOUT_MS),
+      });
+      const data = (await resp.json()) as {
+        answer?: string;
+        results?: Array<{ title?: string; url?: string; content?: string }>;
       };
       const parts: string[] = [];
-      if (data.AbstractText) parts.push(data.AbstractText);
-      for (const topic of (data.RelatedTopics || []).slice(0, 5)) {
-        if (topic.Text) {
-          parts.push(`- ${topic.Text}${topic.FirstURL ? ` (${topic.FirstURL})` : ""}`);
-        }
+      if (data.answer) parts.push(data.answer);
+      for (const r of (data.results || []).slice(0, 5)) {
+        parts.push(`### ${r.title || "Untitled"}\n${r.url || ""}\n${r.content || ""}`);
       }
-      return parts.length > 0 ? parts.join("\n") : "No results found. Try a different query.";
+      return parts.length > 0 ? parts.join("\n\n") : "No results found.";
     } catch (err) {
       return `Search error: ${err instanceof Error ? err.message : "failed"}`;
+    }
+  }
+
+  if (name === "web_fetch") {
+    const url = typeof input.url === "string" ? input.url.trim() : "";
+    if (!url) return "Error: url is required";
+
+    try {
+      const resp = await fetch(url, {
+        headers: { "User-Agent": "OpenHorn/1.0 (compatible; bot)" },
+        signal: AbortSignal.timeout(SUBPROCESS_TIMEOUT_MS),
+        redirect: "follow",
+      });
+      if (!resp.ok) return `Error: HTTP ${resp.status} ${resp.statusText}`;
+      const contentType = resp.headers.get("content-type") || "";
+      if (
+        !contentType.includes("text/html") &&
+        !contentType.includes("text/plain") &&
+        !contentType.includes("application/json")
+      ) {
+        return `Error: unsupported content type: ${contentType}`;
+      }
+      const html = await resp.text();
+      if (contentType.includes("text/plain") || contentType.includes("application/json")) {
+        return html.length > MAX_READ_CHARS
+          ? `${html.slice(0, MAX_READ_CHARS)}\n...(truncated)`
+          : html;
+      }
+      // HTML -> Markdown via turndown
+      const TurndownService = (await import("turndown")).default;
+      const td = new TurndownService({ headingStyle: "atx", codeBlockStyle: "fenced" });
+      td.remove(["script", "style", "nav", "footer", "header", "aside", "iframe", "noscript"]);
+      const md = td.turndown(html);
+      return md.length > MAX_READ_CHARS
+        ? `${md.slice(0, MAX_READ_CHARS)}\n...(truncated)`
+        : md;
+    } catch (err) {
+      return `Fetch error: ${err instanceof Error ? err.message : "failed"}`;
     }
   }
 
@@ -300,8 +352,12 @@ function makeAgentTool<T extends TSchema>(
   };
 }
 
-function buildTools(cwd: string, options?: ExecuteToolOptions): AgentTool<TSchema>[] {
-  return [
+interface BuildToolsOptions extends ExecuteToolOptions {
+  webSearchEnabled?: boolean;
+}
+
+function buildTools(cwd: string, options?: BuildToolsOptions): AgentTool<TSchema>[] {
+  const tools: AgentTool<TSchema>[] = [
     makeAgentTool(
       "bash",
       "Bash",
@@ -386,17 +442,35 @@ function buildTools(cwd: string, options?: ExecuteToolOptions): AgentTool<TSchem
       cwd,
       options,
     ),
-    makeAgentTool(
-      "web_search",
-      "Web Search",
-      "Search the web for information. Use this when you need current/real-time data.",
-      Type.Object({
-        query: Type.String({ description: "The search query" }),
-      }),
-      cwd,
-      options,
-    ),
   ];
+
+  // Only include web tools when webSearchEnabled is not explicitly false
+  if (options?.webSearchEnabled !== false) {
+    tools.push(
+      makeAgentTool(
+        "web_search",
+        "Web Search",
+        "Search the web for information. Use this when you need current/real-time data.",
+        Type.Object({
+          query: Type.String({ description: "The search query" }),
+        }),
+        cwd,
+        options,
+      ),
+      makeAgentTool(
+        "web_fetch",
+        "Web Fetch",
+        "Fetch a web page and return its content as Markdown. Use this to read documentation, articles, or any web content.",
+        Type.Object({
+          url: Type.String({ description: "The URL to fetch" }),
+        }),
+        cwd,
+        options,
+      ),
+    );
+  }
+
+  return tools;
 }
 
 // ---------------------------------------------------------------------------
@@ -429,7 +503,9 @@ export async function runDirectAgent(input: RunDirectAgentInput): Promise<void> 
   const model = buildModel(input);
   const tools = buildTools(input.cwd, {
     permissionMode: input.permissionMode,
+    tavilyApiKey: input.tavilyApiKey,
     requestApproval: input.requestApproval,
+    webSearchEnabled: input.webSearchEnabled,
   });
   const apiKey = input.apiKey;
 
@@ -445,7 +521,9 @@ export async function runDirectAgent(input: RunDirectAgentInput): Promise<void> 
   }
 
   // Merge product system prompt, user system prompt, and intent context
-  const intentResult = await buildIntentContext(input.prompt);
+  const intentResult = await buildIntentContext(input.prompt, {
+    webSearchEnabled: input.webSearchEnabled,
+  });
   const finalSystemPrompt = [SYSTEM_PROMPT, input.systemPrompt, intentResult.context]
     .filter(Boolean)
     .join("\n\n");
