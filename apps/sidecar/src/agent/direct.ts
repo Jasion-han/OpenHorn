@@ -1,5 +1,5 @@
 import { exec, execFile } from "node:child_process";
-import { readdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   Agent,
@@ -7,13 +7,6 @@ import {
   type AgentEvent as PiAgentEvent,
 } from "@earendil-works/pi-agent-core";
 import { type Api, type Model, streamSimple, type TSchema, Type } from "@earendil-works/pi-ai";
-import {
-  assertExistingPathInsideWorkspace,
-  ensureParentDirExists,
-  resolvePathInsideWorkspace,
-  resolveWritePathInsideWorkspace,
-  toWorkspaceRelative,
-} from "../workspace";
 import type { AgentEvent } from "./events";
 
 export type RunDirectAgentInput = {
@@ -24,6 +17,12 @@ export type RunDirectAgentInput = {
   cwd: string;
   abortController: AbortController;
   conversationHistory?: Array<{ role: "user" | "assistant"; content: string }>;
+  permissionMode?: "default" | "full-access";
+  requestApproval?: (input: {
+    toolName: string;
+    toolInput: Record<string, unknown>;
+    reason: string;
+  }) => Promise<boolean>;
   onEvent: (event: AgentEvent) => void;
 };
 
@@ -49,57 +48,42 @@ const BASH_TIMEOUT_MS = 30_000;
 const SUBPROCESS_TIMEOUT_MS = 15_000;
 
 // ---------------------------------------------------------------------------
-// Helpers — path validation delegates to the shared workspace module
-// ---------------------------------------------------------------------------
-
-/**
- * Resolve a workspace-relative (or absolute-inside-workspace) path for a
- * *read* operation. For existing paths the realpath is checked; ENOENT is
- * tolerated so the caller gets a normal "file not found" from readFile.
- */
-async function resolveReadPath(cwd: string, filePath: string): Promise<string> {
-  const relative = toWorkspaceRelative(cwd, filePath);
-  const resolved = resolvePathInsideWorkspace({
-    workspaceRoot: cwd,
-    targetPath: relative,
-  });
-  try {
-    await assertExistingPathInsideWorkspace({
-      workspaceRoot: cwd,
-      resolvedPath: resolved,
-    });
-  } catch (err) {
-    // ENOENT is fine for read — the caller will get a normal "file not found"
-    if ((err as NodeJS.ErrnoException)?.code !== "ENOENT") throw err;
-  }
-  return resolved;
-}
-
-/**
- * Resolve a workspace-relative (or absolute-inside-workspace) path for a
- * *write* operation.  Delegates to the battle-tested
- * `resolveWritePathInsideWorkspace` in workspace.ts.
- */
-async function resolveWritePath(cwd: string, filePath: string): Promise<string> {
-  const relative = toWorkspaceRelative(cwd, filePath);
-  return resolveWritePathInsideWorkspace({
-    workspaceRoot: cwd,
-    targetPath: relative,
-  });
-}
-
-// ---------------------------------------------------------------------------
 // Tool execution
 // ---------------------------------------------------------------------------
+
+interface ExecuteToolOptions {
+  permissionMode?: "default" | "full-access";
+  requestApproval?: (input: {
+    toolName: string;
+    toolInput: Record<string, unknown>;
+    reason: string;
+  }) => Promise<boolean>;
+}
 
 async function executeTool(
   name: string,
   input: Record<string, unknown>,
   cwd: string,
+  options?: ExecuteToolOptions,
 ): Promise<string> {
   if (name === "bash") {
     const command = typeof input.command === "string" ? input.command.trim() : "";
     if (!command) return "Error: command is empty";
+
+    // Risk-based approval for bash commands in default permission mode
+    if (options?.permissionMode !== "full-access") {
+      const { classifyBashCommandRisk } = await import("../shell-risk");
+      const risk = classifyBashCommandRisk(command);
+      if (risk.level !== "allow" && options?.requestApproval) {
+        const allowed = await options.requestApproval({
+          toolName: "bash",
+          toolInput: { command },
+          reason: risk.reason || "This command may be dangerous",
+        });
+        if (!allowed) return "Command rejected by user";
+      }
+    }
+
     return new Promise((resolve) => {
       exec(
         command,
@@ -121,7 +105,7 @@ async function executeTool(
     const filePath = typeof input.path === "string" ? input.path.trim() : "";
     if (!filePath) return "Error: path is required";
     try {
-      const resolved = await resolveReadPath(cwd, filePath);
+      const resolved = path.resolve(cwd, filePath);
       const content = await readFile(resolved, "utf-8");
       return content.length > MAX_READ_CHARS
         ? `${content.slice(0, MAX_READ_CHARS)}\n...(truncated)`
@@ -134,7 +118,7 @@ async function executeTool(
   if (name === "list_dir") {
     const dirPath = typeof input.path === "string" ? input.path.trim() || "." : ".";
     try {
-      const resolved = await resolveReadPath(cwd, dirPath);
+      const resolved = path.resolve(cwd, dirPath);
       const entries = await readdir(resolved, { withFileTypes: true });
       const lines = entries
         .slice(0, MAX_LIST_DIR_ENTRIES)
@@ -153,8 +137,8 @@ async function executeTool(
     if (!filePath) return "Error: path is required";
     const content = typeof input.content === "string" ? input.content : "";
     try {
-      const resolved = await resolveWritePath(cwd, filePath);
-      await ensureParentDirExists(resolved);
+      const resolved = path.resolve(cwd, filePath);
+      await mkdir(path.dirname(resolved), { recursive: true });
       await writeFile(resolved, content, "utf-8");
       return `File written: ${filePath}`;
     } catch (err) {
@@ -169,7 +153,7 @@ async function executeTool(
     const newStr = typeof input.new_string === "string" ? input.new_string : "";
     if (!oldStr) return "Error: old_string must not be empty";
     try {
-      const resolved = await resolveWritePath(cwd, filePath);
+      const resolved = path.resolve(cwd, filePath);
       const content = await readFile(resolved, "utf-8");
       if (!content.includes(oldStr)) return "Error: old_string not found in file";
       const updated = content.replace(oldStr, newStr);
@@ -185,11 +169,6 @@ async function executeTool(
     if (!pattern) return "Error: pattern is required";
     const searchPath = typeof input.path === "string" ? input.path : ".";
     const include = typeof input.include === "string" ? input.include : "";
-    try {
-      await resolveReadPath(cwd, searchPath);
-    } catch {
-      return "Error: path outside workspace or not found";
-    }
     // Use execFile with explicit args array to avoid shell injection.
     // grep is invoked directly (no shell), so $() / backticks are harmless.
     const args = ["-rn"];
@@ -216,7 +195,7 @@ async function executeTool(
     const pattern = typeof input.pattern === "string" ? input.pattern : "";
     if (!pattern) return "Error: pattern is required";
     const namePattern = pattern.includes("/") ? path.basename(pattern) : pattern;
-    // Strip "**" segments from dir — `find` already recurses; "**" is shell glob
+    // Strip "**" segments from dir -- `find` already recurses; "**" is shell glob
     // syntax that find would treat as a literal directory name.
     const rawDir = pattern.includes("/") ? path.dirname(pattern) : ".";
     const dirPattern =
@@ -224,11 +203,6 @@ async function executeTool(
         .split("/")
         .filter((seg) => seg !== "**")
         .join("/") || ".";
-    try {
-      await resolveReadPath(cwd, dirPattern);
-    } catch {
-      return "Error: path outside workspace or not found";
-    }
     // Use execFile with explicit args to avoid shell injection via crafted patterns.
     const args = [
       dirPattern,
@@ -298,6 +272,7 @@ function makeAgentTool<T extends TSchema>(
   description: string,
   parameters: T,
   cwd: string,
+  options?: ExecuteToolOptions,
 ): AgentTool<T> {
   return {
     name,
@@ -305,13 +280,13 @@ function makeAgentTool<T extends TSchema>(
     description,
     parameters,
     execute: async (_toolCallId, params) => {
-      const result = await executeTool(name, params as Record<string, unknown>, cwd);
+      const result = await executeTool(name, params as Record<string, unknown>, cwd, options);
       return { content: [{ type: "text", text: result }], details: undefined };
     },
   };
 }
 
-function buildTools(cwd: string): AgentTool<TSchema>[] {
+function buildTools(cwd: string, options?: ExecuteToolOptions): AgentTool<TSchema>[] {
   return [
     makeAgentTool(
       "bash",
@@ -321,6 +296,7 @@ function buildTools(cwd: string): AgentTool<TSchema>[] {
         command: Type.String({ description: "The shell command to execute" }),
       }),
       cwd,
+      options,
     ),
     makeAgentTool(
       "read_file",
@@ -330,6 +306,7 @@ function buildTools(cwd: string): AgentTool<TSchema>[] {
         path: Type.String({ description: "File path relative to workspace root" }),
       }),
       cwd,
+      options,
     ),
     makeAgentTool(
       "list_dir",
@@ -341,6 +318,7 @@ function buildTools(cwd: string): AgentTool<TSchema>[] {
         }),
       }),
       cwd,
+      options,
     ),
     makeAgentTool(
       "write_file",
@@ -351,6 +329,7 @@ function buildTools(cwd: string): AgentTool<TSchema>[] {
         content: Type.String({ description: "The content to write" }),
       }),
       cwd,
+      options,
     ),
     makeAgentTool(
       "edit_file",
@@ -362,6 +341,7 @@ function buildTools(cwd: string): AgentTool<TSchema>[] {
         new_string: Type.String({ description: "The replacement string" }),
       }),
       cwd,
+      options,
     ),
     makeAgentTool(
       "grep",
@@ -380,6 +360,7 @@ function buildTools(cwd: string): AgentTool<TSchema>[] {
         ),
       }),
       cwd,
+      options,
     ),
     makeAgentTool(
       "glob",
@@ -389,6 +370,7 @@ function buildTools(cwd: string): AgentTool<TSchema>[] {
         pattern: Type.String({ description: "Glob pattern, e.g. '**/*.ts', 'src/**/*.json'" }),
       }),
       cwd,
+      options,
     ),
     makeAgentTool(
       "web_search",
@@ -398,6 +380,7 @@ function buildTools(cwd: string): AgentTool<TSchema>[] {
         query: Type.String({ description: "The search query" }),
       }),
       cwd,
+      options,
     ),
   ];
 }
@@ -430,7 +413,10 @@ function buildModel(input: RunDirectAgentInput): Model<Api> {
 
 export async function runDirectAgent(input: RunDirectAgentInput): Promise<void> {
   const model = buildModel(input);
-  const tools = buildTools(input.cwd);
+  const tools = buildTools(input.cwd, {
+    permissionMode: input.permissionMode,
+    requestApproval: input.requestApproval,
+  });
   const apiKey = input.apiKey;
 
   // Build the effective prompt, prepending conversation history if present

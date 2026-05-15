@@ -18,12 +18,6 @@ const PROVIDER_LABELS: Record<string, string> = {
   google: "Google",
 };
 
-const API_KEY_LINKS: Record<string, string> = {
-  openai: "https://platform.openai.com/api-keys",
-  anthropic: "https://console.anthropic.com/settings/keys",
-  google: "https://aistudio.google.com/apikey",
-};
-
 export function DesktopCredentialSourcesPanel() {
   const [sources, setSources] = useState<CredentialSource[]>([]);
   const [loading, setLoading] = useState(false);

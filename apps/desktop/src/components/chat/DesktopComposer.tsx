@@ -1,4 +1,4 @@
-import { ChevronDown, CornerDownLeft, Globe, Paperclip, Square } from "lucide-react";
+import { ChevronDown, CornerDownLeft, Globe, Paperclip, ShieldOff, Square } from "lucide-react";
 import type {
   ClipboardEvent,
   DragEvent,
@@ -35,6 +35,8 @@ export function DesktopComposer({
   modelLabel,
   modelTone = "normal",
   onOpenModelPicker,
+  fullAccessEnabled = false,
+  onToggleFullAccess,
   forceWebSearch,
   onToggleWebSearch,
   onInputFocus,
@@ -60,6 +62,8 @@ export function DesktopComposer({
   modelLabel?: string | null;
   modelTone?: "normal" | "warning";
   onOpenModelPicker?: () => void;
+  fullAccessEnabled?: boolean;
+  onToggleFullAccess?: () => void;
   forceWebSearch: boolean;
   onToggleWebSearch: () => void;
   onInputFocus?: () => void;
@@ -313,6 +317,37 @@ export function DesktopComposer({
                 </p>
               </TooltipContent>
             </Tooltip>
+
+            {mode === "agent" && onToggleFullAccess && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={onToggleFullAccess}
+                    disabled={disabled || streaming}
+                    className={cn(
+                      "inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs transition-colors",
+                      fullAccessEnabled
+                        ? "bg-amber-400/20 text-amber-600"
+                        : "text-muted-foreground hover:text-foreground hover:bg-accent",
+                      (disabled || streaming) && "pointer-events-none opacity-60",
+                    )}
+                    aria-label="Full Access"
+                    title="Full Access"
+                  >
+                    <ShieldOff size={14} />
+                    <span>Full Access</span>
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top">
+                  <p>
+                    {fullAccessEnabled
+                      ? "Full Access: all operations auto-approved"
+                      : "Full Access: off (dangerous commands need approval)"}
+                  </p>
+                </TooltipContent>
+              </Tooltip>
+            )}
           </div>
 
           <div className="flex items-center gap-1.5">

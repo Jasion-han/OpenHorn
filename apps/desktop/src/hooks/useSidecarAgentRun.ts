@@ -25,6 +25,7 @@ export interface SidecarAgentRunInput {
   assistantMessageId: string;
   prompt: string;
   sdkSessionId?: string;
+  permissionMode?: "default" | "full-access";
   conversationHistory?: Array<{ role: "user" | "assistant"; content: string }>;
 }
 
@@ -95,10 +96,6 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
       setLastError("本地运行尚未就绪");
       return;
     }
-    if (!sidecar.workspaceRoot) {
-      setLastError("请先选择本地工作目录");
-      return;
-    }
     if (runRef.current !== null) {
       setLastError("已有一个本地运行在进行中");
       return;
@@ -153,6 +150,7 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
         baseUrl: credentials.baseUrl ?? undefined,
         protocol: credentials.protocol,
         sdkSessionId: input.sdkSessionId ?? sdkSessionId ?? undefined,
+        permissionMode: input.permissionMode,
         conversationHistory: input.conversationHistory,
         onSdkSessionId: (sessionId) => {
           setSdkSessionId(sessionId);

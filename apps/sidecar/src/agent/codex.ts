@@ -142,7 +142,6 @@ export async function runCodexAgent(input: RunCodexAgentInput): Promise<void> {
   return new Promise<void>((resolve) => {
     let nextId = 0;
     let threadId = "";
-    let initialized = false;
     let threadStarted = false;
     let done = false;
     let pendingText = "";
@@ -248,7 +247,6 @@ export async function runCodexAgent(input: RunCodexAgentInput): Promise<void> {
           return;
         }
         sendNotification(proc, "initialized");
-        initialized = true;
 
         const threadResp = await sendReq("thread/start", {
           model,

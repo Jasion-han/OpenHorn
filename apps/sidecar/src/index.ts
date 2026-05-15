@@ -246,17 +246,26 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
         return;
       }
       case "agent.run": {
-        if (!state.workspaceRoot) throw new Error("Workspace not set");
-        const { prompt, apiKey, model, baseUrl, protocol, sdkSessionId, conversationHistory } =
-          params as {
-            prompt: string;
-            apiKey: string;
-            model: string;
-            baseUrl?: string;
-            protocol?: string;
-            sdkSessionId?: string;
-            conversationHistory?: Array<{ role: "user" | "assistant"; content: string }>;
-          };
+        const cwd = state.workspaceRoot || (await import("node:os")).default.homedir();
+        const {
+          prompt,
+          apiKey,
+          model,
+          baseUrl,
+          protocol,
+          sdkSessionId,
+          permissionMode,
+          conversationHistory,
+        } = params as {
+          prompt: string;
+          apiKey: string;
+          model: string;
+          baseUrl?: string;
+          protocol?: string;
+          sdkSessionId?: string;
+          permissionMode?: "default" | "full-access";
+          conversationHistory?: Array<{ role: "user" | "assistant"; content: string }>;
+        };
 
         const abortController = new AbortController();
 
@@ -291,7 +300,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
             runCodexAgent({
               model,
               prompt,
-              cwd: state.workspaceRoot,
+              cwd,
               abortController,
               onEvent,
             }),
@@ -301,7 +310,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
 
         if (protocol === "anthropic") {
           const { runId, onEvent, guard } = initRun("claude");
-          const checkpoint = await createCheckpointSession(state.workspaceRoot);
+          const checkpoint = await createCheckpointSession(cwd);
           guard(
             "Claude agent",
             runClaudeAgent({
@@ -309,7 +318,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
               baseUrl,
               model,
               prompt,
-              cwd: state.workspaceRoot,
+              cwd,
               abortController,
               checkpoint,
               sdkSessionId,
@@ -334,7 +343,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
         }
 
         {
-          const { onEvent, guard } = initRun("direct");
+          const { runId, onEvent, guard } = initRun("direct");
           guard(
             "Direct agent",
             runDirectAgent({
@@ -342,9 +351,27 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
               baseUrl,
               model,
               prompt,
-              cwd: state.workspaceRoot,
+              cwd,
               abortController,
               conversationHistory,
+              permissionMode,
+              requestApproval: async (approvalInput) => {
+                const approvalId = `approval-${Date.now()}`;
+                return new Promise<boolean>((resolve) => {
+                  state.pendingApprovals.set(approvalId, resolve);
+                  ws.send(
+                    JSON.stringify(
+                      buildEvent("approval.request", {
+                        runId,
+                        toolUseId: approvalId,
+                        toolName: approvalInput.toolName,
+                        toolInput: approvalInput.toolInput,
+                        decisionReason: approvalInput.reason,
+                      }),
+                    ),
+                  );
+                });
+              },
               onEvent,
             }),
           );

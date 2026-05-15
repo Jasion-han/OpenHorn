@@ -710,6 +710,7 @@ export function DesktopChatArea() {
   );
   const messageAnchorRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const [streamingAssistantId, setStreamingAssistantId] = useState<string | null>(null);
+  const [fullAccessEnabled, setFullAccessEnabled] = useState(false);
   const sidecarRun = useSidecarAgentRun();
   const prevSidecarBusyRef = useRef(false);
   useEffect(() => {
@@ -991,8 +992,8 @@ export function DesktopChatArea() {
 
       if (mode === "agent") {
         const sidecar = useSidecarStore.getState();
-        if (sidecar.status !== "ready" || !sidecar.workspaceRoot) {
-          throw new Error("Agent 模式需要本地运行环境。请确认工作目录已选择且 sidecar 已就绪。");
+        if (sidecar.status !== "ready") {
+          throw new Error("Agent 模式需要本地运行环境。请确认 sidecar 已就绪。");
         }
         if (files.length > 0) {
           notifyWarning(
@@ -1023,6 +1024,7 @@ export function DesktopChatArea() {
           modelId: effectiveModel.modelId,
           assistantMessageId,
           prompt: effectiveContent,
+          permissionMode: fullAccessEnabled ? "full-access" : "default",
           conversationHistory: conversationHistory.length > 0 ? conversationHistory : undefined,
         });
 
@@ -1186,6 +1188,7 @@ export function DesktopChatArea() {
           modelId: effectiveModel.ok ? effectiveModel.modelId : "",
           assistantMessageId: messageId,
           prompt: userMessage.content,
+          permissionMode: fullAccessEnabled ? "full-access" : "default",
           conversationHistory: conversationHistory.length > 0 ? conversationHistory : undefined,
         });
         setLoading(false);
@@ -1318,6 +1321,7 @@ export function DesktopChatArea() {
           modelId: effectiveModel.ok ? effectiveModel.modelId : "",
           assistantMessageId,
           prompt: nextContent,
+          permissionMode: fullAccessEnabled ? "full-access" : "default",
           conversationHistory: conversationHistory.length > 0 ? conversationHistory : undefined,
         });
         setLoading(false);
@@ -1570,6 +1574,8 @@ export function DesktopChatArea() {
           }
           modelTone={effectiveModel.ok ? "normal" : "warning"}
           onOpenModelPicker={() => setModelPickerOpen(true)}
+          fullAccessEnabled={fullAccessEnabled}
+          onToggleFullAccess={() => setFullAccessEnabled((v) => !v)}
           forceWebSearch={forceWebSearch}
           onToggleWebSearch={() => void handleToggleWebSearch()}
           onInputFocus={handleInputFocus}
