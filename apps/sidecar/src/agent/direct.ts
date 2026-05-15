@@ -1,6 +1,12 @@
 import { exec } from "node:child_process";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import {
+  Agent,
+  type AgentTool,
+  type AgentEvent as PiAgentEvent,
+} from "@earendil-works/pi-agent-core";
+import { type Api, type Model, streamSimple, type TSchema, Type } from "@earendil-works/pi-ai";
 import type { AgentEvent } from "./events";
 
 export type RunDirectAgentInput = {
@@ -15,129 +21,15 @@ export type RunDirectAgentInput = {
   onEvent: (event: AgentEvent) => void;
 };
 
-const TOOLS = [
-  {
-    name: "bash",
-    description: "Run a shell command and return its output.",
-    input_schema: {
-      type: "object" as const,
-      properties: {
-        command: { type: "string" as const, description: "The shell command to execute" },
-      },
-      required: ["command"],
-    },
-  },
-  {
-    name: "read_file",
-    description: "Read the contents of a file at the given path (relative to cwd).",
-    input_schema: {
-      type: "object" as const,
-      properties: {
-        path: { type: "string" as const, description: "File path relative to workspace root" },
-      },
-      required: ["path"],
-    },
-  },
-  {
-    name: "list_dir",
-    description: "List files and directories at the given path.",
-    input_schema: {
-      type: "object" as const,
-      properties: {
-        path: {
-          type: "string" as const,
-          description: "Directory path relative to workspace root, use '.' for root",
-        },
-      },
-      required: ["path"],
-    },
-  },
-  {
-    name: "write_file",
-    description: "Create or overwrite a file with the given content.",
-    input_schema: {
-      type: "object" as const,
-      properties: {
-        path: { type: "string" as const, description: "File path relative to workspace root" },
-        content: { type: "string" as const, description: "The content to write" },
-      },
-      required: ["path", "content"],
-    },
-  },
-  {
-    name: "edit_file",
-    description:
-      "Edit a file by replacing an exact string match. Use this for precise modifications.",
-    input_schema: {
-      type: "object" as const,
-      properties: {
-        path: { type: "string" as const, description: "File path relative to workspace root" },
-        old_string: {
-          type: "string" as const,
-          description: "The exact string to find and replace",
-        },
-        new_string: { type: "string" as const, description: "The replacement string" },
-      },
-      required: ["path", "old_string", "new_string"],
-    },
-  },
-  {
-    name: "grep",
-    description:
-      "Search for a text pattern in files. Returns matching lines with file paths and line numbers.",
-    input_schema: {
-      type: "object" as const,
-      properties: {
-        pattern: {
-          type: "string" as const,
-          description: "Search pattern (literal string or regex)",
-        },
-        path: {
-          type: "string" as const,
-          description:
-            "Directory or file to search in, relative to workspace root. Defaults to '.'",
-        },
-        include: {
-          type: "string" as const,
-          description: "File glob pattern to filter, e.g. '*.ts' or '*.py'",
-        },
-      },
-      required: ["pattern"],
-    },
-  },
-  {
-    name: "glob",
-    description: "Find files matching a glob pattern. Returns a list of matching file paths.",
-    input_schema: {
-      type: "object" as const,
-      properties: {
-        pattern: {
-          type: "string" as const,
-          description: "Glob pattern, e.g. '**/*.ts', 'src/**/*.json'",
-        },
-      },
-      required: ["pattern"],
-    },
-  },
-  {
-    name: "web_search",
-    description: "Search the web for information. Use this when you need current/real-time data.",
-    input_schema: {
-      type: "object" as const,
-      properties: {
-        query: { type: "string" as const, description: "The search query" },
-      },
-      required: ["query"],
-    },
-  },
-];
-
-const MAX_TURNS = 30;
 const SYSTEM_PROMPT = [
   "You are a helpful assistant with access to the user's local workspace.",
   "Use tools when needed to inspect files, run commands, and answer questions.",
   "Be concise and direct. Respond in the same language as the user.",
 ].join(" ");
+
+// ---------------------------------------------------------------------------
+// Tool execution (unchanged from the original hand-written implementation)
+// ---------------------------------------------------------------------------
 
 async function executeTool(
   name: string,
@@ -177,7 +69,9 @@ async function executeTool(
     if (!resolved.startsWith(cwd)) return "Error: path outside workspace";
     try {
       const entries = await readdir(resolved, { withFileTypes: true });
-      return entries.map((e) => `${e.isDirectory() ? "📁" : "📄"} ${e.name}`).join("\n");
+      return entries
+        .map((e) => `${e.isDirectory() ? "\u{1F4C1}" : "\u{1F4C4}"} ${e.name}`)
+        .join("\n");
     } catch (err) {
       return `Error: ${err instanceof Error ? err.message : "list failed"}`;
     }
@@ -278,186 +172,255 @@ async function executeTool(
   return `Unknown tool: ${name}`;
 }
 
-type ApiMessage = {
-  role: "user" | "assistant";
-  content: string | Array<Record<string, unknown>>;
-};
+// ---------------------------------------------------------------------------
+// AgentTool definitions (typebox schemas wrapping executeTool)
+// ---------------------------------------------------------------------------
 
-async function runAnthropicAgent(input: RunDirectAgentInput): Promise<void> {
-  const baseUrl = (input.baseUrl || "https://api.anthropic.com").replace(/\/$/, "");
-  const messages: ApiMessage[] = [];
-
-  if (input.conversationHistory) {
-    for (const msg of input.conversationHistory) {
-      messages.push({ role: msg.role, content: msg.content });
-    }
-  }
-  messages.push({ role: "user", content: input.prompt });
-
-  for (let turn = 0; turn < MAX_TURNS; turn++) {
-    if (input.abortController.signal.aborted) break;
-
-    const isOAuthToken = input.apiKey.startsWith("sk-ant-oat");
-    const authHeaders: Record<string, string> = isOAuthToken
-      ? { Authorization: `Bearer ${input.apiKey}` }
-      : { "x-api-key": input.apiKey };
-    const response = await fetch(`${baseUrl}/v1/messages`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...authHeaders,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: input.model,
-        max_tokens: 8192,
-        system: SYSTEM_PROMPT,
-        messages,
-        tools: TOOLS,
-      }),
-      signal: input.abortController.signal,
-    });
-
-    if (!response.ok) {
-      const errText = await response.text().catch(() => "API error");
-      input.onEvent({
-        type: "error",
-        content: `API error ${response.status}: ${errText.slice(0, 200)}`,
-      });
-      return;
-    }
-
-    const data = (await response.json()) as {
-      content: Array<{
-        type: string;
-        text?: string;
-        id?: string;
-        name?: string;
-        input?: Record<string, unknown>;
-      }>;
-      stop_reason: string;
-    };
-
-    messages.push({ role: "assistant", content: data.content as unknown as string });
-
-    for (const block of data.content) {
-      if (block.type === "text" && block.text) {
-        input.onEvent({ type: "text", content: block.text });
-      }
-    }
-
-    const toolBlocks = data.content.filter((b) => b.type === "tool_use");
-    if (toolBlocks.length === 0 || data.stop_reason === "end_turn") break;
-
-    const toolResults: Array<Record<string, unknown>> = [];
-    for (const tool of toolBlocks) {
-      const toolName = tool.name || "";
-      const toolInput = (tool.input || {}) as Record<string, unknown>;
-      input.onEvent({ type: "tool_start", toolName, toolInput });
-      const result = await executeTool(toolName, toolInput, input.cwd);
-      input.onEvent({
-        type: "tool_result",
-        content: result.length > 500 ? `${result.slice(0, 500)}...` : result,
-      });
-      toolResults.push({ type: "tool_result", tool_use_id: tool.id, content: result });
-    }
-
-    messages.push({ role: "user", content: toolResults as unknown as string });
-  }
+function makeAgentTool<T extends TSchema>(
+  name: string,
+  label: string,
+  description: string,
+  parameters: T,
+  cwd: string,
+): AgentTool<T> {
+  return {
+    name,
+    label,
+    description,
+    parameters,
+    execute: async (_toolCallId, params) => {
+      const result = await executeTool(name, params as Record<string, unknown>, cwd);
+      return { content: [{ type: "text", text: result }], details: undefined };
+    },
+  };
 }
 
-const OPENAI_TOOLS = TOOLS.map((t) => ({
-  type: "function" as const,
-  function: { name: t.name, description: t.description, parameters: t.input_schema },
-}));
+function buildTools(cwd: string): AgentTool<TSchema>[] {
+  return [
+    makeAgentTool(
+      "bash",
+      "Bash",
+      "Run a shell command and return its output.",
+      Type.Object({
+        command: Type.String({ description: "The shell command to execute" }),
+      }),
+      cwd,
+    ),
+    makeAgentTool(
+      "read_file",
+      "Read File",
+      "Read the contents of a file at the given path (relative to cwd).",
+      Type.Object({
+        path: Type.String({ description: "File path relative to workspace root" }),
+      }),
+      cwd,
+    ),
+    makeAgentTool(
+      "list_dir",
+      "List Directory",
+      "List files and directories at the given path.",
+      Type.Object({
+        path: Type.String({
+          description: "Directory path relative to workspace root, use '.' for root",
+        }),
+      }),
+      cwd,
+    ),
+    makeAgentTool(
+      "write_file",
+      "Write File",
+      "Create or overwrite a file with the given content.",
+      Type.Object({
+        path: Type.String({ description: "File path relative to workspace root" }),
+        content: Type.String({ description: "The content to write" }),
+      }),
+      cwd,
+    ),
+    makeAgentTool(
+      "edit_file",
+      "Edit File",
+      "Edit a file by replacing an exact string match. Use this for precise modifications.",
+      Type.Object({
+        path: Type.String({ description: "File path relative to workspace root" }),
+        old_string: Type.String({ description: "The exact string to find and replace" }),
+        new_string: Type.String({ description: "The replacement string" }),
+      }),
+      cwd,
+    ),
+    makeAgentTool(
+      "grep",
+      "Grep",
+      "Search for a text pattern in files. Returns matching lines with file paths and line numbers.",
+      Type.Object({
+        pattern: Type.String({ description: "Search pattern (literal string or regex)" }),
+        path: Type.Optional(
+          Type.String({
+            description:
+              "Directory or file to search in, relative to workspace root. Defaults to '.'",
+          }),
+        ),
+        include: Type.Optional(
+          Type.String({ description: "File glob pattern to filter, e.g. '*.ts' or '*.py'" }),
+        ),
+      }),
+      cwd,
+    ),
+    makeAgentTool(
+      "glob",
+      "Glob",
+      "Find files matching a glob pattern. Returns a list of matching file paths.",
+      Type.Object({
+        pattern: Type.String({ description: "Glob pattern, e.g. '**/*.ts', 'src/**/*.json'" }),
+      }),
+      cwd,
+    ),
+    makeAgentTool(
+      "web_search",
+      "Web Search",
+      "Search the web for information. Use this when you need current/real-time data.",
+      Type.Object({
+        query: Type.String({ description: "The search query" }),
+      }),
+      cwd,
+    ),
+  ];
+}
 
-async function runOpenAIAgent(input: RunDirectAgentInput): Promise<void> {
+// ---------------------------------------------------------------------------
+// Model construction helpers
+// ---------------------------------------------------------------------------
+
+function buildModel(input: RunDirectAgentInput): Model<Api> {
+  if (input.protocol === "anthropic") {
+    const baseUrl = (input.baseUrl || "https://api.anthropic.com").replace(/\/$/, "");
+    return {
+      id: input.model,
+      name: input.model,
+      api: "anthropic-messages",
+      provider: "anthropic",
+      baseUrl,
+      reasoning: false,
+      input: ["text"],
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: 200_000,
+      maxTokens: 8192,
+    };
+  }
+
+  // Default: OpenAI-compatible completions
   const baseUrl = (input.baseUrl || "https://api.openai.com/v1").replace(/\/$/, "");
-  const messages: Array<Record<string, unknown>> = [{ role: "system", content: SYSTEM_PROMPT }];
-
-  if (input.conversationHistory) {
-    for (const msg of input.conversationHistory) {
-      messages.push({ role: msg.role, content: msg.content });
-    }
-  }
-  messages.push({ role: "user", content: input.prompt });
-
-  for (let turn = 0; turn < MAX_TURNS; turn++) {
-    if (input.abortController.signal.aborted) break;
-
-    const response = await fetch(`${baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${input.apiKey}`,
-      },
-      body: JSON.stringify({
-        model: input.model,
-        messages,
-        tools: OPENAI_TOOLS,
-        tool_choice: "auto",
-      }),
-      signal: input.abortController.signal,
-    });
-
-    if (!response.ok) {
-      const errText = await response.text().catch(() => "API error");
-      input.onEvent({
-        type: "error",
-        content: `API error ${response.status}: ${errText.slice(0, 200)}`,
-      });
-      return;
-    }
-
-    const data = (await response.json()) as {
-      choices: Array<{
-        message: {
-          role: string;
-          content?: string | null;
-          tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }>;
-        };
-        finish_reason: string;
-      }>;
-    };
-
-    const choice = data.choices?.[0];
-    if (!choice) break;
-
-    const msg = choice.message;
-    messages.push(msg as Record<string, unknown>);
-
-    if (msg.content) {
-      input.onEvent({ type: "text", content: msg.content });
-    }
-
-    const toolCalls = msg.tool_calls;
-    if (!toolCalls || toolCalls.length === 0 || choice.finish_reason === "stop") break;
-
-    for (const tc of toolCalls) {
-      const toolName = tc.function.name;
-      let toolInput: Record<string, unknown> = {};
-      try {
-        toolInput = JSON.parse(tc.function.arguments);
-      } catch {}
-      input.onEvent({ type: "tool_start", toolName, toolInput });
-      const result = await executeTool(toolName, toolInput, input.cwd);
-      input.onEvent({
-        type: "tool_result",
-        content: result.length > 500 ? `${result.slice(0, 500)}...` : result,
-      });
-      messages.push({ role: "tool", tool_call_id: tc.id, content: result });
-    }
-  }
+  return {
+    id: input.model,
+    name: input.model,
+    api: "openai-completions",
+    provider: "openai",
+    baseUrl,
+    reasoning: false,
+    input: ["text"],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 128_000,
+    maxTokens: 16_384,
+  };
 }
+
+// ---------------------------------------------------------------------------
+// Entry point
+// ---------------------------------------------------------------------------
 
 export async function runDirectAgent(input: RunDirectAgentInput): Promise<void> {
-  try {
-    if (input.protocol === "anthropic") {
-      await runAnthropicAgent(input);
-    } else {
-      await runOpenAIAgent(input);
+  const model = buildModel(input);
+  const tools = buildTools(input.cwd);
+  const apiKey = input.apiKey;
+
+  // Build the effective prompt, prepending conversation history if present
+  // (same pattern as claude.ts since pi-agent-core doesn't accept pre-seeded
+  // message history directly).
+  let effectivePrompt = input.prompt;
+  if (input.conversationHistory && input.conversationHistory.length > 0) {
+    const historyBlock = input.conversationHistory
+      .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
+      .join("\n\n");
+    effectivePrompt = `${historyBlock}\n\n---\n\nUser: ${input.prompt}`;
+  }
+
+  const agent = new Agent({
+    initialState: {
+      model,
+      tools,
+      systemPrompt: SYSTEM_PROMPT,
+    },
+    streamFn: streamSimple,
+    getApiKey: () => apiKey,
+    toolExecution: "sequential",
+  });
+
+  // Map pi-agent-core events to our AgentEvent format
+  agent.subscribe((event: PiAgentEvent) => {
+    switch (event.type) {
+      case "message_update": {
+        // Extract text deltas from the assistant message event stream
+        const ame = event.assistantMessageEvent;
+        if (ame.type === "text_delta") {
+          input.onEvent({ type: "final_text", content: ame.delta });
+        }
+        break;
+      }
+      case "tool_execution_start":
+        input.onEvent({
+          type: "tool_start",
+          toolName: event.toolName,
+          toolInput: event.args,
+        });
+        break;
+      case "tool_execution_end": {
+        const resultContent = event.result?.content;
+        let text = "";
+        if (Array.isArray(resultContent)) {
+          text = resultContent
+            .filter((c: { type: string }) => c.type === "text")
+            .map((c: { type: string; text?: string }) => c.text || "")
+            .join("\n");
+        }
+        input.onEvent({
+          type: "tool_result",
+          content: text.length > 500 ? `${text.slice(0, 500)}...` : text,
+        });
+        break;
+      }
+      case "agent_end": {
+        // Check if agent ended with an error
+        const msgs = event.messages;
+        if (msgs.length > 0) {
+          const last = msgs[msgs.length - 1];
+          if (
+            last &&
+            "role" in last &&
+            last.role === "assistant" &&
+            "errorMessage" in last &&
+            last.errorMessage
+          ) {
+            input.onEvent({ type: "error", content: last.errorMessage });
+          }
+        }
+        break;
+      }
+      default:
+        break;
     }
+  });
+
+  // Wire up external abort to the agent
+  const onAbort = () => agent.abort();
+  input.abortController.signal.addEventListener("abort", onAbort, { once: true });
+
+  try {
+    await agent.prompt(effectivePrompt);
+    await agent.waitForIdle();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    input.onEvent({ type: "error", content: msg });
   } finally {
+    input.abortController.signal.removeEventListener("abort", onAbort);
     input.onEvent({ type: "done" });
   }
 }
