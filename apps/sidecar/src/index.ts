@@ -315,7 +315,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
             },
             onCheckpointReady: () => {},
             onSdkSessionId: (sid) => {
-              ws.send(JSON.stringify(buildEvent("agent.session", { runId, sessionId: sid })));
+              ws.send(JSON.stringify(buildEvent("agent.session", { runId, sdkSessionId: sid })));
             },
           }).catch((err) => {
             const msg = err instanceof Error ? err.message : "Claude agent crashed";
