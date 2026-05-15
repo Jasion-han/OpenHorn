@@ -146,30 +146,33 @@ function LiveStatusBadge({
 
 function CollapsibleBlock({ children, maxLines = 3 }: { children: React.ReactNode; maxLines?: number }) {
   const [expanded, setExpanded] = useState(false);
-  const contentRef = useRef<HTMLDivElement>(null);
-  const [collapsedHeight, setCollapsedHeight] = useState<number | null>(null);
+  const measureRef = useRef<HTMLDivElement>(null);
+  const [needsCollapse, setNeedsCollapse] = useState(false);
+  const [clampHeight, setClampHeight] = useState(0);
 
   useEffect(() => {
-    const el = contentRef.current;
+    const el = measureRef.current;
     if (!el || maxLines <= 0) return;
     const lineHeight = parseFloat(getComputedStyle(el).lineHeight) || 20;
-    const threshold = lineHeight * maxLines + lineHeight * 0.5;
-    if (el.scrollHeight > threshold) {
-      setCollapsedHeight(Math.round(lineHeight * (maxLines + 0.3)));
+    const fullHeight = el.scrollHeight;
+    const maxAllowed = lineHeight * (maxLines + 1);
+    if (fullHeight > maxAllowed) {
+      setNeedsCollapse(true);
+      setClampHeight(Math.ceil(lineHeight * maxLines));
     } else {
-      setCollapsedHeight(null);
+      setNeedsCollapse(false);
     }
   });
 
-  if (maxLines <= 0 || collapsedHeight === null) {
-    return <div ref={contentRef}>{children}</div>;
+  if (maxLines <= 0 || !needsCollapse) {
+    return <div ref={measureRef}>{children}</div>;
   }
   return (
-    <div className="relative">
+    <div>
       <div
-        ref={contentRef}
+        ref={measureRef}
         className={cn(!expanded && "overflow-hidden")}
-        style={!expanded ? { maxHeight: collapsedHeight } : undefined}
+        style={!expanded ? { maxHeight: clampHeight } : undefined}
       >
         {children}
       </div>
