@@ -1,6 +1,5 @@
 import { Bot, KeyRound, Palette, Radio, Settings } from "lucide-react";
-import { type ReactNode, useEffect, useRef } from "react";
-import { useMemo } from "react";
+import { type ReactNode, useState } from "react";
 import { cn, ScrollArea } from "ui";
 import {
   useDesktopShellStore,
@@ -20,31 +19,36 @@ const TABS: Array<{ id: SettingsTab; label: string; icon: ReactNode }> = [
   { id: "appearance", label: "外观", icon: <Palette size={16} /> },
 ];
 
+function TabContent({ id }: { id: SettingsTab }) {
+  switch (id) {
+    case "general":
+      return <GeneralSettings />;
+    case "channels":
+      return <ChannelSettings />;
+    case "credentials":
+      return <DesktopCredentialSourcesPanel />;
+    case "agent":
+      return <AgentSettings />;
+    case "appearance":
+      return <AppearanceSettings />;
+  }
+}
+
 export function SettingsView({ initialTab = "channels" }: { initialTab?: SettingsTab }) {
   const activeTab = useDesktopShellStore((state) => state.settingsTab);
   const setActiveTab = useDesktopShellStore((state) => state.setSettingsTab);
-
-  const content = useMemo(() => {
-    switch (activeTab) {
-      case "general":
-        return <GeneralSettings />;
-      case "channels":
-        return <ChannelSettings />;
-      case "credentials":
-        return <DesktopCredentialSourcesPanel />;
-      case "agent":
-        return <AgentSettings />;
-      case "appearance":
-        return <AppearanceSettings />;
-    }
-  }, [activeTab]);
-
   const resolvedTab = TABS.some((tab) => tab.id === activeTab) ? activeTab : initialTab;
-  const containerRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const viewport = containerRef.current?.querySelector("[data-radix-scroll-area-viewport]");
-    if (viewport) viewport.scrollTop = 0;
-  }, [activeTab]);
+  const [visited, setVisited] = useState<Set<SettingsTab>>(new Set([resolvedTab]));
+
+  const handleTabClick = (tabId: SettingsTab) => {
+    setActiveTab(tabId);
+    setVisited((prev) => {
+      if (prev.has(tabId)) return prev;
+      const next = new Set(prev);
+      next.add(tabId);
+      return next;
+    });
+  };
 
   return (
     <div className="h-full min-h-0">
@@ -58,7 +62,7 @@ export function SettingsView({ initialTab = "channels" }: { initialTab?: Setting
               <button
                 key={tab.id}
                 type="button"
-                onClick={() => setActiveTab(tab.id)}
+                onClick={() => handleTabClick(tab.id)}
                 className={cn(
                   "flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors titlebar-no-drag",
                   resolvedTab === tab.id
@@ -73,10 +77,23 @@ export function SettingsView({ initialTab = "channels" }: { initialTab?: Setting
           </nav>
         </div>
 
-        <div ref={containerRef} className="flex-1 min-h-0">
-          <ScrollArea className="h-full pt-8">
-            <div className="px-6 pb-8">{content}</div>
-          </ScrollArea>
+        <div className="flex-1 min-h-0 relative">
+          {TABS.map((tab) => {
+            if (!visited.has(tab.id)) return null;
+            return (
+              <div
+                key={tab.id}
+                className="absolute inset-0"
+                style={{ display: resolvedTab === tab.id ? "block" : "none" }}
+              >
+                <ScrollArea className="h-full pt-8">
+                  <div className="px-6 pb-8">
+                    <TabContent id={tab.id} />
+                  </div>
+                </ScrollArea>
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>
