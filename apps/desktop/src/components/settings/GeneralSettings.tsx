@@ -80,7 +80,7 @@ export function GeneralSettings() {
       </SettingsSection>
 
       <SettingsSection
-        title="Custom Instructions"
+        title="自定义指令"
         description="对所有对话与 Agent 会话生效，用于设置你的个人偏好与回答风格。"
       >
         <SettingsCard divided={false} className="p-4">
@@ -91,7 +91,7 @@ export function GeneralSettings() {
               </div>
               <div>
                 <div className="flex items-center gap-2">
-                  <p className="font-bold">Custom Instructions</p>
+                  <p className="font-bold">自定义指令</p>
                   {savedPrompt && !editing && (
                     <Badge variant="secondary">{savedPrompt.length} 字符</Badge>
                   )}
