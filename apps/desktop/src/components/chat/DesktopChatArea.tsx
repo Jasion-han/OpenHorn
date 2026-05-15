@@ -155,7 +155,7 @@ function CollapsibleBlock({ children, maxLines = 3 }: { children: React.ReactNod
     const lineHeight = parseFloat(getComputedStyle(el).lineHeight) || 20;
     const threshold = lineHeight * maxLines + lineHeight * 0.5;
     if (el.scrollHeight > threshold) {
-      setCollapsedHeight(Math.round(lineHeight * maxLines));
+      setCollapsedHeight(Math.round(lineHeight * (maxLines + 0.3)));
     } else {
       setCollapsedHeight(null);
     }
