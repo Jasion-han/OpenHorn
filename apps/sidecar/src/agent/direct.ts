@@ -206,9 +206,7 @@ async function executeTool(
           if (!out) resolve("No matches found");
           else
             resolve(
-              out.length > MAX_GREP_CHARS
-                ? `${out.slice(0, MAX_GREP_CHARS)}\n...(truncated)`
-                : out,
+              out.length > MAX_GREP_CHARS ? `${out.slice(0, MAX_GREP_CHARS)}\n...(truncated)` : out,
             );
         },
       );
