@@ -87,7 +87,7 @@ export function SettingsView({ initialTab = "channels" }: { initialTab?: Setting
                 style={{ display: resolvedTab === tab.id ? "block" : "none" }}
               >
                 <ScrollArea className="h-full pt-8">
-                  <div className="px-6 pb-8">
+                  <div className="mx-auto max-w-3xl px-6 pb-8">
                     <TabContent id={tab.id} />
                   </div>
                 </ScrollArea>
