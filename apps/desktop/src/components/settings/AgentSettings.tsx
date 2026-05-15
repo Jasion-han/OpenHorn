@@ -244,7 +244,7 @@ export function AgentSettings() {
                 </p>
               </div>
               {defaultChannel ? (
-                <Badge variant="secondary" className="gap-1" title={defaultChannel.provider}>
+                <Badge variant="secondary" className="gap-1 whitespace-nowrap" title={defaultChannel.provider}>
                   <DesktopProviderLogo provider={defaultChannel.provider} className="size-4" />
                   <span className="sr-only">{defaultChannel.provider}</span>
                   <span>{defaultChannel.modelId}</span>
