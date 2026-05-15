@@ -152,28 +152,30 @@ function CollapsibleBlock({ children, maxLines = 3 }: { children: React.ReactNod
   useEffect(() => {
     const el = contentRef.current;
     if (!el || maxLines <= 0) return;
-    setIsOverflowing(el.scrollHeight > maxLines * 24);
+    const lineHeight = parseFloat(getComputedStyle(el).lineHeight) || 20;
+    setIsOverflowing(el.scrollHeight > lineHeight * maxLines + 4);
   });
 
   if (maxLines <= 0) return <>{children}</>;
+  if (!isOverflowing) {
+    return <div ref={contentRef}>{children}</div>;
+  }
   return (
     <div className="relative">
       <div
         ref={contentRef}
-        className={cn(!expanded && isOverflowing && "overflow-hidden")}
-        style={!expanded && isOverflowing ? { maxHeight: `${maxLines * 1.5}rem` } : undefined}
+        className={cn(!expanded && "overflow-hidden")}
+        style={!expanded ? { maxHeight: `${maxLines * 1.5}rem` } : undefined}
       >
         {children}
       </div>
-      {isOverflowing && (
-        <button
-          type="button"
-          onClick={() => setExpanded((v) => !v)}
-          className="mt-0.5 text-xs text-muted-foreground/60 hover:text-muted-foreground"
-        >
-          {expanded ? "··· 收起" : "··· 展开"}
-        </button>
-      )}
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="mt-0.5 text-xs text-muted-foreground/60 hover:text-muted-foreground"
+      >
+        {expanded ? "··· 收起" : "··· 展开"}
+      </button>
     </div>
   );
 }
