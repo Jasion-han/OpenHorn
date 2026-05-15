@@ -147,17 +147,21 @@ function LiveStatusBadge({
 function CollapsibleBlock({ children, maxLines = 3 }: { children: React.ReactNode; maxLines?: number }) {
   const [expanded, setExpanded] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
-  const [isOverflowing, setIsOverflowing] = useState(false);
+  const [collapsedHeight, setCollapsedHeight] = useState<number | null>(null);
 
   useEffect(() => {
     const el = contentRef.current;
     if (!el || maxLines <= 0) return;
     const lineHeight = parseFloat(getComputedStyle(el).lineHeight) || 20;
-    setIsOverflowing(el.scrollHeight > lineHeight * maxLines + 4);
+    const threshold = lineHeight * maxLines + lineHeight * 0.5;
+    if (el.scrollHeight > threshold) {
+      setCollapsedHeight(Math.round(lineHeight * maxLines));
+    } else {
+      setCollapsedHeight(null);
+    }
   });
 
-  if (maxLines <= 0) return <>{children}</>;
-  if (!isOverflowing) {
+  if (maxLines <= 0 || collapsedHeight === null) {
     return <div ref={contentRef}>{children}</div>;
   }
   return (
@@ -165,7 +169,7 @@ function CollapsibleBlock({ children, maxLines = 3 }: { children: React.ReactNod
       <div
         ref={contentRef}
         className={cn(!expanded && "overflow-hidden")}
-        style={!expanded ? { maxHeight: `${maxLines * 1.5}rem` } : undefined}
+        style={!expanded ? { maxHeight: collapsedHeight } : undefined}
       >
         {children}
       </div>
