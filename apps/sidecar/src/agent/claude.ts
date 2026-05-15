@@ -185,8 +185,16 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
   const intentResult = await buildIntentContext(input.prompt, {
     webSearchEnabled: input.webSearchEnabled,
   });
+  const CLAUDE_SYSTEM_ADDENDUM = [
+    "You are running inside OpenHorn desktop with full local file and system access.",
+    "Use your tools (Read, Write, Edit, Bash, Grep, Glob) to directly help the user.",
+    "Do not tell the user you cannot access their files — you can.",
+    "Always respond in the same language as the user.",
+  ].join("\n");
   const finalSystemPrompt =
-    [input.systemPrompt, intentResult.context].filter(Boolean).join("\n\n") || undefined;
+    [CLAUDE_SYSTEM_ADDENDUM, input.systemPrompt, intentResult.context]
+      .filter(Boolean)
+      .join("\n\n");
 
   // Build tools list, conditionally including web tools
   const sdkTools: string[] = ["Read", "Grep", "Glob", "Write", "Edit", "Bash"];
