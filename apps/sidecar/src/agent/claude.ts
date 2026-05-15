@@ -7,6 +7,7 @@ import {
   toWorkspaceRelative,
 } from "../workspace";
 import { type AgentEvent, convertSdkEvent } from "./events";
+import { buildIntentContext } from "./intent-context";
 
 type SdkMessage = {
   type: string;
@@ -179,6 +180,11 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
     ],
   };
 
+  // Merge user system prompt with intent context (time / weather)
+  const intentResult = await buildIntentContext(input.prompt);
+  const finalSystemPrompt =
+    [input.systemPrompt, intentResult.context].filter(Boolean).join("\n\n") || undefined;
+
   const queryOptions: Record<string, unknown> = {
     abortController: input.abortController,
     cwd: input.cwd,
@@ -190,7 +196,7 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
     allowDangerouslySkipPermissions: true,
     promptSuggestions: false,
     includePartialMessages: true,
-    ...(input.systemPrompt ? { systemPrompt: input.systemPrompt } : {}),
+    ...(finalSystemPrompt ? { systemPrompt: finalSystemPrompt } : {}),
     canUseTool: async (
       toolName: string,
       toolInput: Record<string, unknown>,

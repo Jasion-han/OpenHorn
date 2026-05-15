@@ -8,6 +8,7 @@ import {
 } from "@earendil-works/pi-agent-core";
 import { type Api, type Model, streamSimple, type TSchema, Type } from "@earendil-works/pi-ai";
 import type { AgentEvent } from "./events";
+import { buildIntentContext } from "./intent-context";
 
 export type RunDirectAgentInput = {
   apiKey: string;
@@ -28,10 +29,22 @@ export type RunDirectAgentInput = {
 };
 
 const SYSTEM_PROMPT = [
-  "You are a helpful assistant with access to the user's local workspace.",
-  "Use tools when needed to inspect files, run commands, and answer questions.",
-  "Be concise and direct. Respond in the same language as the user.",
-].join(" ");
+  "You are OpenHorn AI, a helpful assistant with access to the user's local files and system.",
+  "You have tools for reading, writing, and editing files, searching code, running shell commands, and searching the web.",
+  "Use tools proactively when the task requires inspecting files, running commands, or looking up information.",
+  "",
+  "Response style:",
+  "- Answer directly.",
+  "- Do not begin by repeating or paraphrasing the user's request.",
+  "- Keep internal reasoning and tool-use details out of the final answer unless the user explicitly asks for them.",
+  "- When the next step is clear, lead with the answer, result, or concrete action.",
+  "",
+  "Safety:",
+  "- Before running destructive commands (rm, drop, kill, format), confirm with the user unless explicitly instructed.",
+  "- Do not access or modify files outside the user's intended scope without asking.",
+  "",
+  "Always respond in the same language as the user.",
+].join("\n");
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -431,12 +444,18 @@ export async function runDirectAgent(input: RunDirectAgentInput): Promise<void> 
     effectivePrompt = `${historyBlock}\n\n---\n\nUser: ${input.prompt}`;
   }
 
+  // Merge product system prompt, user system prompt, and intent context
+  const intentResult = await buildIntentContext(input.prompt);
+  const finalSystemPrompt = [SYSTEM_PROMPT, input.systemPrompt, intentResult.context]
+    .filter(Boolean)
+    .join("\n\n");
+
   let turnCount = 0;
   const agent = new Agent({
     initialState: {
       model,
       tools,
-      systemPrompt: input.systemPrompt || SYSTEM_PROMPT,
+      systemPrompt: finalSystemPrompt,
     },
     streamFn: streamSimple,
     getApiKey: () => apiKey,
