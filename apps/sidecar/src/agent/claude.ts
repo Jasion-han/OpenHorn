@@ -24,6 +24,7 @@ export type RunClaudeAgentInput = {
   abortController: AbortController;
   checkpoint: CheckpointSession;
   sdkSessionId?: string;
+  systemPrompt?: string;
   conversationHistory?: Array<{ role: "user" | "assistant"; content: string }>;
   requestApproval: (input: {
     toolUseId: string;
@@ -189,6 +190,7 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
     allowDangerouslySkipPermissions: true,
     promptSuggestions: false,
     includePartialMessages: true,
+    ...(input.systemPrompt ? { systemPrompt: input.systemPrompt } : {}),
     canUseTool: async (
       toolName: string,
       toolInput: Record<string, unknown>,

@@ -255,6 +255,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
           protocol,
           sdkSessionId,
           permissionMode,
+          systemPrompt,
           conversationHistory,
         } = params as {
           prompt: string;
@@ -264,6 +265,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
           protocol?: string;
           sdkSessionId?: string;
           permissionMode?: "default" | "full-access";
+          systemPrompt?: string;
           conversationHistory?: Array<{ role: "user" | "assistant"; content: string }>;
         };
 
@@ -322,6 +324,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
               abortController,
               checkpoint,
               sdkSessionId,
+              systemPrompt,
               conversationHistory,
               requestApproval: async (approvalInput) => {
                 const { toolUseId } = approvalInput;
@@ -355,6 +358,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
               abortController,
               conversationHistory,
               permissionMode,
+              systemPrompt,
               requestApproval: async (approvalInput) => {
                 const approvalId = `approval-${Date.now()}`;
                 return new Promise<boolean>((resolve) => {

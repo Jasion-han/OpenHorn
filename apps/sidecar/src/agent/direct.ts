@@ -18,6 +18,7 @@ export type RunDirectAgentInput = {
   abortController: AbortController;
   conversationHistory?: Array<{ role: "user" | "assistant"; content: string }>;
   permissionMode?: "default" | "full-access";
+  systemPrompt?: string;
   requestApproval?: (input: {
     toolName: string;
     toolInput: Record<string, unknown>;
@@ -435,7 +436,7 @@ export async function runDirectAgent(input: RunDirectAgentInput): Promise<void> 
     initialState: {
       model,
       tools,
-      systemPrompt: SYSTEM_PROMPT,
+      systemPrompt: input.systemPrompt || SYSTEM_PROMPT,
     },
     streamFn: streamSimple,
     getApiKey: () => apiKey,

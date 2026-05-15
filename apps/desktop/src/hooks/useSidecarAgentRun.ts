@@ -26,6 +26,7 @@ export interface SidecarAgentRunInput {
   prompt: string;
   sdkSessionId?: string;
   permissionMode?: "default" | "full-access";
+  systemPrompt?: string;
   conversationHistory?: Array<{ role: "user" | "assistant"; content: string }>;
 }
 
@@ -151,6 +152,7 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
         protocol: credentials.protocol,
         sdkSessionId: input.sdkSessionId ?? sdkSessionId ?? undefined,
         permissionMode: input.permissionMode,
+        systemPrompt: input.systemPrompt,
         conversationHistory: input.conversationHistory,
         onSdkSessionId: (sessionId) => {
           setSdkSessionId(sessionId);

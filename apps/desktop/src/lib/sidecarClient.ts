@@ -67,6 +67,7 @@ export interface SidecarRunAgentInput {
   protocol?: string;
   sdkSessionId?: string;
   permissionMode?: "default" | "full-access";
+  systemPrompt?: string;
   conversationHistory?: Array<{ role: "user" | "assistant"; content: string }>;
   onEvent: (event: AgentTaskStreamEvent) => void | Promise<void>;
   onApproval: (request: SidecarApprovalRequest) => void | Promise<void>;
@@ -288,6 +289,7 @@ export class SidecarClient {
       protocol,
       sdkSessionId,
       permissionMode,
+      systemPrompt,
       conversationHistory,
       onEvent,
       onApproval,
@@ -303,6 +305,7 @@ export class SidecarClient {
       ...(protocol ? { protocol } : {}),
       ...(sdkSessionId ? { sdkSessionId } : {}),
       ...(permissionMode ? { permissionMode } : {}),
+      ...(systemPrompt ? { systemPrompt } : {}),
       ...(conversationHistory && conversationHistory.length > 0 ? { conversationHistory } : {}),
     })) as { runId: string };
     const runId = result.runId;

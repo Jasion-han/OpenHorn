@@ -6,7 +6,7 @@ import { getDesktopBackendBase } from "../../lib/backendBase";
 import { sanitizeDisplayContent } from "../../lib/citations";
 import { getEffectiveModelForConversation } from "../../lib/effectiveModel";
 import { notifyWarning } from "../../lib/notify";
-import { readErrorMessage } from "../../lib/serverApi";
+import { createServerApi, readErrorMessage } from "../../lib/serverApi";
 import { useSidecarAgentRun } from "../../hooks/useSidecarAgentRun";
 import { readSseStream } from "../../lib/sse";
 import { useChatStore } from "../../stores/chatStore";
@@ -86,6 +86,19 @@ async function fetchDesktopSearchStatus(): Promise<DesktopSearchStatus> {
   }
 
   return (await response.json()) as DesktopSearchStatus;
+}
+
+const chatAreaApi = createServerApi();
+const GLOBAL_SYSTEM_PROMPT_KEY = "chat.systemPrompt";
+
+async function fetchGlobalSystemPrompt(): Promise<string | undefined> {
+  try {
+    const { settings } = await chatAreaApi.settings.get([GLOBAL_SYSTEM_PROMPT_KEY]);
+    const value = settings[GLOBAL_SYSTEM_PROMPT_KEY];
+    return value || undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function LiveStatusBadge({
@@ -1018,6 +1031,7 @@ export function DesktopChatArea() {
             conversationHistory.push({ role: m.role, content: text });
           }
         }
+        const globalSystemPrompt = await fetchGlobalSystemPrompt();
         await sidecarRun.startRun({
           conversationId,
           channelId: currentConversation.channelId,
@@ -1025,6 +1039,7 @@ export function DesktopChatArea() {
           assistantMessageId,
           prompt: effectiveContent,
           permissionMode: fullAccessEnabled ? "full-access" : "default",
+          systemPrompt: globalSystemPrompt,
           conversationHistory: conversationHistory.length > 0 ? conversationHistory : undefined,
         });
 
@@ -1182,6 +1197,7 @@ export function DesktopChatArea() {
             conversationHistory.push({ role: m.role, content: text });
           }
         }
+        const retrySystemPrompt = await fetchGlobalSystemPrompt();
         await sidecarRun.startRun({
           conversationId: currentConversation.id,
           channelId: currentConversation.channelId!,
@@ -1189,6 +1205,7 @@ export function DesktopChatArea() {
           assistantMessageId: messageId,
           prompt: userMessage.content,
           permissionMode: fullAccessEnabled ? "full-access" : "default",
+          systemPrompt: retrySystemPrompt,
           conversationHistory: conversationHistory.length > 0 ? conversationHistory : undefined,
         });
         setLoading(false);
@@ -1315,6 +1332,7 @@ export function DesktopChatArea() {
             conversationHistory.push({ role: m.role, content: text });
           }
         }
+        const editSystemPrompt = await fetchGlobalSystemPrompt();
         await sidecarRun.startRun({
           conversationId: currentConversation.id,
           channelId: currentConversation.channelId!,
@@ -1322,6 +1340,7 @@ export function DesktopChatArea() {
           assistantMessageId,
           prompt: nextContent,
           permissionMode: fullAccessEnabled ? "full-access" : "default",
+          systemPrompt: editSystemPrompt,
           conversationHistory: conversationHistory.length > 0 ? conversationHistory : undefined,
         });
         setLoading(false);
