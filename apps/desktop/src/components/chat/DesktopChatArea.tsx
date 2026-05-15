@@ -146,43 +146,53 @@ function LiveStatusBadge({
 
 function CollapsibleBlock({ children, maxLines = 3 }: { children: React.ReactNode; maxLines?: number }) {
   const [expanded, setExpanded] = useState(false);
-  const measureRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const [needsCollapse, setNeedsCollapse] = useState(false);
-  const [clampHeight, setClampHeight] = useState(0);
 
   useEffect(() => {
-    const el = measureRef.current;
+    const el = contentRef.current;
     if (!el || maxLines <= 0) return;
-    const lineHeight = parseFloat(getComputedStyle(el).lineHeight) || 20;
-    const fullHeight = el.scrollHeight;
-    const maxAllowed = lineHeight * (maxLines + 1);
-    if (fullHeight > maxAllowed) {
-      setNeedsCollapse(true);
-      setClampHeight(Math.ceil(lineHeight * maxLines));
-    } else {
-      setNeedsCollapse(false);
-    }
-  });
+    let prevWidth = 0;
+    const check = () => {
+      el.style.webkitLineClamp = "";
+      el.style.display = "";
+      el.style.webkitBoxOrient = "";
+      el.style.overflow = "";
+      const fullHeight = el.scrollHeight;
+      const lineHeight = parseFloat(getComputedStyle(el).lineHeight) || 20;
+      const shouldCollapse = fullHeight > lineHeight * (maxLines + 1);
+      setNeedsCollapse(shouldCollapse);
+      if (shouldCollapse && !expanded) {
+        el.style.display = "-webkit-box";
+        el.style.webkitLineClamp = String(maxLines);
+        el.style.webkitBoxOrient = "vertical";
+        el.style.overflow = "hidden";
+      }
+      prevWidth = el.offsetWidth;
+    };
+    check();
+    const ro = new ResizeObserver(() => {
+      if (el.offsetWidth !== prevWidth) check();
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [maxLines, expanded]);
 
-  if (maxLines <= 0 || !needsCollapse) {
-    return <div ref={measureRef}>{children}</div>;
-  }
+  if (maxLines <= 0) return <>{children}</>;
   return (
     <div>
-      <div
-        ref={measureRef}
-        className={cn(!expanded && "overflow-hidden")}
-        style={!expanded ? { maxHeight: clampHeight } : undefined}
-      >
+      <div ref={contentRef}>
         {children}
       </div>
-      <button
-        type="button"
-        onClick={() => setExpanded((v) => !v)}
-        className="mt-0.5 text-xs text-muted-foreground/60 hover:text-muted-foreground"
-      >
-        {expanded ? "··· 收起" : "··· 展开"}
-      </button>
+      {needsCollapse && (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="mt-0.5 text-xs text-muted-foreground/60 hover:text-muted-foreground"
+        >
+          {expanded ? "··· 收起" : "··· 展开"}
+        </button>
+      )}
     </div>
   );
 }
