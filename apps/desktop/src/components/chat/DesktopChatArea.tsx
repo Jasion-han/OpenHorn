@@ -1022,11 +1022,12 @@ export function DesktopChatArea() {
       setError(null);
       queueMicrotask(() => inputRef.current?.focus());
 
+      const sidecar = useSidecarStore.getState();
+      if (sidecar.status !== "ready") {
+        throw new Error("需要本地运行环境。请确认 sidecar 已就绪。");
+      }
+
       if (mode === "agent") {
-        const sidecar = useSidecarStore.getState();
-        if (sidecar.status !== "ready") {
-          throw new Error("Agent 模式需要本地运行环境。请确认 sidecar 已就绪。");
-        }
         if (files.length > 0) {
           notifyWarning(
             "本地运行暂不支持附件",
@@ -1108,19 +1109,49 @@ export function DesktopChatArea() {
         setPendingAttachments([]);
       }
 
-      const { response } = await sendMessage({
+      const prepared = await chatAreaApi.messages.chatPrepare({
+        conversationId,
         content: effectiveContent,
         attachments: attachmentIds,
-        attachmentsMeta:
-          attachmentsMeta || (localAttachmentMeta.length > 0 ? localAttachmentMeta : undefined),
-        mode,
-        existingMessageIds: {
-          userMessageId,
-          assistantMessageId,
-        },
       });
 
-      await consumeStreamingResponse(assistantMessageId, response);
+      updateMessage(userMessageId, { id: prepared.userMessageId });
+      updateMessage(assistantMessageId, { id: prepared.assistantMessageId });
+
+      const sidecarClient = useSidecarStore.getState().client;
+      if (!sidecarClient) {
+        throw new Error("Sidecar 连接不可用");
+      }
+
+      let chatContent = "";
+      await new Promise<void>((resolve, reject) => {
+        sidecarClient.chatStream({
+          apiKey: prepared.apiKey,
+          baseUrl: prepared.baseUrl || undefined,
+          protocol: prepared.protocol,
+          model: prepared.model,
+          messages: prepared.messages,
+          onEvent: (event) => {
+            if (event.type === "execution_event" && event.eventType === "text") {
+              chatContent += event.content || "";
+              useChatStore.getState().appendMessageDelta(prepared.assistantMessageId, event.content || "");
+            }
+          },
+          onError: (message) => {
+            chatContent = `Error: ${message}`;
+            useChatStore.getState().updateMessage(prepared.assistantMessageId, { content: chatContent });
+            reject(new Error(message));
+          },
+          onDone: () => resolve(),
+        }).catch(reject);
+      });
+
+      await chatAreaApi.messages.chatComplete({
+        assistantMessageId: prepared.assistantMessageId,
+        conversationId,
+        content: chatContent,
+        model: prepared.model,
+      });
 
       setStreaming(false);
       setStreamingAssistantId(null);

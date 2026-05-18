@@ -1,3 +1,4 @@
+import { runChatStream } from "./agent/chat";
 import { runClaudeAgent } from "./agent/claude";
 import { runCodexAgent } from "./agent/codex";
 import { runDirectAgent } from "./agent/direct";
@@ -243,6 +244,50 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
         state.pendingApprovals.delete(toolUseId);
         resolver(Boolean(allow));
         ws.send(JSON.stringify(buildOkResponse(request.requestId, { ok: true })));
+        return;
+      }
+      case "chat.stream": {
+        const {
+          apiKey,
+          baseUrl,
+          protocol,
+          model,
+          messages,
+        } = params as {
+          apiKey: string;
+          baseUrl?: string;
+          protocol: string;
+          model: string;
+          messages: Array<{ role: string; content: unknown }>;
+        };
+
+        const abortController = new AbortController();
+        const runId = `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        state.agentRuns.set(runId, { abortController });
+        state.ownedRunIds.add(runId);
+        ws.send(JSON.stringify(buildOkResponse(request.requestId, { runId })));
+
+        const onEvent = (event: import("./agent/events").AgentEvent) => {
+          ws.send(JSON.stringify(buildEvent("agent.event", { runId, event })));
+        };
+
+        void runChatStream({
+          apiKey,
+          baseUrl,
+          protocol,
+          model,
+          messages: messages as any,
+          abortController,
+          onEvent,
+        })
+          .catch((err) => {
+            const msg = err instanceof Error ? err.message : "Chat stream crashed";
+            onEvent({ type: "error", content: msg });
+          })
+          .finally(() => {
+            state.agentRuns.delete(runId);
+          });
+
         return;
       }
       case "agent.run": {

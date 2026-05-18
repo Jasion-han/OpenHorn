@@ -1,8 +1,10 @@
 import { Hono } from "hono";
 import {
+  completeChatFromSidecar,
   deleteMessage,
   editUserMessage,
   getMessagesForUserWithAttachments,
+  prepareChatForSidecar,
   regenerateMessage,
   sendMessage,
   streamMessage,
@@ -138,6 +140,54 @@ messages.post("/:id/edit", async (c) => {
     });
   } catch (error) {
     return c.json({ error: error instanceof Error ? error.message : "Failed" }, 400);
+  }
+});
+
+messages.post("/chat/prepare", async (c) => {
+  const user = c.get("user");
+  try {
+    const body = await c.req.json();
+    if (!body?.conversationId) {
+      return c.json({ error: "conversationId is required" }, 400);
+    }
+    const hasContent = typeof body.content === "string" && body.content.trim().length > 0;
+    const hasAttachments = Array.isArray(body.attachments) && body.attachments.length > 0;
+    if (!hasContent && !hasAttachments) {
+      return c.json({ error: "content or attachments are required" }, 400);
+    }
+    const result = await prepareChatForSidecar(user.id, {
+      conversationId: body.conversationId,
+      content: body.content.trim(),
+      attachments: body.attachments,
+    });
+    return c.json(result);
+  } catch (error) {
+    return c.json(
+      { error: error instanceof Error ? error.message : "Failed to prepare chat" },
+      400,
+    );
+  }
+});
+
+messages.post("/chat/complete", async (c) => {
+  const user = c.get("user");
+  try {
+    const body = await c.req.json();
+    if (!body?.assistantMessageId || !body?.conversationId) {
+      return c.json({ error: "assistantMessageId and conversationId are required" }, 400);
+    }
+    await completeChatFromSidecar(user.id, {
+      assistantMessageId: body.assistantMessageId,
+      conversationId: body.conversationId,
+      content: body.content || "",
+      model: body.model,
+    });
+    return c.json({ success: true });
+  } catch (error) {
+    return c.json(
+      { error: error instanceof Error ? error.message : "Failed to complete chat" },
+      400,
+    );
   }
 });
 

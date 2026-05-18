@@ -1,3 +1,12 @@
+export type {
+  AgentCapabilityMode,
+  GenericToolDefinition,
+  GenericToolCall,
+  GenericToolResult,
+  GenericAgentConversationMessage,
+  GenericAgentTurnResult,
+} from "./types";
+
 export {
   createAdapter,
   supportsToolCalling,
@@ -6,7 +15,7 @@ export {
   OpenAIAdapter,
   AnthropicAdapter,
   GoogleAdapter,
-} from "adapters";
+} from "./adapters";
 
 export type {
   ChatContentPart,
@@ -19,4 +28,4 @@ export type {
   ToolCallingAdapter,
   StreamingToolCallingAdapter,
   AdapterProtocol,
-} from "adapters";
+} from "./adapters";

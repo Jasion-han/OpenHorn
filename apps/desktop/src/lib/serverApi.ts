@@ -17,6 +17,16 @@ export const UNAUTHORIZED_EVENT = "openhorn:unauthorized";
 
 type FetchLike = typeof fetch;
 
+export interface ChatPrepareResult {
+  apiKey: string;
+  baseUrl: string | null;
+  protocol: string;
+  model: string;
+  messages: Array<{ role: string; content: unknown }>;
+  userMessageId: string;
+  assistantMessageId: string;
+}
+
 export interface ServerApi {
   auth: {
     login: (data: LoginInput) => Promise<{ user: ApiUser }>;
@@ -48,6 +58,17 @@ export interface ServerApi {
       model?: string;
       agentRun?: unknown;
     }) => Promise<{ userMessageId: string; assistantMessageId: string }>;
+    chatPrepare: (data: {
+      conversationId: string;
+      content: string;
+      attachments?: string[];
+    }) => Promise<ChatPrepareResult>;
+    chatComplete: (data: {
+      assistantMessageId: string;
+      conversationId: string;
+      content: string;
+      model?: string;
+    }) => Promise<{ success: boolean }>;
   };
   channels: {
     list: () => Promise<{ channels: ApiChannel[] }>;
@@ -345,6 +366,16 @@ export function createServerApi(options?: { baseUrl?: string; fetch?: FetchLike 
       },
       syncSidecar: (data) =>
         fetchJson(fetchImpl, baseUrl, "/messages/sync-sidecar", {
+          method: "POST",
+          body: JSON.stringify(data),
+        }),
+      chatPrepare: (data) =>
+        fetchJson(fetchImpl, baseUrl, "/messages/chat/prepare", {
+          method: "POST",
+          body: JSON.stringify(data),
+        }),
+      chatComplete: (data) =>
+        fetchJson(fetchImpl, baseUrl, "/messages/chat/complete", {
           method: "POST",
           body: JSON.stringify(data),
         }),

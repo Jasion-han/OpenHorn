@@ -1669,3 +1669,117 @@ export async function syncSidecarMessages(
 
   return { userMessageId, assistantMessageId };
 }
+
+export interface PrepareChatInput {
+  conversationId: string;
+  content: string;
+  attachments?: string[];
+}
+
+export interface PrepareChatResult {
+  apiKey: string;
+  baseUrl: string | null;
+  protocol: string;
+  model: string;
+  messages: ChatMessage[];
+  userMessageId: string;
+  assistantMessageId: string;
+}
+
+export async function prepareChatForSidecar(
+  userId: string,
+  input: PrepareChatInput,
+): Promise<PrepareChatResult> {
+  const conversation = await getConversationForUser(userId, input.conversationId);
+
+  const now = new Date();
+  const userMessageId = generateId();
+  await db.insert(messages).values({
+    id: userMessageId,
+    conversationId: input.conversationId,
+    role: "user",
+    content: input.content,
+    mode: "chat",
+    attachments: input.attachments ? JSON.stringify(input.attachments) : null,
+    agentRun: null,
+    createdAt: now,
+  });
+
+  if (input.attachments?.length) {
+    await linkAttachmentsToMessage(input.attachments, userMessageId);
+  }
+
+  const assistantMessageId = generateId();
+  const assistantCreatedAt = new Date(now.getTime() + 1);
+
+  await db
+    .update(conversations)
+    .set({ updatedAt: now, lastMode: "chat", runStatus: null })
+    .where(eq(conversations.id, input.conversationId));
+
+  const resolvedChannel = await getResolvedChannelForConversation(userId, conversation);
+  if (!resolvedChannel) {
+    const message = conversation.channelId
+      ? "该对话选择的渠道/模型不可用（可能已被禁用或已删除）。请在对话中重新选择模型。"
+      : "未配置可用的默认渠道/默认模型。请先在设置中完成配置后再开始对话。";
+    throw new Error(message);
+  }
+
+  await db.insert(messages).values({
+    id: assistantMessageId,
+    conversationId: input.conversationId,
+    role: "assistant",
+    content: "",
+    model: resolvedChannel.modelId,
+    mode: "chat",
+    attachments: null,
+    agentRun: null,
+    liveMetadata: null,
+    citations: null,
+    createdAt: assistantCreatedAt,
+  });
+
+  const settings = await getSettingValues(userId, [GLOBAL_SYSTEM_PROMPT_KEY]);
+  const baseSystemPrompt =
+    conversation.systemPrompt || settings[GLOBAL_SYSTEM_PROMPT_KEY] || null;
+
+  const conversationMessages = await getMessages(input.conversationId);
+  const chatMessages = await buildChatMessages(conversationMessages, baseSystemPrompt);
+
+  return {
+    apiKey: resolvedChannel.apiKey,
+    baseUrl: resolvedChannel.channel.baseUrl || null,
+    protocol: resolvedChannel.channel.protocol,
+    model: resolvedChannel.modelId,
+    messages: chatMessages,
+    userMessageId,
+    assistantMessageId,
+  };
+}
+
+export interface CompleteChatInput {
+  assistantMessageId: string;
+  conversationId: string;
+  content: string;
+  model?: string;
+}
+
+export async function completeChatFromSidecar(
+  userId: string,
+  input: CompleteChatInput,
+): Promise<void> {
+  const conversation = await getConversationForUser(userId, input.conversationId);
+
+  await db
+    .update(messages)
+    .set({
+      content: input.content,
+      model: input.model || null,
+    })
+    .where(eq(messages.id, input.assistantMessageId));
+
+  await db
+    .update(conversations)
+    .set({ updatedAt: new Date(), lastMode: "chat", runStatus: null })
+    .where(eq(conversations.id, conversation.id));
+}

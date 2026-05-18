@@ -59,6 +59,17 @@ export interface SidecarApprovalRequest {
   blockedPath?: string;
 }
 
+export interface SidecarChatStreamInput {
+  apiKey: string;
+  baseUrl?: string;
+  protocol: string;
+  model: string;
+  messages: Array<{ role: string; content: unknown }>;
+  onEvent: (event: AgentTaskStreamEvent) => void | Promise<void>;
+  onError: (message: string) => void;
+  onDone: (runId: string) => void;
+}
+
 export interface SidecarRunAgentInput {
   prompt: string;
   apiKey: string;
@@ -316,6 +327,25 @@ export class SidecarClient {
     })) as { runId: string };
     const runId = result.runId;
     this.runHandlers.set(runId, { onEvent, onApproval, onError, onDone, onSdkSessionId });
+    return runId;
+  }
+
+  async chatStream(input: SidecarChatStreamInput): Promise<string> {
+    const { apiKey, baseUrl, protocol, model, messages, onEvent, onError, onDone } = input;
+    const result = (await this.request("chat.stream", {
+      apiKey,
+      protocol,
+      model,
+      messages,
+      ...(baseUrl ? { baseUrl } : {}),
+    })) as { runId: string };
+    const runId = result.runId;
+    this.runHandlers.set(runId, {
+      onEvent,
+      onApproval: () => {},
+      onError,
+      onDone,
+    });
     return runId;
   }
 

@@ -142,6 +142,8 @@ function createStubServerApi() {
         return new Response("ok", { status: 200 });
       },
       syncSidecar: async () => ({ userMessageId: "u1", assistantMessageId: "a1" }),
+      chatPrepare: async () => ({ apiKey: "sk-test", baseUrl: null, protocol: "openai", model: "gpt-4o", messages: [], userMessageId: "u1", assistantMessageId: "a1" }),
+      chatComplete: async () => ({ success: true }),
     },
     channels: {
       list: async () => ({
