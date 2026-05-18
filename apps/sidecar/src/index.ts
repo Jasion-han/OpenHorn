@@ -1,4 +1,5 @@
 import { runChatStream } from "./agent/chat";
+import { runCodexChat } from "./agent/chatCodex";
 import { runClaudeAgent } from "./agent/claude";
 import { runCodexAgent } from "./agent/codex";
 import { runDirectAgent } from "./agent/direct";
@@ -257,10 +258,20 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
         };
 
         let resolvedApiKey = apiKey;
+        let useCodexCli = false;
         if (!resolvedApiKey || resolvedApiKey.startsWith("__sidecar_auto__")) {
           const cred = await detectCredentialForProtocol(protocol);
           if (cred) {
             resolvedApiKey = cred.token;
+          } else if (protocol === "openai") {
+            const allCreds = await detectAllCredentials();
+            const codexCred = allCreds.find(c => c.source === "codex_cli");
+            if (codexCred) {
+              useCodexCli = true;
+            } else {
+              ws.send(JSON.stringify(buildErrorResponse(request.requestId, "未检测到 OpenAI 认证。请设置 OPENAI_API_KEY 环境变量或登录 Codex CLI。")));
+              return;
+            }
           } else {
             ws.send(JSON.stringify(buildErrorResponse(request.requestId, "未检测到本地认证凭据，请配置 API Key 或登录对应的 CLI 工具")));
             return;
@@ -277,22 +288,45 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
           ws.send(JSON.stringify(buildEvent("agent.event", { runId, event })));
         };
 
-        void runChatStream({
-          apiKey: resolvedApiKey,
-          baseUrl,
-          protocol,
-          model,
-          messages: messages as any,
-          abortController,
-          onEvent,
-        })
-          .catch((err) => {
-            const msg = err instanceof Error ? err.message : "Chat stream crashed";
-            onEvent({ type: "error", content: msg });
+        const lastUserMessage = [...messages].reverse().find(m => m.role === "user");
+        const prompt = typeof lastUserMessage?.content === "string"
+          ? lastUserMessage.content
+          : Array.isArray(lastUserMessage?.content)
+            ? (lastUserMessage.content as any[]).filter(p => p.type === "text").map(p => p.text).join("")
+            : "";
+
+        if (useCodexCli) {
+          void runCodexChat({
+            model,
+            prompt,
+            abortController,
+            onEvent,
           })
-          .finally(() => {
-            state.agentRuns.delete(runId);
-          });
+            .catch((err) => {
+              const msg = err instanceof Error ? err.message : "Codex chat crashed";
+              onEvent({ type: "error", content: msg });
+            })
+            .finally(() => {
+              state.agentRuns.delete(runId);
+            });
+        } else {
+          void runChatStream({
+            apiKey: resolvedApiKey,
+            baseUrl,
+            protocol,
+            model,
+            messages: messages as any,
+            abortController,
+            onEvent,
+          })
+            .catch((err) => {
+              const msg = err instanceof Error ? err.message : "Chat stream crashed";
+              onEvent({ type: "error", content: msg });
+            })
+            .finally(() => {
+              state.agentRuns.delete(runId);
+            });
+        }
 
         return;
       }
