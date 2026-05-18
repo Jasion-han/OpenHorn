@@ -8,6 +8,7 @@ export type LocalCredential = {
   token: string;
   expiresAt?: Date;
   email?: string;
+  directApiAccess: boolean;
 };
 
 function decodeJwtPayload(token: string): Record<string, unknown> | null {
@@ -49,6 +50,7 @@ async function detectCodexCli(): Promise<LocalCredential | null> {
       token: accessToken,
       expiresAt,
       email,
+      directApiAccess: false,
     };
   } catch {
     return null;
@@ -89,6 +91,7 @@ async function detectClaudeCode(): Promise<LocalCredential | null> {
       source: "claude_code",
       type: "oauth_token",
       token,
+      directApiAccess: true,
     };
   } catch {
     return null;
@@ -119,6 +122,7 @@ async function detectGeminiCli(): Promise<LocalCredential | null> {
       type: "oauth_token",
       token: accessToken,
       expiresAt,
+      directApiAccess: true,
     };
   } catch {
     return null;
@@ -136,6 +140,7 @@ function detectEnvVar(
     source: "env_var",
     type: "api_key",
     token: value.trim(),
+    directApiAccess: true,
   };
 }
 
@@ -168,11 +173,12 @@ export async function detectCredentialForProtocol(
   protocol: string,
 ): Promise<LocalCredential | null> {
   switch (protocol) {
-    case "openai":
-    case "codex_cli": {
+    case "openai": {
       const env = detectEnvVar("OPENAI_API_KEY", "openai");
       if (env) return env;
-      return detectCodexCli();
+      const codex = await detectCodexCli();
+      if (codex?.directApiAccess) return codex;
+      return null;
     }
     case "anthropic": {
       const env = detectEnvVar("ANTHROPIC_API_KEY", "anthropic");
