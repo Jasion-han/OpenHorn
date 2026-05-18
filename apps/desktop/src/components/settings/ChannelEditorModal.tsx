@@ -4,6 +4,7 @@ import {
   Badge,
   Button,
   Checkbox,
+  cn,
   Dialog,
   DialogContent,
   DialogDescription,
@@ -12,10 +13,17 @@ import {
   Input,
   Label,
   ScrollArea,
-  cn,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from "ui";
 import { getCredentialKey, listCredentialSources } from "../../lib/credentialApi";
+import { getCredentialLabel } from "../../lib/i18n/agent";
 import { createServerApi } from "../../lib/serverApi";
+import type { DetectedCredential } from "../../lib/sidecarClient";
+import { useSidecarStore } from "../../stores/sidecarStore";
 import type { Channel } from "../../types/chat";
 import { DesktopProviderLogo } from "../chat/DesktopProviderLogo";
 
@@ -94,6 +102,12 @@ const COMMON_PROVIDER_PRESETS = [
     label: "MiniMax",
     protocol: "openai" as const,
     baseUrl: "https://api.minimax.chat/v1",
+  },
+  {
+    value: "ollama",
+    label: "Ollama",
+    protocol: "openai" as const,
+    baseUrl: "http://localhost:11434/v1",
   },
 ] as const;
 
@@ -174,8 +188,13 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
   const [envKeySources, setEnvKeySources] = useState<
     Array<{ id: string; provider: string; sourceName: string }>
   >([]);
+  const [sidecarCredentials, setSidecarCredentials] = useState<DetectedCredential[]>([]);
+  const [authSource, setAuthSource] = useState<"manual" | "local">("manual");
   const [saving, setSaving] = useState(false);
   const [formNotice, setFormNotice] = useState<SettingsNotice | null>(null);
+
+  const sidecarClient = useSidecarStore((state) => state.client);
+  const sidecarStatus = useSidecarStore((state) => state.status);
 
   const sortedChannels = useMemo(() => {
     const next = channels.slice();
@@ -212,6 +231,7 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
     setBaseUrl(CHANNEL_PROTOCOLS.openai.baseUrl);
     setEnabled(true);
     setApiKey("");
+    setAuthSource("manual");
     setFormNotice(null);
   };
 
@@ -248,7 +268,17 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
     } catch {
       setEnvKeySources([]);
     }
-  }, []);
+
+    // Load sidecar-detected credentials
+    if (sidecarClient && sidecarStatus === "ready") {
+      try {
+        const detected = await sidecarClient.detectCredentials();
+        setSidecarCredentials(detected);
+      } catch {
+        setSidecarCredentials([]);
+      }
+    }
+  }, [sidecarClient, sidecarStatus]);
 
   useEffect(() => {
     if (!opened) return;
@@ -318,10 +348,21 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
     baseUrl,
     activeChannel?.protocol || "openai",
   );
+  const matchingSidecarCredentials = useMemo(() => {
+    const protocol = inferProtocolFromProvider(provider, baseUrl);
+    return sidecarCredentials.filter((cred) => {
+      if (protocol === "anthropic") return cred.provider === "anthropic";
+      if (protocol === "google") return cred.provider === "google";
+      return cred.provider === "openai";
+    });
+  }, [sidecarCredentials, provider, baseUrl]);
+
   const canSubmitCreate =
-    Boolean(normalizeCompareText(name)) &&
-    Boolean(normalizeCompareText(apiKey)) &&
-    apiKey.trim() !== API_KEY_MASK;
+    authSource === "local"
+      ? Boolean(normalizeCompareText(name)) && matchingSidecarCredentials.length > 0
+      : Boolean(normalizeCompareText(name)) &&
+        Boolean(normalizeCompareText(apiKey)) &&
+        apiKey.trim() !== API_KEY_MASK;
   const canSubmitEdit = Boolean(activeChannel?.id) && Boolean(normalizeCompareText(name));
 
   const handleSubmit = async () => {
@@ -342,11 +383,20 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
       return;
     }
 
-    if (isCreate) {
+    if (isCreate && authSource === "manual") {
       if (!trimmedApiKey || trimmedApiKey === API_KEY_MASK) {
         setFormNotice({ kind: "error", title: "无法创建", message: "请填写 API Key。" });
         return;
       }
+    }
+
+    if (isCreate && authSource === "local" && matchingSidecarCredentials.length === 0) {
+      setFormNotice({
+        kind: "error",
+        title: "无法创建",
+        message: "未检测到匹配的本地认证来源。",
+      });
+      return;
     }
 
     setSaving(true);
@@ -354,11 +404,16 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
 
     try {
       if (isCreate) {
+        const resolvedApiKey =
+          authSource === "local" && matchingSidecarCredentials.length > 0
+            ? `__sidecar_auto__:${matchingSidecarCredentials[0].source}`
+            : trimmedApiKey;
+
         const { channel } = await api.channels.create({
           name: trimmedName,
           provider: trimmedProvider,
           protocol: inferProtocolFromProvider(trimmedProvider, trimmedBaseUrl, "openai"),
-          apiKey: trimmedApiKey,
+          apiKey: resolvedApiKey,
           baseUrl: trimmedBaseUrl || undefined,
           enabled,
         });
@@ -617,58 +672,113 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
                   <Label htmlFor="channel-enabled">启用该渠道</Label>
                 </div>
 
-                <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="channel-api-key">API Key {isCreate && "*"}</Label>
-                  <Input
-                    id="channel-api-key"
-                    type="password"
-                    placeholder={isCreate ? "输入 API Key" : "保持为 ******** 或留空表示不修改"}
-                    value={apiKey}
-                    onChange={(event) => setApiKey(event.target.value)}
-                  />
-                  {!isCreate && (
-                    <p className="text-xs text-muted-foreground">
-                      出于安全原因，不会展示已保存的明文 Key。输入新 Key 才会更新。
-                    </p>
-                  )}
-                  {envKeySources.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5 pt-1">
-                      {envKeySources
-                        .filter((s) => {
-                          const prot = inferProtocolFromProvider(provider, baseUrl);
-                          if (prot === "anthropic") return s.provider === "anthropic";
-                          if (prot === "google") return s.provider === "google";
-                          return s.provider === "openai";
-                        })
-                        .map((s) => (
-                          <button
-                            key={s.id}
-                            type="button"
-                            className="rounded border border-green-300 bg-green-50 px-2 py-0.5 text-xs text-green-700 hover:bg-green-100 dark:border-green-700 dark:bg-green-900/30 dark:text-green-300 dark:hover:bg-green-900/50"
-                            onClick={async () => {
-                              try {
-                                const key = await getCredentialKey(s.id);
-                                setApiKey(key);
-                                setFormNotice({
-                                  kind: "success",
-                                  title: "已填入",
-                                  message: `已使用 ${s.sourceName} 的 API Key`,
-                                });
-                              } catch (err) {
-                                setFormNotice({
-                                  kind: "error",
-                                  title: "获取失败",
-                                  message: err instanceof Error ? err.message : "未知错误",
-                                });
-                              }
-                            }}
-                          >
-                            从 {s.sourceName} 填入
-                          </button>
-                        ))}
-                    </div>
-                  )}
-                </div>
+                {isCreate && sidecarStatus === "ready" && matchingSidecarCredentials.length > 0 && (
+                  <div className="flex flex-col gap-1.5">
+                    <Label>{getCredentialLabel("channel.selectAuth")}</Label>
+                    <Select
+                      value={authSource}
+                      onValueChange={(v) => setAuthSource(v as "manual" | "local")}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="manual">
+                          {getCredentialLabel("channel.authManual")}
+                        </SelectItem>
+                        <SelectItem value="local">
+                          {getCredentialLabel("channel.authFromLocal")}
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                    {authSource === "local" && (
+                      <div className="mt-1 flex flex-col gap-1">
+                        {matchingSidecarCredentials.map((cred) => {
+                          const sourceLabel =
+                            cred.source === "codex_cli"
+                              ? "Codex CLI (ChatGPT Plus)"
+                              : cred.source === "claude_code"
+                                ? "Claude Code"
+                                : cred.source === "gemini_cli"
+                                  ? "Gemini CLI"
+                                  : cred.source;
+                          return (
+                            <div
+                              key={`${cred.provider}-${cred.source}`}
+                              className="flex items-center gap-2 rounded border border-green-200 bg-green-50 px-2 py-1.5 text-xs dark:border-green-800 dark:bg-green-900/20"
+                            >
+                              <span className="text-green-600 dark:text-green-400">✓</span>
+                              <span className="font-medium">{sourceLabel}</span>
+                              {cred.email && (
+                                <span className="text-neutral-500">({cred.email})</span>
+                              )}
+                            </div>
+                          );
+                        })}
+                        <p className="text-xs text-muted-foreground">
+                          Sidecar 将自动使用检测到的本地认证，无需手动填写 API Key。
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {!(isCreate && authSource === "local") && (
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="channel-api-key">
+                      API Key {isCreate && authSource === "manual" && "*"}
+                    </Label>
+                    <Input
+                      id="channel-api-key"
+                      type="password"
+                      placeholder={isCreate ? "输入 API Key" : "保持为 ******** 或留空表示不修改"}
+                      value={apiKey}
+                      onChange={(event) => setApiKey(event.target.value)}
+                    />
+                    {!isCreate && (
+                      <p className="text-xs text-muted-foreground">
+                        出于安全原因，不会展示已保存的明文 Key。输入新 Key 才会更新。
+                      </p>
+                    )}
+                    {envKeySources.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 pt-1">
+                        {envKeySources
+                          .filter((s) => {
+                            const prot = inferProtocolFromProvider(provider, baseUrl);
+                            if (prot === "anthropic") return s.provider === "anthropic";
+                            if (prot === "google") return s.provider === "google";
+                            return s.provider === "openai";
+                          })
+                          .map((s) => (
+                            <button
+                              key={s.id}
+                              type="button"
+                              className="rounded border border-green-300 bg-green-50 px-2 py-0.5 text-xs text-green-700 hover:bg-green-100 dark:border-green-700 dark:bg-green-900/30 dark:text-green-300 dark:hover:bg-green-900/50"
+                              onClick={async () => {
+                                try {
+                                  const key = await getCredentialKey(s.id);
+                                  setApiKey(key);
+                                  setFormNotice({
+                                    kind: "success",
+                                    title: "已填入",
+                                    message: `已使用 ${s.sourceName} 的 API Key`,
+                                  });
+                                } catch (err) {
+                                  setFormNotice({
+                                    kind: "error",
+                                    title: "获取失败",
+                                    message: err instanceof Error ? err.message : "未知错误",
+                                  });
+                                }
+                              }}
+                            >
+                              从 {s.sourceName} 填入
+                            </button>
+                          ))}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {formNotice && (
                   <div

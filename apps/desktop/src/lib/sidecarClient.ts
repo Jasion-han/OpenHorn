@@ -202,6 +202,14 @@ export function projectSidecarAgentEvent(runId: string, raw: unknown): AgentTask
   }
 }
 
+export interface DetectedCredential {
+  provider: "openai" | "anthropic" | "google";
+  source: "codex_cli" | "claude_code" | "gemini_cli" | "env_var";
+  type: "oauth_token" | "api_key";
+  expiresAt?: string;
+  email?: string;
+}
+
 export interface SidecarClientOptions {
   endpoint: SidecarEndpoint;
   createSocket?: SidecarWebSocketFactory;
@@ -360,6 +368,11 @@ export class SidecarClient {
   async rollbackCheckpoint(runId: string): Promise<{ ok: true }> {
     const result = (await this.request("checkpoint.rollback", { runId })) as { ok: true };
     return result;
+  }
+
+  async detectCredentials(): Promise<DetectedCredential[]> {
+    const result = await this.request("auth.detectCredentials", {});
+    return (result as { credentials: DetectedCredential[] }).credentials;
   }
 
   close(): Promise<void> {

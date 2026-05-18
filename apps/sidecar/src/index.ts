@@ -2,6 +2,7 @@ import { runChatStream } from "./agent/chat";
 import { runClaudeAgent } from "./agent/claude";
 import { runCodexAgent } from "./agent/codex";
 import { runDirectAgent } from "./agent/direct";
+import { detectAllCredentials, detectCredentialForProtocol } from "./auth";
 import { createCheckpointSession, rollbackCheckpoint } from "./checkpoints";
 import { fsList, fsReadText, fsWriteText } from "./fs";
 import {
@@ -247,19 +248,19 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
         return;
       }
       case "chat.stream": {
-        const {
-          apiKey,
-          baseUrl,
-          protocol,
-          model,
-          messages,
-        } = params as {
+        const { apiKey, baseUrl, protocol, model, messages } = params as {
           apiKey: string;
           baseUrl?: string;
           protocol: string;
           model: string;
           messages: Array<{ role: string; content: unknown }>;
         };
+
+        let resolvedApiKey = apiKey;
+        if (!resolvedApiKey) {
+          const cred = await detectCredentialForProtocol(protocol);
+          if (cred) resolvedApiKey = cred.token;
+        }
 
         const abortController = new AbortController();
         const runId = `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -272,7 +273,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
         };
 
         void runChatStream({
-          apiKey,
+          apiKey: resolvedApiKey,
           baseUrl,
           protocol,
           model,
@@ -317,6 +318,12 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
           webSearchEnabled?: boolean;
           tavilyApiKey?: string;
         };
+
+        let resolvedApiKey = apiKey;
+        if (!resolvedApiKey && protocol) {
+          const cred = await detectCredentialForProtocol(protocol);
+          if (cred) resolvedApiKey = cred.token;
+        }
 
         const abortController = new AbortController();
 
@@ -365,7 +372,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
           guard(
             "Claude agent",
             runClaudeAgent({
-              apiKey,
+              apiKey: resolvedApiKey,
               baseUrl,
               model,
               prompt,
@@ -400,7 +407,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
           guard(
             "Direct agent",
             runDirectAgent({
-              apiKey,
+              apiKey: resolvedApiKey,
               baseUrl,
               model,
               prompt,
@@ -461,6 +468,12 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
         }
         const result = await rollbackCheckpoint(state.workspaceRoot, runId);
         ws.send(JSON.stringify(buildOkResponse(request.requestId, result)));
+        return;
+      }
+      case "auth.detectCredentials": {
+        const credentials = await detectAllCredentials();
+        const safe = credentials.map(({ token: _token, ...rest }) => rest);
+        ws.send(JSON.stringify(buildOkResponse(request.requestId, { credentials: safe })));
         return;
       }
       default:

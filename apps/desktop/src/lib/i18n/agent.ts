@@ -48,6 +48,36 @@ export const agentPanelLabels = {
   approvalSubmitFailed: "提交失败",
 } as const;
 
+/**
+ * Labels for the credential sources panel and channel creation flow.
+ */
+export const credentialLabels = {
+  "settings.credentialSources": "认证来源",
+  "settings.credentialSources.description": "自动检测本地 AI 工具认证，或手动添加 API Key",
+  "settings.credentialSources.detected": "已检测到",
+  "settings.credentialSources.notDetected": "未检测到",
+  "settings.credentialSources.expired": "已过期",
+  "settings.credentialSources.available": "可用",
+  "settings.credentialSources.envVar": "环境变量",
+  "settings.credentialSources.codexCli": "Codex CLI (ChatGPT Plus)",
+  "settings.credentialSources.claudeCode": "Claude Code",
+  "settings.credentialSources.geminiCli": "Gemini CLI",
+  "settings.credentialSources.manualKey": "手动 API Key",
+  "settings.credentialSources.scanning": "正在扫描...",
+  "settings.credentialSources.scanFailed": "扫描失败",
+  "settings.credentialSources.refreshScan": "重新扫描",
+  "channel.selectProvider": "选择 Provider",
+  "channel.selectAuth": "选择认证来源",
+  "channel.authFromLocal": "使用本地认证",
+  "channel.authManual": "手动输入 API Key",
+} as const;
+
+type CredentialLabelKey = keyof typeof credentialLabels;
+
+export function getCredentialLabel(key: CredentialLabelKey): string {
+  return credentialLabels[key];
+}
+
 export function getAgentActionLabel(action: AgentActionKey): string {
   return agentActionLabels[action];
 }

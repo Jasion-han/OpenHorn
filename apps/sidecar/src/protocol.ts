@@ -63,7 +63,7 @@ export const ApprovalsRespondParamsSchema = z.object({
 
 export const AgentRunParamsSchema = z.object({
   prompt: z.string().min(1),
-  apiKey: z.string(),
+  apiKey: z.string().default(""),
   model: z.string().min(1),
   baseUrl: z.string().optional(),
   protocol: z.enum(["anthropic", "openai", "codex_cli"]).optional(),
@@ -81,9 +81,19 @@ export const AgentCancelParamsSchema = z.object({
   runId: z.string().min(1),
 });
 
+export const ChatStreamParamsSchema = z.object({
+  apiKey: z.string().default(""),
+  baseUrl: z.string().optional(),
+  protocol: z.string().min(1),
+  model: z.string().min(1),
+  messages: z.array(z.object({ role: z.string(), content: z.unknown() })),
+});
+
 export const CheckpointRollbackParamsSchema = z.object({
   runId: z.string().min(1),
 });
+
+export const AuthDetectCredentialsParamsSchema = z.object({}).optional();
 
 export function parseIncomingJsonMessage(raw: string): IncomingMessage {
   const parsed = JSON.parse(raw);
@@ -104,12 +114,16 @@ export function validateMethodParams(method: string, params: unknown): unknown {
       return FsWriteParamsSchema.parse(params);
     case "approvals.respond":
       return ApprovalsRespondParamsSchema.parse(params);
+    case "chat.stream":
+      return ChatStreamParamsSchema.parse(params);
     case "agent.run":
       return AgentRunParamsSchema.parse(params);
     case "agent.cancel":
       return AgentCancelParamsSchema.parse(params);
     case "checkpoint.rollback":
       return CheckpointRollbackParamsSchema.parse(params);
+    case "auth.detectCredentials":
+      return params ?? {};
     default:
       throw new Error(`Unknown method: ${method}`);
   }

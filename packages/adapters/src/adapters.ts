@@ -47,6 +47,7 @@ export interface ToolCallingOptions {
   messages: GenericAgentConversationMessage[];
   tools: GenericToolDefinition[];
   toolChoice?: "auto" | { type: "tool"; name: string };
+  maxTokens?: number;
   signal?: AbortSignal;
   requestTimeoutMs?: number;
 }
@@ -1380,7 +1381,7 @@ export class AnthropicAdapter implements ProviderAdapter {
         options.toolChoice && options.toolChoice !== "auto"
           ? { type: "tool", name: options.toolChoice.name }
           : { type: "auto" },
-      max_tokens: 4096,
+      max_tokens: options.maxTokens || 8192,
     });
 
     const timeout = createRequestTimeoutSignal(
