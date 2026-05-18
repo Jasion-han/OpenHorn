@@ -185,8 +185,12 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
   const intentResult = await buildIntentContext(input.prompt, {
     webSearchEnabled: input.webSearchEnabled,
   });
+  const homeDir = (await import("node:os")).homedir();
+  const username = process.env.USER || process.env.USERNAME || "user";
   const CLAUDE_SYSTEM_ADDENDUM = [
     "You are running inside OpenHorn desktop with full local file and system access.",
+    `Current user: ${username}, home directory: ${homeDir}`,
+    `When the user says "my" files/directories, always use ${homeDir} — never check other users' directories.`,
     "Use your tools (Read, Write, Edit, Bash, Grep, Glob) to directly help the user.",
     "Do not tell the user you cannot access their files — you can.",
     "Always respond in the same language as the user.",
