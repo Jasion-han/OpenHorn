@@ -57,8 +57,11 @@ export function DesktopStreamingMarkdownMessage({
         return;
       }
       smoother.push(delta);
+    } else if (currentTarget === "" || !currentTarget) {
+      smoother.push(nextContent);
     } else {
-      smoother.replace(nextContent);
+      smoother.cancel({ flush: true });
+      setRenderedContent(nextContent);
     }
 
     targetContentRef.current = nextContent;
