@@ -22,24 +22,17 @@ export function convertSdkEvent(message: SdkMessage): AgentEvent | AgentEvent[] 
     const msg = message.message as {
       content?: Array<{ type?: string; text?: string; name?: string; input?: unknown }>;
     };
-    const hasToolUse = (msg.content || []).some((item) => item.type === "tool_use");
-    if (hasToolUse) {
-      const events: AgentEvent[] = [];
-      for (const block of msg.content || []) {
-        if (block.type === "text" && block.text) {
-          events.push({ type: "text", content: block.text });
-        }
-        if (block.type === "tool_use") {
-          events.push({
-            type: "tool_start",
-            toolName: typeof block.name === "string" ? block.name : undefined,
-            toolInput: block.input,
-          });
-        }
+    const events: AgentEvent[] = [];
+    for (const block of msg.content || []) {
+      if (block.type === "tool_use") {
+        events.push({
+          type: "tool_start",
+          toolName: typeof block.name === "string" ? block.name : undefined,
+          toolInput: block.input,
+        });
       }
-      return events.length > 0 ? events : null;
     }
-    return null;
+    return events.length > 0 ? events : null;
   }
 
   if (message.type === "stream_event" && message.event && typeof message.event === "object") {
