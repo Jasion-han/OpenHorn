@@ -1691,7 +1691,7 @@ export function DesktopChatArea() {
       {modelPickerOpen && (
         <DesktopModelPickerModal
           opened={modelPickerOpen}
-          onClose={() => { setModelPickerOpen(false); queueMicrotask(() => inputRef.current?.focus()); }}
+          onClose={() => { setModelPickerOpen(false); setTimeout(() => inputRef.current?.focus(), 100); }}
           conversationId={currentConversation.id}
           conversationFixReason={
             !effectiveModel.ok && effectiveModel.scope === "conversation"
