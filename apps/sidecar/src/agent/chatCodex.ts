@@ -76,17 +76,16 @@ export async function runCodexChat(input: RunCodexChatInput): Promise<void> {
 }
 
 async function findCodexBinary(): Promise<string | null> {
-  for (const name of ["codex", "/opt/homebrew/bin/codex", "/usr/local/bin/codex"]) {
-    try {
-      const proc = Bun.spawn(["which", name], { stdout: "pipe", stderr: "pipe" });
-      const code = await proc.exited;
-      if (code === 0) {
-        const path = (await new Response(proc.stdout).text()).trim();
-        return path || name;
-      }
-    } catch {
-      continue;
-    }
+  const { existsSync } = await import("node:fs");
+  for (const p of ["/opt/homebrew/bin/codex", "/usr/local/bin/codex"]) {
+    if (existsSync(p)) return p;
   }
+  try {
+    const proc = Bun.spawn(["which", "codex"], { stdout: "pipe", stderr: "pipe" });
+    if (await proc.exited === 0) {
+      const path = (await new Response(proc.stdout).text()).trim();
+      if (path) return path;
+    }
+  } catch {}
   return null;
 }

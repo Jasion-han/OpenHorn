@@ -92,8 +92,10 @@ function mapCodexEvent(msg: JsonRpcMessage): AgentEvent | null {
 
 export async function runCodexAgent(input: RunCodexAgentInput): Promise<void> {
   const { model, prompt, cwd, abortController, onEvent } = input;
+  console.error(`[codex-agent] starting: model=${model} cwd=${cwd} prompt=${prompt.substring(0, 50)}`);
 
   const codexPath = await findCodexBinary();
+  console.error(`[codex-agent] codexPath=${codexPath}`);
   if (!codexPath) {
     onEvent({ type: "error", content: "Codex CLI 未安装。请先安装：npm i -g @openai/codex" });
     onEvent({ type: "done" });
@@ -108,9 +110,7 @@ export async function runCodexAgent(input: RunCodexAgentInput): Promise<void> {
     try { symlinkSync(authSrc, authDst); } catch {}
   }
   const cfgPath = join(sidecarCodexHome, "config.toml");
-  if (!existsSync(cfgPath)) {
-    writeFileSync(cfgPath, 'approval_policy = "never"\nsandbox_mode = "danger-full-access"\n[mcp_servers]\n');
-  }
+  writeFileSync(cfgPath, 'approval_policy = "never"\nsandbox_mode = "danger-full-access"\n[mcp_servers]\n');
 
   const proc = spawn(
     codexPath,
@@ -253,7 +253,7 @@ export async function runCodexAgent(input: RunCodexAgentInput): Promise<void> {
           cwd,
           approvalPolicy: "never",
           sandbox: "danger-full-access",
-          instructions: "You are a proactive coding assistant. When the user asks you to do something, execute it immediately using available tools (shell commands, file operations, etc.) without asking for confirmation. Act first, report results after.",
+          developerInstructions: "When the user asks a question that can be answered by running a command or reading files, execute the command immediately and report the result. Do not ask for clarification or list options — act first. For example, if asked 'how many images in my Downloads', run `ls` or `find` right away.",
         });
         if (threadResp.error) {
           finish({ type: "error", content: `Codex thread 创建失败: ${threadResp.error.message}` });
@@ -286,9 +286,17 @@ export async function runCodexAgent(input: RunCodexAgentInput): Promise<void> {
 }
 
 async function findCodexBinary(): Promise<string | null> {
+  const { existsSync: fsExists } = await import("node:fs");
+  for (const p of [
+    "/opt/homebrew/bin/codex",
+    "/usr/local/bin/codex",
+    join(homedir(), ".local/bin/codex"),
+  ]) {
+    if (fsExists(p)) return p;
+  }
   const { execSync } = await import("node:child_process");
   try {
-    const path = execSync("which codex", { timeout: 5000 }).toString().trim();
+    const path = execSync("which codex", { timeout: 5000, env: { ...process.env, PATH: `${process.env.PATH}:/opt/homebrew/bin:/usr/local/bin` } }).toString().trim();
     return path || null;
   } catch {
     return null;
