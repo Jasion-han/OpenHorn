@@ -359,16 +359,21 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
         };
 
         let resolvedApiKey = apiKey;
+        let forceCodexCli = false;
         if ((!resolvedApiKey || resolvedApiKey.startsWith("__sidecar_auto__")) && protocol) {
           const cred = await detectCredentialForProtocol(protocol);
-          if (cred) resolvedApiKey = cred.token;
+          if (cred) {
+            resolvedApiKey = cred.token;
+          } else if (protocol === "openai") {
+            const allCreds = await detectAllCredentials();
+            if (allCreds.find(c => c.source === "codex_cli")) {
+              forceCodexCli = true;
+            }
+          }
         }
 
         const abortController = new AbortController();
 
-        // Common setup shared by all agent routes: generate a run ID,
-        // register it, send the OK response, and return helpers for the
-        // shared onEvent / catch / finally patterns.
         const initRun = (prefix: string) => {
           const runId = `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
           state.agentRuns.set(runId, { abortController });
@@ -390,7 +395,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
           return { runId, onEvent, guard };
         };
 
-        if (protocol === "codex_cli") {
+        if (protocol === "codex_cli" || forceCodexCli) {
           const { onEvent, guard } = initRun("codex");
           guard(
             "Codex agent",
