@@ -9,6 +9,7 @@ export type LocalCredential = {
   expiresAt?: Date;
   email?: string;
   directApiAccess: boolean;
+  limitation?: string;
 };
 
 function decodeJwtPayload(token: string): Record<string, unknown> | null {
@@ -51,6 +52,7 @@ async function detectCodexCli(): Promise<LocalCredential | null> {
       expiresAt,
       email,
       directApiAccess: false,
+      limitation: "ChatGPT Plus 订阅 token 需要通过 Codex 内部协议使用，无法直接调用 OpenAI 标准 API。如需使用 GPT 模型，请配置 OPENAI_API_KEY 环境变量或使用 OpenRouter 渠道。",
     };
   } catch {
     return null;
