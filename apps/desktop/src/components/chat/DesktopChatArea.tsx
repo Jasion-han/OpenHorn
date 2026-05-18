@@ -821,6 +821,7 @@ export function DesktopChatArea() {
 
   useEffect(() => {
     setStreamingAssistantId(null);
+    sidecarRun.clearError();
   }, [currentConversation?.id]);
 
   useEffect(() => {

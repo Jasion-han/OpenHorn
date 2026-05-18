@@ -403,6 +403,10 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
           const guard = (label: string, promise: Promise<void>) => {
             void promise
               .catch((err) => {
+                if (abortController.signal.aborted) {
+                  onEvent({ type: "done" });
+                  return;
+                }
                 const msg = err instanceof Error ? err.message : `${label} crashed`;
                 onEvent({ type: "error", content: msg });
               })

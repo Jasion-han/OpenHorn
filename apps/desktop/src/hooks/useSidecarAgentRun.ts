@@ -62,6 +62,9 @@ export interface SidecarAgentRunApi {
 
   /** Rolls back the most recently finished sidecar run's checkpoint. */
   rollbackLast: () => Promise<void>;
+
+  /** Clears the last error (e.g. when switching conversations). */
+  clearError: () => void;
 }
 
 /**
@@ -324,5 +327,6 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
     respondToApproval,
     cancel,
     rollbackLast,
+    clearError: () => setLastError(null),
   };
 }
