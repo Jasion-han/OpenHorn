@@ -184,7 +184,7 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
               });
               return;
             }
-            if (event.type === "execution_event") {
+            if (event.type === "execution_event" && event.eventType !== "final_text" && event.eventType !== "text") {
               useChatStore.getState().applyStreamEvent(input.assistantMessageId, {
                 type: "agent_event",
                 event: {
