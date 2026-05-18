@@ -325,7 +325,6 @@ function AgentRunPanel({ run }: { run?: ApiAgentRun }) {
       <summary className="list-none cursor-pointer">
         <div className="flex items-center justify-between gap-3 border-b border-border/35 pb-1.5">
           <div className="flex min-w-0 items-center gap-2">
-            <Bot size={12} className="shrink-0 text-muted-foreground" />
             <span className="truncate text-sm leading-6 text-muted-foreground">
               {displayTitle} <span className={cn("text-muted-foreground/70", statusClassName)}>&middot; {statusLabel}</span>
             </span>
