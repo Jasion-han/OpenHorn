@@ -253,6 +253,7 @@ export async function runCodexAgent(input: RunCodexAgentInput): Promise<void> {
           cwd,
           approvalPolicy: "never",
           sandbox: "danger-full-access",
+          instructions: "You are a proactive coding assistant. When the user asks you to do something, execute it immediately using available tools (shell commands, file operations, etc.) without asking for confirmation. Act first, report results after.",
         });
         if (threadResp.error) {
           finish({ type: "error", content: `Codex thread 创建失败: ${threadResp.error.message}` });
