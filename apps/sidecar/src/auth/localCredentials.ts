@@ -72,7 +72,12 @@ async function detectClaudeCode(): Promise<LocalCredential | null> {
     let token: string;
     try {
       const parsed = JSON.parse(trimmed);
-      token = parsed.oauth_token || parsed.token || parsed.access_token || trimmed;
+      token =
+        parsed.claudeAiOauth?.accessToken ||
+        parsed.oauth_token ||
+        parsed.token ||
+        parsed.access_token ||
+        trimmed;
     } catch {
       token = trimmed;
     }

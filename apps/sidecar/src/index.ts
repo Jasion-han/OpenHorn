@@ -257,9 +257,14 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
         };
 
         let resolvedApiKey = apiKey;
-        if (!resolvedApiKey) {
+        if (!resolvedApiKey || resolvedApiKey.startsWith("__sidecar_auto__")) {
           const cred = await detectCredentialForProtocol(protocol);
-          if (cred) resolvedApiKey = cred.token;
+          if (cred) {
+            resolvedApiKey = cred.token;
+          } else {
+            ws.send(JSON.stringify(buildErrorResponse(request.requestId, "未检测到本地认证凭据，请配置 API Key 或登录对应的 CLI 工具")));
+            return;
+          }
         }
 
         const abortController = new AbortController();
@@ -320,7 +325,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
         };
 
         let resolvedApiKey = apiKey;
-        if (!resolvedApiKey && protocol) {
+        if ((!resolvedApiKey || resolvedApiKey.startsWith("__sidecar_auto__")) && protocol) {
           const cred = await detectCredentialForProtocol(protocol);
           if (cred) resolvedApiKey = cred.token;
         }
