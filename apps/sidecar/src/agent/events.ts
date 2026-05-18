@@ -43,7 +43,7 @@ export function convertSdkEvent(message: SdkMessage): AgentEvent | AgentEvent[] 
   }
 
   if (message.type === "text" && typeof message.text === "string") {
-    return { type: "final_text", content: message.text };
+    return null;
   }
 
   if (message.type === "tool_start") {
