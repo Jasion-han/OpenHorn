@@ -5,6 +5,20 @@ import { runCodexAgent } from "./agent/codex";
 import { runDirectAgent } from "./agent/direct";
 import { detectAllCredentials, detectCredentialForProtocol } from "./auth";
 import { createCheckpointSession, rollbackCheckpoint } from "./checkpoints";
+
+function isChatGptOAuthToken(key: string): boolean {
+  if (!key.startsWith("eyJ")) return false;
+  try {
+    const payload = key.split(".")[1];
+    if (!payload) return false;
+    const padded = payload + "=".repeat((4 - (payload.length % 4)) % 4);
+    const json = JSON.parse(atob(padded.replace(/-/g, "+").replace(/_/g, "/")));
+    const scopes: string[] = json.scp || [];
+    return scopes.includes("api.connectors.invoke") && !scopes.includes("api.responses.write");
+  } catch {
+    return false;
+  }
+}
 import { fsList, fsReadText, fsWriteText } from "./fs";
 import {
   buildErrorResponse,
@@ -259,7 +273,9 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
 
         let resolvedApiKey = apiKey;
         let useCodexCli = false;
-        if (!resolvedApiKey || resolvedApiKey.startsWith("__sidecar_auto__")) {
+        if (protocol === "openai" && resolvedApiKey && isChatGptOAuthToken(resolvedApiKey)) {
+          useCodexCli = true;
+        } else if (!resolvedApiKey || resolvedApiKey.startsWith("__sidecar_auto__")) {
           const cred = await detectCredentialForProtocol(protocol);
           if (cred) {
             resolvedApiKey = cred.token;
@@ -360,7 +376,9 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
 
         let resolvedApiKey = apiKey;
         let forceCodexCli = false;
-        if ((!resolvedApiKey || resolvedApiKey.startsWith("__sidecar_auto__")) && protocol) {
+        if (protocol === "openai" && resolvedApiKey && isChatGptOAuthToken(resolvedApiKey)) {
+          forceCodexCli = true;
+        } else if ((!resolvedApiKey || resolvedApiKey.startsWith("__sidecar_auto__")) && protocol) {
           const cred = await detectCredentialForProtocol(protocol);
           if (cred) {
             resolvedApiKey = cred.token;
