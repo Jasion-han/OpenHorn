@@ -194,6 +194,7 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
     "Use your tools (Read, Write, Edit, Bash, Grep, Glob) to directly help the user.",
     "Do not tell the user you cannot access their files — you can.",
     "Always respond in the same language as the user.",
+    "When presenting file lists or results, use markdown formatting (bullet lists, headers, bold) instead of raw code blocks. Make the output readable and well-organized.",
   ].join("\n");
   const finalSystemPrompt =
     [CLAUDE_SYSTEM_ADDENDUM, input.systemPrompt, intentResult.context]
