@@ -656,7 +656,7 @@ function MessageBubble({
               }}
             >
               {hasAssistantText ? (
-                isMessageStreaming ? (
+                isMessageStreaming && !isFlatAgentAssistant ? (
                   <DesktopStreamingMarkdownMessage
                     content={displayContent}
                     tailLength={streamTailLength}
