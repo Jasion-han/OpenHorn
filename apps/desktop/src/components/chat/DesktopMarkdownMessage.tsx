@@ -6,6 +6,17 @@ import remarkGfm from "remark-gfm";
 import { normalizeExternalUrl } from "../../lib/normalizeExternalUrl";
 import styles from "./desktop-markdown.module.css";
 
+// Micromark fails to recognise **…** as bold when a CJK character sits
+// directly before the opening ** (CommonMark left-flanking delimiter rule).
+// Inserting a hair space (U+200A) before the opening ** fixes this without
+// a visible layout change.
+const CJK_BOLD_PAIR_RE =
+  /(?<=[⺀-鿿豈-﫿\u{20000}-\u{2FA1F}\u{3000}-\u{303F}\u{2018}-\u{201F}！-｠])\*\*([^*\n]+?)\*\*/gu;
+
+function fixCjkBold(text: string): string {
+  return text.replace(CJK_BOLD_PAIR_RE, " **$1**");
+}
+
 function CopyButton({ code }: { code: string }) {
   const [copied, setCopied] = useState(false);
 
@@ -23,7 +34,7 @@ function CopyButton({ code }: { code: string }) {
 }
 
 export function DesktopMarkdownMessage({ content }: { content: string }) {
-  const normalized = (content || "").replace(/\r\n/g, "\n").trim();
+  const normalized = fixCjkBold((content || "").replace(/\r\n/g, "\n").trim());
 
   type CodeProps = React.ComponentPropsWithoutRef<"code"> & { inline?: boolean; node?: unknown };
   type PreProps = React.ComponentPropsWithoutRef<"pre"> & { node?: unknown };
