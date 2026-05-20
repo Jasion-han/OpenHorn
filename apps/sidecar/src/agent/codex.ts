@@ -102,23 +102,18 @@ export async function runCodexAgent(input: RunCodexAgentInput): Promise<void> {
     return;
   }
 
-  const sidecarCodexHome = join(tmpdir(), "openhorn-codex-sidecar");
-  if (!existsSync(sidecarCodexHome)) mkdirSync(sidecarCodexHome, { recursive: true });
-  const authSrc = join(homedir(), ".codex", "auth.json");
-  const authDst = join(sidecarCodexHome, "auth.json");
-  if (existsSync(authSrc) && !existsSync(authDst)) {
-    try { symlinkSync(authSrc, authDst); } catch {}
-  }
-  const cfgPath = join(sidecarCodexHome, "config.toml");
-  writeFileSync(cfgPath, 'approval_policy = "never"\nsandbox_mode = "danger-full-access"\n[mcp_servers]\n');
-
   const proc = spawn(
     codexPath,
-    ["app-server", "--listen", "stdio://"],
+    [
+      "app-server",
+      "--listen", "stdio://",
+      "-c", 'approval_policy="never"',
+      "-c", 'sandbox_mode="danger-full-access"',
+    ],
     {
       cwd,
       stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env, CODEX_HOME: sidecarCodexHome },
+      env: process.env,
     },
   );
 
