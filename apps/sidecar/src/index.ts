@@ -313,17 +313,14 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
             : "";
 
         if (useCodexResponses) {
-          const chatCwd = state.workspaceRoot || (await import("node:os")).default.homedir();
-          void runDirectAgent({
-            apiKey: resolvedApiKey,
+          void runCodexChat({
             model,
             prompt,
-            cwd: chatCwd,
             abortController,
             onEvent,
           })
             .catch((err) => {
-              const msg = err instanceof Error ? err.message : "Chat via codex-responses crashed";
+              const msg = err instanceof Error ? err.message : "Codex chat crashed";
               onEvent({ type: "error", content: msg });
             })
             .finally(() => {
@@ -421,7 +418,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
           return { runId, onEvent, guard };
         };
 
-        if (protocol === "codex_cli") {
+        if (protocol === "codex_cli" || forceCodexCli) {
           const { onEvent, guard } = initRun("codex");
           guard(
             "Codex agent",
