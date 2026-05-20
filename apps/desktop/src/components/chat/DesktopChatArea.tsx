@@ -357,9 +357,7 @@ function AgentRunPanel({ run }: { run?: ApiAgentRun }) {
           }
 
           const stepKey = `${step.type}-${step.toolName || ""}-${stepIndex}`;
-          const isLastToolStart = step.type === "tool_start" &&
-            !run.steps.slice(stepIndex + 1).some((s) => s.type === "tool_start");
-          const isActive = run.status !== "completed" && run.status !== "failed" && isLastToolStart;
+          const isActive = false;
           const label = step.type === "error" ? "Error" : presentToolLabel(step.toolName);
           const detail =
             step.type === "tool_start"
@@ -688,29 +686,9 @@ function MessageBubble({
           ) : null
         ) : null}
       {isFlatAgentAssistant && isMessageStreaming && (hasAssistantText || (message.agentRun?.steps?.length ?? 0) > 0) && (
-        <div className="mt-1.5 flex items-center gap-2 text-sm text-muted-foreground/60">
-          <style>{`
-            @keyframes workingDotPulse {
-              0%, 100% { transform: scale(0.85); opacity: 0.3; }
-              50% { transform: scale(1.1); opacity: 0.7; }
-            }
-            @keyframes workingTextShimmer {
-              0% { background-position: 130% 50%; }
-              100% { background-position: -30% 50%; }
-            }
-          `}</style>
-          <span
-            className="h-1.5 w-1.5 rounded-full bg-current"
-            style={{ animation: "workingDotPulse 1.35s ease-in-out infinite" }}
-          />
-          <span style={{
-            background: "linear-gradient(90deg, currentColor 40%, transparent 50%, currentColor 60%)",
-            backgroundSize: "200% 100%",
-            WebkitBackgroundClip: "text",
-            WebkitTextFillColor: "transparent",
-            animation: "workingTextShimmer 2s linear infinite",
-          }}>Working</span>
-        </div>
+        <section className="mt-0.5 px-1 pt-0 pb-1">
+          <DesktopAgentTaskMetaLine text="Working" active />
+        </section>
       )}
       </div>
       <MessageActionBar
