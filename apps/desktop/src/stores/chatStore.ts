@@ -74,7 +74,7 @@ function applyAgentEventToRun(
     };
   }
 
-  if (event.type === "text") {
+  if (event.type === "text" || event.type === "thinking") {
     const content = event.content ?? "";
     const lastStep = base.steps[base.steps.length - 1];
     if (lastStep && lastStep.type === "text") {
