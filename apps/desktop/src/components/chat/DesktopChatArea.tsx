@@ -357,7 +357,7 @@ function AgentRunPanel({ run }: { run?: ApiAgentRun }) {
           }
 
           const stepKey = `${step.type}-${step.toolName || ""}-${stepIndex}`;
-          const isActive = (run.status === "running" || run.status === "partial") &&
+          const isActive = run.status !== "completed" && run.status !== "failed" &&
             step.type === "tool_start" &&
             !run.steps.slice(stepIndex + 1).some((s) => s.type === "tool_result" || s.type === "error");
           const label = step.type === "error" ? "Error" : presentToolLabel(step.toolName);
