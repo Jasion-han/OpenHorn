@@ -272,9 +272,9 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
         };
 
         let resolvedApiKey = apiKey;
-        let useCodexCli = false;
+        let useCodexResponses = false;
         if (protocol === "openai" && resolvedApiKey && isChatGptOAuthToken(resolvedApiKey)) {
-          useCodexCli = true;
+          useCodexResponses = true;
         } else if (!resolvedApiKey || resolvedApiKey.startsWith("__sidecar_auto__")) {
           const cred = await detectCredentialForProtocol(protocol);
           if (cred) {
@@ -283,7 +283,8 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
             const allCreds = await detectAllCredentials();
             const codexCred = allCreds.find(c => c.source === "codex_cli");
             if (codexCred) {
-              useCodexCli = true;
+              resolvedApiKey = codexCred.token;
+              useCodexResponses = true;
             } else {
               ws.send(JSON.stringify(buildErrorResponse(request.requestId, "未检测到 OpenAI 认证。请设置 OPENAI_API_KEY 环境变量或登录 Codex CLI。")));
               return;
@@ -311,15 +312,18 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
             ? (lastUserMessage.content as any[]).filter(p => p.type === "text").map(p => p.text).join("")
             : "";
 
-        if (useCodexCli) {
-          void runCodexChat({
+        if (useCodexResponses) {
+          const chatCwd = state.workspaceRoot || (await import("node:os")).default.homedir();
+          void runDirectAgent({
+            apiKey: resolvedApiKey,
             model,
             prompt,
+            cwd: chatCwd,
             abortController,
             onEvent,
           })
             .catch((err) => {
-              const msg = err instanceof Error ? err.message : "Codex chat crashed";
+              const msg = err instanceof Error ? err.message : "Chat via codex-responses crashed";
               onEvent({ type: "error", content: msg });
             })
             .finally(() => {
@@ -417,7 +421,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
           return { runId, onEvent, guard };
         };
 
-        if (protocol === "codex_cli" || forceCodexCli) {
+        if (protocol === "codex_cli") {
           const { onEvent, guard } = initRun("codex");
           guard(
             "Codex agent",

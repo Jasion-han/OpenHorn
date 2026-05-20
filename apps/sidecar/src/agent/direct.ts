@@ -477,9 +477,36 @@ function buildTools(cwd: string, options?: BuildToolsOptions): AgentTool<TSchema
 // Model construction helpers
 // ---------------------------------------------------------------------------
 
+function isChatGptOAuthToken(key: string): boolean {
+  if (!key.startsWith("eyJ")) return false;
+  try {
+    const payload = key.split(".")[1];
+    if (!payload) return false;
+    const padded = payload + "=".repeat((4 - (payload.length % 4)) % 4);
+    const json = JSON.parse(atob(padded.replace(/-/g, "+").replace(/_/g, "/")));
+    const scopes: string[] = json.scp || [];
+    return scopes.includes("api.connectors.invoke") && !scopes.includes("api.responses.write");
+  } catch {
+    return false;
+  }
+}
+
 function buildModel(input: RunDirectAgentInput): Model<Api> {
-  // direct.ts only handles non-Anthropic protocols (OpenAI-compatible).
-  // Anthropic models are routed to claude.ts by index.ts.
+  const useCodexResponses = isChatGptOAuthToken(input.apiKey);
+  if (useCodexResponses) {
+    return {
+      id: input.model,
+      name: input.model,
+      api: "openai-codex-responses",
+      provider: "openai-codex",
+      baseUrl: "https://api.openai.com/v1",
+      reasoning: false,
+      input: ["text"],
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: 128_000,
+      maxTokens: 16_384,
+    };
+  }
   const baseUrl = (input.baseUrl || "https://api.openai.com/v1").replace(/\/$/, "");
   return {
     id: input.model,
