@@ -22,6 +22,22 @@ export function App() {
   const resetChat = useChatStore((state) => state.reset);
 
   useEffect(() => {
+    const handleLinkClick = (e: MouseEvent) => {
+      const anchor = (e.target as HTMLElement).closest("a[href]") as HTMLAnchorElement | null;
+      if (!anchor) return;
+      const href = anchor.href;
+      if (!href || href === "#" || href.startsWith("javascript:")) return;
+      if (href.startsWith("http://localhost") || href.startsWith("https://localhost") || href.startsWith("tauri://")) return;
+      e.preventDefault();
+      import("@tauri-apps/plugin-shell")
+        .then((mod) => mod.open(href))
+        .catch(() => window.open(href, "_blank"));
+    };
+    document.addEventListener("click", handleLinkClick);
+    return () => document.removeEventListener("click", handleLinkClick);
+  }, []);
+
+  useEffect(() => {
     void bootstrapAuth();
 
     const handleUnauthorized = () => {

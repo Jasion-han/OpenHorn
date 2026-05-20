@@ -312,18 +312,6 @@ pub fn run() {
                 )?;
             }
 
-            if let Some(window) = app.get_webview_window("main") {
-                window.on_navigation(|url| {
-                    let s = url.as_str();
-                    if s.starts_with("http://localhost") || s.starts_with("https://localhost") || s.starts_with("tauri://") {
-                        true
-                    } else {
-                        let _ = open::that(s);
-                        false
-                    }
-                });
-            }
-
             Ok(())
         })
         // Make sure the sidecar child is killed whenever the window is
