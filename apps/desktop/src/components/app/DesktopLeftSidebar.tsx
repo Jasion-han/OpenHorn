@@ -211,8 +211,10 @@ export function DesktopLeftSidebar() {
   }, [conversations, query]);
 
   const handleCreateConversation = async () => {
+    if (useChatStore.getState().isStreaming) return;
+    const currentConv = useChatStore.getState().currentConversation;
     const existing = conversations.find(
-      (c) => /^新会话 \d{2}-\d{2} \d{2}:\d{2}$/.test(c.title),
+      (c) => c.id !== currentConv?.id && /^新会话 \d{2}-\d{2} \d{2}:\d{2}$/.test(c.title),
     );
     if (existing) {
       useChatStore.getState().selectConversation(existing.id);
