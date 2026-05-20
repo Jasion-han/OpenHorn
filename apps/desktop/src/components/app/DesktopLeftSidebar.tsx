@@ -212,14 +212,13 @@ export function DesktopLeftSidebar() {
 
   const handleCreateConversation = async () => {
     if (useChatStore.getState().isStreaming) return;
-    const currentConv = useChatStore.getState().currentConversation;
-    const existing = conversations.find(
-      (c) => c.id !== currentConv?.id && /^新会话 \d{2}-\d{2} \d{2}:\d{2}$/.test(c.title),
-    );
-    if (existing) {
-      useChatStore.getState().selectConversation(existing.id);
-      setActiveView("chat");
-      return;
+    const state = useChatStore.getState();
+    const currentConv = state.currentConversation;
+    if (currentConv && /^新会话 \d{2}-\d{2} \d{2}:\d{2}$/.test(currentConv.title)) {
+      const hasMessages = state.messages.some(
+        (m) => m.conversationId === currentConv.id && !m.id.startsWith("draft-"),
+      );
+      if (!hasMessages) return;
     }
     setCreating(true);
     try {
