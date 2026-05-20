@@ -211,6 +211,14 @@ export function DesktopLeftSidebar() {
   }, [conversations, query]);
 
   const handleCreateConversation = async () => {
+    const existing = conversations.find(
+      (c) => /^新会话 \d{2}-\d{2} \d{2}:\d{2}$/.test(c.title),
+    );
+    if (existing) {
+      useChatStore.getState().selectConversation(existing.id);
+      setActiveView("chat");
+      return;
+    }
     setCreating(true);
     try {
       const defaultChannel = getGlobalDefaultChannel(useChatStore.getState().channels);
