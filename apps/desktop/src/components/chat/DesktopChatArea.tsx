@@ -687,6 +687,31 @@ function MessageBubble({
             </p>
           ) : null
         ) : null}
+      {isFlatAgentAssistant && isMessageStreaming && (hasAssistantText || (message.agentRun?.steps?.length ?? 0) > 0) && (
+        <div className="mt-1.5 flex items-center gap-2 text-sm text-muted-foreground/60">
+          <style>{`
+            @keyframes workingDotPulse {
+              0%, 100% { transform: scale(0.85); opacity: 0.3; }
+              50% { transform: scale(1.1); opacity: 0.7; }
+            }
+            @keyframes workingTextShimmer {
+              0% { background-position: 130% 50%; }
+              100% { background-position: -30% 50%; }
+            }
+          `}</style>
+          <span
+            className="h-1.5 w-1.5 rounded-full bg-current"
+            style={{ animation: "workingDotPulse 1.35s ease-in-out infinite" }}
+          />
+          <span style={{
+            background: "linear-gradient(90deg, currentColor 40%, transparent 50%, currentColor 60%)",
+            backgroundSize: "200% 100%",
+            WebkitBackgroundClip: "text",
+            WebkitTextFillColor: "transparent",
+            animation: "workingTextShimmer 2s linear infinite",
+          }}>Working</span>
+        </div>
+      )}
       </div>
       <MessageActionBar
         message={message}
