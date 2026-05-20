@@ -6,7 +6,7 @@ use std::sync::Mutex;
 use rand::rngs::OsRng;
 use rand::RngCore;
 use serde::Serialize;
-use tauri::{Manager, State};
+use tauri::{Manager, State, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_shell::process::CommandChild;
 use tauri_plugin_shell::ShellExt;
 
@@ -311,6 +311,32 @@ pub fn run() {
                         .build(),
                 )?;
             }
+
+            let url = WebviewUrl::default();
+            WebviewWindowBuilder::new(app, "main", url)
+                .title("OpenHorn")
+                .inner_size(1200.0, 800.0)
+                .resizable(true)
+                .on_navigation(|url| {
+                    let s = url.as_str();
+                    if s.starts_with("http://localhost") || s.starts_with("https://localhost") || s.starts_with("tauri://") {
+                        return true;
+                    }
+                    #[cfg(target_os = "macos")]
+                    {
+                        let _ = std::process::Command::new("open").arg(s).spawn();
+                    }
+                    #[cfg(target_os = "linux")]
+                    {
+                        let _ = std::process::Command::new("xdg-open").arg(s).spawn();
+                    }
+                    #[cfg(target_os = "windows")]
+                    {
+                        let _ = std::process::Command::new("cmd").args(["/c", "start", s]).spawn();
+                    }
+                    false
+                })
+                .build()?;
 
             Ok(())
         })
