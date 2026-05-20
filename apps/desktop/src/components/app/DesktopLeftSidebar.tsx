@@ -211,7 +211,6 @@ export function DesktopLeftSidebar() {
   }, [conversations, query]);
 
   const handleCreateConversation = async () => {
-    if (useChatStore.getState().isStreaming) return;
     const state = useChatStore.getState();
     const currentConv = state.currentConversation;
     if (currentConv && /^新会话 \d{2}-\d{2} \d{2}:\d{2}$/.test(currentConv.title)) {
