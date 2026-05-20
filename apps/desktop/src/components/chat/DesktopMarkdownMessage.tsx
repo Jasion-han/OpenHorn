@@ -31,8 +31,36 @@ export function DesktopMarkdownMessage({ content }: { content: string }) {
 
   const components: Components = {
     a({ href, children, ...props }: LinkProps) {
+      const normalizedHref = normalizeExternalUrl(href);
+      let domain = "";
+      try {
+        domain = new URL(normalizedHref).hostname;
+      } catch {}
+      const faviconUrl = domain
+        ? `https://www.google.com/s2/favicons?sz=16&domain=${domain}`
+        : "";
       return (
-        <a href={normalizeExternalUrl(href)} target="_blank" rel="noreferrer" {...props}>
+        <a
+          href={normalizedHref}
+          target="_blank"
+          rel="noreferrer"
+          className={styles.richLink}
+          {...props}
+        >
+          {faviconUrl ? (
+            <img
+              src={faviconUrl}
+              alt=""
+              width={16}
+              height={16}
+              className={styles.linkFavicon}
+              onError={(e) => {
+                (e.target as HTMLImageElement).style.display = "none";
+              }}
+            />
+          ) : (
+            <span className={styles.linkFaviconFallback}>🌐</span>
+          )}
           {children}
         </a>
       );
