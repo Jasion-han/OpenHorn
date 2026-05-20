@@ -2,44 +2,27 @@ import { cn } from "ui";
 import { agentPanelLabels, getAgentActionLabel } from "../../lib/i18n/agent";
 import type { SidecarApprovalRequest } from "../../lib/sidecarClient";
 
-/**
- * Inline banner shown just above the composer whenever the sidecar
- * runtime has something the user must see — a pending tool approval,
- * a recent sidecar-level error, or a sidecar run still in progress.
- *
- * We deliberately keep this component separate from the main message
- * list: sidecar runs stream into the existing assistant message
- * through chatStore, so the bubble-side rendering is already
- * correct. This panel handles the out-of-band bits (approvals +
- * errors) that don't fit cleanly inside a single message bubble.
- */
 export function DesktopSidecarRuntimePanel({
   pendingApproval,
-  lastError,
   isBusy,
   onApprove,
   onReject,
   onCancel,
 }: {
   pendingApproval: SidecarApprovalRequest | null;
-  lastError: string | null;
   isBusy: boolean;
   onApprove: (toolUseId: string) => void;
   onReject: (toolUseId: string) => void;
   onCancel: () => void;
 }) {
-  if (!pendingApproval && !lastError && !isBusy) return null;
+  if (!pendingApproval && !isBusy) return null;
 
   return (
     <div
       data-testid="sidecar-runtime-panel"
       className={cn(
         "mb-2 rounded-lg border bg-background/80 px-3 py-2 text-sm",
-        pendingApproval
-          ? "border-amber-300/60"
-          : lastError
-            ? "border-destructive/50"
-            : "border-border/50",
+        pendingApproval ? "border-amber-300/60" : "border-border/50",
       )}
     >
       {pendingApproval ? (
@@ -48,10 +31,6 @@ export function DesktopSidecarRuntimePanel({
           onApprove={onApprove}
           onReject={onReject}
         />
-      ) : lastError ? (
-        <div className="flex items-center justify-between gap-3 text-xs">
-          <span className="text-destructive/80">本地运行出错：{lastError}</span>
-        </div>
       ) : isBusy ? (
         <div className="flex items-center justify-between gap-3 text-xs text-foreground/70">
           <span>本地 Agent 正在执行...</span>

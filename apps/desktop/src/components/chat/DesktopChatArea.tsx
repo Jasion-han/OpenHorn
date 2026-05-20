@@ -1644,7 +1644,6 @@ export function DesktopChatArea() {
       >
         <DesktopSidecarRuntimePanel
           pendingApproval={sidecarRun.pendingApproval}
-          lastError={sidecarRun.lastError}
           isBusy={sidecarRun.isBusy && !sidecarRun.pendingApproval && !isStreaming}
           onApprove={(toolUseId) => void sidecarRun.respondToApproval(toolUseId, true)}
           onReject={(toolUseId) => void sidecarRun.respondToApproval(toolUseId, false)}

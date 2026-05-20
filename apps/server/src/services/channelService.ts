@@ -516,7 +516,6 @@ async function probeOpenAICompatibleModel(baseUrl: string, apiKey: string, model
     body: JSON.stringify({
       model: modelId,
       messages: [{ role: "user", content: "hi" }],
-      max_tokens: 1,
     }),
   });
 
