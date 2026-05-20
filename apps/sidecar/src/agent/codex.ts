@@ -206,9 +206,6 @@ export async function runCodexAgent(input: RunCodexAgentInput): Promise<void> {
         if (event.type === "text") {
           pendingText += event.content;
         } else if (event.type === "tool_start") {
-          if (pendingText) {
-            onEvent({ type: "text", content: pendingText });
-          }
           pendingText = "";
           onEvent(event);
         } else if (event.type !== "done") {
