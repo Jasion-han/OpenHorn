@@ -301,7 +301,7 @@ function AgentRunPanel({ run }: { run?: ApiAgentRun }) {
   const displayTitle =
     toolCount > 0 ? `Execution · ${toolCount} ${toolCount === 1 ? "tool" : "tools"}` : "Execution";
   const activeStartKey = (() => {
-    if (run.status !== "running") return null;
+    if (run.status !== "running" && run.status !== "partial") return null;
     for (let index = run.steps.length - 1; index >= 0; index -= 1) {
       const step = run.steps[index];
       if (!step) continue;
