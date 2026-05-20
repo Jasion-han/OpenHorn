@@ -103,8 +103,11 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
       return;
     }
     if (runRef.current !== null) {
-      setLastError("已有一个本地运行在进行中");
-      return;
+      try {
+        await client.cancelRun(runRef.current.runId);
+      } catch {}
+      syncRun(null);
+      setIsBusy(false);
     }
 
     setIsBusy(true);

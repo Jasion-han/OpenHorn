@@ -1273,6 +1273,9 @@ export function DesktopChatArea() {
 
     try {
       if (isSidecarRetry && userMessage) {
+        if (sidecarRun.isBusy) {
+          await sidecarRun.cancel();
+        }
         const historyMsgs = useChatStore.getState().messages
           .filter((m) => m.conversationId === currentConversation.id && !m.id.startsWith("draft-"))
           .filter((m) => m.id !== userMessage.id && m.id !== messageId);
