@@ -39,11 +39,18 @@ export function DesktopMarkdownMessage({ content }: { content: string }) {
       const faviconUrl = domain
         ? `https://www.google.com/s2/favicons?sz=16&domain=${domain}`
         : "";
+      const handleClick = (e: React.MouseEvent) => {
+        e.preventDefault();
+        if (normalizedHref && normalizedHref !== "#") {
+          import("@tauri-apps/plugin-shell")
+            .then((mod) => mod.open(normalizedHref))
+            .catch(() => window.open(normalizedHref, "_blank"));
+        }
+      };
       return (
         <a
           href={normalizedHref}
-          target="_blank"
-          rel="noreferrer"
+          onClick={handleClick}
           className={styles.richLink}
           {...props}
         >
