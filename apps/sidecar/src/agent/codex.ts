@@ -207,7 +207,7 @@ export async function runCodexAgent(input: RunCodexAgentInput): Promise<void> {
           pendingText += event.content;
         } else if (event.type === "tool_start") {
           if (pendingText) {
-            onEvent({ type: "tool_start", toolName: "thinking", toolInput: { content: pendingText } });
+            onEvent({ type: "tool_start", toolName: "💭" });
             onEvent({ type: "tool_result", content: pendingText });
           }
           pendingText = "";
