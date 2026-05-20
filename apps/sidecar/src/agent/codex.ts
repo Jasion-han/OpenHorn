@@ -64,8 +64,7 @@ function mapCodexEvent(msg: JsonRpcMessage): AgentEvent | null {
   }
 
   if (method === "item/commandExecution/outputDelta") {
-    const delta = typeof params.delta === "string" ? params.delta : "";
-    if (delta) return { type: "tool_result", content: delta };
+    return null;
   }
 
   if (method === "item/completed") {
