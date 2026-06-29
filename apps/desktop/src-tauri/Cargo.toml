@@ -30,3 +30,8 @@ tauri-plugin-dialog = "2"
 # Cryptographically random handshake token for the sidecar handshake.
 # rand::rngs::OsRng is backed by the platform CSPRNG on all OSes.
 rand = "0.8"
+# Parsing Codex CLI's MCP config (~/.codex/config.toml) during import.
+toml = "0.8"
+# Reading CC Switch's SQLite store (~/.cc-switch/cc-switch.db) during MCP
+# import. `bundled` compiles SQLite in so there is no system dependency.
+rusqlite = { version = "0.31", features = ["bundled"] }

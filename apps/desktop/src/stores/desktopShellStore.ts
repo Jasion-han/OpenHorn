@@ -2,7 +2,13 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
 export type DesktopActiveView = "chat" | "settings";
-export type DesktopSettingsTab = "general" | "channels" | "credentials" | "agent" | "appearance";
+export type DesktopSettingsTab =
+  | "general"
+  | "channels"
+  | "credentials"
+  | "agent"
+  | "mcp"
+  | "appearance";
 
 export interface DesktopShellState {
   activeView: DesktopActiveView;

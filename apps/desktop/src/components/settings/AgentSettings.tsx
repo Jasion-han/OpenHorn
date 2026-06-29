@@ -1,21 +1,5 @@
-import { Plus, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  Badge,
-  Button,
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  Input,
-  Label,
-  SettingsCard,
-  SettingsSection,
-  Switch,
-  Textarea,
-} from "ui";
+import { Badge, Button, Input, Label, SettingsCard, SettingsSection, Switch } from "ui";
 import { getGlobalDefaultChannel } from "../../lib/defaultChannel";
 import { notifyError, notifySuccess } from "../../lib/notify";
 import { createServerApi } from "../../lib/serverApi";
@@ -24,14 +8,6 @@ import type { ApiChannel, Channel } from "../../types/chat";
 import { DesktopProviderLogo } from "../chat/DesktopProviderLogo";
 
 const api = createServerApi();
-
-type MCPServer = {
-  id: string;
-  name: string;
-  type: string;
-  config: Record<string, unknown>;
-  isEnabled: boolean;
-};
 
 const TAVILY_API_KEY_SETTING = "liveSearch.tavilyApiKey";
 const TAVILY_ENABLED_SETTING = "liveSearch.tavilyEnabled";
@@ -66,7 +42,6 @@ function mapChannel(channel: ApiChannel): Channel {
 
 export function AgentSettings() {
   const [channels, setChannels] = useState<Channel[]>([]);
-  const [mcpServers, setMcpServers] = useState<MCPServer[]>([]);
   const [, setLoading] = useState(false);
 
   const [tavilyApiKey, setTavilyApiKey] = useState("");
@@ -74,25 +49,18 @@ export function AgentSettings() {
   const [savingTavilyApiKey, setSavingTavilyApiKey] = useState(false);
   const [tavilyEnabled, setTavilyEnabled] = useState(true);
   const [savingTavilyEnabled, setSavingTavilyEnabled] = useState(false);
-  const [mcpModalOpen, setMcpModalOpen] = useState(false);
-  const [mcpName, setMcpName] = useState("");
-  const [mcpType, setMcpType] = useState("stdio");
-  const [mcpConfig, setMcpConfig] = useState("{\n  \n}");
-  const [mcpBusyId, setMcpBusyId] = useState<string | null>(null);
 
   const defaultChannel = useMemo(() => getGlobalDefaultChannel(channels), [channels]);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [{ channels }, { servers }, { settings }] = await Promise.all([
+      const [{ channels }, { settings }] = await Promise.all([
         api.channels.list(),
-        api.mcp.listServers(),
         api.settings.get([TAVILY_API_KEY_SETTING, TAVILY_ENABLED_SETTING]),
       ]);
 
       setChannels(channels.map(mapChannel));
-      setMcpServers((servers || []) as MCPServer[]);
 
       const currentKey = settings[TAVILY_API_KEY_SETTING] || "";
       const enabledRaw = settings[TAVILY_ENABLED_SETTING];
@@ -156,69 +124,6 @@ export function AgentSettings() {
     }
   };
 
-  const handleCreateMcp = async () => {
-    if (!mcpName.trim()) {
-      notifyError("配置错误", "请填写 MCP Server 名称。");
-      return;
-    }
-
-    let parsedConfig: Record<string, unknown>;
-    try {
-      parsedConfig = JSON.parse(mcpConfig);
-    } catch {
-      notifyError("配置错误", "MCP config 必须是合法 JSON。");
-      return;
-    }
-
-    setLoading(true);
-    try {
-      await api.mcp.createServer({
-        name: mcpName.trim(),
-        type: mcpType,
-        config: parsedConfig,
-      });
-      setMcpModalOpen(false);
-      setMcpName("");
-      setMcpType("stdio");
-      setMcpConfig("{\n  \n}");
-      await loadAll();
-      notifySuccess("已创建", "MCP Server 已添加。");
-    } catch (error) {
-      notifyError("创建失败", error instanceof Error ? error.message : "无法创建 MCP Server。");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleDeleteMcp = async (id: string) => {
-    setMcpBusyId(id);
-    try {
-      await api.mcp.deleteServer(id);
-      await loadAll();
-      notifySuccess("已删除", "MCP Server 已删除。");
-    } catch (error) {
-      notifyError("删除失败", error instanceof Error ? error.message : "无法删除 MCP Server。");
-    } finally {
-      setMcpBusyId(null);
-    }
-  };
-
-  const handleToggleMcp = async (server: MCPServer) => {
-    setMcpBusyId(server.id);
-    try {
-      await api.mcp.updateServer(server.id, { isEnabled: !server.isEnabled });
-      await loadAll();
-      notifySuccess("已更新", "MCP Server 状态已更新。");
-    } catch (error) {
-      notifyError(
-        "更新失败",
-        error instanceof Error ? error.message : "无法更新 MCP Server 状态。",
-      );
-    } finally {
-      setMcpBusyId(null);
-    }
-  };
-
   return (
     <div className="flex flex-col gap-8">
       <SettingsSection
@@ -244,7 +149,11 @@ export function AgentSettings() {
                 </p>
               </div>
               {defaultChannel ? (
-                <Badge variant="secondary" className="gap-1 whitespace-nowrap" title={defaultChannel.provider}>
+                <Badge
+                  variant="secondary"
+                  className="gap-1 whitespace-nowrap"
+                  title={defaultChannel.provider}
+                >
                   <DesktopProviderLogo provider={defaultChannel.provider} className="size-4" />
                   <span className="sr-only">{defaultChannel.provider}</span>
                   <span>{defaultChannel.modelId}</span>
@@ -285,7 +194,8 @@ export function AgentSettings() {
               <div>
                 <p className="text-sm font-medium">启用 Tavily 搜索</p>
                 <p className="text-xs text-muted-foreground">
-                  关闭后将不会进行实时搜索，即使存在 API Key；开启后也只会在需要最新信息时联网。
+                  关闭后不使用 Tavily，仅用免费的 DuckDuckGo 搜索（无需 Key）；开启并填写 Key 后用
+                  Tavily。仅在需要最新信息时才会联网。
                 </p>
               </div>
               <Switch
@@ -324,92 +234,6 @@ export function AgentSettings() {
           </div>
         </SettingsCard>
       </SettingsSection>
-
-      <SettingsSection
-        title="高级工具（MCP）"
-        description="MCP 是 Agent 的附加工具层，用于私有数据源、执行器和自定义工作流，不是默认联网能力的前提。"
-        action={
-          <Button size="sm" onClick={() => setMcpModalOpen(true)}>
-            <Plus size={16} /> 添加 MCP
-          </Button>
-        }
-      >
-        <SettingsCard divided={false} className="p-4">
-          {mcpServers.length === 0 ? (
-            <p className="text-sm text-muted-foreground">暂无 MCP Server 配置。</p>
-          ) : (
-            <div className="flex flex-col gap-2">
-              {mcpServers.map((server) => (
-                <div
-                  key={server.id}
-                  className="flex items-center justify-between rounded-xl border border-border/50 bg-background/60 p-3"
-                >
-                  <div>
-                    <p className="text-sm font-medium">{server.name}</p>
-                    <p className="text-xs text-muted-foreground">{server.type}</p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Switch
-                      checked={server.isEnabled}
-                      onCheckedChange={() => void handleToggleMcp(server)}
-                      disabled={mcpBusyId === server.id}
-                    />
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="text-destructive"
-                      onClick={() => void handleDeleteMcp(server.id)}
-                      disabled={mcpBusyId === server.id}
-                    >
-                      <Trash2 size={18} />
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </SettingsCard>
-      </SettingsSection>
-
-      <Dialog open={mcpModalOpen} onOpenChange={setMcpModalOpen}>
-        <DialogContent className="sm:max-w-xl">
-          <DialogHeader>
-            <DialogTitle>添加 MCP Server</DialogTitle>
-            <DialogDescription className="sr-only">
-              填写名称、类型和 JSON 配置，创建一个新的 MCP Server。
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="grid gap-4">
-            <div className="grid gap-1.5">
-              <Label>名称</Label>
-              <Input value={mcpName} onChange={(event) => setMcpName(event.target.value)} />
-            </div>
-
-            <div className="grid gap-1.5">
-              <Label>类型</Label>
-              <Input value={mcpType} onChange={(event) => setMcpType(event.target.value)} />
-            </div>
-
-            <div className="grid gap-1.5">
-              <Label>配置 JSON</Label>
-              <Textarea
-                rows={12}
-                className="font-mono text-sm"
-                value={mcpConfig}
-                onChange={(event) => setMcpConfig(event.target.value)}
-              />
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setMcpModalOpen(false)}>
-              取消
-            </Button>
-            <Button onClick={() => void handleCreateMcp()}>创建</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { Bot, KeyRound, Palette, Radio, Settings } from "lucide-react";
+import { Bot, KeyRound, Palette, Plug, Radio, Settings } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { cn, ScrollArea } from "ui";
 import {
@@ -10,12 +10,14 @@ import { AppearanceSettings } from "./AppearanceSettings";
 import { ChannelSettings } from "./ChannelSettings";
 import { DesktopCredentialSourcesPanel } from "./DesktopCredentialSourcesPanel";
 import { GeneralSettings } from "./GeneralSettings";
+import { McpSettings } from "./McpSettings";
 
 const TABS: Array<{ id: SettingsTab; label: string; icon: ReactNode }> = [
   { id: "general", label: "通用", icon: <Settings size={16} /> },
   { id: "channels", label: "渠道", icon: <Radio size={16} /> },
   { id: "credentials", label: "认证来源", icon: <KeyRound size={16} /> },
   { id: "agent", label: "Agent", icon: <Bot size={16} /> },
+  { id: "mcp", label: "MCP", icon: <Plug size={16} /> },
   { id: "appearance", label: "外观", icon: <Palette size={16} /> },
 ];
 
@@ -29,6 +31,8 @@ function TabContent({ id }: { id: SettingsTab }) {
       return <DesktopCredentialSourcesPanel />;
     case "agent":
       return <AgentSettings />;
+    case "mcp":
+      return <McpSettings />;
     case "appearance":
       return <AppearanceSettings />;
   }

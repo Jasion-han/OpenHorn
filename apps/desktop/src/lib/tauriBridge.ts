@@ -19,6 +19,46 @@ function isTauriRuntime(): boolean {
   return Boolean(w.__TAURI_INTERNALS__);
 }
 
+export function isDesktopRuntime(): boolean {
+  return isTauriRuntime();
+}
+
+/**
+ * An MCP server discovered in (or parsed from) an existing client config on
+ * the user's machine, already normalised into OpenHorn's shape.
+ */
+export interface DiscoveredMcpServer {
+  client: string;
+  /** Every platform this same tool was found in (for coverage tags). */
+  clients: string[];
+  name: string;
+  type: string;
+  config: Record<string, unknown>;
+  description?: string;
+  /** Tool-identity key; the same tool from several platforms shares it. */
+  signature: string;
+}
+
+/**
+ * Scans known MCP client config locations (Claude Desktop, Cursor, VS Code,
+ * Codex CLI) and returns every server found. Returns [] outside Tauri.
+ */
+export async function discoverMcpConfigs(): Promise<DiscoveredMcpServer[]> {
+  if (!isTauriRuntime()) return [];
+  const { invoke } = await import("@tauri-apps/api/core");
+  return (await invoke("mcp_discover_configs")) as DiscoveredMcpServer[];
+}
+
+/**
+ * Opens a native file picker and parses the chosen MCP config file. Returns
+ * null when the user cancels, [] when nothing parseable was found.
+ */
+export async function pickMcpConfigFile(): Promise<DiscoveredMcpServer[] | null> {
+  if (!isTauriRuntime()) return null;
+  const { invoke } = await import("@tauri-apps/api/core");
+  return (await invoke("mcp_pick_config_file")) as DiscoveredMcpServer[] | null;
+}
+
 /**
  * Returns a `SidecarPlatform` backed by the real Tauri IPC when we are
  * running inside the desktop shell. Returns `null` in every other

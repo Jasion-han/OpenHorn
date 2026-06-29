@@ -297,6 +297,363 @@ async fn pick_workspace_dir(app: tauri::AppHandle) -> Result<Option<String>, Str
     Ok(picked)
 }
 
+/// One MCP server discovered in (or parsed out of) an existing client
+/// config on the user's machine, normalised into OpenHorn's shape.
+#[derive(Clone, Debug, Serialize)]
+struct DiscoveredServer {
+    /// The source this entry was parsed from, e.g. "CC-Switch".
+    client: String,
+    /// Every platform this same tool was found in, accumulated during dedup so
+    /// the UI can show coverage (e.g. "CC-Switch · Codex · Gemini") on one row.
+    clients: Vec<String>,
+    name: String,
+    #[serde(rename = "type")]
+    server_type: String,
+    config: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
+    /// Tool-identity key used to dedup the same tool seen across platforms.
+    signature: String,
+}
+
+/// Normalise a single server entry into OpenHorn's shape. Tolerant of the
+/// field variations seen across clients:
+///   - `type`: explicit "stdio"/"http"/"sse" is respected; OpenCode's
+///     "local"/"remote" map to stdio/http; otherwise inferred from command/url.
+///   - `command`: string, or an array whose first item is the command.
+///   - args/env: `args`, `env` or OpenCode's `environment`.
+///   - url/headers: `url` or `httpUrl`; `headers` or Codex's `http_headers`.
+/// A foreign `disabled` flag is ignored — import is opt-in per checkbox, and
+/// OpenHorn carries its own enable toggle, so we never hide a server just
+/// because another client has it switched off.
+fn normalize_entry(
+    client: &str,
+    name: &str,
+    val: &serde_json::Value,
+    description: Option<String>,
+) -> Option<DiscoveredServer> {
+    let obj = val.as_object()?;
+
+    let declared = obj.get("type").and_then(|v| v.as_str()).unwrap_or("");
+    let url = obj
+        .get("url")
+        .or_else(|| obj.get("httpUrl"))
+        .and_then(|v| v.as_str());
+
+    let is_remote = url.is_some()
+        || declared.eq_ignore_ascii_case("http")
+        || declared.eq_ignore_ascii_case("sse")
+        || declared.eq_ignore_ascii_case("remote");
+
+    if is_remote {
+        let url = url?;
+        let server_type = if declared.eq_ignore_ascii_case("sse") {
+            "sse"
+        } else {
+            "http"
+        };
+        let mut config = serde_json::Map::new();
+        config.insert("url".into(), serde_json::Value::String(url.to_string()));
+        if let Some(headers) = obj.get("headers").or_else(|| obj.get("http_headers")) {
+            config.insert("headers".into(), headers.clone());
+        }
+        let config = serde_json::Value::Object(config);
+        let signature = config_signature(server_type, name, &config);
+        return Some(DiscoveredServer {
+            client: client.to_string(),
+            clients: vec![client.to_string()],
+            name: name.to_string(),
+            server_type: server_type.to_string(),
+            config,
+            description,
+            signature,
+        });
+    }
+
+    // stdio: `command` is a string, or an array whose first item is the binary.
+    let mut args: Vec<serde_json::Value> = Vec::new();
+    let command = match obj.get("command") {
+        Some(serde_json::Value::String(s)) => s.clone(),
+        Some(serde_json::Value::Array(items)) => {
+            let strings: Vec<String> = items
+                .iter()
+                .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                .collect();
+            let mut iter = strings.into_iter();
+            let cmd = iter.next()?;
+            args.extend(iter.map(serde_json::Value::String));
+            cmd
+        }
+        _ => return None,
+    };
+
+    if let Some(serde_json::Value::Array(extra)) = obj.get("args") {
+        args.extend(extra.iter().cloned());
+    }
+
+    let mut config = serde_json::Map::new();
+    config.insert("command".into(), serde_json::Value::String(command));
+    if !args.is_empty() {
+        config.insert("args".into(), serde_json::Value::Array(args));
+    }
+    if let Some(env) = obj.get("env").or_else(|| obj.get("environment")) {
+        config.insert("env".into(), env.clone());
+    }
+
+    let config = serde_json::Value::Object(config);
+    let signature = config_signature("stdio", name, &config);
+    Some(DiscoveredServer {
+        client: client.to_string(),
+        clients: vec![client.to_string()],
+        name: name.to_string(),
+        server_type: "stdio".to_string(),
+        config,
+        description,
+        signature,
+    })
+}
+
+/// Pull MCP servers out of an already-parsed JSON value, accepting the various
+/// top-level keys used across clients: `mcpServers` (Claude/Cursor/Gemini),
+/// `servers` (VS Code), `mcp_servers` (Codex), `mcp` (OpenCode).
+fn extract_servers(client: &str, root: &serde_json::Value) -> Vec<DiscoveredServer> {
+    let mut out = Vec::new();
+    let servers = root
+        .get("mcpServers")
+        .or_else(|| root.get("servers"))
+        .or_else(|| root.get("mcp_servers"))
+        .or_else(|| root.get("mcp"));
+    if let Some(serde_json::Value::Object(map)) = servers {
+        for (name, val) in map {
+            if let Some(ds) = normalize_entry(client, name, val, None) {
+                out.push(ds);
+            }
+        }
+    }
+    out
+}
+
+fn parse_json_mcp(client: &str, content: &str) -> Vec<DiscoveredServer> {
+    match serde_json::from_str::<serde_json::Value>(content) {
+        Ok(root) => extract_servers(client, &root),
+        Err(_) => Vec::new(),
+    }
+}
+
+fn parse_toml_mcp(client: &str, content: &str) -> Vec<DiscoveredServer> {
+    let toml_val: toml::Value = match toml::from_str(content) {
+        Ok(v) => v,
+        Err(_) => return Vec::new(),
+    };
+    match serde_json::to_value(&toml_val) {
+        Ok(json) => extract_servers(client, &json),
+        Err(_) => Vec::new(),
+    }
+}
+
+/// Reads CC Switch's SQLite store (the user's global MCP manager). Its
+/// `mcp_servers` table is the authoritative list — each row's `server_config`
+/// is the per-server JSON. Opened read-only; missing/locked DBs are skipped.
+fn read_ccswitch_db(path: &std::path::Path) -> Vec<DiscoveredServer> {
+    let mut out = Vec::new();
+    if !path.exists() {
+        return out;
+    }
+    let conn = match rusqlite::Connection::open_with_flags(
+        path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    ) {
+        Ok(c) => c,
+        Err(_) => return out,
+    };
+    let mut stmt = match conn.prepare("SELECT name, server_config, description FROM mcp_servers") {
+        Ok(s) => s,
+        Err(_) => return out,
+    };
+    let rows = stmt.query_map([], |row| {
+        let name: String = row.get(0)?;
+        let cfg: String = row.get(1)?;
+        let desc: Option<String> = row.get(2).ok().flatten();
+        Ok((name, cfg, desc))
+    });
+    if let Ok(rows) = rows {
+        for (name, cfg, desc) in rows.flatten() {
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&cfg) {
+                let desc = desc.filter(|d| !d.trim().is_empty());
+                if let Some(ds) = normalize_entry("CC-Switch", &name, &val, desc) {
+                    out.push(ds);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Strips a trailing `@version` (e.g. `firecrawl-mcp@latest` → `firecrawl-mcp`)
+/// while leaving a scoped package's leading `@` intact (`@scope/pkg`).
+fn strip_version(arg: &str) -> String {
+    if let Some(idx) = arg.rfind('@') {
+        if idx > 0 && !arg[idx + 1..].contains('/') {
+            return arg[..idx].to_string();
+        }
+    }
+    arg.to_string()
+}
+
+/// A signature identifying the underlying tool, so the same server collapses
+/// even when different clients gave it different display names (e.g. ccswitch's
+/// `firecrawl-mcp` vs VS Code's `firecrawl`, both `npx … firecrawl-mcp`).
+/// Remote servers key on URL; stdio servers key on command + package args with
+/// version suffixes and leading flags (`-y`, …) removed. Differing args (e.g. a
+/// filesystem root path) keep distinct signatures, avoiding false merges.
+fn config_signature(server_type: &str, name: &str, config: &serde_json::Value) -> String {
+    if server_type != "stdio" {
+        if let Some(url) = config.get("url").and_then(|v| v.as_str()) {
+            return format!("url:{}", url.trim().trim_end_matches('/').to_lowercase());
+        }
+        return format!("name:{}", name.to_lowercase());
+    }
+    let command = config.get("command").and_then(|v| v.as_str()).unwrap_or("");
+    let mut tokens: Vec<String> = vec![command.to_lowercase()];
+    if let Some(serde_json::Value::Array(args)) = config.get("args") {
+        for a in args {
+            if let Some(s) = a.as_str() {
+                if s.starts_with('-') {
+                    continue;
+                }
+                tokens.push(strip_version(s).to_lowercase());
+            }
+        }
+    }
+    // No package arg to key on — fall back to the name to avoid over-merging
+    // unrelated bare-command entries.
+    if tokens.len() == 1 {
+        tokens.push(name.to_lowercase());
+    }
+    format!("stdio:{}", tokens.join(" "))
+}
+
+/// Scans the known config locations of common MCP clients (plus the CC Switch
+/// store) and returns each distinct tool once, with `clients` listing every
+/// platform it was found in (CC Switch first, then Claude Code, …). Dedup is by
+/// tool signature. Missing/unreadable sources are skipped.
+#[tauri::command]
+fn mcp_discover_configs(app: tauri::AppHandle) -> Vec<DiscoveredServer> {
+    let mut all: Vec<DiscoveredServer> = Vec::new();
+    let home = app.path().home_dir().ok();
+    let config = app.path().config_dir().ok();
+
+    // CC Switch first — it's the user's global source of truth, and carries
+    // descriptions, so it wins the dedup against per-client copies.
+    if let Some(dir) = &home {
+        all.extend(read_ccswitch_db(&dir.join(".cc-switch").join("cc-switch.db")));
+    }
+    // Claude Code (CLI) — global config and project-scoped file.
+    if let Some(dir) = &home {
+        if let Ok(content) = fs::read_to_string(dir.join(".claude.json")) {
+            all.extend(parse_json_mcp("Claude Code", &content));
+        }
+        if let Ok(content) = fs::read_to_string(dir.join(".claude").join(".mcp.json")) {
+            all.extend(parse_json_mcp("Claude Code", &content));
+        }
+    }
+    // Codex CLI (TOML).
+    if let Some(dir) = &home {
+        if let Ok(content) = fs::read_to_string(dir.join(".codex").join("config.toml")) {
+            all.extend(parse_toml_mcp("Codex CLI", &content));
+        }
+    }
+    // Gemini CLI.
+    if let Some(dir) = &home {
+        if let Ok(content) = fs::read_to_string(dir.join(".gemini").join("settings.json")) {
+            all.extend(parse_json_mcp("Gemini CLI", &content));
+        }
+    }
+    // Cursor.
+    if let Some(dir) = &home {
+        if let Ok(content) = fs::read_to_string(dir.join(".cursor").join("mcp.json")) {
+            all.extend(parse_json_mcp("Cursor", &content));
+        }
+    }
+    // OpenCode.
+    if let Some(dir) = &home {
+        let path = dir.join(".config").join("opencode").join("opencode.json");
+        if let Ok(content) = fs::read_to_string(&path) {
+            all.extend(parse_json_mcp("OpenCode", &content));
+        }
+    }
+    // Claude Desktop app.
+    if let Some(dir) = &config {
+        let path = dir.join("Claude").join("claude_desktop_config.json");
+        if let Ok(content) = fs::read_to_string(&path) {
+            all.extend(parse_json_mcp("Claude Desktop", &content));
+        }
+    }
+
+    // Dedup by tool signature so each tool appears once, accumulating the list
+    // of platforms it was found in. First occurrence (CC Switch, then Claude
+    // Code, …) wins its name/config; later matches just contribute their
+    // platform label and a description if the winner lacked one.
+    let mut result: Vec<DiscoveredServer> = Vec::new();
+    let mut idx_by_sig: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for server in all {
+        if let Some(&i) = idx_by_sig.get(&server.signature) {
+            if !result[i].clients.contains(&server.client) {
+                result[i].clients.push(server.client.clone());
+            }
+            if result[i].description.is_none() && server.description.is_some() {
+                result[i].description = server.description.clone();
+            }
+        } else {
+            idx_by_sig.insert(server.signature.clone(), result.len());
+            result.push(server);
+        }
+    }
+    result
+}
+
+/// Opens a file picker and parses the chosen config file. Returns None when
+/// the user cancels. Picks JSON vs TOML by extension, falling back to the
+/// other parser if the first yields nothing.
+#[tauri::command]
+async fn mcp_pick_config_file(
+    app: tauri::AppHandle,
+) -> Result<Option<Vec<DiscoveredServer>>, String> {
+    use tauri_plugin_dialog::DialogExt;
+
+    let picked = app
+        .dialog()
+        .file()
+        .add_filter("MCP config", &["json", "toml"])
+        .blocking_pick_file();
+
+    let Some(file_path) = picked else {
+        return Ok(None);
+    };
+
+    let path = PathBuf::from(file_path.to_string());
+    let content = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let client = "导入的文件";
+
+    let is_toml = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.eq_ignore_ascii_case("toml"))
+        .unwrap_or(false);
+
+    let servers = if is_toml {
+        parse_toml_mcp(client, &content)
+    } else {
+        let mut parsed = parse_json_mcp(client, &content);
+        if parsed.is_empty() {
+            parsed = parse_toml_mcp(client, &content);
+        }
+        parsed
+    };
+
+    Ok(Some(servers))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -360,7 +717,9 @@ pub fn run() {
             start_sidecar,
             stop_sidecar,
             get_sidecar_endpoint,
-            pick_workspace_dir
+            pick_workspace_dir,
+            mcp_discover_configs,
+            mcp_pick_config_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
