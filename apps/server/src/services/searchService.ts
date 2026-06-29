@@ -1,21 +1,30 @@
+import {
+  buildTavilyPayload,
+  isNewsQuery,
+  normalizeCitations,
+  normalizeSearchQuery,
+  rerankCitations,
+  type SearchCitation,
+  searchDuckDuckGo,
+  type TavilyResult,
+} from "shared/search";
 import type { LiveRouteType } from "./liveCapabilities";
+
+// Re-exported so existing consumers (e.g. liveCapabilities.ts) keep importing
+// the citation type from this module.
+export type { SearchCitation };
 
 export const TAVILY_API_KEY_SETTING = "liveSearch.tavilyApiKey";
 export const TAVILY_ENABLED_SETTING = "liveSearch.tavilyEnabled";
 
-export type SearchCitation = {
-  title: string;
-  url: string;
-  snippet?: string;
-  publishedDate?: string;
-};
+export type SearchProvider = "tavily" | "duckduckgo" | "none";
 
 export type SearchContextResult = {
   status: "live" | "offline";
   label: string;
   systemContext?: string;
   citations: SearchCitation[];
-  provider: "tavily" | "none";
+  provider: SearchProvider;
   degradedToDirectModel?: boolean;
 };
 
@@ -26,19 +35,14 @@ export type BuildSearchContextInput = {
   envKey?: string | null;
   fetchImpl?: FetchFn;
   timeoutMs?: number;
+  /** Clock override for deterministic freshness re-ranking in tests. */
+  now?: () => number;
 };
 
 type FetchFn = (
   input: Parameters<typeof fetch>[0],
   init?: Parameters<typeof fetch>[1],
 ) => ReturnType<typeof fetch>;
-
-type TavilyResult = {
-  title?: string;
-  url?: string;
-  content?: string;
-  published_date?: string;
-};
 
 const DEFAULT_FETCH: FetchFn = fetch;
 const DEFAULT_SEARCH_TIMEOUT_MS = 4_000;
@@ -50,13 +54,7 @@ function getSearchRouteName(route: BuildSearchContextInput["route"]) {
 
 function buildFailureLabel(
   route: BuildSearchContextInput["route"],
-  reason:
-    | "disabled"
-    | "not_configured"
-    | "timeout"
-    | "upstream_error"
-    | "no_results"
-    | "failed",
+  reason: "disabled" | "not_configured" | "timeout" | "upstream_error" | "no_results" | "failed",
   detail?: string,
 ) {
   const name = getSearchRouteName(route);
@@ -93,54 +91,22 @@ function pickApiKey(input: BuildSearchContextInput) {
   return null;
 }
 
-function isNewsQuery(prompt: string) {
-  return /新闻|最新|最近|刚刚|today|latest|news|recent|发生了什么/i.test(prompt);
-}
-
-function normalizeSearchQuery(prompt: string) {
-  const trimmed = prompt.trim();
-  if (!trimmed) return trimmed;
-
-  const compact = trimmed
-    .replace(/请联网搜索|联网搜索|帮我查一下|帮我搜一下|查一下|搜一下/g, " ")
-    .replace(/并给我一句总结|给我一句总结|顺便总结一下|再总结一下/g, " ")
-    .replace(/[，。！？]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  if (
-    /openai/i.test(compact) &&
-    /responses api/i.test(compact) &&
-    /官网|官方网站|官方文档|official|文档|docs/i.test(compact)
-  ) {
-    return 'site:developers.openai.com/api/reference/responses/overview OR site:platform.openai.com/docs/api-reference/responses "Responses Overview" "OpenAI"';
-  }
-
-  if (/openai/i.test(compact) && /官网|官方网站|官方文档|official/i.test(compact)) {
-    return `site:developers.openai.com OR site:platform.openai.com -site:community.openai.com -site:help.openai.com ${compact}`;
-  }
-
-  return compact;
-}
-
-function normalizeCitations(results: TavilyResult[] | undefined): SearchCitation[] {
-  return (results || [])
-    .map((result) => ({
-      title: result.title?.trim() || result.url?.trim() || "Untitled source",
-      url: result.url?.trim() || "",
-      snippet: result.content?.trim() || undefined,
-      publishedDate: result.published_date?.trim() || undefined,
-    }))
-    .filter((result) => result.url.length > 0);
-}
+const PROVIDER_DISPLAY_NAME: Record<Exclude<SearchProvider, "none">, string> = {
+  tavily: "Tavily",
+  duckduckgo: "DuckDuckGo",
+};
 
 function buildSystemContext(
   route: BuildSearchContextInput["route"],
   prompt: string,
   citations: SearchCitation[],
+  provider: Exclude<SearchProvider, "none">,
 ) {
+  const providerName = PROVIDER_DISPLAY_NAME[provider];
   const header =
-    route === "research" ? "Tavily live research results:" : "Tavily live search results:";
+    route === "research"
+      ? `${providerName} live research results:`
+      : `${providerName} live search results:`;
 
   const lines = citations
     .flatMap((citation, index) => {
@@ -180,36 +146,67 @@ function buildOfflineResult(
 export async function buildSearchContext(
   input: BuildSearchContextInput,
 ): Promise<SearchContextResult> {
-  if (!isTavilyEnabled(input)) {
-    return buildOfflineResult(
-      buildFailureLabel(input.route, "disabled"),
-      "Live search is disabled for this user. Do not claim you searched the web or cite sources. State that the answer may be outdated.",
-    );
-  }
-
+  // Provider selection: a configured Tavily key (user > server env) wins for
+  // quality, but only when Tavily is enabled (pickApiKey returns null when the
+  // "启用 Tavily" toggle is off). Otherwise fall back to the keyless DuckDuckGo
+  // provider so search still works for users who disabled Tavily or never
+  // configured a key.
   const apiKey = pickApiKey(input);
-  if (!apiKey) {
+  if (apiKey) {
+    return runTavilySearch(input, apiKey);
+  }
+  return runDuckDuckGoSearch(input);
+}
+
+async function runDuckDuckGoSearch(input: BuildSearchContextInput): Promise<SearchContextResult> {
+  const rawCitations = await searchDuckDuckGo(normalizeSearchQuery(input.prompt), {
+    fetchImpl: input.fetchImpl,
+    timeoutMs: input.timeoutMs,
+    maxResults: input.route === "research" ? 8 : 5,
+    now: input.now,
+  });
+
+  if (rawCitations.length === 0) {
     return buildOfflineResult(
-      buildFailureLabel(input.route, "not_configured"),
-      "Live search is not configured. Do not claim you searched the web or cite sources. State that the answer may be outdated.",
+      buildFailureLabel(input.route, "no_results"),
+      "Live search returned no usable sources. Do not claim you searched the web or cite sources. State that the answer may be outdated.",
+      { degradedToDirectModel: true },
     );
   }
 
-  const payload = {
-    query: normalizeSearchQuery(input.prompt),
-    topic: isNewsQuery(input.prompt) ? "news" : "general",
-    search_depth: input.route === "research" ? "advanced" : "basic",
-    max_results: input.route === "research" ? 8 : 5,
-    chunks_per_source: 3,
-    include_answer: false,
-    include_raw_content: false,
-    time_range:
-      input.route === "research" ? "month" : isNewsQuery(input.prompt) ? "week" : undefined,
+  const citations = rerankCitations(rawCitations, isNewsQuery(input.prompt), input.now);
+  return {
+    status: "live",
+    label: input.route === "research" ? "已使用研究搜索" : "已使用实时搜索",
+    systemContext: buildSystemContext(input.route, input.prompt, citations, "duckduckgo"),
+    citations,
+    provider: "duckduckgo",
   };
+}
+
+/**
+ * Tavily failure fallback: try the keyless DuckDuckGo provider so search still
+ * works. Returns a live DDG result when it has sources, otherwise null so the
+ * caller can keep its original offline degradation.
+ */
+async function degradeToDuckDuckGo(
+  input: BuildSearchContextInput,
+): Promise<SearchContextResult | null> {
+  const result = await runDuckDuckGoSearch(input);
+  return result.status === "live" ? result : null;
+}
+
+async function runTavilySearch(
+  input: BuildSearchContextInput,
+  apiKey: string,
+): Promise<SearchContextResult> {
+  const isResearch = input.route === "research";
+  const isNews = isNewsQuery(input.prompt);
+  const payload = buildTavilyPayload(input.prompt, { route: input.route });
 
   try {
     const timeoutMs =
-      input.timeoutMs ?? (input.route === "research" ? DEFAULT_RESEARCH_TIMEOUT_MS : DEFAULT_SEARCH_TIMEOUT_MS);
+      input.timeoutMs ?? (isResearch ? DEFAULT_RESEARCH_TIMEOUT_MS : DEFAULT_SEARCH_TIMEOUT_MS);
     const response = await (input.fetchImpl || DEFAULT_FETCH)("https://api.tavily.com/search", {
       method: "POST",
       headers: {
@@ -221,6 +218,8 @@ export async function buildSearchContext(
     });
 
     if (!response.ok) {
+      const fallback = await degradeToDuckDuckGo(input);
+      if (fallback) return fallback;
       return buildOfflineResult(
         buildFailureLabel(input.route, "upstream_error", `HTTP ${response.status}`),
         "Live search failed. Do not claim you searched the web or cite sources. State that the answer may be outdated.",
@@ -229,8 +228,10 @@ export async function buildSearchContext(
     }
 
     const data = (await response.json()) as { results?: TavilyResult[] };
-    const citations = normalizeCitations(data.results);
+    const citations = rerankCitations(normalizeCitations(data.results), isNews, input.now);
     if (citations.length === 0) {
+      const fallback = await degradeToDuckDuckGo(input);
+      if (fallback) return fallback;
       return buildOfflineResult(
         buildFailureLabel(input.route, "no_results"),
         "Live search returned no usable sources. Do not claim you searched the web or cite sources. State that the answer may be outdated.",
@@ -240,12 +241,14 @@ export async function buildSearchContext(
 
     return {
       status: "live",
-      label: input.route === "research" ? "已使用研究搜索" : "已使用实时搜索",
-      systemContext: buildSystemContext(input.route, input.prompt, citations),
+      label: isResearch ? "已使用研究搜索" : "已使用实时搜索",
+      systemContext: buildSystemContext(input.route, input.prompt, citations, "tavily"),
       citations,
       provider: "tavily",
     };
   } catch (error) {
+    const fallback = await degradeToDuckDuckGo(input);
+    if (fallback) return fallback;
     const isTimeout = error instanceof Error && error.name === "TimeoutError";
     return buildOfflineResult(
       buildFailureLabel(input.route, isTimeout ? "timeout" : "failed"),

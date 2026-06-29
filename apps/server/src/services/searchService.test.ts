@@ -45,27 +45,68 @@ test("buildSearchContext uses env key when user key is absent", async () => {
   expect(result.systemContext).toContain("https://example.com/news");
 });
 
-test("buildSearchContext returns offline when no key exists", async () => {
-  const result = await buildSearchContext({
-    route: "research",
-    prompt: "比较最近几家 AI 公司的发布和融资",
-  });
+const DDG_LITE_HTML = `<table>
+<tr><td><a rel="nofollow" href="https://example.com/news" class='result-link'>AI News Today</a></td></tr>
+<tr><td class='result-snippet'>Latest updates from the AI world.</td></tr>
+</table>`;
 
-  expect(result.status).toBe("offline");
-  expect(result.label).toBe("在线研究未配置，任务无法继续");
-  expect(result.citations).toEqual([]);
-});
-
-test("buildSearchContext returns offline when disabled", async () => {
+test("buildSearchContext falls back to DuckDuckGo when no tavily key exists", async () => {
   const result = await buildSearchContext({
     route: "web_search",
-    prompt: "最近 AI 圈有什么新闻",
-    envKey: "env-key",
-    userSettings: { [TAVILY_ENABLED_SETTING]: "false" },
+    prompt: "最近 AI 圈有什么新闻 (ddg-fallback-1)",
+    fetchImpl: async (input) => {
+      expect(String(input)).toContain("duckduckgo.com");
+      return new Response(DDG_LITE_HTML);
+    },
+  });
+
+  expect(result.status).toBe("live");
+  expect(result.provider).toBe("duckduckgo");
+  expect(result.citations).toHaveLength(1);
+  expect(result.systemContext).toContain("DuckDuckGo live search results:");
+  expect(result.systemContext).toContain("https://example.com/news");
+});
+
+test("buildSearchContext goes offline when DuckDuckGo returns nothing", async () => {
+  const result = await buildSearchContext({
+    route: "research",
+    prompt: "比较最近几家 AI 公司的发布和融资 (ddg-empty-1)",
+    fetchImpl: async () => new Response("<html><body>no results</body></html>"),
   });
 
   expect(result.status).toBe("offline");
-  expect(result.label).toBe("实时搜索已关闭，任务无法继续");
+  expect(result.label).toBe("在线研究未返回可用来源，任务已停止");
+  expect(result.citations).toEqual([]);
+  expect(result.degradedToDirectModel).toBe(true);
+});
+
+test("buildSearchContext uses DuckDuckGo when Tavily disabled but a key exists", async () => {
+  const result = await buildSearchContext({
+    route: "web_search",
+    prompt: "最近 AI 圈有什么新闻 (ddg-disabled-1)",
+    envKey: "env-key",
+    userSettings: { [TAVILY_ENABLED_SETTING]: "false" },
+    fetchImpl: async (input) => {
+      expect(String(input)).toContain("duckduckgo.com");
+      return new Response(DDG_LITE_HTML);
+    },
+  });
+
+  expect(result.status).toBe("live");
+  expect(result.provider).toBe("duckduckgo");
+  expect(result.systemContext).toContain("DuckDuckGo live search results:");
+});
+
+test("buildSearchContext goes offline when Tavily disabled and DuckDuckGo empty", async () => {
+  const result = await buildSearchContext({
+    route: "web_search",
+    prompt: "最近 AI 圈有什么新闻 (ddg-disabled-empty-1)",
+    envKey: "env-key",
+    userSettings: { [TAVILY_ENABLED_SETTING]: "false" },
+    fetchImpl: async () => new Response("<html><body>no results</body></html>"),
+  });
+
+  expect(result.status).toBe("offline");
   expect(result.citations).toEqual([]);
 });
 
@@ -95,6 +136,97 @@ test("buildSearchContext narrows OpenAI official-doc queries to official domains
       );
     },
   });
+});
+
+test("buildSearchContext tightens news queries to topic=news and time_range=day", async () => {
+  const result = await buildSearchContext({
+    route: "web_search",
+    prompt: "推送今天科技新闻",
+    envKey: "env-key",
+    fetchImpl: async (_input, init) => {
+      const payload = JSON.parse(String(init?.body ?? "{}")) as {
+        topic?: string;
+        time_range?: string;
+        chunks_per_source?: number;
+      };
+      expect(payload.topic).toBe("news");
+      expect(payload.time_range).toBe("day");
+      // basic route must not send the advanced-only chunks_per_source field.
+      expect(payload.chunks_per_source).toBeUndefined();
+      return new Response(
+        JSON.stringify({
+          results: [{ title: "Tech News", url: "https://ithome.com/0/1", content: "x" }],
+        }),
+      );
+    },
+  });
+
+  expect(result.status).toBe("live");
+  expect(result.provider).toBe("tavily");
+});
+
+test("buildSearchContext soft-targets curated domains for a clear category", async () => {
+  await buildSearchContext({
+    route: "web_search",
+    prompt: "今天 A股股市行情怎么样",
+    envKey: "env-key",
+    fetchImpl: async (_input, init) => {
+      const payload = JSON.parse(String(init?.body ?? "{}")) as { include_domains?: string[] };
+      expect(payload.include_domains).toBeDefined();
+      expect(payload.include_domains).toContain("bloomberg.com");
+      return new Response(
+        JSON.stringify({
+          results: [{ title: "Markets", url: "https://bloomberg.com/markets", content: "x" }],
+        }),
+      );
+    },
+  });
+});
+
+test("buildSearchContext reranks high-trust fresh results ahead of low-trust ones", async () => {
+  const now = () => Date.parse("2026-06-29T00:00:00Z");
+  const result = await buildSearchContext({
+    route: "web_search",
+    prompt: "今天有什么最新新闻",
+    envKey: "env-key",
+    now,
+    fetchImpl: async () =>
+      new Response(
+        JSON.stringify({
+          results: [
+            { title: "Random Blog", url: "https://random-blog.example.org/post", content: "x" },
+            {
+              title: "Reuters World",
+              url: "https://reuters.com/world/x",
+              content: "y",
+              published_date: "2026-06-28T12:00:00Z",
+            },
+          ],
+        }),
+      ),
+  });
+
+  expect(result.status).toBe("live");
+  expect(result.citations[0].url).toContain("reuters.com");
+});
+
+test("buildSearchContext falls back to DuckDuckGo when Tavily upstream fails", async () => {
+  const result = await buildSearchContext({
+    route: "web_search",
+    prompt: "最近科技新闻 (tavily-degrade-1)",
+    envKey: "env-key",
+    fetchImpl: async (input) => {
+      if (String(input).includes("api.tavily.com")) {
+        return new Response("upstream down", { status: 500 });
+      }
+      return new Response(DDG_LITE_HTML);
+    },
+  });
+
+  expect(result.status).toBe("live");
+  expect(result.provider).toBe("duckduckgo");
+  expect(result.citations).toHaveLength(1);
+  expect(result.systemContext).toContain("https://example.com/news");
 });
 
 test("buildSearchContext aborts slow web search and keeps a user-facing timeout label", async () => {

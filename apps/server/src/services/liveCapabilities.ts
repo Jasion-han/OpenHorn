@@ -7,8 +7,8 @@ export type LiveRouteType =
 
 export type LiveStatus = "live" | "offline";
 
-import { buildSearchContext, type SearchCitation } from "./searchService";
 import { buildCurrentWorkspaceSystemContext } from "./currentWorkspaceContext";
+import { buildSearchContext, type SearchCitation } from "./searchService";
 
 export type LiveSourceType = "local" | "weather" | "web_search" | "none";
 
@@ -435,7 +435,9 @@ export function routeLiveQuery(prompt: string): LiveRoute {
   // contains words like "分析" that normally trigger research mode.
   // The user wants the agent to inspect local files, not fetch web pages.
   if (
-    /(仓库|代码库|工作区|项目|源码|目录|repo|repository|codebase|workspace|readme|package\.json|tsconfig|src\/|apps\/)/i.test(text)
+    /(仓库|代码库|工作区|项目|源码|目录|repo|repository|codebase|workspace|readme|package\.json|tsconfig|src\/|apps\/)/i.test(
+      text,
+    )
   ) {
     return { type: "direct_model", needsCitation: false };
   }
@@ -535,7 +537,7 @@ export async function buildLiveContext(input: BuildLiveContextInput): Promise<Li
       userLabel: searchContext.label,
       source: {
         type: searchContext.status === "live" ? "web_search" : "none",
-        provider: searchContext.provider === "tavily" ? "tavily" : undefined,
+        provider: searchContext.provider === "none" ? undefined : searchContext.provider,
       },
       systemContext: searchContext.systemContext,
       citations: searchContext.citations,

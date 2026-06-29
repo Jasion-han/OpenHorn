@@ -56,16 +56,19 @@ test("buildLiveContext does not guess weather location from timezone or defaults
   expect(result.systemContext).toContain("Do not infer the user location");
 });
 
-test("buildLiveContext marks web-search routes as degraded when no provider exists", async () => {
+test("buildLiveContext marks web-search routes as degraded when keyless search finds nothing", async () => {
+  // With no Tavily key the keyless DuckDuckGo fallback runs; an empty response
+  // degrades to offline with the no-usable-sources label.
   const result = await buildLiveContext({
     prompt: "最近 AI 圈有什么新闻",
     tavilyEnvKey: null,
+    fetchImpl: async () => new Response("<html></html>"),
   });
 
   expect(result.status).toBe("offline");
   expect(result.route).toBe("web_search");
-  expect(result.userLabel).toContain("实时搜索未配置");
-  expect(result.systemContext).toContain("Live search is not configured");
+  expect(result.userLabel).toContain("实时搜索未返回可用来源");
+  expect(result.systemContext).toContain("Live search returned no usable sources");
 });
 
 test("buildLiveContext uses tavily for web search when a key is available", async () => {
@@ -101,13 +104,18 @@ test("buildLiveContext keeps web search route when live search times out", async
   const result = await buildLiveContext({
     prompt: "最近 AI 圈有什么新闻",
     tavilyEnvKey: "env-key",
-    fetchImpl: async (_input, init) =>
-      new Promise((_, reject) => {
-        const signal = init?.signal as AbortSignal | undefined;
-        signal?.addEventListener("abort", () => {
-          reject(new DOMException("timed out", "TimeoutError"));
+    fetchImpl: async (input, init) => {
+      if (String(input).includes("api.tavily.com")) {
+        return new Promise((_, reject) => {
+          const signal = init?.signal as AbortSignal | undefined;
+          signal?.addEventListener("abort", () => {
+            reject(new DOMException("timed out", "TimeoutError"));
+          });
         });
-      }),
+      }
+      // DuckDuckGo degrade attempt: return nothing so the timeout label stands.
+      return new Response("<html></html>");
+    },
   });
 
   expect(result.status).toBe("offline");
@@ -248,6 +256,7 @@ test("buildLiveContext prefers web search for named tool capability lookups when
     prompt: "OpenClaw 有什么能力？",
     forceWebSearch: true,
     tavilyEnvKey: null,
+    fetchImpl: async () => new Response("<html></html>"),
     classifier: async () => {
       classifierCalled = true;
       return "direct_model";
@@ -257,7 +266,7 @@ test("buildLiveContext prefers web search for named tool capability lookups when
   expect(classifierCalled).toBe(false);
   expect(result.route).toBe("web_search");
   expect(result.status).toBe("offline");
-  expect(result.userLabel).toContain("实时搜索未配置");
+  expect(result.userLabel).toContain("实时搜索未返回可用来源");
 });
 
 test("buildLiveContext prefers research for named tool comparison lookups when allowed", async () => {
@@ -267,6 +276,7 @@ test("buildLiveContext prefers research for named tool comparison lookups when a
     prompt: "OpenClaw 相较于 AI 编程工具有什么优势？",
     forceWebSearch: true,
     tavilyEnvKey: null,
+    fetchImpl: async () => new Response("<html></html>"),
     classifier: async () => {
       classifierCalled = true;
       return "direct_model";
@@ -276,7 +286,7 @@ test("buildLiveContext prefers research for named tool comparison lookups when a
   expect(classifierCalled).toBe(false);
   expect(result.route).toBe("research");
   expect(result.status).toBe("offline");
-  expect(result.userLabel).toContain("在线研究未配置");
+  expect(result.userLabel).toContain("在线研究未返回可用来源");
 });
 
 test("buildLiveContext routes current interview-practice comparisons to research", async () => {
@@ -286,6 +296,7 @@ test("buildLiveContext routes current interview-practice comparisons to research
     prompt: "现在的 AI 面试一般是怎么面的？和传统技术方向面试有什么差异？",
     forceWebSearch: true,
     tavilyEnvKey: null,
+    fetchImpl: async () => new Response("<html></html>"),
     classifier: async () => {
       classifierCalled = true;
       return "direct_model";
@@ -295,5 +306,5 @@ test("buildLiveContext routes current interview-practice comparisons to research
   expect(classifierCalled).toBe(false);
   expect(result.route).toBe("research");
   expect(result.status).toBe("offline");
-  expect(result.userLabel).toContain("在线研究未配置");
+  expect(result.userLabel).toContain("在线研究未返回可用来源");
 });
