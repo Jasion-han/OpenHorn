@@ -47,11 +47,12 @@ export function DesktopMarkdownMessage({ content }: { content: string }) {
       try {
         domain = new URL(normalizedHref).hostname;
       } catch {}
-      const faviconUrl = domain
-        ? `https://www.google.com/s2/favicons?sz=16&domain=${domain}`
-        : "";
+      const faviconUrl = domain ? `https://www.google.com/s2/favicons?sz=16&domain=${domain}` : "";
       const handleClick = (e: React.MouseEvent) => {
         e.preventDefault();
+        // Stop here so App.tsx's global click interceptor does not also fire
+        // and open the same URL a second time.
+        e.stopPropagation();
         if (normalizedHref && normalizedHref !== "#") {
           import("@tauri-apps/plugin-shell")
             .then((mod) => mod.open(normalizedHref))
@@ -59,12 +60,7 @@ export function DesktopMarkdownMessage({ content }: { content: string }) {
         }
       };
       return (
-        <a
-          href={normalizedHref}
-          onClick={handleClick}
-          className={styles.richLink}
-          {...props}
-        >
+        <a href={normalizedHref} onClick={handleClick} className={styles.richLink} {...props}>
           {faviconUrl ? (
             <img
               src={faviconUrl}

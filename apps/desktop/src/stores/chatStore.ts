@@ -149,6 +149,13 @@ export interface ChatState {
   failStreamingMessage: (messageId: string, error: string) => void;
   updateMessage: (messageId: string, updates: Partial<Message>) => void;
   appendMessageDelta: (messageId: string, delta: string, updates?: Partial<Message>) => void;
+  findMessageAnywhere: (messageId: string) => Message | undefined;
+  reconcileSidecarMessageIds: (input: {
+    conversationId: string;
+    assistantDraftId: string;
+    userMessageId: string;
+    assistantMessageId: string;
+  }) => void;
   replaceMessages: (messages: Message[]) => void;
   setComposerMode: (mode: ChatMode) => void;
   setSelectedChannelId: (channelId: string | null) => void;
@@ -172,6 +179,23 @@ const INITIAL_STATE = {
 
 export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter()) {
   let selectConversationRequestId = 0;
+  const messageCache = new Map<string, Message[]>();
+
+  function updateCachedMessage(
+    messageId: string,
+    updater: (msg: Message) => Message,
+  ): boolean {
+    for (const [convId, msgs] of messageCache) {
+      const idx = msgs.findIndex((m) => m.id === messageId);
+      if (idx !== -1) {
+        const updated = [...msgs];
+        updated[idx] = updater(updated[idx]);
+        messageCache.set(convId, updated);
+        return true;
+      }
+    }
+    return false;
+  }
 
   return create<ChatState>((set, get) => ({
     ...INITIAL_STATE,
@@ -219,6 +243,11 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
     },
 
     async selectConversation(conversationId) {
+      const prev = get();
+      if (prev.currentConversation?.id && prev.messages.length > 0) {
+        messageCache.set(prev.currentConversation.id, prev.messages);
+      }
+
       const conversation =
         get().conversations.find((item) => item.id === conversationId) || null;
 
@@ -230,24 +259,44 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
         return;
       }
 
+      const cached = messageCache.get(conversationId);
+
       const requestId = ++selectConversationRequestId;
       set((state) => ({
         currentConversation: conversation,
-        messages: [],
+        messages: cached || [],
         composerMode: conversation.lastMode || state.composerMode,
         selectedChannelId: conversation.channelId || state.selectedChannelId,
-        isLoading: true,
+        isLoading: !cached,
         error: null,
       }));
 
       try {
-        const messages = await adapter.loadMessages(conversation.id);
+        const dbMessages = await adapter.loadMessages(conversation.id);
         if (requestId !== selectConversationRequestId) return;
 
+        const current = get().messages;
+        const dbIds = new Set(dbMessages.map((m) => m.id));
+        // Optimistic drafts use client ids (draft-*). Once a run is persisted,
+        // the server assigns new ids, so an id-only check would keep the stale
+        // draft alongside the persisted copy and render the whole exchange
+        // twice. Drop any draft whose (role, content) already exists in the DB;
+        // only genuinely in-flight drafts (not yet persisted) survive.
+        const dbSignatures = new Set(
+          dbMessages.map((m) => `${m.role} ${(m.content || "").trim()}`),
+        );
+        const drafts = current.filter(
+          (m) =>
+            !dbIds.has(m.id) &&
+            !dbSignatures.has(`${m.role} ${(m.content || "").trim()}`),
+        );
+        const merged = drafts.length > 0 ? [...dbMessages, ...drafts] : dbMessages;
+
         set({
-          messages,
+          messages: merged,
           isLoading: false,
         });
+        messageCache.set(conversationId, merged);
       } catch (error) {
         if (requestId !== selectConversationRequestId) return;
         set({ isLoading: false, error: toErrorMessage(error) });
@@ -481,16 +530,24 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
       }
 
       if (event.type === "agent_event") {
-        set((state) => ({
-          messages: state.messages.map((message) =>
-            message.id === messageId
-              ? {
-                  ...message,
-                  agentRun: applyAgentEventToRun(message.agentRun, event.event),
-                }
-              : message,
-          ),
-        }));
+        const found = get().messages.some((m) => m.id === messageId);
+        if (found) {
+          set((state) => ({
+            messages: state.messages.map((message) =>
+              message.id === messageId
+                ? {
+                    ...message,
+                    agentRun: applyAgentEventToRun(message.agentRun, event.event),
+                  }
+                : message,
+            ),
+          }));
+        } else {
+          updateCachedMessage(messageId, (msg) => ({
+            ...msg,
+            agentRun: applyAgentEventToRun(msg.agentRun, event.event),
+          }));
+        }
         return;
       }
 
@@ -521,50 +578,127 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
     },
 
     failStreamingMessage(messageId, error) {
-      set((state) => ({
-        isStreaming: false,
-        error,
-        messages: state.messages.map((message) =>
-          message.id === messageId
-            ? {
-                ...message,
-                content: message.content || error,
-                agentRun: message.agentRun
-                  ? {
-                      ...message.agentRun,
-                      status: "failed",
-                      summary: "Error",
-                      error,
-                    }
-                  : message.agentRun,
-              }
-            : message,
-        ),
-      }));
+      const found = get().messages.some((m) => m.id === messageId);
+      if (found) {
+        set((state) => ({
+          isStreaming: false,
+          error,
+          messages: state.messages.map((message) =>
+            message.id === messageId
+              ? {
+                  ...message,
+                  content: message.content || error,
+                  agentRun: message.agentRun
+                    ? {
+                        ...message.agentRun,
+                        status: "failed",
+                        summary: "Error",
+                        error,
+                      }
+                    : message.agentRun,
+                }
+              : message,
+          ),
+        }));
+      } else {
+        set({ isStreaming: false, error });
+        updateCachedMessage(messageId, (msg) => ({
+          ...msg,
+          content: msg.content || error,
+          agentRun: msg.agentRun
+            ? { ...msg.agentRun, status: "failed", summary: "Error", error }
+            : msg.agentRun,
+        }));
+      }
     },
 
     updateMessage(messageId, updates) {
-      set((state) => ({
-        messages: state.messages.map((message) =>
-          message.id === messageId ? { ...message, ...updates } : message,
-        ),
-      }));
+      const found = get().messages.some((m) => m.id === messageId);
+      if (found) {
+        set((state) => ({
+          messages: state.messages.map((message) =>
+            message.id === messageId ? { ...message, ...updates } : message,
+          ),
+        }));
+      } else {
+        updateCachedMessage(messageId, (msg) => ({ ...msg, ...updates }));
+      }
     },
 
     appendMessageDelta(messageId, delta, updates) {
-      set((state) => ({
-        messages: state.messages.map((message) =>
-          message.id === messageId
-            ? {
-                ...message,
-                ...updates,
-                content: `${message.content}${delta}`,
-                streamTail: getRollingTail(`${message.content}${delta}`),
-                streamPulseKey: (message.streamPulseKey ?? 0) + 1,
-              }
-            : message,
-        ),
-      }));
+      const found = get().messages.some((m) => m.id === messageId);
+      if (found) {
+        set((state) => ({
+          messages: state.messages.map((message) =>
+            message.id === messageId
+              ? {
+                  ...message,
+                  ...updates,
+                  content: `${message.content}${delta}`,
+                  streamTail: getRollingTail(`${message.content}${delta}`),
+                  streamPulseKey: (message.streamPulseKey ?? 0) + 1,
+                }
+              : message,
+          ),
+        }));
+      } else {
+        updateCachedMessage(messageId, (msg) => ({
+          ...msg,
+          ...updates,
+          content: `${msg.content}${delta}`,
+        }));
+      }
+    },
+
+    findMessageAnywhere(messageId) {
+      const inStore = get().messages.find((m) => m.id === messageId);
+      if (inStore) return inStore;
+      for (const msgs of messageCache.values()) {
+        const found = msgs.find((m) => m.id === messageId);
+        if (found) return found;
+      }
+      return undefined;
+    },
+
+    reconcileSidecarMessageIds({
+      conversationId,
+      assistantDraftId,
+      userMessageId,
+      assistantMessageId,
+    }) {
+      // After a sidecar run is persisted, the optimistic draft ids (draft-*)
+      // must be swapped for the server-assigned ids. Otherwise a later
+      // selectConversation() sees the draft ids as "not in the DB" and renders
+      // the exchange twice. Remap the assistant message and its prompt (the
+      // nearest preceding user message) in both the live state and the cache.
+      const remap = (msgs: Message[]): Message[] | null => {
+        const assistantIdx = msgs.findIndex((m) => m.id === assistantDraftId);
+        if (assistantIdx === -1) return null;
+        const next = [...msgs];
+        next[assistantIdx] = { ...next[assistantIdx], id: assistantMessageId };
+        for (let i = assistantIdx - 1; i >= 0; i--) {
+          if (next[i].role === "user") {
+            if (next[i].id !== userMessageId) {
+              next[i] = { ...next[i], id: userMessageId };
+            }
+            break;
+          }
+        }
+        return next;
+      };
+
+      const remappedLive = remap(get().messages);
+      if (remappedLive) {
+        set({ messages: remappedLive });
+        messageCache.set(conversationId, remappedLive);
+        return;
+      }
+
+      const cached = messageCache.get(conversationId);
+      if (cached) {
+        const remappedCache = remap(cached);
+        if (remappedCache) messageCache.set(conversationId, remappedCache);
+      }
     },
 
     replaceMessages(messages) {

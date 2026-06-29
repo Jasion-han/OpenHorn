@@ -25,14 +25,11 @@ export function DesktopCitationList({
           <a
             key={`${citation.url}-${index}`}
             href={normalizeExternalUrl(citation.url)}
-            target="_blank"
             rel="noreferrer"
             className="block w-full min-w-0 max-w-full overflow-hidden py-0.5 text-sm leading-6 text-foreground/56 transition-colors hover:text-foreground"
           >
             <div className="flex min-w-0 items-baseline gap-2">
-              <span className="shrink-0 text-foreground/30">
-                [{index}]
-              </span>
+              <span className="shrink-0 text-foreground/30">[{index}]</span>
               <div className="min-w-0 flex-1 break-words text-foreground/70">
                 {citation.title || citation.url}
               </div>

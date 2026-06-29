@@ -21,8 +21,8 @@ export function DesktopAgentTaskMetaLine({
       {active && (
         <style>{`
           @keyframes agentMetaTextShimmer {
-            0% { background-position: 130% 50%; }
-            100% { background-position: -30% 50%; }
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
           }
           @keyframes agentMetaDotPulse {
             0%, 100% { transform: scale(0.9); opacity: 0.35; }
@@ -39,7 +39,7 @@ export function DesktopAgentTaskMetaLine({
             animation: active ? "agentMetaDotPulse 1.35s ease-in-out infinite" : undefined,
           }}
         />
-        <span className="min-w-0">
+        <span className="min-w-0 flex-1">
           <span className="mr-0" />
           <span style={active ? getActiveMetaTextStyle() : undefined}>{text}</span>
           {subtext ? <span className="text-foreground opacity-32"> · {subtext}</span> : null}

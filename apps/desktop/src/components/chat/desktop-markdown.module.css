@@ -2,7 +2,12 @@
   max-width: 100%;
   overflow-wrap: anywhere;
   word-break: break-word;
-  line-height: 1.45;
+  line-height: 1.55;
+}
+
+/* The first block never pushes the bubble open with a top margin. */
+.root > :first-child {
+  margin-top: 0;
 }
 
 .root p {
@@ -14,12 +19,12 @@
 }
 
 .root p + p {
-  margin-top: 0.55em;
+  margin-top: 0.8em;
 }
 
 .root ul,
 .root ol {
-  margin: 0.35em 0;
+  margin: 0.5em 0;
   padding-left: 0;
   list-style-position: inside;
 }
@@ -34,16 +39,25 @@
 }
 
 .root li + li {
-  margin-top: 0.15em;
+  margin-top: 0.8em;
 }
 
 .root h1,
 .root h2,
 .root h3,
 .root h4 {
-  margin: 0.3em 0 0.14em;
+  margin: 1.2em 0 0.5em;
   font-weight: 700;
   line-height: 1.3;
+}
+
+/* A heading right after a divider shouldn't double the section gap — the
+   divider already supplies the breathing room above it. */
+.root hr + h1,
+.root hr + h2,
+.root hr + h3,
+.root hr + h4 {
+  margin-top: 0;
 }
 
 .root pre {
@@ -74,7 +88,7 @@
 }
 
 .root hr {
-  margin: 0.45em 0;
+  margin: 1.2em 0;
   border: 0;
   border-top: 1px solid hsl(var(--border));
 }

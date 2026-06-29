@@ -1,20 +1,26 @@
 import { Bot, Check, Copy, MessageSquare, Pencil, RefreshCw, Trash2 } from "lucide-react";
 import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Button, Textarea, cn } from "ui";
+import { Button, cn, Textarea } from "ui";
+import { useSidecarAgentRun } from "../../hooks/useSidecarAgentRun";
+import { type StreamTone, toneClassName } from "../../lib/agentTaskPresenter";
 import { uploadAttachments } from "../../lib/attachments";
 import { getDesktopBackendBase } from "../../lib/backendBase";
 import { sanitizeDisplayContent } from "../../lib/citations";
 import { getEffectiveModelForConversation } from "../../lib/effectiveModel";
 import { notifyWarning } from "../../lib/notify";
 import { createServerApi, readErrorMessage } from "../../lib/serverApi";
-import { useSidecarAgentRun } from "../../hooks/useSidecarAgentRun";
 import { readSseStream } from "../../lib/sse";
 import { useChatStore } from "../../stores/chatStore";
 import { useSidecarStore } from "../../stores/sidecarStore";
-import type { ApiAgentRun, ChatStreamEvent, Message, MessageAttachmentMeta } from "../../types/chat";
-import { DesktopCitationList } from "./DesktopCitationList";
+import type {
+  ApiAgentRun,
+  ChatStreamEvent,
+  Message,
+  MessageAttachmentMeta,
+} from "../../types/chat";
 import { DesktopAgentTaskMetaLine } from "./DesktopAgentTaskMetaLine";
 import { DesktopChatHeader } from "./DesktopChatHeader";
+import { DesktopCitationList } from "./DesktopCitationList";
 import { DesktopComposer } from "./DesktopComposer";
 import { DesktopMarkdownMessage } from "./DesktopMarkdownMessage";
 import { DesktopMessageAttachments } from "./DesktopMessageAttachments";
@@ -144,53 +150,179 @@ function LiveStatusBadge({
   );
 }
 
-function CollapsibleBlock({ children, maxLines = 3 }: { children: React.ReactNode; maxLines?: number }) {
+// Inline collapsible step. Instead of `-webkit-line-clamp` + a gradient mask (which
+// lets the More button overlap and hide the tail of the third line), we measure with
+// JS and binary-search the longest detail prefix that fits in `maxLines` rows *with a
+// trailing reserve slot*. The third line's text is truncated so it ends before the
+// More/Less button — the overflow text moves into the hidden (expandable) part, and a
+// ~56px end-of-line spacer keeps the button from covering any glyphs. Body text of 1-2
+// lines still uses the full width (no per-line padding/compression).
+const CLAMP_LINE_HEIGHT = 24; // matches leading-6
+const CLAMP_RESERVE = 64; // px reserved at the end of the last line for More/Less
+
+function InlineClampStep({
+  label,
+  detail,
+  isResult,
+  tone,
+  maxLines = 3,
+}: {
+  label: string;
+  detail: string | null;
+  isResult: boolean;
+  tone: StreamTone;
+  maxLines?: number;
+}) {
   const [expanded, setExpanded] = useState(false);
-  const contentRef = useRef<HTMLDivElement>(null);
   const [needsCollapse, setNeedsCollapse] = useState(false);
+  const [clampedDetail, setClampedDetail] = useState<string | null>(null);
+  const measureRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    const el = contentRef.current;
-    if (!el || maxLines <= 0) return;
-    let prevWidth = 0;
-    const check = () => {
-      el.style.webkitLineClamp = "";
-      el.style.display = "";
-      el.style.webkitBoxOrient = "";
-      el.style.overflow = "";
-      const fullHeight = el.scrollHeight;
-      const lineHeight = parseFloat(getComputedStyle(el).lineHeight) || 20;
-      const shouldCollapse = fullHeight > lineHeight * (maxLines + 1);
-      setNeedsCollapse(shouldCollapse);
-      if (shouldCollapse && !expanded) {
-        el.style.display = "-webkit-box";
-        el.style.webkitLineClamp = String(maxLines);
-        el.style.webkitBoxOrient = "vertical";
-        el.style.overflow = "hidden";
-      }
-      prevWidth = el.offsetWidth;
+  useLayoutEffect(() => {
+    const measure = measureRef.current;
+    const content = contentRef.current;
+    if (!measure || !content) return;
+
+    // Pin the offscreen clone to the exact content-box width of the visible block so
+    // the binary search wraps identically to the real render (no stray reserve span
+    // spilling onto a 4th line). Both carry pl-3.5/text-sm/leading-6, so matching the
+    // border-box width (clientWidth includes padding) aligns the wrap point exactly.
+    measure.style.boxSizing = "border-box";
+    measure.style.width = `${content.clientWidth}px`;
+
+    const labelText = `${label}${isResult ? " done" : ""}`;
+    // Build/reuse the offscreen measurement children so we only mutate text content
+    // (no React re-render churn) while binary searching.
+    let labelSpan = measure.querySelector<HTMLSpanElement>("[data-m='label']");
+    let detailSpan = measure.querySelector<HTMLSpanElement>("[data-m='detail']");
+    let reserveSpan = measure.querySelector<HTMLSpanElement>("[data-m='reserve']");
+    if (!labelSpan || !detailSpan || !reserveSpan) {
+      measure.textContent = "";
+      labelSpan = document.createElement("span");
+      labelSpan.dataset.m = "label";
+      detailSpan = document.createElement("span");
+      detailSpan.dataset.m = "detail";
+      reserveSpan = document.createElement("span");
+      reserveSpan.dataset.m = "reserve";
+      reserveSpan.setAttribute("aria-hidden", "true");
+      reserveSpan.style.display = "inline-block";
+      reserveSpan.style.width = `${CLAMP_RESERVE}px`;
+      measure.append(labelSpan, detailSpan, reserveSpan);
+    }
+    labelSpan.textContent = labelText;
+    const detailNode = detailSpan;
+    const reserveNode = reserveSpan;
+
+    const threshold = CLAMP_LINE_HEIGHT * maxLines + 2;
+    const heightFor = (text: string, withReserve: boolean): number => {
+      detailNode.textContent = text ? ` · ${text}` : "";
+      reserveNode.style.display = withReserve ? "inline-block" : "none";
+      return measure.scrollHeight;
     };
-    check();
-    const ro = new ResizeObserver(() => {
-      if (el.offsetWidth !== prevWidth) check();
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [maxLines, expanded]);
 
-  if (maxLines <= 0) return <>{children}</>;
+    const run = () => {
+      if (!detail) {
+        setNeedsCollapse(false);
+        setClampedDetail(null);
+        return;
+      }
+      // Natural height with the full detail (no reserve) decides whether we clamp.
+      if (heightFor(detail, false) <= threshold) {
+        setNeedsCollapse(false);
+        setClampedDetail(null);
+        return;
+      }
+      // Longest prefix that still fits in `maxLines` once the ellipsis + reserve slot
+      // are appended to the last line.
+      let lo = 0;
+      let hi = detail.length;
+      let best = 0;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        const candidate = `${detail.slice(0, mid).trimEnd()}…`;
+        if (heightFor(candidate, true) <= threshold) {
+          best = mid;
+          lo = mid + 1;
+        } else {
+          hi = mid - 1;
+        }
+      }
+      setNeedsCollapse(true);
+      setClampedDetail(`${detail.slice(0, best).trimEnd()}…`);
+    };
+
+    run();
+
+    // Observe the visible block (not the clone — the clone has an explicit pinned
+    // width and would not react to container resizes). Re-pin the clone width and
+    // re-run the binary search only when the real content width actually changes.
+    let prevWidth = content.clientWidth;
+    const ro = new ResizeObserver(() => {
+      const width = content.clientWidth;
+      if (width !== prevWidth) {
+        prevWidth = width;
+        measure.style.width = `${width}px`;
+        run();
+      }
+    });
+    ro.observe(content);
+    return () => ro.disconnect();
+  }, [label, detail, isResult, maxLines]);
+
+  const collapsed = needsCollapse && !expanded;
+
   return (
-    <div>
-      <div ref={contentRef}>
-        {children}
+    <div className={cn("relative py-0.5 text-sm leading-6", toneClassName(tone))}>
+      <span
+        aria-hidden="true"
+        className="absolute left-0 top-[8px] h-1.5 w-1.5 rounded-full bg-current opacity-20"
+      />
+      {/* Offscreen measurement clone: same width (pl-3.5, full-width block) and text
+          metrics (text-sm leading-6) as the visible content below. */}
+      <div
+        ref={measureRef}
+        aria-hidden="true"
+        className="pl-3.5 text-sm leading-6"
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          visibility: "hidden",
+          pointerEvents: "none",
+        }}
+      />
+      <div
+        ref={contentRef}
+        className="pl-3.5"
+        // Hard cap the collapsed block at `maxLines` rows so that even if the inline
+        // reserve span wraps, the overflow (a would-be 4th line) is clipped and the
+        // absolutely-positioned More/Less button stays anchored to the 3rd line.
+        style={
+          collapsed ? { maxHeight: maxLines * CLAMP_LINE_HEIGHT, overflow: "hidden" } : undefined
+        }
+      >
+        <span>
+          {label}
+          {isResult ? " done" : ""}
+        </span>
+        {detail ? (
+          <span className="text-foreground opacity-32">
+            {" · "}
+            {collapsed ? clampedDetail : detail}
+            {collapsed ? (
+              <span aria-hidden="true" style={{ display: "inline-block", width: CLAMP_RESERVE }} />
+            ) : null}
+          </span>
+        ) : null}
       </div>
       {needsCollapse && (
         <button
           type="button"
           onClick={() => setExpanded((v) => !v)}
-          className="mt-0.5 text-xs text-muted-foreground/60 hover:text-muted-foreground"
+          className="absolute right-0 bottom-0.5 pr-5 text-sm text-foreground/60 leading-6 transition-colors hover:text-foreground/80"
         >
-          {expanded ? "··· 收起" : "··· 展开"}
+          {expanded ? "Less" : "More"}
         </button>
       )}
     </div>
@@ -268,8 +400,13 @@ function AgentRunPanel({ run }: { run?: ApiAgentRun }) {
       .filter((line) => !/^exit_?code\s*:/i.test(line));
 
     if (lines.length === 0) return null;
-    const summary = lines.slice(0, 2).join(" · ").replace(/\s+/g, " ").trim();
-    return summary.length > 112 ? `${summary.slice(0, 109)}...` : summary;
+    const summary = lines.join(" · ").replace(/\s+/g, " ").trim();
+    // No hard line/character truncation here: visual collapsing is handled by
+    // InlineClampStep (3 lines collapsed, full content when expanded). Keep all
+    // lines so the expanded view shows the complete tool result, and only apply
+    // a loose safety ceiling to avoid pathologically long strings — never
+    // insert an inline ellipsis.
+    return summary.length > 8000 ? summary.slice(0, 8000) : summary;
   };
 
   const statusLabel = (() => {
@@ -314,7 +451,10 @@ function AgentRunPanel({ run }: { run?: ApiAgentRun }) {
   })();
 
   return (
-    <details className="mt-2 text-sm" open={run.status === "running" || run.status === "partial" || undefined}>
+    <details
+      className="mt-2 text-sm"
+      open={run.status === "running" || run.status === "partial" || undefined}
+    >
       <style>{`
         @keyframes agentMetaTextFlow {
           0% { background-position: 130% 50%; text-shadow: 0 0 0 rgba(15,23,42,0); }
@@ -326,16 +466,17 @@ function AgentRunPanel({ run }: { run?: ApiAgentRun }) {
         <div className="flex items-center justify-between gap-3 border-b border-border/35 pb-1.5">
           <div className="flex min-w-0 items-center gap-2">
             <span className="truncate text-sm leading-6 text-muted-foreground">
-              {displayTitle} <span className={cn("text-muted-foreground/70", statusClassName)}>&middot; {statusLabel}</span>
+              {displayTitle}{" "}
+              <span className={cn("text-muted-foreground/70", statusClassName)}>
+                &middot; {statusLabel}
+              </span>
             </span>
           </div>
         </div>
       </summary>
 
       <div className="mt-2 flex flex-col gap-2.5">
-        {run.error && (
-          <DesktopAgentTaskMetaLine text={run.error} tone="danger" />
-        )}
+        {run.error && <DesktopAgentTaskMetaLine text={run.error} tone="danger" />}
         {run.steps.map((step, stepIndex) => {
           if (step.type === "text") {
             const isLastText = !run.steps.slice(stepIndex + 1).some((s) => s.type === "tool_start");
@@ -368,24 +509,31 @@ function AgentRunPanel({ run }: { run?: ApiAgentRun }) {
 
           if (step.type === "tool_result" && !detail) return null;
 
-          const text =
-            step.type === "tool_result"
-              ? `${label} done`
-              : step.type === "error"
-                ? label
-                : label || detail;
+          if (step.type === "tool_start" || step.type === "tool_result") {
+            return (
+              <InlineClampStep
+                key={stepKey}
+                label={label || "Tool"}
+                detail={detail}
+                isResult={step.type === "tool_result"}
+                tone={step.type === "tool_result" ? "success" : "default"}
+                maxLines={3}
+              />
+            );
+          }
+
+          const text = step.type === "error" ? label : label || detail;
 
           if (!text && !detail) return null;
 
           return (
-            <CollapsibleBlock key={stepKey} maxLines={step.type === "tool_start" ? 3 : 0}>
-              <DesktopAgentTaskMetaLine
-                text={text ?? detail ?? "Tool"}
-                subtext={detail}
-                active={isActive}
-                tone={step.type === "tool_result" ? "success" : step.type === "error" ? "danger" : "default"}
-              />
-            </CollapsibleBlock>
+            <DesktopAgentTaskMetaLine
+              key={stepKey}
+              text={text ?? detail ?? "Tool"}
+              subtext={detail}
+              active={isActive}
+              tone={step.type === "error" ? "danger" : "default"}
+            />
           );
         })}
       </div>
@@ -594,7 +742,10 @@ function MessageBubble({
     isAssistant && isMessageStreaming && hasAssistantText ? (message.streamTail || "").length : 0;
   const isFlatAgentAssistant = isAssistant && message.mode === "agent";
   const processPanel = isAssistant ? (
-    message.mode === "agent" && isMessageStreaming && !hasAssistantText && !(message.agentRun?.steps?.length) ? (
+    message.mode === "agent" &&
+    isMessageStreaming &&
+    !hasAssistantText &&
+    !message.agentRun?.steps?.length ? (
       <section className="mt-0.5 px-1 pt-0 pb-1">
         <DesktopAgentTaskMetaLine text={message.agentRun?.summary?.trim() || "Thinking"} active />
       </section>
@@ -648,7 +799,6 @@ function MessageBubble({
             <div
               className="text-sm leading-6"
               style={{
-                whiteSpace: "pre-wrap",
                 overflowWrap: "anywhere",
                 wordBreak: "break-word",
                 maxWidth: "100%",
@@ -685,11 +835,13 @@ function MessageBubble({
             </p>
           ) : null
         ) : null}
-      {isFlatAgentAssistant && isMessageStreaming && (hasAssistantText || (message.agentRun?.steps?.length ?? 0) > 0) && (
-        <section className="mt-0.5 px-1 pt-0 pb-1">
-          <DesktopAgentTaskMetaLine text="Working" active />
-        </section>
-      )}
+        {isFlatAgentAssistant &&
+          isMessageStreaming &&
+          (hasAssistantText || (message.agentRun?.steps?.length ?? 0) > 0) && (
+            <section className="mt-0.5 px-1 pt-0 pb-1">
+              <DesktopAgentTaskMetaLine text="Working" active />
+            </section>
+          )}
       </div>
       <MessageActionBar
         message={message}
@@ -740,9 +892,9 @@ export function DesktopChatArea() {
   const viewportRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const pendingPreviewUrlsRef = useRef<Map<string, string[]>>(new Map());
-  const pendingScrollTargetRef = useRef<{ type: "bottom" } | { type: "message"; id: string } | null>(
-    null,
-  );
+  const pendingScrollTargetRef = useRef<
+    { type: "bottom" } | { type: "message"; id: string } | null
+  >(null);
   const messageAnchorRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const [streamingAssistantId, setStreamingAssistantId] = useState<string | null>(null);
   const [fullAccessEnabled, setFullAccessEnabled] = useState(false);
@@ -858,11 +1010,7 @@ export function DesktopChatArea() {
 
     const userMessage = messages[messageIndex];
     const assistantMessage = messages[messageIndex + 1];
-    if (
-      !userMessage ||
-      userMessage.role !== "user" ||
-      userMessage.id.startsWith("draft-")
-    ) {
+    if (!userMessage || userMessage.role !== "user" || userMessage.id.startsWith("draft-")) {
       return null;
     }
     if (
@@ -895,7 +1043,9 @@ export function DesktopChatArea() {
 
   const handleRemoveAttachment = (file: File) => {
     const targetKey = fileKey(file);
-    setPendingAttachments((currentFiles) => currentFiles.filter((item) => fileKey(item) !== targetKey));
+    setPendingAttachments((currentFiles) =>
+      currentFiles.filter((item) => fileKey(item) !== targetKey),
+    );
   };
 
   const consumeStreamingResponse = async (messageId: string, response: Response) => {
@@ -989,7 +1139,7 @@ export function DesktopChatArea() {
           fileName: string;
           fileType: string;
           fileSize: number;
-      }>
+        }>
       | undefined;
 
     try {
@@ -1044,8 +1194,9 @@ export function DesktopChatArea() {
         if (!effectiveModel.ok) {
           throw new Error("未找到可用模型，无法本地运行");
         }
-        const historyMsgs = useChatStore.getState().messages
-          .filter((m) => m.conversationId === conversationId && !m.id.startsWith("draft-"))
+        const historyMsgs = useChatStore
+          .getState()
+          .messages.filter((m) => m.conversationId === conversationId && !m.id.startsWith("draft-"))
           .filter((m) => m.id !== userMessageId && m.id !== assistantMessageId);
         const conversationHistory: Array<{ role: "user" | "assistant"; content: string }> = [];
         for (const m of historyMsgs) {
@@ -1059,8 +1210,15 @@ export function DesktopChatArea() {
         let tavilyApiKey: string | undefined;
         if (forceWebSearch) {
           try {
-            const { settings } = await chatAreaApi.settings.get(["liveSearch.tavilyApiKey"]);
-            tavilyApiKey = settings["liveSearch.tavilyApiKey"] || undefined;
+            const { settings } = await chatAreaApi.settings.get([
+              "liveSearch.tavilyApiKey",
+              "liveSearch.tavilyEnabled",
+            ]);
+            // Only forward the key when Tavily is enabled; when disabled the
+            // sidecar falls back to keyless DuckDuckGo.
+            if (settings["liveSearch.tavilyEnabled"] !== "false") {
+              tavilyApiKey = settings["liveSearch.tavilyApiKey"] || undefined;
+            }
           } catch {
             // ignore
           }
@@ -1129,25 +1287,31 @@ export function DesktopChatArea() {
 
       let chatContent = "";
       await new Promise<void>((resolve, reject) => {
-        sidecarClient.chatStream({
-          apiKey: prepared.apiKey,
-          baseUrl: prepared.baseUrl || undefined,
-          protocol: prepared.protocol,
-          model: prepared.model,
-          messages: prepared.messages,
-          onEvent: (event) => {
-            if (event.type === "execution_event" && event.eventType === "text") {
-              chatContent += event.content || "";
-              useChatStore.getState().appendMessageDelta(prepared.assistantMessageId, event.content || "");
-            }
-          },
-          onError: (message) => {
-            chatContent = `Error: ${message}`;
-            useChatStore.getState().updateMessage(prepared.assistantMessageId, { content: chatContent });
-            reject(new Error(message));
-          },
-          onDone: () => resolve(),
-        }).catch(reject);
+        sidecarClient
+          .chatStream({
+            apiKey: prepared.apiKey,
+            baseUrl: prepared.baseUrl || undefined,
+            protocol: prepared.protocol,
+            model: prepared.model,
+            messages: prepared.messages,
+            onEvent: (event) => {
+              if (event.type === "execution_event" && event.eventType === "text") {
+                chatContent += event.content || "";
+                useChatStore
+                  .getState()
+                  .appendMessageDelta(prepared.assistantMessageId, event.content || "");
+              }
+            },
+            onError: (message) => {
+              chatContent = `Error: ${message}`;
+              useChatStore
+                .getState()
+                .updateMessage(prepared.assistantMessageId, { content: chatContent });
+              reject(new Error(message));
+            },
+            onDone: () => resolve(),
+          })
+          .catch(reject);
       });
 
       await chatAreaApi.messages.chatComplete({
@@ -1247,15 +1411,19 @@ export function DesktopChatArea() {
           : undefined,
     });
 
-    const isSidecarRetry = assistantMessage?.mode === "agent" && currentConversation.channelId && effectiveModel.ok;
+    const isSidecarRetry =
+      assistantMessage?.mode === "agent" && currentConversation.channelId && effectiveModel.ok;
 
     try {
       if (isSidecarRetry && userMessage) {
         if (sidecarRun.isBusy) {
           await sidecarRun.cancel();
         }
-        const historyMsgs = useChatStore.getState().messages
-          .filter((m) => m.conversationId === currentConversation.id && !m.id.startsWith("draft-"))
+        const historyMsgs = useChatStore
+          .getState()
+          .messages.filter(
+            (m) => m.conversationId === currentConversation.id && !m.id.startsWith("draft-"),
+          )
           .filter((m) => m.id !== userMessage.id && m.id !== messageId);
         const conversationHistory: Array<{ role: "user" | "assistant"; content: string }> = [];
         for (const m of historyMsgs) {
@@ -1269,8 +1437,13 @@ export function DesktopChatArea() {
         let retryTavilyApiKey: string | undefined;
         if (forceWebSearch) {
           try {
-            const { settings } = await chatAreaApi.settings.get(["liveSearch.tavilyApiKey"]);
-            retryTavilyApiKey = settings["liveSearch.tavilyApiKey"] || undefined;
+            const { settings } = await chatAreaApi.settings.get([
+              "liveSearch.tavilyApiKey",
+              "liveSearch.tavilyEnabled",
+            ]);
+            if (settings["liveSearch.tavilyEnabled"] !== "false") {
+              retryTavilyApiKey = settings["liveSearch.tavilyApiKey"] || undefined;
+            }
           } catch {
             // ignore
           }
@@ -1316,10 +1489,12 @@ export function DesktopChatArea() {
         return;
       }
       setError(error instanceof Error ? error.message : "Retry message failed");
-      useChatStore.getState().failStreamingMessage(
-        messageId,
-        error instanceof Error ? error.message : "Retry message failed",
-      );
+      useChatStore
+        .getState()
+        .failStreamingMessage(
+          messageId,
+          error instanceof Error ? error.message : "Retry message failed",
+        );
     } finally {
       setLoading(false);
     }
@@ -1349,8 +1524,7 @@ export function DesktopChatArea() {
     }
 
     const { userMessage, assistantMessage: existingAssistantMessage } = editable;
-    const assistantMessageId =
-      existingAssistantMessage?.id ?? `temp-assistant-edit-${Date.now()}`;
+    const assistantMessageId = existingAssistantMessage?.id ?? `temp-assistant-edit-${Date.now()}`;
     handleCancelEdit();
     pendingScrollTargetRef.current = { type: "message", id: userMessage.id };
     setLoading(true);
@@ -1385,23 +1559,28 @@ export function DesktopChatArea() {
         mode: userMessage.mode,
         agentRun:
           userMessage.mode === "agent"
-          ? {
-              status: "partial",
-              summary: "Thinking",
-              steps: [],
-            }
-          : undefined,
+            ? {
+                status: "partial",
+                summary: "Thinking",
+                steps: [],
+              }
+            : undefined,
         createdAt: new Date(),
       });
     }
 
     const useSidecarForEdit =
-      existingAssistantMessage?.mode === "agent" && currentConversation.channelId && effectiveModel.ok;
+      existingAssistantMessage?.mode === "agent" &&
+      currentConversation.channelId &&
+      effectiveModel.ok;
 
     try {
       if (useSidecarForEdit) {
-        const historyMsgs = useChatStore.getState().messages
-          .filter((m) => m.conversationId === currentConversation.id && !m.id.startsWith("draft-"))
+        const historyMsgs = useChatStore
+          .getState()
+          .messages.filter(
+            (m) => m.conversationId === currentConversation.id && !m.id.startsWith("draft-"),
+          )
           .filter((m) => m.id !== userMessage.id && m.id !== assistantMessageId);
         const conversationHistory: Array<{ role: "user" | "assistant"; content: string }> = [];
         for (const m of historyMsgs) {
@@ -1415,8 +1594,13 @@ export function DesktopChatArea() {
         let editTavilyApiKey: string | undefined;
         if (forceWebSearch) {
           try {
-            const { settings } = await chatAreaApi.settings.get(["liveSearch.tavilyApiKey"]);
-            editTavilyApiKey = settings["liveSearch.tavilyApiKey"] || undefined;
+            const { settings } = await chatAreaApi.settings.get([
+              "liveSearch.tavilyApiKey",
+              "liveSearch.tavilyEnabled",
+            ]);
+            if (settings["liveSearch.tavilyEnabled"] !== "false") {
+              editTavilyApiKey = settings["liveSearch.tavilyApiKey"] || undefined;
+            }
           } catch {
             // ignore
           }
@@ -1449,10 +1633,12 @@ export function DesktopChatArea() {
         return;
       }
       setError(error instanceof Error ? error.message : "Edit message failed");
-      useChatStore.getState().failStreamingMessage(
-        assistantMessageId,
-        error instanceof Error ? error.message : "Edit message failed",
-      );
+      useChatStore
+        .getState()
+        .failStreamingMessage(
+          assistantMessageId,
+          error instanceof Error ? error.message : "Edit message failed",
+        );
     } finally {
       setLoading(false);
     }
@@ -1537,15 +1723,18 @@ export function DesktopChatArea() {
       )}
     >
       {(() => {
-        const isMessageStreaming =
-          Boolean(isStreaming && streamingAssistantId && message.id === streamingAssistantId);
+        const isMessageStreaming = Boolean(
+          isStreaming && streamingAssistantId && message.id === streamingAssistantId,
+        );
 
         return (
           <MessageBubble
             message={message}
             isStreaming={isMessageStreaming}
             canEdit={Boolean(getEditableMessageRound(message.id))}
-            canRetry={message.role === "assistant" && !isLoading && !isMessageStreaming && !isUploading}
+            canRetry={
+              message.role === "assistant" && !isLoading && !isMessageStreaming && !isUploading
+            }
             canDelete={!message.id.startsWith("draft-")}
             onEdit={() => handleStartEdit(message)}
             onRetry={() => void handleRetryMessage(message.id)}
@@ -1609,7 +1798,9 @@ export function DesktopChatArea() {
             {groupedMessages.map((group) => (
               <div key={group.key} className="flex min-w-0 flex-col gap-2">
                 {group.user ? renderMessageRow(group.user.msg, group.user.index) : null}
-                {group.assistant ? renderMessageRow(group.assistant.msg, group.assistant.index) : null}
+                {group.assistant
+                  ? renderMessageRow(group.assistant.msg, group.assistant.index)
+                  : null}
               </div>
             ))}
           </div>
@@ -1622,7 +1813,9 @@ export function DesktopChatArea() {
             <div className="mb-2 rounded-xl border border-orange-200 bg-orange-50 p-3 text-sm shadow-minimal">
               <p className="font-medium text-orange-800">当前会话模型不可用</p>
               <p className="text-orange-700">{effectiveModel.reason}</p>
-              <p className="mt-1 text-xs text-muted-foreground">在下方输入框的 Model 里修复即可。</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                在下方输入框的 Model 里修复即可。
+              </p>
             </div>
           ) : (
             <div className="mb-2 flex items-center gap-3 rounded-xl border border-orange-200 bg-orange-50 p-3 text-sm shadow-minimal">
@@ -1697,7 +1890,10 @@ export function DesktopChatArea() {
       {modelPickerOpen && (
         <DesktopModelPickerModal
           opened={modelPickerOpen}
-          onClose={() => { setModelPickerOpen(false); setTimeout(() => inputRef.current?.focus(), 100); }}
+          onClose={() => {
+            setModelPickerOpen(false);
+            setTimeout(() => inputRef.current?.focus(), 100);
+          }}
           conversationId={currentConversation.id}
           conversationFixReason={
             !effectiveModel.ok && effectiveModel.scope === "conversation"

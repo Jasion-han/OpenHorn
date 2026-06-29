@@ -16,17 +16,18 @@ export function toneClassName(tone: StreamTone = "default") {
 }
 
 export function getActiveMetaTextStyle(): CSSProperties {
-  // Shimmer effect using the theme's foreground HSL variable so it works
-  // in both light and dark modes.
+  // Shining-text style shimmer: a focused bright band sweeps diagonally across
+  // a dimmed base. Uses the theme's foreground HSL variable so the highlight
+  // works in both light and dark modes.
   const fg = "hsl(var(--foreground))";
-  const fgDim = "hsl(var(--foreground) / 0.3)";
+  const fgDim = "hsl(var(--foreground) / 0.35)";
   return {
-    backgroundImage: `linear-gradient(90deg, ${fgDim} 0%, ${fg} 45%, ${fg} 55%, ${fgDim} 100%)`,
-    backgroundSize: "250% 100%",
+    backgroundImage: `linear-gradient(110deg, ${fgDim} 0%, ${fgDim} 35%, ${fg} 50%, ${fgDim} 65%, ${fgDim} 100%)`,
+    backgroundSize: "200% 100%",
     backgroundClip: "text",
     WebkitBackgroundClip: "text",
     color: "transparent",
     WebkitTextFillColor: "transparent",
-    animation: "agentMetaTextShimmer 2.2s linear infinite",
+    animation: "agentMetaTextShimmer 2s linear infinite",
   };
 }
