@@ -8,6 +8,7 @@ import {
 } from "../workspace";
 import { type AgentEvent, convertSdkEvent } from "./events";
 import { buildIntentContext } from "./intent-context";
+import { buildAgentSystemPrompt } from "./system-prompt";
 
 type SdkMessage = {
   type: string;
@@ -25,8 +26,16 @@ export type RunClaudeAgentInput = {
   abortController: AbortController;
   checkpoint: CheckpointSession;
   sdkSessionId?: string;
+  permissionMode?: "default" | "full-access";
   systemPrompt?: string;
   webSearchEnabled?: boolean;
+  /**
+   * Enabled MCP servers, keyed by name, already in the Claude Agent SDK's
+   * shape (`{ type, command, args, env }` for stdio; `{ type, url, headers }`
+   * for http/sse). The SDK launches stdio servers itself and exposes their
+   * tools to the model — they're additive to the built-in `tools` allowlist.
+   */
+  mcpServers?: Record<string, Record<string, unknown>>;
   conversationHistory?: Array<{ role: "user" | "assistant"; content: string }>;
   requestApproval: (input: {
     toolUseId: string;
@@ -185,21 +194,16 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
   const intentResult = await buildIntentContext(input.prompt, {
     webSearchEnabled: input.webSearchEnabled,
   });
-  const homeDir = (await import("node:os")).homedir();
-  const username = process.env.USER || process.env.USERNAME || "user";
-  const CLAUDE_SYSTEM_ADDENDUM = [
-    "You are running inside OpenHorn desktop with full local file and system access.",
-    `Current user: ${username}, home directory: ${homeDir}`,
-    `When the user says "my" files/directories, always use ${homeDir} — never check other users' directories.`,
-    "Use your tools (Read, Write, Edit, Bash, Grep, Glob) to directly help the user.",
-    "Do not tell the user you cannot access their files — you can.",
-    "Always respond in the same language as the user.",
-    "When presenting file lists or results, use markdown formatting (bullet lists, headers, bold) instead of raw code blocks. Make the output readable and well-organized.",
-  ].join("\n");
-  const finalSystemPrompt =
-    [CLAUDE_SYSTEM_ADDENDUM, input.systemPrompt, intentResult.context]
-      .filter(Boolean)
-      .join("\n\n");
+  const finalSystemPrompt = [
+    buildAgentSystemPrompt({
+      cwd: input.cwd,
+      permissionMode: input.permissionMode ?? "full-access",
+    }),
+    input.systemPrompt,
+    intentResult.context,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 
   // Build tools list, conditionally including web tools
   const sdkTools: string[] = ["Read", "Grep", "Glob", "Write", "Edit", "Bash"];
@@ -219,6 +223,9 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
     promptSuggestions: false,
     includePartialMessages: true,
     ...(finalSystemPrompt ? { systemPrompt: finalSystemPrompt } : {}),
+    ...(input.mcpServers && Object.keys(input.mcpServers).length > 0
+      ? { mcpServers: input.mcpServers }
+      : {}),
     canUseTool: async (
       toolName: string,
       toolInput: Record<string, unknown>,

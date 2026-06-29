@@ -4,6 +4,7 @@ import { mkdirSync, symlinkSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import type { AgentEvent } from "./events";
+import { buildAgentSystemPrompt } from "./system-prompt";
 
 export type RunCodexAgentInput = {
   model: string;
@@ -247,7 +248,12 @@ export async function runCodexAgent(input: RunCodexAgentInput): Promise<void> {
           cwd,
           approvalPolicy: "never",
           sandbox: "danger-full-access",
-          developerInstructions: "When the user asks a question that can be answered by running a command or reading files, execute the command immediately and report the result. Do not ask for clarification or list options — act first. For example, if asked 'how many images in my Downloads', run `ls` or `find` right away.",
+          developerInstructions: buildAgentSystemPrompt({
+            cwd,
+            permissionMode: "full-access",
+            extra:
+              "For simple lookups answerable by running a command or reading files (e.g. 'how many images in my Downloads'), act first — run `ls`/`find` immediately and report the result rather than listing options.",
+          }),
         });
         if (threadResp.error) {
           finish({ type: "error", content: `Codex thread 创建失败: ${threadResp.error.message}` });

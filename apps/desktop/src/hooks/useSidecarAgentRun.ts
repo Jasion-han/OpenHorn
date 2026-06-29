@@ -150,6 +150,30 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
       return;
     }
 
+    // Both the Claude Agent SDK (anthropic) and the pi-agent-core "direct"
+    // runtime (openai) consume MCP servers, so fetch them for either protocol.
+    // Best-effort: a failure here must not block the run. Each enabled server is
+    // reshaped into the SDK's format (`{ type, ...config }`), keyed by name.
+    let mcpServers: Record<string, Record<string, unknown>> | undefined;
+    if (credentials.protocol === "anthropic" || credentials.protocol === "openai") {
+      try {
+        const { servers } = await api.mcp.listServers();
+        const map: Record<string, Record<string, unknown>> = {};
+        for (const server of (servers || []) as Array<{
+          name: string;
+          type: string;
+          config: Record<string, unknown> | null;
+          isEnabled: boolean;
+        }>) {
+          if (!server.isEnabled) continue;
+          map[server.name] = { type: server.type, ...(server.config || {}) };
+        }
+        if (Object.keys(map).length > 0) mcpServers = map;
+      } catch {
+        // MCP is additive; ignore load failures and run without it.
+      }
+    }
+
     let runId: string;
     try {
       runId = await client.runAgent({
@@ -163,6 +187,7 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
         systemPrompt: input.systemPrompt,
         webSearchEnabled: input.webSearchEnabled,
         tavilyApiKey: input.tavilyApiKey,
+        mcpServers,
         conversationHistory: input.conversationHistory,
         onSdkSessionId: (sessionId) => {
           setSdkSessionId(sessionId);
@@ -206,7 +231,7 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
               });
               const assistantMsg = useChatStore
                 .getState()
-                .messages.find((m) => m.id === input.assistantMessageId);
+                .findMessageAnywhere(input.assistantMessageId);
               const assistantContent = assistantMsg?.content || "";
               if (assistantContent) {
                 void api.messages
@@ -216,6 +241,18 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
                     assistantContent,
                     model: input.modelId || credentials.modelId,
                     agentRun: assistantMsg?.agentRun ?? undefined,
+                  })
+                  .then((res) => {
+                    // Align the optimistic draft ids with the persisted ids so
+                    // revisiting the conversation doesn't duplicate the round.
+                    if (res?.userMessageId && res?.assistantMessageId) {
+                      useChatStore.getState().reconcileSidecarMessageIds({
+                        conversationId: input.conversationId,
+                        assistantDraftId: input.assistantMessageId,
+                        userMessageId: res.userMessageId,
+                        assistantMessageId: res.assistantMessageId,
+                      });
+                    }
                   })
                   .catch(() => {});
               }

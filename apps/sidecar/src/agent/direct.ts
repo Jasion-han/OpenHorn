@@ -7,8 +7,20 @@ import {
   type AgentEvent as PiAgentEvent,
 } from "@earendil-works/pi-agent-core";
 import { type Api, type Model, streamSimple, type TSchema, Type } from "@earendil-works/pi-ai";
+import {
+  buildTavilyPayload,
+  isNewsQuery,
+  normalizeCitations,
+  normalizeSearchQuery,
+  rerankCitations,
+  type SearchCitation,
+  searchDuckDuckGo,
+  type TavilyResult,
+} from "shared/search";
 import type { AgentEvent } from "./events";
 import { buildIntentContext } from "./intent-context";
+import { connectMcpTools } from "./mcp-tools";
+import { buildAgentSystemPrompt } from "./system-prompt";
 
 export type RunDirectAgentInput = {
   apiKey: string;
@@ -22,6 +34,8 @@ export type RunDirectAgentInput = {
   systemPrompt?: string;
   webSearchEnabled?: boolean;
   tavilyApiKey?: string;
+  /** Enabled MCP servers keyed by name (`{ type, command/url, args, env }`). */
+  mcpServers?: Record<string, Record<string, unknown>>;
   requestApproval?: (input: {
     toolName: string;
     toolInput: Record<string, unknown>;
@@ -30,23 +44,6 @@ export type RunDirectAgentInput = {
   onEvent: (event: AgentEvent) => void;
 };
 
-const SYSTEM_PROMPT = [
-  "You are OpenHorn AI, a helpful assistant with access to the user's local files and system.",
-  "You have tools for reading, writing, and editing files, searching code, running shell commands, and searching the web.",
-  "Use tools proactively when the task requires inspecting files, running commands, or looking up information.",
-  "",
-  "Response style:",
-  "- Answer directly.",
-  "- Do not begin by repeating or paraphrasing the user's request.",
-  "- Keep internal reasoning and tool-use details out of the final answer unless the user explicitly asks for them.",
-  "- When the next step is clear, lead with the answer, result, or concrete action.",
-  "",
-  "Safety:",
-  "- Before running destructive commands (rm, drop, kill, format), confirm with the user unless explicitly instructed.",
-  "- Do not access or modify files outside the user's intended scope without asking.",
-  "",
-  "Always respond in the same language as the user.",
-].join("\n");
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -252,39 +249,8 @@ async function executeTool(
   }
 
   if (name === "web_search") {
-    const query = typeof input.query === "string" ? input.query.trim() : "";
-    if (!query) return "Error: query is required";
-
-    const tavilyKey = options?.tavilyApiKey;
-    if (!tavilyKey) {
-      return "Error: web search is not configured. Please set a Tavily API Key in Agent settings.";
-    }
-
-    try {
-      const resp = await fetch("https://api.tavily.com/search", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          api_key: tavilyKey,
-          query,
-          max_results: 5,
-          include_answer: true,
-        }),
-        signal: AbortSignal.timeout(SUBPROCESS_TIMEOUT_MS),
-      });
-      const data = (await resp.json()) as {
-        answer?: string;
-        results?: Array<{ title?: string; url?: string; content?: string }>;
-      };
-      const parts: string[] = [];
-      if (data.answer) parts.push(data.answer);
-      for (const r of (data.results || []).slice(0, 5)) {
-        parts.push(`### ${r.title || "Untitled"}\n${r.url || ""}\n${r.content || ""}`);
-      }
-      return parts.length > 0 ? parts.join("\n\n") : "No results found.";
-    } catch (err) {
-      return `Search error: ${err instanceof Error ? err.message : "failed"}`;
-    }
+    const query = typeof input.query === "string" ? input.query : "";
+    return runWebSearch(query, { tavilyApiKey: options?.tavilyApiKey });
   }
 
   if (name === "web_fetch") {
@@ -317,15 +283,107 @@ async function executeTool(
       const td = new TurndownService({ headingStyle: "atx", codeBlockStyle: "fenced" });
       td.remove(["script", "style", "nav", "footer", "header", "aside", "iframe", "noscript"]);
       const md = td.turndown(html);
-      return md.length > MAX_READ_CHARS
-        ? `${md.slice(0, MAX_READ_CHARS)}\n...(truncated)`
-        : md;
+      return md.length > MAX_READ_CHARS ? `${md.slice(0, MAX_READ_CHARS)}\n...(truncated)` : md;
     } catch (err) {
       return `Fetch error: ${err instanceof Error ? err.message : "failed"}`;
     }
   }
 
   return `Unknown tool: ${name}`;
+}
+
+// ---------------------------------------------------------------------------
+// Web search (provider-agnostic core shared with the server)
+// ---------------------------------------------------------------------------
+
+type WebSearchFetchFn = (
+  input: Parameters<typeof fetch>[0],
+  init?: Parameters<typeof fetch>[1],
+) => ReturnType<typeof fetch>;
+
+export interface WebSearchOptions {
+  /** Tavily key — present means use Tavily, absent means DuckDuckGo. */
+  tavilyApiKey?: string;
+  /** Injectable fetch for tests; defaults to global fetch. */
+  fetchImpl?: WebSearchFetchFn;
+  /** Clock override for deterministic re-ranking in tests. */
+  now?: () => number;
+  /** Sleep hook (ms) — overridable in tests to avoid real DDG backoff delays. */
+  sleep?: (ms: number) => Promise<void>;
+  timeoutMs?: number;
+}
+
+/** Format normalized citations into the sidecar's plain-text tool output. */
+function formatSearchResults(citations: SearchCitation[], answer?: string): string {
+  const parts: string[] = [];
+  if (answer?.trim()) parts.push(answer.trim());
+  for (const c of citations) {
+    parts.push(`### ${c.title}\n${c.url}\n${c.snippet ?? ""}`);
+  }
+  return parts.length > 0 ? parts.join("\n\n") : "No results found.";
+}
+
+/**
+ * Tavily branch. Returns the formatted string on success, or null on any
+ * failure (non-2xx / timeout / no results) so the caller can degrade to DDG.
+ */
+async function tavilyWebSearch(
+  query: string,
+  apiKey: string,
+  options: WebSearchOptions,
+): Promise<string | null> {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const payload = buildTavilyPayload(query, { route: "web_search", includeAnswer: true });
+  try {
+    const resp = await fetchImpl("https://api.tavily.com/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      // Sidecar keeps Tavily's legacy body-based auth (`api_key`).
+      body: JSON.stringify({ api_key: apiKey, ...payload }),
+      signal: AbortSignal.timeout(options.timeoutMs ?? SUBPROCESS_TIMEOUT_MS),
+    });
+    if (!resp.ok) return null;
+    const data = (await resp.json()) as { answer?: string; results?: TavilyResult[] };
+    const citations = rerankCitations(
+      normalizeCitations(data.results),
+      isNewsQuery(query),
+      options.now,
+    );
+    if (citations.length === 0) return null;
+    return formatSearchResults(citations, data.answer);
+  } catch {
+    return null;
+  }
+}
+
+/** DuckDuckGo branch (keyless default / Tavily fallback). */
+async function duckDuckGoWebSearch(query: string, options: WebSearchOptions): Promise<string> {
+  const rawCitations = await searchDuckDuckGo(normalizeSearchQuery(query), {
+    fetchImpl: options.fetchImpl,
+    timeoutMs: options.timeoutMs,
+    now: options.now,
+    sleep: options.sleep,
+  });
+  if (rawCitations.length === 0) return "No results found.";
+  const citations = rerankCitations(rawCitations, isNewsQuery(query), options.now);
+  return formatSearchResults(citations);
+}
+
+/**
+ * Provider-agnostic web search for the sidecar `web_search` tool. A Tavily key
+ * (when configured) is used for quality; otherwise — or when Tavily fails — the
+ * keyless DuckDuckGo provider runs so search always works without a key.
+ */
+export async function runWebSearch(query: string, options: WebSearchOptions = {}): Promise<string> {
+  const trimmed = query.trim();
+  if (!trimmed) return "Error: query is required";
+
+  if (options.tavilyApiKey) {
+    const result = await tavilyWebSearch(trimmed, options.tavilyApiKey, options);
+    if (result !== null) return result;
+    // Tavily failed — degrade to DuckDuckGo.
+  }
+  return duckDuckGoWebSearch(trimmed, options);
 }
 
 // ---------------------------------------------------------------------------
@@ -528,12 +586,21 @@ function buildModel(input: RunDirectAgentInput): Model<Api> {
 
 export async function runDirectAgent(input: RunDirectAgentInput): Promise<void> {
   const model = buildModel(input);
-  const tools = buildTools(input.cwd, {
+  let tools = buildTools(input.cwd, {
     permissionMode: input.permissionMode,
     tavilyApiKey: input.tavilyApiKey,
     requestApproval: input.requestApproval,
     webSearchEnabled: input.webSearchEnabled,
   });
+  // Bridge enabled MCP servers into the tool set (best-effort). The Claude SDK
+  // path gets MCP natively; here we connect and expose them as agent tools so
+  // OpenAI-protocol models get the same capability.
+  let mcpCleanup: (() => Promise<void>) | null = null;
+  if (input.mcpServers && Object.keys(input.mcpServers).length > 0) {
+    const connected = await connectMcpTools(input.mcpServers);
+    if (connected.tools.length > 0) tools = [...tools, ...connected.tools];
+    mcpCleanup = connected.cleanup;
+  }
   const apiKey = input.apiKey;
 
   // Build the effective prompt, prepending conversation history if present
@@ -551,7 +618,11 @@ export async function runDirectAgent(input: RunDirectAgentInput): Promise<void> 
   const intentResult = await buildIntentContext(input.prompt, {
     webSearchEnabled: input.webSearchEnabled,
   });
-  const finalSystemPrompt = [SYSTEM_PROMPT, input.systemPrompt, intentResult.context]
+  const finalSystemPrompt = [
+    buildAgentSystemPrompt({ cwd: input.cwd, permissionMode: input.permissionMode }),
+    input.systemPrompt,
+    intentResult.context,
+  ]
     .filter(Boolean)
     .join("\n\n");
 
@@ -606,7 +677,7 @@ export async function runDirectAgent(input: RunDirectAgentInput): Promise<void> 
         }
         input.onEvent({
           type: "tool_result",
-          content: text.length > 500 ? `${text.slice(0, 500)}...` : text,
+          content: text.length > 8000 ? `${text.slice(0, 8000)}...` : text,
         });
         break;
       }
@@ -648,6 +719,7 @@ export async function runDirectAgent(input: RunDirectAgentInput): Promise<void> 
     input.onEvent({ type: "error", content: msg });
   } finally {
     input.abortController.signal.removeEventListener("abort", onAbort);
+    await mcpCleanup?.();
     input.onEvent({ type: "done" });
   }
 }

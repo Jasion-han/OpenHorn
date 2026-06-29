@@ -81,6 +81,8 @@ export interface SidecarRunAgentInput {
   systemPrompt?: string;
   webSearchEnabled?: boolean;
   tavilyApiKey?: string;
+  /** Enabled MCP servers keyed by name, in the Claude Agent SDK shape. */
+  mcpServers?: Record<string, Record<string, unknown>>;
   conversationHistory?: Array<{ role: "user" | "assistant"; content: string }>;
   onEvent: (event: AgentTaskStreamEvent) => void | Promise<void>;
   onApproval: (request: SidecarApprovalRequest) => void | Promise<void>;
@@ -321,6 +323,7 @@ export class SidecarClient {
       systemPrompt,
       webSearchEnabled,
       tavilyApiKey,
+      mcpServers,
       conversationHistory,
       onEvent,
       onApproval,
@@ -339,6 +342,7 @@ export class SidecarClient {
       ...(systemPrompt ? { systemPrompt } : {}),
       ...(webSearchEnabled !== undefined ? { webSearchEnabled } : {}),
       ...(tavilyApiKey ? { tavilyApiKey } : {}),
+      ...(mcpServers && Object.keys(mcpServers).length > 0 ? { mcpServers } : {}),
       ...(conversationHistory && conversationHistory.length > 0 ? { conversationHistory } : {}),
     })) as { runId: string };
     const runId = result.runId;

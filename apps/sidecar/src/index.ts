@@ -361,6 +361,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
           conversationHistory,
           webSearchEnabled,
           tavilyApiKey,
+          mcpServers,
         } = params as {
           prompt: string;
           apiKey: string;
@@ -373,6 +374,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
           conversationHistory?: Array<{ role: "user" | "assistant"; content: string }>;
           webSearchEnabled?: boolean;
           tavilyApiKey?: string;
+          mcpServers?: Record<string, Record<string, unknown>>;
         };
 
         let resolvedApiKey = apiKey;
@@ -447,8 +449,10 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
               abortController,
               checkpoint,
               sdkSessionId,
+              permissionMode,
               systemPrompt,
               webSearchEnabled,
+              mcpServers,
               conversationHistory,
               requestApproval: async (approvalInput) => {
                 const { toolUseId } = approvalInput;
@@ -485,6 +489,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
               systemPrompt,
               webSearchEnabled,
               tavilyApiKey,
+              mcpServers,
               requestApproval: async (approvalInput) => {
                 const approvalId = `approval-${Date.now()}`;
                 return new Promise<boolean>((resolve) => {
