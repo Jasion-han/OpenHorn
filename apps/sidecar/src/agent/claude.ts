@@ -1,4 +1,6 @@
 import type { CanUseTool, HookCallbackMatcher } from "@anthropic-ai/claude-agent-sdk";
+import type { AttachmentPart } from "shared/types";
+import { modelSupportsVision } from "shared/vision";
 import { type CheckpointSession, ensureCheckpointBackup, finalizeCheckpoint } from "../checkpoints";
 import { classifyBashCommandRisk } from "../shell-risk";
 import {
@@ -6,6 +8,13 @@ import {
   resolveWritePathInsideWorkspace,
   toWorkspaceRelative,
 } from "../workspace";
+import {
+  buildFileContext,
+  getImageAttachments,
+  imageFallbackText,
+  imageUnsupportedFormatText,
+  partitionImagesByFormat,
+} from "./attachments";
 import { type AgentEvent, convertSdkEvent } from "./events";
 import { buildIntentContext } from "./intent-context";
 import { buildAgentSystemPrompt } from "./system-prompt";
@@ -37,6 +46,7 @@ export type RunClaudeAgentInput = {
    */
   mcpServers?: Record<string, Record<string, unknown>>;
   conversationHistory?: Array<{ role: "user" | "assistant"; content: string }>;
+  attachments?: AttachmentPart[];
   requestApproval: (input: {
     toolUseId: string;
     toolName: string;
@@ -159,11 +169,17 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
     ...process.env,
   };
   for (const key of Object.keys(childEnv)) {
-    if (key.startsWith("CLAUDE") || key === "AI_AGENT" || key.startsWith("CODEX_COMPANION") || key.startsWith("TRELLIS_")) {
+    if (
+      key.startsWith("CLAUDE") ||
+      key === "AI_AGENT" ||
+      key.startsWith("CODEX_COMPANION") ||
+      key.startsWith("TRELLIS_")
+    ) {
       delete childEnv[key];
     }
   }
-  const isOAuthToken = input.apiKey?.startsWith("sk-ant-oat") || input.apiKey?.startsWith("__cli_oauth__");
+  const isOAuthToken =
+    input.apiKey?.startsWith("sk-ant-oat") || input.apiKey?.startsWith("__cli_oauth__");
   if (input.apiKey && !isOAuthToken) childEnv.ANTHROPIC_API_KEY = input.apiKey;
   if (input.baseUrl && !isOAuthToken) childEnv.ANTHROPIC_BASE_URL = input.baseUrl;
 
@@ -278,9 +294,50 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
       .join("\n\n");
     effectivePrompt = `${historyBlock}\n\n---\n\nUser: ${input.prompt}`;
   }
+  // Inject file attachment text (works for every model regardless of vision).
+  const fileContext = buildFileContext(input.attachments);
+  if (fileContext) effectivePrompt += fileContext;
+
+  // Image attachments: send real content blocks to vision-capable models,
+  // otherwise degrade to a textual placeholder so the run never errors. Images
+  // whose format the provider rejects (bmp/svg/heic …) also degrade to text.
+  const images = getImageAttachments(input.attachments);
+  const supportsVision = modelSupportsVision(input.model);
+  const { injectable, unsupported } = supportsVision
+    ? partitionImagesByFormat(images)
+    : { injectable: [], unsupported: [] };
+  const useVisionImages = injectable.length > 0;
+  if (!supportsVision && images.length > 0) {
+    effectivePrompt += imageFallbackText(images);
+  }
+  if (unsupported.length > 0) {
+    effectivePrompt += imageUnsupportedFormatText(unsupported);
+  }
+
+  // Build the prompt input: a plain string normally, or an async-iterable
+  // single user message carrying image content blocks for vision runs.
+  let promptInput: Parameters<typeof sdk.query>[0]["prompt"] = effectivePrompt;
+  if (useVisionImages) {
+    const content: Array<Record<string, unknown>> = [{ type: "text", text: effectivePrompt }];
+    for (const img of injectable) {
+      content.push({
+        type: "image",
+        source: { type: "base64", media_type: img.mediaType, data: img.dataBase64 },
+      });
+    }
+    const userMessage = {
+      type: "user",
+      message: { role: "user", content },
+      parent_tool_use_id: null,
+      session_id: input.sdkSessionId ?? "",
+    };
+    promptInput = (async function* () {
+      yield userMessage;
+    })() as Parameters<typeof sdk.query>[0]["prompt"];
+  }
 
   const query = sdk.query({
-    prompt: effectivePrompt,
+    prompt: promptInput,
     options: queryOptions as Parameters<typeof sdk.query>[0]["options"],
   });
 

@@ -19,6 +19,7 @@ function isChatGptOAuthToken(key: string): boolean {
     return false;
   }
 }
+
 import { fsList, fsReadText, fsWriteText } from "./fs";
 import {
   buildErrorResponse,
@@ -281,16 +282,30 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
             resolvedApiKey = cred.token;
           } else if (protocol === "openai") {
             const allCreds = await detectAllCredentials();
-            const codexCred = allCreds.find(c => c.source === "codex_cli");
+            const codexCred = allCreds.find((c) => c.source === "codex_cli");
             if (codexCred) {
               resolvedApiKey = codexCred.token;
               useCodexResponses = true;
             } else {
-              ws.send(JSON.stringify(buildErrorResponse(request.requestId, "未检测到 OpenAI 认证。请设置 OPENAI_API_KEY 环境变量或登录 Codex CLI。")));
+              ws.send(
+                JSON.stringify(
+                  buildErrorResponse(
+                    request.requestId,
+                    "未检测到 OpenAI 认证。请设置 OPENAI_API_KEY 环境变量或登录 Codex CLI。",
+                  ),
+                ),
+              );
               return;
             }
           } else {
-            ws.send(JSON.stringify(buildErrorResponse(request.requestId, "未检测到本地认证凭据，请配置 API Key 或登录对应的 CLI 工具")));
+            ws.send(
+              JSON.stringify(
+                buildErrorResponse(
+                  request.requestId,
+                  "未检测到本地认证凭据，请配置 API Key 或登录对应的 CLI 工具",
+                ),
+              ),
+            );
             return;
           }
         }
@@ -305,12 +320,16 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
           ws.send(JSON.stringify(buildEvent("agent.event", { runId, event })));
         };
 
-        const lastUserMessage = [...messages].reverse().find(m => m.role === "user");
-        const prompt = typeof lastUserMessage?.content === "string"
-          ? lastUserMessage.content
-          : Array.isArray(lastUserMessage?.content)
-            ? (lastUserMessage.content as any[]).filter(p => p.type === "text").map(p => p.text).join("")
-            : "";
+        const lastUserMessage = [...messages].reverse().find((m) => m.role === "user");
+        const prompt =
+          typeof lastUserMessage?.content === "string"
+            ? lastUserMessage.content
+            : Array.isArray(lastUserMessage?.content)
+              ? (lastUserMessage.content as any[])
+                  .filter((p) => p.type === "text")
+                  .map((p) => p.text)
+                  .join("")
+              : "";
 
         if (useCodexResponses) {
           void runCodexChat({
@@ -362,6 +381,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
           webSearchEnabled,
           tavilyApiKey,
           mcpServers,
+          attachments,
         } = params as {
           prompt: string;
           apiKey: string;
@@ -375,6 +395,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
           webSearchEnabled?: boolean;
           tavilyApiKey?: string;
           mcpServers?: Record<string, Record<string, unknown>>;
+          attachments?: import("shared/types").AttachmentPart[];
         };
 
         let resolvedApiKey = apiKey;
@@ -387,7 +408,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
             resolvedApiKey = cred.token;
           } else if (protocol === "openai") {
             const allCreds = await detectAllCredentials();
-            if (allCreds.find(c => c.source === "codex_cli")) {
+            if (allCreds.find((c) => c.source === "codex_cli")) {
               forceCodexCli = true;
             }
           }
@@ -429,6 +450,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
               prompt,
               cwd,
               abortController,
+              attachments,
               onEvent,
             }),
           );
@@ -454,6 +476,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
               webSearchEnabled,
               mcpServers,
               conversationHistory,
+              attachments,
               requestApproval: async (approvalInput) => {
                 const { toolUseId } = approvalInput;
                 return new Promise<boolean>((resolve) => {
@@ -490,6 +513,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
               webSearchEnabled,
               tavilyApiKey,
               mcpServers,
+              attachments,
               requestApproval: async (approvalInput) => {
                 const approvalId = `approval-${Date.now()}`;
                 return new Promise<boolean>((resolve) => {

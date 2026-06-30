@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import type { AttachmentPart } from "shared/types";
 import { createServerApi } from "../lib/serverApi";
 import type { SidecarApprovalRequest } from "../lib/sidecarClient";
 import { useChatStore } from "../stores/chatStore";
@@ -30,6 +31,7 @@ export interface SidecarAgentRunInput {
   webSearchEnabled?: boolean;
   tavilyApiKey?: string;
   conversationHistory?: Array<{ role: "user" | "assistant"; content: string }>;
+  attachments?: AttachmentPart[];
 }
 
 export interface SidecarAgentRunApi {
@@ -189,6 +191,7 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
         tavilyApiKey: input.tavilyApiKey,
         mcpServers,
         conversationHistory: input.conversationHistory,
+        attachments: input.attachments,
         onSdkSessionId: (sessionId) => {
           setSdkSessionId(sessionId);
         },
@@ -212,7 +215,11 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
               });
               return;
             }
-            if (event.type === "execution_event" && event.eventType !== "final_text" && event.eventType !== "text") {
+            if (
+              event.type === "execution_event" &&
+              event.eventType !== "final_text" &&
+              event.eventType !== "text"
+            ) {
               useChatStore.getState().applyStreamEvent(input.assistantMessageId, {
                 type: "agent_event",
                 event: {

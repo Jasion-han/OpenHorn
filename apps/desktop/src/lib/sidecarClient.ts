@@ -22,6 +22,7 @@
  *    (the sidecar is blocking the run waiting for `approvals.respond`).
  */
 
+import type { AttachmentPart } from "shared/types";
 import type { AgentTaskStreamEvent } from "./agentTaskStream";
 
 /**
@@ -84,6 +85,8 @@ export interface SidecarRunAgentInput {
   /** Enabled MCP servers keyed by name, in the Claude Agent SDK shape. */
   mcpServers?: Record<string, Record<string, unknown>>;
   conversationHistory?: Array<{ role: "user" | "assistant"; content: string }>;
+  /** Normalized attachment parts (image base64 / extracted file text). */
+  attachments?: AttachmentPart[];
   onEvent: (event: AgentTaskStreamEvent) => void | Promise<void>;
   onApproval: (request: SidecarApprovalRequest) => void | Promise<void>;
   onError: (message: string) => void;
@@ -121,7 +124,15 @@ type SidecarIncoming = SidecarIncomingResponse | SidecarIncomingEvent;
 
 /** Sidecar AgentEvent — see apps/sidecar/src/agent/events.ts. */
 interface SidecarAgentEvent {
-  type: "text" | "final_text" | "thinking" | "tool_start" | "tool_result" | "user_message" | "done" | "error";
+  type:
+    | "text"
+    | "final_text"
+    | "thinking"
+    | "tool_start"
+    | "tool_result"
+    | "user_message"
+    | "done"
+    | "error";
   content?: string;
   toolName?: string;
   toolInput?: unknown;
@@ -325,6 +336,7 @@ export class SidecarClient {
       tavilyApiKey,
       mcpServers,
       conversationHistory,
+      attachments,
       onEvent,
       onApproval,
       onError,
@@ -344,6 +356,7 @@ export class SidecarClient {
       ...(tavilyApiKey ? { tavilyApiKey } : {}),
       ...(mcpServers && Object.keys(mcpServers).length > 0 ? { mcpServers } : {}),
       ...(conversationHistory && conversationHistory.length > 0 ? { conversationHistory } : {}),
+      ...(attachments && attachments.length > 0 ? { attachments } : {}),
     })) as { runId: string };
     const runId = result.runId;
     this.runHandlers.set(runId, { onEvent, onApproval, onError, onDone, onSdkSessionId });

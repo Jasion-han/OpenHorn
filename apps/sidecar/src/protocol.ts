@@ -61,6 +61,21 @@ export const ApprovalsRespondParamsSchema = z.object({
   allow: z.boolean(),
 });
 
+export const AttachmentPartSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("image"),
+    mediaType: z.string(),
+    dataBase64: z.string(),
+    fileName: z.string().optional(),
+  }),
+  z.object({
+    kind: z.literal("file"),
+    fileName: z.string(),
+    mediaType: z.string(),
+    text: z.string(),
+  }),
+]);
+
 export const AgentRunParamsSchema = z.object({
   prompt: z.string().min(1),
   apiKey: z.string().default(""),
@@ -75,6 +90,7 @@ export const AgentRunParamsSchema = z.object({
     .optional(),
   webSearchEnabled: z.boolean().optional(),
   tavilyApiKey: z.string().optional(),
+  attachments: z.array(AttachmentPartSchema).optional(),
 });
 
 export const AgentCancelParamsSchema = z.object({

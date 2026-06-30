@@ -6,7 +6,14 @@ import {
   type AgentTool,
   type AgentEvent as PiAgentEvent,
 } from "@earendil-works/pi-agent-core";
-import { type Api, type Model, streamSimple, type TSchema, Type } from "@earendil-works/pi-ai";
+import {
+  type Api,
+  type ImageContent,
+  type Model,
+  streamSimple,
+  type TSchema,
+  Type,
+} from "@earendil-works/pi-ai";
 import {
   buildTavilyPayload,
   isNewsQuery,
@@ -17,6 +24,15 @@ import {
   searchDuckDuckGo,
   type TavilyResult,
 } from "shared/search";
+import type { AttachmentPart } from "shared/types";
+import { modelSupportsVision } from "shared/vision";
+import {
+  buildFileContext,
+  getImageAttachments,
+  imageFallbackText,
+  imageUnsupportedFormatText,
+  partitionImagesByFormat,
+} from "./attachments";
 import type { AgentEvent } from "./events";
 import { buildIntentContext } from "./intent-context";
 import { connectMcpTools } from "./mcp-tools";
@@ -36,6 +52,7 @@ export type RunDirectAgentInput = {
   tavilyApiKey?: string;
   /** Enabled MCP servers keyed by name (`{ type, command/url, args, env }`). */
   mcpServers?: Record<string, Record<string, unknown>>;
+  attachments?: AttachmentPart[];
   requestApproval?: (input: {
     toolName: string;
     toolInput: Record<string, unknown>;
@@ -43,7 +60,6 @@ export type RunDirectAgentInput = {
   }) => Promise<boolean>;
   onEvent: (event: AgentEvent) => void;
 };
-
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -549,7 +565,10 @@ function isChatGptOAuthToken(key: string): boolean {
   }
 }
 
-function buildModel(input: RunDirectAgentInput): Model<Api> {
+function buildModel(input: RunDirectAgentInput, supportsVision: boolean): Model<Api> {
+  // Only advertise image input when the model is vision-capable; otherwise the
+  // provider may reject the request or mis-handle the image modality.
+  const modelInput: ("text" | "image")[] = supportsVision ? ["text", "image"] : ["text"];
   const useCodexResponses = isChatGptOAuthToken(input.apiKey);
   if (useCodexResponses) {
     return {
@@ -559,7 +578,7 @@ function buildModel(input: RunDirectAgentInput): Model<Api> {
       provider: "openai-codex",
       baseUrl: "https://api.openai.com/v1",
       reasoning: false,
-      input: ["text"],
+      input: modelInput,
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
       contextWindow: 128_000,
       maxTokens: 16_384,
@@ -573,7 +592,7 @@ function buildModel(input: RunDirectAgentInput): Model<Api> {
     provider: "openai",
     baseUrl,
     reasoning: false,
-    input: ["text"],
+    input: modelInput,
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: 128_000,
     maxTokens: 16_384,
@@ -585,7 +604,13 @@ function buildModel(input: RunDirectAgentInput): Model<Api> {
 // ---------------------------------------------------------------------------
 
 export async function runDirectAgent(input: RunDirectAgentInput): Promise<void> {
-  const model = buildModel(input);
+  const images = getImageAttachments(input.attachments);
+  const supportsVision = modelSupportsVision(input.model);
+  const { injectable, unsupported } = supportsVision
+    ? partitionImagesByFormat(images)
+    : { injectable: [], unsupported: [] };
+  const useVisionImages = injectable.length > 0;
+  const model = buildModel(input, useVisionImages);
   let tools = buildTools(input.cwd, {
     permissionMode: input.permissionMode,
     tavilyApiKey: input.tavilyApiKey,
@@ -612,6 +637,17 @@ export async function runDirectAgent(input: RunDirectAgentInput): Promise<void> 
       .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
       .join("\n\n");
     effectivePrompt = `${historyBlock}\n\n---\n\nUser: ${input.prompt}`;
+  }
+  // Inject file attachment text (works for every model regardless of vision).
+  const fileContext = buildFileContext(input.attachments);
+  if (fileContext) effectivePrompt += fileContext;
+  // Non-vision models can't receive images: degrade to a textual placeholder.
+  // Vision models still degrade images whose format the provider rejects.
+  if (!supportsVision && images.length > 0) {
+    effectivePrompt += imageFallbackText(images);
+  }
+  if (unsupported.length > 0) {
+    effectivePrompt += imageUnsupportedFormatText(unsupported);
   }
 
   // Merge product system prompt, user system prompt, and intent context
@@ -712,7 +748,16 @@ export async function runDirectAgent(input: RunDirectAgentInput): Promise<void> 
   }
 
   try {
-    await agent.prompt(effectivePrompt);
+    if (useVisionImages) {
+      const piImages: ImageContent[] = injectable.map((img) => ({
+        type: "image",
+        data: img.dataBase64,
+        mimeType: img.mediaType,
+      }));
+      await agent.prompt(effectivePrompt, piImages);
+    } else {
+      await agent.prompt(effectivePrompt);
+    }
     await agent.waitForIdle();
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

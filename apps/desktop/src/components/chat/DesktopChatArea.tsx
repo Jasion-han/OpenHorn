@@ -3,6 +3,7 @@ import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "re
 import { Button, cn, Textarea } from "ui";
 import { useSidecarAgentRun } from "../../hooks/useSidecarAgentRun";
 import { type StreamTone, toneClassName } from "../../lib/agentTaskPresenter";
+import { filesToAttachmentParts } from "../../lib/attachmentParts";
 import { uploadAttachments } from "../../lib/attachments";
 import { getDesktopBackendBase } from "../../lib/backendBase";
 import { sanitizeDisplayContent } from "../../lib/citations";
@@ -1182,11 +1183,11 @@ export function DesktopChatArea() {
       }
 
       if (mode === "agent") {
+        // Local (sidecar) runs read attachments client-side and inject them as
+        // normalized parts: image base64 + extracted file/PDF text.
+        const attachmentParts = files.length > 0 ? await filesToAttachmentParts(files) : undefined;
         if (files.length > 0) {
-          notifyWarning(
-            "本地运行暂不支持附件",
-            "本次运行将忽略已添加的附件；如需使用附件请关闭本地运行。",
-          );
+          setPendingAttachments([]);
         }
         if (!currentConversation.channelId) {
           throw new Error("当前会话没有绑定渠道，无法本地运行");
@@ -1234,6 +1235,7 @@ export function DesktopChatArea() {
           webSearchEnabled: forceWebSearch,
           tavilyApiKey,
           conversationHistory: conversationHistory.length > 0 ? conversationHistory : undefined,
+          attachments: attachmentParts,
         });
 
         setLoading(false);

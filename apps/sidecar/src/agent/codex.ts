@@ -1,8 +1,10 @@
-import { spawn, type ChildProcess } from "node:child_process";
-import { createInterface } from "node:readline";
-import { mkdirSync, symlinkSync, writeFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { type ChildProcess, spawn } from "node:child_process";
+import { existsSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
+import { join } from "node:path";
+import { createInterface } from "node:readline";
+import type { AttachmentPart } from "shared/types";
+import { appendAttachmentContext } from "./attachments";
 import type { AgentEvent } from "./events";
 import { buildAgentSystemPrompt } from "./system-prompt";
 
@@ -11,6 +13,7 @@ export type RunCodexAgentInput = {
   prompt: string;
   cwd: string;
   abortController: AbortController;
+  attachments?: AttachmentPart[];
   onEvent: (event: AgentEvent) => void;
 };
 
@@ -91,8 +94,12 @@ function mapCodexEvent(msg: JsonRpcMessage): AgentEvent | null {
 }
 
 export async function runCodexAgent(input: RunCodexAgentInput): Promise<void> {
-  const { model, prompt, cwd, abortController, onEvent } = input;
-  console.error(`[codex-agent] starting: model=${model} cwd=${cwd} prompt=${prompt.substring(0, 50)}`);
+  const { model, cwd, abortController, onEvent } = input;
+  // Inject attachment context (file text now; image placeholders until phase B).
+  const prompt = appendAttachmentContext(input.prompt, input.attachments);
+  console.error(
+    `[codex-agent] starting: model=${model} cwd=${cwd} prompt=${prompt.substring(0, 50)}`,
+  );
 
   const codexPath = await findCodexBinary();
   console.error(`[codex-agent] codexPath=${codexPath}`);
@@ -106,9 +113,12 @@ export async function runCodexAgent(input: RunCodexAgentInput): Promise<void> {
     codexPath,
     [
       "app-server",
-      "--listen", "stdio://",
-      "-c", 'approval_policy="never"',
-      "-c", 'sandbox_mode="danger-full-access"',
+      "--listen",
+      "stdio://",
+      "-c",
+      'approval_policy="never"',
+      "-c",
+      'sandbox_mode="danger-full-access"',
     ],
     {
       cwd,
@@ -296,7 +306,12 @@ async function findCodexBinary(): Promise<string | null> {
   }
   const { execSync } = await import("node:child_process");
   try {
-    const path = execSync("which codex", { timeout: 5000, env: { ...process.env, PATH: `${process.env.PATH}:/opt/homebrew/bin:/usr/local/bin` } }).toString().trim();
+    const path = execSync("which codex", {
+      timeout: 5000,
+      env: { ...process.env, PATH: `${process.env.PATH}:/opt/homebrew/bin:/usr/local/bin` },
+    })
+      .toString()
+      .trim();
     return path || null;
   } catch {
     return null;
