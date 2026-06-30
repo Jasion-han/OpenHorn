@@ -48,6 +48,16 @@ export interface Attachment {
   createdAt: Date;
 }
 
+/**
+ * Normalized attachment payload shared between the desktop composer and the
+ * sidecar agent runtimes. Images carry base64 bytes for vision-capable models;
+ * files carry already-extracted UTF-8 text (text/code/JSON or PDF text pulled
+ * client-side via pdf.js) so every runtime can inject them as plain context.
+ */
+export type AttachmentPart =
+  | { kind: "image"; mediaType: string; dataBase64: string; fileName?: string }
+  | { kind: "file"; fileName: string; mediaType: string; text: string };
+
 export interface AgentSession {
   id: string;
   userId: string;

@@ -10,7 +10,8 @@
     "./types": "./src/types/index.ts",
     "./constants": "./src/constants/index.ts",
     "./utils": "./src/utils/index.ts",
-    "./search": "./src/search/index.ts"
+    "./search": "./src/search/index.ts",
+    "./vision": "./src/vision/index.ts"
   },
   "devDependencies": {
     "typescript": "^5.0.0"
