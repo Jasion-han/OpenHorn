@@ -105,6 +105,18 @@ function applyAgentEventToRun(
   return base;
 }
 
+function completeAgentRun(run: ApiAgentRun | undefined): ApiAgentRun | undefined {
+  if (!run) return undefined;
+  if (run.status === "failed" || run.error) {
+    return run;
+  }
+  const trimmedSteps = run.steps ? [...run.steps] : [];
+  while (trimmedSteps.length > 0 && trimmedSteps[trimmedSteps.length - 1].type === "text") {
+    trimmedSteps.pop();
+  }
+  return { ...run, status: "completed", steps: trimmedSteps };
+}
+
 export interface ChatState {
   channels: Channel[];
   conversations: Conversation[];
@@ -554,11 +566,7 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
       if (event.type === "done") {
         const currentMsg = get().messages.find((m) => m.id === messageId);
         const existingRun = currentMsg?.agentRun;
-        const trimmedSteps = existingRun?.steps ? [...existingRun.steps] : [];
-        while (trimmedSteps.length > 0 && trimmedSteps[trimmedSteps.length - 1].type === "text") {
-          trimmedSteps.pop();
-        }
-        const doneRun = event.agentRun ?? (existingRun ? { ...existingRun, status: "completed" as const, steps: trimmedSteps } : undefined);
+        const doneRun = event.agentRun ?? completeAgentRun(existingRun);
         get().updateMessage(messageId, {
           id: event.messageId || messageId,
           model: event.model,

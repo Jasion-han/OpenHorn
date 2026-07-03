@@ -365,6 +365,35 @@ describe("desktop chat store", () => {
     expect(store.getState().messages[2]?.agentRun?.status).toBe("completed");
   });
 
+  test("keeps failed agent status when a done event follows an error", async () => {
+    const { adapter } = createStubAdapter();
+    const store = createDesktopChatStore(adapter);
+
+    await store.getState().loadConversations();
+    await store.getState().selectConversation("conv-1");
+    const result = await store.getState().sendMessage({ content: "继续执行", mode: "agent" });
+
+    store.getState().applyStreamEvent(result.assistantMessageId, {
+      type: "agent_event",
+      event: {
+        type: "error",
+        content: "Connection error.",
+      },
+    });
+    store.getState().applyStreamEvent(result.assistantMessageId, {
+      type: "done",
+      messageId: result.assistantMessageId,
+      model: "claude-3-7-sonnet",
+    });
+
+    expect(store.getState().isStreaming).toBe(false);
+    expect(store.getState().messages[2]?.agentRun).toMatchObject({
+      status: "failed",
+      summary: "Error",
+      error: "Connection error.",
+    });
+  });
+
   test("rolls back optimistic draft messages when send fails", async () => {
     const { adapter } = createStubAdapter();
     const store = createDesktopChatStore({
