@@ -79,6 +79,7 @@
 
 /* Code block with header bar */
 .codeBlock {
+  position: relative;
   margin: 0.4em 0;
   border-radius: 0.5rem;
   border: 1px solid hsl(var(--border));
@@ -91,6 +92,7 @@
   align-items: center;
   justify-content: space-between;
   padding: 0.3em 0.75em;
+  padding-right: 4.75rem;
   background: hsl(var(--muted));
   border-bottom: 1px solid hsl(var(--border));
   min-height: 2em;
@@ -112,17 +114,27 @@
   border-radius: 0.25rem;
   background: transparent;
   color: hsl(var(--muted-foreground));
+  position: absolute;
+  top: 0.3em;
+  right: 0.75em;
+  z-index: 1;
   font-size: 0.75em;
   cursor: pointer;
-  transition:
-    background 0.15s,
-    color 0.15s;
+  transition: none;
   font-family: inherit;
+  opacity: 0;
+  pointer-events: none;
 }
 
-.copyButton:hover {
-  background: hsl(var(--accent));
-  color: hsl(var(--accent-foreground));
+.codeBlock:hover .copyButton,
+.codeBlock:focus-within .copyButton {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.copyButton:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
 }
 
 /* Table */

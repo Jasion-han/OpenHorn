@@ -129,6 +129,7 @@
 }
 
 .codeBlock {
+  position: relative;
   margin: 0.95em 0 1.05em;
   overflow: hidden;
   border: 1px solid color-mix(in srgb, hsl(var(--border)) 88%, hsl(var(--foreground)) 12%);
@@ -152,6 +153,7 @@
   justify-content: space-between;
   gap: 0.75em;
   padding: 0.26em 0.62em 0.26em 0.95em;
+  padding-right: 5.75rem;
   border-bottom: 1px solid color-mix(in srgb, hsl(var(--border)) 76%, transparent);
   background:
     linear-gradient(
@@ -199,31 +201,29 @@
   border-radius: 0.55rem;
   background: color-mix(in srgb, hsl(var(--background)) 82%, transparent);
   color: hsl(var(--muted-foreground));
+  position: absolute;
+  top: 0.34rem;
+  right: 0.62rem;
+  z-index: 1;
   font-size: 0.75em;
   font-weight: 600;
   cursor: pointer;
-  transition:
-    background 0.16s ease,
-    border-color 0.16s ease,
-    color 0.16s ease,
-    transform 0.16s ease;
+  transition: none;
   font-family: inherit;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.codeBlock:hover .copyButton,
+.codeBlock:focus-within .copyButton {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .copyButton svg {
   width: 0.92rem;
   height: 0.92rem;
   stroke-width: 2;
-}
-
-.copyButton:hover {
-  border-color: color-mix(in srgb, hsl(var(--border)) 62%, hsl(var(--foreground)) 38%);
-  background: hsl(var(--background));
-  color: hsl(var(--foreground));
-}
-
-.copyButton:active {
-  transform: translateY(1px);
 }
 
 .copyButton:focus-visible {
