@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
 import { Check, Copy } from "lucide-react";
+import { Fragment, memo, startTransition, useEffect, useMemo, useState } from "react";
 import type { Components } from "react-markdown";
 import ReactMarkdown from "react-markdown";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
@@ -18,7 +18,7 @@ const CJK_BOLD_PAIR_RE =
   /(?<=[⺀-鿿豈-﫿\u{20000}-\u{2FA1F}\u{3000}-\u{303F}\u{2018}-\u{201F}！-｠])\*\*([^*\n]+?)\*\*/gu;
 
 function fixCjkBold(text: string): string {
-  return text.replace(CJK_BOLD_PAIR_RE, " **$1**");
+  return text.replace(CJK_BOLD_PAIR_RE, " **$1**");
 }
 
 const LANGUAGE_META: Record<string, { label: string; syntax: string; accent: string }> = {
@@ -42,7 +42,7 @@ const LANGUAGE_META: Record<string, { label: string; syntax: string; accent: str
   yml: { label: "YAML", syntax: "yaml", accent: "#db2777" },
 };
 
-function getLanguageMeta(language: string | undefined) {
+export function getLanguageMeta(language: string | undefined) {
   const normalized = (language || "text").trim().toLowerCase();
   return (
     LANGUAGE_META[normalized] || {
@@ -51,6 +51,61 @@ function getLanguageMeta(language: string | undefined) {
       accent: "#64748b",
     }
   );
+}
+
+// Shared so the plain-text placeholder and the highlighted version keep an
+// identical mono font — any drift here would shift text when highlight lands.
+const CODE_FONT_FAMILY = "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
+
+// The gutter width (minWidth + paddingRight) must match the highlighted line
+// numbers exactly so switching from placeholder to highlight causes no
+// horizontal jump. `display`/`textAlign` mirror react-syntax-highlighter's own
+// default line-number styles.
+const LINE_NUMBER_STYLE: React.CSSProperties = {
+  minWidth: "1.65rem",
+  paddingRight: "0.55rem",
+  color: "hsl(var(--muted-foreground) / 0.48)",
+  fontVariantNumeric: "tabular-nums",
+  userSelect: "none",
+};
+
+const PLACEHOLDER_LINE_NUMBER_STYLE: React.CSSProperties = {
+  display: "inline-block",
+  textAlign: "right",
+  ...LINE_NUMBER_STYLE,
+};
+
+const CODE_CUSTOM_STYLE: React.CSSProperties = {
+  margin: 0,
+  padding: 0,
+  background: "transparent",
+  // Pin the line-height so the placeholder and the highlighted output stay
+  // vertically identical. SyntaxHighlighter puts the prism theme's inline
+  // `line-height: 1.5` on its scroll container (inline style beats the
+  // `.codeScroll` class), so the plain-text placeholder must match it or the
+  // block shrinks the moment highlight lands.
+  lineHeight: 1.5,
+};
+
+type IdleWindow = typeof window & {
+  requestIdleCallback?: (cb: () => void) => number;
+  cancelIdleCallback?: (handle: number) => void;
+};
+
+// Defer the highlight work until the browser is idle so switching into a
+// conversation with many long code blocks paints the plain text immediately.
+function scheduleIdle(run: () => void): () => void {
+  const w = window as IdleWindow;
+  if (typeof w.requestIdleCallback === "function") {
+    const id = w.requestIdleCallback(run);
+    return () => {
+      if (typeof w.cancelIdleCallback === "function") {
+        w.cancelIdleCallback(id);
+      }
+    };
+  }
+  const id = window.setTimeout(run, 0);
+  return () => window.clearTimeout(id);
 }
 
 function CopyButton({ code }: { code: string }) {
@@ -70,7 +125,105 @@ function CopyButton({ code }: { code: string }) {
   );
 }
 
-export function DesktopMarkdownMessage({ content }: { content: string }) {
+type CodeBlockProps = {
+  codeString: string;
+  className?: string;
+  language: string;
+  accent: string;
+  label: string;
+  lineCount: number;
+  isDark: boolean;
+  syntaxTheme: Record<string, React.CSSProperties>;
+  codeProps: React.ComponentPropsWithoutRef<"code">;
+};
+
+function CodeBlockImpl({
+  codeString,
+  className,
+  language,
+  accent,
+  label,
+  lineCount,
+  syntaxTheme,
+  codeProps,
+}: CodeBlockProps) {
+  const showLineNumbers = lineCount > 1;
+  // First frame renders the lightweight plain-text placeholder; the heavy
+  // Prism tokenize is scheduled for the next idle slice via startTransition.
+  const [highlighted, setHighlighted] = useState(false);
+
+  useEffect(() => {
+    return scheduleIdle(() => {
+      startTransition(() => setHighlighted(true));
+    });
+  }, []);
+
+  return (
+    <div className={styles.codeBlock} style={{ "--code-accent": accent } as React.CSSProperties}>
+      <div className={styles.codeHeader}>
+        <div className={styles.codeTitle}>
+          <span className={styles.codeLang}>{label}</span>
+          <span className={styles.codeMeta}>
+            {lineCount} {lineCount === 1 ? "line" : "lines"}
+          </span>
+        </div>
+        <CopyButton code={codeString} />
+      </div>
+      {highlighted ? (
+        <SyntaxHighlighter
+          className={styles.codeScroll}
+          style={syntaxTheme}
+          language={language}
+          PreTag="div"
+          showLineNumbers={showLineNumbers}
+          wrapLongLines={false}
+          customStyle={CODE_CUSTOM_STYLE}
+          lineNumberStyle={LINE_NUMBER_STYLE}
+          codeTagProps={{
+            className,
+            style: { fontFamily: CODE_FONT_FAMILY },
+            ...codeProps,
+          }}
+        >
+          {codeString}
+        </SyntaxHighlighter>
+      ) : (
+        <div className={styles.codeScroll} style={CODE_CUSTOM_STYLE}>
+          <code className={className} style={{ fontFamily: CODE_FONT_FAMILY }} {...codeProps}>
+            {showLineNumbers
+              ? codeString.split("\n").map((line, index, lines) => (
+                  // biome-ignore lint/suspicious/noArrayIndexKey: line order is stable
+                  <Fragment key={index}>
+                    <span>
+                      <span
+                        className="comment linenumber react-syntax-highlighter-line-number"
+                        style={PLACEHOLDER_LINE_NUMBER_STYLE}
+                      >
+                        {index + 1}
+                      </span>
+                      {line}
+                    </span>
+                    {index < lines.length - 1 ? "\n" : null}
+                  </Fragment>
+                ))
+              : codeString}
+          </code>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const CodeBlock = memo(
+  CodeBlockImpl,
+  (prev, next) =>
+    prev.codeString === next.codeString &&
+    prev.className === next.className &&
+    prev.language === next.language &&
+    prev.isDark === next.isDark,
+);
+
+function DesktopMarkdownMessageImpl({ content }: { content: string }) {
   const normalized = fixCjkBold((content || "").replace(/\r\n/g, "\n").trim());
   const [isDark, setIsDark] = useState(false);
 
@@ -142,49 +295,17 @@ export function DesktopMarkdownMessage({ content }: { content: string }) {
       if (isBlock) {
         const lineCount = codeString.split("\n").length;
         return (
-          <div
-            className={styles.codeBlock}
-            style={{ "--code-accent": langMeta.accent } as React.CSSProperties}
-          >
-            <div className={styles.codeHeader}>
-              <div className={styles.codeTitle}>
-                <span className={styles.codeLang}>{langMeta.label}</span>
-                <span className={styles.codeMeta}>
-                  {lineCount} {lineCount === 1 ? "line" : "lines"}
-                </span>
-              </div>
-              <CopyButton code={codeString} />
-            </div>
-            <SyntaxHighlighter
-              className={styles.codeScroll}
-              style={syntaxTheme}
-              language={langMeta.syntax}
-              PreTag="div"
-              showLineNumbers={lineCount > 1}
-              wrapLongLines={false}
-              customStyle={{
-                margin: 0,
-                padding: 0,
-                background: "transparent",
-              }}
-              lineNumberStyle={{
-                minWidth: "1.65rem",
-                paddingRight: "0.55rem",
-                color: "hsl(var(--muted-foreground) / 0.48)",
-                fontVariantNumeric: "tabular-nums",
-                userSelect: "none",
-              }}
-              codeTagProps={{
-                className,
-                style: {
-                  fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-                },
-                ...props,
-              }}
-            >
-              {codeString}
-            </SyntaxHighlighter>
-          </div>
+          <CodeBlock
+            codeString={codeString}
+            className={className}
+            language={langMeta.syntax}
+            accent={langMeta.accent}
+            label={langMeta.label}
+            lineCount={lineCount}
+            isDark={isDark}
+            syntaxTheme={syntaxTheme}
+            codeProps={props}
+          />
         );
       }
 
@@ -207,3 +328,8 @@ export function DesktopMarkdownMessage({ content }: { content: string }) {
     </div>
   );
 }
+
+export const DesktopMarkdownMessage = memo(
+  DesktopMarkdownMessageImpl,
+  (prev, next) => prev.content === next.content,
+);
