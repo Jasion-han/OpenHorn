@@ -35,7 +35,8 @@ import {
 } from "./attachments";
 import type { AgentEvent } from "./events";
 import { buildIntentContext } from "./intent-context";
-import { connectMcpTools } from "./mcp-tools";
+import { capMcpTools, connectMcpTools } from "./mcp-tools";
+import { buildSkillsPromptSection, type MaterializedSkill } from "./skills";
 import { buildAgentSystemPrompt } from "./system-prompt";
 
 export type RunDirectAgentInput = {
@@ -53,6 +54,8 @@ export type RunDirectAgentInput = {
   /** Enabled MCP servers keyed by name (`{ type, command/url, args, env }`). */
   mcpServers?: Record<string, Record<string, unknown>>;
   attachments?: AttachmentPart[];
+  /** Enabled skills materialized to the workspace; read on demand via `read_file`. */
+  skills?: MaterializedSkill[];
   requestApproval?: (input: {
     toolName: string;
     toolInput: Record<string, unknown>;
@@ -619,11 +622,14 @@ export async function runDirectAgent(input: RunDirectAgentInput): Promise<void> 
   });
   // Bridge enabled MCP servers into the tool set (best-effort). The Claude SDK
   // path gets MCP natively; here we connect and expose them as agent tools so
-  // OpenAI-protocol models get the same capability.
+  // OpenAI-protocol models get the same capability. capMcpTools keeps the
+  // combined tool count under the provider limit (server order wins ties), so
+  // an oversized MCP roster degrades loudly instead of failing the request.
   let mcpCleanup: (() => Promise<void>) | null = null;
   if (input.mcpServers && Object.keys(input.mcpServers).length > 0) {
     const connected = await connectMcpTools(input.mcpServers);
-    if (connected.tools.length > 0) tools = [...tools, ...connected.tools];
+    const mcpTools = capMcpTools(tools.length, connected.toolsByServer);
+    if (mcpTools.length > 0) tools = [...tools, ...mcpTools];
     mcpCleanup = connected.cleanup;
   }
   const apiKey = input.apiKey;
@@ -655,7 +661,11 @@ export async function runDirectAgent(input: RunDirectAgentInput): Promise<void> 
     webSearchEnabled: input.webSearchEnabled,
   });
   const finalSystemPrompt = [
-    buildAgentSystemPrompt({ cwd: input.cwd, permissionMode: input.permissionMode }),
+    buildAgentSystemPrompt({
+      cwd: input.cwd,
+      permissionMode: input.permissionMode,
+      extra: buildSkillsPromptSection(input.skills ?? [], "read_file"),
+    }),
     input.systemPrompt,
     intentResult.context,
   ]

@@ -1,3 +1,4 @@
+import path from "node:path";
 import type { CanUseTool, HookCallbackMatcher } from "@anthropic-ai/claude-agent-sdk";
 import type { AttachmentPart } from "shared/types";
 import { modelSupportsVision } from "shared/vision";
@@ -17,6 +18,7 @@ import {
 } from "./attachments";
 import { type AgentEvent, convertSdkEvent } from "./events";
 import { buildIntentContext } from "./intent-context";
+import { buildSkillsPromptSection, type MaterializedSkill } from "./skills";
 import { buildAgentSystemPrompt } from "./system-prompt";
 
 type SdkMessage = {
@@ -47,6 +49,11 @@ export type RunClaudeAgentInput = {
   mcpServers?: Record<string, Record<string, unknown>>;
   conversationHistory?: Array<{ role: "user" | "assistant"; content: string }>;
   attachments?: AttachmentPart[];
+  /**
+   * Enabled skills already materialized to the workspace. Surfaced to the model
+   * as a Level-1 metadata block (read on demand via the SDK's `Read` tool).
+   */
+  skills?: MaterializedSkill[];
   requestApproval: (input: {
     toolUseId: string;
     toolName: string;
@@ -81,9 +88,23 @@ export async function checkSdkFsToolPath(
   toolName: string,
   toolInput: unknown,
   workspaceRoot: string,
+  readAllowRoots: string[] = [],
 ): Promise<string | null> {
   const filePath = extractTargetFilePath(toolName, toolInput);
   if (!filePath) return null;
+
+  // Skills are read in place from their real folders (Claude-style), which live
+  // outside the workspace. Allow READ tools within any enabled skill folder;
+  // Write/Edit stay strictly workspace-bounded.
+  if (toolName !== "Write" && toolName !== "Edit" && readAllowRoots.length > 0) {
+    const abs = path.isAbsolute(filePath)
+      ? path.resolve(filePath)
+      : path.resolve(workspaceRoot, filePath);
+    for (const root of readAllowRoots) {
+      const r = path.resolve(root);
+      if (abs === r || abs.startsWith(`${r}${path.sep}`)) return null;
+    }
+  }
 
   try {
     const relative = toWorkspaceRelative(workspaceRoot, filePath);
@@ -214,6 +235,7 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
     buildAgentSystemPrompt({
       cwd: input.cwd,
       permissionMode: input.permissionMode ?? "full-access",
+      extra: buildSkillsPromptSection(input.skills ?? [], "Read"),
     }),
     input.systemPrompt,
     intentResult.context,
@@ -265,7 +287,12 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
           : ({ behavior: "deny", message: "User denied command" } as const);
       }
 
-      const fsDeny = await checkSdkFsToolPath(toolName, toolInput, input.cwd);
+      const fsDeny = await checkSdkFsToolPath(
+        toolName,
+        toolInput,
+        input.cwd,
+        (input.skills ?? []).map((s) => s.skillDir),
+      );
       if (fsDeny !== null) {
         return { behavior: "deny", message: fsDeny } as const;
       }

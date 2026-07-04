@@ -3,6 +3,8 @@ import { runCodexChat } from "./agent/chatCodex";
 import { runClaudeAgent } from "./agent/claude";
 import { runCodexAgent } from "./agent/codex";
 import { runDirectAgent } from "./agent/direct";
+import { testMcpServer } from "./agent/mcp-tools";
+import { resolveSkills } from "./agent/skills";
 import { detectAllCredentials, detectCredentialForProtocol } from "./auth";
 import { createCheckpointSession, rollbackCheckpoint } from "./checkpoints";
 
@@ -20,6 +22,7 @@ function isChatGptOAuthToken(key: string): boolean {
   }
 }
 
+import path from "node:path";
 import { fsList, fsReadText, fsWriteText } from "./fs";
 import {
   buildErrorResponse,
@@ -382,6 +385,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
           tavilyApiKey,
           mcpServers,
           attachments,
+          skills,
         } = params as {
           prompt: string;
           apiKey: string;
@@ -396,6 +400,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
           tavilyApiKey?: string;
           mcpServers?: Record<string, Record<string, unknown>>;
           attachments?: import("shared/types").AttachmentPart[];
+          skills?: import("./agent/skills").SkillMeta[];
         };
 
         let resolvedApiKey = apiKey;
@@ -441,6 +446,13 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
           return { runId, onEvent, guard };
         };
 
+        // Skills are read IN PLACE from their real folders (Claude-style): the
+        // run carries each skill's name/description + absolute folder path. Each
+        // runtime builds its own Level-1 prompt block naming its real read tool.
+        // Skills target the Claude + direct runtimes (codex_cli is out of scope).
+        const usesCodex = protocol === "codex_cli" || forceCodexCli;
+        const materializedSkills = usesCodex ? [] : await resolveSkills(skills);
+
         if (protocol === "codex_cli" || forceCodexCli) {
           const { onEvent, guard } = initRun("codex");
           guard(
@@ -477,6 +489,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
               mcpServers,
               conversationHistory,
               attachments,
+              skills: materializedSkills,
               requestApproval: async (approvalInput) => {
                 const { toolUseId } = approvalInput;
                 return new Promise<boolean>((resolve) => {
@@ -514,6 +527,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
               tavilyApiKey,
               mcpServers,
               attachments,
+              skills: materializedSkills,
               requestApproval: async (approvalInput) => {
                 const approvalId = `approval-${Date.now()}`;
                 return new Promise<boolean>((resolve) => {
@@ -536,6 +550,15 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
           );
         }
 
+        return;
+      }
+      case "mcp.test": {
+        // Standalone health probe: opens its own client, lists tools, closes.
+        // It never touches state.agentRuns, so concurrent agent runs (and
+        // their MCP connections) are unaffected.
+        const { name, config } = params as { name: string; config: Record<string, unknown> };
+        const result = await testMcpServer(name, config);
+        ws.send(JSON.stringify(buildOkResponse(request.requestId, result)));
         return;
       }
       case "agent.cancel": {

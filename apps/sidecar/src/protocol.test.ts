@@ -26,4 +26,17 @@ describe("protocol", () => {
   test("rejects unknown method params", () => {
     expect(() => validateMethodParams("nope", {})).toThrow();
   });
+
+  test("validates mcp.test params", () => {
+    const params = validateMethodParams("mcp.test", {
+      name: "context7",
+      config: { command: "npx", args: ["-y", "context7"] },
+    }) as { name: string; config: Record<string, unknown> };
+    expect(params.name).toBe("context7");
+    expect(params.config.command).toBe("npx");
+  });
+
+  test("rejects mcp.test params without a name", () => {
+    expect(() => validateMethodParams("mcp.test", { config: {} })).toThrow();
+  });
 });

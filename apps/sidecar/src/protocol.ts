@@ -76,6 +76,13 @@ export const AttachmentPartSchema = z.discriminatedUnion("kind", [
   }),
 ]);
 
+export const SkillMetaSchema = z.object({
+  name: z.string().min(1),
+  description: z.string().default(""),
+  /** Absolute path of the skill's real folder (read in place, Claude-style). */
+  path: z.string().min(1),
+});
+
 export const AgentRunParamsSchema = z.object({
   prompt: z.string().min(1),
   apiKey: z.string().default(""),
@@ -90,11 +97,22 @@ export const AgentRunParamsSchema = z.object({
     .optional(),
   webSearchEnabled: z.boolean().optional(),
   tavilyApiKey: z.string().optional(),
+  // Enabled MCP servers keyed by name. Zod strips unknown keys, so this field
+  // must be declared here or the desktop's mcpServers never reaches the run.
+  mcpServers: z.record(z.record(z.unknown())).optional(),
   attachments: z.array(AttachmentPartSchema).optional(),
+  skills: z.array(SkillMetaSchema).optional(),
 });
 
 export const AgentCancelParamsSchema = z.object({
   runId: z.string().min(1),
+});
+
+// Health-check probe for a single MCP server: same config shape agent.run
+// carries in mcpServers, but for exactly one server.
+export const McpTestParamsSchema = z.object({
+  name: z.string().min(1),
+  config: z.record(z.unknown()),
 });
 
 export const ChatStreamParamsSchema = z.object({
@@ -136,6 +154,8 @@ export function validateMethodParams(method: string, params: unknown): unknown {
       return AgentRunParamsSchema.parse(params);
     case "agent.cancel":
       return AgentCancelParamsSchema.parse(params);
+    case "mcp.test":
+      return McpTestParamsSchema.parse(params);
     case "checkpoint.rollback":
       return CheckpointRollbackParamsSchema.parse(params);
     case "auth.detectCredentials":
