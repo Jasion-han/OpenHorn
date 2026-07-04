@@ -496,8 +496,8 @@ export function DesktopComposer({
               <TooltipContent side="top">
                 <p>
                   {forceWebSearch
-                    ? "需要最新信息时允许联网：已开启"
-                    : "需要最新信息时允许联网：已关闭"}
+                    ? "Web search: on (used when fresh info is needed)"
+                    : "Web search: off"}
                 </p>
               </TooltipContent>
             </Tooltip>
