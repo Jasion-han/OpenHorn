@@ -490,12 +490,12 @@ export function DesktopComposer({
                   title="Allow web search"
                 >
                   <Globe className="size-3.5" />
-                  <span>Web search</span>
+                  <span>Web Search</span>
                 </button>
               </TooltipTrigger>
               <TooltipContent side="top">
                 <p>
-                  {forceWebSearch ? "Web search: on" : "Web search: off"}
+                  {forceWebSearch ? "Web Search: On" : "Web Search: Off"}
                 </p>
               </TooltipContent>
             </Tooltip>
