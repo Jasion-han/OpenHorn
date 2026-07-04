@@ -490,7 +490,7 @@ export function DesktopComposer({
                   title="Allow web search"
                 >
                   <Globe className="size-3.5" />
-                  <span>允许联网</span>
+                  <span>Web search</span>
                 </button>
               </TooltipTrigger>
               <TooltipContent side="top">
