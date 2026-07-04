@@ -495,9 +495,7 @@ export function DesktopComposer({
               </TooltipTrigger>
               <TooltipContent side="top">
                 <p>
-                  {forceWebSearch
-                    ? "Web Search: On (fetches fresh info from the web)"
-                    : "Web Search: Off (answers from model knowledge only)"}
+                  {forceWebSearch ? "Web Search: On" : "Web Search: Off"}
                 </p>
               </TooltipContent>
             </Tooltip>
