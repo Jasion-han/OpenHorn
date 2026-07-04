@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import type { AttachmentPart } from "shared/types";
+import { normalizeMcpServerConfig } from "../lib/mcpServerConfig";
 import { createServerApi } from "../lib/serverApi";
 import type { SidecarApprovalRequest } from "../lib/sidecarClient";
 import { discoverSkills, skillsDisabledList } from "../lib/tauriBridge";
@@ -300,7 +301,8 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
     // Both the Claude Agent SDK (anthropic) and the pi-agent-core "direct"
     // runtime (openai) consume MCP servers, so fetch them for either protocol.
     // Best-effort: a failure here must not block the run. Each enabled server is
-    // reshaped into the SDK's format (`{ type, ...config }`), keyed by name.
+    // reshaped into the SDK's format (keyed by name) with its transport type
+    // normalized to stdio/sse/http — see normalizeMcpServerConfig.
     let mcpServers: Record<string, Record<string, unknown>> | undefined;
     if (credentials.protocol === "anthropic" || credentials.protocol === "openai") {
       try {
@@ -313,7 +315,7 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
           isEnabled: boolean;
         }>) {
           if (!server.isEnabled) continue;
-          map[server.name] = { type: server.type, ...(server.config || {}) };
+          map[server.name] = normalizeMcpServerConfig(server.type, server.config);
         }
         if (Object.keys(map).length > 0) mcpServers = map;
         // Slash-targeted run: keep only the invoked server. If the name no
