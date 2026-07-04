@@ -524,8 +524,8 @@ export function DesktopComposer({
                 <TooltipContent side="top">
                   <p>
                     {fullAccessEnabled
-                      ? "Full Access: all operations auto-approved"
-                      : "Full Access: off (dangerous commands need approval)"}
+                      ? "Full Access: All operations auto-approved"
+                      : "Full Access: Off (dangerous commands need approval)"}
                   </p>
                 </TooltipContent>
               </Tooltip>
