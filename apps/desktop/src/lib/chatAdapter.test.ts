@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import type { ApiChannel, ApiConversation, ApiMessage } from "../types/chat";
 import { createChatAdapter } from "./chatAdapter";
 import type { ServerApi } from "./serverApi";
-import type { ApiChannel, ApiConversation, ApiMessage } from "../types/chat";
 
 function createStubServerApi() {
   let streamedBody: unknown;
@@ -142,7 +142,15 @@ function createStubServerApi() {
         return new Response("ok", { status: 200 });
       },
       syncSidecar: async () => ({ userMessageId: "u1", assistantMessageId: "a1" }),
-      chatPrepare: async () => ({ apiKey: "sk-test", baseUrl: null, protocol: "openai", model: "gpt-4o", messages: [], userMessageId: "u1", assistantMessageId: "a1" }),
+      chatPrepare: async () => ({
+        apiKey: "sk-test",
+        baseUrl: null,
+        protocol: "openai",
+        model: "gpt-4o",
+        messages: [],
+        userMessageId: "u1",
+        assistantMessageId: "a1",
+      }),
       chatComplete: async () => ({ success: true }),
     },
     channels: {
@@ -344,12 +352,8 @@ describe("chatAdapter", () => {
   });
 
   test("deletes and regenerates messages through the desktop adapter", async () => {
-    const {
-      api,
-      getDeletedMessageId,
-      getRegeneratedMessageId,
-      getRegeneratedPayload,
-    } = createStubServerApi();
+    const { api, getDeletedMessageId, getRegeneratedMessageId, getRegeneratedPayload } =
+      createStubServerApi();
     const adapter = createChatAdapter(api);
 
     await adapter.deleteMessage("msg-1");

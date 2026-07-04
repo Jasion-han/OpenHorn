@@ -78,6 +78,26 @@ export interface MCPServer {
   updatedAt: Date;
 }
 
+export interface SkillFile {
+  id: string;
+  path: string;
+  content: string;
+  isBinary: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface Skill {
+  id: string;
+  name: string;
+  description: string;
+  content: string;
+  isEnabled: boolean;
+  files?: SkillFile[];
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export interface User {
   id: string;
   email: string;

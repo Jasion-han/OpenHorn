@@ -1,11 +1,11 @@
 import { create } from "zustand";
-import { createChatAdapter, type ChatAdapter } from "../lib/chatAdapter";
+import { type ChatAdapter, createChatAdapter } from "../lib/chatAdapter";
 import type {
   ApiAgentRun,
   ApiCitation,
-  ChatStreamEvent,
   Channel,
   ChatMode,
+  ChatStreamEvent,
   Conversation,
   Message,
   MessageAttachmentMeta,
@@ -162,6 +162,12 @@ export interface ChatState {
   updateMessage: (messageId: string, updates: Partial<Message>) => void;
   appendMessageDelta: (messageId: string, delta: string, updates?: Partial<Message>) => void;
   findMessageAnywhere: (messageId: string) => Message | undefined;
+  // Mark/unmark the message ids of an in-flight run. While marked, selectConversation
+  // keeps the live/cached copy of these messages instead of the (stale) DB copy —
+  // an in-flight edit re-uses persisted ids, so the server row is out of date until
+  // the run completes and persists.
+  markMessagesActive: (ids: string[]) => void;
+  unmarkMessagesActive: (ids: string[]) => void;
   reconcileSidecarMessageIds: (input: {
     conversationId: string;
     assistantDraftId: string;
@@ -192,11 +198,10 @@ const INITIAL_STATE = {
 export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter()) {
   let selectConversationRequestId = 0;
   const messageCache = new Map<string, Message[]>();
+  // Message ids currently being written by an active run (assistant + its user).
+  const activeRunMessageIds = new Set<string>();
 
-  function updateCachedMessage(
-    messageId: string,
-    updater: (msg: Message) => Message,
-  ): boolean {
+  function updateCachedMessage(messageId: string, updater: (msg: Message) => Message): boolean {
     for (const [convId, msgs] of messageCache) {
       const idx = msgs.findIndex((m) => m.id === messageId);
       if (idx !== -1) {
@@ -219,7 +224,8 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
         set((state) => ({
           channels,
           selectedChannelId:
-            state.selectedChannelId && channels.some((channel) => channel.id === state.selectedChannelId)
+            state.selectedChannelId &&
+            channels.some((channel) => channel.id === state.selectedChannelId)
               ? state.selectedChannelId
               : (channels.find((channel) => channel.isDefault)?.id ?? channels[0]?.id ?? null),
           isLoading: false,
@@ -236,8 +242,9 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
         const conversations = await adapter.listConversations();
         set((state) => {
           const currentConversation = state.currentConversation
-            ? conversations.find((conversation) => conversation.id === state.currentConversation?.id) ||
-              null
+            ? conversations.find(
+                (conversation) => conversation.id === state.currentConversation?.id,
+              ) || null
             : null;
 
           return {
@@ -260,8 +267,7 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
         messageCache.set(prev.currentConversation.id, prev.messages);
       }
 
-      const conversation =
-        get().conversations.find((item) => item.id === conversationId) || null;
+      const conversation = get().conversations.find((item) => item.id === conversationId) || null;
 
       if (!conversation) {
         set({
@@ -289,20 +295,27 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
 
         const current = get().messages;
         const dbIds = new Set(dbMessages.map((m) => m.id));
+        // An in-flight edit re-uses the persisted ids but hasn't written the new
+        // content to the DB yet, so the server copy of those rows is stale. For
+        // ids belonging to an active run, prefer the live/cached message (edited
+        // prompt + streaming answer) over the DB row.
+        const currentById = new Map(current.map((m) => [m.id, m]));
+        const dbMerged =
+          activeRunMessageIds.size > 0
+            ? dbMessages.map((m) =>
+                activeRunMessageIds.has(m.id) ? (currentById.get(m.id) ?? m) : m,
+              )
+            : dbMessages;
         // Optimistic drafts use client ids (draft-*). Once a run is persisted,
         // the server assigns new ids, so an id-only check would keep the stale
         // draft alongside the persisted copy and render the whole exchange
         // twice. Drop any draft whose (role, content) already exists in the DB;
         // only genuinely in-flight drafts (not yet persisted) survive.
-        const dbSignatures = new Set(
-          dbMessages.map((m) => `${m.role} ${(m.content || "").trim()}`),
-        );
+        const dbSignatures = new Set(dbMessages.map((m) => `${m.role} ${(m.content || "").trim()}`));
         const drafts = current.filter(
-          (m) =>
-            !dbIds.has(m.id) &&
-            !dbSignatures.has(`${m.role} ${(m.content || "").trim()}`),
+          (m) => !dbIds.has(m.id) && !dbSignatures.has(`${m.role} ${(m.content || "").trim()}`),
         );
-        const merged = drafts.length > 0 ? [...dbMessages, ...drafts] : dbMessages;
+        const merged = drafts.length > 0 ? [...dbMerged, ...drafts] : dbMerged;
 
         set({
           messages: merged,
@@ -317,6 +330,18 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
     },
 
     async createConversation(title, options) {
+      const state = get();
+      const cur = state.currentConversation;
+      if (cur) {
+        const hasRealMessages = state.messages.some(
+          (m) => m.conversationId === cur.id && !m.id.startsWith("draft-"),
+        );
+        if (!hasRealMessages) {
+          // 当前已是空会话，复用它而不是再建一个空会话
+          return cur;
+        }
+      }
+
       const conversation = await adapter.createConversation({
         title,
         channelId: options?.channelId,
@@ -336,7 +361,8 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
 
     async updateConversation(conversationId, updates) {
       const state = get();
-      const previous = state.conversations.find((conversation) => conversation.id === conversationId) || null;
+      const previous =
+        state.conversations.find((conversation) => conversation.id === conversationId) || null;
 
       set((nextState) => ({
         conversations: nextState.conversations.map((conversation) =>
@@ -388,7 +414,9 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
     async deleteConversation(conversationId) {
       await adapter.deleteConversation(conversationId);
       set((state) => ({
-        conversations: state.conversations.filter((conversation) => conversation.id !== conversationId),
+        conversations: state.conversations.filter(
+          (conversation) => conversation.id !== conversationId,
+        ),
         currentConversation:
           state.currentConversation?.id === conversationId ? null : state.currentConversation,
         messages: state.currentConversation?.id === conversationId ? [] : state.messages,
@@ -564,7 +592,12 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
       }
 
       if (event.type === "done") {
-        const currentMsg = get().messages.find((m) => m.id === messageId);
+        // Look the message up anywhere (current view OR the background cache): if
+        // the user navigated to another conversation while this run was streaming,
+        // the message — and its accumulated agentRun steps — live only in the
+        // cache. Using get().messages.find() here would miss it, so existingRun
+        // would be undefined and the whole tool-call process panel gets wiped.
+        const currentMsg = get().findMessageAnywhere(messageId);
         const existingRun = currentMsg?.agentRun;
         const doneRun = event.agentRun ?? completeAgentRun(existingRun);
         get().updateMessage(messageId, {
@@ -666,6 +699,18 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
         if (found) return found;
       }
       return undefined;
+    },
+
+    markMessagesActive(ids) {
+      for (const id of ids) {
+        if (id) activeRunMessageIds.add(id);
+      }
+    },
+
+    unmarkMessagesActive(ids) {
+      for (const id of ids) {
+        activeRunMessageIds.delete(id);
+      }
     },
 
     reconcileSidecarMessageIds({

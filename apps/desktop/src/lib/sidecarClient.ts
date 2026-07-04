@@ -87,6 +87,12 @@ export interface SidecarRunAgentInput {
   conversationHistory?: Array<{ role: "user" | "assistant"; content: string }>;
   /** Normalized attachment parts (image base64 / extracted file text). */
   attachments?: AttachmentPart[];
+  /**
+   * Enabled Agent Skills, read IN PLACE from their real folders (Claude-style):
+   * each carries its name/description + the absolute folder path. No copy — the
+   * sidecar reads SKILL.md and scripts directly from `path`.
+   */
+  skills?: Array<{ name: string; description: string; path: string }>;
   onEvent: (event: AgentTaskStreamEvent) => void | Promise<void>;
   onApproval: (request: SidecarApprovalRequest) => void | Promise<void>;
   onError: (message: string) => void;
@@ -223,6 +229,15 @@ export function projectSidecarAgentEvent(runId: string, raw: unknown): AgentTask
   }
 }
 
+/** Result of a single-server MCP health probe — see sidecar "mcp.test". */
+export interface SidecarMcpTestResult {
+  ok: boolean;
+  toolCount?: number;
+  toolNames?: string[];
+  error?: string;
+  elapsedMs: number;
+}
+
 export interface DetectedCredential {
   provider: "openai" | "anthropic" | "google";
   source: "codex_cli" | "claude_code" | "gemini_cli" | "env_var";
@@ -337,6 +352,7 @@ export class SidecarClient {
       mcpServers,
       conversationHistory,
       attachments,
+      skills,
       onEvent,
       onApproval,
       onError,
@@ -357,6 +373,7 @@ export class SidecarClient {
       ...(mcpServers && Object.keys(mcpServers).length > 0 ? { mcpServers } : {}),
       ...(conversationHistory && conversationHistory.length > 0 ? { conversationHistory } : {}),
       ...(attachments && attachments.length > 0 ? { attachments } : {}),
+      ...(skills && skills.length > 0 ? { skills } : {}),
     })) as { runId: string };
     const runId = result.runId;
     this.runHandlers.set(runId, { onEvent, onApproval, onError, onDone, onSdkSessionId });
@@ -393,6 +410,22 @@ export class SidecarClient {
   async rollbackCheckpoint(runId: string): Promise<{ ok: true }> {
     const result = (await this.request("checkpoint.rollback", { runId })) as { ok: true };
     return result;
+  }
+
+  /**
+   * Probes a single MCP server through the sidecar (real runtime env: local
+   * PATH / process env), returning tool count on success or the raw failure
+   * reason. The sidecar caps connect + listTools at 15s each.
+   */
+  async testMcpServer(server: {
+    name: string;
+    config: Record<string, unknown>;
+  }): Promise<SidecarMcpTestResult> {
+    const result = await this.request("mcp.test", {
+      name: server.name,
+      config: server.config,
+    });
+    return result as SidecarMcpTestResult;
   }
 
   async detectCredentials(): Promise<DetectedCredential[]> {

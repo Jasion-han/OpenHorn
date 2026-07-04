@@ -8,6 +8,7 @@ export type DesktopSettingsTab =
   | "credentials"
   | "agent"
   | "mcp"
+  | "skill"
   | "appearance";
 
 export interface DesktopShellState {

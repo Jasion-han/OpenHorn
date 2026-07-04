@@ -58,6 +58,13 @@ export interface SidecarState {
   stop: () => Promise<void>;
   pickAndSetWorkspace: () => Promise<string | null>;
   setWorkspace: (root: string) => Promise<void>;
+  /**
+   * Guarantees a workspace root is set before a run, falling back to the saved
+   * one or the default (/tmp). Without this, a failed/raced default-workspace
+   * setup leaves workspaceRoot null, which silently drops Agent Skills and
+   * makes the sidecar cwd fall back to the home directory.
+   */
+  ensureWorkspace: () => Promise<string | null>;
   markUnsupported: (reason: string) => void;
   reset: () => void;
 }
@@ -245,6 +252,34 @@ export function createDesktopSidecarStore(options: CreateSidecarStoreOptions) {
       } catch (error) {
         set({ lastError: toErrorMessage(error) });
       }
+    },
+
+    async ensureWorkspace() {
+      const { client, status } = get();
+      // Pick the target: current store value, else the saved one, else /tmp.
+      let target = get().workspaceRoot;
+      if (!target) {
+        try {
+          target = localStorage.getItem(WORKSPACE_STORAGE_KEY);
+        } catch {}
+        target = target || "/tmp";
+      }
+      // ALWAYS re-push to the sidecar before a run. The sidecar may have
+      // restarted and reset its workspace to null (cwd then falls back to the
+      // home dir) while the desktop store kept a stale value — the two diverge,
+      // and Agent Skills silently vanish because the materialized skillsRoot no
+      // longer matches the sidecar's cwd. Re-syncing keeps them in lockstep.
+      if (status === "ready" && client) {
+        try {
+          const result = await client.setWorkspace(target);
+          set({ workspaceRoot: result.workspaceRoot, lastError: null });
+          try {
+            localStorage.setItem(WORKSPACE_STORAGE_KEY, result.workspaceRoot);
+          } catch {}
+          return result.workspaceRoot;
+        } catch {}
+      }
+      return get().workspaceRoot;
     },
 
     markUnsupported(reason) {

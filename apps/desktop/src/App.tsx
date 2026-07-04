@@ -1,9 +1,9 @@
 import { useEffect } from "react";
 import { Toaster, TooltipProvider } from "ui";
-import { DesktopAuthScreen } from "./components/auth/DesktopAuthScreen";
-import { SettingsView } from "./components/settings/SettingsView";
 import { DesktopShellLayout } from "./components/app/DesktopShellLayout";
+import { DesktopAuthScreen } from "./components/auth/DesktopAuthScreen";
 import { DesktopChatArea } from "./components/chat/DesktopChatArea";
+import { SettingsView } from "./components/settings/SettingsView";
 import { ThemeListener } from "./components/theme/ThemeListener";
 import { UNAUTHORIZED_EVENT } from "./lib/serverApi";
 import { getTauriSidecarPlatform } from "./lib/tauriBridge";
@@ -27,7 +27,12 @@ export function App() {
       if (!anchor) return;
       const href = anchor.href;
       if (!href || href === "#" || href.startsWith("javascript:")) return;
-      if (href.startsWith("http://localhost") || href.startsWith("https://localhost") || href.startsWith("tauri://")) return;
+      if (
+        href.startsWith("http://localhost") ||
+        href.startsWith("https://localhost") ||
+        href.startsWith("tauri://")
+      )
+        return;
       e.preventDefault();
       import("@tauri-apps/plugin-shell")
         .then((mod) => mod.open(href))
@@ -65,10 +70,12 @@ export function App() {
     (async () => {
       const platform = await getTauriSidecarPlatform();
       if (cancelled) return;
-      useSidecarStore.getState().attachPlatform(
-        platform,
-        platform === null ? "sidecar runtime requires the desktop shell" : undefined,
-      );
+      useSidecarStore
+        .getState()
+        .attachPlatform(
+          platform,
+          platform === null ? "sidecar runtime requires the desktop shell" : undefined,
+        );
       if (platform !== null) {
         void useSidecarStore.getState().start();
       }

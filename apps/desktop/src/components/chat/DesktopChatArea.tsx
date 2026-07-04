@@ -1,5 +1,5 @@
 import { Bot, Check, Copy, MessageSquare, Pencil, RefreshCw, Trash2 } from "lucide-react";
-import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { memo, type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Button, cn, Textarea } from "ui";
 import { useSidecarAgentRun } from "../../hooks/useSidecarAgentRun";
 import { type StreamTone, toneClassName } from "../../lib/agentTaskPresenter";
@@ -7,11 +7,21 @@ import { filesToAttachmentParts } from "../../lib/attachmentParts";
 import { uploadAttachments } from "../../lib/attachments";
 import { getDesktopBackendBase } from "../../lib/backendBase";
 import { sanitizeDisplayContent } from "../../lib/citations";
+import { getGlobalDefaultChannel } from "../../lib/defaultChannel";
 import { getEffectiveModelForConversation } from "../../lib/effectiveModel";
+import { getSlashLabel } from "../../lib/i18n/agent";
 import { notifyWarning } from "../../lib/notify";
 import { createServerApi, readErrorMessage } from "../../lib/serverApi";
+import {
+  findKnownSlashToken,
+  findSlashTokenAtCursor,
+  type SlashCommandType,
+  stripSlashToken,
+} from "../../lib/slashToken";
 import { readSseStream } from "../../lib/sse";
+import { discoverSkills, skillsDisabledList } from "../../lib/tauriBridge";
 import { useChatStore } from "../../stores/chatStore";
+import { useDesktopShellStore } from "../../stores/desktopShellStore";
 import { useSidecarStore } from "../../stores/sidecarStore";
 import type {
   ApiAgentRun,
@@ -22,7 +32,12 @@ import type {
 import { DesktopAgentTaskMetaLine } from "./DesktopAgentTaskMetaLine";
 import { DesktopChatHeader } from "./DesktopChatHeader";
 import { DesktopCitationList } from "./DesktopCitationList";
-import { DesktopComposer } from "./DesktopComposer";
+import {
+  DesktopComposer,
+  SLASH_ICONS,
+  type SlashHighlightRange,
+  type SlashPanelItem,
+} from "./DesktopComposer";
 import { DesktopMarkdownMessage } from "./DesktopMarkdownMessage";
 import { DesktopMessageAttachments } from "./DesktopMessageAttachments";
 import { DesktopModelPickerModal } from "./DesktopModelPickerModal";
@@ -106,6 +121,20 @@ async function fetchGlobalSystemPrompt(): Promise<string | undefined> {
   } catch {
     return undefined;
   }
+}
+
+/** Collapse newlines / repeated whitespace into a single line for the slash panel. */
+function collapseLine(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+function formatNewConversationTitle(): string {
+  const date = new Date();
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  const hh = String(date.getHours()).padStart(2, "0");
+  const min = String(date.getMinutes()).padStart(2, "0");
+  return `新会话 ${mm}-${dd} ${hh}:${min}`;
 }
 
 function LiveStatusBadge({
@@ -334,12 +363,32 @@ function AgentRunPanel({ run }: { run?: ApiAgentRun }) {
   if (!run) return null;
   const toolCount = run.steps.filter((step) => step.type === "tool_start").length;
   const hasThinking = run.steps.some((step) => step.type === "text");
-  const shouldRender = Boolean(run.error) || toolCount > 0 || hasThinking;
+  const isInProgress = run.status === "partial" || run.status === "running";
+  const shouldRender = Boolean(run.error) || toolCount > 0 || hasThinking || isInProgress;
   if (!shouldRender) return null;
 
+  // An in-progress run that has not yet produced any steps, text, or error would
+  // otherwise render nothing — causing a brief blank when switching back to an
+  // active conversation. Show a minimal working indicator instead.
+  if (!run.error && toolCount === 0 && !hasThinking && isInProgress) {
+    return (
+      <section className="mt-0.5 px-1 pt-0 pb-1">
+        <DesktopAgentTaskMetaLine text={run.summary?.trim() || "Working"} active />
+      </section>
+    );
+  }
+
   const presentToolLabel = (toolName: string | null | undefined) => {
-    const normalized = (toolName ?? "").trim().toLowerCase();
+    const raw = (toolName ?? "").trim();
+    const normalized = raw.toLowerCase();
     if (!normalized) return "Tool";
+    // MCP tools (`mcp__<server>__<tool>`) must resolve before the fuzzy includes
+    // matches below, or names like `mcp__tavily__tavily_search` show as "Search".
+    if (normalized.startsWith("mcp__")) {
+      const [, server, ...toolParts] = raw.split("__");
+      const tool = toolParts.join("__");
+      return server && tool ? `${server} · ${tool}` : "MCP";
+    }
     if (normalized.includes("bash") || normalized.includes("terminal") || normalized === "shell") {
       return "Bash";
     }
@@ -348,7 +397,6 @@ function AgentRunPanel({ run }: { run?: ApiAgentRun }) {
     if (normalized.includes("read")) return "Read";
     if (normalized.includes("write")) return "Write";
     if (normalized.includes("browser")) return "Browser";
-    if (normalized.startsWith("mcp__")) return "MCP";
     return normalized.charAt(0).toUpperCase() + normalized.slice(1);
   };
 
@@ -569,6 +617,15 @@ function fileKey(file: File) {
   return `${file.name}:${file.size}:${file.lastModified}`;
 }
 
+// Meta persisted with a local (sidecar) run's user message. Only durable fields
+// go to the server — previewUrl is a session-scoped objectURL and must not leak.
+function toSyncAttachmentsMeta(
+  meta?: MessageAttachmentMeta[],
+): Array<{ fileName: string; fileType?: string; fileSize?: number }> | undefined {
+  if (!meta || meta.length === 0) return undefined;
+  return meta.map(({ fileName, fileType, fileSize }) => ({ fileName, fileType, fileSize }));
+}
+
 function IconActionButton({
   title,
   onClick,
@@ -707,7 +764,7 @@ function groupMessagesByRound(messages: Message[]): MessageRoundGroup[] {
   return groups;
 }
 
-function MessageBubble({
+function MessageBubbleImpl({
   message,
   isStreaming,
   canEdit,
@@ -718,6 +775,7 @@ function MessageBubble({
   onDelete,
   assistantWidth,
   userMaxWidth,
+  knownCommands,
 }: {
   message: Message;
   isStreaming: boolean;
@@ -729,6 +787,7 @@ function MessageBubble({
   onDelete: () => void;
   assistantWidth: string;
   userMaxWidth: string;
+  knownCommands?: Map<string, SlashCommandType>;
 }) {
   const isAssistant = message.role === "assistant";
   const isMessageStreaming = isStreaming;
@@ -822,19 +881,41 @@ function MessageBubble({
             <DesktopCitationList citations={message.citations} content={displayContent} />
           </div>
         ) : !isAssistant ? (
-          message.content?.trim() ? (
-            <p
-              className="text-sm"
-              style={{
-                whiteSpace: "pre-wrap",
-                overflowWrap: "anywhere",
-                wordBreak: "break-word",
-                maxWidth: "100%",
-              }}
-            >
-              {message.content}
-            </p>
-          ) : null
+          (() => {
+            // A user message may carry a slash command token (`/web-access …`) at
+            // any token boundary. It stays in the stored content so it survives
+            // reload; we render it inline, in place, as a typed chip — but only
+            // when it maps to a *known* skill/MCP, so ordinary text containing
+            // "/" is left untouched.
+            const content = message.content || "";
+            const token = knownCommands ? findKnownSlashToken(content, knownCommands) : null;
+            if (!token && !content.trim()) return null;
+            const ChipIcon = token ? SLASH_ICONS[token.type] : null;
+            return (
+              <p
+                className="text-sm"
+                style={{
+                  whiteSpace: "pre-wrap",
+                  overflowWrap: "anywhere",
+                  wordBreak: "break-word",
+                  maxWidth: "100%",
+                }}
+              >
+                {token && ChipIcon ? (
+                  <>
+                    {content.slice(0, token.start)}
+                    <span className="font-medium text-blue-500">
+                      <ChipIcon size={14} className="mr-1 inline-block align-[-2px]" />
+                      {content.slice(token.start, token.end)}
+                    </span>
+                    {content.slice(token.end)}
+                  </>
+                ) : (
+                  content
+                )}
+              </p>
+            );
+          })()
         ) : null}
         {isFlatAgentAssistant &&
           isMessageStreaming &&
@@ -858,6 +939,24 @@ function MessageBubble({
     </div>
   );
 }
+
+// Memoized: during streaming, the messages array changes on every token, which
+// re-renders the list. Message updates use `.map` that returns the SAME object for
+// unchanged rows, so a reference check on `message` lets every non-streaming bubble
+// bail out — only the streaming message re-renders. Callbacks are ignored (stable
+// per message); all render-affecting scalar props are compared.
+const MessageBubble = memo(
+  MessageBubbleImpl,
+  (prev, next) =>
+    prev.message === next.message &&
+    prev.isStreaming === next.isStreaming &&
+    prev.canEdit === next.canEdit &&
+    prev.canRetry === next.canRetry &&
+    prev.canDelete === next.canDelete &&
+    prev.assistantWidth === next.assistantWidth &&
+    prev.userMaxWidth === next.userMaxWidth &&
+    prev.knownCommands === next.knownCommands,
+);
 
 export function DesktopChatArea() {
   const ASSISTANT_BUBBLE_WIDTH = "92%";
@@ -899,6 +998,29 @@ export function DesktopChatArea() {
   const messageAnchorRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const [streamingAssistantId, setStreamingAssistantId] = useState<string | null>(null);
   const [fullAccessEnabled, setFullAccessEnabled] = useState(false);
+  const createConversation = useChatStore((state) => state.createConversation);
+  const openSettings = useDesktopShellStore((state) => state.openSettings);
+  const setActiveView = useDesktopShellStore((state) => state.setActiveView);
+  const [slashOpen, setSlashOpen] = useState(false);
+  const [slashQuery, setSlashQuery] = useState("");
+  const [slashIndex, setSlashIndex] = useState(0);
+  // The `/token` span (start = `/`, end = cursor) the panel is filtering on.
+  // Captured on input so a later panel click (which does not move the caret)
+  // still replaces the right slice.
+  const slashTokenRangeRef = useRef<{ start: number; end: number } | null>(null);
+  const [slashSkills, setSlashSkills] = useState<
+    Array<{ id: string; name: string; description: string }>
+  >([]);
+  const [slashMcps, setSlashMcps] = useState<Array<{ id: string; name: string; type: string }>>([]);
+  // Known skill/MCP command names with their type — drives the bubble chip and
+  // send-time slash resolution. Built-in commands are added separately where
+  // needed (highlight/send); they never persist into a stored message.
+  const knownSlashCommands = useMemo(() => {
+    const map = new Map<string, SlashCommandType>();
+    for (const s of slashSkills) map.set(s.name.toLowerCase(), "skill");
+    for (const m of slashMcps) map.set(m.name.toLowerCase(), "mcp");
+    return map;
+  }, [slashSkills, slashMcps]);
   const sidecarRun = useSidecarAgentRun();
   const prevSidecarBusyRef = useRef(false);
   useEffect(() => {
@@ -983,6 +1105,49 @@ export function DesktopChatArea() {
   useEffect(() => {
     setPendingAttachments([]);
   }, [currentConversation?.id]);
+
+  // Prefetch enabled skills + MCP servers for the slash (/) command panel.
+  // currentConversation?.id and slashOpen are intentional re-fetch triggers.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: deps are triggers, not read in body
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const [discovered, disabled, mcpRes] = await Promise.all([
+          discoverSkills(),
+          skillsDisabledList(),
+          chatAreaApi.mcp.listServers(),
+        ]);
+        if (cancelled) return;
+        const disabledSet = new Set(disabled.map((n) => n.trim().toLowerCase()));
+        const servers = mcpRes.servers as Array<{
+          id: string;
+          name: string;
+          type?: string;
+          isEnabled: boolean;
+        }>;
+        setSlashSkills(
+          (discovered ?? [])
+            .filter((s) => !disabledSet.has(s.name.trim().toLowerCase()))
+            .map((s) => ({
+              id: s.path,
+              name: s.name,
+              description: collapseLine(s.description ?? ""),
+            })),
+        );
+        setSlashMcps(
+          servers
+            .filter((m) => m.isEnabled)
+            .map((m) => ({ id: m.id, name: m.name, type: m.type ?? "" })),
+        );
+      } catch {
+        // ignore — the panel still works with built-in commands only
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentConversation?.id, slashOpen]);
 
   useEffect(() => {
     if (!input.trim()) {
@@ -1079,17 +1244,224 @@ export function DesktopChatArea() {
     }
   };
 
+  const runNewConversation = () => {
+    const state = useChatStore.getState();
+    const defaultChannel = getGlobalDefaultChannel(state.channels);
+    void createConversation(formatNewConversationTitle(), {
+      channelId: defaultChannel?.channelId ?? null,
+      modelId: defaultChannel?.modelId ?? null,
+    })
+      .then(() => setActiveView("chat"))
+      .catch(() => {});
+  };
+
+  // Plain consts (not memoized): recomputed each render, which is cheap and
+  // avoids stale closures over the latest store state inside the handlers.
+  const builtinCommands: Array<{ id: string; name: string; subtitle: string; run: () => void }> = [
+    {
+      id: "new-conversation",
+      name: getSlashLabel("slash.command.newConversation"),
+      subtitle: getSlashLabel("slash.command.newConversation.desc"),
+      run: runNewConversation,
+    },
+    {
+      id: "open-settings",
+      name: getSlashLabel("slash.command.openSettings"),
+      subtitle: getSlashLabel("slash.command.openSettings.desc"),
+      run: () => openSettings(),
+    },
+  ];
+
+  const buildSlashItems = (): Array<SlashPanelItem & { run?: () => void }> => {
+    if (!slashOpen) return [];
+    const q = slashQuery.toLowerCase();
+    const items: Array<SlashPanelItem & { run?: () => void }> = [];
+    const skillGroup = getSlashLabel("slash.group.skill");
+    for (const s of slashSkills) {
+      if (q && !s.name.toLowerCase().includes(q)) continue;
+      items.push({
+        type: "skill",
+        id: s.id,
+        name: s.name,
+        subtitle: s.description,
+        group: skillGroup,
+      });
+    }
+    const mcpGroup = getSlashLabel("slash.group.mcp");
+    for (const m of slashMcps) {
+      if (q && !m.name.toLowerCase().includes(q)) continue;
+      items.push({ type: "mcp", id: m.id, name: m.name, subtitle: m.type, group: mcpGroup });
+    }
+    const cmdGroup = getSlashLabel("slash.group.command");
+    for (const c of builtinCommands) {
+      if (q && !c.name.toLowerCase().includes(q)) continue;
+      items.push({
+        type: "command",
+        id: c.id,
+        name: c.name,
+        subtitle: c.subtitle,
+        group: cmdGroup,
+        run: c.run,
+      });
+    }
+    return items;
+  };
+  const slashItems = buildSlashItems();
+
+  // The `/<name>` token span to paint blue, anywhere in the input, but only when
+  // it matches a *recognized* command (enabled skill / enabled MCP server /
+  // built-in command id or name). Unrecognized `/xxx` is not highlighted. Reuses
+  // the slash data already fetched for the panel — no extra requests.
+  const slashHighlight: SlashHighlightRange | null = (() => {
+    const recognized = new Map(knownSlashCommands);
+    for (const c of builtinCommands) {
+      recognized.set(c.name.toLowerCase(), "command");
+      recognized.set(c.id.toLowerCase(), "command");
+    }
+    const token = findKnownSlashToken(input, recognized);
+    return token ? { start: token.start, len: token.end - token.start } : null;
+  })();
+
+  const handleInputChange = (value: string) => {
+    setInput(value);
+    // The textarea's selection is already updated when change fires, so the
+    // cursor position tells us which `/token` (if any) is being typed.
+    const cursor = inputRef.current?.selectionStart ?? value.length;
+    const token = findSlashTokenAtCursor(value, cursor);
+    if (token) {
+      slashTokenRangeRef.current = { start: token.start, end: cursor };
+      setSlashQuery(token.query);
+      setSlashIndex(0);
+      setSlashOpen(true);
+      return;
+    }
+    slashTokenRangeRef.current = null;
+    setSlashOpen(false);
+  };
+
+  const handleSlashSelect = (index: number) => {
+    const item = slashItems[index];
+    if (!item) return;
+    // Re-validate the captured `/token` span against the *current* input before
+    // splicing — a stale or shifted range (e.g. IME composition edge cases) must
+    // never eat user text. If invalid, re-derive from the caret; if that also
+    // fails, close the panel and leave the input untouched.
+    const stored = slashTokenRangeRef.current;
+    slashTokenRangeRef.current = null;
+    setSlashOpen(false);
+    let range =
+      stored &&
+      stored.start >= 0 &&
+      stored.end >= stored.start + 1 &&
+      stored.end <= input.length &&
+      input[stored.start] === "/" &&
+      !/\s/.test(input.slice(stored.start + 1, stored.end))
+        ? stored
+        : null;
+    if (!range) {
+      const cursor = inputRef.current?.selectionStart ?? input.length;
+      const token = findSlashTokenAtCursor(input, cursor);
+      if (token) range = { start: token.start, end: Math.min(cursor, input.length) };
+    }
+    if (!range) return;
+    if (item.type === "command") {
+      // Built-ins run immediately; only the typed `/token` is cleaned up, any
+      // other text the user already wrote stays.
+      const remainder = input.slice(0, range.start) + input.slice(range.end).replace(/^[ \t]/, "");
+      setInput(remainder.trim() ? remainder : "");
+      item.run?.();
+      return;
+    }
+    // Replace the typed `/token` in place — never wipe the rest of the input.
+    const insert = `/${item.name} `;
+    const next = input.slice(0, range.start) + insert + input.slice(range.end);
+    const caret = range.start + insert.length;
+    setInput(next);
+    queueMicrotask(() => {
+      const el = inputRef.current;
+      if (el) {
+        el.focus();
+        el.setSelectionRange(caret, caret);
+      }
+    });
+  };
+
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    const nativeEvent = event.nativeEvent;
+    const keyCode =
+      "keyCode" in nativeEvent ? (nativeEvent.keyCode as number | undefined) : undefined;
+    const composing = nativeEvent.isComposing || keyCode === 229;
+
+    if (slashOpen && !composing && slashItems.length > 0) {
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        setSlashIndex((i) => (i + 1) % slashItems.length);
+        return;
+      }
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        setSlashIndex((i) => (i - 1 + slashItems.length) % slashItems.length);
+        return;
+      }
+      if (event.key === "Enter" || event.key === "Tab") {
+        event.preventDefault();
+        handleSlashSelect(slashIndex);
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setSlashOpen(false);
+        return;
+      }
+    }
+
     if (event.key === "Enter" && !event.shiftKey) {
-      const nativeEvent = event.nativeEvent;
-      const keyCode =
-        "keyCode" in nativeEvent ? (nativeEvent.keyCode as number | undefined) : undefined;
-      if (nativeEvent.isComposing || keyCode === 229) {
+      if (composing) {
         return;
       }
       event.preventDefault();
       void handleSend();
     }
+  };
+
+  // Resolve the first token-boundary `/skill` or `/mcp` slash command (anywhere
+  // in the text, one per message) into the model-facing instruction wrapper
+  // (`sendContent`), the content shown/stored in the user bubble
+  // (`displayContent`, keeps the `/token` in place for the chip), and a clean
+  // title seed. Shared by the send and edit-resend paths so both behave the same.
+  const resolveSkillMcpSlash = (
+    text: string,
+  ): {
+    sendContent: string;
+    displayContent: string;
+    titleContent: string;
+    // Canonical name of the invoked MCP server (undefined for skills/no token);
+    // startRun uses it to connect that single server instead of the full roster.
+    targetMcpServer?: string;
+  } => {
+    const token = findKnownSlashToken(text, knownSlashCommands);
+    if (!token) {
+      return { sendContent: text, displayContent: text, titleContent: text };
+    }
+    const canonicalName =
+      token.type === "skill"
+        ? (slashSkills.find((s) => s.name.toLowerCase() === token.name.toLowerCase())?.name ??
+          token.name)
+        : (slashMcps.find((m) => m.name.toLowerCase() === token.name.toLowerCase())?.name ??
+          token.name);
+    const rest = stripSlashToken(text, token);
+    const instructionKey =
+      token.type === "skill" ? "slash.instruction.skill" : "slash.instruction.mcp";
+    const sendContent = getSlashLabel(instructionKey)
+      .replace("{name}", canonicalName)
+      .replace("{rest}", rest)
+      .trimEnd();
+    return {
+      sendContent,
+      displayContent: text,
+      titleContent: rest || canonicalName,
+      targetMcpServer: token.type === "mcp" ? canonicalName : undefined,
+    };
   };
 
   const handleSend = async () => {
@@ -1106,11 +1478,40 @@ export function DesktopChatArea() {
     const conversationId = currentConversation.id;
     const mode = composerMode;
     const trimmed = input.trim();
-    const effectiveContent = trimmed.length > 0 ? trimmed : "";
+
+    // Built-in slash commands (e.g. /新会话) run immediately and abort the send,
+    // matching the same any-position token-boundary rule as skills/MCP.
+    // Skill/MCP commands resolve into the instruction wrapper below.
+    // Recognize both name and id, matching the highlight's `recognized` map — a
+    // token painted blue in the input must also be acted on at send time.
+    const builtinNames = new Map<string, SlashCommandType>();
+    for (const c of builtinCommands) {
+      builtinNames.set(c.name.toLowerCase(), "command");
+      builtinNames.set(c.id.toLowerCase(), "command");
+    }
+    const builtinToken = findKnownSlashToken(trimmed, builtinNames);
+    if (builtinToken) {
+      const typed = builtinToken.name.toLowerCase();
+      const cmd = builtinCommands.find(
+        (c) => c.name.toLowerCase() === typed || c.id.toLowerCase() === typed,
+      );
+      if (cmd) {
+        cmd.run();
+        setInput("");
+        setSlashOpen(false);
+        return;
+      }
+    }
+    // `sendContent` is what we transmit to the model (may carry a strong skill
+    // instruction); `displayContent` is what the user's bubble shows/stores
+    // (their request with the normalized `/token` preserved for the chip).
+    const { sendContent, displayContent, titleContent, targetMcpServer } =
+      resolveSkillMcpSlash(trimmed);
+
     const files = pendingAttachments;
     const autoTitleSeed =
-      trimmed.length > 0
-        ? trimmed
+      titleContent.length > 0
+        ? titleContent
         : files.length > 0
           ? `Attachments: ${files.map((file) => file.name).join(", ")}`
           : "";
@@ -1148,7 +1549,7 @@ export function DesktopChatArea() {
         id: userMessageId,
         conversationId,
         role: "user",
-        content: effectiveContent,
+        content: displayContent,
         mode,
         attachmentsMeta: localAttachmentMeta.length > 0 ? localAttachmentMeta : undefined,
         createdAt: new Date(),
@@ -1171,6 +1572,7 @@ export function DesktopChatArea() {
       });
       pendingScrollTargetRef.current = { type: "message", id: userMessageId };
       setInput("");
+      setSlashOpen(false);
       setLoading(true);
       setStreaming(true);
       setStreamingAssistantId(assistantMessageId);
@@ -1229,13 +1631,16 @@ export function DesktopChatArea() {
           channelId: currentConversation.channelId,
           modelId: effectiveModel.modelId,
           assistantMessageId,
-          prompt: effectiveContent,
+          prompt: sendContent,
+          displayContent,
           permissionMode: fullAccessEnabled ? "full-access" : "default",
           systemPrompt: globalSystemPrompt,
           webSearchEnabled: forceWebSearch,
           tavilyApiKey,
+          targetMcpServer,
           conversationHistory: conversationHistory.length > 0 ? conversationHistory : undefined,
           attachments: attachmentParts,
+          attachmentsMeta: toSyncAttachmentsMeta(localAttachmentMeta),
         });
 
         setLoading(false);
@@ -1275,7 +1680,7 @@ export function DesktopChatArea() {
 
       const prepared = await chatAreaApi.messages.chatPrepare({
         conversationId,
-        content: effectiveContent,
+        content: sendContent,
         attachments: attachmentIds,
       });
 
@@ -1450,17 +1855,26 @@ export function DesktopChatArea() {
             // ignore
           }
         }
+        // Re-parse the original message so a retried `/server` (or `/skill`)
+        // invocation behaves exactly like the original send: the model gets the
+        // instruction wrapper, the run targets that single MCP server, and the
+        // bubble/persisted content keeps the raw `/token` text.
+        const { sendContent: retrySendContent, targetMcpServer: retryTargetMcpServer } =
+          resolveSkillMcpSlash(userMessage.content);
         await sidecarRun.startRun({
           conversationId: currentConversation.id,
           channelId: currentConversation.channelId!,
           modelId: effectiveModel.ok ? effectiveModel.modelId : "",
           assistantMessageId: messageId,
-          prompt: userMessage.content,
+          prompt: retrySendContent,
+          displayContent: userMessage.content,
           permissionMode: fullAccessEnabled ? "full-access" : "default",
           systemPrompt: retrySystemPrompt,
           webSearchEnabled: forceWebSearch,
           tavilyApiKey: retryTavilyApiKey,
+          targetMcpServer: retryTargetMcpServer,
           conversationHistory: conversationHistory.length > 0 ? conversationHistory : undefined,
+          attachmentsMeta: toSyncAttachmentsMeta(userMessage.attachmentsMeta),
         });
         setLoading(false);
       } else {
@@ -1518,6 +1932,15 @@ export function DesktopChatArea() {
     const nextContent = editingContent.trim();
     if (!currentConversation || !nextContent) return;
 
+    // Resolve slash commands just like a fresh send, so editing a `/web-access …`
+    // message re-triggers the skill (wrapped prompt) instead of sending the raw
+    // slash text — which would run tools but yield no final answer.
+    const {
+      sendContent: editSendContent,
+      displayContent: editDisplayContent,
+      targetMcpServer: editTargetMcpServer,
+    } = resolveSkillMcpSlash(nextContent);
+
     const editable = getEditableMessageRound(messageId);
     if (!editable) {
       notifyWarning("当前消息不可编辑", "这条用户消息后面没有对应的助手回复，无法重新编辑并生成。");
@@ -1533,7 +1956,7 @@ export function DesktopChatArea() {
     setStreaming(true);
     setStreamingAssistantId(assistantMessageId);
     setError(null);
-    useChatStore.getState().updateMessage(userMessage.id, { content: nextContent });
+    useChatStore.getState().updateMessage(userMessage.id, { content: editDisplayContent });
     if (existingAssistantMessage) {
       useChatStore.getState().updateMessage(existingAssistantMessage.id, {
         content: "",
@@ -1612,12 +2035,17 @@ export function DesktopChatArea() {
           channelId: currentConversation.channelId!,
           modelId: effectiveModel.ok ? effectiveModel.modelId : "",
           assistantMessageId,
-          prompt: nextContent,
+          prompt: editSendContent,
+          displayContent: editDisplayContent,
+          existingUserMessageId: userMessage.id,
+          existingAssistantMessageId: existingAssistantMessage?.id,
           permissionMode: fullAccessEnabled ? "full-access" : "default",
           systemPrompt: editSystemPrompt,
           webSearchEnabled: forceWebSearch,
           tavilyApiKey: editTavilyApiKey,
+          targetMcpServer: editTargetMcpServer,
           conversationHistory: conversationHistory.length > 0 ? conversationHistory : undefined,
+          attachmentsMeta: toSyncAttachmentsMeta(userMessage.attachmentsMeta),
         });
         setLoading(false);
       } else {
@@ -1725,9 +2153,21 @@ export function DesktopChatArea() {
       )}
     >
       {(() => {
-        const isMessageStreaming = Boolean(
+        // "In progress" must be derived from the globally-persisted agentRun.status
+        // (partial/running) rather than only the local streamingAssistantId. The
+        // local id is reset whenever the user switches conversations / the area
+        // unmounts, which previously made an active run look frozen on return.
+        // Reading agentRun.status restores the live appearance on remount because
+        // the global chat store (with messageCache fallback) keeps writing it.
+        const isInProgress =
+          message.agentRun?.status === "partial" || message.agentRun?.status === "running";
+        // Keep the local-streaming fallback for chat-mode messages, which have no
+        // agentRun. It also covers the brief window after sending an agent message
+        // but before the first agent_event materializes agentRun.
+        const isLocallyStreaming = Boolean(
           isStreaming && streamingAssistantId && message.id === streamingAssistantId,
         );
+        const isMessageStreaming = isInProgress || isLocallyStreaming;
 
         return (
           <MessageBubble
@@ -1743,6 +2183,7 @@ export function DesktopChatArea() {
             onDelete={() => void handleDeleteMessage(message.id)}
             assistantWidth={ASSISTANT_BUBBLE_WIDTH}
             userMaxWidth={USER_BUBBLE_MAX_WIDTH}
+            knownCommands={knownSlashCommands}
           />
         );
       })()}
@@ -1846,8 +2287,16 @@ export function DesktopChatArea() {
         />
         <DesktopComposer
           value={input}
-          onChange={setInput}
+          onChange={handleInputChange}
           onKeyDown={handleKeyDown}
+          slashHighlight={slashHighlight}
+          slashOpen={slashOpen}
+          slashItems={slashItems}
+          slashIndex={slashIndex}
+          slashEmptyLabel={getSlashLabel("slash.empty")}
+          onSlashSelect={handleSlashSelect}
+          onSlashHover={setSlashIndex}
+          onSlashClose={() => setSlashOpen(false)}
           placeholder={placeholder}
           attachments={pendingAttachments}
           disabled={isUploading}

@@ -9,7 +9,7 @@ import {
   Settings,
   Trash2,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import {
   Badge,
   Button,
@@ -30,13 +30,8 @@ import {
   ScrollArea,
 } from "ui";
 import { getDesktopBackendBase } from "../../lib/backendBase";
-import {
-  hideNotification,
-  notifyError,
-  notifyErrorOnce,
-  notifySuccess,
-} from "../../lib/notify";
 import { getGlobalDefaultChannel } from "../../lib/defaultChannel";
+import { hideNotification, notifyError, notifyErrorOnce, notifySuccess } from "../../lib/notify";
 import { useAuthStore } from "../../stores/authStore";
 import { BACKEND_UP_EVENT, useBackendStatusStore } from "../../stores/backendStatusStore";
 import { useChatStore } from "../../stores/chatStore";
@@ -80,88 +75,101 @@ function groupByCreatedAt(
   return groups;
 }
 
-function ConversationRow({
-  conversation,
-  isActive,
-  onSelect,
-  onRename,
-  onTogglePin,
-  onDelete,
-  pinLabel,
-}: {
-  conversation: Conversation;
-  isActive: boolean;
-  onSelect: () => void;
-  onRename: () => void;
-  onTogglePin: () => void;
-  onDelete: () => void;
-  pinLabel: string;
-}) {
-  return (
-    // biome-ignore lint/a11y/useSemanticElements: cannot use <button> due to nested interactive menu controls
-    <div
-      role="button"
-      tabIndex={0}
-      onClick={onSelect}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          onSelect();
-        }
-      }}
-      className={cn(
-        "group flex cursor-pointer items-center justify-between rounded-[10px] border border-transparent px-3 py-[7px] text-left text-sm transition-colors duration-100 titlebar-no-drag",
-        isActive
-          ? "bg-foreground/[0.08] text-foreground shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]"
-          : "text-foreground/70 hover:bg-foreground/[0.04] hover:text-foreground",
-      )}
-    >
-      <span className="min-w-0 flex-1 truncate">{conversation.title}</span>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild onClick={(event) => event.stopPropagation()}>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            className="h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100"
-          >
-            <MoreHorizontal size={13} />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-36">
-          <DropdownMenuItem
-            onClick={(event) => {
-              event.stopPropagation();
-              onRename();
-            }}
-          >
-            <Pencil size={14} />
-            重命名
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            onClick={(event) => {
-              event.stopPropagation();
-              onTogglePin();
-            }}
-          >
-            <Pin size={14} />
-            {pinLabel}
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            className="text-destructive focus:text-destructive"
-            onClick={(event) => {
-              event.stopPropagation();
-              window.setTimeout(() => onDelete(), 0);
-            }}
-          >
-            <Trash2 size={14} />
-            删除
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </div>
-  );
-}
+// Memoized: switching conversations changes `currentConversation`, which re-renders
+// the sidebar. Without this, every row (each mounting a Radix DropdownMenu) would
+// re-render — the dominant cost of a conversation switch. The comparator ignores the
+// callback props (they behave identically for a given conversation) and only reacts
+// to the fields that actually change what a row renders.
+const ConversationRow = memo(
+  function ConversationRow({
+    conversation,
+    isActive,
+    onSelect,
+    onRename,
+    onTogglePin,
+    onDelete,
+    pinLabel,
+  }: {
+    conversation: Conversation;
+    isActive: boolean;
+    onSelect: () => void;
+    onRename: () => void;
+    onTogglePin: () => void;
+    onDelete: () => void;
+    pinLabel: string;
+  }) {
+    return (
+      // biome-ignore lint/a11y/useSemanticElements: cannot use <button> due to nested interactive menu controls
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={onSelect}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            onSelect();
+          }
+        }}
+        className={cn(
+          "group flex cursor-pointer items-center justify-between rounded-[10px] border border-transparent px-3 py-[7px] text-left text-sm transition-colors duration-100 titlebar-no-drag",
+          isActive
+            ? "bg-foreground/[0.08] text-foreground shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]"
+            : "text-foreground/70 hover:bg-foreground/[0.04] hover:text-foreground",
+        )}
+      >
+        <span className="min-w-0 flex-1 truncate">{conversation.title}</span>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild onClick={(event) => event.stopPropagation()}>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100"
+            >
+              <MoreHorizontal size={13} />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-36">
+            <DropdownMenuItem
+              onClick={(event) => {
+                event.stopPropagation();
+                onRename();
+              }}
+            >
+              <Pencil size={14} />
+              重命名
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={(event) => {
+                event.stopPropagation();
+                onTogglePin();
+              }}
+            >
+              <Pin size={14} />
+              {pinLabel}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              className="text-destructive focus:text-destructive"
+              onClick={(event) => {
+                event.stopPropagation();
+                window.setTimeout(() => onDelete(), 0);
+              }}
+            >
+              <Trash2 size={14} />
+              删除
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+    );
+  },
+  (prev, next) =>
+    prev.isActive === next.isActive &&
+    prev.pinLabel === next.pinLabel &&
+    prev.conversation.id === next.conversation.id &&
+    prev.conversation.title === next.conversation.title &&
+    prev.conversation.isPinned === next.conversation.isPinned,
+);
 
 export function DesktopLeftSidebar() {
   const [query, setQuery] = useState("");
@@ -211,23 +219,18 @@ export function DesktopLeftSidebar() {
   }, [conversations, query]);
 
   const handleCreateConversation = async () => {
-    const state = useChatStore.getState();
-    const currentConv = state.currentConversation;
-    if (currentConv && /^新会话 \d{2}-\d{2} \d{2}:\d{2}$/.test(currentConv.title)) {
-      const hasMessages = state.messages.some(
-        (m) => m.conversationId === currentConv.id && !m.id.startsWith("draft-"),
-      );
-      if (!hasMessages) return;
-    }
     setCreating(true);
     try {
+      const prevId = useChatStore.getState().currentConversation?.id;
       const defaultChannel = getGlobalDefaultChannel(useChatStore.getState().channels);
-      await createConversation(formatNewConversationTitle(), {
+      const conv = await createConversation(formatNewConversationTitle(), {
         channelId: defaultChannel?.channelId ?? null,
         modelId: defaultChannel?.modelId ?? null,
       });
       setActiveView("chat");
-      notifySuccess("已创建", "新会话已创建");
+      if (conv && conv.id !== prevId) {
+        notifySuccess("已创建", "新会话已创建");
+      }
     } catch (error) {
       notifyError("创建失败", error instanceof Error ? error.message : "无法创建会话");
     } finally {
@@ -501,7 +504,9 @@ export function DesktopLeftSidebar() {
               取消
             </Button>
             <Button
-              ref={(el) => { queueMicrotask(() => el?.focus()); }}
+              ref={(el) => {
+                queueMicrotask(() => el?.focus());
+              }}
               variant="destructive"
               onClick={() => {
                 const target = pendingDelete;

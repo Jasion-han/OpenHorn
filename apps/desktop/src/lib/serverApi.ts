@@ -1,3 +1,5 @@
+import { useBackendStatusStore } from "../stores/backendStatusStore";
+import type { ApiUser, LoginInput, RegisterInput } from "../types/auth";
 import type {
   ApiAgentCheckResult,
   ApiChannel,
@@ -9,8 +11,6 @@ import type {
   SendMessageInput,
   UpdateConversationInput,
 } from "../types/chat";
-import type { ApiUser, LoginInput, RegisterInput } from "../types/auth";
-import { useBackendStatusStore } from "../stores/backendStatusStore";
 import { getDesktopBackendBase } from "./backendBase";
 
 export const UNAUTHORIZED_EVENT = "openhorn:unauthorized";
@@ -57,6 +57,13 @@ export interface ServerApi {
       assistantContent: string;
       model?: string;
       agentRun?: unknown;
+      // Local-run attachments never reach the server as files; this metadata is
+      // stored so the user's bubble keeps its attachment chips across reloads.
+      attachmentsMeta?: Array<{ fileName: string; fileType?: string; fileSize?: number }>;
+      // When both are provided, the existing round is updated in place instead of
+      // inserting a new pair (edit-and-resend), preventing duplicate rounds.
+      userMessageId?: string;
+      assistantMessageId?: string;
     }) => Promise<{ userMessageId: string; assistantMessageId: string }>;
     chatPrepare: (data: {
       conversationId: string;
@@ -354,15 +361,19 @@ export function createServerApi(options?: { baseUrl?: string; fetch?: FetchLike 
         );
       },
       edit: async (id, content, options) => {
-        return requestWithBackendStatus(fetchImpl, `${baseUrl}/messages/${encodeURIComponent(id)}/edit`, {
-          method: "POST",
-          credentials: "include",
-          signal: options?.signal,
-          headers: {
-            "Content-Type": "application/json",
+        return requestWithBackendStatus(
+          fetchImpl,
+          `${baseUrl}/messages/${encodeURIComponent(id)}/edit`,
+          {
+            method: "POST",
+            credentials: "include",
+            signal: options?.signal,
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ content }),
           },
-          body: JSON.stringify({ content }),
-        });
+        );
       },
       syncSidecar: (data) =>
         fetchJson(fetchImpl, baseUrl, "/messages/sync-sidecar", {
@@ -468,6 +479,5 @@ export function createServerApi(options?: { baseUrl?: string; fetch?: FetchLike 
           method: "POST",
         }),
     },
-
   };
 }

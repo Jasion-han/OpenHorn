@@ -2,10 +2,36 @@ import { useRef, useState } from "react";
 import type { AttachmentPart } from "shared/types";
 import { createServerApi } from "../lib/serverApi";
 import type { SidecarApprovalRequest } from "../lib/sidecarClient";
+import { discoverSkills, skillsDisabledList } from "../lib/tauriBridge";
 import { useChatStore } from "../stores/chatStore";
 import { useSidecarStore } from "../stores/sidecarStore";
 
 const api = createServerApi();
+
+/** Skill metadata sent with a run — read in place from `path` (Claude-style). */
+interface SkillMeta {
+  name: string;
+  description: string;
+  path: string;
+}
+
+/**
+ * Resolve the user's enabled skills to send with a run. Skills are discovered
+ * as real folders across the known locations (cc-switch, Claude Code, Codex,
+ * Gemini) minus the user-disabled set, and read IN PLACE — the run carries each
+ * skill's name/description + absolute folder path; nothing is copied.
+ */
+async function resolveEnabledSkills(): Promise<SkillMeta[]> {
+  const [discovered, disabled] = await Promise.all([discoverSkills(), skillsDisabledList()]);
+  const disabledSet = new Set(disabled.map((n) => n.trim().toLowerCase()));
+  return (discovered ?? [])
+    .filter((s) => !disabledSet.has(s.name.trim().toLowerCase()))
+    .map((s) => ({
+      name: s.name,
+      description: (s.description ?? "").replace(/\s+/g, " ").trim(),
+      path: s.path,
+    }));
+}
 
 /**
  * Identity of the sidecar agent run that is currently bound to a
@@ -25,13 +51,28 @@ export interface SidecarAgentRunInput {
   modelId: string;
   assistantMessageId: string;
   prompt: string;
+  // What the user's bubble should show/store. `prompt` may carry a slash-command
+  // instruction wrapper for the model; this is the clean typed content (with the
+  // `/skill` token preserved) so reloaded conversations match what was sent.
+  displayContent?: string;
+  // Edit-and-resend: when both point at existing persisted rows, the round is
+  // updated in place instead of inserting a new pair (avoids duplicate rounds).
+  existingUserMessageId?: string;
+  existingAssistantMessageId?: string;
   sdkSessionId?: string;
   permissionMode?: "default" | "full-access";
   systemPrompt?: string;
   webSearchEnabled?: boolean;
   tavilyApiKey?: string;
+  // Set when the user invoked an MCP server via `/server`: the run connects to
+  // that single server only (case-insensitive name match) instead of the full
+  // enabled roster — faster startup and its tools can't fall past the tool cap.
+  targetMcpServer?: string;
   conversationHistory?: Array<{ role: "user" | "assistant"; content: string }>;
   attachments?: AttachmentPart[];
+  // Metadata of the local attachments (name/type/size only — the files stay on
+  // this machine), persisted with the user message so its chips survive reloads.
+  attachmentsMeta?: Array<{ fileName: string; fileType?: string; fileSize?: number }>;
 }
 
 export interface SidecarAgentRunApi {
@@ -87,6 +128,11 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
   const [rollbackError, setRollbackError] = useState<string | null>(null);
   const [sdkSessionId, setSdkSessionId] = useState<string | null>(null);
   const runRef = useRef<ActiveSidecarRun | null>(null);
+  // Guards the one-shot persistence of a run's user+assistant messages. A run
+  // ends through exactly one of done / onError, but error events can interleave;
+  // this ref ensures syncSidecar (an insert, not an upsert) runs at most once
+  // per run so we never duplicate the round. Reset at the start of every run.
+  const persistedRef = useRef(false);
 
   const syncRun = (run: ActiveSidecarRun | null) => {
     if (run === null && runRef.current) {
@@ -121,6 +167,82 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
     setLastFinishedRunId(null);
     setRollbackError(null);
 
+    // Fresh persistence guard for this run.
+    persistedRef.current = false;
+
+    // Mark this run's message ids so that navigating away and back mid-run keeps
+    // the live/streaming copy instead of overwriting it with the (stale) DB row —
+    // matters for in-flight edits, which re-use the persisted ids. Cleared once
+    // the run persists (server row becomes fresh) in persistOnce.
+    const activeRunIds = [
+      input.existingUserMessageId,
+      input.existingAssistantMessageId,
+      input.assistantMessageId,
+    ].filter((id): id is string => Boolean(id));
+    useChatStore.getState().markMessagesActive(activeRunIds);
+
+    // One-shot persistence of the user message + assistant result. Called from
+    // the done path (final text, possibly empty) and from every failure path
+    // (error / onError / early returns), so that even a failed or empty-output
+    // run keeps the user's message — and its failure state — in the DB. Idempotent
+    // via persistedRef; syncSidecar inserts (or, for edits, updates) both rows so
+    // it must run at most once.
+    const persistOnce = async (assistantContent: string, agentRun: unknown, model: string) => {
+      if (persistedRef.current) return;
+      persistedRef.current = true;
+      try {
+        // Only reuse ids that are already persisted (real server ids). Optimistic
+        // temp-/draft- ids don't exist server-side, so fall back to insert.
+        const isPersistedId = (id?: string) =>
+          Boolean(id && !id.startsWith("temp-") && !id.startsWith("draft-"));
+        const updateInPlace =
+          isPersistedId(input.existingUserMessageId) &&
+          isPersistedId(input.existingAssistantMessageId);
+        const res = await api.messages.syncSidecar({
+          conversationId: input.conversationId,
+          userContent: input.displayContent ?? input.prompt,
+          assistantContent,
+          model,
+          agentRun: agentRun ?? undefined,
+          attachmentsMeta: input.attachmentsMeta,
+          ...(updateInPlace
+            ? {
+                userMessageId: input.existingUserMessageId,
+                assistantMessageId: input.existingAssistantMessageId,
+              }
+            : {}),
+        });
+        // Align the optimistic draft ids with the persisted ids so revisiting
+        // the conversation doesn't duplicate the round.
+        if (res?.userMessageId && res?.assistantMessageId) {
+          useChatStore.getState().reconcileSidecarMessageIds({
+            conversationId: input.conversationId,
+            assistantDraftId: input.assistantMessageId,
+            userMessageId: res.userMessageId,
+            assistantMessageId: res.assistantMessageId,
+          });
+        }
+      } catch {
+        // Best-effort: a persistence failure must not affect the UI.
+      } finally {
+        // Server row is now fresh (or we tried) — the stale-DB guard is no longer
+        // needed for these ids.
+        useChatStore.getState().unmarkMessagesActive(activeRunIds);
+      }
+    };
+
+    // Persist a failed run, preferring the assistant message's current content +
+    // failure-state agentRun (applyStreamEvent error sets status "failed"), and
+    // falling back to a minimal failure object when the message isn't available.
+    const persistFailure = (message: string, model: string) => {
+      const msg = useChatStore.getState().findMessageAnywhere(input.assistantMessageId);
+      void persistOnce(
+        msg?.content || "",
+        msg?.agentRun ?? { status: "failed", summary: message, error: message, steps: [] },
+        model,
+      );
+    };
+
     let credentials: {
       apiKey: string;
       baseUrl: string | null;
@@ -138,6 +260,7 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
         type: "error",
         message,
       });
+      persistFailure(message, input.modelId);
       return;
     }
 
@@ -149,6 +272,7 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
         type: "error",
         message,
       });
+      persistFailure(message, input.modelId || credentials.modelId);
       return;
     }
 
@@ -171,8 +295,38 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
           map[server.name] = { type: server.type, ...(server.config || {}) };
         }
         if (Object.keys(map).length > 0) mcpServers = map;
+        // Slash-targeted run: keep only the invoked server. If the name no
+        // longer matches an enabled server (e.g. it was disabled meanwhile),
+        // fall back to the full roster rather than silently dropping MCP.
+        const target = input.targetMcpServer?.trim().toLowerCase();
+        if (mcpServers && target) {
+          const hit = Object.entries(mcpServers).find(([name]) => name.toLowerCase() === target);
+          if (hit) mcpServers = { [hit[0]]: hit[1] };
+        }
       } catch {
         // MCP is additive; ignore load failures and run without it.
+      }
+    }
+
+    // Re-sync the workspace to the sidecar before EVERY run (for the agent's cwd
+    // and MCP). The sidecar may have restarted and lost it, diverging from the
+    // desktop's value. Best-effort — the run continues regardless.
+    try {
+      await useSidecarStore.getState().ensureWorkspace();
+    } catch {
+      // ignore; the sidecar keeps whatever workspace it already has
+    }
+
+    // Enabled Agent Skills — read IN PLACE from their real folders (Claude-style):
+    // the run carries each skill's name/description + absolute folder path;
+    // nothing is copied and no workspace is required. Best-effort, never blocks.
+    let skillMetas: SkillMeta[] | undefined;
+    if (credentials.protocol === "anthropic" || credentials.protocol === "openai") {
+      try {
+        const resolved = await resolveEnabledSkills();
+        if (resolved.length > 0) skillMetas = resolved;
+      } catch {
+        // Skills are additive; ignore discovery failures and run without.
       }
     }
 
@@ -190,6 +344,7 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
         webSearchEnabled: input.webSearchEnabled,
         tavilyApiKey: input.tavilyApiKey,
         mcpServers,
+        skills: skillMetas,
         conversationHistory: input.conversationHistory,
         attachments: input.attachments,
         onSdkSessionId: (sessionId) => {
@@ -240,29 +395,14 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
                 .getState()
                 .findMessageAnywhere(input.assistantMessageId);
               const assistantContent = assistantMsg?.content || "";
-              if (assistantContent) {
-                void api.messages
-                  .syncSidecar({
-                    conversationId: input.conversationId,
-                    userContent: input.prompt,
-                    assistantContent,
-                    model: input.modelId || credentials.modelId,
-                    agentRun: assistantMsg?.agentRun ?? undefined,
-                  })
-                  .then((res) => {
-                    // Align the optimistic draft ids with the persisted ids so
-                    // revisiting the conversation doesn't duplicate the round.
-                    if (res?.userMessageId && res?.assistantMessageId) {
-                      useChatStore.getState().reconcileSidecarMessageIds({
-                        conversationId: input.conversationId,
-                        assistantDraftId: input.assistantMessageId,
-                        userMessageId: res.userMessageId,
-                        assistantMessageId: res.assistantMessageId,
-                      });
-                    }
-                  })
-                  .catch(() => {});
-              }
+              // Persist even when the assistant produced no text, so an empty-output
+              // run still keeps the user's message. Deduped against onError via
+              // persistedRef.
+              void persistOnce(
+                assistantContent,
+                assistantMsg?.agentRun ?? undefined,
+                input.modelId || credentials.modelId,
+              );
               if (credentials.protocol !== "anthropic") {
                 setLastFinishedRunId(null);
               }
@@ -286,6 +426,9 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
             type: "error",
             message,
           });
+          // Keep the user's message (with the failure state) in the DB even
+          // though the run never produced a persistable assistant result.
+          persistFailure(message, input.modelId || credentials.modelId);
           syncRun(null);
           setIsBusy(false);
         },
@@ -302,6 +445,7 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
         type: "error",
         message,
       });
+      persistFailure(message, input.modelId || credentials.modelId);
       return;
     }
 

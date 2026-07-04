@@ -1,4 +1,14 @@
-import { ChevronDown, CornerDownLeft, Globe, Paperclip, ShieldOff, Square } from "lucide-react";
+import {
+  ChevronDown,
+  CornerDownLeft,
+  Globe,
+  Paperclip,
+  Plug,
+  ShieldOff,
+  Sparkles,
+  Square,
+  Terminal,
+} from "lucide-react";
 import type {
   ClipboardEvent,
   DragEvent,
@@ -10,6 +20,27 @@ import { Button, cn, Textarea, Tooltip, TooltipContent, TooltipTrigger } from "u
 import type { ChatMode } from "../../types/chat";
 import { DesktopAttachmentPreviewItem } from "./DesktopAttachmentPreviewItem";
 import { DesktopProviderLogo } from "./DesktopProviderLogo";
+
+export type SlashPanelItem = {
+  type: "skill" | "mcp" | "command";
+  id: string;
+  name: string;
+  subtitle: string;
+  group: string;
+};
+
+export const SLASH_ICONS = {
+  skill: Sparkles,
+  mcp: Plug,
+  command: Terminal,
+} as const;
+
+export type SlashHighlightRange = {
+  /** Index of the `/` in the input value. */
+  start: number;
+  /** Token length including the `/`. */
+  len: number;
+};
 
 const ACCEPT_FILES = "image/png,image/jpeg,image/webp,application/pdf,text/plain,text/markdown";
 
@@ -44,6 +75,14 @@ export function DesktopComposer({
   canSubmit,
   onStop,
   inputRef,
+  slashHighlight = null,
+  slashOpen = false,
+  slashItems = [],
+  slashIndex = 0,
+  slashEmptyLabel = "",
+  onSlashSelect,
+  onSlashHover,
+  onSlashClose,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -71,11 +110,44 @@ export function DesktopComposer({
   canSubmit: boolean;
   onStop: () => void | Promise<void>;
   inputRef?: RefObject<HTMLTextAreaElement | null>;
+  slashHighlight?: SlashHighlightRange | null;
+  slashOpen?: boolean;
+  slashItems?: SlashPanelItem[];
+  slashIndex?: number;
+  slashEmptyLabel?: string;
+  onSlashSelect?: (index: number) => void;
+  onSlashHover?: (index: number) => void;
+  onSlashClose?: () => void;
 }) {
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const modeMenuRef = useRef<HTMLDivElement>(null);
+  const slashContainerRef = useRef<HTMLDivElement>(null);
+  const slashPointerRef = useRef<{ x: number; y: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const highlightBackdropRef = useRef<HTMLDivElement>(null);
+
+  // Keep the highlight backdrop scrolled in lock-step with the textarea so the
+  // painted (colored) text stays aligned with the caret on multi-line input.
+  const syncBackdropScroll = (target: HTMLTextAreaElement) => {
+    const backdrop = highlightBackdropRef.current;
+    if (!backdrop) return;
+    backdrop.scrollTop = target.scrollTop;
+    backdrop.scrollLeft = target.scrollLeft;
+  };
+
+  // Clamp the highlighted token to the current value so a stale range from a
+  // just-shortened input never paints out of bounds.
+  const highlight =
+    slashHighlight && slashHighlight.len > 0 && slashHighlight.start < value.length
+      ? {
+          start: slashHighlight.start,
+          end: Math.min(slashHighlight.start + slashHighlight.len, value.length),
+        }
+      : null;
+  // A trailing newline in a pre-wrap block has no rendered height unless a glyph
+  // follows; append a zero-width space so the backdrop height matches the textarea.
+  const trailingGuard = value.endsWith("\n") ? "​" : "";
 
   const handleAppendAttachments = (files: File[] | FileList) => {
     const nextFiles = Array.from(files);
@@ -142,6 +214,28 @@ export function DesktopComposer({
     };
   }, [modeMenuOpen]);
 
+  useEffect(() => {
+    if (!slashOpen) return;
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!slashContainerRef.current?.contains(event.target as Node)) {
+        onSlashClose?.();
+      }
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+    };
+  }, [slashOpen, onSlashClose]);
+
+  useEffect(() => {
+    if (!slashOpen) return;
+    slashContainerRef.current
+      ?.querySelector(`[data-slash-index="${slashIndex}"]`)
+      ?.scrollIntoView({ block: "nearest" });
+  }, [slashOpen, slashIndex]);
+
   return (
     <div className="pt-2">
       {/* biome-ignore lint/a11y/noStaticElementInteractions: drag-and-drop container is mouse-only, inner controls are accessible */}
@@ -181,19 +275,109 @@ export function DesktopComposer({
           </div>
         )}
 
-        <div className="px-[15px] pb-2">
-          <Textarea
-            value={value}
-            ref={inputRef}
-            disabled={disabled}
-            onChange={(event) => onChange(event.target.value)}
-            onPaste={handlePaste}
-            onFocus={() => onInputFocus?.()}
-            placeholder={placeholder}
-            rows={1}
-            className="min-h-[36px] max-h-[160px] resize-none border-0 bg-transparent p-0 shadow-none placeholder:text-muted-foreground/70 focus-visible:ring-0 disabled:cursor-default disabled:opacity-100"
-            onKeyDown={onKeyDown}
-          />
+        <div ref={slashContainerRef} className="relative px-[15px] pb-2">
+          {slashOpen && (
+            <div className="absolute bottom-full left-0 right-0 z-30 mb-2 overflow-hidden rounded-[14px] border-[0.5px] border-border bg-popover/95 shadow-[0_16px_40px_rgba(15,23,42,0.18)] ring-1 ring-border/25 backdrop-blur-md">
+              {slashItems.length === 0 ? (
+                <div className="px-3 py-2.5 text-xs text-muted-foreground">{slashEmptyLabel}</div>
+              ) : (
+                <div className="max-h-[280px] overflow-y-auto py-1">
+                  {slashItems.map((item, index) => {
+                    const Icon = SLASH_ICONS[item.type];
+                    const prev = slashItems[index - 1];
+                    const showGroup = !prev || prev.group !== item.group;
+                    const active = index === slashIndex;
+                    return (
+                      <div key={`${item.type}:${item.id}`}>
+                        {showGroup && (
+                          <div className="px-3 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">
+                            {item.group}
+                          </div>
+                        )}
+                        <button
+                          type="button"
+                          data-slash-index={index}
+                          onClick={() => onSlashSelect?.(index)}
+                          // Hover selection must only follow real pointer movement; scrolling
+                          // under a stationary pointer redispatches synthetic mousemove events
+                          // with unchanged coordinates, which must not steal the selection.
+                          onMouseMove={(event) => {
+                            const last = slashPointerRef.current;
+                            const moved =
+                              !!last && (last.x !== event.clientX || last.y !== event.clientY);
+                            slashPointerRef.current = { x: event.clientX, y: event.clientY };
+                            if (!moved || index === slashIndex) return;
+                            onSlashHover?.(index);
+                          }}
+                          className={cn(
+                            "flex w-full items-center gap-2.5 px-3 py-1.5 text-left transition-colors",
+                            active
+                              ? "bg-blue-500/10 text-blue-600 dark:bg-blue-400/10 dark:text-blue-400"
+                              : "text-foreground/80 hover:bg-accent/60",
+                          )}
+                        >
+                          <Icon
+                            className={cn(
+                              "size-4 shrink-0",
+                              active ? "text-blue-600 dark:text-blue-400" : "text-muted-foreground",
+                            )}
+                          />
+                          <span className="shrink-0 truncate text-sm font-medium">{item.name}</span>
+                          {item.subtitle && (
+                            <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+                              {item.subtitle}
+                            </span>
+                          )}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+          {/* Highlight overlay: a backdrop div paints the text (with the /command
+              token in blue, wherever it sits) while the textarea on top stays
+              transparent but keeps a visible caret + native selection. Both layers
+              share identical box model + typography so the painted text aligns 1:1
+              with the caret. */}
+          <div className="relative">
+            <div
+              ref={highlightBackdropRef}
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-0 z-0 overflow-hidden whitespace-pre-wrap break-words p-0 text-sm leading-5 text-foreground"
+              style={{ overflowWrap: "break-word", wordBreak: "break-word" }}
+            >
+              {highlight ? (
+                <>
+                  {value.slice(0, highlight.start)}
+                  <span className="text-blue-500 dark:text-blue-400">
+                    {value.slice(highlight.start, highlight.end)}
+                  </span>
+                  {value.slice(highlight.end)}
+                  {trailingGuard}
+                </>
+              ) : (
+                <>
+                  {value}
+                  {trailingGuard}
+                </>
+              )}
+            </div>
+            <Textarea
+              value={value}
+              ref={inputRef}
+              disabled={disabled}
+              onChange={(event) => onChange(event.target.value)}
+              onScroll={(event) => syncBackdropScroll(event.currentTarget)}
+              onPaste={handlePaste}
+              onFocus={() => onInputFocus?.()}
+              placeholder={placeholder}
+              rows={1}
+              className="relative z-[1] min-h-[36px] max-h-[160px] resize-none border-0 bg-transparent p-0 text-sm leading-5 text-transparent caret-foreground shadow-none placeholder:text-muted-foreground/70 focus-visible:ring-0 disabled:cursor-default disabled:opacity-100"
+              onKeyDown={onKeyDown}
+            />
+          </div>
         </div>
 
         <div className="flex h-[40px] items-center justify-between gap-4 px-2 py-[5px]">
