@@ -512,7 +512,7 @@ export function DesktopComposer({
                     className={cn(
                       "inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs transition-colors",
                       fullAccessEnabled
-                        ? "bg-amber-400/20 text-amber-600"
+                        ? "bg-rose-400/20 text-rose-600 hover:bg-rose-400/30"
                         : "text-muted-foreground hover:text-foreground hover:bg-accent",
                       (disabled || streaming) && "pointer-events-none opacity-60",
                     )}
