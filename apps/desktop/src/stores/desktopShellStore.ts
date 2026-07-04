@@ -15,11 +15,13 @@ export interface DesktopShellState {
   activeView: DesktopActiveView;
   sidebarCollapsed: boolean;
   settingsTab: DesktopSettingsTab;
+  fullAccessEnabled: boolean;
 
   setActiveView: (view: DesktopActiveView) => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
   setSettingsTab: (tab: DesktopSettingsTab) => void;
   openSettings: (tab?: DesktopSettingsTab) => void;
+  toggleFullAccess: () => void;
   reset: () => void;
 }
 
@@ -27,6 +29,7 @@ const INITIAL_STATE = {
   activeView: "chat" as DesktopActiveView,
   sidebarCollapsed: false,
   settingsTab: "channels" as DesktopSettingsTab,
+  fullAccessEnabled: false,
 };
 
 export function createDesktopShellStore() {
@@ -42,6 +45,7 @@ export function createDesktopShellStore() {
             activeView: "settings",
             settingsTab,
           }),
+        toggleFullAccess: () => set((state) => ({ fullAccessEnabled: !state.fullAccessEnabled })),
         reset: () => set({ ...INITIAL_STATE }),
       }),
       {
@@ -49,6 +53,7 @@ export function createDesktopShellStore() {
         partialize: (state) => ({
           sidebarCollapsed: state.sidebarCollapsed,
           settingsTab: state.settingsTab,
+          fullAccessEnabled: state.fullAccessEnabled,
         }),
       },
     ),

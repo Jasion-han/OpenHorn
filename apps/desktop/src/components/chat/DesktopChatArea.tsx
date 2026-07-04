@@ -997,7 +997,8 @@ export function DesktopChatArea() {
   >(null);
   const messageAnchorRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const [streamingAssistantId, setStreamingAssistantId] = useState<string | null>(null);
-  const [fullAccessEnabled, setFullAccessEnabled] = useState(false);
+  const fullAccessEnabled = useDesktopShellStore((state) => state.fullAccessEnabled);
+  const toggleFullAccess = useDesktopShellStore((state) => state.toggleFullAccess);
   const createConversation = useChatStore((state) => state.createConversation);
   const openSettings = useDesktopShellStore((state) => state.openSettings);
   const setActiveView = useDesktopShellStore((state) => state.setActiveView);
@@ -2327,7 +2328,7 @@ export function DesktopChatArea() {
           modelTone={effectiveModel.ok ? "normal" : "warning"}
           onOpenModelPicker={() => setModelPickerOpen(true)}
           fullAccessEnabled={fullAccessEnabled}
-          onToggleFullAccess={() => setFullAccessEnabled((v) => !v)}
+          onToggleFullAccess={toggleFullAccess}
           forceWebSearch={forceWebSearch}
           onToggleWebSearch={() => void handleToggleWebSearch()}
           onInputFocus={handleInputFocus}
