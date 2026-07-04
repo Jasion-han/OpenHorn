@@ -5,6 +5,7 @@ import type { SidecarApprovalRequest } from "../lib/sidecarClient";
 import { discoverSkills, skillsDisabledList } from "../lib/tauriBridge";
 import { useChatStore } from "../stores/chatStore";
 import { useSidecarStore } from "../stores/sidecarStore";
+import { claimRunOwnership, createRunPersistGuard, isRunOwner } from "./sidecarRunOwnership";
 
 const api = createServerApi();
 
@@ -128,11 +129,6 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
   const [rollbackError, setRollbackError] = useState<string | null>(null);
   const [sdkSessionId, setSdkSessionId] = useState<string | null>(null);
   const runRef = useRef<ActiveSidecarRun | null>(null);
-  // Guards the one-shot persistence of a run's user+assistant messages. A run
-  // ends through exactly one of done / onError, but error events can interleave;
-  // this ref ensures syncSidecar (an insert, not an upsert) runs at most once
-  // per run so we never duplicate the round. Reset at the start of every run.
-  const persistedRef = useRef(false);
 
   const syncRun = (run: ActiveSidecarRun | null) => {
     if (run === null && runRef.current) {
@@ -150,6 +146,28 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
       setLastError("本地运行尚未就绪");
       return;
     }
+
+    // Run-ownership guard. Regenerate re-uses the SAME assistant message id:
+    // the retry path clears the bubble and calls startRun again while the old
+    // run may still be streaming. The cancelRun below is best-effort only, so
+    // the old run's in-flight events can still arrive — and chatStore appends
+    // deltas purely by message id, which would interleave both runs' text
+    // character-by-character into one message. Claiming a fresh token here
+    // disowns the previous run; every callback of THIS run checks ownership
+    // first and drops itself once superseded (no store writes, no persistence,
+    // no isBusy/activeRun changes).
+    const ownerToken = claimRunOwnership([
+      input.assistantMessageId,
+      input.existingAssistantMessageId,
+    ]);
+    const ownsMessage = () => isRunOwner(input.assistantMessageId, ownerToken);
+    // Per-run one-shot persistence guard. A run ends through exactly one of
+    // done / onError, but error events can interleave; syncSidecar (an insert,
+    // not an upsert) must run at most once per run so we never duplicate the
+    // round. Lives in this closure — a hook-level ref would be reset by the
+    // next run, letting the old run's late done/error persist again.
+    const shouldPersist = createRunPersistGuard(input.assistantMessageId, ownerToken);
+
     if (runRef.current !== null) {
       try {
         await client.cancelRun(runRef.current.runId);
@@ -167,9 +185,6 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
     setLastFinishedRunId(null);
     setRollbackError(null);
 
-    // Fresh persistence guard for this run.
-    persistedRef.current = false;
-
     // Mark this run's message ids so that navigating away and back mid-run keeps
     // the live/streaming copy instead of overwriting it with the (stale) DB row —
     // matters for in-flight edits, which re-use the persisted ids. Cleared once
@@ -185,11 +200,10 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
     // the done path (final text, possibly empty) and from every failure path
     // (error / onError / early returns), so that even a failed or empty-output
     // run keeps the user's message — and its failure state — in the DB. Idempotent
-    // via persistedRef; syncSidecar inserts (or, for edits, updates) both rows so
-    // it must run at most once.
+    // via shouldPersist, which also blocks a disowned run (regenerate started a
+    // newer run for this message) from overwriting the new run's result.
     const persistOnce = async (assistantContent: string, agentRun: unknown, model: string) => {
-      if (persistedRef.current) return;
-      persistedRef.current = true;
+      if (!shouldPersist()) return;
       try {
         // Only reuse ids that are already persisted (real server ids). Optimistic
         // temp-/draft- ids don't exist server-side, so fall back to insert.
@@ -235,6 +249,8 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
     // failure-state agentRun (applyStreamEvent error sets status "failed"), and
     // falling back to a minimal failure object when the message isn't available.
     const persistFailure = (message: string, model: string) => {
+      // A disowned run must not read the (already re-cleared) message or persist.
+      if (!ownsMessage()) return;
       const msg = useChatStore.getState().findMessageAnywhere(input.assistantMessageId);
       void persistOnce(
         msg?.content || "",
@@ -253,6 +269,9 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
       const result = await api.channels.getCredentials(input.channelId);
       credentials = result.credentials;
     } catch (error) {
+      // A newer run may have claimed this message while we were awaiting —
+      // its UI state and persistence must not be clobbered by this attempt.
+      if (!ownsMessage()) return;
       setIsBusy(false);
       const message = error instanceof Error ? error.message : "获取凭据失败";
       setLastError(message);
@@ -265,6 +284,8 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
     }
 
     if (credentials.protocol !== "anthropic" && credentials.protocol !== "openai") {
+      // Same as above: skip entirely if a newer run took over during the await.
+      if (!ownsMessage()) return;
       setIsBusy(false);
       const message = `本地运行暂不支持该协议：${credentials.protocol}`;
       setLastError(message);
@@ -352,6 +373,11 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
         },
         onEvent: (() => {
           return (event: import("../lib/agentTaskStream").AgentTaskStreamEvent) => {
+            // Ownership guard: once a newer run (regenerate) claims this
+            // message, every late event from this run — delta, done, error —
+            // is dropped wholesale so the two runs' text can't interleave and
+            // this run can't flip the new run's isBusy/activeRun state.
+            if (!ownsMessage()) return;
             if (
               event.type === "execution_event" &&
               event.eventType === "final_text" &&
@@ -397,7 +423,7 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
               const assistantContent = assistantMsg?.content || "";
               // Persist even when the assistant produced no text, so an empty-output
               // run still keeps the user's message. Deduped against onError via
-              // persistedRef.
+              // the per-run shouldPersist guard.
               void persistOnce(
                 assistantContent,
                 assistantMsg?.agentRun ?? undefined,
@@ -421,6 +447,9 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
           setPendingApproval(request);
         },
         onError: (message) => {
+          // Ownership guard (see onEvent): a superseded run's failure must not
+          // pollute the new run's message, UI state, or persistence.
+          if (!ownsMessage()) return;
           setLastError(message);
           useChatStore.getState().applyStreamEvent(input.assistantMessageId, {
             type: "error",
@@ -433,11 +462,16 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
           setIsBusy(false);
         },
         onDone: () => {
+          // Ownership guard (see onEvent): the old run's done — e.g. after the
+          // best-effort cancel — must not clear the NEW run's busy/active state.
+          if (!ownsMessage()) return;
           syncRun(null);
           setIsBusy(false);
         },
       });
     } catch (error) {
+      // Ownership guard (see above): don't clobber a newer run's state.
+      if (!ownsMessage()) return;
       setIsBusy(false);
       const message = error instanceof Error ? error.message : "启动本地运行失败";
       setLastError(message);
@@ -446,6 +480,17 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
         message,
       });
       persistFailure(message, input.modelId || credentials.modelId);
+      return;
+    }
+
+    if (!ownsMessage()) {
+      // A newer run claimed this message while the sidecar was accepting this
+      // one — cancel the now-orphaned run instead of registering it as active
+      // (its events would be dropped by the guards anyway, but there is no
+      // point letting it keep executing).
+      try {
+        await client.cancelRun(runId);
+      } catch {}
       return;
     }
 
