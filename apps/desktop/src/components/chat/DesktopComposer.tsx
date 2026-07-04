@@ -397,7 +397,7 @@ export function DesktopComposer({
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="top">
-                <p>Add attachments</p>
+                <p>Add Attachments</p>
               </TooltipContent>
             </Tooltip>
 
