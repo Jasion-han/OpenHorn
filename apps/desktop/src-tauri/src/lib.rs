@@ -654,6 +654,506 @@ async fn mcp_pick_config_file(
     Ok(Some(servers))
 }
 
+// ── Agent Skills (SKILL.md) discovery & import ──────────────────────────────
+
+/// One skill (a directory containing a `SKILL.md`) discovered on disk, mirroring
+/// `DiscoveredServer`. `clients` accumulates every client a skill was found in
+/// (the same skill is symlinked across CLIs by managers like cc-switch).
+#[derive(Clone, Debug, Serialize)]
+struct DiscoveredSkill {
+    name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
+    /// Absolute path of the skill directory.
+    path: String,
+    /// The client this row was first parsed from, e.g. "CC-Switch".
+    client: String,
+    /// Every client this same skill was found in (for coverage tags).
+    clients: Vec<String>,
+    /// Dedup key: the canonical real path of SKILL.md (symlinks resolved).
+    signature: String,
+}
+
+/// A skill folder read into OpenHorn's create-skill shape.
+#[derive(Clone, Debug, Serialize)]
+struct ImportedSkill {
+    name: String,
+    description: String,
+    content: String,
+    files: Vec<ImportedSkillFile>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct ImportedSkillFile {
+    /// Path relative to the skill directory, `/`-separated.
+    path: String,
+    content: String,
+    #[serde(rename = "isBinary")]
+    is_binary: bool,
+}
+
+/// Trim a YAML scalar and strip a single pair of surrounding quotes.
+fn clean_yaml_scalar(raw: &str) -> String {
+    let s = raw.trim();
+    let bytes = s.as_bytes();
+    if bytes.len() >= 2
+        && ((bytes[0] == b'"' && bytes[bytes.len() - 1] == b'"')
+            || (bytes[0] == b'\'' && bytes[bytes.len() - 1] == b'\''))
+    {
+        return s[1..s.len() - 1].to_string();
+    }
+    s.to_string()
+}
+
+/// Collapse all runs of whitespace (incl. newlines) into single spaces.
+fn collapse_ws(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Parse a SKILL.md, returning `(name, description, body)`. Hand-rolled: we only
+/// need two scalar frontmatter fields, so no YAML dependency. When there is no
+/// `---` frontmatter block, name/description are None and body is the whole text.
+fn parse_skill_md(text: &str) -> (Option<String>, Option<String>, String) {
+    let stripped = text.strip_prefix('\u{feff}').unwrap_or(text);
+    let lines: Vec<&str> = stripped.lines().collect();
+    if lines.first().map(|l| l.trim_end()) != Some("---") {
+        return (None, None, stripped.to_string());
+    }
+    let close_idx = lines
+        .iter()
+        .enumerate()
+        .skip(1)
+        .find(|(_, l)| l.trim_end() == "---")
+        .map(|(i, _)| i);
+    let Some(close_idx) = close_idx else {
+        return (None, None, stripped.to_string());
+    };
+    let mut name: Option<String> = None;
+    let mut description: Option<String> = None;
+    for line in &lines[1..close_idx] {
+        if let Some(rest) = line.strip_prefix("name:") {
+            if name.is_none() {
+                let v = clean_yaml_scalar(rest);
+                if !v.is_empty() {
+                    name = Some(v);
+                }
+            }
+        } else if let Some(rest) = line.strip_prefix("description:") {
+            if description.is_none() {
+                let v = clean_yaml_scalar(rest);
+                if !v.is_empty() {
+                    description = Some(collapse_ws(&v));
+                }
+            }
+        }
+    }
+    let body = lines[close_idx + 1..]
+        .join("\n")
+        .trim_start_matches('\n')
+        .to_string();
+    (name, description, body)
+}
+
+/// Scan a `skills/` directory: each child dir with a `SKILL.md` is one skill.
+/// Hidden dirs (`.system`, `.git`, …) and symlinks pointing outside are skipped.
+/// Symlinked skill dirs (cc-switch fan-out) are followed; signature dedup later
+/// collapses the duplicates by the SKILL.md's canonical path.
+fn scan_skills_dir(dir: &std::path::Path, client: &str, out: &mut Vec<DiscoveredSkill>) {
+    let entries = match fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let dir_name = match path.file_name().and_then(|n| n.to_str()) {
+            Some(n) => n.to_string(),
+            None => continue,
+        };
+        // Skip hidden / system dirs (Codex bundles defaults under `.system/`).
+        if dir_name.starts_with('.') {
+            continue;
+        }
+        // `metadata()` follows symlinks, so symlinked skill dirs still count.
+        if !path.metadata().map(|m| m.is_dir()).unwrap_or(false) {
+            continue;
+        }
+        let skill_md = path.join("SKILL.md");
+        if !skill_md.is_file() {
+            continue;
+        }
+        let text = fs::read_to_string(&skill_md).unwrap_or_default();
+        let (fm_name, description, _body) = parse_skill_md(&text);
+        let name = fm_name.unwrap_or_else(|| dir_name.clone());
+        // Dedup by the real path of SKILL.md so the same skill symlinked into
+        // several CLI dirs collapses to one row. Fall back to name on failure.
+        let signature = fs::canonicalize(&skill_md)
+            .ok()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|| format!("name:{}", name));
+        out.push(DiscoveredSkill {
+            name,
+            description,
+            path: path.to_string_lossy().to_string(),
+            client: client.to_string(),
+            clients: vec![client.to_string()],
+            signature,
+        });
+    }
+}
+
+/// Scans the known SKILL.md locations of common AI CLIs (cc-switch central store
+/// first, so it wins dedup), returning each distinct skill once with `clients`
+/// listing every platform it was found in. Dedup is by the SKILL.md canonical
+/// path (resolving the symlink fan-out cc-switch creates).
+#[tauri::command]
+fn skills_discover(app: tauri::AppHandle) -> Vec<DiscoveredSkill> {
+    let mut all: Vec<DiscoveredSkill> = Vec::new();
+    let home = app.path().home_dir().ok();
+
+    if let Some(dir) = &home {
+        // cc-switch central store — source of truth, wins dedup.
+        scan_skills_dir(&dir.join(".cc-switch").join("skills"), "CC-Switch", &mut all);
+        // Claude Code user-level.
+        scan_skills_dir(&dir.join(".claude").join("skills"), "Claude Code", &mut all);
+        // Codex CLI — new cross-tool user path, then legacy/cc-switch path.
+        scan_skills_dir(&dir.join(".agents").join("skills"), "Codex CLI", &mut all);
+        scan_skills_dir(&dir.join(".codex").join("skills"), "Codex CLI", &mut all);
+        // Gemini CLI user-level.
+        scan_skills_dir(&dir.join(".gemini").join("skills"), "Gemini CLI", &mut all);
+    }
+
+    // Dedup by normalized skill name, accumulating each platform a skill was
+    // found in. Name-based (not signature/path) so cc-switch standalone copies
+    // in ~/.codex/skills — which have a different real path — still merge with
+    // the cc-switch original instead of appearing twice. cc-switch is scanned
+    // first, so its entry is pushed first and wins as the representative.
+    let mut result: Vec<DiscoveredSkill> = Vec::new();
+    let mut idx_by_name: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for skill in all {
+        let key = skill.name.trim().to_lowercase();
+        if let Some(&i) = idx_by_name.get(&key) {
+            if !result[i].clients.contains(&skill.client) {
+                result[i].clients.push(skill.client.clone());
+            }
+            if result[i].description.is_none() && skill.description.is_some() {
+                result[i].description = skill.description.clone();
+            }
+        } else {
+            idx_by_name.insert(key, result.len());
+            result.push(skill);
+        }
+    }
+    result
+}
+
+/// Recursively collect resource files under a skill dir (everything except the
+/// top-level SKILL.md). Text decodes as UTF-8; non-UTF-8 is stored base64 and
+/// flagged binary. Hidden entries (`.git`, …) and symlinks escaping the root are
+/// skipped.
+fn collect_skill_files(
+    root: &std::path::Path,
+    dir: &std::path::Path,
+    out: &mut Vec<ImportedSkillFile>,
+) {
+    let entries = match fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let file_name = match path.file_name().and_then(|n| n.to_str()) {
+            Some(n) => n.to_string(),
+            None => continue,
+        };
+        if file_name.starts_with('.') {
+            continue;
+        }
+        let meta = match path.metadata() {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        if meta.is_dir() {
+            // Guard against symlink escapes: only descend if the resolved path
+            // stays within the skill root.
+            if let (Ok(canon), Ok(root_canon)) = (fs::canonicalize(&path), fs::canonicalize(root)) {
+                if !canon.starts_with(&root_canon) {
+                    continue;
+                }
+            }
+            collect_skill_files(root, &path, out);
+        } else if meta.is_file() {
+            let rel = match path.strip_prefix(root) {
+                Ok(r) => r.to_string_lossy().replace('\\', "/"),
+                Err(_) => continue,
+            };
+            if rel == "SKILL.md" {
+                continue;
+            }
+            let bytes = match fs::read(&path) {
+                Ok(b) => b,
+                Err(_) => continue,
+            };
+            match String::from_utf8(bytes) {
+                Ok(text) => out.push(ImportedSkillFile {
+                    path: rel,
+                    content: text,
+                    is_binary: false,
+                }),
+                Err(err) => {
+                    use base64::Engine;
+                    let encoded = base64::engine::general_purpose::STANDARD.encode(err.as_bytes());
+                    out.push(ImportedSkillFile {
+                        path: rel,
+                        content: encoded,
+                        is_binary: true,
+                    });
+                }
+            }
+        }
+    }
+}
+
+/// Read a skill directory into the create-skill shape: SKILL.md gives
+/// name/description/body, sibling files become resources. Errors when SKILL.md
+/// is missing.
+#[tauri::command]
+fn skill_read_dir(path: String) -> Result<ImportedSkill, String> {
+    let root = PathBuf::from(&path);
+    let text = fs::read_to_string(root.join("SKILL.md"))
+        .map_err(|_| "所选文件夹不是有效的技能（缺少 SKILL.md）".to_string())?;
+    let (fm_name, description, body) = parse_skill_md(&text);
+    let name = fm_name.unwrap_or_else(|| {
+        root.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("skill")
+            .to_string()
+    });
+    let mut files: Vec<ImportedSkillFile> = Vec::new();
+    collect_skill_files(&root, &root, &mut files);
+    Ok(ImportedSkill {
+        name,
+        description: description.unwrap_or_default(),
+        content: body,
+        files,
+    })
+}
+
+/// Opens the folder picker and reads the chosen skill directory. Returns None
+/// when the user cancels; errors when the folder lacks a SKILL.md.
+#[tauri::command]
+async fn skill_pick_folder(app: tauri::AppHandle) -> Result<Option<ImportedSkill>, String> {
+    use tauri_plugin_dialog::DialogExt;
+
+    let picked = app
+        .dialog()
+        .file()
+        .blocking_pick_folder()
+        .map(|p| p.to_string());
+
+    let Some(path) = picked else {
+        return Ok(None);
+    };
+    let imported = skill_read_dir(path)?;
+    Ok(Some(imported))
+}
+
+/// One file to write during skill materialization. `rel_path` is relative to
+/// the materialization root (`<sanitizedName>/SKILL.md`, `<sanitizedName>/...`),
+/// `/`-separated. Binary resources arrive base64-encoded (`is_binary`), mirroring
+/// `skill_read_dir`'s encoding so a round-trip is byte-exact.
+#[derive(Clone, Debug, serde::Deserialize)]
+struct MaterializeEntry {
+    rel_path: String,
+    content: String,
+    #[serde(rename = "isBinary", default)]
+    is_binary: bool,
+}
+
+/// Reject path-traversal / absolute / Windows-drive `rel_path`s before joining
+/// them onto the materialization root. A second canonicalize-based guard runs in
+/// `skills_materialize_batch` after the parent dirs are created.
+fn is_safe_rel_path(rel: &str) -> bool {
+    if rel.is_empty() || rel.contains('\\') {
+        return false;
+    }
+    let p = std::path::Path::new(rel);
+    if p.is_absolute() {
+        return false;
+    }
+    for comp in p.components() {
+        match comp {
+            std::path::Component::Normal(_) => {}
+            // CurDir is harmless but ParentDir / RootDir / Prefix are traversal.
+            std::path::Component::CurDir => {}
+            _ => return false,
+        }
+    }
+    true
+}
+
+/// Ensure `.openhorn/` is git-ignored in a git repo so materialized skills never
+/// pollute the user's working tree. No-op outside a git repo (mirrors the sidecar
+/// checkpoints behaviour).
+fn ensure_openhorn_gitignored(workspace_root: &std::path::Path) {
+    if !workspace_root.join(".git").exists() {
+        return;
+    }
+    let gitignore = workspace_root.join(".gitignore");
+    let current = fs::read_to_string(&gitignore).unwrap_or_default();
+    if current.lines().any(|line| line.trim() == ".openhorn/") {
+        return;
+    }
+    let mut next = current.trim_end().to_string();
+    if !next.is_empty() {
+        next.push('\n');
+    }
+    next.push_str(".openhorn/\n");
+    let _ = fs::write(&gitignore, next);
+}
+
+/// Begin a skill materialization: create a fresh staging dir
+/// `<root>/.openhorn/skills.tmp-<rand>` and ensure `.openhorn/` is git-ignored.
+/// Returns the staging dir path; the caller streams files into it via
+/// `skills_materialize_batch`, then swaps it in atomically with
+/// `skills_materialize_finalize`.
+#[tauri::command]
+fn skills_materialize_begin(workspace_root: String) -> Result<String, String> {
+    let root = PathBuf::from(&workspace_root);
+    if !root.is_dir() {
+        return Err("工作目录不存在".to_string());
+    }
+    ensure_openhorn_gitignored(&root);
+
+    let mut bytes = [0u8; 8];
+    OsRng.fill_bytes(&mut bytes);
+    let suffix = bytes.iter().map(|b| format!("{:02x}", b)).collect::<String>();
+
+    let tmp_root = root.join(".openhorn").join(format!("skills.tmp-{}", suffix));
+    fs::create_dir_all(&tmp_root).map_err(|e| format!("创建临时目录失败：{}", e))?;
+    Ok(tmp_root.to_string_lossy().to_string())
+}
+
+/// Write one batch of files into a staging dir created by
+/// `skills_materialize_begin`. Each `rel_path` is validated (no `..`, no absolute
+/// path) and the resolved parent dir is canonicalize-checked to stay inside the
+/// staging root, defending against symlink escapes.
+#[tauri::command]
+fn skills_materialize_batch(tmp_root: String, entries: Vec<MaterializeEntry>) -> Result<(), String> {
+    let root = PathBuf::from(&tmp_root);
+    let root_canon = fs::canonicalize(&root).map_err(|_| "临时目录无效".to_string())?;
+
+    for entry in entries {
+        if !is_safe_rel_path(&entry.rel_path) {
+            return Err(format!("非法的技能文件路径：{}", entry.rel_path));
+        }
+        let dest = root.join(&entry.rel_path);
+        if let Some(parent) = dest.parent() {
+            fs::create_dir_all(parent).map_err(|e| format!("创建目录失败：{}", e))?;
+            // Re-check after the dirs exist: the resolved parent must stay inside
+            // the staging root (catches symlink escapes a string check misses).
+            let parent_canon = fs::canonicalize(parent).map_err(|_| "技能路径无效".to_string())?;
+            if !parent_canon.starts_with(&root_canon) {
+                return Err(format!("技能文件路径越界：{}", entry.rel_path));
+            }
+        }
+        if entry.is_binary {
+            use base64::Engine;
+            let decoded = base64::engine::general_purpose::STANDARD
+                .decode(entry.content.as_bytes())
+                .map_err(|e| format!("解码二进制资源失败：{}", e))?;
+            fs::write(&dest, decoded).map_err(|e| format!("写入文件失败：{}", e))?;
+        } else {
+            fs::write(&dest, entry.content.as_bytes()).map_err(|e| format!("写入文件失败：{}", e))?;
+        }
+    }
+    Ok(())
+}
+
+/// Atomically swap the staging dir into place as `<root>/.openhorn/skills`,
+/// replacing any previous materialization. Returns the final skills root.
+#[tauri::command]
+fn skills_materialize_finalize(
+    workspace_root: String,
+    tmp_root: String,
+) -> Result<String, String> {
+    let root = PathBuf::from(&workspace_root);
+    let skills_root = root.join(".openhorn").join("skills");
+    let tmp = PathBuf::from(&tmp_root);
+
+    // Stash any existing skills dir, swap the new one in, then drop the stash —
+    // keeps the window where `skills/` is absent as small as possible.
+    if skills_root.exists() {
+        let mut bytes = [0u8; 8];
+        OsRng.fill_bytes(&mut bytes);
+        let suffix = bytes.iter().map(|b| format!("{:02x}", b)).collect::<String>();
+        let old = root.join(".openhorn").join(format!("skills.old-{}", suffix));
+        fs::rename(&skills_root, &old).map_err(|e| format!("替换技能目录失败：{}", e))?;
+        fs::rename(&tmp, &skills_root).map_err(|e| format!("替换技能目录失败：{}", e))?;
+        let _ = fs::remove_dir_all(&old);
+    } else {
+        fs::rename(&tmp, &skills_root).map_err(|e| format!("替换技能目录失败：{}", e))?;
+    }
+    Ok(skills_root.to_string_lossy().to_string())
+}
+
+/// Whether a previously-materialized skills dir still exists on disk. Used by the
+/// desktop cache to confirm a cache hit before reusing a `skillsRoot`.
+#[tauri::command]
+fn skills_materialized_exists(skills_root: String) -> bool {
+    PathBuf::from(&skills_root).is_dir()
+}
+
+/// Path of the JSON file recording which discovered skills the user disabled.
+/// Absence of a name means enabled (skills default on, like the old DB flag).
+fn skills_enabled_state_path(app: &tauri::AppHandle) -> Option<PathBuf> {
+    app.path()
+        .home_dir()
+        .ok()
+        .map(|h| h.join(".openhorn").join("skills-enabled.json"))
+}
+
+/// The set of skill names the user has explicitly DISABLED. Everything else is
+/// treated as enabled.
+#[tauri::command]
+fn skills_disabled_list(app: tauri::AppHandle) -> Vec<String> {
+    let Some(path) = skills_enabled_state_path(&app) else {
+        return Vec::new();
+    };
+    let Ok(content) = fs::read_to_string(&path) else {
+        return Vec::new();
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&content) else {
+        return Vec::new();
+    };
+    value
+        .get("disabled")
+        .and_then(|d| d.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Toggles a skill's enabled state by updating the disabled-set JSON file.
+#[tauri::command]
+fn skills_set_enabled(app: tauri::AppHandle, name: String, enabled: bool) -> Result<(), String> {
+    let path = skills_enabled_state_path(&app).ok_or_else(|| "无法定位配置目录".to_string())?;
+    let mut disabled: Vec<String> = skills_disabled_list(app.clone());
+    let key = name.trim().to_lowercase();
+    disabled.retain(|n| n.trim().to_lowercase() != key);
+    if !enabled {
+        disabled.push(name);
+    }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("创建目录失败：{}", e))?;
+    }
+    let body = serde_json::json!({ "disabled": disabled }).to_string();
+    fs::write(&path, body).map_err(|e| format!("写入失败：{}", e))?;
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -719,7 +1219,16 @@ pub fn run() {
             get_sidecar_endpoint,
             pick_workspace_dir,
             mcp_discover_configs,
-            mcp_pick_config_file
+            mcp_pick_config_file,
+            skills_discover,
+            skill_read_dir,
+            skill_pick_folder,
+            skills_materialize_begin,
+            skills_materialize_batch,
+            skills_materialize_finalize,
+            skills_materialized_exists,
+            skills_disabled_list,
+            skills_set_enabled
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

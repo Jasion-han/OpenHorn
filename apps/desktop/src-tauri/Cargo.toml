@@ -35,3 +35,5 @@ toml = "0.8"
 # Reading CC Switch's SQLite store (~/.cc-switch/cc-switch.db) during MCP
 # import. `bundled` compiles SQLite in so there is no system dependency.
 rusqlite = { version = "0.31", features = ["bundled"] }
+# Encoding non-UTF-8 skill resource files as base64 during skill import.
+base64 = "0.22"
