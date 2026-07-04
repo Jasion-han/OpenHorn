@@ -147,6 +147,12 @@ attachments.get("/:id", async (c) => {
     return c.json({ error: "Not found" }, 404);
   }
 
+  // Sidecar-synced attachments are metadata-only (`local:` sentinel path):
+  // the file lives on the user's machine and was never uploaded.
+  if (typeof record.filePath === "string" && record.filePath.startsWith("local:")) {
+    return c.json({ error: "Not found" }, 404);
+  }
+
   const download = c.req.query("download") === "1";
   const mode = download ? "attachment" : "inline";
   const fileType = record.fileType || "application/octet-stream";

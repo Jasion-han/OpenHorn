@@ -7,9 +7,9 @@ import attachmentRoutes from "./routes/attachments";
 import authRoutes from "./routes/auth";
 import channelRoutes from "./routes/channels";
 import conversationRoutes from "./routes/conversations";
+import credentialRoutes from "./routes/credentials";
 import mcpRoutes from "./routes/mcp";
 import messageRoutes from "./routes/messages";
-import credentialRoutes from "./routes/credentials";
 import settingsRoutes from "./routes/settings";
 
 await bootstrapDatabase();

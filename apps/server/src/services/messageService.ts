@@ -1619,6 +1619,37 @@ export async function regenerateMessage(
   });
 }
 
+// Sidecar (local) runs never upload attachment files to the server; only their
+// metadata is synced so the user's bubble keeps its attachment chips across
+// reloads. The rows reuse the attachments table with a `local:` filePath
+// sentinel meaning "metadata only, no server-side file".
+async function insertSidecarAttachmentMeta(
+  conversationId: string,
+  userMessageId: string,
+  meta: Array<{ fileName: string; fileType?: string; fileSize?: number }>,
+  createdAt: Date,
+) {
+  const rows = meta
+    .filter((item) => typeof item?.fileName === "string" && item.fileName.length > 0)
+    .map((item) => ({
+      id: generateId(),
+      conversationId,
+      sessionId: null,
+      messageId: userMessageId,
+      fileName: item.fileName,
+      filePath: `local:${item.fileName}`,
+      fileType:
+        typeof item.fileType === "string" && item.fileType.length > 0
+          ? item.fileType
+          : "application/octet-stream",
+      fileSize:
+        typeof item.fileSize === "number" && Number.isFinite(item.fileSize) ? item.fileSize : 0,
+      createdAt,
+    }));
+  if (rows.length === 0) return;
+  await db.insert(attachments).values(rows);
+}
+
 export async function syncSidecarMessages(
   userId: string,
   input: {
@@ -1628,6 +1659,15 @@ export async function syncSidecarMessages(
     model?: string;
     mode?: string;
     agentRun?: unknown;
+    // Metadata-only attachment info for local (sidecar) runs — see
+    // insertSidecarAttachmentMeta. When provided on an in-place update, it
+    // replaces the user message's existing attachment rows.
+    attachmentsMeta?: Array<{ fileName: string; fileType?: string; fileSize?: number }>;
+    // When both ids are provided and belong to this conversation, the existing
+    // round is UPDATED in place (used by edit-and-resend) instead of inserting a
+    // new pair — otherwise editing would duplicate the round on reload.
+    userMessageId?: string;
+    assistantMessageId?: string;
   },
 ) {
   const conversation = await db.query.conversations.findFirst({
@@ -1639,6 +1679,54 @@ export async function syncSidecarMessages(
   if (!conversation) throw new Error("Conversation not found");
 
   const now = new Date();
+
+  if (input.userMessageId && input.assistantMessageId) {
+    const [existingUser, existingAssistant] = await Promise.all([
+      db.query.messages.findFirst({
+        where: and(
+          eq(messages.id, input.userMessageId),
+          eq(messages.conversationId, input.conversationId),
+        ),
+      }),
+      db.query.messages.findFirst({
+        where: and(
+          eq(messages.id, input.assistantMessageId),
+          eq(messages.conversationId, input.conversationId),
+        ),
+      }),
+    ]);
+    if (existingUser && existingAssistant) {
+      await db
+        .update(messages)
+        .set({ content: input.userContent })
+        .where(eq(messages.id, input.userMessageId));
+      await db
+        .update(messages)
+        .set({
+          content: input.assistantContent,
+          model: input.model || null,
+          agentRun: input.agentRun ? JSON.stringify(input.agentRun) : null,
+          liveMetadata: null,
+          citations: null,
+        })
+        .where(eq(messages.id, input.assistantMessageId));
+      if (Array.isArray(input.attachmentsMeta)) {
+        // Replace, not append: the edit's meta is authoritative for this message.
+        await db.delete(attachments).where(eq(attachments.messageId, input.userMessageId));
+        await insertSidecarAttachmentMeta(
+          input.conversationId,
+          input.userMessageId,
+          input.attachmentsMeta,
+          now,
+        );
+      }
+      return {
+        userMessageId: input.userMessageId,
+        assistantMessageId: input.assistantMessageId,
+      };
+    }
+  }
+
   const userMessageId = generateId();
   const assistantMessageId = generateId();
 
@@ -1652,6 +1740,15 @@ export async function syncSidecarMessages(
     agentRun: null,
     createdAt: now,
   });
+
+  if (Array.isArray(input.attachmentsMeta) && input.attachmentsMeta.length > 0) {
+    await insertSidecarAttachmentMeta(
+      input.conversationId,
+      userMessageId,
+      input.attachmentsMeta,
+      now,
+    );
+  }
 
   await db.insert(messages).values({
     id: assistantMessageId,

@@ -148,18 +148,19 @@ export async function deleteMCPServer(userId: string, serverId: string) {
   return { success: true };
 }
 
+/**
+ * Server-side MCP connection testing is NOT implemented. The server (often a
+ * container) cannot faithfully exercise stdio commands that only exist on the
+ * user's machine — the real MCP runtime is the desktop sidecar, and the
+ * desktop UI tests connections through the sidecar's "mcp.test" RPC instead.
+ * An unconditional { success: true } here would be a lie, so this reports
+ * honestly until a web-appropriate implementation exists.
+ */
 export async function testMCPServer(userId: string, serverId: string) {
   const server = await getMCPServerById(userId, serverId);
   if (!server) {
     return { success: false, error: "Server not found" };
   }
 
-  try {
-    return { success: true };
-  } catch (error) {
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : "Test failed",
-    };
-  }
+  return { success: false, error: "not implemented" };
 }
