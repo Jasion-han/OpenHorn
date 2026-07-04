@@ -87,24 +87,45 @@ const CODE_CUSTOM_STYLE: React.CSSProperties = {
   lineHeight: 1.5,
 };
 
+// Small blocks highlight synchronously on the first frame: their Prism
+// tokenize cost is negligible, so deferring them only produces a visible
+// plain-text -> colored flash. Only large blocks keep the "placeholder then
+// idle highlight" path that keeps conversation switching smooth. Line count is
+// the primary gate; the char cap guards against a single absurdly long line
+// (few lines but expensive to tokenize).
+const EAGER_HIGHLIGHT_MAX_LINES = 12;
+const EAGER_HIGHLIGHT_MAX_CHARS = 2000;
+
+export function shouldHighlightEagerly(codeString: string, lineCount: number): boolean {
+  return lineCount <= EAGER_HIGHLIGHT_MAX_LINES && codeString.length <= EAGER_HIGHLIGHT_MAX_CHARS;
+}
+
 type IdleWindow = typeof window & {
-  requestIdleCallback?: (cb: () => void) => number;
+  requestIdleCallback?: (cb: () => void, options?: { timeout?: number }) => number;
   cancelIdleCallback?: (handle: number) => void;
 };
+
+// The idle callback is bounded by a timeout so a busy main thread (e.g.
+// mounting a whole message list on conversation switch) cannot starve the
+// highlight for ~1s. 200ms keeps the large-block plain-text window short
+// enough to be barely perceptible while still yielding the first paint.
+const IDLE_HIGHLIGHT_TIMEOUT_MS = 200;
 
 // Defer the highlight work until the browser is idle so switching into a
 // conversation with many long code blocks paints the plain text immediately.
 function scheduleIdle(run: () => void): () => void {
   const w = window as IdleWindow;
   if (typeof w.requestIdleCallback === "function") {
-    const id = w.requestIdleCallback(run);
+    const id = w.requestIdleCallback(run, { timeout: IDLE_HIGHLIGHT_TIMEOUT_MS });
     return () => {
       if (typeof w.cancelIdleCallback === "function") {
         w.cancelIdleCallback(id);
       }
     };
   }
-  const id = window.setTimeout(run, 0);
+  // Fall back to the same bounded delay rather than 0 so we do not contend
+  // with the synchronous first paint while still capping the wait.
+  const id = window.setTimeout(run, IDLE_HIGHLIGHT_TIMEOUT_MS);
   return () => window.clearTimeout(id);
 }
 
@@ -148,15 +169,23 @@ function CodeBlockImpl({
   codeProps,
 }: CodeBlockProps) {
   const showLineNumbers = lineCount > 1;
-  // First frame renders the lightweight plain-text placeholder; the heavy
-  // Prism tokenize is scheduled for the next idle slice via startTransition.
-  const [highlighted, setHighlighted] = useState(false);
+  // Small blocks highlight on the first frame (no flash); large blocks render
+  // the lightweight plain-text placeholder first and schedule the heavy Prism
+  // tokenize for the next idle slice via startTransition. The props that decide
+  // this (codeString/lineCount) are stable for a given block, so the lazy
+  // initializer runs once and switching isDark never resets a highlighted block.
+  const [highlighted, setHighlighted] = useState(() =>
+    shouldHighlightEagerly(codeString, lineCount),
+  );
 
   useEffect(() => {
+    // Eager blocks are already highlighted from the first frame — nothing to
+    // schedule, so skip the idle work entirely.
+    if (highlighted) return;
     return scheduleIdle(() => {
       startTransition(() => setHighlighted(true));
     });
-  }, []);
+  }, [highlighted]);
 
   return (
     <div className={styles.codeBlock} style={{ "--code-accent": accent } as React.CSSProperties}>
