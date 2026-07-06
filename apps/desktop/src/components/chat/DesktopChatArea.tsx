@@ -1,5 +1,15 @@
+import { defaultRangeExtractor, type Range, useVirtualizer } from "@tanstack/react-virtual";
 import { Bot, Check, Copy, MessageSquare, Pencil, RefreshCw, Trash2 } from "lucide-react";
-import { memo, type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  memo,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Button, cn, Textarea } from "ui";
 import { useSidecarAgentRun } from "../../hooks/useSidecarAgentRun";
 import { type StreamTone, toneClassName } from "../../lib/agentTaskPresenter";
@@ -10,6 +20,11 @@ import { sanitizeDisplayContent } from "../../lib/citations";
 import { getGlobalDefaultChannel } from "../../lib/defaultChannel";
 import { getEffectiveModelForConversation } from "../../lib/effectiveModel";
 import { getSlashLabel } from "../../lib/i18n/agent";
+import {
+  findGroupIndexByMessageId,
+  groupMessagesByRound,
+  type MessageRoundGroup,
+} from "../../lib/messageGroups";
 import { notifyWarning } from "../../lib/notify";
 import { createServerApi, readErrorMessage } from "../../lib/serverApi";
 import {
@@ -732,52 +747,6 @@ function MessageActionBar({
   );
 }
 
-type GroupedMessageEntry = {
-  msg: Message;
-  index: number;
-};
-
-type MessageRoundGroup = {
-  key: string;
-  user?: GroupedMessageEntry;
-  assistant?: GroupedMessageEntry;
-};
-
-function groupMessagesByRound(messages: Message[]): MessageRoundGroup[] {
-  const groups: MessageRoundGroup[] = [];
-
-  for (let index = 0; index < messages.length; index += 1) {
-    const msg = messages[index];
-    if (!msg) continue;
-
-    if (msg.role === "user") {
-      const next = messages[index + 1];
-      if (next?.role === "assistant" && next.mode === msg.mode) {
-        groups.push({
-          key: `${msg.id}:${next.id}`,
-          user: { msg, index },
-          assistant: { msg: next, index: index + 1 },
-        });
-        index += 1;
-        continue;
-      }
-
-      groups.push({
-        key: msg.id,
-        user: { msg, index },
-      });
-      continue;
-    }
-
-    groups.push({
-      key: msg.id,
-      assistant: { msg, index },
-    });
-  }
-
-  return groups;
-}
-
 function MessageBubbleImpl({
   message,
   isStreaming,
@@ -1009,7 +978,6 @@ export function DesktopChatArea() {
   const pendingScrollTargetRef = useRef<
     { type: "bottom" } | { type: "message"; id: string } | null
   >(null);
-  const messageAnchorRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const [streamingAssistantId, setStreamingAssistantId] = useState<string | null>(null);
   const fullAccessEnabled = useDesktopShellStore((state) => state.fullAccessEnabled);
   const toggleFullAccess = useDesktopShellStore((state) => state.toggleFullAccess);
@@ -1078,6 +1046,66 @@ export function DesktopChatArea() {
   // the grouping only depends on the message list.
   const groupedMessages = useMemo(() => groupMessagesByRound(messages), [messages]);
 
+  // Group indexes that MUST always stay mounted regardless of the scroll window:
+  //  - the group carrying the currently streaming assistant (keeps the
+  //    `DesktopStreamingMarkdownMessage` smoother alive so it never resets),
+  //  - any group whose assistant run is still running/partial (survives a
+  //    conversation switch and back),
+  //  - the group being edited (keeps the inline <Textarea> + its focus mounted).
+  // The pinned scroll target's user message lives in the same round group as the
+  // streaming assistant, so forcing the streaming group also keeps the pin
+  // target rendered for the re-pin layout effect below.
+  const forcedGroupIndexes = useMemo(() => {
+    const indexes: number[] = [];
+    if (streamingAssistantId) {
+      const idx = groupedMessages.findIndex(
+        (g) =>
+          g.assistant?.msg.id === streamingAssistantId || g.user?.msg.id === streamingAssistantId,
+      );
+      if (idx >= 0) indexes.push(idx);
+    }
+    const runningIdx = groupedMessages.findIndex((g) => {
+      const status = g.assistant?.msg.agentRun?.status;
+      return status === "running" || status === "partial";
+    });
+    if (runningIdx >= 0) indexes.push(runningIdx);
+    if (editingMessageId) {
+      const idx = findGroupIndexByMessageId(groupedMessages, editingMessageId);
+      if (idx >= 0) indexes.push(idx);
+    }
+    return indexes;
+  }, [groupedMessages, streamingAssistantId, editingMessageId]);
+
+  const getItemKey = useCallback(
+    (index: number) => groupedMessages[index]?.key ?? index,
+    [groupedMessages],
+  );
+
+  const rangeExtractor = useCallback(
+    (range: Range) => {
+      const indexes = new Set(defaultRangeExtractor(range));
+      for (const idx of forcedGroupIndexes) {
+        if (idx >= 0 && idx < range.count) indexes.add(idx);
+      }
+      return Array.from(indexes).sort((a, b) => a - b);
+    },
+    [forcedGroupIndexes],
+  );
+
+  const virtualizer = useVirtualizer({
+    count: groupedMessages.length,
+    getScrollElement: () => viewportRef.current,
+    // Rough initial guess; every row is dynamically re-measured via
+    // `measureElement`'s ResizeObserver (handles deferred code highlighting,
+    // AgentRunPanel expand/collapse, async images and streaming growth).
+    estimateSize: () => 120,
+    getItemKey,
+    overscan: 6,
+    // React 19: avoid the "flushSync was called from inside a lifecycle" warning.
+    useFlushSync: false,
+    rangeExtractor,
+  });
+
   useEffect(() => {
     pendingScrollTargetRef.current = { type: "bottom" };
     queueMicrotask(() => inputRef.current?.focus());
@@ -1089,31 +1117,45 @@ export function DesktopChatArea() {
     if (!viewportEl || !pending) return;
 
     if (pending.type === "bottom") {
-      viewportEl.scrollTop = viewportEl.scrollHeight;
+      const lastIndex = groupedMessages.length - 1;
+      if (lastIndex < 0) {
+        pendingScrollTargetRef.current = null;
+        return;
+      }
+      // scrollToIndex keeps an internal reconcile loop and re-settles to the
+      // real bottom as dynamic row heights are measured, replacing the old
+      // `scrollTop = scrollHeight` one-shot.
+      virtualizer.scrollToIndex(lastIndex, { align: "end" });
       pendingScrollTargetRef.current = null;
       return;
     }
 
-    const anchorEl = messageAnchorRefs.current.get(pending.id);
-    if (!anchorEl) return;
+    // Pin the target user message's group to the top of the viewport. While
+    // streaming we keep retrying (the assistant answer grows below, so the
+    // group can only reach the very top once enough content exists) — this
+    // mirrors the old anchor-based re-pin behaviour exactly.
+    const groupIndex = findGroupIndexByMessageId(groupedMessages, pending.id);
+    if (groupIndex < 0) return; // group not present yet — retry on next run
 
-    const desiredTop =
-      anchorEl.getBoundingClientRect().top -
-      viewportEl.getBoundingClientRect().top +
-      viewportEl.scrollTop;
+    virtualizer.scrollToIndex(groupIndex, { align: "start" });
 
-    viewportEl.scrollTop = desiredTop;
-
-    const currentAnchor = messageAnchorRefs.current.get(pending.id);
-    if (!currentAnchor) return;
+    const rowEl = viewportEl.querySelector<HTMLElement>(`[data-index="${groupIndex}"]`);
+    if (!rowEl) return; // forced row not mounted yet — retry on next run
 
     const distanceFromTop =
-      currentAnchor.getBoundingClientRect().top - viewportEl.getBoundingClientRect().top;
+      rowEl.getBoundingClientRect().top - viewportEl.getBoundingClientRect().top;
 
     if (Math.abs(distanceFromTop) <= 4 || !isStreaming) {
       pendingScrollTargetRef.current = null;
     }
-  }, [messages, currentConversation?.id, editingMessageId, isStreaming]);
+  }, [
+    messages,
+    groupedMessages,
+    currentConversation?.id,
+    editingMessageId,
+    isStreaming,
+    virtualizer,
+  ]);
 
   useEffect(() => {
     setStreamingAssistantId(null);
@@ -2155,16 +2197,8 @@ export function DesktopChatArea() {
     );
   }
 
-  const renderMessageRow = (message: Message, index: number) => (
+  const renderMessageRow = (message: Message) => (
     <div
-      ref={(node) => {
-        if (message.role !== "user") return;
-        if (node) {
-          messageAnchorRefs.current.set(message.id, node);
-          return;
-        }
-        messageAnchorRefs.current.delete(message.id);
-      }}
       className={cn(
         "flex min-w-0 flex-col",
         message.role === "assistant" ? "items-start" : "items-end",
@@ -2255,15 +2289,49 @@ export function DesktopChatArea() {
         style={{ paddingLeft: PAGE_PAD, paddingRight: PAGE_PAD }}
       >
         <div className="flex min-w-0 w-full flex-col">
-          <div className="mt-auto flex min-w-0 flex-col gap-2 pb-2">
-            {groupedMessages.map((group) => (
-              <div key={group.key} className="flex min-w-0 flex-col gap-2">
-                {group.user ? renderMessageRow(group.user.msg, group.user.index) : null}
-                {group.assistant
-                  ? renderMessageRow(group.assistant.msg, group.assistant.index)
-                  : null}
-              </div>
-            ))}
+          {/*
+            Virtualized round-group list. `mt-auto` keeps short conversations
+            hugging the composer (unchanged). The inner spacer owns the full
+            measured height; each round group is absolutely positioned at its
+            measured offset and only the visible window (+overscan +forced
+            rows) is mounted. `getItemKey` (= group.key) keeps measurements and
+            scroll stable across streaming updates and post-stream reloads.
+          */}
+          <div className="mt-auto flex min-w-0 flex-col pb-2">
+            <div
+              style={{
+                position: "relative",
+                width: "100%",
+                height: virtualizer.getTotalSize(),
+              }}
+            >
+              {virtualizer.getVirtualItems().map((virtualRow) => {
+                const group: MessageRoundGroup | undefined = groupedMessages[virtualRow.index];
+                if (!group) return null;
+                return (
+                  <div
+                    key={virtualRow.key}
+                    data-index={virtualRow.index}
+                    ref={virtualizer.measureElement}
+                    style={{
+                      position: "absolute",
+                      top: 0,
+                      left: 0,
+                      width: "100%",
+                      transform: `translateY(${virtualRow.start}px)`,
+                      // Replaces the removed flex `gap-2` between groups so the
+                      // measured height still includes the inter-group spacing.
+                      paddingBottom: 8,
+                    }}
+                  >
+                    <div className="flex min-w-0 flex-col gap-2">
+                      {group.user ? renderMessageRow(group.user.msg) : null}
+                      {group.assistant ? renderMessageRow(group.assistant.msg) : null}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
       </div>
