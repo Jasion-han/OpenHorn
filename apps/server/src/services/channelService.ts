@@ -344,28 +344,36 @@ async function getOwnedChannelItem(userId: string, channelId: string) {
 
 async function setDefaultChannelInternal(userId: string, channelId: string) {
   const now = new Date();
-  await db
-    .update(channels)
-    .set({ isDefault: false, updatedAt: now })
-    .where(eq(channels.userId, userId));
+  // Atomic: clearing every default then setting one must not leave a window
+  // where the user has zero (or two) default channels if the second write fails.
+  await db.transaction(async (tx) => {
+    await tx
+      .update(channels)
+      .set({ isDefault: false, updatedAt: now })
+      .where(eq(channels.userId, userId));
 
-  await db
-    .update(channels)
-    .set({ isDefault: true, updatedAt: now })
-    .where(and(eq(channels.id, channelId), eq(channels.userId, userId)));
+    await tx
+      .update(channels)
+      .set({ isDefault: true, updatedAt: now })
+      .where(and(eq(channels.id, channelId), eq(channels.userId, userId)));
+  });
 }
 
 async function setDefaultModelInternal(channelId: string, modelId: string) {
   const now = new Date();
-  await db
-    .update(channelModels)
-    .set({ isDefault: false, updatedAt: now })
-    .where(eq(channelModels.channelId, channelId));
+  // Atomic for the same reason as setDefaultChannelInternal: never leave the
+  // channel with zero or multiple default models mid-operation.
+  await db.transaction(async (tx) => {
+    await tx
+      .update(channelModels)
+      .set({ isDefault: false, updatedAt: now })
+      .where(eq(channelModels.channelId, channelId));
 
-  await db
-    .update(channelModels)
-    .set({ isDefault: true, updatedAt: now })
-    .where(and(eq(channelModels.channelId, channelId), eq(channelModels.modelId, modelId)));
+    await tx
+      .update(channelModels)
+      .set({ isDefault: true, updatedAt: now })
+      .where(and(eq(channelModels.channelId, channelId), eq(channelModels.modelId, modelId)));
+  });
 }
 
 function getRuntimeBaseUrl(protocol: ChannelProtocol, baseUrl: string | null) {
@@ -702,23 +710,32 @@ export async function deleteChannel(userId: string, channelId: string) {
     }
   }
 
-  await db
-    .update(conversations)
-    .set({ channelId: null, modelId: null, updatedAt: new Date() })
-    .where(and(eq(conversations.userId, userId), eq(conversations.channelId, channelId)));
+  // Atomic: detaching the channel from conversations/sessions/tasks and then
+  // deleting its models and the channel itself must all succeed or all roll
+  // back — a partial failure would orphan references or leave a half-deleted
+  // channel.
+  const now = new Date();
+  await db.transaction(async (tx) => {
+    await tx
+      .update(conversations)
+      .set({ channelId: null, modelId: null, updatedAt: now })
+      .where(and(eq(conversations.userId, userId), eq(conversations.channelId, channelId)));
 
-  await db
-    .update(agentSessions)
-    .set({ channelId: null, modelId: null, updatedAt: new Date() })
-    .where(and(eq(agentSessions.userId, userId), eq(agentSessions.channelId, channelId)));
+    await tx
+      .update(agentSessions)
+      .set({ channelId: null, modelId: null, updatedAt: now })
+      .where(and(eq(agentSessions.userId, userId), eq(agentSessions.channelId, channelId)));
 
-  await db
-    .update(agentTasks)
-    .set({ channelId: null, modelId: null, updatedAt: new Date() })
-    .where(and(eq(agentTasks.userId, userId), eq(agentTasks.channelId, channelId)));
+    await tx
+      .update(agentTasks)
+      .set({ channelId: null, modelId: null, updatedAt: now })
+      .where(and(eq(agentTasks.userId, userId), eq(agentTasks.channelId, channelId)));
 
-  await db.delete(channelModels).where(eq(channelModels.channelId, channelId));
-  await db.delete(channels).where(and(eq(channels.id, channelId), eq(channels.userId, userId)));
+    await tx.delete(channelModels).where(eq(channelModels.channelId, channelId));
+    await tx
+      .delete(channels)
+      .where(and(eq(channels.id, channelId), eq(channels.userId, userId)));
+  });
 
   return { success: true };
 }
@@ -764,50 +781,55 @@ export async function updateChannelModels(
 
   const existingByModelId = new Map(existingModels.map((model) => [model.modelId, model]));
   const nextModelIds = new Set(normalizedModels.map((model) => model.modelId));
-
-  for (const model of existingModels) {
-    if (!nextModelIds.has(model.modelId)) {
-      await db.delete(channelModels).where(eq(channelModels.id, model.id));
-    }
-  }
-
-  for (const model of normalizedModels) {
-    const existing = existingByModelId.get(model.modelId);
-    const now = new Date();
-
-    if (existing) {
-      await db
-        .update(channelModels)
-        .set({
-          displayName: model.displayName,
-          enabled: model.enabled,
-          isDefault: model.isDefault,
-          updatedAt: now,
-        })
-        .where(eq(channelModels.id, existing.id));
-      continue;
-    }
-
-    await db.insert(channelModels).values({
-      id: generateId(),
-      channelId,
-      modelId: model.modelId,
-      displayName: model.displayName,
-      enabled: model.enabled,
-      isDefault: model.isDefault,
-      createdAt: now,
-      updatedAt: now,
-    });
-  }
-
   const defaultModel = normalizedModels.find((model) => model.isDefault);
-  await db
-    .update(channels)
-    .set({
-      model: defaultModel?.modelId || null,
-      updatedAt: new Date(),
-    })
-    .where(eq(channels.id, channelId));
+
+  // Atomic: the delete/update/insert reconciliation plus the channel's default
+  // model pointer must all commit together, otherwise a mid-loop failure leaves
+  // the channel's model set inconsistent (e.g. deleted rows but stale default).
+  await db.transaction(async (tx) => {
+    for (const model of existingModels) {
+      if (!nextModelIds.has(model.modelId)) {
+        await tx.delete(channelModels).where(eq(channelModels.id, model.id));
+      }
+    }
+
+    for (const model of normalizedModels) {
+      const existing = existingByModelId.get(model.modelId);
+      const now = new Date();
+
+      if (existing) {
+        await tx
+          .update(channelModels)
+          .set({
+            displayName: model.displayName,
+            enabled: model.enabled,
+            isDefault: model.isDefault,
+            updatedAt: now,
+          })
+          .where(eq(channelModels.id, existing.id));
+        continue;
+      }
+
+      await tx.insert(channelModels).values({
+        id: generateId(),
+        channelId,
+        modelId: model.modelId,
+        displayName: model.displayName,
+        enabled: model.enabled,
+        isDefault: model.isDefault,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+
+    await tx
+      .update(channels)
+      .set({
+        model: defaultModel?.modelId || null,
+        updatedAt: new Date(),
+      })
+      .where(eq(channels.id, channelId));
+  });
 
   return listChannelModels(userId, channelId);
 }

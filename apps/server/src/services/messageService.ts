@@ -398,14 +398,33 @@ async function applyTaskBackedAgentTurnToMessage(params: {
   contextPaths?: string[];
   agentOverrides?: StreamMessageInput["agentOverrides"];
 }) {
-  const { detail, content, agentRun, modelId } = await createTaskBackedAgentTurn({
-    userId: params.userId,
-    conversationId: params.conversationId,
-    conversation: params.conversation,
-    prompt: params.prompt,
-    attachmentIds: params.attachmentIds,
-    agentOverrides: params.agentOverrides,
-  });
+  let turn: Awaited<ReturnType<typeof createTaskBackedAgentTurn>>;
+  try {
+    turn = await createTaskBackedAgentTurn({
+      userId: params.userId,
+      conversationId: params.conversationId,
+      conversation: params.conversation,
+      prompt: params.prompt,
+      attachmentIds: params.attachmentIds,
+      agentOverrides: params.agentOverrides,
+    });
+  } catch (error) {
+    // The caller set conversations.runStatus to "running" before this turn.
+    // If the turn throws (model/network failure), the success-path reset below
+    // never runs and the conversation is stuck showing "running" forever.
+    // Reset to "failed" so the UI unsticks; best-effort so the original error
+    // still propagates to the SSE error handler.
+    try {
+      await db
+        .update(conversations)
+        .set({ updatedAt: new Date(), runStatus: "failed" })
+        .where(eq(conversations.id, params.conversationId));
+    } catch {
+      // ignore — surfacing the original turn error matters more
+    }
+    throw error;
+  }
+  const { detail, content, agentRun, modelId } = turn;
 
   await db
     .update(messages)
@@ -1259,8 +1278,14 @@ export async function streamMessage(
         send({ type: "delta", content: chunk });
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Stream error";
-      responseContent = `Error: ${message}`;
+      // A client disconnect aborts ctx.signal, which surfaces here as an abort
+      // error. That is a normal cancellation, not a failure — keep whatever
+      // partial content already streamed instead of overwriting it with an
+      // "Error:" message that would be persisted as the assistant's reply.
+      if (!ctx.signal.aborted) {
+        const message = error instanceof Error ? error.message : "Stream error";
+        responseContent = `Error: ${message}`;
+      }
     }
 
     await db
