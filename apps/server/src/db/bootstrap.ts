@@ -240,6 +240,37 @@ const SCHEMA_DDL: string[] = [
     created_at INTEGER NOT NULL,
     FOREIGN KEY (session_id) REFERENCES agent_sessions(id) ON DELETE CASCADE
   );`,
+
+  // Indexes for hot-path lookups. SQLite does not auto-index foreign-key
+  // columns, so every FK that appears in a WHERE / JOIN / ORDER BY / DELETE
+  // gets an explicit index here. Keep this list in sync with the `index()`
+  // declarations in packages/db/src/schema/index.ts.
+  `CREATE INDEX IF NOT EXISTS messages_conversation_created_idx ON messages(conversation_id, created_at);`,
+  `CREATE INDEX IF NOT EXISTS attachments_message_idx ON attachments(message_id);`,
+  `CREATE INDEX IF NOT EXISTS attachments_conversation_idx ON attachments(conversation_id);`,
+  `CREATE INDEX IF NOT EXISTS attachments_session_idx ON attachments(session_id);`,
+  `CREATE INDEX IF NOT EXISTS conversations_user_idx ON conversations(user_id);`,
+  `CREATE INDEX IF NOT EXISTS conversations_channel_idx ON conversations(channel_id);`,
+  `CREATE INDEX IF NOT EXISTS channels_user_idx ON channels(user_id);`,
+  `CREATE INDEX IF NOT EXISTS channel_models_channel_idx ON channel_models(channel_id);`,
+  `CREATE INDEX IF NOT EXISTS agent_sessions_user_idx ON agent_sessions(user_id);`,
+  `CREATE INDEX IF NOT EXISTS agent_sessions_conversation_idx ON agent_sessions(conversation_id);`,
+  `CREATE INDEX IF NOT EXISTS agent_sessions_channel_idx ON agent_sessions(channel_id);`,
+  `CREATE INDEX IF NOT EXISTS agent_tasks_user_idx ON agent_tasks(user_id);`,
+  `CREATE INDEX IF NOT EXISTS agent_tasks_conversation_idx ON agent_tasks(conversation_id);`,
+  `CREATE INDEX IF NOT EXISTS agent_tasks_channel_idx ON agent_tasks(channel_id);`,
+  `CREATE INDEX IF NOT EXISTS agent_runs_task_idx ON agent_runs(task_id);`,
+  `CREATE INDEX IF NOT EXISTS agent_plan_steps_task_idx ON agent_plan_steps(task_id);`,
+  `CREATE INDEX IF NOT EXISTS agent_plan_steps_run_idx ON agent_plan_steps(run_id);`,
+  `CREATE INDEX IF NOT EXISTS agent_task_events_task_idx ON agent_task_events(task_id);`,
+  `CREATE INDEX IF NOT EXISTS agent_task_events_run_idx ON agent_task_events(run_id);`,
+  `CREATE INDEX IF NOT EXISTS agent_approval_requests_task_idx ON agent_approval_requests(task_id);`,
+  `CREATE INDEX IF NOT EXISTS agent_approval_requests_run_idx ON agent_approval_requests(run_id);`,
+  `CREATE INDEX IF NOT EXISTS agent_artifacts_task_idx ON agent_artifacts(task_id);`,
+  `CREATE INDEX IF NOT EXISTS agent_artifacts_run_idx ON agent_artifacts(run_id);`,
+  `CREATE INDEX IF NOT EXISTS agent_events_session_idx ON agent_events(session_id);`,
+  `CREATE INDEX IF NOT EXISTS mcp_servers_user_idx ON mcp_servers(user_id);`,
+  `CREATE INDEX IF NOT EXISTS settings_user_key_idx ON settings(user_id, key);`,
 ];
 
 function getRows(result: ResultSet): Row[] {
