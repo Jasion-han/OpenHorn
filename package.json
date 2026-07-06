@@ -1,10 +1,6 @@
 {
   "name": "openhorn",
   "private": true,
-  "workspaces": [
-    "packages/*",
-    "apps/*"
-  ],
   "scripts": {
     "dev:web": "pnpm --filter web dev",
     "dev:desktop": "pnpm --filter desktop dev",

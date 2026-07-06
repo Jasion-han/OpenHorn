@@ -13,7 +13,7 @@ OpenHorn is a self-hostable AI workspace for chat, agent execution, and provider
 | `apps/desktop` | Tauri 2, React 19, Vite | — | Rust + Bun |
 | `apps/sidecar` | WebSocket agent runtime | dynamic | Bun |
 
-Shared packages: `packages/shared` (DTO types), `packages/db` (Drizzle schema), `packages/ui` (Radix components), `packages/agent` (scaffolding).
+Shared packages: `packages/shared` (DTO types), `packages/db` (Drizzle schema), `packages/ui` (Radix components), `packages/adapters` (OpenAI/Anthropic/Google protocol conversion — the core of the provider adapter pattern).
 
 ## Commands
 

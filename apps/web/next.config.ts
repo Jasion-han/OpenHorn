@@ -9,7 +9,10 @@ const nextConfig: NextConfig = {
   // Otherwise running `next build` while a local `next dev` server is alive can
   // corrupt the active dev chunk manifest and trigger ChunkLoadError.
   distDir: process.env.NODE_ENV === "development" ? ".next-dev" : ".next",
-  transpilePackages: ["ui", "shared", "agent", "db"],
+  // Only the workspace packages web actually imports. `agent` is a dead
+  // (empty) package and `db` is not a web dependency — both were transpile
+  // no-ops that misrepresented the dependency graph.
+  transpilePackages: ["ui", "shared"],
   experimental: {
     devtoolSegmentExplorer: false,
   },
