@@ -13,13 +13,7 @@ import { SidecarClient, type SidecarEndpoint } from "../lib/sidecarClient";
  *   error       → a previous start / connect / handshake attempt failed;
  *                 see `lastError` for the reason
  */
-export type SidecarStatus =
-  | "idle"
-  | "starting"
-  | "connecting"
-  | "ready"
-  | "unsupported"
-  | "error";
+export type SidecarStatus = "idle" | "starting" | "connecting" | "ready" | "unsupported" | "error";
 
 /**
  * Platform bridge the store needs to reach Tauri IPC. Defined as an
@@ -38,8 +32,7 @@ export interface SidecarPlatform {
  */
 export type SidecarClientFactory = (endpoint: SidecarEndpoint) => SidecarClient;
 
-const defaultClientFactory: SidecarClientFactory = (endpoint) =>
-  new SidecarClient({ endpoint });
+const defaultClientFactory: SidecarClientFactory = (endpoint) => new SidecarClient({ endpoint });
 
 export interface SidecarState {
   status: SidecarStatus;
@@ -110,8 +103,22 @@ export function createDesktopSidecarStore(options: CreateSidecarStoreOptions) {
   let platform: SidecarPlatform | null = options.platform;
   const createClient = options.createClient ?? defaultClientFactory;
   let unsupportedReason =
-    options.unsupportedReason ??
-    "sidecar runtime is only available inside the desktop shell";
+    options.unsupportedReason ?? "sidecar runtime is only available inside the desktop shell";
+
+  // Auto-reconnect bookkeeping. Kept in the store closure (not module scope) so
+  // each store instance — including test instances — has its own state.
+  const BASE_RECONNECT_DELAY_MS = 1000;
+  const MAX_RECONNECT_DELAY_MS = 30_000;
+  const MAX_RECONNECT_ATTEMPTS = 10;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let reconnectAttempts = 0;
+
+  const clearReconnectTimer = () => {
+    if (reconnectTimer !== null) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+  };
 
   return create<SidecarState>((set, get) => ({
     ...INITIAL_STATE,
@@ -171,16 +178,33 @@ export function createDesktopSidecarStore(options: CreateSidecarStoreOptions) {
 
       client.onDisconnect = () => {
         const current = get().status;
-        if (current === "ready") {
-          set({ status: "error", client: null, lastError: "sidecar 连接断开，正在重连..." });
-          setTimeout(() => {
-            if (get().status === "error") {
-              void get().start();
-            }
-          }, 1000);
+        if (current !== "ready") return;
+        clearReconnectTimer();
+        if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+          set({ status: "error", client: null, lastError: "sidecar 连接断开，重连失败" });
+          return;
         }
+        // Exponential backoff (1s, 2s, 4s … capped at 30s) instead of a fixed
+        // 1s hammer, with a hard attempt cap so an unavailable sidecar doesn't
+        // spin forever.
+        const delay = Math.min(
+          BASE_RECONNECT_DELAY_MS * 2 ** reconnectAttempts,
+          MAX_RECONNECT_DELAY_MS,
+        );
+        reconnectAttempts += 1;
+        set({ status: "error", client: null, lastError: "sidecar 连接断开，正在重连..." });
+        reconnectTimer = setTimeout(() => {
+          reconnectTimer = null;
+          if (get().status === "error") {
+            void get().start();
+          }
+        }, delay);
       };
 
+      // Connected successfully — reset the backoff counter and cancel any
+      // pending reconnect from a previous drop.
+      clearReconnectTimer();
+      reconnectAttempts = 0;
       set({ status: "ready", client });
 
       try {
@@ -192,6 +216,10 @@ export function createDesktopSidecarStore(options: CreateSidecarStoreOptions) {
     },
 
     async stop() {
+      // Cancel any pending auto-reconnect so a queued timer can't resurrect the
+      // sidecar after an explicit stop.
+      clearReconnectTimer();
+      reconnectAttempts = 0;
       const { client } = get();
       if (client) {
         try {

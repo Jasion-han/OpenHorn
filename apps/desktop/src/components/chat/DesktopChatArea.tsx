@@ -681,11 +681,25 @@ function MessageActionBar({
   onDelete: () => void;
 }) {
   const [copied, setCopied] = useState(false);
+  const copyResetTimerRef = useRef<number | null>(null);
+
+  // Clear the pending "copied" reset on unmount so we don't setState on an
+  // unmounted component if the user switches conversations within 2s of copying.
+  useEffect(() => {
+    return () => {
+      if (copyResetTimerRef.current !== null) {
+        window.clearTimeout(copyResetTimerRef.current);
+      }
+    };
+  }, []);
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(copyValue ?? message.content ?? "");
     setCopied(true);
-    window.setTimeout(() => setCopied(false), 2000);
+    if (copyResetTimerRef.current !== null) {
+      window.clearTimeout(copyResetTimerRef.current);
+    }
+    copyResetTimerRef.current = window.setTimeout(() => setCopied(false), 2000);
   };
 
   return (
@@ -1059,7 +1073,10 @@ export function DesktopChatArea() {
     !isStreaming &&
     !isUploading &&
     (hasInput || hasFiles);
-  const groupedMessages = groupMessagesByRound(messages);
+  // Memoized: during streaming `messages` changes on every token, and without
+  // this the whole round-grouping array would be rebuilt each token even though
+  // the grouping only depends on the message list.
+  const groupedMessages = useMemo(() => groupMessagesByRound(messages), [messages]);
 
   useEffect(() => {
     pendingScrollTargetRef.current = { type: "bottom" };

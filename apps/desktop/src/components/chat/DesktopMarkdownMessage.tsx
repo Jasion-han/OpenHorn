@@ -1,5 +1,5 @@
 import { Check, Copy } from "lucide-react";
-import { Fragment, memo, startTransition, useEffect, useMemo, useState } from "react";
+import { Fragment, memo, startTransition, useEffect, useMemo, useRef, useState } from "react";
 import type { Components } from "react-markdown";
 import ReactMarkdown from "react-markdown";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
@@ -131,11 +131,23 @@ function scheduleIdle(run: () => void): () => void {
 
 function CopyButton({ code }: { code: string }) {
   const [copied, setCopied] = useState(false);
+  const copyResetTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (copyResetTimerRef.current !== null) {
+        window.clearTimeout(copyResetTimerRef.current);
+      }
+    };
+  }, []);
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(code);
     setCopied(true);
-    window.setTimeout(() => setCopied(false), 2000);
+    if (copyResetTimerRef.current !== null) {
+      window.clearTimeout(copyResetTimerRef.current);
+    }
+    copyResetTimerRef.current = window.setTimeout(() => setCopied(false), 2000);
   };
 
   return (
