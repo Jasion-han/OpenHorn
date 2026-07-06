@@ -5,7 +5,20 @@ import { jwtVerify, SignJWT } from "jose";
 import { db } from "../db";
 import { generateId } from "../utils";
 
-const JWT_SECRET = new TextEncoder().encode(process.env.JWT_SECRET || "your-secret-key");
+/**
+ * Resolves the JWT signing secret. Fails fast when `JWT_SECRET` is missing
+ * instead of silently falling back to a publicly-known default (which would
+ * let anyone forge tokens for any user). Mirrors the `ENCRYPTION_KEY` handling
+ * in `utils.ts`. Lazy so importing this module never throws — only signing /
+ * verifying a token requires the secret.
+ */
+function getJwtSecret(): Uint8Array {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    throw new Error("JWT_SECRET is not set");
+  }
+  return new TextEncoder().encode(secret);
+}
 
 export interface RegisterInput {
   email: string;
@@ -42,7 +55,7 @@ export async function register(input: RegisterInput) {
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime("7d")
-    .sign(JWT_SECRET);
+    .sign(getJwtSecret());
 
   return { token, user: { id, email: input.email, username: input.username } };
 }
@@ -65,7 +78,7 @@ export async function login(input: LoginInput) {
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime("7d")
-    .sign(JWT_SECRET);
+    .sign(getJwtSecret());
 
   return {
     token,
@@ -78,8 +91,11 @@ export async function login(input: LoginInput) {
 }
 
 export async function verifyToken(token: string) {
+  // Resolve the secret outside the try so a missing-config error surfaces
+  // (fail-fast) instead of being swallowed as an "invalid token".
+  const secret = getJwtSecret();
   try {
-    const { payload } = await jwtVerify(token, JWT_SECRET);
+    const { payload } = await jwtVerify(token, secret);
     return payload as { userId: string };
   } catch {
     return null;

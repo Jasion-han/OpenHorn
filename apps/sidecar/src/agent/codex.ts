@@ -1,6 +1,5 @@
 import { type ChildProcess, spawn } from "node:child_process";
-import { existsSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import type { AttachmentPart } from "shared/types";
@@ -35,6 +34,38 @@ function sendRequest(proc: ChildProcess, id: number, method: string, params?: un
 
 function sendNotification(proc: ChildProcess, method: string, params?: unknown) {
   send(proc, { method, ...(params ? { params } : {}) });
+}
+
+/**
+ * Builds the env for the codex child process. Codex runs with
+ * `sandbox_mode="danger-full-access"` and `approval_policy="never"`, so a
+ * prompt-injected codex agent has a full shell. It must NOT inherit our
+ * handshake token or unrelated service credentials (a `printenv` would leak
+ * them). Codex authenticates via its own `~/.codex` config (keyed off HOME),
+ * so stripping these does not break it. Mirrors the env hygiene in claude.ts.
+ */
+function buildCodexEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  for (const key of Object.keys(env)) {
+    if (
+      key.startsWith("OPENHORN") ||
+      key.startsWith("CLAUDE") ||
+      key.startsWith("CODEX_COMPANION") ||
+      key.startsWith("TRELLIS_") ||
+      key === "AI_AGENT" ||
+      key === "ANTHROPIC_API_KEY" ||
+      key === "ANTHROPIC_BASE_URL" ||
+      key === "DEEPSEEK_API_KEY" ||
+      key === "GOOGLE_API_KEY" ||
+      key === "TAVILY_API_KEY" ||
+      key === "JWT_SECRET" ||
+      key === "ENCRYPTION_KEY" ||
+      key === "DATABASE_URL"
+    ) {
+      delete env[key];
+    }
+  }
+  return env;
 }
 
 function mapCodexEvent(msg: JsonRpcMessage): AgentEvent | null {
@@ -123,7 +154,7 @@ export async function runCodexAgent(input: RunCodexAgentInput): Promise<void> {
     {
       cwd,
       stdio: ["pipe", "pipe", "pipe"],
-      env: process.env,
+      env: buildCodexEnv(),
     },
   );
 

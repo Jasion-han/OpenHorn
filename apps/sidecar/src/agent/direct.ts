@@ -27,6 +27,11 @@ import {
 import type { AttachmentPart } from "shared/types";
 import { modelSupportsVision } from "shared/vision";
 import {
+  resolvePathInsideWorkspace,
+  resolveWritePathInsideWorkspace,
+  toWorkspaceRelative,
+} from "../workspace";
+import {
   buildFileContext,
   getImageAttachments,
   imageFallbackText,
@@ -93,7 +98,30 @@ interface ExecuteToolOptions {
   }) => Promise<boolean>;
 }
 
-async function executeTool(
+/**
+ * Resolves a model-supplied path for a *read* operation, keeping it inside the
+ * workspace (`cwd` is the canonicalized workspace root — see index.ts). Models
+ * frequently emit absolute paths that happen to live inside the workspace, so we
+ * normalise via `toWorkspaceRelative` first, then apply the lexical boundary
+ * check. Throws on `..`/absolute/escape; callers turn the throw into a tool-error
+ * string rather than crashing the agent. Mirrors claude.ts `checkSdkFsToolPath`.
+ */
+function resolveReadPathInWorkspace(cwd: string, filePath: string): string {
+  const relative = toWorkspaceRelative(cwd, filePath);
+  return resolvePathInsideWorkspace({ workspaceRoot: cwd, targetPath: relative });
+}
+
+/**
+ * Resolves a model-supplied path for a *write* operation. Adds the
+ * realpath-of-ancestor check so a symlink planted inside the workspace can't be
+ * used to escape on first write.
+ */
+function resolveWritePathInWorkspace(cwd: string, filePath: string): Promise<string> {
+  const relative = toWorkspaceRelative(cwd, filePath);
+  return resolveWritePathInsideWorkspace({ workspaceRoot: cwd, targetPath: relative });
+}
+
+export async function executeTool(
   name: string,
   input: Record<string, unknown>,
   cwd: string,
@@ -138,7 +166,7 @@ async function executeTool(
     const filePath = typeof input.path === "string" ? input.path.trim() : "";
     if (!filePath) return "Error: path is required";
     try {
-      const resolved = path.resolve(cwd, filePath);
+      const resolved = resolveReadPathInWorkspace(cwd, filePath);
       const content = await readFile(resolved, "utf-8");
       return content.length > MAX_READ_CHARS
         ? `${content.slice(0, MAX_READ_CHARS)}\n...(truncated)`
@@ -151,7 +179,7 @@ async function executeTool(
   if (name === "list_dir") {
     const dirPath = typeof input.path === "string" ? input.path.trim() || "." : ".";
     try {
-      const resolved = path.resolve(cwd, dirPath);
+      const resolved = resolveReadPathInWorkspace(cwd, dirPath);
       const entries = await readdir(resolved, { withFileTypes: true });
       const lines = entries
         .slice(0, MAX_LIST_DIR_ENTRIES)
@@ -170,7 +198,7 @@ async function executeTool(
     if (!filePath) return "Error: path is required";
     const content = typeof input.content === "string" ? input.content : "";
     try {
-      const resolved = path.resolve(cwd, filePath);
+      const resolved = await resolveWritePathInWorkspace(cwd, filePath);
       await mkdir(path.dirname(resolved), { recursive: true });
       await writeFile(resolved, content, "utf-8");
       return `File written: ${filePath}`;
@@ -186,7 +214,7 @@ async function executeTool(
     const newStr = typeof input.new_string === "string" ? input.new_string : "";
     if (!oldStr) return "Error: old_string must not be empty";
     try {
-      const resolved = path.resolve(cwd, filePath);
+      const resolved = await resolveWritePathInWorkspace(cwd, filePath);
       const content = await readFile(resolved, "utf-8");
       if (!content.includes(oldStr)) return "Error: old_string not found in file";
       const updated = content.replace(oldStr, newStr);
