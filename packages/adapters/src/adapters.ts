@@ -344,9 +344,34 @@ function canonicalizeToolName(name: string, tools?: GenericToolDefinition[]) {
   return looseMatch?.name ?? trimmed;
 }
 
+// Parse tool-call arguments, distinguishing a legitimately-empty argument
+// object from a truncated/corrupted one. Silently defaulting unparseable JSON
+// to `{}` would run the tool with empty args as if valid — especially harmful
+// when the response was cut off (`finish_reason: "length"`).
+function parseToolCallArguments(
+  argumentsText: string,
+  toolName: string,
+  finishReason: string | null,
+): Record<string, unknown> {
+  const trimmed = (argumentsText || "").trim();
+  if (!trimmed) {
+    return {};
+  }
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    return isRecord(parsed) ? parsed : {};
+  } catch {
+    const truncated = finishReason === "length" ? " (finish_reason=length)" : "";
+    throw new Error(
+      `Provider API error: tool call arguments truncated${truncated} for "${toolName}"`,
+    );
+  }
+}
+
 function parseOpenAIToolCalls(
   rawToolCalls: unknown,
   tools?: GenericToolDefinition[],
+  finishReason: string | null = null,
 ): GenericAgentTurnResult["toolCalls"] {
   if (!Array.isArray(rawToolCalls)) {
     return [];
@@ -364,16 +389,8 @@ function parseOpenAIToolCalls(
           : "";
       if (!name) return null;
       const argsRaw =
-        typeof toolCall.function.arguments === "string" ? toolCall.function.arguments : "{}";
-      let input: Record<string, unknown> = {};
-      try {
-        const parsed = JSON.parse(argsRaw) as unknown;
-        if (isRecord(parsed)) {
-          input = parsed;
-        }
-      } catch {
-        input = {};
-      }
+        typeof toolCall.function.arguments === "string" ? toolCall.function.arguments : "";
+      const input = parseToolCallArguments(argsRaw, name, finishReason);
       return { id, name, input };
     })
     .filter((toolCall): toolCall is GenericAgentTurnResult["toolCalls"][number] =>
@@ -396,11 +413,13 @@ function parseOpenAIToolCallingResult(
     throw new Error("OpenAI API error: Missing response message");
   }
 
+  const finishReason =
+    isRecord(first) && typeof first.finish_reason === "string" ? first.finish_reason : null;
+
   return {
     text: extractOpenAITextContent(message.content),
-    toolCalls: parseOpenAIToolCalls(message.tool_calls, tools),
-    finishReason:
-      isRecord(first) && typeof first.finish_reason === "string" ? first.finish_reason : null,
+    toolCalls: parseOpenAIToolCalls(message.tool_calls, tools, finishReason),
+    finishReason,
   };
 }
 
@@ -906,6 +925,12 @@ export class OpenAIAdapter implements ProviderAdapter {
       number,
       { id?: string; name: string; argumentsText: string }
     >();
+    // Some gateways (DeepSeek/Qwen/proxies) omit `index` on streamed tool-call
+    // fragments. Without a fallback slot, distinct parallel calls collapse into
+    // one corrupted entry. Track a synthetic slot: a fragment carrying a new
+    // tool-call `id` starts a new slot, otherwise it appends to the current one.
+    let lastToolCallKey: number | null = null;
+    let nextSyntheticToolCallKey = 0;
 
     const emitParsedPayload = function* (payload: string): Generator<ToolCallingStreamEvent> {
       const parsed = JSON.parse(payload) as unknown;
@@ -929,7 +954,16 @@ export class OpenAIAdapter implements ProviderAdapter {
       const toolCalls = Array.isArray(delta.tool_calls) ? delta.tool_calls : [];
       for (const toolCall of toolCalls) {
         if (!isRecord(toolCall)) continue;
-        const index = typeof toolCall.index === "number" ? toolCall.index : 0;
+        const hasNewId = typeof toolCall.id === "string" && toolCall.id.trim().length > 0;
+        let index: number;
+        if (typeof toolCall.index === "number") {
+          index = toolCall.index;
+        } else if (hasNewId || lastToolCallKey === null) {
+          index = nextSyntheticToolCallKey++;
+        } else {
+          index = lastToolCallKey;
+        }
+        lastToolCallKey = index;
         const current = toolCallsByIndex.get(index) || {
           id: undefined,
           name: "",
@@ -962,15 +996,7 @@ export class OpenAIAdapter implements ProviderAdapter {
           const id = toolCall.id || crypto.randomUUID();
           const name = canonicalizeToolName(toolCall.name, options.tools);
           if (!name) return null;
-          let input: Record<string, unknown> = {};
-          try {
-            const parsed = JSON.parse(toolCall.argumentsText || "{}") as unknown;
-            if (isRecord(parsed)) {
-              input = parsed;
-            }
-          } catch {
-            input = {};
-          }
+          const input = parseToolCallArguments(toolCall.argumentsText, name, finishReason);
           return { id, name, input };
         })
         .filter((toolCall): toolCall is GenericAgentTurnResult["toolCalls"][number] =>
@@ -1152,16 +1178,6 @@ export class AnthropicAdapter implements ProviderAdapter {
 
     if (!response || !response.ok) {
       const detail = response ? await readErrorDetail(response) : "Request failed";
-      if (
-        (options as any).toolChoice &&
-        (options as any).toolChoice !== "auto" &&
-        shouldRetryWithoutForcedToolChoice(detail)
-      ) {
-        return this.runToolCallingTurn({
-          ...(options as any),
-          toolChoice: "auto",
-        }) as any;
-      }
       throw new Error(formatProviderApiError(response?.status, detail));
     }
 
@@ -1172,8 +1188,15 @@ export class AnthropicAdapter implements ProviderAdapter {
     const id = typeof data.id === "string" ? data.id : "";
     const model = typeof data.model === "string" ? data.model : options.model;
     const blocks = Array.isArray(data.content) ? data.content : [];
-    const first = blocks[0];
-    const content = isRecord(first) && typeof first.text === "string" ? first.text : null;
+    // content[0] may be a non-text block (e.g. a thinking block); collect every
+    // text block so a valid answer after such a block is not dropped.
+    const content = blocks
+      .filter(
+        (block): block is { type?: string; text?: string } =>
+          isRecord(block) && block.type === "text" && typeof block.text === "string",
+      )
+      .map((block) => block.text ?? "")
+      .join("");
     if (!content) {
       throw new Error("Provider API error: Missing response content");
     }
@@ -1258,17 +1281,6 @@ export class AnthropicAdapter implements ProviderAdapter {
     if (!response || !response.ok) {
       timeout.cleanup();
       const detail = response ? await readErrorDetail(response) : "Request failed";
-      if (
-        (options as any).toolChoice &&
-        (options as any).toolChoice !== "auto" &&
-        shouldRetryWithoutForcedToolChoice(detail)
-      ) {
-        yield* (this as any).runToolCallingTurnStream({
-          ...options,
-          toolChoice: "auto",
-        });
-        return;
-      }
       throw new Error(formatProviderApiError(response?.status, detail));
     }
 
@@ -1292,19 +1304,30 @@ export class AnthropicAdapter implements ProviderAdapter {
         buffer = lines.pop() || "";
 
         for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            const data = line.slice(6);
-            if (data === "[DONE]") return;
-            try {
-              const parsed = JSON.parse(data);
-              if (parsed.type === "content_block_delta") {
-                const text = parsed?.delta?.text;
-                if (typeof text === "string" && text.length > 0) {
-                  yield text;
-                }
-              }
-            } catch {
-              // Skip invalid JSON
+          if (!line.startsWith("data: ")) continue;
+          const data = line.slice(6);
+          if (data === "[DONE]") return;
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(data);
+          } catch {
+            // Skip invalid JSON
+            continue;
+          }
+          if (!isRecord(parsed)) continue;
+          // Anthropic emits mid-stream error events (overloaded/rate-limit);
+          // surface them instead of silently truncating the stream.
+          if (parsed.type === "error") {
+            const err = isRecord(parsed.error) ? parsed.error : null;
+            const message =
+              err && typeof err.message === "string" ? err.message : "Streaming error";
+            throw new Error(formatProviderApiError(undefined, message));
+          }
+          if (parsed.type === "content_block_delta") {
+            const delta = isRecord(parsed.delta) ? parsed.delta : null;
+            const text = delta?.text;
+            if (typeof text === "string" && text.length > 0) {
+              yield text;
             }
           }
         }
