@@ -143,16 +143,14 @@ function ConvItem({
 export function ChatAside() {
   const router = useRouter();
   const pathname = usePathname();
-  const {
-    conversations,
-    currentConversation,
-    setCurrentConversation,
-    loadConversations,
-    createConversation,
-    deleteConversation,
-    loadMessages,
-    updateConversation,
-  } = useChatStore();
+  const conversations = useChatStore((state) => state.conversations);
+  const currentConversation = useChatStore((state) => state.currentConversation);
+  const setCurrentConversation = useChatStore((state) => state.setCurrentConversation);
+  const loadConversations = useChatStore((state) => state.loadConversations);
+  const createConversation = useChatStore((state) => state.createConversation);
+  const deleteConversation = useChatStore((state) => state.deleteConversation);
+  const loadMessages = useChatStore((state) => state.loadMessages);
+  const updateConversation = useChatStore((state) => state.updateConversation);
 
   const [query, setQuery] = useState("");
   const [creating, setCreating] = useState(false);

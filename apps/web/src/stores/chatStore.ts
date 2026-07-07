@@ -49,16 +49,7 @@ export interface Message {
   liveRoute?: ApiLiveRoute;
   liveLabel?: string;
   citations?: ApiCitation[];
-  streamTail?: string;
-  streamPulseKey?: number;
   createdAt: Date;
-}
-
-const STREAM_TAIL_WINDOW = 18;
-
-function getRollingTail(text: string, size = STREAM_TAIL_WINDOW) {
-  const chars = Array.from(text);
-  return chars.slice(Math.max(0, chars.length - size)).join("");
 }
 
 function parseConversation(conv: ApiConversation): Conversation {
@@ -327,8 +318,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
           ? {
               ...message,
               content: `${message.content || ""}${delta}`,
-              streamTail: getRollingTail(`${message.content || ""}${delta}`),
-              streamPulseKey: (message.streamPulseKey ?? 0) + 1,
               ...updates,
             }
           : message,

@@ -6,7 +6,7 @@ import { useChatStore } from "@/stores/chatStore";
 import { useUIStore } from "@/stores/uiStore";
 
 export function ChatHeader() {
-  const { currentConversation } = useChatStore();
+  const currentConversation = useChatStore((state) => state.currentConversation);
   const { sidebarCollapsed, setSidebarCollapsed } = useUIStore();
 
   const sidebarToggle = (

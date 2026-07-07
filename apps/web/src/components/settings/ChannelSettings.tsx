@@ -49,7 +49,8 @@ function getPreferredChannelToFix(channels: ApiChannel[]): ApiChannel | null {
 }
 
 export function ChannelSettings() {
-  const { channels, setChannels } = useChatStore();
+  const channels = useChatStore((state) => state.channels);
+  const setChannels = useChatStore((state) => state.setChannels);
   const router = useRouter();
   const search = useSearchParams();
   const [editorOpen, setEditorOpen] = useState(false);

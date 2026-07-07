@@ -2,7 +2,7 @@
 
 import { Bot, Check, Copy, MessageSquare, Pencil, RefreshCw, Trash2 } from "lucide-react";
 import type React from "react";
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import {
   type MessageAttachmentItem,
   MessageAttachments,
@@ -25,7 +25,6 @@ import { createTextStreamSmoother, type TextStreamSmoother } from "@/lib/textStr
 import { cn } from "@/lib/utils";
 import {
   type ApiAgentRun,
-  type ApiCitation,
   type ApiLiveRoute,
   type ApiLiveStatus,
   api,
@@ -284,7 +283,7 @@ function LiveStatusBadge({
   );
 }
 
-function MessageBubble({
+function MessageBubbleImpl({
   msg,
   isStreaming,
   canEdit,
@@ -292,30 +291,16 @@ function MessageBubble({
   onEdit,
   onRetry,
   onDelete,
-  attachments,
   assistantWidth,
   userMaxWidth,
 }: {
-  msg: {
-    id: string;
-    role: "user" | "assistant";
-    content: string;
-    mode: "chat" | "agent";
-    agentRun?: ApiAgentRun;
-    liveStatus?: ApiLiveStatus;
-    liveRoute?: ApiLiveRoute;
-    liveLabel?: string;
-    citations?: ApiCitation[];
-    streamTail?: string;
-    streamPulseKey?: number;
-  };
+  msg: Message;
   isStreaming: boolean;
   canEdit: boolean;
   canRetry: boolean;
   onEdit: () => void;
   onRetry: () => void;
   onDelete: () => void;
-  attachments?: MessageAttachmentItem[];
   assistantWidth: string;
   userMaxWidth: string;
 }) {
@@ -333,8 +318,10 @@ function MessageBubble({
   const hasAssistantText = isAssistant && Boolean((displayContent || "").trim());
   const isAssistantPlaceholder = isAssistant && isStreaming && !hasAssistantText;
   const isAgent = msg.mode === "agent";
-  const streamTailLength =
-    isAssistant && isStreaming && hasAssistantText ? (msg.streamTail || "").length : 0;
+  const attachments =
+    msg.role === "user" && msg.attachmentsMeta && msg.attachmentsMeta.length > 0
+      ? msg.attachmentsMeta
+      : undefined;
   const processPanel = isAssistant ? (
     msg.agentRun?.taskId ? (
       <ChatAgentTaskCard messageId={msg.id} taskId={msg.agentRun.taskId} />
@@ -384,12 +371,7 @@ function MessageBubble({
             <LiveStatusBadge status={msg.liveStatus} route={msg.liveRoute} label={msg.liveLabel} />
             {hasAssistantText ? (
               isStreaming ? (
-                <StreamingMarkdownMessage
-                  content={displayContent}
-                  tailLength={streamTailLength}
-                  pulseKey={msg.streamPulseKey ?? 0}
-                  citations={msg.citations}
-                />
+                <StreamingMarkdownMessage content={displayContent} citations={msg.citations} />
               ) : (
                 <MarkdownMessage content={displayContent} citations={msg.citations} />
               )
@@ -433,6 +415,24 @@ function MessageBubble({
     </div>
   );
 }
+
+// Memoized: during streaming the messages array changes on every token, which
+// re-renders the list. `updateMessage`/`appendMessageDelta` use `.map` returning
+// the SAME object for unchanged rows, so a reference check on `msg` lets every
+// non-streaming bubble bail out — only the streaming message re-renders (avoiding
+// re-running MarkdownMessage + Prism for every completed bubble per token).
+// Callbacks are ignored (they are id-based and read fresh store state); all
+// render-affecting props are compared.
+const MessageBubble = memo(
+  MessageBubbleImpl,
+  (prev, next) =>
+    prev.msg === next.msg &&
+    prev.isStreaming === next.isStreaming &&
+    prev.canEdit === next.canEdit &&
+    prev.canRetry === next.canRetry &&
+    prev.assistantWidth === next.assistantWidth &&
+    prev.userMaxWidth === next.userMaxWidth,
+);
 
 type GroupedMessageEntry = {
   msg: Message;
@@ -481,22 +481,20 @@ function groupMessagesByRound(messages: Message[]): MessageRoundGroup[] {
 }
 
 export function ChatArea() {
-  const {
-    currentConversation,
-    messages,
-    isLoading,
-    isStreaming,
-    addMessage,
-    appendMessageDelta,
-    loadMessages,
-    setIsLoading,
-    setIsStreaming,
-    channels,
-    updateConversation,
-    deleteMessage,
-    composerMode,
-    setComposerMode,
-  } = useChatStore();
+  const currentConversation = useChatStore((state) => state.currentConversation);
+  const messages = useChatStore((state) => state.messages);
+  const isLoading = useChatStore((state) => state.isLoading);
+  const isStreaming = useChatStore((state) => state.isStreaming);
+  const addMessage = useChatStore((state) => state.addMessage);
+  const appendMessageDelta = useChatStore((state) => state.appendMessageDelta);
+  const loadMessages = useChatStore((state) => state.loadMessages);
+  const setIsLoading = useChatStore((state) => state.setIsLoading);
+  const setIsStreaming = useChatStore((state) => state.setIsStreaming);
+  const channels = useChatStore((state) => state.channels);
+  const updateConversation = useChatStore((state) => state.updateConversation);
+  const deleteMessage = useChatStore((state) => state.deleteMessage);
+  const composerMode = useChatStore((state) => state.composerMode);
+  const setComposerMode = useChatStore((state) => state.setComposerMode);
 
   const [input, setInput] = useState("");
   const [files, setFiles] = useState<File[]>([]);
@@ -518,7 +516,7 @@ export function ChatArea() {
 
   const ASSISTANT_BUBBLE_WIDTH = "92%";
   const USER_BUBBLE_MAX_WIDTH = "72%";
-  const groupedMessages = groupMessagesByRound(messages);
+  const groupedMessages = useMemo(() => groupMessagesByRound(messages), [messages]);
 
   useEffect(() => {
     pendingScrollTargetRef.current = { type: "bottom" };
@@ -626,8 +624,6 @@ export function ChatArea() {
 
   const resetAssistantMessageForStream = (assistantMessageId: string, agentRun?: ApiAgentRun) => {
     useChatStore.getState().updateMessage(assistantMessageId, "", {
-      streamTail: undefined,
-      streamPulseKey: 0,
       liveStatus: undefined,
       liveRoute: undefined,
       liveLabel: undefined,
@@ -646,6 +642,7 @@ export function ChatArea() {
   };
 
   const getEditableUserMessageAt = (index: number) => {
+    const messages = useChatStore.getState().messages;
     const userMsg = messages[index];
     if (!userMsg || userMsg.role !== "user") return null;
     if (userMsg.id.startsWith("temp-")) return null;
@@ -1002,8 +999,13 @@ export function ChatArea() {
     }
   };
 
-  const handleRetry = async (msgIndex: number) => {
+  const handleRetry = async (msgId: string) => {
+    const state = useChatStore.getState();
+    const currentConversation = state.currentConversation;
+    const messages = state.messages;
     if (!currentConversation) return;
+    const msgIndex = messages.findIndex((m) => m.id === msgId);
+    if (msgIndex < 0) return;
     const assistantMsg = messages[msgIndex];
     if (!assistantMsg || assistantMsg.role !== "assistant") return;
     const precedingUserMsg = (() => {
@@ -1238,38 +1240,16 @@ export function ChatArea() {
       )}
     >
       <MessageBubble
-        msg={{
-          id: msg.id,
-          role: msg.role,
-          content: msg.content,
-          mode: msg.mode,
-          agentRun: msg.agentRun,
-          liveStatus: msg.liveStatus,
-          liveRoute: msg.liveRoute,
-          liveLabel: msg.liveLabel,
-          citations: msg.citations,
-          streamTail: msg.streamTail,
-          streamPulseKey: msg.streamPulseKey,
-        }}
+        msg={msg}
         isStreaming={Boolean(
           isStreaming && streamingAssistantId && msg.id === streamingAssistantId,
         )}
         canEdit={canEditUserMessageAt(index)}
         canRetry={msg.role === "assistant" && !isLoading && !isStreaming && !isUploading}
-        attachments={
-          msg.role === "user" && msg.attachmentsMeta
-            ? msg.attachmentsMeta.map((att) => ({
-                id: att.id,
-                fileName: att.fileName,
-                fileType: att.fileType,
-                fileSize: att.fileSize,
-                previewUrl: att.previewUrl,
-              }))
-            : undefined
-        }
         onEdit={() => {
           if (msg.role !== "user") return;
-          if (!canEditUserMessageAt(index)) {
+          const idx = useChatStore.getState().messages.findIndex((m) => m.id === msg.id);
+          if (idx < 0 || !canEditUserMessageAt(idx)) {
             notifyWarning(
               "当前消息不可编辑",
               "这条用户消息后面没有对应的助手回复，无法重新编辑并生成。",
@@ -1279,7 +1259,7 @@ export function ChatArea() {
           setEditingMsgId(msg.id);
           setEditingContent(msg.content || "");
         }}
-        onRetry={() => void handleRetry(index)}
+        onRetry={() => void handleRetry(msg.id)}
         onDelete={() => void deleteMessage(msg.id)}
         assistantWidth={ASSISTANT_BUBBLE_WIDTH}
         userMaxWidth={USER_BUBBLE_MAX_WIDTH}

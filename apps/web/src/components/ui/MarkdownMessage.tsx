@@ -152,70 +152,72 @@ export function MarkdownMessage({
     [inlineCitationPlugin],
   );
 
-  type CodeProps = React.ComponentPropsWithoutRef<"code"> & { inline?: boolean; node?: unknown };
-  type PreProps = React.ComponentPropsWithoutRef<"pre"> & { node?: unknown };
-  type LinkProps = React.ComponentPropsWithoutRef<"a"> & { node?: unknown };
+  const components = useMemo<Components>(() => {
+    type CodeProps = React.ComponentPropsWithoutRef<"code"> & { inline?: boolean; node?: unknown };
+    type PreProps = React.ComponentPropsWithoutRef<"pre"> & { node?: unknown };
+    type LinkProps = React.ComponentPropsWithoutRef<"a"> & { node?: unknown };
 
-  const components: Components = {
-    a({ href, children, ...props }: LinkProps) {
-      if (href?.startsWith(CITATION_LINK_PREFIX)) {
-        const index = Number.parseInt(href.slice(CITATION_LINK_PREFIX.length), 10);
-        const citation = citations?.[index - 1];
-        if (!citation) {
-          return <>{children}</>;
+    return {
+      a({ href, children, ...props }: LinkProps) {
+        if (href?.startsWith(CITATION_LINK_PREFIX)) {
+          const index = Number.parseInt(href.slice(CITATION_LINK_PREFIX.length), 10);
+          const citation = citations?.[index - 1];
+          if (!citation) {
+            return <>{children}</>;
+          }
+          return <InlineCitationReference index={index} citation={citation} />;
         }
-        return <InlineCitationReference index={index} citation={citation} />;
-      }
 
-      return (
-        <a href={resolveMarkdownHref(href)} target="_blank" rel="noreferrer" {...props}>
-          {children}
-        </a>
-      );
-    },
-    code({ className, children, ...props }: CodeProps) {
-      const match = /language-(\w+)/.exec(className || "");
-      const codeString = String(children).replace(/\n$/, "");
-      const isBlock = codeString.includes("\n") || Boolean(match);
-      if (isBlock) {
         return (
-          <div className={styles.codeBlock}>
-            <div className={styles.codeHeader}>
-              <span className={styles.codeLang}>{match ? match[1] : ""}</span>
-              <CopyButton code={codeString} />
-            </div>
-            <SyntaxHighlighter
-              style={syntaxTheme}
-              language={match ? match[1] : "text"}
-              PreTag="div"
-              customStyle={{
-                margin: 0,
-                padding: "0.75em 1em",
-                background: "transparent",
-                fontSize: "0.875em",
-                lineHeight: "1.5",
-              }}
-              codeTagProps={{
-                style: {
-                  fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-                },
-              }}
-            >
-              {codeString}
-            </SyntaxHighlighter>
-          </div>
+          <a href={resolveMarkdownHref(href)} target="_blank" rel="noreferrer" {...props}>
+            {children}
+          </a>
         );
-      }
-      return (
-        <code className={className} {...props}>
-          {children}
-        </code>
-      );
-    },
-    pre({ children }: PreProps) {
-      return <>{children}</>;
-    },
-  };
+      },
+      code({ className, children, ...props }: CodeProps) {
+        const match = /language-(\w+)/.exec(className || "");
+        const codeString = String(children).replace(/\n$/, "");
+        const isBlock = codeString.includes("\n") || Boolean(match);
+        if (isBlock) {
+          return (
+            <div className={styles.codeBlock}>
+              <div className={styles.codeHeader}>
+                <span className={styles.codeLang}>{match ? match[1] : ""}</span>
+                <CopyButton code={codeString} />
+              </div>
+              <SyntaxHighlighter
+                style={syntaxTheme}
+                language={match ? match[1] : "text"}
+                PreTag="div"
+                customStyle={{
+                  margin: 0,
+                  padding: "0.75em 1em",
+                  background: "transparent",
+                  fontSize: "0.875em",
+                  lineHeight: "1.5",
+                }}
+                codeTagProps={{
+                  style: {
+                    fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+                  },
+                }}
+              >
+                {codeString}
+              </SyntaxHighlighter>
+            </div>
+          );
+        }
+        return (
+          <code className={className} {...props}>
+            {children}
+          </code>
+        );
+      },
+      pre({ children }: PreProps) {
+        return <>{children}</>;
+      },
+    };
+  }, [citations, syntaxTheme]);
 
   return (
     <div className={styles.root}>

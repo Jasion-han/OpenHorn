@@ -12,8 +12,9 @@ const UNAUTHORIZED_EVENT = "openhorn:unauthorized";
 export function AuthBootstrap({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
-  const { setUser, logout } = useAuthStore();
-  const { setChannels } = useChatStore();
+  const setUser = useAuthStore((state) => state.setUser);
+  const logout = useAuthStore((state) => state.logout);
+  const setChannels = useChatStore((state) => state.setChannels);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {

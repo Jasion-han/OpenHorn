@@ -67,7 +67,9 @@ export function ModelPickerModal(props: {
     beforeSelect,
     onSelect,
   } = props;
-  const { channels, setChannels, setConversationModel } = useChatStore();
+  const channels = useChatStore((state) => state.channels);
+  const setChannels = useChatStore((state) => state.setChannels);
+  const setConversationModel = useChatStore((state) => state.setConversationModel);
 
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
