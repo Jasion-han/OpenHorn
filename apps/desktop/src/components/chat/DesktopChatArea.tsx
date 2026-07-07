@@ -23,7 +23,7 @@ import {
 } from "../../lib/conversationTitle";
 import { getGlobalDefaultChannel } from "../../lib/defaultChannel";
 import { getEffectiveModelForConversation } from "../../lib/effectiveModel";
-import { getSlashLabel } from "../../lib/i18n/agent";
+import { getChatLabel, getSlashLabel } from "../../lib/i18n/agent";
 import {
   findGroupIndexByMessageId,
   groupMessagesByRound,
@@ -189,15 +189,15 @@ function LiveStatusBadge({
   const routeLabel = (() => {
     switch (route) {
       case "local":
-        return "本地";
+        return getChatLabel("chat.liveRoute.local");
       case "structured_live":
-        return "天气";
+        return getChatLabel("chat.liveRoute.structuredLive");
       case "web_search":
-        return "搜索";
+        return getChatLabel("chat.liveRoute.webSearch");
       case "research":
-        return "调研";
+        return getChatLabel("chat.liveRoute.research");
       default:
-        return "直答";
+        return getChatLabel("chat.liveRoute.direct");
     }
   })();
 
@@ -631,7 +631,7 @@ function AgentRunPanel({ run }: { run?: ApiAgentRun }) {
 function TypingIndicator() {
   return (
     <div
-      aria-label="正在生成"
+      aria-label={getChatLabel("chat.typing")}
       className="inline-flex items-center gap-1 rounded-full bg-muted/30 px-2.5 py-1.5 text-muted-foreground/80"
     >
       <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current opacity-70" />
@@ -751,19 +751,35 @@ function MessageActionBar({
       )}
     >
       {message.role === "user" && (
-        <IconActionButton onClick={onEdit} title="编辑" disabled={!canEdit}>
+        <IconActionButton
+          onClick={onEdit}
+          title={getChatLabel("chat.action.edit")}
+          disabled={!canEdit}
+        >
           <Pencil size={13} />
         </IconActionButton>
       )}
-      <IconActionButton onClick={() => void handleCopy()} title={copied ? "已复制" : "复制"}>
+      <IconActionButton
+        onClick={() => void handleCopy()}
+        title={copied ? getChatLabel("chat.action.copied") : getChatLabel("chat.action.copy")}
+      >
         {copied ? <Check size={13} /> : <Copy size={13} />}
       </IconActionButton>
       {message.role === "assistant" && (
-        <IconActionButton onClick={onRetry} title="重新生成" disabled={!canRetry}>
+        <IconActionButton
+          onClick={onRetry}
+          title={getChatLabel("chat.action.regenerate")}
+          disabled={!canRetry}
+        >
           <RefreshCw size={13} />
         </IconActionButton>
       )}
-      <IconActionButton onClick={onDelete} title="删除" danger disabled={!canDelete}>
+      <IconActionButton
+        onClick={onDelete}
+        title={getChatLabel("chat.action.delete")}
+        danger
+        disabled={!canDelete}
+      >
         <Trash2 size={13} />
       </IconActionButton>
     </div>
@@ -1050,7 +1066,7 @@ export function DesktopChatArea() {
   const agentModeSupported = effectiveModel.ok;
   const agentModeDisabledReason = effectiveModel.ok
     ? null
-    : "请先配置可用模型后再使用 Agent 模式。";
+    : getChatLabel("chat.agentUnavailableReason");
   const hasInput = Boolean(input.trim());
   const hasFiles = pendingAttachments.length > 0;
   const forceWebSearch = currentConversation?.forceWebSearch ?? true;
@@ -1574,8 +1590,8 @@ export function DesktopChatArea() {
 
     if (composerMode === "agent" && !agentModeSupported) {
       notifyWarning(
-        "Agent 当前不可用",
-        agentModeDisabledReason || "请先配置可用模型后再使用 Agent 模式。",
+        getChatLabel("chat.agentUnavailableTitle"),
+        agentModeDisabledReason || getChatLabel("chat.agentUnavailableReason"),
       );
       return;
     }
@@ -1686,7 +1702,7 @@ export function DesktopChatArea() {
 
       const sidecar = useSidecarStore.getState();
       if (sidecar.status !== "ready") {
-        throw new Error("需要本地运行环境。请确认 sidecar 已就绪。");
+        throw new Error(getChatLabel("chat.error.sidecarNotReady"));
       }
 
       if (mode === "agent") {
@@ -1697,10 +1713,10 @@ export function DesktopChatArea() {
           setPendingAttachments([]);
         }
         if (!currentConversation.channelId) {
-          throw new Error("当前会话没有绑定渠道，无法本地运行");
+          throw new Error(getChatLabel("chat.error.noChannel"));
         }
         if (!effectiveModel.ok) {
-          throw new Error("未找到可用模型，无法本地运行");
+          throw new Error(getChatLabel("chat.error.noModel"));
         }
         const historyMsgs = useChatStore
           .getState()
@@ -1779,7 +1795,7 @@ export function DesktopChatArea() {
 
       const sidecarClient = useSidecarStore.getState().client;
       if (!sidecarClient) {
-        throw new Error("Sidecar 连接不可用");
+        throw new Error(getChatLabel("chat.error.sidecarDisconnected"));
       }
 
       let chatContent = "";
@@ -2020,7 +2036,7 @@ export function DesktopChatArea() {
 
     const editable = getEditableMessageRound(messageId);
     if (!editable) {
-      notifyWarning("当前消息不可编辑", "这条用户消息后面没有对应的助手回复，无法重新编辑并生成。");
+      notifyWarning(getChatLabel("chat.notEditableTitle"), getChatLabel("chat.notEditableBody"));
       handleCancelEdit();
       return;
     }
@@ -2147,13 +2163,13 @@ export function DesktopChatArea() {
         const status = await fetchDesktopSearchStatus();
         if (!status.configured || status.source === "none") {
           notifyWarning(
-            "未配置实时搜索",
-            "未检测到 Tavily Key，需要最新信息时的联网搜索可能无法使用。请在设置中填写或配置服务端 TAVILY_API_KEY。",
+            getChatLabel("chat.search.notConfiguredTitle"),
+            getChatLabel("chat.search.notConfiguredBody"),
           );
         } else if (status.source === "disabled") {
           notifyWarning(
-            "实时搜索已关闭",
-            "在设置中启用 Tavily 搜索后，系统才会在需要最新信息时联网。",
+            getChatLabel("chat.search.disabledTitle"),
+            getChatLabel("chat.search.disabledBody"),
           );
         }
       } catch {
@@ -2195,7 +2211,7 @@ export function DesktopChatArea() {
           <DesktopChatHeader conversation={null} />
         </div>
         <div className="flex flex-1 items-center justify-center">
-          <p className="text-sm text-muted-foreground">在左侧选择一个会话，或创建新会话开始交流</p>
+          <p className="text-sm text-muted-foreground">{getChatLabel("chat.emptyState")}</p>
         </div>
       </div>
     );
@@ -2265,7 +2281,7 @@ export function DesktopChatArea() {
           />
           <div className="flex gap-2">
             <Button type="button" size="sm" variant="ghost" onClick={handleCancelEdit}>
-              取消
+              {getChatLabel("chat.edit.cancel")}
             </Button>
             <Button
               type="button"
@@ -2273,7 +2289,7 @@ export function DesktopChatArea() {
               onClick={() => void handleSaveEdit(message.id)}
               disabled={!editingContent.trim() || isStreaming}
             >
-              确认
+              {getChatLabel("chat.edit.confirm")}
             </Button>
           </div>
         </div>
@@ -2344,10 +2360,12 @@ export function DesktopChatArea() {
         <div style={{ paddingLeft: PAGE_PAD, paddingRight: PAGE_PAD }}>
           {effectiveModel.scope === "conversation" ? (
             <div className="mb-2 rounded-xl border border-orange-200 bg-orange-50 p-3 text-sm shadow-minimal">
-              <p className="font-medium text-orange-800">当前会话模型不可用</p>
+              <p className="font-medium text-orange-800">
+                {getChatLabel("chat.model.unavailableTitle")}
+              </p>
               <p className="text-orange-700">{effectiveModel.reason}</p>
               <p className="mt-1 text-xs text-muted-foreground">
-                在下方输入框的 Model 里修复即可。
+                {getChatLabel("chat.model.fixHint")}
               </p>
             </div>
           ) : (
@@ -2396,8 +2414,8 @@ export function DesktopChatArea() {
           onModeChange={(nextMode) => {
             if (nextMode === "agent" && !agentModeSupported) {
               notifyWarning(
-                "Agent 当前不可用",
-                agentModeDisabledReason || "请先配置可用模型后再使用 Agent 模式。",
+                getChatLabel("chat.agentUnavailableTitle"),
+                agentModeDisabledReason || getChatLabel("chat.agentUnavailableReason"),
               );
               return;
             }

@@ -437,3 +437,58 @@ export function getSlashLabel(key: SlashLabelKey): string {
 export function getAgentActionLabel(action: AgentActionKey): string {
   return agentActionLabels[action];
 }
+
+/**
+ * Labels for the main chat area (DesktopChatArea): live-route badges, message
+ * action buttons (aria/title), agent-mode availability copy, sidecar/run error
+ * text surfaced to the user, edit guards, web-search toggle warnings, the empty
+ * state and the model-unavailable notice. Product/mode words ("Agent", "Model",
+ * "Tavily", "Sidecar", "TAVILY_API_KEY") stay English per rule 3 above; raw
+ * server/user values are never routed through here.
+ */
+export const chatLabels = {
+  // Live status route badges
+  "chat.liveRoute.local": "本地",
+  "chat.liveRoute.structuredLive": "天气",
+  "chat.liveRoute.webSearch": "搜索",
+  "chat.liveRoute.research": "调研",
+  "chat.liveRoute.direct": "直答",
+  // Message action bar (aria-label / title)
+  "chat.typing": "正在生成",
+  "chat.action.edit": "编辑",
+  "chat.action.copy": "复制",
+  "chat.action.copied": "已复制",
+  "chat.action.regenerate": "重新生成",
+  "chat.action.delete": "删除",
+  // Agent mode availability
+  "chat.agentUnavailableTitle": "Agent 当前不可用",
+  "chat.agentUnavailableReason": "请先配置可用模型后再使用 Agent 模式。",
+  // Sidecar / run errors (surfaced via setError / failStreamingMessage)
+  "chat.error.sidecarNotReady": "需要本地运行环境。请确认 sidecar 已就绪。",
+  "chat.error.noChannel": "当前会话没有绑定渠道，无法本地运行",
+  "chat.error.noModel": "未找到可用模型，无法本地运行",
+  "chat.error.sidecarDisconnected": "Sidecar 连接不可用",
+  // Edit guard
+  "chat.notEditableTitle": "当前消息不可编辑",
+  "chat.notEditableBody": "这条用户消息后面没有对应的助手回复，无法重新编辑并生成。",
+  // Web search toggle warnings
+  "chat.search.notConfiguredTitle": "未配置实时搜索",
+  "chat.search.notConfiguredBody":
+    "未检测到 Tavily Key，需要最新信息时的联网搜索可能无法使用。请在设置中填写或配置服务端 TAVILY_API_KEY。",
+  "chat.search.disabledTitle": "实时搜索已关闭",
+  "chat.search.disabledBody": "在设置中启用 Tavily 搜索后，系统才会在需要最新信息时联网。",
+  // Empty state
+  "chat.emptyState": "在左侧选择一个会话，或创建新会话开始交流",
+  // Inline edit buttons
+  "chat.edit.cancel": "取消",
+  "chat.edit.confirm": "确认",
+  // Model unavailable notice
+  "chat.model.unavailableTitle": "当前会话模型不可用",
+  "chat.model.fixHint": "在下方输入框的 Model 里修复即可。",
+} as const;
+
+type ChatLabelKey = keyof typeof chatLabels;
+
+export function getChatLabel(key: ChatLabelKey): string {
+  return chatLabels[key];
+}
