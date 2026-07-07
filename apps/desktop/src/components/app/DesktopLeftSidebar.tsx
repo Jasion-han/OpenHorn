@@ -30,6 +30,7 @@ import {
   ScrollArea,
 } from "ui";
 import { getDesktopBackendBase } from "../../lib/backendBase";
+import { DEFAULT_CONVERSATION_TITLE, displayConversationTitle } from "../../lib/conversationTitle";
 import { getGlobalDefaultChannel } from "../../lib/defaultChannel";
 import { hideNotification, notifyError, notifyErrorOnce, notifySuccess } from "../../lib/notify";
 import { useAuthStore } from "../../stores/authStore";
@@ -39,15 +40,6 @@ import { useDesktopShellStore } from "../../stores/desktopShellStore";
 import type { Conversation } from "../../types/chat";
 
 type DateGroup = "今天" | "昨天" | "更早";
-
-function formatNewConversationTitle() {
-  const date = new Date();
-  const mm = String(date.getMonth() + 1).padStart(2, "0");
-  const dd = String(date.getDate()).padStart(2, "0");
-  const hh = String(date.getHours()).padStart(2, "0");
-  const min = String(date.getMinutes()).padStart(2, "0");
-  return `新会话 ${mm}-${dd} ${hh}:${min}`;
-}
 
 function groupByCreatedAt(
   items: Conversation[],
@@ -117,7 +109,9 @@ const ConversationRow = memo(
             : "text-foreground/70 hover:bg-foreground/[0.04] hover:text-foreground",
         )}
       >
-        <span className="min-w-0 flex-1 truncate">{conversation.title}</span>
+        <span className="min-w-0 flex-1 truncate">
+          {displayConversationTitle(conversation.title)}
+        </span>
         <DropdownMenu>
           <DropdownMenuTrigger asChild onClick={(event) => event.stopPropagation()}>
             <Button
@@ -223,7 +217,7 @@ export function DesktopLeftSidebar() {
     try {
       const prevId = useChatStore.getState().currentConversation?.id;
       const defaultChannel = getGlobalDefaultChannel(useChatStore.getState().channels);
-      const conv = await createConversation(formatNewConversationTitle(), {
+      const conv = await createConversation(DEFAULT_CONVERSATION_TITLE, {
         channelId: defaultChannel?.channelId ?? null,
         modelId: defaultChannel?.modelId ?? null,
       });
@@ -411,7 +405,7 @@ export function DesktopLeftSidebar() {
                           }}
                           onRename={() => {
                             setRenamingId(conversation.id);
-                            setRenameValue(conversation.title);
+                            setRenameValue(displayConversationTitle(conversation.title));
                           }}
                           onTogglePin={() => void handleTogglePin(conversation)}
                           onDelete={() => setPendingDelete(conversation)}
@@ -452,7 +446,7 @@ export function DesktopLeftSidebar() {
                         }}
                         onRename={() => {
                           setRenamingId(conversation.id);
-                          setRenameValue(conversation.title);
+                          setRenameValue(displayConversationTitle(conversation.title));
                         }}
                         onTogglePin={() => void handleTogglePin(conversation)}
                         onDelete={() => setPendingDelete(conversation)}

@@ -1,5 +1,6 @@
 import { PanelLeft, PanelLeftClose } from "lucide-react";
 import { Button } from "ui";
+import { displayConversationTitle, formatConversationTime } from "../../lib/conversationTitle";
 import { useDesktopShellStore } from "../../stores/desktopShellStore";
 import type { Conversation } from "../../types/chat";
 
@@ -33,7 +34,10 @@ export function DesktopChatHeader({ conversation }: { conversation: Conversation
     <div className="mb-3 flex items-center justify-between gap-2">
       {sidebarToggle}
       <div className="min-w-0 flex-1">
-        <p className="truncate font-semibold">{conversation.title}</p>
+        <p className="truncate font-semibold">{displayConversationTitle(conversation.title)}</p>
+        <p className="truncate text-xs text-muted-foreground">
+          {formatConversationTime(conversation.createdAt)}
+        </p>
       </div>
     </div>
   );

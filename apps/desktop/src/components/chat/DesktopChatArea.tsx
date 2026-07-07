@@ -17,6 +17,10 @@ import { filesToAttachmentParts } from "../../lib/attachmentParts";
 import { uploadAttachments } from "../../lib/attachments";
 import { getDesktopBackendBase } from "../../lib/backendBase";
 import { sanitizeDisplayContent } from "../../lib/citations";
+import {
+  DEFAULT_CONVERSATION_TITLE,
+  isDefaultConversationTitle,
+} from "../../lib/conversationTitle";
 import { getGlobalDefaultChannel } from "../../lib/defaultChannel";
 import { getEffectiveModelForConversation } from "../../lib/effectiveModel";
 import { getSlashLabel } from "../../lib/i18n/agent";
@@ -141,15 +145,6 @@ async function fetchGlobalSystemPrompt(): Promise<string | undefined> {
 /** Collapse newlines / repeated whitespace into a single line for the slash panel. */
 function collapseLine(text: string): string {
   return text.replace(/\s+/g, " ").trim();
-}
-
-function formatNewConversationTitle(): string {
-  const date = new Date();
-  const mm = String(date.getMonth() + 1).padStart(2, "0");
-  const dd = String(date.getDate()).padStart(2, "0");
-  const hh = String(date.getHours()).padStart(2, "0");
-  const min = String(date.getMinutes()).padStart(2, "0");
-  return `新会话 ${mm}-${dd} ${hh}:${min}`;
 }
 
 function LiveStatusBadge({
@@ -1013,7 +1008,7 @@ export function DesktopChatArea() {
       setStreaming(false);
       setStreamingAssistantId(null);
       const conv = useChatStore.getState().currentConversation;
-      if (conv && /^新会话 \d{2}-\d{2} \d{2}:\d{2}$/.test(conv.title)) {
+      if (conv && isDefaultConversationTitle(conv.title)) {
         const firstUserMsg = useChatStore
           .getState()
           .messages.find((m) => m.conversationId === conv.id && m.role === "user");
@@ -1307,7 +1302,7 @@ export function DesktopChatArea() {
   const runNewConversation = () => {
     const state = useChatStore.getState();
     const defaultChannel = getGlobalDefaultChannel(state.channels);
-    void createConversation(formatNewConversationTitle(), {
+    void createConversation(DEFAULT_CONVERSATION_TITLE, {
       channelId: defaultChannel?.channelId ?? null,
       modelId: defaultChannel?.modelId ?? null,
     })
@@ -1795,7 +1790,7 @@ export function DesktopChatArea() {
       if (
         nextConversation &&
         nextConversation.id === conversationId &&
-        /^新会话 \d{2}-\d{2} \d{2}:\d{2}$/.test(nextConversation.title) &&
+        isDefaultConversationTitle(nextConversation.title) &&
         autoTitleSeed
       ) {
         void autoTitleConversation(conversationId, autoTitleSeed).catch(() => {});
