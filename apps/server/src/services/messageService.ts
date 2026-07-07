@@ -1035,20 +1035,28 @@ export async function sendMessage(userId: string, input: SendMessageInput) {
       resolvedChannel.apiKey,
       resolvedChannel.channel.baseUrl || undefined,
     );
-
-    const stream = await adapter.chatStream({
-      model: resolvedChannel.modelId,
-      messages: chatMessages,
-      maxTokens: 4096,
-    });
-
-    for await (const chunk of stream) {
-      if (typeof chunk !== "string" || chunk.length === 0) {
-        continue;
-      }
-      responseContent += chunk;
-    }
     responseModel = resolvedChannel.modelId;
+
+    // Mirror the streaming path (streamMessage): if the provider throws mid-turn,
+    // persist an "Error:" assistant reply below instead of throwing and leaving a
+    // dangling user message with no assistant row for this turn.
+    try {
+      const stream = await adapter.chatStream({
+        model: resolvedChannel.modelId,
+        messages: chatMessages,
+        maxTokens: 4096,
+      });
+
+      for await (const chunk of stream) {
+        if (typeof chunk !== "string" || chunk.length === 0) {
+          continue;
+        }
+        responseContent += chunk;
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Stream error";
+      responseContent = `Error: ${message}`;
+    }
   } else {
     responseContent = conversation.channelId
       ? "该对话选择的渠道/模型不可用（可能已被禁用或已删除）。请在对话中重新选择模型。"

@@ -220,21 +220,18 @@ function resolveStrictDefaultModelId(channel: ChannelItem): string | null {
   return def?.modelId || null;
 }
 
-async function ensureLegacyModelMigrated(channelId: string) {
-  const existingChannel = await db
-    .select()
-    .from(channels)
-    .where(eq(channels.id, channelId))
-    .limit(1);
-
-  if (existingChannel.length === 0 || !existingChannel[0].model) {
+async function ensureLegacyModelMigrated(channel: Pick<ChannelRow, "id" | "model">) {
+  // Nothing to migrate when the legacy `model` column is empty — skip the
+  // channelModels probe entirely. The caller already holds the channel row, so
+  // we no longer re-SELECT it here.
+  if (!channel.model) {
     return;
   }
 
   const existingModels = await db
     .select()
     .from(channelModels)
-    .where(eq(channelModels.channelId, channelId))
+    .where(eq(channelModels.channelId, channel.id))
     .limit(1);
 
   if (existingModels.length > 0) {
@@ -244,9 +241,9 @@ async function ensureLegacyModelMigrated(channelId: string) {
   const now = new Date();
   await db.insert(channelModels).values({
     id: generateId(),
-    channelId,
-    modelId: existingChannel[0].model,
-    displayName: existingChannel[0].model,
+    channelId: channel.id,
+    modelId: channel.model,
+    displayName: channel.model,
     enabled: true,
     isDefault: true,
     createdAt: now,
@@ -254,13 +251,20 @@ async function ensureLegacyModelMigrated(channelId: string) {
   });
 }
 
-async function listModelsByChannelIds(channelIds: string[]) {
-  if (channelIds.length === 0) {
+async function listModelsByChannelIds(channelRows: ChannelRow[]) {
+  if (channelRows.length === 0) {
     return new Map<string, ChannelModelItem[]>();
   }
 
-  await Promise.all(channelIds.map((channelId) => ensureLegacyModelMigrated(channelId)));
+  // Only channels that still carry a legacy `model` value can need migration;
+  // this avoids the per-channel migration probe on the hot resolve path for the
+  // common case (nothing to migrate).
+  const rowsNeedingMigration = channelRows.filter((row) => Boolean(row.model));
+  if (rowsNeedingMigration.length > 0) {
+    await Promise.all(rowsNeedingMigration.map((row) => ensureLegacyModelMigrated(row)));
+  }
 
+  const channelIds = channelRows.map((row) => row.id);
   const rows = await db
     .select()
     .from(channelModels)
@@ -295,7 +299,7 @@ async function listModelsByChannelIds(channelIds: string[]) {
 }
 
 async function buildChannelItems(channelRows: ChannelRow[]) {
-  const modelsByChannel = await listModelsByChannelIds(channelRows.map((row) => row.id));
+  const modelsByChannel = await listModelsByChannelIds(channelRows);
 
   return channelRows.map((row) => {
     const models = modelsByChannel.get(row.id) || [];
@@ -336,10 +340,15 @@ async function getOwnedChannelRow(userId: string, channelId: string) {
   return rows[0];
 }
 
-async function getOwnedChannelItem(userId: string, channelId: string) {
+async function getOwnedChannelRowAndItem(userId: string, channelId: string) {
   const row = await getOwnedChannelRow(userId, channelId);
-  const items = await buildChannelItems([row]);
-  return items[0];
+  const [item] = await buildChannelItems([row]);
+  return { row, item };
+}
+
+async function getOwnedChannelItem(userId: string, channelId: string) {
+  const { item } = await getOwnedChannelRowAndItem(userId, channelId);
+  return item;
 }
 
 async function setDefaultChannelInternal(userId: string, channelId: string) {
@@ -671,29 +680,37 @@ export async function updateChannel(userId: string, channelId: string, input: Up
     updates.apiKey = encrypt(input.apiKey.trim());
   }
 
-  await db
-    .update(channels)
-    .set(updates)
-    .where(and(eq(channels.id, channelId), eq(channels.userId, userId)));
-
-  if (
+  const protocolChanged =
     nextProvider !== current.provider ||
-    nextProtocol !== normalizeProtocol(current.protocol, current.provider)
-  ) {
-    // Protocol-bearing changes invalidate the cached model list and legacy model field.
-    await db.delete(channelModels).where(eq(channelModels.channelId, channelId));
-    await db
-      .update(channels)
-      .set({ model: null, updatedAt: new Date() })
-      .where(and(eq(channels.id, channelId), eq(channels.userId, userId)));
-  }
+    nextProtocol !== normalizeProtocol(current.protocol, current.provider);
 
-  if (input.isDefault === false) {
-    await db
+  // Atomic: the main channel update, the protocol-change cache invalidation
+  // (dropping channelModels + clearing the legacy model field), and the
+  // explicit un-default write must all commit together — a crash between them
+  // would leave the channel's protocol, model list, and default flag
+  // inconsistent.
+  await db.transaction(async (tx) => {
+    await tx
       .update(channels)
-      .set({ isDefault: false, updatedAt: new Date() })
+      .set(updates)
       .where(and(eq(channels.id, channelId), eq(channels.userId, userId)));
-  }
+
+    if (protocolChanged) {
+      // Protocol-bearing changes invalidate the cached model list and legacy model field.
+      await tx.delete(channelModels).where(eq(channelModels.channelId, channelId));
+      await tx
+        .update(channels)
+        .set({ model: null, updatedAt: new Date() })
+        .where(and(eq(channels.id, channelId), eq(channels.userId, userId)));
+    }
+
+    if (input.isDefault === false) {
+      await tx
+        .update(channels)
+        .set({ isDefault: false, updatedAt: new Date() })
+        .where(and(eq(channels.id, channelId), eq(channels.userId, userId)));
+    }
+  });
 
   return getOwnedChannelItem(userId, channelId);
 }
@@ -888,33 +905,31 @@ export async function fetchChannelModels(
         models: [],
       };
     }
+    // Network fetch stays OUTSIDE the transaction below — only DB writes are
+    // wrapped so a slow/hanging provider can't hold a write transaction open.
     const models = await fetchProviderModels(protocol, baseUrl, apiKey);
     const existingModels = await listChannelModels(userId, channelId);
     const existingByModelId = new Map(existingModels.map((model) => [model.modelId, model]));
     const nextModelIds = new Set(models.map((m) => m.modelId));
     const now = new Date();
 
-    // Remove models that no longer exist in provider list (authoritative sync).
-    for (const model of existingModels) {
-      if (!nextModelIds.has(model.modelId)) {
-        await db.delete(channelModels).where(eq(channelModels.id, model.id));
-      }
-    }
+    // Models no longer advertised by the provider are removed (authoritative sync).
+    const removedIds = existingModels
+      .filter((model) => !nextModelIds.has(model.modelId))
+      .map((model) => model.id);
 
-    for (const model of models) {
-      const existing = existingByModelId.get(model.modelId);
-      if (existing) {
-        await db
-          .update(channelModels)
-          .set({
-            displayName: model.displayName,
-            updatedAt: now,
-          })
-          .where(eq(channelModels.id, existing.id));
-        continue;
-      }
+    const modelsToUpdate = models
+      .map((model) => ({ model, existing: existingByModelId.get(model.modelId) }))
+      .filter(
+        (
+          item,
+        ): item is { model: (typeof models)[number]; existing: (typeof existingModels)[number] } =>
+          Boolean(item.existing),
+      );
 
-      await db.insert(channelModels).values({
+    const insertRows = models
+      .filter((model) => !existingByModelId.has(model.modelId))
+      .map((model) => ({
         id: generateId(),
         channelId,
         modelId: model.modelId,
@@ -923,16 +938,48 @@ export async function fetchChannelModels(
         isDefault: false,
         createdAt: now,
         updatedAt: now,
-      });
-    }
+      }));
+
+    // The channel's default pointer must reflect the post-sync set: if the
+    // provider dropped the model that was default, clear the pointer. Computed
+    // in-memory (inserts are never default, updates don't touch isDefault/enabled)
+    // so it matches the reconciled rows without an extra read inside the tx.
+    const survivingDefaultModelId =
+      existingModels.find(
+        (model) => model.isDefault && model.enabled && nextModelIds.has(model.modelId),
+      )?.modelId || null;
+
+    // Atomic: the delete/upsert reconciliation plus the channel's default model
+    // pointer must all commit together, otherwise a mid-loop failure leaves the
+    // channel's model set inconsistent (e.g. deleted rows but stale default).
+    await db.transaction(async (tx) => {
+      if (removedIds.length > 0) {
+        await tx.delete(channelModels).where(inArray(channelModels.id, removedIds));
+      }
+
+      for (const { model, existing } of modelsToUpdate) {
+        await tx
+          .update(channelModels)
+          .set({
+            displayName: model.displayName,
+            updatedAt: now,
+          })
+          .where(eq(channelModels.id, existing.id));
+      }
+
+      if (insertRows.length > 0) {
+        await tx.insert(channelModels).values(insertRows);
+      }
+
+      await tx
+        .update(channels)
+        .set({ model: survivingDefaultModelId, updatedAt: new Date() })
+        .where(eq(channels.id, channelId));
+    });
 
     const updatedModels = await listChannelModels(userId, channelId);
     const enabledModels = updatedModels.filter((m) => m.enabled);
     const defaultModel = updatedModels.find((m) => m.isDefault && m.enabled) || null;
-    await db
-      .update(channels)
-      .set({ model: defaultModel?.modelId || null, updatedAt: new Date() })
-      .where(eq(channels.id, channelId));
 
     return {
       success: true,
@@ -1074,15 +1121,23 @@ export async function getResolvedChannelForUser(
   userId: string,
   requestedChannelId?: string | null,
 ): Promise<ResolvedChannel | null> {
-  const targetChannel = requestedChannelId
-    ? await getOwnedChannelItem(userId, requestedChannelId)
+  // Fetch the requested channel's row + built item together to avoid a
+  // duplicate SELECT of the same channel row below.
+  const requested = requestedChannelId
+    ? await getOwnedChannelRowAndItem(userId, requestedChannelId)
+    : null;
+  const targetChannel = requested
+    ? requested.item
     : (await getChannels(userId)).find((channel) => channel.isDefault && channel.enabled) || null;
 
   if (!targetChannel || !targetChannel.enabled) {
     return null;
   }
 
-  const row = await getOwnedChannelRow(userId, targetChannel.id);
+  const row =
+    requested?.item.id === targetChannel.id
+      ? requested.row
+      : await getOwnedChannelRow(userId, targetChannel.id);
   const modelId = resolveModelIdFromChannelItem(targetChannel, null);
   if (!modelId) {
     return null;
@@ -1134,11 +1189,16 @@ export async function getResolvedChannelForConversation(
   const requestedModelId = typeof conversation.modelId === "string" ? conversation.modelId : null;
 
   if (requestedChannelId) {
-    const targetChannel = await getOwnedChannelItem(userId, requestedChannelId);
+    // Fetch the row + built item together — the resolve path runs on every
+    // sendMessage/streamMessage/editUserMessage/regenerateMessage, and the old
+    // code re-SELECTed the same channel row a second time here.
+    const { row, item: targetChannel } = await getOwnedChannelRowAndItem(
+      userId,
+      requestedChannelId,
+    );
     if (!targetChannel?.enabled) {
       return null;
     }
-    const row = await getOwnedChannelRow(userId, targetChannel.id);
     const modelId = requestedModelId
       ? targetChannel.models.find((model) => model.modelId === requestedModelId && model.enabled)
           ?.modelId || null
