@@ -1,8 +1,8 @@
 import type { Context, MiddlewareHandler } from "hono";
 import { getCookie } from "hono/cookie";
-import { getUserById, verifyToken } from "../services/authService";
+import { getUserFromToken } from "../services/authService";
 
-export type RequestUser = Awaited<ReturnType<typeof getUserById>>;
+export type RequestUser = Awaited<ReturnType<typeof getUserFromToken>>;
 export type AuthenticatedUser = NonNullable<RequestUser>;
 export type UserEnv = {
   Variables: {
@@ -14,10 +14,7 @@ export async function getRequestUser(c: Context): Promise<RequestUser> {
   const token = getCookie(c, "token");
   if (!token) return null;
 
-  const payload = await verifyToken(token);
-  if (!payload) return null;
-
-  return getUserById(payload.userId);
+  return getUserFromToken(token);
 }
 
 export const requireUser: MiddlewareHandler<UserEnv> = async (c, next) => {

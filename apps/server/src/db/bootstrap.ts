@@ -14,6 +14,7 @@ const SCHEMA_DDL: string[] = [
     email TEXT NOT NULL,
     username TEXT NOT NULL,
     password_hash TEXT NOT NULL,
+    token_version INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
   );`,
@@ -297,6 +298,14 @@ function getColumnDefaultValue(rows: Row[], columnName: string): string | null {
   return String(raw)
     .trim()
     .replace(/^['"]|['"]$/g, "");
+}
+
+async function ensureUserTokenVersionColumn(): Promise<void> {
+  const result = await client.execute(`PRAGMA table_info('users');`);
+  const rows = getRows(result);
+  if (!hasColumnNamed(rows, "token_version")) {
+    await client.execute(`ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0;`);
+  }
 }
 
 async function ensureConversationModelIdColumn(): Promise<void> {
@@ -959,6 +968,7 @@ export async function bootstrapDatabase(): Promise<void> {
   }
 
   // Backward compatible alter for databases created before model_id existed.
+  await ensureUserTokenVersionColumn();
   await ensureChannelProtocolColumn();
   await ensureConversationModelIdColumn();
   await ensureConversationDefaultModeColumn();

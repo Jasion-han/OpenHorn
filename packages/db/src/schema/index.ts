@@ -5,6 +5,10 @@ export const users = sqliteTable("users", {
   email: text("email").notNull().unique(),
   username: text("username").notNull(),
   passwordHash: text("password_hash").notNull(),
+  // Monotonic counter bumped whenever the user revokes all sessions. A JWT is
+  // only accepted while its embedded `tokenVersion` matches this value, so
+  // incrementing it invalidates every previously-issued token immediately.
+  tokenVersion: integer("token_version").notNull().default(0),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
 });

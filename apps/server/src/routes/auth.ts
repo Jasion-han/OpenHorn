@@ -1,8 +1,9 @@
 import { Hono } from "hono";
 import { getCookie, setCookie } from "hono/cookie";
-import { getUserById, login, register, verifyToken } from "../services/authService";
+import { getUserFromToken, login, register, revokeUserSessions } from "../services/authService";
+import { requireUser, type UserEnv } from "../utils/requestUser";
 
-const auth = new Hono();
+const auth = new Hono<UserEnv>();
 
 auth.post("/register", async (c) => {
   try {
@@ -59,6 +60,21 @@ auth.post("/logout", async (c) => {
   return c.json({ success: true });
 });
 
+// Revokes every active session for the authenticated user (e.g. after a leaked
+// cookie) by bumping the server-side token version, then clears the local
+// cookie. All other outstanding JWTs stop verifying immediately.
+auth.post("/logout-all", requireUser, async (c) => {
+  const user = c.get("user");
+  await revokeUserSessions(user.id);
+
+  setCookie(c, "token", "", {
+    httpOnly: true,
+    maxAge: 0,
+  });
+
+  return c.json({ success: true });
+});
+
 auth.get("/me", async (c) => {
   const token = getCookie(c, "token");
 
@@ -66,13 +82,7 @@ auth.get("/me", async (c) => {
     return c.json({ user: null });
   }
 
-  const payload = await verifyToken(token);
-
-  if (!payload) {
-    return c.json({ user: null });
-  }
-
-  const user = await getUserById(payload.userId);
+  const user = await getUserFromToken(token);
 
   return c.json({ user });
 });
