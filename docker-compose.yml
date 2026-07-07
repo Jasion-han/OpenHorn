@@ -13,18 +13,9 @@ services:
       - JWT_SECRET=${JWT_SECRET}
       - ENCRYPTION_KEY=${ENCRYPTION_KEY}
       - NODE_ENV=production
-
-  mysql:
-    image: mysql:8.0
-    ports:
-      - "3306:3306"
-    environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
-      MYSQL_DATABASE: openhorn
-    volumes:
-      - mysql_data:/var/lib/mysql
-    profiles:
-      - with-mysql
-
-volumes:
-  mysql_data:
+      # Optional provider keys (pass-through from host env / .env)
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - ANTHROPIC_OAUTH_TOKEN=${ANTHROPIC_OAUTH_TOKEN:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - TAVILY_API_KEY=${TAVILY_API_KEY:-}
