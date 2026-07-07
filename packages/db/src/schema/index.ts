@@ -1,4 +1,4 @@
-import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export const users = sqliteTable("users", {
   id: text("id").primaryKey(),
@@ -333,5 +333,5 @@ export const settings = sqliteTable(
     value: text("value").notNull(),
     updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
   },
-  (table) => [index("settings_user_key_idx").on(table.userId, table.key)],
+  (table) => [uniqueIndex("settings_user_key_unique").on(table.userId, table.key)],
 );

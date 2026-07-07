@@ -1111,8 +1111,10 @@ export async function deleteMessage(userId: string, messageId: string) {
     throw new Error("Conversation not found");
   }
 
-  await db.delete(attachments).where(eq(attachments.messageId, messageId));
-  await db.delete(messages).where(eq(messages.id, messageId));
+  await db.transaction(async (tx) => {
+    await tx.delete(attachments).where(eq(attachments.messageId, messageId));
+    await tx.delete(messages).where(eq(messages.id, messageId));
+  });
 
   return { success: true };
 }

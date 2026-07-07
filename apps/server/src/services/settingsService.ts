@@ -33,17 +33,22 @@ export async function setSettingValue(userId: string, key: string, value: string
   const normalizedValue = value;
   const now = new Date();
 
-  // Keep it simple: delete then insert. This avoids requiring a unique index.
+  // Upsert against the (user_id, key) unique index so concurrent writes can't
+  // duplicate rows. Requires the settings_user_key_unique index (declared in
+  // both packages/db/src/schema/index.ts and apps/server/src/db/bootstrap.ts).
   await db
-    .delete(settings)
-    .where(and(eq(settings.userId, userId), eq(settings.key, normalizedKey)));
-  await db.insert(settings).values({
-    id: generateId(),
-    userId,
-    key: normalizedKey,
-    value: normalizedValue,
-    updatedAt: now,
-  });
+    .insert(settings)
+    .values({
+      id: generateId(),
+      userId,
+      key: normalizedKey,
+      value: normalizedValue,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: [settings.userId, settings.key],
+      set: { value: normalizedValue, updatedAt: now },
+    });
 }
 
 export async function deleteSettingValue(userId: string, key: string) {

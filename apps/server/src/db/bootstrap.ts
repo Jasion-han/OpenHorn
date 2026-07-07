@@ -270,7 +270,7 @@ const SCHEMA_DDL: string[] = [
   `CREATE INDEX IF NOT EXISTS agent_artifacts_run_idx ON agent_artifacts(run_id);`,
   `CREATE INDEX IF NOT EXISTS agent_events_session_idx ON agent_events(session_id);`,
   `CREATE INDEX IF NOT EXISTS mcp_servers_user_idx ON mcp_servers(user_id);`,
-  `CREATE INDEX IF NOT EXISTS settings_user_key_idx ON settings(user_id, key);`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS settings_user_key_unique ON settings(user_id, key);`,
 ];
 
 function getRows(result: ResultSet): Row[] {
