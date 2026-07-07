@@ -178,7 +178,9 @@ export function DesktopLeftSidebar() {
   const openSettings = useDesktopShellStore((state) => state.openSettings);
   const user = useAuthStore((state) => state.user);
   const logout = useAuthStore((state) => state.logout);
-  const backend = useBackendStatusStore();
+  const backendStatus = useBackendStatusStore((state) => state.status);
+  const backendLastError = useBackendStatusStore((state) => state.lastError);
+  const backendRetry = useBackendStatusStore((state) => state.retry);
   const [retrying, setRetrying] = useState(false);
 
   const conversations = useChatStore((state) => state.conversations);
@@ -276,16 +278,16 @@ export function DesktopLeftSidebar() {
     if (retrying) return;
     setRetrying(true);
     try {
-      const ok = await backend.retry();
+      const ok = await backendRetry();
       if (ok) {
         hideNotification("backend_down");
         notifySuccess("连接已恢复", "已重新连接后端");
         return;
       }
       const hint =
-        backend.lastError === "Blocked by browser (CORS?)"
+        backendLastError === "Blocked by browser (CORS?)"
           ? "仍然无法访问后端（可能被浏览器跨域/CORS 拦截）。请检查后端 CORS 是否允许当前页面 Origin，并查看 DevTools Console/Network。"
-          : backend.lastError === "Blocked by browser (mixed content)"
+          : backendLastError === "Blocked by browser (mixed content)"
             ? "仍然无法访问后端（可能被浏览器 Mixed Content 拦截：HTTPS 页面访问 HTTP 后端）。"
             : `仍然无法连接到后端服务（${backendBase}）。`;
       notifyErrorOnce("backend_down", "后端不可用", hint);
@@ -304,8 +306,8 @@ export function DesktopLeftSidebar() {
         <div className="min-w-0">
           <div className="truncate text-sm font-semibold leading-5">OpenHorn</div>
           <div className="flex items-center gap-2">
-            {backend.status === "down" && <Badge variant="destructive">offline</Badge>}
-            {backend.status === "down" && (
+            {backendStatus === "down" && <Badge variant="destructive">offline</Badge>}
+            {backendStatus === "down" && (
               <Button
                 size="sm"
                 variant="outline"

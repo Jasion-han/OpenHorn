@@ -142,6 +142,34 @@ async function fetchGlobalSystemPrompt(): Promise<string | undefined> {
   }
 }
 
+/**
+ * Shared run-settings resolution used by the send / retry / edit paths so the
+ * three sites cannot drift. Returns the global system prompt plus the Tavily
+ * key (only forwarded when web search is forced and Tavily is enabled; a
+ * disabled Tavily lets the sidecar fall back to keyless DuckDuckGo).
+ */
+async function resolveRunSettings(forceWebSearch: boolean): Promise<{
+  systemPrompt: string | undefined;
+  tavilyApiKey: string | undefined;
+}> {
+  const systemPrompt = await fetchGlobalSystemPrompt();
+  let tavilyApiKey: string | undefined;
+  if (forceWebSearch) {
+    try {
+      const { settings } = await chatAreaApi.settings.get([
+        "liveSearch.tavilyApiKey",
+        "liveSearch.tavilyEnabled",
+      ]);
+      if (settings["liveSearch.tavilyEnabled"] !== "false") {
+        tavilyApiKey = settings["liveSearch.tavilyApiKey"] || undefined;
+      }
+    } catch {
+      // ignore
+    }
+  }
+  return { systemPrompt, tavilyApiKey };
+}
+
 /** Collapse newlines / repeated whitespace into a single line for the slash panel. */
 function collapseLine(text: string): string {
   return text.replace(/\s+/g, " ").trim();
@@ -776,8 +804,6 @@ function MessageBubbleImpl({
     : message.content;
   const hasAssistantText = isAssistant && Boolean((displayContent || "").trim());
   const isAssistantPlaceholder = isAssistant && isMessageStreaming && !hasAssistantText;
-  const streamTailLength =
-    isAssistant && isMessageStreaming && hasAssistantText ? (message.streamTail || "").length : 0;
   const isFlatAgentAssistant = isAssistant && message.mode === "agent";
   const processPanel = isAssistant ? (
     message.mode === "agent" &&
@@ -846,7 +872,6 @@ function MessageBubbleImpl({
                 isMessageStreaming && !isFlatAgentAssistant ? (
                   <DesktopStreamingMarkdownMessage
                     content={displayContent}
-                    tailLength={streamTailLength}
                     pulseKey={message.streamPulseKey ?? 0}
                   />
                 ) : (
@@ -1689,23 +1714,8 @@ export function DesktopChatArea() {
             conversationHistory.push({ role: m.role, content: text });
           }
         }
-        const globalSystemPrompt = await fetchGlobalSystemPrompt();
-        let tavilyApiKey: string | undefined;
-        if (forceWebSearch) {
-          try {
-            const { settings } = await chatAreaApi.settings.get([
-              "liveSearch.tavilyApiKey",
-              "liveSearch.tavilyEnabled",
-            ]);
-            // Only forward the key when Tavily is enabled; when disabled the
-            // sidecar falls back to keyless DuckDuckGo.
-            if (settings["liveSearch.tavilyEnabled"] !== "false") {
-              tavilyApiKey = settings["liveSearch.tavilyApiKey"] || undefined;
-            }
-          } catch {
-            // ignore
-          }
-        }
+        const { systemPrompt: globalSystemPrompt, tavilyApiKey } =
+          await resolveRunSettings(forceWebSearch);
         await sidecarRun.startRun({
           conversationId,
           channelId: currentConversation.channelId,
@@ -1920,21 +1930,8 @@ export function DesktopChatArea() {
             conversationHistory.push({ role: m.role, content: text });
           }
         }
-        const retrySystemPrompt = await fetchGlobalSystemPrompt();
-        let retryTavilyApiKey: string | undefined;
-        if (forceWebSearch) {
-          try {
-            const { settings } = await chatAreaApi.settings.get([
-              "liveSearch.tavilyApiKey",
-              "liveSearch.tavilyEnabled",
-            ]);
-            if (settings["liveSearch.tavilyEnabled"] !== "false") {
-              retryTavilyApiKey = settings["liveSearch.tavilyApiKey"] || undefined;
-            }
-          } catch {
-            // ignore
-          }
-        }
+        const { systemPrompt: retrySystemPrompt, tavilyApiKey: retryTavilyApiKey } =
+          await resolveRunSettings(forceWebSearch);
         // Re-parse the original message so a retried `/server` (or `/skill`)
         // invocation behaves exactly like the original send: the model gets the
         // instruction wrapper, the run targets that single MCP server, and the
@@ -2095,21 +2092,8 @@ export function DesktopChatArea() {
             conversationHistory.push({ role: m.role, content: text });
           }
         }
-        const editSystemPrompt = await fetchGlobalSystemPrompt();
-        let editTavilyApiKey: string | undefined;
-        if (forceWebSearch) {
-          try {
-            const { settings } = await chatAreaApi.settings.get([
-              "liveSearch.tavilyApiKey",
-              "liveSearch.tavilyEnabled",
-            ]);
-            if (settings["liveSearch.tavilyEnabled"] !== "false") {
-              editTavilyApiKey = settings["liveSearch.tavilyApiKey"] || undefined;
-            }
-          } catch {
-            // ignore
-          }
-        }
+        const { systemPrompt: editSystemPrompt, tavilyApiKey: editTavilyApiKey } =
+          await resolveRunSettings(forceWebSearch);
         await sidecarRun.startRun({
           conversationId: currentConversation.id,
           channelId: currentConversation.channelId!,

@@ -4,11 +4,9 @@ import { DesktopMarkdownMessage } from "./DesktopMarkdownMessage";
 
 export function DesktopStreamingMarkdownMessage({
   content,
-  tailLength: _tailLength,
   pulseKey,
 }: {
   content: string;
-  tailLength: number;
   pulseKey: number;
 }) {
   const [renderedContent, setRenderedContent] = useState("");
@@ -60,8 +58,10 @@ export function DesktopStreamingMarkdownMessage({
     } else if (currentTarget === "" || !currentTarget) {
       smoother.push(nextContent);
     } else {
-      smoother.cancel({ flush: true });
-      setRenderedContent(nextContent);
+      // Content diverged (retry/edit reset) — re-seed the smoother's target so
+      // subsequent push(delta) calls append to the new base instead of the
+      // stale flushed content.
+      smoother.replace(nextContent);
     }
 
     targetContentRef.current = nextContent;
