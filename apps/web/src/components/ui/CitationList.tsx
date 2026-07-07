@@ -22,7 +22,12 @@ export function CitationList({
 
   const displayed = effectiveShowAll
     ? citations.map((citation, index) => ({ citation, index: index + 1 }))
-    : used.map((index) => ({ citation: citations[index - 1], index }));
+    : used
+        .map((index) => ({ citation: citations[index - 1], index }))
+        .filter(
+          (entry): entry is { citation: ApiCitation; index: number } =>
+            entry.citation !== undefined,
+        );
 
   const usedCount = used.length > 0 ? used.length : citations.length;
 
