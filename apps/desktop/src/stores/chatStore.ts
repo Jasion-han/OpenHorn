@@ -197,17 +197,45 @@ const INITIAL_STATE = {
 
 export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter()) {
   let selectConversationRequestId = 0;
+  // Bounded LRU of per-conversation message lists. Purpose (from 05-20):
+  //   A. instant, flicker-free re-open of recently visited conversations;
+  //   B. no lost content when switching away from a still-streaming conversation.
+  // A plain Map preserves insertion order, so the head is always the least
+  // recently used. cacheSet re-inserts at the tail and evicts the head past the
+  // cap; cacheGet re-inserts to mark "recently used". A conversation that keeps
+  // receiving background deltas is refreshed on every write, so it is naturally
+  // never the eviction target while it streams.
+  const MAX_CACHED_CONVERSATIONS = 20;
   const messageCache = new Map<string, Message[]>();
   // Message ids currently being written by an active run (assistant + its user).
   const activeRunMessageIds = new Set<string>();
 
+  function cacheSet(conversationId: string, msgs: Message[]) {
+    if (messageCache.has(conversationId)) messageCache.delete(conversationId);
+    messageCache.set(conversationId, msgs);
+    while (messageCache.size > MAX_CACHED_CONVERSATIONS) {
+      const oldest = messageCache.keys().next().value;
+      if (oldest === undefined) break;
+      messageCache.delete(oldest);
+    }
+  }
+
+  function cacheGet(conversationId: string): Message[] | undefined {
+    const msgs = messageCache.get(conversationId);
+    if (msgs && messageCache.size > 1) {
+      messageCache.delete(conversationId);
+      messageCache.set(conversationId, msgs);
+    }
+    return msgs;
+  }
+
   function updateCachedMessage(messageId: string, updater: (msg: Message) => Message): boolean {
-    for (const [convId, msgs] of messageCache) {
+    for (const [conversationId, msgs] of messageCache) {
       const idx = msgs.findIndex((m) => m.id === messageId);
       if (idx !== -1) {
         const updated = [...msgs];
         updated[idx] = updater(updated[idx]);
-        messageCache.set(convId, updated);
+        cacheSet(conversationId, updated);
         return true;
       }
     }
@@ -264,7 +292,7 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
     async selectConversation(conversationId) {
       const prev = get();
       if (prev.currentConversation?.id && prev.messages.length > 0) {
-        messageCache.set(prev.currentConversation.id, prev.messages);
+        cacheSet(prev.currentConversation.id, prev.messages);
       }
 
       const conversation = get().conversations.find((item) => item.id === conversationId) || null;
@@ -277,7 +305,7 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
         return;
       }
 
-      const cached = messageCache.get(conversationId);
+      const cached = cacheGet(conversationId);
 
       const requestId = ++selectConversationRequestId;
       set((state) => ({
@@ -321,7 +349,7 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
           messages: merged,
           isLoading: false,
         });
-        messageCache.set(conversationId, merged);
+        cacheSet(conversationId, merged);
       } catch (error) {
         if (requestId !== selectConversationRequestId) return;
         set({ isLoading: false, error: toErrorMessage(error) });
@@ -743,14 +771,14 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
       const remappedLive = remap(get().messages);
       if (remappedLive) {
         set({ messages: remappedLive });
-        messageCache.set(conversationId, remappedLive);
+        cacheSet(conversationId, remappedLive);
         return;
       }
 
       const cached = messageCache.get(conversationId);
       if (cached) {
         const remappedCache = remap(cached);
-        if (remappedCache) messageCache.set(conversationId, remappedCache);
+        if (remappedCache) cacheSet(conversationId, remappedCache);
       }
     },
 
@@ -779,6 +807,7 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
     },
 
     reset() {
+      messageCache.clear();
       set({ ...INITIAL_STATE });
     },
   }));

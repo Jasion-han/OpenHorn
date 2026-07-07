@@ -520,3 +520,108 @@ describe("desktop chat store", () => {
     expect(store.getState().currentConversation?.title).toBe("标题: 第一条消息");
   });
 });
+
+function createManyConvAdapter(count: number): ChatAdapter {
+  const conversations: Conversation[] = Array.from({ length: count }, (_, i) => ({
+    id: `conv-${i}`,
+    title: `会话 ${i}`,
+    channelId: "channel-1",
+    contextLength: 4096,
+    defaultMode: "agent",
+    lastMode: "agent",
+    isPinned: false,
+    forceWebSearch: false,
+    createdAt: new Date("2026-03-20T10:00:00.000Z"),
+    updatedAt: new Date("2026-03-20T10:00:00.000Z"),
+  }));
+  return {
+    listChannels: async () => [],
+    listConversations: async () => conversations,
+    createConversation: async () => ({
+      id: "conv-created",
+      title: "新会话",
+      channelId: "channel-1",
+      contextLength: 4096,
+      defaultMode: "agent",
+      lastMode: "agent",
+      isPinned: false,
+      forceWebSearch: false,
+      createdAt: new Date("2026-03-20T10:00:00.000Z"),
+      updatedAt: new Date("2026-03-20T10:00:00.000Z"),
+    }),
+    updateConversation: async () => {},
+    deleteConversation: async () => {},
+    autoTitleConversation: async () => ({ success: false }),
+    loadMessages: async (conversationId) =>
+      [
+        {
+          id: `msg-${conversationId}`,
+          conversationId,
+          role: "assistant",
+          content: `内容 ${conversationId}`,
+          mode: "agent",
+          createdAt: new Date("2026-03-20T10:01:00.000Z"),
+        },
+      ] satisfies Message[],
+    sendMessage: async () => new Response("ok", { status: 200 }),
+    deleteMessage: async () => {},
+    regenerateMessage: async () => new Response("ok", { status: 200 }),
+    editUserMessage: async () => new Response("ok", { status: 200 }),
+    abortActiveStream: () => {},
+    getSettings: async () => ({}),
+  };
+}
+
+describe("desktop chat store message cache", () => {
+  test("returns cached messages instantly when switching back", async () => {
+    const store = createDesktopChatStore(createManyConvAdapter(3));
+
+    await store.getState().loadConversations();
+    await store.getState().selectConversation("conv-0");
+    await store.getState().selectConversation("conv-1");
+
+    // Re-selecting conv-0 must hit the cache: no loading state, messages present
+    // synchronously (05-20 requirement A: instant, flicker-free re-open).
+    const pending = store.getState().selectConversation("conv-0");
+    expect(store.getState().isLoading).toBe(false);
+    expect(store.getState().messages).toHaveLength(1);
+    await pending;
+  });
+
+  test("evicts the least-recently-used conversation past the cap", async () => {
+    const store = createDesktopChatStore(createManyConvAdapter(25));
+
+    await store.getState().loadConversations();
+    // Visit conv-0..conv-21 (22 conversations). Each leave caches the previous
+    // one, so 21 entries are inserted against a cap of 20 → conv-0 is evicted.
+    for (let i = 0; i < 22; i++) {
+      await store.getState().selectConversation(`conv-${i}`);
+    }
+
+    // conv-0 was evicted → cache miss → loading state is entered.
+    const evicted = store.getState().selectConversation("conv-0");
+    expect(store.getState().isLoading).toBe(true);
+    await evicted;
+  });
+
+  test("reset clears the message cache", async () => {
+    const store = createDesktopChatStore(createManyConvAdapter(3));
+
+    await store.getState().loadConversations();
+    await store.getState().selectConversation("conv-0");
+    await store.getState().selectConversation("conv-1");
+
+    // conv-0 is cached; confirm hit.
+    const hit = store.getState().selectConversation("conv-0");
+    expect(store.getState().isLoading).toBe(false);
+    await hit;
+
+    store.getState().reset();
+    await store.getState().loadConversations();
+
+    // After reset the cache is empty → conv-0 is a miss again.
+    const miss = store.getState().selectConversation("conv-0");
+    expect(store.getState().isLoading).toBe(true);
+    await miss;
+  });
+});
