@@ -112,14 +112,19 @@ const server = Bun.serve({
     // happens after the upgrade, but enforcing Origin first stops
     // browser-side attackers from even establishing a socket.
     const origin = req.headers.get("origin");
+    // A null Origin is permitted on purpose: native / non-browser clients
+    // (the desktop host's own tooling, CLI diagnostics) don't send an Origin
+    // header. This is safe because access is still gated by the handshake
+    // token after the upgrade — the Origin check only blocks in-browser tabs.
     const originIsAllowed = origin === null || ALLOWED_ORIGINS.has(origin);
     if (!originIsAllowed) {
       return new Response("Forbidden", { status: 403 });
     }
 
-    // Single-connection limit: OpenHorn ships one desktop client per
-    // sidecar process. Refusing additional sockets makes credential
-    // leakage and resource exhaustion far harder.
+    // Connection limit: one slot for the desktop webview and one for
+    // out-of-band tooling (see MAX_CONCURRENT_CONNECTIONS). Refusing
+    // additional sockets caps resource exhaustion; the handshake token
+    // remains the real access gate.
     if (activeConnections.size >= MAX_CONCURRENT_CONNECTIONS) {
       return new Response("Too many connections", { status: 429 });
     }

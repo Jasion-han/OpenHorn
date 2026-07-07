@@ -109,9 +109,8 @@ export async function runCodexAgent(input: RunCodexAgentInput): Promise<void> {
   const { model, cwd, abortController, onEvent } = input;
   // Inject attachment context (file text now; image placeholders until phase B).
   const prompt = appendAttachmentContext(input.prompt, input.attachments);
-  console.error(
-    `[codex-agent] starting: model=${model} cwd=${cwd} prompt=${prompt.substring(0, 50)}`,
-  );
+  // Do not log prompt content (user data); a length marker is enough.
+  console.error(`[codex-agent] starting: model=${model} cwd=${cwd} promptLen=${prompt.length}`);
 
   const codexPath = await findCodexBinary();
   console.error(`[codex-agent] codexPath=${codexPath}`);

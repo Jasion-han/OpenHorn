@@ -130,17 +130,21 @@ describe("sidecar network hardening", () => {
     }
   });
 
-  test("rejects connections beyond the single-connection limit", async () => {
+  test("rejects connections beyond the concurrent-connection limit", async () => {
     const sidecar = await startSidecar();
-    try {
-      // Open one real WebSocket; while it's alive any subsequent upgrade
-      // attempt should be rejected with 429.
-      const ws = new WebSocket(`ws://127.0.0.1:${sidecar.port}/`);
-      await new Promise<void>((resolve, reject) => {
-        ws.addEventListener("open", () => resolve(), { once: true });
+    const openSocket = (port: number) => {
+      const ws = new WebSocket(`ws://127.0.0.1:${port}/`);
+      return new Promise<WebSocket>((resolve, reject) => {
+        ws.addEventListener("open", () => resolve(ws), { once: true });
         ws.addEventListener("error", () => reject(new Error("ws open failed")), { once: true });
         setTimeout(() => reject(new Error("ws open timeout")), 3000);
       });
+    };
+    try {
+      // The limit is 2 (one webview slot + one diagnostic-tooling slot).
+      // Fill both slots, then a third upgrade attempt should be 429.
+      const ws1 = await openSocket(sidecar.port);
+      const ws2 = await openSocket(sidecar.port);
 
       try {
         const response = await fetch(`http://127.0.0.1:${sidecar.port}/`, {
@@ -150,7 +154,8 @@ describe("sidecar network hardening", () => {
         });
         expect(response.status).toBe(429);
       } finally {
-        ws.close();
+        ws1.close();
+        ws2.close();
         // Give the server a tick to process the close so subsequent tests
         // (if any reuse this sidecar) can reconnect.
         await new Promise((r) => setTimeout(r, 50));
