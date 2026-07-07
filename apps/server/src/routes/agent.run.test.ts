@@ -34,6 +34,10 @@ test("POST /sessions/:id/run returns compatibility error before starting SSE run
   mock.module("../services/authService", () => ({
     verifyToken: async () => ({ userId: "user-1" }),
     getUserById: async () => ({ id: "user-1" }),
+    // requireUser resolves the request user via getUserFromToken (JWT verify +
+    // tokenVersion revocation check). Mock it so the default agent router
+    // authenticates instead of returning 401.
+    getUserFromToken: async () => ({ id: "user-1" }),
   }));
 
   mock.module("../services/agentService", () => ({
