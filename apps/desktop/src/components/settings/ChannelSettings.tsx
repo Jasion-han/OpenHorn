@@ -15,6 +15,7 @@ import {
   Badge,
   Button,
   Checkbox,
+  cn,
   Dialog,
   DialogContent,
   DialogDescription,
@@ -32,8 +33,8 @@ import {
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-  cn,
 } from "ui";
+import { formatChannelLabel, getChannelLabel } from "../../lib/i18n/agent";
 import { notifyError, notifySuccess, notifyWarning } from "../../lib/notify";
 import { createServerApi } from "../../lib/serverApi";
 import { useChatStore } from "../../stores/chatStore";
@@ -53,28 +54,30 @@ function sortChannels(a: Channel, b: Channel) {
 function getAgentCheckErrorTitle(result: ApiAgentCheckResult) {
   switch (result.errorCode) {
     case "model_not_found":
-      return "模型不可用";
+      return getChannelLabel("settings.channel.agentCheck.error.modelNotFound");
     case "auth_failed":
-      return "鉴权失败";
+      return getChannelLabel("settings.channel.agentCheck.error.authFailed");
     case "quota_exhausted":
-      return "配额不足";
+      return getChannelLabel("settings.channel.agentCheck.error.quotaExhausted");
     case "ssl_handshake_failed":
-      return "SSL 握手失败";
+      return getChannelLabel("settings.channel.agentCheck.error.sslHandshakeFailed");
     case "gateway_failed":
-      return "网关异常";
+      return getChannelLabel("settings.channel.agentCheck.error.gatewayFailed");
     case "timeout":
-      return "请求超时";
+      return getChannelLabel("settings.channel.agentCheck.error.timeout");
     case "protocol_incompatible":
-      return "协议不兼容";
+      return getChannelLabel("settings.channel.agentCheck.error.protocolIncompatible");
     default:
-      return "Agent 检查失败";
+      return getChannelLabel("settings.channel.agentCheck.error.default");
   }
 }
 
 function formatAgentCheckErrorMessage(result: ApiAgentCheckResult) {
-  const base = (result.error || "当前配置不能用于 Agent。").trim();
+  const base = (result.error || getChannelLabel("settings.channel.agentCheck.defaultError")).trim();
   if (!result.retryable) return base;
-  return base.includes("请稍后重试") ? base : `${base} 可稍后重试。`;
+  return base.includes(getChannelLabel("settings.channel.agentCheck.retryPhrase"))
+    ? base
+    : `${base}${getChannelLabel("settings.channel.agentCheck.retrySuffix")}`;
 }
 
 export function ChannelSettings() {
@@ -101,7 +104,12 @@ export function ChannelSettings() {
     try {
       await loadChannels();
     } catch (error) {
-      notifyError("加载失败", error instanceof Error ? error.message : "无法加载渠道列表。");
+      notifyError(
+        getChannelLabel("settings.channel.notify.loadFailedTitle"),
+        error instanceof Error
+          ? error.message
+          : getChannelLabel("settings.channel.notify.loadFailedBody"),
+      );
     } finally {
       setLoading(false);
     }
@@ -116,10 +124,15 @@ export function ChannelSettings() {
     result: { success: boolean; error?: string },
   ) => {
     if (!result.success) {
-      const message = result.error || "无法获取模型列表。";
+      const message =
+        result.error || getChannelLabel("settings.channel.notify.fetchModelsFailedBody");
       setChannelNotice((prev) => ({
         ...prev,
-        [channelId]: { kind: "error", title: "同步失败", message },
+        [channelId]: {
+          kind: "error",
+          title: getChannelLabel("settings.channel.notice.syncFailedTitle"),
+          message,
+        },
       }));
       return { ok: false, warn: false };
     }
@@ -127,7 +140,11 @@ export function ChannelSettings() {
     if (result.error) {
       setChannelNotice((prev) => ({
         ...prev,
-        [channelId]: { kind: "warn", title: "需要处理", message: result.error || "" },
+        [channelId]: {
+          kind: "warn",
+          title: getChannelLabel("settings.channel.notice.needsAttentionTitle"),
+          message: result.error || "",
+        },
       }));
       return { ok: true, warn: true };
     }
@@ -145,7 +162,12 @@ export function ChannelSettings() {
     try {
       await action();
     } catch (error) {
-      notifyError("操作失败", error instanceof Error ? error.message : "渠道操作失败。");
+      notifyError(
+        getChannelLabel("settings.channel.notify.actionFailedTitle"),
+        error instanceof Error
+          ? error.message
+          : getChannelLabel("settings.channel.notify.actionFailedBody"),
+      );
     } finally {
       setBusyKey(null);
     }
@@ -177,7 +199,9 @@ export function ChannelSettings() {
 
   const openAgentCheck = (channel: Channel) => {
     setAgentCheckChannelId(channel.id);
-    setAgentCheckModelId(channel.defaultModelId || channel.models.find((item) => item.isDefault)?.modelId || "");
+    setAgentCheckModelId(
+      channel.defaultModelId || channel.models.find((item) => item.isDefault)?.modelId || "",
+    );
     setAgentCheckOpen(true);
   };
 
@@ -211,7 +235,10 @@ export function ChannelSettings() {
         setExpandedChannelId(null);
       }
       await loadChannelList();
-      notifySuccess("已删除", "渠道已删除。");
+      notifySuccess(
+        getChannelLabel("settings.channel.notify.deletedTitle"),
+        getChannelLabel("settings.channel.notify.deletedBody"),
+      );
     });
   };
 
@@ -219,10 +246,16 @@ export function ChannelSettings() {
     await runChannelAction(`test:${channelId}`, async () => {
       const result = await api.channels.test(channelId);
       if (result.success) {
-        notifySuccess("连接成功", "该渠道可正常连接。");
+        notifySuccess(
+          getChannelLabel("settings.channel.notify.testSuccessTitle"),
+          getChannelLabel("settings.channel.notify.testSuccessBody"),
+        );
         return;
       }
-      notifyError("连接失败", result.error || "无法连接该渠道。");
+      notifyError(
+        getChannelLabel("settings.channel.notify.testFailedTitle"),
+        result.error || getChannelLabel("settings.channel.notify.testFailedBody"),
+      );
     });
   };
 
@@ -233,21 +266,33 @@ export function ChannelSettings() {
       setExpandedChannelId(channelId);
       const outcome = applyFetchModelsOutcome(channelId, result);
       if (!outcome.ok) {
-        notifyError("同步失败", result.error || "无法获取模型列表。");
+        notifyError(
+          getChannelLabel("settings.channel.notice.syncFailedTitle"),
+          result.error || getChannelLabel("settings.channel.notify.fetchModelsFailedBody"),
+        );
         return;
       }
       if (outcome.warn) {
-        notifyWarning("同步已完成", "模型列表已刷新，但该渠道还有待处理项。");
+        notifyWarning(
+          getChannelLabel("settings.channel.notify.syncDoneWarnTitle"),
+          getChannelLabel("settings.channel.notify.syncDoneWarnBody"),
+        );
         return;
       }
-      notifySuccess("同步成功", "模型列表已更新。");
+      notifySuccess(
+        getChannelLabel("settings.channel.notify.syncSuccessTitle"),
+        getChannelLabel("settings.channel.notify.syncSuccessBody"),
+      );
     });
   };
 
   const handleAgentCheck = async (channelId: string, modelId: string) => {
     const trimmed = modelId.trim();
     if (!trimmed) {
-      notifyError("缺少模型", "请选择或输入 modelId。");
+      notifyError(
+        getChannelLabel("settings.channel.notify.missingModelTitle"),
+        getChannelLabel("settings.channel.notify.missingModelBody"),
+      );
       return;
     }
 
@@ -259,7 +304,10 @@ export function ChannelSettings() {
           const { [channelId]: _removed, ...rest } = prev;
           return rest;
         });
-        notifySuccess("Agent 可用", `模型 ${trimmed} 已通过 Agent 兼容性检查。`);
+        notifySuccess(
+          getChannelLabel("settings.channel.notify.agentOkTitle"),
+          formatChannelLabel("settings.channel.notify.agentOkBody", { modelId: trimmed }),
+        );
       } else {
         const title = getAgentCheckErrorTitle(result);
         const message = formatAgentCheckErrorMessage(result);
@@ -281,7 +329,10 @@ export function ChannelSettings() {
     await runChannelAction(`default:${channelId}`, async () => {
       await api.channels.setDefault(channelId);
       await loadChannelList({ preserveExpanded: true });
-      notifySuccess("已更新", "默认渠道已更新。");
+      notifySuccess(
+        getChannelLabel("settings.channel.notify.updatedTitle"),
+        getChannelLabel("settings.channel.notify.defaultChannelUpdatedBody"),
+      );
     });
   };
 
@@ -304,7 +355,10 @@ export function ChannelSettings() {
         model.modelId === modelId ? { ...model, enabled: !model.enabled } : model,
       );
       await updateModels(channel, nextModels);
-      notifySuccess("已更新", "模型启用状态已保存。");
+      notifySuccess(
+        getChannelLabel("settings.channel.notify.updatedTitle"),
+        getChannelLabel("settings.channel.notify.modelEnabledUpdatedBody"),
+      );
     });
   };
 
@@ -313,18 +367,27 @@ export function ChannelSettings() {
       await api.channels.setDefaultModel(channel.id, modelId);
       await loadChannelList({ preserveExpanded: true });
       setExpandedChannelId(channel.id);
-      notifySuccess("已更新", "默认模型已更新。");
+      notifySuccess(
+        getChannelLabel("settings.channel.notify.updatedTitle"),
+        getChannelLabel("settings.channel.notify.defaultModelUpdatedBody"),
+      );
     });
   };
 
   const handleAddModel = async (channel: Channel) => {
     const modelId = (draftModelIdByChannel[channel.id] || "").trim();
     if (!modelId) {
-      notifyError("缺少 modelId", "请输入要添加的 modelId。");
+      notifyError(
+        getChannelLabel("settings.channel.notify.missingModelIdTitle"),
+        getChannelLabel("settings.channel.notify.missingModelIdBody"),
+      );
       return;
     }
     if (channel.models.some((model) => model.modelId === modelId)) {
-      notifyWarning("模型已存在", `${modelId} 已在当前渠道中。`);
+      notifyWarning(
+        getChannelLabel("settings.channel.notify.modelExistsTitle"),
+        formatChannelLabel("settings.channel.notify.modelExistsBody", { modelId }),
+      );
       return;
     }
 
@@ -341,7 +404,10 @@ export function ChannelSettings() {
       });
       await updateModels(channel, nextModels);
       setDraftModelIdByChannel((prev) => ({ ...prev, [channel.id]: "" }));
-      notifySuccess("已添加", `${modelId} 已加入当前渠道。`);
+      notifySuccess(
+        getChannelLabel("settings.channel.notify.addedTitle"),
+        formatChannelLabel("settings.channel.notify.addedBody", { modelId }),
+      );
     });
   };
 
@@ -362,406 +428,472 @@ export function ChannelSettings() {
       }));
 
       await updateModels(channel, nextModels);
-      notifySuccess("已移除", `${modelId} 已从当前渠道移除。`);
+      notifySuccess(
+        getChannelLabel("settings.channel.notify.removedTitle"),
+        formatChannelLabel("settings.channel.notify.removedBody", { modelId }),
+      );
     });
   };
 
   return (
     <>
-    <SettingsSection
-      title="渠道配置"
-      description="全局用户级配置，对话与 Agent 共用。"
-      action={
-        <Button onClick={() => openEditor(NEW_CHANNEL_KEY)}>
-          <Plus size={16} /> 渠道管理
-        </Button>
-      }
-    >
-      <div className="flex flex-col gap-3">
-        {sortedChannels.map((channel) => {
-          const isExpanded = expandedChannelId === channel.id;
-          const needsDefaultModel = Boolean(channel.isDefault && channel.enabled && !channel.defaultModelId);
-          const notice = channelNotice[channel.id] || null;
+      <SettingsSection
+        title={getChannelLabel("settings.channel.title")}
+        description={getChannelLabel("settings.channel.description")}
+        action={
+          <Button onClick={() => openEditor(NEW_CHANNEL_KEY)}>
+            <Plus size={16} /> {getChannelLabel("settings.channel.manageButton")}
+          </Button>
+        }
+      >
+        <div className="flex flex-col gap-3">
+          {sortedChannels.map((channel) => {
+            const isExpanded = expandedChannelId === channel.id;
+            const needsDefaultModel = Boolean(
+              channel.isDefault && channel.enabled && !channel.defaultModelId,
+            );
+            const notice = channelNotice[channel.id] || null;
 
-          return (
-            <div
-              key={channel.id}
-              className="rounded-xl border border-border/60 bg-card p-4 shadow-minimal"
-            >
-              <div className="flex flex-col gap-3">
-                <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
-                  <div className="min-w-0">
-                    <div className="mb-1 flex flex-wrap items-center gap-1.5">
-                      <p className="font-semibold">{channel.name}</p>
-                      {channel.isDefault && <Badge>默认</Badge>}
-                      {needsDefaultModel && (
-                        <Badge variant="outline" className="border-orange-400 text-orange-600">
-                          缺少默认模型
-                        </Badge>
-                      )}
-                      {!channel.enabled && <Badge variant="secondary">已禁用</Badge>}
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
-                      <Badge variant="secondary" className="gap-1" title={channel.provider}>
-                        <DesktopProviderLogo provider={channel.provider} />
-                        <span className="sr-only">{channel.provider}</span>
-                      </Badge>
-                      {channel.defaultModelId && <Badge variant="outline">{channel.defaultModelId}</Badge>}
-                      <span className="break-all">{channel.baseUrl || "未设置 Base URL"}</span>
-                    </div>
-                  </div>
-
-                  <TooltipProvider>
-                    <div className="flex shrink-0 items-center gap-1">
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            onClick={() => openEditor(channel.id)}
-                            aria-label="编辑渠道"
-                          >
-                            <PenSquare size={16} />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent side="top">
-                          <p>编辑渠道</p>
-                        </TooltipContent>
-                      </Tooltip>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            onClick={() => openAgentCheck(channel)}
-                            disabled={busyKey === `agent-check:${channel.id}`}
-                            aria-label="Agent 检查"
-                          >
-                            <Bot size={16} />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent side="top">
-                          <p>Agent 检查</p>
-                        </TooltipContent>
-                      </Tooltip>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            onClick={() => void handleTest(channel.id)}
-                            disabled={busyKey === `test:${channel.id}`}
-                            aria-label="连接测试"
-                          >
-                            <Check size={16} />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent side="top">
-                          <p>连接测试</p>
-                        </TooltipContent>
-                      </Tooltip>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            onClick={() => void handleFetchModels(channel.id)}
-                            disabled={busyKey === `fetch:${channel.id}`}
-                            aria-label="同步模型"
-                          >
-                            <RefreshCw
-                              size={16}
-                              className={busyKey === `fetch:${channel.id}` ? "animate-spin" : ""}
-                            />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent side="top">
-                          <p>同步模型</p>
-                        </TooltipContent>
-                      </Tooltip>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            className={channel.isDefault ? "text-yellow-500" : ""}
-                            onClick={() => void handleSetDefaultChannel(channel.id)}
-                            disabled={Boolean(busyKey)}
-                            aria-label="设为默认"
-                          >
-                            <Pin size={16} />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent side="top">
-                          <p>设为默认</p>
-                        </TooltipContent>
-                      </Tooltip>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            onClick={() => toggleExpanded(channel.id)}
-                            aria-label={isExpanded ? "收起" : "展开"}
-                          >
-                            {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent side="top">
-                          <p>{isExpanded ? "收起" : "展开"}</p>
-                        </TooltipContent>
-                      </Tooltip>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            className="text-destructive"
-                            onClick={() => void handleDelete(channel.id)}
-                            disabled={busyKey === `delete:${channel.id}`}
-                            aria-label="删除渠道"
-                          >
-                            <Trash2 size={16} />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent side="top">
-                          <p>删除渠道</p>
-                        </TooltipContent>
-                      </Tooltip>
-                    </div>
-                  </TooltipProvider>
-                </div>
-
-                {notice && (
-                  <div
-                    className={cn(
-                      "rounded-xl border p-3",
-                      notice.kind === "error"
-                        ? "border-red-200 bg-red-50 dark:border-red-900/70 dark:bg-red-950/40"
-                        : "border-orange-200 bg-orange-50 dark:border-orange-900/70 dark:bg-orange-950/40",
-                    )}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold">{notice.title || "需要处理"}</p>
-                        <p className="mt-1 text-sm whitespace-pre-wrap text-muted-foreground">
-                          {notice.message}
-                        </p>
+            return (
+              <div
+                key={channel.id}
+                className="rounded-xl border border-border/60 bg-card p-4 shadow-minimal"
+              >
+                <div className="flex flex-col gap-3">
+                  <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+                    <div className="min-w-0">
+                      <div className="mb-1 flex flex-wrap items-center gap-1.5">
+                        <p className="font-semibold">{channel.name}</p>
+                        {channel.isDefault && (
+                          <Badge>{getChannelLabel("settings.channel.badge.default")}</Badge>
+                        )}
+                        {needsDefaultModel && (
+                          <Badge variant="outline" className="border-orange-400 text-orange-600">
+                            {getChannelLabel("settings.channel.badge.missingDefaultModel")}
+                          </Badge>
+                        )}
+                        {!channel.enabled && (
+                          <Badge variant="secondary">
+                            {getChannelLabel("settings.channel.badge.disabled")}
+                          </Badge>
+                        )}
                       </div>
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        className="shrink-0"
-                        onClick={() => dismissChannelNotice(channel.id)}
-                        aria-label="关闭提示"
-                        title="关闭提示"
-                      >
-                        <X size={14} />
-                      </Button>
-                    </div>
-                  </div>
-                )}
 
-                {isExpanded && (
-                  <div className="flex flex-col gap-2">
-                    <div className="flex flex-col gap-2 rounded-lg border border-dashed border-border/60 p-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <div>
-                          <p className="text-sm font-medium">模型</p>
-                          <p className="text-xs text-muted-foreground">
-                            已同步 {channel.models.length} 个，可手动补充 modelId
+                      <div className="flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
+                        <Badge variant="secondary" className="gap-1" title={channel.provider}>
+                          <DesktopProviderLogo provider={channel.provider} />
+                          <span className="sr-only">{channel.provider}</span>
+                        </Badge>
+                        {channel.defaultModelId && (
+                          <Badge variant="outline">{channel.defaultModelId}</Badge>
+                        )}
+                        <span className="break-all">
+                          {channel.baseUrl || getChannelLabel("settings.channel.baseUrlUnset")}
+                        </span>
+                      </div>
+                    </div>
+
+                    <TooltipProvider>
+                      <div className="flex shrink-0 items-center gap-1">
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              onClick={() => openEditor(channel.id)}
+                              aria-label={getChannelLabel("settings.channel.action.edit")}
+                            >
+                              <PenSquare size={16} />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent side="top">
+                            <p>{getChannelLabel("settings.channel.action.edit")}</p>
+                          </TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              onClick={() => openAgentCheck(channel)}
+                              disabled={busyKey === `agent-check:${channel.id}`}
+                              aria-label={getChannelLabel("settings.channel.action.agentCheck")}
+                            >
+                              <Bot size={16} />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent side="top">
+                            <p>{getChannelLabel("settings.channel.action.agentCheck")}</p>
+                          </TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              onClick={() => void handleTest(channel.id)}
+                              disabled={busyKey === `test:${channel.id}`}
+                              aria-label={getChannelLabel("settings.channel.action.test")}
+                            >
+                              <Check size={16} />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent side="top">
+                            <p>{getChannelLabel("settings.channel.action.test")}</p>
+                          </TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              onClick={() => void handleFetchModels(channel.id)}
+                              disabled={busyKey === `fetch:${channel.id}`}
+                              aria-label={getChannelLabel("settings.channel.action.syncModels")}
+                            >
+                              <RefreshCw
+                                size={16}
+                                className={busyKey === `fetch:${channel.id}` ? "animate-spin" : ""}
+                              />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent side="top">
+                            <p>{getChannelLabel("settings.channel.action.syncModels")}</p>
+                          </TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              className={channel.isDefault ? "text-yellow-500" : ""}
+                              onClick={() => void handleSetDefaultChannel(channel.id)}
+                              disabled={Boolean(busyKey)}
+                              aria-label={getChannelLabel("settings.channel.action.setDefault")}
+                            >
+                              <Pin size={16} />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent side="top">
+                            <p>{getChannelLabel("settings.channel.action.setDefault")}</p>
+                          </TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              onClick={() => toggleExpanded(channel.id)}
+                              aria-label={
+                                isExpanded
+                                  ? getChannelLabel("settings.channel.action.collapse")
+                                  : getChannelLabel("settings.channel.action.expand")
+                              }
+                            >
+                              {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent side="top">
+                            <p>
+                              {isExpanded
+                                ? getChannelLabel("settings.channel.action.collapse")
+                                : getChannelLabel("settings.channel.action.expand")}
+                            </p>
+                          </TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              className="text-destructive"
+                              onClick={() => void handleDelete(channel.id)}
+                              disabled={busyKey === `delete:${channel.id}`}
+                              aria-label={getChannelLabel("settings.channel.action.delete")}
+                            >
+                              <Trash2 size={16} />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent side="top">
+                            <p>{getChannelLabel("settings.channel.action.delete")}</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </div>
+                    </TooltipProvider>
+                  </div>
+
+                  {notice && (
+                    <div
+                      className={cn(
+                        "rounded-xl border p-3",
+                        notice.kind === "error"
+                          ? "border-red-200 bg-red-50 dark:border-red-900/70 dark:bg-red-950/40"
+                          : "border-orange-200 bg-orange-50 dark:border-orange-900/70 dark:bg-orange-950/40",
+                      )}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold">
+                            {notice.title ||
+                              getChannelLabel("settings.channel.notice.needsAttentionTitle")}
+                          </p>
+                          <p className="mt-1 text-sm whitespace-pre-wrap text-muted-foreground">
+                            {notice.message}
                           </p>
                         </div>
-                        <div className="flex w-full max-w-md items-center gap-2">
-                          <Input
-                            placeholder="手动添加 modelId，例如：qwen3.5-plus"
-                            value={draftModelIdByChannel[channel.id] || ""}
-                            onChange={(event) =>
-                              setDraftModelIdByChannel((prev) => ({
-                                ...prev,
-                                [channel.id]: event.target.value,
-                              }))
-                            }
-                            onKeyDown={(event) => {
-                              if (event.key === "Enter") {
-                                event.preventDefault();
-                                void handleAddModel(channel);
-                              }
-                            }}
-                          />
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => void handleAddModel(channel)}
-                            disabled={busyKey === `add-model:${channel.id}`}
-                          >
-                            添加
-                          </Button>
-                        </div>
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          className="shrink-0"
+                          onClick={() => dismissChannelNotice(channel.id)}
+                          aria-label={getChannelLabel("settings.channel.notice.dismiss")}
+                          title={getChannelLabel("settings.channel.notice.dismiss")}
+                        >
+                          <X size={14} />
+                        </Button>
                       </div>
-                      {channel.baseUrl?.includes("coding.dashscope.aliyuncs.com") && (
-                        <p className="text-xs text-muted-foreground">
-                          百炼/Coding Plan 不支持接口查询模型列表，可直接手动添加，例如：
-                          qwen3.5-plus、qwen3-coder-next、glm-5、kimi-k2.5。
-                        </p>
-                      )}
                     </div>
+                  )}
 
-                    {channel.models.length === 0 ? (
-                      <div className="rounded-lg border border-dashed border-border/60 px-3 py-4 text-sm text-muted-foreground">
-                        当前还没有模型。该渠道如果不支持同步，可直接在上方手动添加 modelId。
-                      </div>
-                    ) : (
-                      <div className="max-h-[400px] overflow-y-auto rounded-md">
-                        <div className="flex flex-col gap-2 pr-1">
-                          {channel.models.map((model) => (
-                            <div
-                              key={model.id}
-                              className="flex items-center justify-between gap-3 rounded-lg border border-border/60 px-3 py-2"
+                  {isExpanded && (
+                    <div className="flex flex-col gap-2">
+                      <div className="flex flex-col gap-2 rounded-lg border border-dashed border-border/60 p-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-medium">
+                              {getChannelLabel("settings.channel.models.heading")}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {formatChannelLabel("settings.channel.models.syncedCount", {
+                                count: channel.models.length,
+                              })}
+                            </p>
+                          </div>
+                          <div className="flex w-full max-w-md items-center gap-2">
+                            <Input
+                              placeholder={getChannelLabel(
+                                "settings.channel.models.addPlaceholder",
+                              )}
+                              value={draftModelIdByChannel[channel.id] || ""}
+                              onChange={(event) =>
+                                setDraftModelIdByChannel((prev) => ({
+                                  ...prev,
+                                  [channel.id]: event.target.value,
+                                }))
+                              }
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter") {
+                                  event.preventDefault();
+                                  void handleAddModel(channel);
+                                }
+                              }}
+                            />
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => void handleAddModel(channel)}
+                              disabled={busyKey === `add-model:${channel.id}`}
                             >
-                              <div className="flex min-w-0 items-center gap-3">
-                                <Checkbox
-                                  checked={model.enabled}
-                                  onCheckedChange={() =>
-                                    void handleToggleModelEnabled(channel, model.modelId)
-                                  }
-                                  disabled={busyKey === `toggle:${channel.id}:${model.modelId}`}
-                                />
-                                <div className="min-w-0">
-                                  <p className="truncate text-sm font-medium">
-                                    {model.displayName || model.modelId}
-                                  </p>
-                                  <p className="truncate text-xs text-muted-foreground">
-                                    {model.modelId}
-                                  </p>
+                              {getChannelLabel("settings.channel.models.addButton")}
+                            </Button>
+                          </div>
+                        </div>
+                        {channel.baseUrl?.includes("coding.dashscope.aliyuncs.com") && (
+                          <p className="text-xs text-muted-foreground">
+                            {getChannelLabel("settings.channel.models.dashscopeHint")}
+                          </p>
+                        )}
+                      </div>
+
+                      {channel.models.length === 0 ? (
+                        <div className="rounded-lg border border-dashed border-border/60 px-3 py-4 text-sm text-muted-foreground">
+                          {getChannelLabel("settings.channel.models.empty")}
+                        </div>
+                      ) : (
+                        <div className="max-h-[400px] overflow-y-auto rounded-md">
+                          <div className="flex flex-col gap-2 pr-1">
+                            {channel.models.map((model) => (
+                              <div
+                                key={model.id}
+                                className="flex items-center justify-between gap-3 rounded-lg border border-border/60 px-3 py-2"
+                              >
+                                <div className="flex min-w-0 items-center gap-3">
+                                  <Checkbox
+                                    checked={model.enabled}
+                                    onCheckedChange={() =>
+                                      void handleToggleModelEnabled(channel, model.modelId)
+                                    }
+                                    disabled={busyKey === `toggle:${channel.id}:${model.modelId}`}
+                                  />
+                                  <div className="min-w-0">
+                                    <p className="truncate text-sm font-medium">
+                                      {model.displayName || model.modelId}
+                                    </p>
+                                    <p className="truncate text-xs text-muted-foreground">
+                                      {model.modelId}
+                                    </p>
+                                  </div>
+                                </div>
+
+                                <div className="flex shrink-0 items-center gap-2">
+                                  {model.isDefault && (
+                                    <Badge variant="secondary">
+                                      {getChannelLabel("settings.channel.badge.default")}
+                                    </Badge>
+                                  )}
+                                  {!model.enabled && (
+                                    <Badge variant="outline">
+                                      {getChannelLabel("settings.channel.badge.disabled")}
+                                    </Badge>
+                                  )}
+                                  <Button
+                                    size="sm"
+                                    variant={model.isDefault ? "default" : "outline"}
+                                    onClick={() =>
+                                      void handleSetDefaultModel(channel, model.modelId)
+                                    }
+                                    disabled={
+                                      busyKey === `default-model:${channel.id}:${model.modelId}`
+                                    }
+                                  >
+                                    {model.isDefault
+                                      ? getChannelLabel("settings.channel.badge.default")
+                                      : getChannelLabel("settings.channel.action.setDefault")}
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className="text-destructive"
+                                    onClick={() => void handleRemoveModel(channel, model.modelId)}
+                                    disabled={
+                                      busyKey === `remove-model:${channel.id}:${model.modelId}`
+                                    }
+                                  >
+                                    {getChannelLabel("settings.channel.model.remove")}
+                                  </Button>
                                 </div>
                               </div>
-
-                              <div className="flex shrink-0 items-center gap-2">
-                                {model.isDefault && <Badge variant="secondary">默认</Badge>}
-                                {!model.enabled && <Badge variant="outline">已禁用</Badge>}
-                                <Button
-                                  size="sm"
-                                  variant={model.isDefault ? "default" : "outline"}
-                                  onClick={() => void handleSetDefaultModel(channel, model.modelId)}
-                                  disabled={busyKey === `default-model:${channel.id}:${model.modelId}`}
-                                >
-                                  {model.isDefault ? "默认" : "设为默认"}
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  className="text-destructive"
-                                  onClick={() => void handleRemoveModel(channel, model.modelId)}
-                                  disabled={busyKey === `remove-model:${channel.id}:${model.modelId}`}
-                                >
-                                  移除
-                                </Button>
-                              </div>
-                            </div>
-                          ))}
+                            ))}
+                          </div>
                         </div>
-                      </div>
-                    )}
-                  </div>
-                )}
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
+            );
+          })}
+
+          {!loading && sortedChannels.length === 0 && (
+            <div className="rounded-xl border border-dashed border-border/60 bg-card px-6 py-10 text-center">
+              <p className="text-sm text-muted-foreground">
+                {getChannelLabel("settings.channel.emptyState")}
+              </p>
             </div>
-          );
-        })}
+          )}
 
-        {!loading && sortedChannels.length === 0 && (
-          <div className="rounded-xl border border-dashed border-border/60 bg-card px-6 py-10 text-center">
-            <p className="text-sm text-muted-foreground">还没有配置渠道，先新增一个渠道。</p>
-          </div>
-        )}
+          {(loading || busyKey) && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+              <span>
+                {loading
+                  ? getChannelLabel("settings.channel.loading")
+                  : getChannelLabel("settings.channel.applying")}
+              </span>
+            </div>
+          )}
+        </div>
 
-        {(loading || busyKey) && (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-            <span>{loading ? "正在加载渠道..." : "正在应用配置..."}</span>
-          </div>
-        )}
-      </div>
+        <ChannelEditorModal
+          opened={editorOpen}
+          channels={sortedChannels}
+          initialChannelId={editorChannelId}
+          onClose={closeEditor}
+          onSaved={handleEditorSaved}
+          applyFetchModelsOutcome={applyFetchModelsOutcome}
+        />
 
-      <ChannelEditorModal
-        opened={editorOpen}
-        channels={sortedChannels}
-        initialChannelId={editorChannelId}
-        onClose={closeEditor}
-        onSaved={handleEditorSaved}
-        applyFetchModelsOutcome={applyFetchModelsOutcome}
-      />
+        <Dialog open={agentCheckOpen} onOpenChange={(nextOpen) => !nextOpen && closeAgentCheck()}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>
+                {getChannelLabel("settings.channel.agentCheck.dialogTitle")}
+              </DialogTitle>
+              <DialogDescription className="sr-only">
+                {getChannelLabel("settings.channel.agentCheck.dialogDescription")}
+              </DialogDescription>
+            </DialogHeader>
 
-      <Dialog open={agentCheckOpen} onOpenChange={(nextOpen) => !nextOpen && closeAgentCheck()}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Agent 兼容性检查</DialogTitle>
-            <DialogDescription className="sr-only">
-              为当前渠道和模型执行一次真实的 Agent 兼容性检查。
-            </DialogDescription>
-          </DialogHeader>
+            <div className="flex flex-col gap-4">
+              {(() => {
+                const channel =
+                  sortedChannels.find((item) => item.id === agentCheckChannelId) || null;
+                if (!channel) {
+                  return (
+                    <p className="text-sm text-muted-foreground">
+                      {getChannelLabel("settings.channel.agentCheck.selectChannel")}
+                    </p>
+                  );
+                }
 
-          <div className="flex flex-col gap-4">
-            {(() => {
-              const channel = sortedChannels.find((item) => item.id === agentCheckChannelId) || null;
-              if (!channel) {
-                return <p className="text-sm text-muted-foreground">请选择一个渠道。</p>;
-              }
+                if (channel.models.length === 0) {
+                  return (
+                    <div className="flex flex-col gap-1.5">
+                      <p className="text-sm font-medium">modelId</p>
+                      <Input
+                        placeholder={getChannelLabel(
+                          "settings.channel.agentCheck.modelIdPlaceholder",
+                        )}
+                        value={agentCheckModelId}
+                        onChange={(event) => setAgentCheckModelId(event.target.value)}
+                      />
+                    </div>
+                  );
+                }
 
-              if (channel.models.length === 0) {
                 return (
                   <div className="flex flex-col gap-1.5">
-                    <p className="text-sm font-medium">modelId</p>
-                    <Input
-                      placeholder="例如：claude-4.6-sonnet"
-                      value={agentCheckModelId}
-                      onChange={(event) => setAgentCheckModelId(event.target.value)}
-                    />
+                    <p className="text-sm font-medium">
+                      {getChannelLabel("settings.channel.agentCheck.selectModelId")}
+                    </p>
+                    <Select value={agentCheckModelId} onValueChange={setAgentCheckModelId}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {channel.models.map((model) => (
+                          <SelectItem key={model.modelId} value={model.modelId}>
+                            {model.enabled
+                              ? model.displayName
+                              : `${model.displayName}${getChannelLabel("settings.channel.agentCheck.modelDisabledSuffix")}`}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                 );
-              }
+              })()}
+            </div>
 
-              return (
-                <div className="flex flex-col gap-1.5">
-                  <p className="text-sm font-medium">选择 modelId</p>
-                  <Select value={agentCheckModelId} onValueChange={setAgentCheckModelId}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {channel.models.map((model) => (
-                        <SelectItem key={model.modelId} value={model.modelId}>
-                          {model.enabled ? model.displayName : `${model.displayName}（已禁用）`}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              );
-            })()}
-          </div>
-
-          <DialogFooter>
-            <Button variant="ghost" onClick={closeAgentCheck}>
-              取消
-            </Button>
-            <Button
-              onClick={() => {
-                if (!agentCheckChannelId) return;
-                void handleAgentCheck(agentCheckChannelId, agentCheckModelId);
-              }}
-              disabled={
-                agentCheckChannelId ? busyKey === `agent-check:${agentCheckChannelId}` : false
-              }
-            >
-              开始检查
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </SettingsSection>
+            <DialogFooter>
+              <Button variant="ghost" onClick={closeAgentCheck}>
+                {getChannelLabel("settings.channel.agentCheck.cancel")}
+              </Button>
+              <Button
+                onClick={() => {
+                  if (!agentCheckChannelId) return;
+                  void handleAgentCheck(agentCheckChannelId, agentCheckModelId);
+                }}
+                disabled={
+                  agentCheckChannelId ? busyKey === `agent-check:${agentCheckChannelId}` : false
+                }
+              >
+                {getChannelLabel("settings.channel.agentCheck.start")}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </SettingsSection>
     </>
   );
 }

@@ -174,6 +174,127 @@ export function getMcpLabel(key: McpLabelKey): string {
 }
 
 /**
+ * Labels for the channel settings panel (list, actions, model management and the
+ * Agent compatibility check dialog). Raw provider/base-url/model ids stay verbatim
+ * (they come from the server); "modelId", "Base URL", "Agent", "MCP", "Coding Plan"
+ * and product names stay English per rule 3 above. Templates use `{name}`
+ * placeholders resolved via `formatChannelLabel`.
+ */
+export const channelLabels = {
+  // Section
+  "settings.channel.title": "渠道配置",
+  "settings.channel.description": "全局用户级配置，对话与 Agent 共用。",
+  "settings.channel.manageButton": "渠道管理",
+  // Badges
+  "settings.channel.badge.default": "默认",
+  "settings.channel.badge.missingDefaultModel": "缺少默认模型",
+  "settings.channel.badge.disabled": "已禁用",
+  "settings.channel.baseUrlUnset": "未设置 Base URL",
+  // Row actions (aria-label + tooltip)
+  "settings.channel.action.edit": "编辑渠道",
+  "settings.channel.action.agentCheck": "Agent 检查",
+  "settings.channel.action.test": "连接测试",
+  "settings.channel.action.syncModels": "同步模型",
+  "settings.channel.action.setDefault": "设为默认",
+  "settings.channel.action.collapse": "收起",
+  "settings.channel.action.expand": "展开",
+  "settings.channel.action.delete": "删除渠道",
+  // Model management
+  "settings.channel.models.heading": "模型",
+  "settings.channel.models.syncedCount": "已同步 {count} 个，可手动补充 modelId",
+  "settings.channel.models.addPlaceholder": "手动添加 modelId，例如：qwen3.5-plus",
+  "settings.channel.models.addButton": "添加",
+  "settings.channel.models.dashscopeHint":
+    "百炼/Coding Plan 不支持接口查询模型列表，可直接手动添加，例如： qwen3.5-plus、qwen3-coder-next、glm-5、kimi-k2.5。",
+  "settings.channel.models.empty":
+    "当前还没有模型。该渠道如果不支持同步，可直接在上方手动添加 modelId。",
+  "settings.channel.model.remove": "移除",
+  // Empty / loading states
+  "settings.channel.emptyState": "还没有配置渠道，先新增一个渠道。",
+  "settings.channel.loading": "正在加载渠道...",
+  "settings.channel.applying": "正在应用配置...",
+  // Inline notice card
+  "settings.channel.notice.needsAttentionTitle": "需要处理",
+  "settings.channel.notice.syncFailedTitle": "同步失败",
+  "settings.channel.notice.dismiss": "关闭提示",
+  // Agent compatibility check dialog
+  "settings.channel.agentCheck.dialogTitle": "Agent 兼容性检查",
+  "settings.channel.agentCheck.dialogDescription":
+    "为当前渠道和模型执行一次真实的 Agent 兼容性检查。",
+  "settings.channel.agentCheck.selectChannel": "请选择一个渠道。",
+  "settings.channel.agentCheck.modelIdPlaceholder": "例如：claude-4.6-sonnet",
+  "settings.channel.agentCheck.selectModelId": "选择 modelId",
+  "settings.channel.agentCheck.modelDisabledSuffix": "（已禁用）",
+  "settings.channel.agentCheck.cancel": "取消",
+  "settings.channel.agentCheck.start": "开始检查",
+  "settings.channel.agentCheck.defaultError": "当前配置不能用于 Agent。",
+  "settings.channel.agentCheck.retryPhrase": "请稍后重试",
+  "settings.channel.agentCheck.retrySuffix": " 可稍后重试。",
+  // Agent check error titles (keyed by server errorCode)
+  "settings.channel.agentCheck.error.modelNotFound": "模型不可用",
+  "settings.channel.agentCheck.error.authFailed": "鉴权失败",
+  "settings.channel.agentCheck.error.quotaExhausted": "配额不足",
+  "settings.channel.agentCheck.error.sslHandshakeFailed": "SSL 握手失败",
+  "settings.channel.agentCheck.error.gatewayFailed": "网关异常",
+  "settings.channel.agentCheck.error.timeout": "请求超时",
+  "settings.channel.agentCheck.error.protocolIncompatible": "协议不兼容",
+  "settings.channel.agentCheck.error.default": "Agent 检查失败",
+  // Toasts
+  "settings.channel.notify.loadFailedTitle": "加载失败",
+  "settings.channel.notify.loadFailedBody": "无法加载渠道列表。",
+  "settings.channel.notify.fetchModelsFailedBody": "无法获取模型列表。",
+  "settings.channel.notify.actionFailedTitle": "操作失败",
+  "settings.channel.notify.actionFailedBody": "渠道操作失败。",
+  "settings.channel.notify.deletedTitle": "已删除",
+  "settings.channel.notify.deletedBody": "渠道已删除。",
+  "settings.channel.notify.testSuccessTitle": "连接成功",
+  "settings.channel.notify.testSuccessBody": "该渠道可正常连接。",
+  "settings.channel.notify.testFailedTitle": "连接失败",
+  "settings.channel.notify.testFailedBody": "无法连接该渠道。",
+  "settings.channel.notify.syncDoneWarnTitle": "同步已完成",
+  "settings.channel.notify.syncDoneWarnBody": "模型列表已刷新，但该渠道还有待处理项。",
+  "settings.channel.notify.syncSuccessTitle": "同步成功",
+  "settings.channel.notify.syncSuccessBody": "模型列表已更新。",
+  "settings.channel.notify.missingModelTitle": "缺少模型",
+  "settings.channel.notify.missingModelBody": "请选择或输入 modelId。",
+  "settings.channel.notify.agentOkTitle": "Agent 可用",
+  "settings.channel.notify.agentOkBody": "模型 {modelId} 已通过 Agent 兼容性检查。",
+  "settings.channel.notify.updatedTitle": "已更新",
+  "settings.channel.notify.defaultChannelUpdatedBody": "默认渠道已更新。",
+  "settings.channel.notify.modelEnabledUpdatedBody": "模型启用状态已保存。",
+  "settings.channel.notify.defaultModelUpdatedBody": "默认模型已更新。",
+  "settings.channel.notify.missingModelIdTitle": "缺少 modelId",
+  "settings.channel.notify.missingModelIdBody": "请输入要添加的 modelId。",
+  "settings.channel.notify.modelExistsTitle": "模型已存在",
+  "settings.channel.notify.modelExistsBody": "{modelId} 已在当前渠道中。",
+  "settings.channel.notify.addedTitle": "已添加",
+  "settings.channel.notify.addedBody": "{modelId} 已加入当前渠道。",
+  "settings.channel.notify.removedTitle": "已移除",
+  "settings.channel.notify.removedBody": "{modelId} 已从当前渠道移除。",
+} as const;
+
+type ChannelLabelKey = keyof typeof channelLabels;
+
+export function getChannelLabel(key: ChannelLabelKey): string {
+  return channelLabels[key];
+}
+
+/**
+ * Resolves a channel label template, substituting `{name}` placeholders with the
+ * provided values. Used for the few interpolated toast/inline strings.
+ */
+export function formatChannelLabel(
+  key: ChannelLabelKey,
+  vars: Record<string, string | number>,
+): string {
+  let text: string = channelLabels[key];
+  for (const [name, value] of Object.entries(vars)) {
+    text = text.replaceAll(`{${name}}`, String(value));
+  }
+  return text;
+}
+
+/**
  * Labels for the composer slash-command panel (type `/` to open). Group titles
  * and built-in command names are user-facing Chinese copy; the literal trigger
  * "/" and tool words (MCP / Skill) stay English per rule 3 above.
