@@ -20,7 +20,7 @@ import {
   SelectValue,
 } from "ui";
 import { getCredentialKey, listCredentialSources } from "../../lib/credentialApi";
-import { getCredentialLabel } from "../../lib/i18n/agent";
+import { formatChannelLabel, getChannelLabel, getCredentialLabel } from "../../lib/i18n/agent";
 import { createServerApi } from "../../lib/serverApi";
 import type { DetectedCredential } from "../../lib/sidecarClient";
 import { useSidecarStore } from "../../stores/sidecarStore";
@@ -374,18 +374,30 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
     const trimmedApiKey = apiKey.trim();
 
     if (!trimmedName) {
-      setFormNotice({ kind: "error", title: "无法保存", message: "请填写渠道名称。" });
+      setFormNotice({
+        kind: "error",
+        title: getChannelLabel("settings.channel.editor.saveErrorTitle"),
+        message: getChannelLabel("settings.channel.editor.nameRequired"),
+      });
       return;
     }
 
     if (!trimmedProvider) {
-      setFormNotice({ kind: "error", title: "无法保存", message: "请填写 provider。" });
+      setFormNotice({
+        kind: "error",
+        title: getChannelLabel("settings.channel.editor.saveErrorTitle"),
+        message: getChannelLabel("settings.channel.editor.providerRequired"),
+      });
       return;
     }
 
     if (isCreate && authSource === "manual") {
       if (!trimmedApiKey || trimmedApiKey === API_KEY_MASK) {
-        setFormNotice({ kind: "error", title: "无法创建", message: "请填写 API Key。" });
+        setFormNotice({
+          kind: "error",
+          title: getChannelLabel("settings.channel.editor.createErrorTitle"),
+          message: getChannelLabel("settings.channel.editor.apiKeyRequired"),
+        });
         return;
       }
     }
@@ -393,8 +405,8 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
     if (isCreate && authSource === "local" && matchingSidecarCredentials.length === 0) {
       setFormNotice({
         kind: "error",
-        title: "无法创建",
-        message: "未检测到匹配的本地认证来源。",
+        title: getChannelLabel("settings.channel.editor.createErrorTitle"),
+        message: getChannelLabel("settings.channel.editor.noLocalAuth"),
       });
       return;
     }
@@ -422,19 +434,23 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
         const syncOutcome = applyFetchModelsOutcome(channel.id, sync);
         await onSaved(channel.id, {
           kind: syncOutcome.ok ? (syncOutcome.warn ? "warn" : "success") : "warn",
-          title: "渠道已创建",
+          title: getChannelLabel("settings.channel.editor.createdTitle"),
           message: !syncOutcome.ok
-            ? "渠道已保存，但模型同步失败。请看列表中的提示并继续处理。"
+            ? getChannelLabel("settings.channel.editor.createdSyncFailed")
             : syncOutcome.warn
-              ? "渠道已保存，模型同步结果请看列表中的提示。"
-              : "渠道已保存，并已同步模型列表。",
+              ? getChannelLabel("settings.channel.editor.createdSyncWarn")
+              : getChannelLabel("settings.channel.editor.createdSyncOk"),
         });
         onClose();
         return;
       }
 
       if (!activeChannel) {
-        setFormNotice({ kind: "error", title: "无法保存", message: "目标渠道不存在。" });
+        setFormNotice({
+          kind: "error",
+          title: getChannelLabel("settings.channel.editor.saveErrorTitle"),
+          message: getChannelLabel("settings.channel.editor.channelNotFound"),
+        });
         return;
       }
 
@@ -476,19 +492,22 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
       const syncOutcome = applyFetchModelsOutcome(activeChannel.id, sync);
       await onSaved(activeChannel.id, {
         kind: syncOutcome.ok ? (syncOutcome.warn ? "warn" : "success") : "warn",
-        title: "渠道已保存",
+        title: getChannelLabel("settings.channel.editor.savedTitle"),
         message: !syncOutcome.ok
-          ? "已保存渠道，但模型同步失败。请看列表中的提示并继续处理。"
+          ? getChannelLabel("settings.channel.editor.savedSyncFailed")
           : syncOutcome.warn
-            ? "已保存渠道，模型同步结果请看列表中的提示。"
-            : "已保存渠道，并已同步模型列表。",
+            ? getChannelLabel("settings.channel.editor.savedSyncWarn")
+            : getChannelLabel("settings.channel.editor.savedSyncOk"),
       });
       onClose();
     } catch (error) {
       setFormNotice({
         kind: "error",
-        title: "操作失败",
-        message: error instanceof Error ? error.message : "无法保存当前渠道。",
+        title: getChannelLabel("settings.channel.notify.actionFailedTitle"),
+        message:
+          error instanceof Error
+            ? error.message
+            : getChannelLabel("settings.channel.editor.saveFailedGeneric"),
       });
     } finally {
       setSaving(false);
@@ -499,18 +518,20 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
     <Dialog open={opened} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
       <DialogContent className="flex h-[min(72vh,760px)] max-w-4xl flex-col p-0">
         <DialogHeader className="px-4 pt-4 pb-0">
-          <DialogTitle>渠道管理</DialogTitle>
+          <DialogTitle>{getChannelLabel("settings.channel.manageButton")}</DialogTitle>
           <DialogDescription className="sr-only">
-            管理桌面端渠道配置，包括 provider、Base URL、API Key 和模型同步。
+            {getChannelLabel("settings.channel.editor.dialogDescription")}
           </DialogDescription>
         </DialogHeader>
 
         <div className="flex min-h-0 flex-1 gap-3 p-4">
           <div className="flex w-[35%] min-w-[220px] flex-col gap-2 rounded-lg border p-3">
             <div className="flex items-center justify-between">
-              <span className="text-sm font-semibold">渠道</span>
+              <span className="text-sm font-semibold">
+                {getChannelLabel("settings.channel.editor.listHeading")}
+              </span>
               <Button size="sm" variant="outline" onClick={openCreate}>
-                <Plus size={14} /> 新建
+                <Plus size={14} /> {getChannelLabel("settings.channel.editor.newButton")}
               </Button>
             </div>
 
@@ -520,7 +541,7 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
                 className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
               />
               <Input
-                placeholder="搜索渠道..."
+                placeholder={getChannelLabel("settings.channel.editor.searchPlaceholder")}
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 className="pl-8"
@@ -543,7 +564,7 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
                       )}
                     >
                       <p className="truncate text-sm font-semibold">
-                        {channel.name || "未命名渠道"}
+                        {channel.name || getChannelLabel("settings.channel.editor.unnamedChannel")}
                       </p>
                       <div className="mt-0.5 flex items-center gap-1">
                         <Badge
@@ -556,12 +577,12 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
                         </Badge>
                         {channel.isDefault && (
                           <Badge variant="outline" className="px-1 py-0 text-xs">
-                            默认
+                            {getChannelLabel("settings.channel.badge.default")}
                           </Badge>
                         )}
                         {!channel.enabled && (
                           <Badge variant="secondary" className="px-1 py-0 text-xs">
-                            已禁用
+                            {getChannelLabel("settings.channel.badge.disabled")}
                           </Badge>
                         )}
                       </div>
@@ -570,7 +591,9 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
                 })}
 
                 {filteredChannels.length === 0 && (
-                  <p className="py-4 text-center text-sm text-muted-foreground">没有匹配的渠道</p>
+                  <p className="py-4 text-center text-sm text-muted-foreground">
+                    {getChannelLabel("settings.channel.editor.noMatch")}
+                  </p>
                 )}
               </div>
             </ScrollArea>
@@ -580,17 +603,25 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
             <div className="mb-3 flex items-start justify-between">
               <div className="min-w-0">
                 <p className="truncate font-semibold">
-                  {isCreate ? "新建渠道" : activeChannel?.name || "编辑渠道"}
+                  {isCreate
+                    ? getChannelLabel("settings.channel.editor.createTitle")
+                    : activeChannel?.name || getChannelLabel("settings.channel.editor.editTitle")}
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  provider 用于标识该渠道兼容的接口类型，保存后会自动同步模型列表。
+                  {getChannelLabel("settings.channel.editor.providerHint")}
                 </p>
               </div>
               {!isCreate && (
                 <div className="flex shrink-0 items-center gap-1.5">
-                  {activeChannel?.isDefault && <Badge variant="outline">默认</Badge>}
+                  {activeChannel?.isDefault && (
+                    <Badge variant="outline">
+                      {getChannelLabel("settings.channel.badge.default")}
+                    </Badge>
+                  )}
                   {activeChannel && !activeChannel.enabled && (
-                    <Badge variant="secondary">已禁用</Badge>
+                    <Badge variant="secondary">
+                      {getChannelLabel("settings.channel.badge.disabled")}
+                    </Badge>
                   )}
                 </div>
               )}
@@ -600,10 +631,12 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
               <div className="flex flex-col gap-3 pr-2">
                 <div className="grid grid-cols-2 gap-3">
                   <div className="flex flex-col gap-1.5">
-                    <Label htmlFor="channel-name">名称 *</Label>
+                    <Label htmlFor="channel-name">
+                      {getChannelLabel("settings.channel.editor.nameLabel")} *
+                    </Label>
                     <Input
                       id="channel-name"
-                      placeholder="例如：我的 Claude 中转"
+                      placeholder={getChannelLabel("settings.channel.editor.namePlaceholder")}
                       value={name}
                       onChange={(event) => setName(event.target.value)}
                     />
@@ -612,7 +645,7 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
                     <Label htmlFor="channel-provider">Provider</Label>
                     <Input
                       id="channel-provider"
-                      placeholder="例如：anthropic / openrouter / my-relay"
+                      placeholder={getChannelLabel("settings.channel.editor.providerPlaceholder")}
                       value={provider}
                       onChange={(event) => setProvider(event.target.value)}
                     />
@@ -620,7 +653,7 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
                 </div>
 
                 <div className="flex flex-col gap-1.5">
-                  <Label>常见预设</Label>
+                  <Label>{getChannelLabel("settings.channel.editor.presetsLabel")}</Label>
                   <div className="flex flex-wrap gap-2">
                     {COMMON_PROVIDER_PRESETS.map((preset) => (
                       <Button
@@ -644,22 +677,26 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
                       id="channel-base-url"
                       value={baseUrl}
                       onChange={(event) => setBaseUrl(event.target.value)}
-                      placeholder="例如：https://api.anthropic.com"
+                      placeholder={getChannelLabel("settings.channel.editor.baseUrlPlaceholder")}
                       className="flex-1"
                     />
                     <Button
                       type="button"
                       variant="outline"
                       size="icon"
-                      title="填入当前默认 Base URL"
+                      title={getChannelLabel("settings.channel.editor.fillDefaultBaseUrl")}
                       onClick={() => setBaseUrl(suggestedBaseUrl)}
                     >
                       <Wand2 size={16} />
                     </Button>
                   </div>
-                  <p className="text-xs text-muted-foreground">当前建议地址：{suggestedBaseUrl}</p>
                   <p className="text-xs text-muted-foreground">
-                    会根据 provider 与 Base URL 自动判断兼容链路；中转服务填写兼容类型即可。
+                    {formatChannelLabel("settings.channel.editor.suggestedBaseUrl", {
+                      url: suggestedBaseUrl,
+                    })}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {getChannelLabel("settings.channel.editor.baseUrlHint")}
                   </p>
                 </div>
 
@@ -669,7 +706,9 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
                     checked={enabled}
                     onCheckedChange={(checked) => setEnabled(Boolean(checked))}
                   />
-                  <Label htmlFor="channel-enabled">启用该渠道</Label>
+                  <Label htmlFor="channel-enabled">
+                    {getChannelLabel("settings.channel.editor.enableLabel")}
+                  </Label>
                 </div>
 
                 {isCreate && sidecarStatus === "ready" && matchingSidecarCredentials.length > 0 && (
@@ -716,7 +755,7 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
                           );
                         })}
                         <p className="text-xs text-muted-foreground">
-                          Sidecar 将自动使用检测到的本地认证，无需手动填写 API Key。
+                          {getChannelLabel("settings.channel.editor.localAuthHint")}
                         </p>
                       </div>
                     )}
@@ -731,13 +770,17 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
                     <Input
                       id="channel-api-key"
                       type="password"
-                      placeholder={isCreate ? "输入 API Key" : "保持为 ******** 或留空表示不修改"}
+                      placeholder={
+                        isCreate
+                          ? getChannelLabel("settings.channel.editor.apiKeyPlaceholderCreate")
+                          : getChannelLabel("settings.channel.editor.apiKeyPlaceholderEdit")
+                      }
                       value={apiKey}
                       onChange={(event) => setApiKey(event.target.value)}
                     />
                     {!isCreate && (
                       <p className="text-xs text-muted-foreground">
-                        出于安全原因，不会展示已保存的明文 Key。输入新 Key 才会更新。
+                        {getChannelLabel("settings.channel.editor.apiKeyHint")}
                       </p>
                     )}
                     {envKeySources.length > 0 && (
@@ -760,19 +803,29 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
                                   setApiKey(key);
                                   setFormNotice({
                                     kind: "success",
-                                    title: "已填入",
-                                    message: `已使用 ${s.sourceName} 的 API Key`,
+                                    title: getChannelLabel("settings.channel.editor.filledTitle"),
+                                    message: formatChannelLabel(
+                                      "settings.channel.editor.filledBody",
+                                      { source: s.sourceName },
+                                    ),
                                   });
                                 } catch (err) {
                                   setFormNotice({
                                     kind: "error",
-                                    title: "获取失败",
-                                    message: err instanceof Error ? err.message : "未知错误",
+                                    title: getChannelLabel(
+                                      "settings.channel.editor.fetchKeyFailedTitle",
+                                    ),
+                                    message:
+                                      err instanceof Error
+                                        ? err.message
+                                        : getChannelLabel("settings.channel.editor.unknownError"),
                                   });
                                 }
                               }}
                             >
-                              从 {s.sourceName} 填入
+                              {formatChannelLabel("settings.channel.editor.fillFromSource", {
+                                source: s.sourceName,
+                              })}
                             </button>
                           ))}
                       </div>
@@ -800,13 +853,17 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
 
             <div className="mt-3 flex justify-end gap-2">
               <Button variant="ghost" onClick={onClose} disabled={saving}>
-                取消
+                {getChannelLabel("settings.channel.agentCheck.cancel")}
               </Button>
               <Button
                 onClick={() => void handleSubmit()}
                 disabled={saving || (isCreate ? !canSubmitCreate : !canSubmitEdit)}
               >
-                {saving ? "处理中..." : isCreate ? "创建并同步模型" : "保存并同步模型"}
+                {saving
+                  ? getChannelLabel("settings.channel.editor.processing")
+                  : isCreate
+                    ? getChannelLabel("settings.channel.editor.createAndSync")
+                    : getChannelLabel("settings.channel.editor.saveAndSync")}
               </Button>
             </div>
           </div>

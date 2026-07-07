@@ -271,6 +271,63 @@ export const channelLabels = {
   "settings.channel.notify.addedBody": "{modelId} 已加入当前渠道。",
   "settings.channel.notify.removedTitle": "已移除",
   "settings.channel.notify.removedBody": "{modelId} 已从当前渠道移除。",
+  // Channel editor modal — dialog chrome + list
+  "settings.channel.editor.dialogDescription":
+    "管理桌面端渠道配置，包括 provider、Base URL、API Key 和模型同步。",
+  "settings.channel.editor.listHeading": "渠道",
+  "settings.channel.editor.newButton": "新建",
+  "settings.channel.editor.searchPlaceholder": "搜索渠道...",
+  "settings.channel.editor.unnamedChannel": "未命名渠道",
+  "settings.channel.editor.noMatch": "没有匹配的渠道",
+  "settings.channel.editor.createTitle": "新建渠道",
+  "settings.channel.editor.editTitle": "编辑渠道",
+  "settings.channel.editor.providerHint":
+    "provider 用于标识该渠道兼容的接口类型，保存后会自动同步模型列表。",
+  // Channel editor modal — form fields
+  "settings.channel.editor.nameLabel": "名称",
+  "settings.channel.editor.namePlaceholder": "例如：我的 Claude 中转",
+  "settings.channel.editor.providerPlaceholder": "例如：anthropic / openrouter / my-relay",
+  "settings.channel.editor.presetsLabel": "常见预设",
+  "settings.channel.editor.baseUrlPlaceholder": "例如：https://api.anthropic.com",
+  "settings.channel.editor.fillDefaultBaseUrl": "填入当前默认 Base URL",
+  "settings.channel.editor.suggestedBaseUrl": "当前建议地址：{url}",
+  "settings.channel.editor.baseUrlHint":
+    "会根据 provider 与 Base URL 自动判断兼容链路；中转服务填写兼容类型即可。",
+  "settings.channel.editor.enableLabel": "启用该渠道",
+  "settings.channel.editor.localAuthHint":
+    "Sidecar 将自动使用检测到的本地认证，无需手动填写 API Key。",
+  "settings.channel.editor.apiKeyPlaceholderCreate": "输入 API Key",
+  "settings.channel.editor.apiKeyPlaceholderEdit": "保持为 ******** 或留空表示不修改",
+  "settings.channel.editor.apiKeyHint":
+    "出于安全原因，不会展示已保存的明文 Key。输入新 Key 才会更新。",
+  "settings.channel.editor.fillFromSource": "从 {source} 填入",
+  // Channel editor modal — footer buttons
+  "settings.channel.editor.processing": "处理中...",
+  "settings.channel.editor.createAndSync": "创建并同步模型",
+  "settings.channel.editor.saveAndSync": "保存并同步模型",
+  // Channel editor modal — validation / toasts
+  "settings.channel.editor.saveErrorTitle": "无法保存",
+  "settings.channel.editor.createErrorTitle": "无法创建",
+  "settings.channel.editor.nameRequired": "请填写渠道名称。",
+  "settings.channel.editor.providerRequired": "请填写 provider。",
+  "settings.channel.editor.apiKeyRequired": "请填写 API Key。",
+  "settings.channel.editor.noLocalAuth": "未检测到匹配的本地认证来源。",
+  "settings.channel.editor.channelNotFound": "目标渠道不存在。",
+  "settings.channel.editor.saveFailedGeneric": "无法保存当前渠道。",
+  "settings.channel.editor.createdTitle": "渠道已创建",
+  "settings.channel.editor.savedTitle": "渠道已保存",
+  "settings.channel.editor.createdSyncFailed":
+    "渠道已保存，但模型同步失败。请看列表中的提示并继续处理。",
+  "settings.channel.editor.createdSyncWarn": "渠道已保存，模型同步结果请看列表中的提示。",
+  "settings.channel.editor.createdSyncOk": "渠道已保存，并已同步模型列表。",
+  "settings.channel.editor.savedSyncFailed":
+    "已保存渠道，但模型同步失败。请看列表中的提示并继续处理。",
+  "settings.channel.editor.savedSyncWarn": "已保存渠道，模型同步结果请看列表中的提示。",
+  "settings.channel.editor.savedSyncOk": "已保存渠道，并已同步模型列表。",
+  "settings.channel.editor.filledTitle": "已填入",
+  "settings.channel.editor.filledBody": "已使用 {source} 的 API Key",
+  "settings.channel.editor.fetchKeyFailedTitle": "获取失败",
+  "settings.channel.editor.unknownError": "未知错误",
 } as const;
 
 type ChannelLabelKey = keyof typeof channelLabels;
