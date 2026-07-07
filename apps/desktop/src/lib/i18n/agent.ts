@@ -146,12 +146,44 @@ export const skillLabels = {
   "settings.skill.importedOk": "已导入",
   "settings.skill.noSelection": "请至少勾选一个要导入的技能。",
   "settings.skill.folderInvalid": "所选文件夹不是有效的技能（缺少 SKILL.md）。",
+  // Folder-driven discovery panel (SkillSettings). Product terms "Agent Skills",
+  // "SKILL.md" and "OpenHorn" stay English per rule 3 above; raw client tags are
+  // rendered verbatim from the server. The summary line interpolates {total} /
+  // {enabled} via formatSkillLabel.
+  "settings.skill.discover.title": "技能（Agent Skills）",
+  "settings.skill.discover.description":
+    "技能是磁盘上的文件夹（含 SKILL.md 与脚本）。OpenHorn 自动发现你机器上已安装的技能目录。开启的技能在 Agent 运行时按原地路径直接读取，无需拷贝，模型按需读取并执行其中的脚本。",
+  "settings.skill.discover.rescan": "重新扫描",
+  "settings.skill.discover.scanning": "正在扫描技能文件夹…",
+  "settings.skill.discover.empty":
+    "未发现任何技能文件夹。把技能目录放到本机常见的技能目录下（或用你的技能管理工具同步），然后点「重新扫描」。",
+  "settings.skill.discover.summary": "共发现 {total} 个技能，已开启 {enabled} 个。",
+  "settings.skill.discover.loadFailedTitle": "加载失败",
+  "settings.skill.discover.loadFailedBody": "无法扫描技能文件夹。",
+  "settings.skill.discover.updateFailedTitle": "更新失败",
+  "settings.skill.discover.updateFailedBody": "无法更新技能状态。",
 } as const;
 
 type SkillLabelKey = keyof typeof skillLabels;
 
 export function getSkillLabel(key: SkillLabelKey): string {
   return skillLabels[key];
+}
+
+/**
+ * Resolves a skill label template, substituting `{name}` placeholders with the
+ * provided values (mirrors formatChannelLabel). Used for the interpolated
+ * discovery summary and the templated import strings.
+ */
+export function formatSkillLabel(
+  key: SkillLabelKey,
+  vars: Record<string, string | number>,
+): string {
+  let text: string = skillLabels[key];
+  for (const [name, value] of Object.entries(vars)) {
+    text = text.replaceAll(`{${name}}`, String(value));
+  }
+  return text;
 }
 
 /**

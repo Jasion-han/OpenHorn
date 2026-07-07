@@ -1,6 +1,7 @@
 import { RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { Button, SettingsCard, SettingsSection, Switch } from "ui";
+import { formatSkillLabel, getSkillLabel } from "../../lib/i18n/agent";
 import { notifyError } from "../../lib/notify";
 import {
   type DiscoveredSkill,
@@ -33,7 +34,12 @@ export function SkillSettings() {
       setSkills(discovered ?? []);
       setDisabled(new Set((disabledList ?? []).map((n) => n.trim().toLowerCase())));
     } catch (error) {
-      notifyError("加载失败", error instanceof Error ? error.message : "无法扫描技能文件夹。");
+      notifyError(
+        getSkillLabel("settings.skill.discover.loadFailedTitle"),
+        error instanceof Error
+          ? error.message
+          : getSkillLabel("settings.skill.discover.loadFailedBody"),
+      );
     } finally {
       setLoading(false);
     }
@@ -62,7 +68,12 @@ export function SkillSettings() {
         return next;
       });
     } catch (error) {
-      notifyError("更新失败", error instanceof Error ? error.message : "无法更新技能状态。");
+      notifyError(
+        getSkillLabel("settings.skill.discover.updateFailedTitle"),
+        error instanceof Error
+          ? error.message
+          : getSkillLabel("settings.skill.discover.updateFailedBody"),
+      );
     } finally {
       setBusyName(null);
     }
@@ -73,25 +84,30 @@ export function SkillSettings() {
   return (
     <div className="flex flex-col gap-8">
       <SettingsSection
-        title="技能（Agent Skills）"
-        description="技能是磁盘上的文件夹（含 SKILL.md 与脚本）。OpenHorn 自动发现你机器上已安装的技能目录。开启的技能在 Agent 运行时按原地路径直接读取，无需拷贝，模型按需读取并执行其中的脚本。"
+        title={getSkillLabel("settings.skill.discover.title")}
+        description={getSkillLabel("settings.skill.discover.description")}
         action={
           <Button size="sm" variant="outline" onClick={() => void load()} disabled={loading}>
-            <RefreshCw size={16} /> 重新扫描
+            <RefreshCw size={16} /> {getSkillLabel("settings.skill.discover.rescan")}
           </Button>
         }
       >
         <SettingsCard divided={false} className="p-4">
           {loading ? (
-            <p className="text-sm text-muted-foreground">正在扫描技能文件夹…</p>
+            <p className="text-sm text-muted-foreground">
+              {getSkillLabel("settings.skill.discover.scanning")}
+            </p>
           ) : skills.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              未发现任何技能文件夹。把技能目录放到本机常见的技能目录下（或用你的技能管理工具同步），然后点「重新扫描」。
+              {getSkillLabel("settings.skill.discover.empty")}
             </p>
           ) : (
             <div className="flex flex-col gap-2">
               <p className="mb-1 text-xs text-muted-foreground">
-                共发现 {skills.length} 个技能，已开启 {enabledCount} 个。
+                {formatSkillLabel("settings.skill.discover.summary", {
+                  total: skills.length,
+                  enabled: enabledCount,
+                })}
               </p>
               <div className="flex flex-col gap-2">
                 {skills.map((skill) => {
