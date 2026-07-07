@@ -237,6 +237,7 @@ test("buildLiveContext still allows explicit web lookup requests for current pro
     prompt: "请联网搜索这个项目的官网首页标题。",
     forceWebSearch: true,
     tavilyEnvKey: null,
+    fetchImpl: async () => new Response("<html></html>"),
     classifier: async () => {
       classifierCalled = true;
       return "direct_model";
@@ -246,7 +247,7 @@ test("buildLiveContext still allows explicit web lookup requests for current pro
   expect(classifierCalled).toBe(false);
   expect(result.route).toBe("web_search");
   expect(result.status).toBe("offline");
-  expect(result.userLabel).toContain("实时搜索未配置");
+  expect(result.userLabel).toContain("实时搜索未返回可用来源");
 });
 
 test("buildLiveContext prefers web search for named tool capability lookups when allowed", async () => {

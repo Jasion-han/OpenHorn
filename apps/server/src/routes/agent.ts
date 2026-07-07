@@ -877,7 +877,8 @@ async function createTaskExecutionResponse(
     return new Response(resolved.error, { status: resolved.status });
   }
 
-  const { task, approvedPlanSteps, executionPrompt, resolvedChannel, compatibility } = resolved;
+  const { task, approvedPlanSteps, executionPrompt, resolvedChannel, compatibility, fallbackUsed } =
+    resolved;
   const attachmentIds = task.attachments
     .map((attachment) => attachment.id)
     .filter((value): value is string => typeof value === "string" && value.trim().length > 0);
@@ -903,6 +904,26 @@ async function createTaskExecutionResponse(
       metadata: { status: "running", mode },
     });
     send({ type: "task_status", taskId, runId: run.id, status: "running" });
+
+    // Record the runtime that actually executed this task so the task detail
+    // endpoint can surface it (deriveTaskRuntime prefers this event over the
+    // task's stored channel/model, which may be empty when the runtime was
+    // auto-resolved or fell back to another channel). Only emit when the
+    // resolved runtime is not simply the task's explicit selection.
+    if (fallbackUsed || !task.channelId || !task.modelId) {
+      await createAgentTaskEvent(userId, taskId, run.id, {
+        type: "execution_event",
+        content: null,
+        metadata: {
+          source: "runtime_selection",
+          channelId: resolvedChannel.channel.id,
+          channelName: resolvedChannel.channel.name ?? null,
+          modelId: resolvedChannel.modelId,
+          fallbackUsed,
+        },
+      });
+    }
+
     await syncExecutionPlanSteps({
       userId,
       taskId,

@@ -434,7 +434,12 @@ export function routeLiveQuery(prompt: string): LiveRoute {
   // do NOT escalate to research or web_search even if the prompt
   // contains words like "分析" that normally trigger research mode.
   // The user wants the agent to inspect local files, not fetch web pages.
+  // Exception: an explicit web-lookup request (e.g. "联网搜索…官网…") still
+  // wins so users can look up a project's public web pages online. This keeps
+  // routing consistent with looksLikeCurrentWorkspaceQuestion, which also
+  // excludes explicit web-lookup prompts.
   if (
+    !hasExplicitWebLookupSignal(text) &&
     /(仓库|代码库|工作区|项目|源码|目录|repo|repository|codebase|workspace|readme|package\.json|tsconfig|src\/|apps\/)/i.test(
       text,
     )
