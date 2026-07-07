@@ -524,3 +524,83 @@ type ChatLabelKey = keyof typeof chatLabels;
 export function getChatLabel(key: ChatLabelKey): string {
   return chatLabels[key];
 }
+
+/**
+ * Labels for the left conversation sidebar (DesktopLeftSidebar): the new-conversation
+ * button, search placeholder, date-group headers, the pinned section, row action menu
+ * items (rename/pin/unpin/delete), the delete-confirm dialog, the empty state, the
+ * logout item and the backend-connectivity toasts. Product name "OpenHorn", the
+ * offline/Retry chrome and raw user values stay English / verbatim per rule 3 above.
+ * Following the per-namespace convention used by skill/channel/agent above, common
+ * words (cancel/delete) get their own keys here rather than reusing other namespaces.
+ * The one interpolated string ({base} in the generic backend-down toast) resolves via
+ * `formatSidebarLabel`.
+ */
+export const sidebarLabels = {
+  // Header
+  "sidebar.logout": "退出登录",
+  // New-conversation button (distinct from DEFAULT_CONVERSATION_TITLE)
+  "sidebar.newConversation": "新会话",
+  // Search
+  "sidebar.searchPlaceholder": "搜索会话...",
+  // Section header
+  "sidebar.pinnedHeading": "置顶",
+  // Date-group headers
+  "sidebar.group.today": "今天",
+  "sidebar.group.yesterday": "昨天",
+  "sidebar.group.earlier": "更早",
+  // Row action menu
+  "sidebar.action.rename": "重命名",
+  "sidebar.action.pin": "置顶",
+  "sidebar.action.unpin": "取消置顶",
+  "sidebar.action.delete": "删除",
+  // Empty state
+  "sidebar.emptyState": "暂无会话",
+  // Delete-confirm dialog
+  "sidebar.deleteDialog.title": "删除对话？",
+  "sidebar.deleteDialog.description": "确定删除该会话？此操作不可恢复。",
+  "sidebar.deleteDialog.cancel": "取消",
+  "sidebar.deleteDialog.confirm": "删除",
+  // Toasts
+  "sidebar.notify.createdTitle": "已创建",
+  "sidebar.notify.createdBody": "新会话已创建",
+  "sidebar.notify.createFailedTitle": "创建失败",
+  "sidebar.notify.createFailedBody": "无法创建会话",
+  "sidebar.notify.deletedTitle": "已删除",
+  "sidebar.notify.deletedBody": "会话已删除",
+  "sidebar.notify.deleteFailedTitle": "删除失败",
+  "sidebar.notify.deleteFailedBody": "无法删除会话",
+  "sidebar.notify.savedTitle": "已保存",
+  "sidebar.notify.savedBody": "标题已更新",
+  "sidebar.notify.saveFailedTitle": "保存失败",
+  "sidebar.notify.saveFailedBody": "无法更新标题",
+  "sidebar.notify.reconnectedTitle": "连接已恢复",
+  "sidebar.notify.reconnectedBody": "已重新连接后端",
+  "sidebar.notify.backendDownTitle": "后端不可用",
+  "sidebar.notify.backendDownCors":
+    "仍然无法访问后端（可能被浏览器跨域/CORS 拦截）。请检查后端 CORS 是否允许当前页面 Origin，并查看 DevTools Console/Network。",
+  "sidebar.notify.backendDownMixedContent":
+    "仍然无法访问后端（可能被浏览器 Mixed Content 拦截：HTTPS 页面访问 HTTP 后端）。",
+  "sidebar.notify.backendDownGeneric": "仍然无法连接到后端服务（{base}）。",
+} as const;
+
+export type SidebarLabelKey = keyof typeof sidebarLabels;
+
+export function getSidebarLabel(key: SidebarLabelKey): string {
+  return sidebarLabels[key];
+}
+
+/**
+ * Resolves a sidebar label template, substituting `{name}` placeholders with the
+ * provided values. Used for the generic backend-down toast ({base}).
+ */
+export function formatSidebarLabel(
+  key: SidebarLabelKey,
+  vars: Record<string, string | number>,
+): string {
+  let text: string = sidebarLabels[key];
+  for (const [name, value] of Object.entries(vars)) {
+    text = text.replaceAll(`{${name}}`, String(value));
+  }
+  return text;
+}

@@ -32,6 +32,7 @@ import {
 import { getDesktopBackendBase } from "../../lib/backendBase";
 import { DEFAULT_CONVERSATION_TITLE, displayConversationTitle } from "../../lib/conversationTitle";
 import { getGlobalDefaultChannel } from "../../lib/defaultChannel";
+import { formatSidebarLabel, getSidebarLabel, type SidebarLabelKey } from "../../lib/i18n/agent";
 import { hideNotification, notifyError, notifyErrorOnce, notifySuccess } from "../../lib/notify";
 import { useAuthStore } from "../../stores/authStore";
 import { BACKEND_UP_EVENT, useBackendStatusStore } from "../../stores/backendStatusStore";
@@ -39,11 +40,14 @@ import { useChatStore } from "../../stores/chatStore";
 import { useDesktopShellStore } from "../../stores/desktopShellStore";
 import type { Conversation } from "../../types/chat";
 
-type DateGroup = "今天" | "昨天" | "更早";
+type DateGroupKey = Extract<
+  SidebarLabelKey,
+  "sidebar.group.today" | "sidebar.group.yesterday" | "sidebar.group.earlier"
+>;
 
 function groupByCreatedAt(
   items: Conversation[],
-): Array<{ label: DateGroup; items: Conversation[] }> {
+): Array<{ label: DateGroupKey; items: Conversation[] }> {
   const now = new Date();
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   const yesterdayStart = todayStart - 86_400_000;
@@ -60,10 +64,11 @@ function groupByCreatedAt(
   }
 
   const desc = (a: Conversation, b: Conversation) => b.createdAt.getTime() - a.createdAt.getTime();
-  const groups: Array<{ label: DateGroup; items: Conversation[] }> = [];
-  if (today.length) groups.push({ label: "今天", items: today.sort(desc) });
-  if (yesterday.length) groups.push({ label: "昨天", items: yesterday.sort(desc) });
-  if (earlier.length) groups.push({ label: "更早", items: earlier.sort(desc) });
+  const groups: Array<{ label: DateGroupKey; items: Conversation[] }> = [];
+  if (today.length) groups.push({ label: "sidebar.group.today", items: today.sort(desc) });
+  if (yesterday.length)
+    groups.push({ label: "sidebar.group.yesterday", items: yesterday.sort(desc) });
+  if (earlier.length) groups.push({ label: "sidebar.group.earlier", items: earlier.sort(desc) });
   return groups;
 }
 
@@ -130,7 +135,7 @@ const ConversationRow = memo(
               }}
             >
               <Pencil size={14} />
-              重命名
+              {getSidebarLabel("sidebar.action.rename")}
             </DropdownMenuItem>
             <DropdownMenuItem
               onClick={(event) => {
@@ -150,7 +155,7 @@ const ConversationRow = memo(
               }}
             >
               <Trash2 size={14} />
-              删除
+              {getSidebarLabel("sidebar.action.delete")}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -225,10 +230,16 @@ export function DesktopLeftSidebar() {
       });
       setActiveView("chat");
       if (conv && conv.id !== prevId) {
-        notifySuccess("已创建", "新会话已创建");
+        notifySuccess(
+          getSidebarLabel("sidebar.notify.createdTitle"),
+          getSidebarLabel("sidebar.notify.createdBody"),
+        );
       }
     } catch (error) {
-      notifyError("创建失败", error instanceof Error ? error.message : "无法创建会话");
+      notifyError(
+        getSidebarLabel("sidebar.notify.createFailedTitle"),
+        error instanceof Error ? error.message : getSidebarLabel("sidebar.notify.createFailedBody"),
+      );
     } finally {
       setCreating(false);
     }
@@ -237,9 +248,15 @@ export function DesktopLeftSidebar() {
   const handleDeleteConversation = async (conversation: Conversation) => {
     try {
       await deleteConversation(conversation.id);
-      notifySuccess("已删除", "会话已删除");
+      notifySuccess(
+        getSidebarLabel("sidebar.notify.deletedTitle"),
+        getSidebarLabel("sidebar.notify.deletedBody"),
+      );
     } catch (error) {
-      notifyError("删除失败", error instanceof Error ? error.message : "无法删除会话");
+      notifyError(
+        getSidebarLabel("sidebar.notify.deleteFailedTitle"),
+        error instanceof Error ? error.message : getSidebarLabel("sidebar.notify.deleteFailedBody"),
+      );
     }
   };
 
@@ -258,9 +275,15 @@ export function DesktopLeftSidebar() {
 
     try {
       await updateConversation(conversation.id, { title: nextTitle });
-      notifySuccess("已保存", "标题已更新");
+      notifySuccess(
+        getSidebarLabel("sidebar.notify.savedTitle"),
+        getSidebarLabel("sidebar.notify.savedBody"),
+      );
     } catch (error) {
-      notifyError("保存失败", error instanceof Error ? error.message : "无法更新标题");
+      notifyError(
+        getSidebarLabel("sidebar.notify.saveFailedTitle"),
+        error instanceof Error ? error.message : getSidebarLabel("sidebar.notify.saveFailedBody"),
+      );
       void loadConversations();
     }
   };
@@ -281,16 +304,19 @@ export function DesktopLeftSidebar() {
       const ok = await backendRetry();
       if (ok) {
         hideNotification("backend_down");
-        notifySuccess("连接已恢复", "已重新连接后端");
+        notifySuccess(
+          getSidebarLabel("sidebar.notify.reconnectedTitle"),
+          getSidebarLabel("sidebar.notify.reconnectedBody"),
+        );
         return;
       }
       const hint =
         backendLastError === "Blocked by browser (CORS?)"
-          ? "仍然无法访问后端（可能被浏览器跨域/CORS 拦截）。请检查后端 CORS 是否允许当前页面 Origin，并查看 DevTools Console/Network。"
+          ? getSidebarLabel("sidebar.notify.backendDownCors")
           : backendLastError === "Blocked by browser (mixed content)"
-            ? "仍然无法访问后端（可能被浏览器 Mixed Content 拦截：HTTPS 页面访问 HTTP 后端）。"
-            : `仍然无法连接到后端服务（${backendBase}）。`;
-      notifyErrorOnce("backend_down", "后端不可用", hint);
+            ? getSidebarLabel("sidebar.notify.backendDownMixedContent")
+            : formatSidebarLabel("sidebar.notify.backendDownGeneric", { base: backendBase });
+      notifyErrorOnce("backend_down", getSidebarLabel("sidebar.notify.backendDownTitle"), hint);
     } finally {
       setRetrying(false);
     }
@@ -342,7 +368,7 @@ export function DesktopLeftSidebar() {
               onClick={() => void handleLogout()}
             >
               <LogOut size={16} />
-              退出登录
+              {getSidebarLabel("sidebar.logout")}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -356,11 +382,11 @@ export function DesktopLeftSidebar() {
             disabled={creating}
           >
             <Plus size={16} />
-            新会话
+            {getSidebarLabel("sidebar.newConversation")}
           </Button>
 
           <Input
-            placeholder="搜索会话..."
+            placeholder={getSidebarLabel("sidebar.searchPlaceholder")}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
@@ -370,7 +396,9 @@ export function DesktopLeftSidebar() {
               {pinned.length > 0 && (
                 <div>
                   <div className="flex items-center justify-between px-2 py-1">
-                    <span className="text-xs font-semibold text-muted-foreground">置顶</span>
+                    <span className="text-xs font-semibold text-muted-foreground">
+                      {getSidebarLabel("sidebar.pinnedHeading")}
+                    </span>
                     <Button
                       variant="ghost"
                       size="icon-sm"
@@ -411,7 +439,7 @@ export function DesktopLeftSidebar() {
                           }}
                           onTogglePin={() => void handleTogglePin(conversation)}
                           onDelete={() => setPendingDelete(conversation)}
-                          pinLabel="取消置顶"
+                          pinLabel={getSidebarLabel("sidebar.action.unpin")}
                         />
                       ),
                     )}
@@ -421,7 +449,7 @@ export function DesktopLeftSidebar() {
               {groups.map((group) => (
                 <div key={group.label}>
                   <p className="px-2 py-1 text-xs font-semibold text-muted-foreground">
-                    {group.label}
+                    {getSidebarLabel(group.label)}
                   </p>
                   {group.items.map((conversation) =>
                     renamingId === conversation.id ? (
@@ -452,7 +480,7 @@ export function DesktopLeftSidebar() {
                         }}
                         onTogglePin={() => void handleTogglePin(conversation)}
                         onDelete={() => setPendingDelete(conversation)}
-                        pinLabel="置顶"
+                        pinLabel={getSidebarLabel("sidebar.action.pin")}
                       />
                     ),
                   )}
@@ -460,7 +488,9 @@ export function DesktopLeftSidebar() {
               ))}
 
               {filteredConversations.length === 0 && (
-                <p className="py-8 text-center text-xs text-muted-foreground">暂无会话</p>
+                <p className="py-8 text-center text-xs text-muted-foreground">
+                  {getSidebarLabel("sidebar.emptyState")}
+                </p>
               )}
             </div>
           </ScrollArea>
@@ -492,12 +522,14 @@ export function DesktopLeftSidebar() {
       >
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>删除对话？</DialogTitle>
-            <DialogDescription>确定删除该会话？此操作不可恢复。</DialogDescription>
+            <DialogTitle>{getSidebarLabel("sidebar.deleteDialog.title")}</DialogTitle>
+            <DialogDescription>
+              {getSidebarLabel("sidebar.deleteDialog.description")}
+            </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setPendingDelete(null)}>
-              取消
+              {getSidebarLabel("sidebar.deleteDialog.cancel")}
             </Button>
             <Button
               ref={(el) => {
@@ -512,7 +544,7 @@ export function DesktopLeftSidebar() {
                 }
               }}
             >
-              删除
+              {getSidebarLabel("sidebar.deleteDialog.confirm")}
             </Button>
           </DialogFooter>
         </DialogContent>
