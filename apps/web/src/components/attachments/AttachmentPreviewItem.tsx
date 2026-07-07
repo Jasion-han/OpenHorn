@@ -2,14 +2,11 @@
 
 import { Paperclip, X } from "lucide-react";
 import type * as React from "react";
+import { truncateName } from "shared/format";
 import { cn } from "@/lib/utils";
 
 function isImage(mediaType: string): boolean {
   return mediaType.startsWith("image/");
-}
-
-function truncateName(name: string, max = 20): string {
-  return name.length > max ? `${name.slice(0, max - 3)}...` : name;
 }
 
 export function AttachmentPreviewItem(props: {

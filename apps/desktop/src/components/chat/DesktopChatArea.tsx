@@ -10,6 +10,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { fileKey } from "shared/format";
 import { Button, cn, Textarea } from "ui";
 import { useSidecarAgentRun } from "../../hooks/useSidecarAgentRun";
 import { type StreamTone, toneClassName } from "../../lib/agentTaskPresenter";
@@ -649,10 +650,6 @@ function TypingIndicator() {
 
 function isAbortError(error: unknown) {
   return error instanceof DOMException && error.name === "AbortError";
-}
-
-function fileKey(file: File) {
-  return `${file.name}:${file.size}:${file.lastModified}`;
 }
 
 // Meta persisted with a local (sidecar) run's user message. Only durable fields

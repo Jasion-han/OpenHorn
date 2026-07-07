@@ -2,6 +2,7 @@
 
 import { ChevronLeft, ChevronRight, Paperclip, X } from "lucide-react";
 import * as React from "react";
+import { truncateName } from "shared/format";
 import { Dialog, DialogClose, DialogContent, DialogDescription } from "@/components/ui/dialog";
 import { getAttachmentUrl } from "@/lib/attachment-url";
 import { cn } from "@/lib/utils";
@@ -16,10 +17,6 @@ export type MessageAttachmentItem = {
 
 function isImageType(fileType?: string) {
   return Boolean(fileType?.startsWith("image/"));
-}
-
-function truncateName(name: string, max = 20): string {
-  return name.length > max ? `${name.slice(0, max - 3)}...` : name;
 }
 
 function getImageSrc(att: MessageAttachmentItem): string | null {

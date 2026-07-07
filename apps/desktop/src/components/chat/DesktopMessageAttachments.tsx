@@ -1,5 +1,6 @@
 import { ChevronLeft, ChevronRight, Paperclip, X } from "lucide-react";
 import { useState } from "react";
+import { truncateName } from "shared/format";
 import { cn, Dialog, DialogClose, DialogContent, DialogDescription } from "ui";
 import { getAttachmentUrl } from "../../lib/attachmentUrl";
 import { getChatLabel } from "../../lib/i18n/agent";
@@ -7,10 +8,6 @@ import type { MessageAttachmentMeta } from "../../types/chat";
 
 function isImageType(fileType?: string) {
   return Boolean(fileType?.startsWith("image/"));
-}
-
-function truncateName(name: string, max = 20): string {
-  return name.length > max ? `${name.slice(0, max - 3)}...` : name;
 }
 
 function getImageSrc(att: MessageAttachmentMeta): string | null {

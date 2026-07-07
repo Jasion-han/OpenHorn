@@ -16,6 +16,7 @@ import type {
   RefObject,
 } from "react";
 import { useEffect, useRef, useState } from "react";
+import { fileKey } from "shared/format";
 import { Button, cn, Textarea, Tooltip, TooltipContent, TooltipTrigger } from "ui";
 import { getChatLabel } from "../../lib/i18n/agent";
 import type { ChatMode } from "../../types/chat";
@@ -44,10 +45,6 @@ export type SlashHighlightRange = {
 };
 
 const ACCEPT_FILES = "image/png,image/jpeg,image/webp,application/pdf,text/plain,text/markdown";
-
-function fileKey(file: File) {
-  return `${file.name}:${file.size}:${file.lastModified}`;
-}
 
 export function DesktopComposer({
   value,

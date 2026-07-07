@@ -2,6 +2,7 @@
 
 import { ChevronDown, CornerDownLeft, Globe, Paperclip, Square } from "lucide-react";
 import * as React from "react";
+import { fileKey } from "shared/format";
 import { AttachmentPreviewItem } from "@/components/attachments/AttachmentPreviewItem";
 import { ProviderLogo } from "@/components/providers/ProviderLogo";
 import { Button } from "@/components/ui/button";
@@ -24,10 +25,6 @@ function extractFilesFromClipboard(e: React.ClipboardEvent): File[] {
 
 function extractFilesFromDragEvent(e: React.DragEvent): File[] {
   return Array.from(e.dataTransfer?.files || []);
-}
-
-function fileKey(file: File): string {
-  return `${file.name}-${file.size}-${file.lastModified}`;
 }
 
 export function PromaComposer(props: {
