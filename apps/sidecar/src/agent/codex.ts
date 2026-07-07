@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { createInterface } from "node:readline";
 import type { AttachmentPart } from "shared/types";
 import { appendAttachmentContext } from "./attachments";
+import { sanitizeChildEnv } from "./childEnv";
 import type { AgentEvent } from "./events";
 import { buildAgentSystemPrompt } from "./system-prompt";
 
@@ -45,27 +46,7 @@ function sendNotification(proc: ChildProcess, method: string, params?: unknown) 
  * so stripping these does not break it. Mirrors the env hygiene in claude.ts.
  */
 function buildCodexEnv(): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...process.env };
-  for (const key of Object.keys(env)) {
-    if (
-      key.startsWith("OPENHORN") ||
-      key.startsWith("CLAUDE") ||
-      key.startsWith("CODEX_COMPANION") ||
-      key.startsWith("TRELLIS_") ||
-      key === "AI_AGENT" ||
-      key === "ANTHROPIC_API_KEY" ||
-      key === "ANTHROPIC_BASE_URL" ||
-      key === "DEEPSEEK_API_KEY" ||
-      key === "GOOGLE_API_KEY" ||
-      key === "TAVILY_API_KEY" ||
-      key === "JWT_SECRET" ||
-      key === "ENCRYPTION_KEY" ||
-      key === "DATABASE_URL"
-    ) {
-      delete env[key];
-    }
-  }
-  return env;
+  return sanitizeChildEnv({ ...process.env });
 }
 
 function mapCodexEvent(msg: JsonRpcMessage): AgentEvent | null {

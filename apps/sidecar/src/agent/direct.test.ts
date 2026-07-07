@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { __clearDuckDuckGoCache } from "shared/search";
 import { canonicalizeWorkspaceRoot } from "../workspace";
-import { executeTool, runWebSearch } from "./direct";
+import { executeTool, isBlockedIpAddress, runWebSearch } from "./direct";
 
 const noSleep = async () => {};
 
@@ -128,5 +128,75 @@ describe("direct fs tools workspace boundary", () => {
     const cwd = await makeWorkspace();
     const result = await executeTool("list_dir", { path: "../.." }, cwd);
     expect(result.startsWith("Error:")).toBe(true);
+  });
+
+  test("grep rejects an absolute path outside the workspace", async () => {
+    const cwd = await makeWorkspace();
+    const result = await executeTool("grep", { pattern: "root", path: "/etc" }, cwd);
+    expect(result.startsWith("Error:")).toBe(true);
+  });
+
+  test("grep rejects a .. traversal escape", async () => {
+    const cwd = await makeWorkspace();
+    const result = await executeTool("grep", { pattern: "root", path: "../.." }, cwd);
+    expect(result.startsWith("Error:")).toBe(true);
+  });
+
+  test("grep searches files inside the workspace", async () => {
+    const cwd = await makeWorkspace();
+    writeFileSync(path.join(cwd, "note.txt"), "the needle is here");
+    const result = await executeTool("grep", { pattern: "needle", path: "." }, cwd);
+    expect(result.includes("needle")).toBe(true);
+  });
+
+  test("glob rejects an absolute base outside the workspace", async () => {
+    const cwd = await makeWorkspace();
+    const result = await executeTool("glob", { pattern: "/etc/*.conf" }, cwd);
+    expect(result.startsWith("Error:")).toBe(true);
+  });
+
+  test("glob rejects a .. traversal base", async () => {
+    const cwd = await makeWorkspace();
+    const result = await executeTool("glob", { pattern: "../*.ts" }, cwd);
+    expect(result.startsWith("Error:")).toBe(true);
+  });
+
+  test("glob finds files inside the workspace", async () => {
+    const cwd = await makeWorkspace();
+    writeFileSync(path.join(cwd, "foo.ts"), "export const x = 1;");
+    const result = await executeTool("glob", { pattern: "*.ts" }, cwd);
+    expect(result.includes("foo.ts")).toBe(true);
+  });
+});
+
+/**
+ * Pure SSRF address classifier for web_fetch — must block loopback, private,
+ * link-local (incl. cloud-metadata), and unique-local/link-local IPv6, while
+ * allowing genuine public addresses and bare hostnames (resolved separately).
+ */
+describe("web_fetch SSRF address classifier", () => {
+  test("blocks loopback, private, and link-local IPv4", () => {
+    expect(isBlockedIpAddress("127.0.0.1")).toBe(true);
+    expect(isBlockedIpAddress("10.0.0.5")).toBe(true);
+    expect(isBlockedIpAddress("192.168.1.1")).toBe(true);
+    expect(isBlockedIpAddress("172.16.0.1")).toBe(true);
+    expect(isBlockedIpAddress("169.254.169.254")).toBe(true);
+    expect(isBlockedIpAddress("0.0.0.0")).toBe(true);
+  });
+
+  test("blocks loopback and unique-local/link-local IPv6", () => {
+    expect(isBlockedIpAddress("::1")).toBe(true);
+    expect(isBlockedIpAddress("fc00::1")).toBe(true);
+    expect(isBlockedIpAddress("fd12:3456::1")).toBe(true);
+    expect(isBlockedIpAddress("fe80::1")).toBe(true);
+    expect(isBlockedIpAddress("::ffff:169.254.169.254")).toBe(true);
+  });
+
+  test("allows public addresses and bare hostnames", () => {
+    expect(isBlockedIpAddress("8.8.8.8")).toBe(false);
+    expect(isBlockedIpAddress("1.1.1.1")).toBe(false);
+    expect(isBlockedIpAddress("172.32.0.1")).toBe(false);
+    expect(isBlockedIpAddress("example.com")).toBe(false);
+    expect(isBlockedIpAddress("::ffff:8.8.8.8")).toBe(false);
   });
 });

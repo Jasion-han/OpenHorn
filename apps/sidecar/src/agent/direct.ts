@@ -1,4 +1,5 @@
 import { exec, execFile } from "node:child_process";
+import { lookup } from "node:dns/promises";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
@@ -83,6 +84,103 @@ const MAX_LIST_DIR_ENTRIES = 1_000;
 const BASH_MAX_BUFFER = 1024 * 1024;
 const BASH_TIMEOUT_MS = 30_000;
 const SUBPROCESS_TIMEOUT_MS = 15_000;
+
+// ---------------------------------------------------------------------------
+// SSRF guard (web_fetch)
+// ---------------------------------------------------------------------------
+
+/** Max redirect hops re-validated for web_fetch before giving up. */
+const WEB_FETCH_MAX_HOPS = 5;
+
+function parseIpv4Parts(host: string): number[] | null {
+  const parts = host.split(".");
+  if (parts.length !== 4) return null;
+  const nums: number[] = [];
+  for (const part of parts) {
+    if (!/^\d{1,3}$/.test(part)) return null;
+    const n = Number(part);
+    if (n > 255) return null;
+    nums.push(n);
+  }
+  return nums;
+}
+
+function isBlockedIpv4Parts([a, b]: number[]): boolean {
+  // 0.0.0.0/8 ("this host"), loopback, RFC1918 private, and link-local
+  // (169.254/16, which includes the 169.254.169.254 cloud-metadata address).
+  return (
+    a === 0 ||
+    a === 127 ||
+    a === 10 ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    (a === 169 && b === 254)
+  );
+}
+
+/**
+ * Pure classifier: true when `host` is an IP literal in a non-public range
+ * (loopback, private, link-local, IPv4-mapped/unique-local/link-local IPv6).
+ * Non-IP inputs (hostnames) return false — those are resolved via DNS and each
+ * resolved address is classified separately. Exported for unit testing without
+ * network access.
+ */
+export function isBlockedIpAddress(host: string): boolean {
+  const v4 = parseIpv4Parts(host);
+  if (v4) return isBlockedIpv4Parts(v4);
+
+  let h = host.toLowerCase();
+  const zone = h.indexOf("%");
+  if (zone !== -1) h = h.slice(0, zone);
+  if (!h.includes(":")) return false; // not an IPv6 literal
+  if (h === "::1" || h === "::") return true; // loopback / unspecified
+
+  // IPv4-mapped/embedded (e.g. ::ffff:169.254.169.254): classify the tail v4.
+  const tail = h.slice(h.lastIndexOf(":") + 1);
+  if (tail.includes(".")) {
+    const mapped = parseIpv4Parts(tail);
+    if (mapped) return isBlockedIpv4Parts(mapped);
+  }
+
+  const firstGroup = h.split(":")[0];
+  const val = firstGroup ? Number.parseInt(firstGroup, 16) : NaN;
+  if (Number.isNaN(val)) return false;
+  const hiByte = val >> 8;
+  if (hiByte === 0xfc || hiByte === 0xfd) return true; // fc00::/7 unique-local
+  if ((val & 0xffc0) === 0xfe80) return true; // fe80::/10 link-local
+  return false;
+}
+
+/**
+ * Validates a web_fetch target: rejects non-http(s) schemes and any host that
+ * resolves (or is) a non-public address, to block SSRF against loopback /
+ * private / link-local (cloud-metadata) endpoints. Returns a tool-error string
+ * when the URL must not be fetched, or null when it is safe.
+ */
+async function assertFetchableUrl(rawUrl: string): Promise<string | null> {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    return "Error: invalid URL";
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    return `Error: unsupported URL scheme: ${parsed.protocol}`;
+  }
+  const hostname = parsed.hostname.replace(/^\[|\]$/g, ""); // strip IPv6 brackets
+  if (isBlockedIpAddress(hostname)) {
+    return "Error: refusing to fetch a non-public address";
+  }
+  try {
+    const resolved = await lookup(hostname, { all: true });
+    if (resolved.some(({ address }) => isBlockedIpAddress(address))) {
+      return "Error: refusing to fetch a non-public address";
+    }
+  } catch {
+    return "Error: could not resolve host";
+  }
+  return null;
+}
 
 // ---------------------------------------------------------------------------
 // Tool execution
@@ -228,13 +326,22 @@ export async function executeTool(
   if (name === "grep") {
     const pattern = typeof input.pattern === "string" ? input.pattern : "";
     if (!pattern) return "Error: pattern is required";
-    const searchPath = typeof input.path === "string" ? input.path : ".";
+    const searchPath = (typeof input.path === "string" && input.path) || ".";
     const include = typeof input.include === "string" ? input.include : "";
+    // Keep the search path inside the workspace before handing it to a
+    // subprocess (execFile gets no boundary check on its own — an absolute or
+    // `..` path would escape). Turn an escape into a tool-error like the fs tools.
+    let resolvedSearchPath: string;
+    try {
+      resolvedSearchPath = resolveReadPathInWorkspace(cwd, searchPath);
+    } catch (err) {
+      return `Error: ${err instanceof Error ? err.message : "invalid path"}`;
+    }
     // Use execFile with explicit args array to avoid shell injection.
     // grep is invoked directly (no shell), so $() / backticks are harmless.
     const args = ["-rn"];
     if (include) args.push(`--include=${include}`);
-    args.push("--", pattern, searchPath);
+    args.push("--", pattern, resolvedSearchPath);
     return new Promise((resolve) => {
       execFile(
         "grep",
@@ -264,9 +371,17 @@ export async function executeTool(
         .split("/")
         .filter((seg) => seg !== "**")
         .join("/") || ".";
+    // Only the base directory must be workspace-bounded; the glob wildcard
+    // (namePattern) is unaffected. Reject an absolute/`..` base before spawning.
+    let resolvedDir: string;
+    try {
+      resolvedDir = resolveReadPathInWorkspace(cwd, dirPattern);
+    } catch (err) {
+      return `Error: ${err instanceof Error ? err.message : "invalid path"}`;
+    }
     // Use execFile with explicit args to avoid shell injection via crafted patterns.
     const args = [
-      dirPattern,
+      resolvedDir,
       "-name",
       namePattern,
       "-not",
@@ -305,11 +420,26 @@ export async function executeTool(
     if (!url) return "Error: url is required";
 
     try {
-      const resp = await fetch(url, {
-        headers: { "User-Agent": "OpenHorn/1.0 (compatible; bot)" },
-        signal: AbortSignal.timeout(SUBPROCESS_TIMEOUT_MS),
-        redirect: "follow",
-      });
+      // Follow redirects manually so each hop is re-validated against the SSRF
+      // guard — a public URL that 30x-redirects to 169.254.169.254 or localhost
+      // must not slip through.
+      let currentUrl = url;
+      let resp: Response | undefined;
+      for (let hop = 0; hop < WEB_FETCH_MAX_HOPS; hop++) {
+        const blocked = await assertFetchableUrl(currentUrl);
+        if (blocked) return blocked;
+        resp = await fetch(currentUrl, {
+          headers: { "User-Agent": "OpenHorn/1.0 (compatible; bot)" },
+          signal: AbortSignal.timeout(SUBPROCESS_TIMEOUT_MS),
+          redirect: "manual",
+        });
+        if (resp.status < 300 || resp.status >= 400) break;
+        const location = resp.headers.get("location");
+        if (!location) break;
+        currentUrl = new URL(location, currentUrl).toString();
+        resp = undefined;
+      }
+      if (!resp) return "Error: too many redirects";
       if (!resp.ok) return `Error: HTTP ${resp.status} ${resp.statusText}`;
       const contentType = resp.headers.get("content-type") || "";
       if (

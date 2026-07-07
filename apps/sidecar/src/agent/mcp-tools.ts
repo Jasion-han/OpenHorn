@@ -4,6 +4,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { sanitizeChildEnv } from "./childEnv";
 
 /**
  * Bridges enabled MCP servers into the pi-agent-core "direct" runtime so the
@@ -79,8 +80,10 @@ function buildTransport(config: Record<string, unknown>): AnyTransport | null {
     ? config.args.filter((a): a is string => typeof a === "string")
     : undefined;
   // The SDK replaces (does not merge) inherited env when `env` is given, so we
-  // merge process.env ourselves to keep PATH etc. available for npx/uvx.
-  const env = { ...processEnvStrings(), ...(asStringRecord(config.env) ?? {}) };
+  // merge process.env ourselves to keep PATH etc. available for npx/uvx — but
+  // strip the sidecar's secrets/handshake token first so an arbitrary
+  // user-configured stdio server can't read them (config.env still wins).
+  const env = { ...sanitizeChildEnv(processEnvStrings()), ...(asStringRecord(config.env) ?? {}) };
   return new StdioClientTransport({ command, ...(args ? { args } : {}), env });
 }
 
