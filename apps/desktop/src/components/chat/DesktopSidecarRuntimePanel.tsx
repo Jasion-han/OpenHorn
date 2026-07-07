@@ -1,5 +1,5 @@
 import { cn } from "ui";
-import { agentPanelLabels, getAgentActionLabel } from "../../lib/i18n/agent";
+import { agentPanelLabels, getAgentActionLabel, getChatLabel } from "../../lib/i18n/agent";
 import type { SidecarApprovalRequest } from "../../lib/sidecarClient";
 
 export function DesktopSidecarRuntimePanel({
@@ -26,14 +26,10 @@ export function DesktopSidecarRuntimePanel({
       )}
     >
       {pendingApproval ? (
-        <SidecarApprovalForm
-          approval={pendingApproval}
-          onApprove={onApprove}
-          onReject={onReject}
-        />
+        <SidecarApprovalForm approval={pendingApproval} onApprove={onApprove} onReject={onReject} />
       ) : isBusy ? (
         <div className="flex items-center justify-between gap-3 text-xs text-foreground/70">
-          <span>本地 Agent 正在执行...</span>
+          <span>{getChatLabel("chat.runtime.executing")}</span>
           <button
             type="button"
             data-testid="sidecar-runtime-cancel"

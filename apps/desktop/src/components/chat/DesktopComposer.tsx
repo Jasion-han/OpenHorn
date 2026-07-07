@@ -17,6 +17,7 @@ import type {
 } from "react";
 import { useEffect, useRef, useState } from "react";
 import { Button, cn, Textarea, Tooltip, TooltipContent, TooltipTrigger } from "ui";
+import { getChatLabel } from "../../lib/i18n/agent";
 import type { ChatMode } from "../../types/chat";
 import { DesktopAttachmentPreviewItem } from "./DesktopAttachmentPreviewItem";
 import { DesktopProviderLogo } from "./DesktopProviderLogo";
@@ -419,7 +420,9 @@ export function DesktopComposer({
                         : "bg-accent/88 text-foreground shadow-[0_10px_24px_rgba(15,23,42,0.12)] ring-1 ring-border/25 backdrop-blur-md transition-colors hover:bg-accent",
                     )}
                     title={
-                      alternateModeDisabled ? (agentModeDisabledReason ?? "当前不可用") : undefined
+                      alternateModeDisabled
+                        ? (agentModeDisabledReason ?? getChatLabel("chat.composer.modeUnavailable"))
+                        : undefined
                     }
                   >
                     <span>{alternateMode === "chat" ? "Chat" : "Agent"}</span>
@@ -494,9 +497,7 @@ export function DesktopComposer({
                 </button>
               </TooltipTrigger>
               <TooltipContent side="top">
-                <p>
-                  {forceWebSearch ? "Web Search: On" : "Web Search: Off"}
-                </p>
+                <p>{forceWebSearch ? "Web Search: On" : "Web Search: Off"}</p>
               </TooltipContent>
             </Tooltip>
 

@@ -1,6 +1,7 @@
 import { Bot, KeyRound, Palette, Plug, Radio, Settings, Sparkles } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { cn, ScrollArea } from "ui";
+import { getCredentialLabel, getSettingsViewLabel } from "../../lib/i18n/agent";
 import {
   type DesktopSettingsTab as SettingsTab,
   useDesktopShellStore,
@@ -14,13 +15,29 @@ import { McpSettings } from "./McpSettings";
 import { SkillSettings } from "./SkillSettings";
 
 const TABS: Array<{ id: SettingsTab; label: string; icon: ReactNode }> = [
-  { id: "general", label: "通用", icon: <Settings size={16} /> },
-  { id: "channels", label: "渠道", icon: <Radio size={16} /> },
-  { id: "credentials", label: "认证来源", icon: <KeyRound size={16} /> },
+  {
+    id: "general",
+    label: getSettingsViewLabel("settings.view.tab.general"),
+    icon: <Settings size={16} />,
+  },
+  {
+    id: "channels",
+    label: getSettingsViewLabel("settings.view.tab.channels"),
+    icon: <Radio size={16} />,
+  },
+  {
+    id: "credentials",
+    label: getCredentialLabel("settings.credentialSources"),
+    icon: <KeyRound size={16} />,
+  },
   { id: "agent", label: "Agent", icon: <Bot size={16} /> },
   { id: "mcp", label: "MCP", icon: <Plug size={16} /> },
   { id: "skill", label: "Skill", icon: <Sparkles size={16} /> },
-  { id: "appearance", label: "外观", icon: <Palette size={16} /> },
+  {
+    id: "appearance",
+    label: getSettingsViewLabel("settings.view.tab.appearance"),
+    icon: <Palette size={16} />,
+  },
 ];
 
 function TabContent({ id }: { id: SettingsTab }) {
@@ -63,7 +80,7 @@ export function SettingsView({ initialTab = "channels" }: { initialTab?: Setting
       <div className="flex h-full min-h-0 w-full">
         <div className="w-[180px] shrink-0 border-r border-border/50 px-2 pt-8">
           <h2 className="text-xs font-medium text-muted-foreground px-3 mb-2 uppercase tracking-wider">
-            设置
+            {getSettingsViewLabel("settings.view.title")}
           </h2>
           <nav className="flex flex-col gap-1">
             {TABS.map((tab) => (

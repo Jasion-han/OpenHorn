@@ -67,6 +67,21 @@ export const credentialLabels = {
   "settings.credentialSources.scanning": "正在扫描...",
   "settings.credentialSources.scanFailed": "扫描失败",
   "settings.credentialSources.refreshScan": "重新扫描",
+  "settings.credentialSources.test": "测试",
+  "settings.credentialSources.testing": "测试中...",
+  "settings.credentialSources.testFailed": "测试失败",
+  "settings.credentialSources.failed": "失败",
+  "settings.credentialSources.cliLoggedIn": "CLI 已登录",
+  "settings.credentialSources.channelCreated": "渠道已创建",
+  "settings.credentialSources.createChannel": "一键创建渠道",
+  "settings.credentialSources.creating": "创建中...",
+  "settings.credentialSources.createFailed": "创建失败",
+  // "Sidecar" is a product name kept English inside the Chinese copy (per rule 3).
+  "settings.credentialSources.sidecarNotReady": "Sidecar 未就绪，无法扫描本地认证",
+  // Env-var identifiers (OPENAI_API_KEY / ANTHROPIC_API_KEY / GEMINI_API_KEY) and
+  // "AI CLI" stay verbatim inside the copy.
+  "settings.credentialSources.emptyState":
+    "未检测到任何认证来源。可通过设置环境变量（OPENAI_API_KEY、ANTHROPIC_API_KEY、GEMINI_API_KEY）或登录 AI CLI 工具来添加。",
   "channel.selectProvider": "选择 Provider",
   "channel.selectAuth": "选择认证来源",
   "channel.authFromLocal": "使用本地认证",
@@ -549,6 +564,14 @@ export const chatLabels = {
   // Model unavailable notice
   "chat.model.unavailableTitle": "当前会话模型不可用",
   "chat.model.fixHint": "在下方输入框的 Model 里修复即可。",
+  // Image attachment lightbox (DesktopMessageAttachments) — sr-only dialog description
+  "chat.attachment.lightboxDescription": "预览当前消息中的图片附件，可切换查看上一张或下一张图片。",
+  // Sidecar runtime panel busy state (DesktopSidecarRuntimePanel). "Agent" stays English.
+  "chat.runtime.executing": "本地 Agent 正在执行...",
+  // Composer mode toggle disabled fallback (DesktopComposer)
+  "chat.composer.modeUnavailable": "当前不可用",
+  // Chat header fallback title when no conversation is selected (DesktopChatHeader)
+  "chat.header.noConversation": "会话",
 } as const;
 
 type ChatLabelKey = keyof typeof chatLabels;
@@ -726,4 +749,23 @@ type AppearanceSettingsLabelKey = keyof typeof appearanceSettingsLabels;
 
 export function getAppearanceSettingsLabel(key: AppearanceSettingsLabelKey): string {
   return appearanceSettingsLabels[key];
+}
+
+/**
+ * Labels for the settings shell (SettingsView): the sidebar heading and tab
+ * names. The "Agent", "MCP" and "Skill" tab labels stay English (process/tool
+ * words per rule 3) and are not routed here; the "认证来源" tab reuses the existing
+ * credentialLabels key rather than duplicating the string. No interpolation.
+ */
+export const settingsViewLabels = {
+  "settings.view.title": "设置",
+  "settings.view.tab.general": "通用",
+  "settings.view.tab.channels": "渠道",
+  "settings.view.tab.appearance": "外观",
+} as const;
+
+type SettingsViewLabelKey = keyof typeof settingsViewLabels;
+
+export function getSettingsViewLabel(key: SettingsViewLabelKey): string {
+  return settingsViewLabels[key];
 }

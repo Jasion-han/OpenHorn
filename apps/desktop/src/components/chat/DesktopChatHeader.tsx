@@ -1,6 +1,7 @@
 import { PanelLeft, PanelLeftClose } from "lucide-react";
 import { Button } from "ui";
 import { displayConversationTitle, formatConversationTime } from "../../lib/conversationTitle";
+import { getChatLabel } from "../../lib/i18n/agent";
 import { useDesktopShellStore } from "../../stores/desktopShellStore";
 import type { Conversation } from "../../types/chat";
 
@@ -24,7 +25,7 @@ export function DesktopChatHeader({ conversation }: { conversation: Conversation
     return (
       <div className="mb-3 flex items-center justify-between gap-2">
         {sidebarToggle}
-        <span className="font-semibold">会话</span>
+        <span className="font-semibold">{getChatLabel("chat.header.noConversation")}</span>
         <div />
       </div>
     );

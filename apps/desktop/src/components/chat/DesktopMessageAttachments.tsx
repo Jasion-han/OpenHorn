@@ -1,7 +1,8 @@
 import { ChevronLeft, ChevronRight, Paperclip, X } from "lucide-react";
 import { useState } from "react";
-import { Dialog, DialogClose, DialogContent, DialogDescription, cn } from "ui";
+import { cn, Dialog, DialogClose, DialogContent, DialogDescription } from "ui";
 import { getAttachmentUrl } from "../../lib/attachmentUrl";
+import { getChatLabel } from "../../lib/i18n/agent";
 import type { MessageAttachmentMeta } from "../../types/chat";
 
 function isImageType(fileType?: string) {
@@ -113,7 +114,7 @@ export function DesktopMessageAttachments({
       <Dialog open={lightboxOpen} onOpenChange={setLightboxOpen}>
         <DialogContent className="max-w-[min(980px,94vw)] overflow-hidden p-0">
           <DialogDescription className="sr-only">
-            预览当前消息中的图片附件，可切换查看上一张或下一张图片。
+            {getChatLabel("chat.attachment.lightboxDescription")}
           </DialogDescription>
           <div className="relative bg-background">
             <DialogClose className="absolute right-3 top-3 z-10 rounded-full bg-background/80 p-1.5 text-foreground/70 shadow-sm backdrop-blur hover:text-foreground">

@@ -25,10 +25,10 @@ const PROVIDER_LABELS: Record<string, string> = {
 };
 
 const SOURCE_LABELS: Record<string, string> = {
-  codex_cli: "Codex CLI (ChatGPT Plus)",
-  claude_code: "Claude Code",
-  gemini_cli: "Gemini CLI",
-  env_var: "环境变量",
+  codex_cli: getCredentialLabel("settings.credentialSources.codexCli"),
+  claude_code: getCredentialLabel("settings.credentialSources.claudeCode"),
+  gemini_cli: getCredentialLabel("settings.credentialSources.geminiCli"),
+  env_var: getCredentialLabel("settings.credentialSources.envVar"),
 };
 
 function getStatusLabel(status: string): string {
@@ -118,7 +118,10 @@ export function DesktopCredentialSourcesPanel() {
         ...prev,
         [sourceId]: {
           success: false,
-          error: err instanceof Error ? err.message : "测试失败",
+          error:
+            err instanceof Error
+              ? err.message
+              : getCredentialLabel("settings.credentialSources.testFailed"),
         },
       }));
     } finally {
@@ -194,7 +197,7 @@ export function DesktopCredentialSourcesPanel() {
 
       {sidecarStatus !== "ready" && (
         <div className="rounded-lg border border-neutral-200 p-3 text-sm text-neutral-500 dark:border-neutral-700 dark:text-neutral-400">
-          Sidecar 未就绪，无法扫描本地认证
+          {getCredentialLabel("settings.credentialSources.sidecarNotReady")}
         </div>
       )}
 
@@ -238,7 +241,8 @@ export function DesktopCredentialSourcesPanel() {
                     >
                       {testResult.success
                         ? `✓ ${getCredentialLabel("settings.credentialSources.available")}`
-                        : testResult.error || "失败"}
+                        : testResult.error ||
+                          getCredentialLabel("settings.credentialSources.failed")}
                     </span>
                   )}
                   <Button
@@ -247,7 +251,9 @@ export function DesktopCredentialSourcesPanel() {
                     onClick={() => handleTest(source.id)}
                     disabled={testing === source.id}
                   >
-                    {testing === source.id ? "测试中..." : "测试"}
+                    {testing === source.id
+                      ? getCredentialLabel("settings.credentialSources.testing")
+                      : getCredentialLabel("settings.credentialSources.test")}
                   </Button>
                 </div>
               </div>
@@ -259,7 +265,9 @@ export function DesktopCredentialSourcesPanel() {
       {/* CLI OAuth sources */}
       {cliSources.length > 0 && (
         <div className="space-y-2">
-          <h4 className="text-sm font-medium text-neutral-600 dark:text-neutral-300">CLI 已登录</h4>
+          <h4 className="text-sm font-medium text-neutral-600 dark:text-neutral-300">
+            {getCredentialLabel("settings.credentialSources.cliLoggedIn")}
+          </h4>
           {cliSources.map((source) => {
             const creating = testing === `create-${source.id}`;
             const alreadyCreated =
@@ -275,7 +283,7 @@ export function DesktopCredentialSourcesPanel() {
                     <div className="text-sm font-medium">{source.sourceName}</div>
                     <div className="flex gap-2 text-xs text-neutral-500 dark:text-neutral-400">
                       <span className="rounded bg-green-50 px-1.5 py-0.5 text-green-700 dark:bg-green-900/30 dark:text-green-300">
-                        CLI 已登录
+                        {getCredentialLabel("settings.credentialSources.cliLoggedIn")}
                       </span>
                       <span className="rounded bg-blue-50 px-1.5 py-0.5 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
                         {PROVIDER_LABELS[source.provider] || source.provider}
@@ -291,7 +299,7 @@ export function DesktopCredentialSourcesPanel() {
                   )}
                   {alreadyCreated ? (
                     <span className="rounded-md bg-neutral-100 px-2.5 py-1 text-xs text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400">
-                      渠道已创建
+                      {getCredentialLabel("settings.credentialSources.channelCreated")}
                     </span>
                   ) : (
                     <Button
@@ -322,7 +330,10 @@ export function DesktopCredentialSourcesPanel() {
                             ...prev,
                             [`create-${source.id}`]: {
                               success: false,
-                              error: err instanceof Error ? err.message : "创建失败",
+                              error:
+                                err instanceof Error
+                                  ? err.message
+                                  : getCredentialLabel("settings.credentialSources.createFailed"),
                             },
                           }));
                         } finally {
@@ -330,7 +341,9 @@ export function DesktopCredentialSourcesPanel() {
                         }
                       }}
                     >
-                      {creating ? "创建中..." : "一键创建渠道"}
+                      {creating
+                        ? getCredentialLabel("settings.credentialSources.creating")
+                        : getCredentialLabel("settings.credentialSources.createChannel")}
                     </Button>
                   )}
                 </div>
@@ -343,8 +356,7 @@ export function DesktopCredentialSourcesPanel() {
       {/* Empty state */}
       {sources.length === 0 && sidecarCredentials.length === 0 && !loading && (
         <div className="rounded-lg border border-neutral-200 p-4 text-center text-sm text-neutral-500 dark:border-neutral-700 dark:text-neutral-400">
-          未检测到任何认证来源。可通过设置环境变量（OPENAI_API_KEY、ANTHROPIC_API_KEY、GEMINI_API_KEY）或登录
-          AI CLI 工具来添加。
+          {getCredentialLabel("settings.credentialSources.emptyState")}
         </div>
       )}
     </div>
