@@ -486,3 +486,56 @@ test("checkChannelAgentCompatibility reuses cached runtime result for repeated c
     mock.restore();
   }
 });
+
+test("checkChannelAgentCompatibility re-checks after the channel apiKey changes", async () => {
+  let probeCalls = 0;
+  let currentApiKey = "old-key";
+
+  mock.module("./channelService", () => ({
+    getChannels: async () => [],
+    getChannelRuntimeCredentialsById: async () => ({
+      channel: { id: "channel-1", baseUrl: "https://relay.example.com", protocol: "openai" },
+      apiKey: currentApiKey,
+    }),
+  }));
+  mock.module("../agent-adapters", () => ({
+    createAdapter: () => ({
+      runToolCallingTurn: (() => {
+        let turnCount = 0;
+        return async () => {
+          turnCount += 1;
+          if (turnCount % 2 === 1) {
+            probeCalls += 1;
+            return {
+              text: "",
+              toolCalls: [
+                { id: "call-1", name: "agent_probe", input: { marker: "AGENT_TOOL_OK" } },
+              ],
+              finishReason: "tool_use",
+            };
+          }
+          return {
+            text: "AGENT_TOOL_OK",
+            toolCalls: [],
+            finishReason: "stop",
+          };
+        };
+      })(),
+    }),
+  }));
+
+  try {
+    const { checkChannelAgentCompatibility } =
+      await loadChannelAgentCheckService("cache-apikey-change");
+    const first = await checkChannelAgentCompatibility("user-1", "channel-1", "gpt-test");
+    currentApiKey = "new-key";
+    const second = await checkChannelAgentCompatibility("user-1", "channel-1", "gpt-test");
+
+    expect(first).toEqual({ success: true, mode: "generic_tool_calling" });
+    expect(second).toEqual({ success: true, mode: "generic_tool_calling" });
+    // Different resolved apiKey => different cache key => the stale verdict is not reused.
+    expect(probeCalls).toBe(2);
+  } finally {
+    mock.restore();
+  }
+});
