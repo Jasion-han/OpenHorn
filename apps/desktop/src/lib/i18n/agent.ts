@@ -328,6 +328,38 @@ export const channelLabels = {
   "settings.channel.editor.filledBody": "已使用 {source} 的 API Key",
   "settings.channel.editor.fetchKeyFailedTitle": "获取失败",
   "settings.channel.editor.unknownError": "未知错误",
+  // Model picker modal (DesktopModelPickerModal) — reuses the badges/notice titles
+  // above; only modal-specific copy lives under settings.channel.picker.*
+  "settings.channel.picker.title": "选择模型",
+  "settings.channel.picker.dialogDescription":
+    "为当前会话选择可用渠道和模型，也可以在这里同步模型列表。",
+  "settings.channel.picker.searchPlaceholder": "搜索渠道或模型...",
+  "settings.channel.picker.syncButton": "同步",
+  "settings.channel.picker.badge.selected": "已选",
+  "settings.channel.picker.modelCount": "{count} 个模型",
+  "settings.channel.picker.noMatch": "没有匹配的模型",
+  "settings.channel.picker.clearSearch": "清空搜索",
+  "settings.channel.picker.noModelsHint": "暂无模型，请先点击上方「同步」获取模型列表。",
+  "settings.channel.picker.fixNoticeTitle": "当前对话模型不可用",
+  "settings.channel.picker.goChannelSettings": "去渠道设置",
+  "settings.channel.picker.unknownChannel": "未知渠道",
+  // Sync notifications
+  "settings.channel.picker.nothingToSyncTitle": "无需同步",
+  "settings.channel.picker.nothingToSyncBody": "当前没有启用的渠道。",
+  "settings.channel.picker.syncDoneTitle": "同步完成（{done}/{total}）",
+  "settings.channel.picker.syncDoneBody": "已更新模型列表",
+  "settings.channel.picker.syncPartialTitle": "同步部分完成（{done}/{total}）",
+  "settings.channel.picker.syncAllFailedTitle": "同步失败（0/{total}）",
+  "settings.channel.picker.warnSummary": "提示 {count} 个",
+  "settings.channel.picker.warnSummaryDetail": "提示 {count} 个（{detail}）",
+  "settings.channel.picker.failSummary": "失败 {count} 个",
+  "settings.channel.picker.failSummaryDetail": "失败 {count} 个（{detail}）",
+  "settings.channel.picker.moreCount": "，另 {count} 个",
+  "settings.channel.picker.syncFailedGenericBody": "无法同步模型列表",
+  "settings.channel.picker.modelUpdatedTitle": "模型已更新",
+  "settings.channel.picker.modelUpdatedBody": "已保存到当前对话",
+  "settings.channel.picker.updateFailedTitle": "更新失败",
+  "settings.channel.picker.updateFailedBody": "无法更新模型选择",
 } as const;
 
 type ChannelLabelKey = keyof typeof channelLabels;

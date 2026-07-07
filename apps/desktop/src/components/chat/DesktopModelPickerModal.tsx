@@ -12,6 +12,7 @@ import {
   Input,
   ScrollArea,
 } from "ui";
+import { formatChannelLabel, getChannelLabel } from "../../lib/i18n/agent";
 import { notifyError, notifySuccess, notifyWarning } from "../../lib/notify";
 import { createServerApi } from "../../lib/serverApi";
 import { useChatStore } from "../../stores/chatStore";
@@ -130,12 +131,16 @@ export function DesktopModelPickerModal(props: {
       };
 
       if (total === 0) {
-        notifyWarning("无需同步", "当前没有启用的渠道。", {
-          action: {
-            label: "去渠道设置",
-            onClick: goChannels,
+        notifyWarning(
+          getChannelLabel("settings.channel.picker.nothingToSyncTitle"),
+          getChannelLabel("settings.channel.picker.nothingToSyncBody"),
+          {
+            action: {
+              label: getChannelLabel("settings.channel.picker.goChannelSettings"),
+              onClick: goChannels,
+            },
           },
-        });
+        );
         return;
       }
 
@@ -153,13 +158,17 @@ export function DesktopModelPickerModal(props: {
       for (const item of results) {
         if (item.status === "rejected") {
           failed.push({
-            name: "未知渠道",
-            error: item.reason instanceof Error ? item.reason.message : "同步失败",
+            name: getChannelLabel("settings.channel.picker.unknownChannel"),
+            error:
+              item.reason instanceof Error
+                ? item.reason.message
+                : getChannelLabel("settings.channel.notice.syncFailedTitle"),
           });
           continue;
         }
         if (!item.value.result.success) {
-          const err = item.value.result.error || "同步失败";
+          const err =
+            item.value.result.error || getChannelLabel("settings.channel.notice.syncFailedTitle");
           if (err.includes("CLI OAuth") || err.includes("cli_oauth")) {
             successCount += 1;
             continue;
@@ -185,7 +194,7 @@ export function DesktopModelPickerModal(props: {
         text.length <= maxLen ? text : `${text.slice(0, Math.max(0, maxLen - 1))}…`;
       const summarizeChannelName = (name: string) => {
         const normalized = normalizeMsg(name);
-        if (!normalized) return "未知渠道";
+        if (!normalized) return getChannelLabel("settings.channel.picker.unknownChannel");
         try {
           const url = new URL(normalized);
           return clipText(url.hostname.replace(/^www\./, "") || normalized, 22);
@@ -218,35 +227,65 @@ export function DesktopModelPickerModal(props: {
         const head = shown
           .map((item) => `${summarizeChannelName(item.name)}: ${clip(item.msg)}`)
           .join("；");
-        return rest > 0 ? `${head}，另 ${rest} 个` : head;
+        return rest > 0
+          ? `${head}${formatChannelLabel("settings.channel.picker.moreCount", { count: rest })}`
+          : head;
       };
       const failedSummary =
         failCount > 0
           ? formatSummary(
-              failed.map((item) => ({ name: item.name, msg: item.error || "同步失败" })),
+              failed.map((item) => ({
+                name: item.name,
+                msg: item.error || getChannelLabel("settings.channel.notice.syncFailedTitle"),
+              })),
             )
           : "";
       const warnedSummary =
         warnCount > 0
           ? formatSummary(
-              warned.map((item) => ({ name: item.name, msg: item.warning || "需要处理" })),
+              warned.map((item) => ({
+                name: item.name,
+                msg: item.warning || getChannelLabel("settings.channel.notice.needsAttentionTitle"),
+              })),
             )
           : "";
 
+      const warnBody = warnedSummary
+        ? formatChannelLabel("settings.channel.picker.warnSummaryDetail", {
+            count: warnCount,
+            detail: warnedSummary,
+          })
+        : formatChannelLabel("settings.channel.picker.warnSummary", { count: warnCount });
+      const failBody = failedSummary
+        ? formatChannelLabel("settings.channel.picker.failSummaryDetail", {
+            count: failCount,
+            detail: failedSummary,
+          })
+        : formatChannelLabel("settings.channel.picker.failSummary", { count: failCount });
+
       if (failCount === 0 && warnCount === 0) {
-        notifySuccess(`同步完成（${successCount}/${total}）`, "已更新模型列表");
+        notifySuccess(
+          formatChannelLabel("settings.channel.picker.syncDoneTitle", {
+            done: successCount,
+            total,
+          }),
+          getChannelLabel("settings.channel.picker.syncDoneBody"),
+        );
         return;
       }
 
       const actionGoSettings = {
-        label: "去渠道设置",
+        label: getChannelLabel("settings.channel.picker.goChannelSettings"),
         onClick: goChannels,
       } as const;
 
       if (failCount === 0 && warnCount > 0) {
         notifyWarning(
-          `同步完成（${successCount}/${total}）`,
-          `提示 ${warnCount} 个${warnedSummary ? `（${warnedSummary}）` : ""}`,
+          formatChannelLabel("settings.channel.picker.syncDoneTitle", {
+            done: successCount,
+            total,
+          }),
+          warnBody,
           { action: actionGoSettings, duration: 12_000 },
         );
         return;
@@ -254,10 +293,15 @@ export function DesktopModelPickerModal(props: {
 
       if (successCount > 0) {
         notifyWarning(
-          `同步部分完成（${successCount}/${total}）`,
+          formatChannelLabel("settings.channel.picker.syncPartialTitle", {
+            done: successCount,
+            total,
+          }),
           [
-            `失败 ${failCount} 个${failedSummary ? `（${failedSummary}）` : ""}`,
-            warnCount > 0 ? `提示 ${warnCount} 个` : null,
+            failBody,
+            warnCount > 0
+              ? formatChannelLabel("settings.channel.picker.warnSummary", { count: warnCount })
+              : null,
           ]
             .filter(Boolean)
             .join(" · "),
@@ -267,15 +311,20 @@ export function DesktopModelPickerModal(props: {
       }
 
       notifyError(
-        `同步失败（0/${total}）`,
-        `失败 ${failCount} 个${failedSummary ? `（${failedSummary}）` : ""}`,
+        formatChannelLabel("settings.channel.picker.syncAllFailedTitle", { total }),
+        failBody,
         {
           action: actionGoSettings,
           duration: 12_000,
         },
       );
     } catch (error) {
-      notifyError("同步失败", error instanceof Error ? error.message : "无法同步模型列表");
+      notifyError(
+        getChannelLabel("settings.channel.notice.syncFailedTitle"),
+        error instanceof Error
+          ? error.message
+          : getChannelLabel("settings.channel.picker.syncFailedGenericBody"),
+      );
     } finally {
       setBusy(false);
     }
@@ -285,10 +334,18 @@ export function DesktopModelPickerModal(props: {
     setBusy(true);
     try {
       await updateConversation(conversationId, { channelId, modelId });
-      notifySuccess("模型已更新", "已保存到当前对话");
+      notifySuccess(
+        getChannelLabel("settings.channel.picker.modelUpdatedTitle"),
+        getChannelLabel("settings.channel.picker.modelUpdatedBody"),
+      );
       onClose();
     } catch (error) {
-      notifyError("更新失败", error instanceof Error ? error.message : "无法更新模型选择");
+      notifyError(
+        getChannelLabel("settings.channel.picker.updateFailedTitle"),
+        error instanceof Error
+          ? error.message
+          : getChannelLabel("settings.channel.picker.updateFailedBody"),
+      );
     } finally {
       setBusy(false);
     }
@@ -298,9 +355,9 @@ export function DesktopModelPickerModal(props: {
     <Dialog open={opened} onOpenChange={(next) => !next && onClose()}>
       <DialogContent className="max-w-4xl">
         <DialogHeader>
-          <DialogTitle>选择模型</DialogTitle>
+          <DialogTitle>{getChannelLabel("settings.channel.picker.title")}</DialogTitle>
           <DialogDescription className="sr-only">
-            为当前会话选择可用渠道和模型，也可以在这里同步模型列表。
+            {getChannelLabel("settings.channel.picker.dialogDescription")}
           </DialogDescription>
         </DialogHeader>
 
@@ -309,7 +366,9 @@ export function DesktopModelPickerModal(props: {
             <div className="rounded-xl border border-orange-200 bg-orange-50 p-3 shadow-minimal">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="text-sm font-semibold text-orange-800">当前对话模型不可用</p>
+                  <p className="text-sm font-semibold text-orange-800">
+                    {getChannelLabel("settings.channel.picker.fixNoticeTitle")}
+                  </p>
                   <p className="break-words text-sm text-orange-700">{conversationFixReason}</p>
                 </div>
                 <p className="shrink-0 text-xs text-muted-foreground">
@@ -326,7 +385,7 @@ export function DesktopModelPickerModal(props: {
                 className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
               />
               <Input
-                placeholder="搜索渠道或模型..."
+                placeholder={getChannelLabel("settings.channel.picker.searchPlaceholder")}
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 className="pl-9"
@@ -334,7 +393,7 @@ export function DesktopModelPickerModal(props: {
             </div>
             <Button variant="outline" onClick={() => void handleSyncModels()} disabled={busy}>
               <RefreshCw size={16} className={busy ? "animate-spin" : ""} />
-              同步
+              {getChannelLabel("settings.channel.picker.syncButton")}
             </Button>
           </div>
 
@@ -371,16 +430,28 @@ export function DesktopModelPickerModal(props: {
                       </div>
 
                       <div className="flex flex-wrap items-center gap-1.5">
-                        {hasSelected && <Badge>已选</Badge>}
-                        {channel.isDefault && <Badge variant="outline">默认</Badge>}
-                        {needsDefaultModel && (
-                          <Badge variant="outline" className="border-orange-400 text-orange-600">
-                            缺少默认模型
+                        {hasSelected && (
+                          <Badge>{getChannelLabel("settings.channel.picker.badge.selected")}</Badge>
+                        )}
+                        {channel.isDefault && (
+                          <Badge variant="outline">
+                            {getChannelLabel("settings.channel.badge.default")}
                           </Badge>
                         )}
-                        {isChannelDisabled && <Badge variant="secondary">已禁用</Badge>}
+                        {needsDefaultModel && (
+                          <Badge variant="outline" className="border-orange-400 text-orange-600">
+                            {getChannelLabel("settings.channel.badge.missingDefaultModel")}
+                          </Badge>
+                        )}
+                        {isChannelDisabled && (
+                          <Badge variant="secondary">
+                            {getChannelLabel("settings.channel.badge.disabled")}
+                          </Badge>
+                        )}
                         <span className="text-xs text-muted-foreground">
-                          {models.length} 个模型
+                          {formatChannelLabel("settings.channel.picker.modelCount", {
+                            count: models.length,
+                          })}
                         </span>
                       </div>
                     </button>
@@ -389,9 +460,11 @@ export function DesktopModelPickerModal(props: {
 
                 {filtered.length === 0 && (
                   <div className="flex flex-col items-center gap-2 py-8">
-                    <p className="text-sm text-muted-foreground">没有匹配的模型</p>
+                    <p className="text-sm text-muted-foreground">
+                      {getChannelLabel("settings.channel.picker.noMatch")}
+                    </p>
                     <Button variant="outline" onClick={() => setQuery("")}>
-                      清空搜索
+                      {getChannelLabel("settings.channel.picker.clearSearch")}
                     </Button>
                   </div>
                 )}
@@ -403,7 +476,7 @@ export function DesktopModelPickerModal(props: {
               <div className="flex flex-col gap-1.5 pr-3">
                 {activeGroup && activeGroup.models.length === 0 && (
                   <p className="px-1 text-sm text-muted-foreground">
-                    暂无模型，请先点击上方「同步」获取模型列表。
+                    {getChannelLabel("settings.channel.picker.noModelsHint")}
                   </p>
                 )}
 
@@ -438,9 +511,21 @@ export function DesktopModelPickerModal(props: {
                         </div>
 
                         <div className="flex shrink-0 items-center gap-1.5">
-                          {model.isDefault && <Badge variant="secondary">默认</Badge>}
-                          {isModelDisabled && <Badge variant="secondary">已禁用</Badge>}
-                          {selected && <Badge>已选</Badge>}
+                          {model.isDefault && (
+                            <Badge variant="secondary">
+                              {getChannelLabel("settings.channel.badge.default")}
+                            </Badge>
+                          )}
+                          {isModelDisabled && (
+                            <Badge variant="secondary">
+                              {getChannelLabel("settings.channel.badge.disabled")}
+                            </Badge>
+                          )}
+                          {selected && (
+                            <Badge>
+                              {getChannelLabel("settings.channel.picker.badge.selected")}
+                            </Badge>
+                          )}
                         </div>
                       </div>
                     </button>
