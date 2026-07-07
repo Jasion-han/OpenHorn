@@ -130,6 +130,26 @@ const defaultAgentRouteDeps: AgentRouteDeps = {
   createAgentStreamTimeoutGuard,
 };
 
+// Pure decision so the approval-wait loop-termination logic is unit-testable
+// without the DB. Lives at module scope (the loop itself is nested in the router).
+export function decideApprovalWait(input: {
+  approvalStatus: string | null;
+  aborted: boolean;
+  elapsedMs: number;
+  maxWaitMs: number;
+}): "resolved" | "aborted" | "timeout" | "continue" {
+  if (input.approvalStatus && input.approvalStatus !== "pending") {
+    return "resolved";
+  }
+  if (input.aborted) {
+    return "aborted";
+  }
+  if (input.elapsedMs >= input.maxWaitMs) {
+    return "timeout";
+  }
+  return "continue";
+}
+
 export function createAgentRouter(overrides: Partial<AgentRouteDeps> = {}) {
   const {
     requireUserMiddleware,
@@ -633,19 +653,46 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+const APPROVAL_POLL_INTERVAL_MS = 600;
+// Stop polling an abandoned pending approval after this long so the run reaches a
+// terminal state instead of hitting the DB forever.
+const APPROVAL_MAX_WAIT_MS = 30 * 60 * 1000;
+
+type ResolvedApproval = Awaited<ReturnType<typeof getAgentTaskDetail>>["approvals"][number];
+
+type ApprovalWaitResult =
+  | { outcome: "resolved"; approval: ResolvedApproval }
+  | { outcome: "aborted" }
+  | { outcome: "timeout" };
+
 async function waitForApprovalResolution(params: {
   userId: string;
   taskId: string;
   approvalId: string;
   signal?: AbortSignal;
-}) {
+}): Promise<ApprovalWaitResult> {
+  const startedAt = Date.now();
   while (true) {
     const detail = await getAgentTaskDetail(params.userId, params.taskId);
     const approval = detail.approvals.find((item) => item.id === params.approvalId) ?? null;
-    if (approval && approval.status !== "pending") {
-      return approval;
+    const decision = decideApprovalWait({
+      approvalStatus: approval?.status ?? null,
+      aborted: params.signal?.aborted ?? false,
+      elapsedMs: Date.now() - startedAt,
+      maxWaitMs: APPROVAL_MAX_WAIT_MS,
+    });
+
+    if (decision === "resolved" && approval) {
+      return { outcome: "resolved", approval };
     }
-    await sleep(600);
+    if (decision === "aborted") {
+      return { outcome: "aborted" };
+    }
+    if (decision === "timeout") {
+      return { outcome: "timeout" };
+    }
+
+    await sleep(APPROVAL_POLL_INTERVAL_MS);
   }
 }
 
@@ -932,23 +979,56 @@ async function createTaskExecutionResponse(
         userId,
         taskId,
         approvalId: approval.id,
+        signal: ctx.signal,
       });
 
-      if (resolvedApproval.status === "approved") {
-        await updateAgentRunStatus(userId, run.id, "running");
-        await updateAgentTaskStatus(userId, taskId, "running");
-        await createAgentTaskEvent(userId, taskId, run.id, {
-          type: "task_status",
-          content: "Task resumed after tool approval.",
-          metadata: { status: "running", approvalId: approval.id, approvalType: approval.type },
-        });
-        send({ type: "task_status", taskId, runId: run.id, status: "running" });
-        return { behavior: "allow" };
+      if (resolvedApproval.outcome === "resolved") {
+        if (resolvedApproval.approval.status === "approved") {
+          await updateAgentRunStatus(userId, run.id, "running");
+          await updateAgentTaskStatus(userId, taskId, "running");
+          await createAgentTaskEvent(userId, taskId, run.id, {
+            type: "task_status",
+            content: "Task resumed after tool approval.",
+            metadata: { status: "running", approvalId: approval.id, approvalType: approval.type },
+          });
+          send({ type: "task_status", taskId, runId: run.id, status: "running" });
+          return { behavior: "allow" };
+        }
+
+        // Explicit denial already resolved the approval and moved the task to a
+        // terminal state in the /approvals/:id/respond route.
+        return {
+          behavior: "deny",
+          message: "User denied tool approval",
+          interrupt: true,
+        };
       }
+
+      // Aborted or timed out: the approval is still pending and nothing resolved it.
+      // Clean up consistently with an explicit denial so the run reaches a terminal
+      // state instead of hanging.
+      const reason = resolvedApproval.outcome;
+      await respondToAgentApproval(userId, approval.id, { status: "rejected" }).catch(
+        () => undefined,
+      );
+      await updateAgentRunStatus(userId, run.id, "failed", {
+        error:
+          reason === "timeout"
+            ? "Tool approval timed out"
+            : "Run aborted while awaiting tool approval",
+        completedAt: new Date(),
+      }).catch(() => undefined);
+      await updateAgentTaskStatus(userId, taskId, "failed").catch(() => undefined);
+      await createAgentTaskEvent(userId, taskId, run.id, {
+        type: "approval_resolved",
+        content: `tool_approval ${reason}`,
+        metadata: { approvalId: approval.id, status: "rejected", reason },
+      }).catch(() => undefined);
+      send({ type: "task_status", taskId, runId: run.id, status: "failed" });
 
       return {
         behavior: "deny",
-        message: "User denied tool approval",
+        message: reason === "timeout" ? "Tool approval timed out" : "Tool approval aborted",
         interrupt: true,
       };
     };

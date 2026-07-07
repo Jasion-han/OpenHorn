@@ -819,12 +819,16 @@ async function streamConversationAgentReply(params: {
   };
 }
 
-async function buildUserContentWithAttachments(content: string, attachmentIds?: string[]) {
+async function buildUserContentWithAttachments(
+  userId: string,
+  content: string,
+  attachmentIds?: string[],
+) {
   if (!attachmentIds || attachmentIds.length === 0) {
     return content;
   }
 
-  const payload = await buildAttachmentPayloadFromIds(attachmentIds);
+  const payload = await buildAttachmentPayloadFromIds(attachmentIds, userId);
   const images = payload.images || [];
   const ctx = payload.textContext || "";
 
@@ -853,6 +857,7 @@ async function buildUserContentWithAttachments(content: string, attachmentIds?: 
 }
 
 async function buildChatMessages(
+  userId: string,
   conversationMessages: Array<{ role: string; content: string; attachments?: string | null }>,
   systemPrompt?: string | null,
 ): Promise<ChatMessage[]> {
@@ -871,7 +876,7 @@ async function buildChatMessages(
         attachmentIds = [];
       }
 
-      const content = await buildUserContentWithAttachments(message.content, attachmentIds);
+      const content = await buildUserContentWithAttachments(userId, message.content, attachmentIds);
       appendChatMessage(chatMessages, "user", content);
       continue;
     }
@@ -986,7 +991,7 @@ export async function sendMessage(userId: string, input: SendMessageInput) {
   });
 
   if (input.attachments?.length) {
-    await linkAttachmentsToMessage(input.attachments, userMessageId);
+    await linkAttachmentsToMessage(input.attachments, userMessageId, userId);
   }
 
   await db
@@ -1016,6 +1021,7 @@ export async function sendMessage(userId: string, input: SendMessageInput) {
     classifier,
   });
   const chatMessages = await buildChatMessages(
+    userId,
     conversationMessages,
     buildEffectiveSystemPrompt(conversation.systemPrompt, liveContext),
   );
@@ -1125,7 +1131,7 @@ export async function streamMessage(
     });
 
     if (input.attachments?.length) {
-      await linkAttachmentsToMessage(input.attachments, userMessageId);
+      await linkAttachmentsToMessage(input.attachments, userMessageId, userId);
     }
 
     const assistantMessageId = generateId();
@@ -1207,7 +1213,7 @@ export async function streamMessage(
     }
 
     const conversationMessages = await getMessages(input.conversationId);
-    const chatMessages = await buildChatMessages(conversationMessages, effectiveSystemPrompt);
+    const chatMessages = await buildChatMessages(userId, conversationMessages, effectiveSystemPrompt);
 
     if (!resolvedChannel) {
       const message = conversation.channelId
@@ -1431,7 +1437,7 @@ export async function editUserMessage(
       send(citationsPayload);
     }
 
-    const chatMessages = await buildChatMessages(contextMsgs, effectiveSystemPrompt);
+    const chatMessages = await buildChatMessages(userId, contextMsgs, effectiveSystemPrompt);
 
     if (!resolvedChannel) {
       send({ type: "error", message: "未配置可用的默认渠道/默认模型。" });
@@ -1603,7 +1609,7 @@ export async function regenerateMessage(
     if (citationsPayload) {
       send(citationsPayload);
     }
-    const chatMessages = await buildChatMessages(contextMsgs, effectiveSystemPrompt);
+    const chatMessages = await buildChatMessages(userId, contextMsgs, effectiveSystemPrompt);
 
     if (!resolvedChannel) {
       send({ type: "error", message: "未配置可用的默认渠道/默认模型。" });
@@ -1828,7 +1834,7 @@ export async function prepareChatForSidecar(
   });
 
   if (input.attachments?.length) {
-    await linkAttachmentsToMessage(input.attachments, userMessageId);
+    await linkAttachmentsToMessage(input.attachments, userMessageId, userId);
   }
 
   const assistantMessageId = generateId();
@@ -1866,7 +1872,7 @@ export async function prepareChatForSidecar(
     conversation.systemPrompt || settings[GLOBAL_SYSTEM_PROMPT_KEY] || null;
 
   const conversationMessages = await getMessages(input.conversationId);
-  const chatMessages = await buildChatMessages(conversationMessages, baseSystemPrompt);
+  const chatMessages = await buildChatMessages(userId, conversationMessages, baseSystemPrompt);
 
   return {
     apiKey: resolvedChannel.apiKey,

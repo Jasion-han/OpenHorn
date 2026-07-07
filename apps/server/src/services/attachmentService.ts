@@ -1,8 +1,8 @@
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { attachments } from "db";
-import { inArray } from "drizzle-orm";
+import { agentSessions, attachments, conversations } from "db";
+import { eq, inArray } from "drizzle-orm";
 import { db } from "../db";
 import { generateId } from "../utils";
 import { formatAttachmentContext, parseAttachmentContent } from "./attachmentParser";
@@ -128,16 +128,45 @@ export async function storeAttachment(params: {
   };
 }
 
-export async function linkAttachmentsToMessage(attachmentIds: string[], messageId: string) {
-  if (attachmentIds.length === 0) return;
-
-  await db.update(attachments).set({ messageId }).where(inArray(attachments.id, attachmentIds));
-}
-
-export async function getAttachmentsByIds(attachmentIds: string[]) {
+// Attachments have no direct `userId` column; ownership is derived from the owning
+// conversation or agent session. Scope by joining to both so a user can only touch
+// attachments they own — cross-user IDs are silently dropped (not linked, not read).
+async function selectOwnedAttachments(attachmentIds: string[], userId: string) {
   if (attachmentIds.length === 0) return [];
 
-  return db.select().from(attachments).where(inArray(attachments.id, attachmentIds));
+  const rows = await db
+    .select({
+      attachment: attachments,
+      convUserId: conversations.userId,
+      sessUserId: agentSessions.userId,
+    })
+    .from(attachments)
+    .leftJoin(conversations, eq(conversations.id, attachments.conversationId))
+    .leftJoin(agentSessions, eq(agentSessions.id, attachments.sessionId))
+    .where(inArray(attachments.id, attachmentIds));
+
+  return rows
+    .filter((row) => row.convUserId === userId || row.sessUserId === userId)
+    .map((row) => row.attachment);
+}
+
+export async function linkAttachmentsToMessage(
+  attachmentIds: string[],
+  messageId: string,
+  userId: string,
+) {
+  if (attachmentIds.length === 0) return;
+
+  const ownedIds = (await selectOwnedAttachments(attachmentIds, userId)).map((row) => row.id);
+  if (ownedIds.length === 0) return;
+
+  await db.update(attachments).set({ messageId }).where(inArray(attachments.id, ownedIds));
+}
+
+export async function getAttachmentsByIds(attachmentIds: string[], userId: string) {
+  if (attachmentIds.length === 0) return [];
+
+  return selectOwnedAttachments(attachmentIds, userId);
 }
 
 export type ImageAttachmentPayload = {
@@ -148,7 +177,7 @@ export type ImageAttachmentPayload = {
   dataBase64: string;
 };
 
-export async function buildAttachmentPayloadFromIds(attachmentIds: string[]) {
+export async function buildAttachmentPayloadFromIds(attachmentIds: string[], userId: string) {
   if (attachmentIds.length === 0) {
     return {
       textContext: "",
@@ -157,7 +186,7 @@ export async function buildAttachmentPayloadFromIds(attachmentIds: string[]) {
     };
   }
 
-  const records = await getAttachmentsByIds(attachmentIds);
+  const records = await getAttachmentsByIds(attachmentIds, userId);
   const parsed: Array<{ fileName: string; text: string }> = [];
   const images: ImageAttachmentPayload[] = [];
   const files: Array<{ id: string; fileName: string; fileType: string; fileSize: number }> = [];
@@ -206,8 +235,8 @@ export async function buildAttachmentPayloadFromIds(attachmentIds: string[]) {
   };
 }
 
-export async function buildAttachmentContextFromIds(attachmentIds: string[]) {
-  const payload = await buildAttachmentPayloadFromIds(attachmentIds);
+export async function buildAttachmentContextFromIds(attachmentIds: string[], userId: string) {
+  const payload = await buildAttachmentPayloadFromIds(attachmentIds, userId);
   // Back-compat: include only text context (images are represented as blocks elsewhere).
   return payload.textContext;
 }

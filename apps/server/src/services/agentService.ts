@@ -359,7 +359,10 @@ export async function* runAgentWithConfig(config: AgentRuntimeConfig): AsyncGene
       ) || undefined;
     const agentWorkingDirectory = resolveAgentWorkingDirectory();
 
-    const attachmentPayload = await buildAttachmentPayloadFromIds(config.attachmentIds || []);
+    const attachmentPayload = await buildAttachmentPayloadFromIds(
+      config.attachmentIds || [],
+      config.userId,
+    );
     const attachmentContext = attachmentPayload.textContext;
     const parts: string[] = [];
     if ((config.conversationHistory || []).length > 0) {
