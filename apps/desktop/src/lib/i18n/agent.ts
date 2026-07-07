@@ -53,7 +53,8 @@ export const agentPanelLabels = {
  */
 export const credentialLabels = {
   "settings.credentialSources": "认证来源",
-  "settings.credentialSources.description": "自动检测本地 AI 工具认证，或手动添加 API Key",
+  "settings.credentialSources.description":
+    "自动检测本地已登录的 AI CLI，用订阅额度认证，免 API key。",
   "settings.credentialSources.detected": "已检测到",
   "settings.credentialSources.notDetected": "未检测到",
   "settings.credentialSources.expired": "已过期",
