@@ -403,14 +403,14 @@ function parseOpenAIToolCallingResult(
   tools?: GenericToolDefinition[],
 ): GenericAgentTurnResult {
   if (!isRecord(data)) {
-    throw new Error("OpenAI API error: Invalid JSON response");
+    throw new Error(formatProviderApiError(undefined, "Invalid JSON response"));
   }
 
   const choices = Array.isArray(data.choices) ? data.choices : [];
   const first = choices[0];
   const message = isRecord(first) ? first.message : null;
   if (!isRecord(message)) {
-    throw new Error("OpenAI API error: Missing response message");
+    throw new Error(formatProviderApiError(undefined, "Missing response message"));
   }
 
   const finishReason =
@@ -494,13 +494,12 @@ export class OpenAIAdapter implements ProviderAdapter {
 
     if (!response || !response.ok) {
       const detail = response ? await readErrorDetail(response) : "Request failed";
-      const status = response?.status ? ` (${response.status})` : "";
-      throw new Error(`OpenAI API error${status}: ${detail}`);
+      throw new Error(formatProviderApiError(response?.status, detail));
     }
 
     const data = (await response.json()) as unknown;
     if (!isRecord(data)) {
-      throw new Error("OpenAI API error: Invalid JSON response");
+      throw new Error(formatProviderApiError(undefined, "Invalid JSON response"));
     }
     const id = typeof data.id === "string" ? data.id : "";
     const model = typeof data.model === "string" ? data.model : options.model;
@@ -510,7 +509,7 @@ export class OpenAIAdapter implements ProviderAdapter {
     const content =
       isRecord(message) && typeof message.content === "string" ? message.content : null;
     if (!content) {
-      throw new Error("OpenAI API error: Missing response content");
+      throw new Error(formatProviderApiError(undefined, "Missing response content"));
     }
     const usageRaw = isRecord(data.usage) ? data.usage : null;
     const promptTokens = usageRaw ? toFiniteNumber(usageRaw.prompt_tokens) : null;
@@ -587,8 +586,7 @@ export class OpenAIAdapter implements ProviderAdapter {
     if (!response || !response.ok) {
       timeout.cleanup();
       const detail = response ? await readErrorDetail(response) : "Request failed";
-      const status = response?.status ? ` (${response.status})` : "";
-      throw new Error(`OpenAI API error${status}: ${detail}`);
+      throw new Error(formatProviderApiError(response?.status, detail));
     }
 
     const reader = response.body?.getReader();
@@ -802,8 +800,7 @@ export class OpenAIAdapter implements ProviderAdapter {
 
     if (!response || !response.ok) {
       const detail = response ? await readErrorDetail(response) : "Request failed";
-      const status = response?.status ? ` (${response.status})` : "";
-      throw new Error(`OpenAI API error${status}: ${detail}`);
+      throw new Error(formatProviderApiError(response?.status, detail));
     }
 
     const data = (await response.json()) as unknown;
@@ -906,8 +903,7 @@ export class OpenAIAdapter implements ProviderAdapter {
     if (!response || !response.ok) {
       timeout.cleanup();
       const detail = response ? await readErrorDetail(response) : "Request failed";
-      const status = response?.status ? ` (${response.status})` : "";
-      throw new Error(`OpenAI API error${status}: ${detail}`);
+      throw new Error(formatProviderApiError(response?.status, detail));
     }
 
     const reader = response.body?.getReader();

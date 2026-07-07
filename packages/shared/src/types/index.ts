@@ -10,6 +10,7 @@ export interface Channel {
   apiKey: string;
   baseUrl?: string;
   model?: string;
+  enabled: boolean;
   isDefault: boolean;
   createdAt: Date;
   updatedAt: Date;
