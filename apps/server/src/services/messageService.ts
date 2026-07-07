@@ -33,6 +33,12 @@ import { getSettingValues } from "./settingsService";
 
 const GLOBAL_SYSTEM_PROMPT_KEY = "chat.systemPrompt";
 const AGENT_RECENT_CONTEXT_LIMIT = 8;
+// Hard safety backstop for chat-mode model context. `getMessages` intentionally
+// stays unbounded (it also feeds the UI message list), and the per-conversation
+// `contextLength` column is a token budget (default 4096), not a message count —
+// so it is not a clean message-count bound. This cap only trims pathologically
+// long conversations; normal conversations stay well under it and are unchanged.
+const CHAT_MAX_CONTEXT_MESSAGES = 200;
 const AGENT_DEFAULT_COMPLEXITY_SETTING = "agent.defaultComplexity";
 const AGENT_DEFAULT_UX_MODE_SETTING = "agent.defaultUxMode";
 const AGENT_DEFAULT_REQUIRES_PLAN_APPROVAL_SETTING = "agent.defaultRequiresPlanApproval";
@@ -867,7 +873,14 @@ async function buildChatMessages(
     appendChatMessage(chatMessages, "system", systemPrompt);
   }
 
-  for (const message of conversationMessages) {
+  // Backstop against unbounded growth on very long conversations: keep only the
+  // most recent messages before re-reading attachments and building the payload.
+  const boundedMessages =
+    conversationMessages.length > CHAT_MAX_CONTEXT_MESSAGES
+      ? conversationMessages.slice(-CHAT_MAX_CONTEXT_MESSAGES)
+      : conversationMessages;
+
+  for (const message of boundedMessages) {
     if (message.role === "user" && message.attachments) {
       let attachmentIds: string[] = [];
       try {
