@@ -369,22 +369,40 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
   });
 
   let capturedSessionId: string | null = null;
-  for await (const message of query as AsyncIterable<SdkMessage>) {
-    if (!capturedSessionId && message.type === "system" && typeof message.session_id === "string") {
-      capturedSessionId = message.session_id;
-      input.onSdkSessionId(capturedSessionId);
+  try {
+    for await (const message of query as AsyncIterable<SdkMessage>) {
+      if (
+        !capturedSessionId &&
+        message.type === "system" &&
+        typeof message.session_id === "string"
+      ) {
+        capturedSessionId = message.session_id;
+        input.onSdkSessionId(capturedSessionId);
+      }
+      const events = convertSdkEvent(message);
+      if (events) {
+        if (Array.isArray(events)) {
+          for (const e of events) input.onEvent(e);
+        } else {
+          input.onEvent(events);
+        }
+      }
     }
-    const events = convertSdkEvent(message);
-    if (events) {
-      if (Array.isArray(events)) {
-        for (const e of events) input.onEvent(e);
-      } else {
-        input.onEvent(events);
+  } finally {
+    // Always finalize the checkpoint when this run actually backed up files,
+    // even on abort (SDK throws AbortError) or a mid-stream throw. Otherwise
+    // manifest.json is never written and rollbackCheckpoint() fails with
+    // ENOENT exactly when the user cancels a run that already edited files.
+    // Best-effort: a finalize failure must not mask the original abort/error.
+    if (input.checkpoint.files.size > 0) {
+      try {
+        await finalizeCheckpoint(input.checkpoint);
+        input.onCheckpointReady(input.checkpoint.runId);
+      } catch {
+        // swallow — preserve the original completion/abort/error outcome
       }
     }
   }
 
-  await finalizeCheckpoint(input.checkpoint);
-  input.onCheckpointReady(input.checkpoint.runId);
   input.onEvent({ type: "done" });
 }

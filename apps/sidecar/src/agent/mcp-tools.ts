@@ -30,6 +30,11 @@ export type ConnectedMcp = {
 
 const CONNECT_TIMEOUT_MS = 15_000;
 
+// Bound each MCP tool invocation. A slow/hung stdio server must not stall the
+// whole agent turn indefinitely; on timeout we surface a tool error so the turn
+// can proceed instead of hanging (and the client is still closed on cleanup).
+const TOOL_CALL_TIMEOUT_MS = 60_000;
+
 // OpenAI rejects requests carrying more than 128 tool definitions; cap the
 // combined built-in + MCP tool count at 120 to keep headroom under that limit.
 export const MAX_TOTAL_TOOLS = 120;
@@ -122,11 +127,23 @@ async function connectServer(
       description: tool.description || `MCP tool "${tool.name}" from ${serverName}.`,
       parameters: (tool.inputSchema ?? { type: "object", properties: {} }) as unknown as TSchema,
       execute: async (_toolCallId, params) => {
-        const result = await client.callTool({
-          name: tool.name,
-          arguments: (params ?? {}) as Record<string, unknown>,
-        });
-        return { content: [{ type: "text", text: extractText(result) }], details: undefined };
+        try {
+          const result = await withTimeout(
+            client.callTool({
+              name: tool.name,
+              arguments: (params ?? {}) as Record<string, unknown>,
+            }),
+            TOOL_CALL_TIMEOUT_MS,
+            `callTool ${serverName}/${tool.name}`,
+          );
+          return { content: [{ type: "text", text: extractText(result) }], details: undefined };
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          return {
+            content: [{ type: "text", text: `MCP tool "${tool.name}" failed: ${message}` }],
+            details: undefined,
+          };
+        }
       },
     }));
     return { client, tools };

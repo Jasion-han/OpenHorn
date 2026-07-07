@@ -17,6 +17,11 @@ export type RunCodexAgentInput = {
   onEvent: (event: AgentEvent) => void;
 };
 
+// How long to wait after SIGTERM before escalating to SIGKILL. Codex runs with
+// danger-full-access, so a child that ignores the graceful signal must not be
+// allowed to linger with full filesystem access.
+const SIGKILL_ESCALATION_MS = 4000;
+
 type JsonRpcMessage = {
   id?: number;
   method?: string;
@@ -138,11 +143,41 @@ export async function runCodexAgent(input: RunCodexAgentInput): Promise<void> {
     },
   );
 
+  // Track child liveness so teardown can (a) escalate SIGTERM→SIGKILL for a
+  // full-access child that ignores the graceful signal, and (b) resolve only
+  // once the process has actually exited, never leaving an orphan behind.
+  let procClosed = false;
+  let killTimer: ReturnType<typeof setTimeout> | null = null;
+  let markClosed: () => void = () => {};
+  const closedPromise = new Promise<void>((res) => {
+    markClosed = res;
+  });
+  const settleClosed = () => {
+    procClosed = true;
+    if (killTimer) {
+      clearTimeout(killTimer);
+      killTimer = null;
+    }
+    markClosed();
+  };
+
   const cleanup = () => {
     try {
       proc.kill("SIGTERM");
     } catch {
       // already dead
+    }
+    // If the child (or a shell it spawned) ignores SIGTERM, force-kill it so a
+    // full-access process can't outlive the run.
+    if (!killTimer && !procClosed) {
+      killTimer = setTimeout(() => {
+        try {
+          proc.kill("SIGKILL");
+        } catch {
+          // already dead
+        }
+      }, SIGKILL_ESCALATION_MS);
+      killTimer.unref?.();
     }
   };
 
@@ -160,7 +195,14 @@ export async function runCodexAgent(input: RunCodexAgentInput): Promise<void> {
     let threadId = "";
     let threadStarted = false;
     let done = false;
+    let resolved = false;
     let pendingText = "";
+
+    const settle = () => {
+      if (resolved) return;
+      resolved = true;
+      resolve();
+    };
 
     const finish = async (event?: AgentEvent) => {
       if (done) return;
@@ -179,7 +221,11 @@ export async function runCodexAgent(input: RunCodexAgentInput): Promise<void> {
       if (event) onEvent(event);
       onEvent({ type: "done" });
       cleanup();
-      resolve();
+      // Resolve only after the child has actually exited so teardown never
+      // leaves an orphaned full-access process. `settleClosed()` (fired from the
+      // 'close'/'error' handlers) unblocks this await.
+      await closedPromise;
+      settle();
     };
 
     const pendingResponses = new Map<number, (msg: JsonRpcMessage) => void>();
@@ -239,16 +285,23 @@ export async function runCodexAgent(input: RunCodexAgentInput): Promise<void> {
     });
 
     proc.on("error", (err) => {
+      // A spawn error may mean no 'close' will ever fire — unblock finish's await.
+      settleClosed();
       finish({ type: "error", content: err.message });
     });
 
     proc.on("close", (code) => {
+      settleClosed();
       if (!done) {
         if (code && code !== 0) {
           finish({ type: "error", content: `Codex 进程退出，代码: ${code}` });
         } else {
           finish();
         }
+      } else {
+        // finish already ran; its await on closedPromise is now unblocked, but
+        // settle here too in case it had already passed that point.
+        settle();
       }
     });
 
