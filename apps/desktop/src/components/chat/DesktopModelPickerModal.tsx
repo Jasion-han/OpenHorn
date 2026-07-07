@@ -1,8 +1,9 @@
-import { ChevronDown, ChevronRight, RefreshCw, Search } from "lucide-react";
+import { RefreshCw, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import {
   Badge,
   Button,
+  cn,
   Dialog,
   DialogContent,
   DialogDescription,
@@ -10,13 +11,12 @@ import {
   DialogTitle,
   Input,
   ScrollArea,
-  cn,
 } from "ui";
-import { createServerApi } from "../../lib/serverApi";
 import { notifyError, notifySuccess, notifyWarning } from "../../lib/notify";
-import type { Channel } from "../../types/chat";
+import { createServerApi } from "../../lib/serverApi";
 import { useChatStore } from "../../stores/chatStore";
 import { useDesktopShellStore } from "../../stores/desktopShellStore";
+import type { Channel } from "../../types/chat";
 import { DesktopProviderLogo } from "./DesktopProviderLogo";
 
 const api = createServerApi();
@@ -66,14 +66,14 @@ export function DesktopModelPickerModal(props: {
 
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
-  const [expanded, setExpanded] = useState<Set<string>>(
-    () => new Set(current?.channelId ? [current.channelId] : []),
+  const [selectedChannelId, setSelectedChannelId] = useState<string | null>(
+    current?.channelId ?? null,
   );
 
   useEffect(() => {
     if (!opened) return;
     setQuery("");
-    setExpanded(new Set(current?.channelId ? [current.channelId] : []));
+    setSelectedChannelId(current?.channelId ?? null);
     void loadChannels();
   }, [opened, current?.channelId, loadChannels]);
 
@@ -109,14 +109,15 @@ export function DesktopModelPickerModal(props: {
       );
   }, [groups, query]);
 
-  const toggleExpanded = (channelId: string) => {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(channelId)) next.delete(channelId);
-      else next.add(channelId);
-      return next;
-    });
-  };
+  // Master-detail: the right pane always shows one channel's models. Prefer the
+  // left-selected channel, but when searching fall back to the first channel that
+  // actually has matching models so search hits are never hidden behind an empty pane.
+  const activeGroup = useMemo(() => {
+    if (filtered.length === 0) return null;
+    const preferred = filtered.find((group) => group.channel.id === selectedChannelId);
+    if (preferred && (!query.trim() || preferred.models.length > 0)) return preferred;
+    return filtered.find((group) => group.models.length > 0) ?? filtered[0];
+  }, [filtered, selectedChannelId, query]);
 
   const handleSyncModels = async () => {
     setBusy(true);
@@ -221,7 +222,9 @@ export function DesktopModelPickerModal(props: {
       };
       const failedSummary =
         failCount > 0
-          ? formatSummary(failed.map((item) => ({ name: item.name, msg: item.error || "同步失败" })))
+          ? formatSummary(
+              failed.map((item) => ({ name: item.name, msg: item.error || "同步失败" })),
+            )
           : "";
       const warnedSummary =
         warnCount > 0
@@ -267,8 +270,8 @@ export function DesktopModelPickerModal(props: {
         `同步失败（0/${total}）`,
         `失败 ${failCount} 个${failedSummary ? `（${failedSummary}）` : ""}`,
         {
-        action: actionGoSettings,
-        duration: 12_000,
+          action: actionGoSettings,
+          duration: 12_000,
         },
       );
     } catch (error) {
@@ -293,7 +296,7 @@ export function DesktopModelPickerModal(props: {
 
   return (
     <Dialog open={opened} onOpenChange={(next) => !next && onClose()}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="max-w-4xl">
         <DialogHeader>
           <DialogTitle>选择模型</DialogTitle>
           <DialogDescription className="sr-only">
@@ -335,32 +338,39 @@ export function DesktopModelPickerModal(props: {
             </Button>
           </div>
 
-          <ScrollArea className="h-[420px]">
-            <div className="flex flex-col gap-3 pr-3">
-              {filtered.map(({ channel, models, isChannelDisabled, needsDefaultModel }) => {
-                const isExpanded = query.trim() ? true : expanded.has(channel.id);
-                const hasSelected = models.some(
-                  (model) =>
-                    current?.channelId === channel.id && current?.modelId === model.modelId,
-                );
+          <div className="flex h-[440px] gap-3">
+            {/* Left pane: channel list (single-select) */}
+            <ScrollArea className="h-full w-[260px] shrink-0 border-r">
+              <div className="flex flex-col gap-1.5 pr-3">
+                {filtered.map(({ channel, models, isChannelDisabled, needsDefaultModel }) => {
+                  const isActive = activeGroup?.channel.id === channel.id;
+                  const hasSelected =
+                    current?.channelId === channel.id &&
+                    models.some((model) => current?.modelId === model.modelId);
 
-                return (
-                  <div key={channel.id}>
+                  return (
                     <button
                       type="button"
-                      className="flex w-full select-none items-center justify-between rounded-md border px-3 py-2 transition-colors hover:bg-accent"
-                      onClick={() => toggleExpanded(channel.id)}
+                      key={channel.id}
+                      className={cn(
+                        "flex w-full select-none flex-col gap-1.5 rounded-md border px-3 py-2 text-left transition-colors",
+                        isActive ? "border-primary bg-accent" : "hover:bg-accent",
+                      )}
+                      onClick={() => setSelectedChannelId(channel.id)}
                     >
                       <div className="flex items-center gap-2">
-                        {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                        <span className="text-sm font-semibold">{channel.name}</span>
-                        <Badge variant="secondary" className="gap-1" title={channel.provider}>
+                        <Badge
+                          variant="secondary"
+                          className="shrink-0 gap-1"
+                          title={channel.provider}
+                        >
                           <DesktopProviderLogo provider={channel.provider} className="size-4" />
                           <span className="sr-only">{channel.provider}</span>
                         </Badge>
+                        <span className="truncate text-sm font-semibold">{channel.name}</span>
                       </div>
 
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex flex-wrap items-center gap-1.5">
                         {hasSelected && <Badge>已选</Badge>}
                         {channel.isDefault && <Badge variant="outline">默认</Badge>}
                         {needsDefaultModel && (
@@ -369,74 +379,76 @@ export function DesktopModelPickerModal(props: {
                           </Badge>
                         )}
                         {isChannelDisabled && <Badge variant="secondary">已禁用</Badge>}
-                        <span className="text-xs text-muted-foreground">{models.length} 个模型</span>
+                        <span className="text-xs text-muted-foreground">
+                          {models.length} 个模型
+                        </span>
                       </div>
                     </button>
+                  );
+                })}
 
-                    {isExpanded && (
-                      <div className="mt-1.5 flex flex-col gap-1.5 pl-4">
-                        {models.length === 0 && (
-                          <p className="px-1 text-sm text-muted-foreground">
-                            暂无模型，请先点击上方「同步」获取模型列表。
-                          </p>
-                        )}
-
-                        {models.map((model) => {
-                          const selected =
-                            current?.channelId === channel.id && current?.modelId === model.modelId;
-                          const isModelDisabled = !model.enabled;
-                          const disabled = busy || isChannelDisabled || isModelDisabled;
-
-                          return (
-                            <button
-                              type="button"
-                              key={`${channel.id}:${model.modelId}`}
-                              className={cn(
-                                "w-full rounded-md border px-3 py-2 text-left transition-colors",
-                                disabled ? "cursor-not-allowed opacity-60" : "hover:bg-accent",
-                                selected && "border-primary bg-accent",
-                              )}
-                              disabled={disabled}
-                              onClick={() => {
-                                if (disabled) return;
-                                void handleSelect(channel.id, model.modelId);
-                              }}
-                            >
-                              <div className="flex items-center justify-between gap-2">
-                                <div className="min-w-0">
-                                  <p className="truncate text-sm font-medium">
-                                    {model.displayName || model.modelId}
-                                  </p>
-                                  <p className="truncate text-xs text-muted-foreground">
-                                    {model.modelId}
-                                  </p>
-                                </div>
-
-                                <div className="flex shrink-0 items-center gap-1.5">
-                                  {model.isDefault && <Badge variant="secondary">默认</Badge>}
-                                  {isModelDisabled && <Badge variant="secondary">已禁用</Badge>}
-                                  {selected && <Badge>已选</Badge>}
-                                </div>
-                              </div>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
+                {filtered.length === 0 && (
+                  <div className="flex flex-col items-center gap-2 py-8">
+                    <p className="text-sm text-muted-foreground">没有匹配的模型</p>
+                    <Button variant="outline" onClick={() => setQuery("")}>
+                      清空搜索
+                    </Button>
                   </div>
-                );
-              })}
+                )}
+              </div>
+            </ScrollArea>
 
-              {filtered.length === 0 && (
-                <div className="flex flex-col items-center gap-2 py-8">
-                  <p className="text-sm text-muted-foreground">没有匹配的模型</p>
-                  <Button variant="outline" onClick={() => setQuery("")}>
-                    清空搜索
-                  </Button>
-                </div>
-              )}
-            </div>
-          </ScrollArea>
+            {/* Right pane: models of the active channel */}
+            <ScrollArea className="h-full flex-1">
+              <div className="flex flex-col gap-1.5 pr-3">
+                {activeGroup && activeGroup.models.length === 0 && (
+                  <p className="px-1 text-sm text-muted-foreground">
+                    暂无模型，请先点击上方「同步」获取模型列表。
+                  </p>
+                )}
+
+                {activeGroup?.models.map((model) => {
+                  const channel = activeGroup.channel;
+                  const selected =
+                    current?.channelId === channel.id && current?.modelId === model.modelId;
+                  const isModelDisabled = !model.enabled;
+                  const disabled = busy || activeGroup.isChannelDisabled || isModelDisabled;
+
+                  return (
+                    <button
+                      type="button"
+                      key={`${channel.id}:${model.modelId}`}
+                      className={cn(
+                        "w-full rounded-md border px-3 py-2 text-left transition-colors",
+                        disabled ? "cursor-not-allowed opacity-60" : "hover:bg-accent",
+                        selected && "border-primary bg-accent",
+                      )}
+                      disabled={disabled}
+                      onClick={() => {
+                        if (disabled) return;
+                        void handleSelect(channel.id, model.modelId);
+                      }}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium">
+                            {model.displayName || model.modelId}
+                          </p>
+                          <p className="truncate text-xs text-muted-foreground">{model.modelId}</p>
+                        </div>
+
+                        <div className="flex shrink-0 items-center gap-1.5">
+                          {model.isDefault && <Badge variant="secondary">默认</Badge>}
+                          {isModelDisabled && <Badge variant="secondary">已禁用</Badge>}
+                          {selected && <Badge>已选</Badge>}
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </ScrollArea>
+          </div>
         </div>
       </DialogContent>
     </Dialog>
