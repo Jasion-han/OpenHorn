@@ -22,7 +22,9 @@ app.use(
   cors({
     origin: (origin) => {
       if (!origin) return null;
-      if (origin === "null") return origin;
+      // Note: a literal "null" Origin (file://, sandboxed iframes, data: URLs) is
+      // deliberately NOT reflected — no legitimate OpenHorn client sends it, and
+      // allowing it with credentials:true would widen the credentialed-CORS surface.
       if (origin === "tauri://localhost") return origin;
 
       try {
