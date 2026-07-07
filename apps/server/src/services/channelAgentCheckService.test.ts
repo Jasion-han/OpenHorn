@@ -1,4 +1,22 @@
-import { expect, mock, test } from "bun:test";
+import { afterAll, expect, mock, test } from "bun:test";
+// These `import * as` namespaces are LIVE views: once this file's in-test `mock.module(...)`
+// calls run, they would reflect the mocked exports. So snapshot each into a plain object at
+// module-eval time (before any test runs a mock) to capture the REAL modules. `mock.restore()`
+// does NOT unregister `mock.module()`, so re-register these real snapshots in afterAll to stop
+// this file's mocks leaking into later test files.
+import * as realAgentAdaptersNs from "../agent-adapters";
+import * as realAgentSdkNs from "./agentSdk";
+import * as realChannelServiceNs from "./channelService";
+
+const realAgentAdapters = { ...realAgentAdaptersNs };
+const realAgentSdk = { ...realAgentSdkNs };
+const realChannelService = { ...realChannelServiceNs };
+
+afterAll(() => {
+  mock.module("./agentSdk", () => realAgentSdk);
+  mock.module("../agent-adapters", () => realAgentAdapters);
+  mock.module("./channelService", () => realChannelService);
+});
 
 async function* gen(...events: Array<{ type?: string; content?: string; toolName?: string }>) {
   for (const e of events) {
@@ -132,9 +150,8 @@ test("probeGenericToolCallingCompatibility: succeeds when adapter returns a stru
   }));
 
   try {
-    const { probeGenericToolCallingCompatibility } = await loadChannelAgentCheckService(
-      "generic-success",
-    );
+    const { probeGenericToolCallingCompatibility } =
+      await loadChannelAgentCheckService("generic-success");
     const result = await probeGenericToolCallingCompatibility({
       apiKey: "test-key",
       modelId: "gpt-5.4",
@@ -196,11 +213,7 @@ test("probeGenericToolCallingCompatibility: retries without forced tool_choice w
       protocol: "anthropic",
     });
     expect(result).toEqual({ success: true, mode: "generic_tool_calling" });
-    expect(seenToolChoices).toEqual([
-      { type: "tool", name: "agent_probe" },
-      undefined,
-      undefined,
-    ]);
+    expect(seenToolChoices).toEqual([{ type: "tool", name: "agent_probe" }, undefined, undefined]);
   } finally {
     mock.restore();
   }
@@ -239,9 +252,8 @@ test("probeGenericToolCallingCompatibility: retries once after a transient timeo
   }));
 
   try {
-    const { probeGenericToolCallingCompatibility } = await loadChannelAgentCheckService(
-      "generic-timeout-retry",
-    );
+    const { probeGenericToolCallingCompatibility } =
+      await loadChannelAgentCheckService("generic-timeout-retry");
     const result = await probeGenericToolCallingCompatibility({
       apiKey: "test-key",
       modelId: "qwen3.5-plus",
@@ -268,9 +280,8 @@ test("probeGenericToolCallingCompatibility: fails when no structured tool call i
   }));
 
   try {
-    const { probeGenericToolCallingCompatibility } = await loadChannelAgentCheckService(
-      "generic-fail",
-    );
+    const { probeGenericToolCallingCompatibility } =
+      await loadChannelAgentCheckService("generic-fail");
     const result = await probeGenericToolCallingCompatibility({
       apiKey: "test-key",
       modelId: "gpt-5.4",
@@ -311,9 +322,8 @@ test("probeGenericToolCallingCompatibility: fails when follow-up turn does not p
   }));
 
   try {
-    const { probeGenericToolCallingCompatibility } = await loadChannelAgentCheckService(
-      "generic-follow-up-fail",
-    );
+    const { probeGenericToolCallingCompatibility } =
+      await loadChannelAgentCheckService("generic-follow-up-fail");
     const result = await probeGenericToolCallingCompatibility({
       apiKey: "test-key",
       modelId: "gpt-5.4",
@@ -356,7 +366,9 @@ test("checkChannelAgentCompatibility: falls back to generic tool calling for ant
           if (callCount === 1) {
             return {
               text: "",
-              toolCalls: [{ id: "call-1", name: "agent_probe", input: { marker: "AGENT_TOOL_OK" } }],
+              toolCalls: [
+                { id: "call-1", name: "agent_probe", input: { marker: "AGENT_TOOL_OK" } },
+              ],
               finishReason: "tool_use",
             };
           }
@@ -372,9 +384,8 @@ test("checkChannelAgentCompatibility: falls back to generic tool calling for ant
   }));
 
   try {
-    const { checkChannelAgentCompatibility } = await loadChannelAgentCheckService(
-      "anthropic-fallback",
-    );
+    const { checkChannelAgentCompatibility } =
+      await loadChannelAgentCheckService("anthropic-fallback");
     const result = await checkChannelAgentCompatibility("user-1", "channel-1", "claude-test");
     expect(result).toEqual({ success: true, mode: "generic_tool_calling" });
   } finally {
@@ -447,7 +458,9 @@ test("checkChannelAgentCompatibility reuses cached runtime result for repeated c
             probeCalls += 1;
             return {
               text: "",
-              toolCalls: [{ id: "call-1", name: "agent_probe", input: { marker: "AGENT_TOOL_OK" } }],
+              toolCalls: [
+                { id: "call-1", name: "agent_probe", input: { marker: "AGENT_TOOL_OK" } },
+              ],
               finishReason: "tool_use",
             };
           }

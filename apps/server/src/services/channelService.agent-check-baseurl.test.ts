@@ -1,4 +1,23 @@
-import { expect, mock, test } from "bun:test";
+import { afterAll, expect, mock, test } from "bun:test";
+// These `import * as` namespaces are LIVE views: once this file's in-test `mock.module(...)`
+// calls run, they would reflect the mocked exports. So snapshot each into a plain object at
+// module-eval time (before any test runs a mock) to capture the REAL modules. `mock.restore()`
+// does NOT unregister `mock.module()`, so we re-register these real snapshots in afterAll to
+// stop this file's `db`/`../db` mocks leaking into later files (the "db.delete is not a
+// function" baseline noise).
+import * as realDbSchemaNs from "db";
+import * as realDbNs from "../db";
+import * as realUtilsNs from "../utils";
+
+const realDbSchema = { ...realDbSchemaNs };
+const realDb = { ...realDbNs };
+const realUtils = { ...realUtilsNs };
+
+afterAll(() => {
+  mock.module("db", () => realDbSchema);
+  mock.module("../db", () => realDb);
+  mock.module("../utils", () => realUtils);
+});
 
 test("agent-check: runtime=agent_sdk keeps OpenAI-compatible /v1 endpoints intact", async () => {
   const channelTable = { id: "channel_id", userId: "channel_user_id" };

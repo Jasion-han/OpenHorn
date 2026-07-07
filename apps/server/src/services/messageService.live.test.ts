@@ -1,4 +1,44 @@
-import { expect, mock, test } from "bun:test";
+import { afterAll, expect, mock, test } from "bun:test";
+// These `import * as` namespaces are LIVE views: once this file's in-test `mock.module(...)`
+// calls run, the namespaces would reflect the mocked exports. So snapshot each into a plain
+// object at module-eval time (before any test runs a mock) to capture the REAL modules.
+// `mock.restore()` does NOT unregister `mock.module()`, so we re-register these real snapshots
+// in afterAll to stop this file's mocks leaking into the next test file (the
+// "db.delete is not a function" baseline noise).
+import * as realDbSchemaNs from "db";
+import * as realAgentAdaptersNs from "../agent-adapters";
+import * as realDbNs from "../db";
+import * as realUtilsNs from "../utils";
+import * as realAgentServiceNs from "./agentService";
+import * as realAgentStreamTimeoutsNs from "./agentStreamTimeouts";
+import * as realAttachmentServiceNs from "./attachmentService";
+import * as realChannelAgentCheckServiceNs from "./channelAgentCheckService";
+import * as realChannelServiceNs from "./channelService";
+import * as realSettingsServiceNs from "./settingsService";
+
+const realDbSchema = { ...realDbSchemaNs };
+const realDb = { ...realDbNs };
+const realAgentAdapters = { ...realAgentAdaptersNs };
+const realUtils = { ...realUtilsNs };
+const realAgentService = { ...realAgentServiceNs };
+const realAgentStreamTimeouts = { ...realAgentStreamTimeoutsNs };
+const realAttachmentService = { ...realAttachmentServiceNs };
+const realChannelAgentCheckService = { ...realChannelAgentCheckServiceNs };
+const realChannelService = { ...realChannelServiceNs };
+const realSettingsService = { ...realSettingsServiceNs };
+
+afterAll(() => {
+  mock.module("db", () => realDbSchema);
+  mock.module("../db", () => realDb);
+  mock.module("../agent-adapters", () => realAgentAdapters);
+  mock.module("../utils", () => realUtils);
+  mock.module("./agentService", () => realAgentService);
+  mock.module("./agentStreamTimeouts", () => realAgentStreamTimeouts);
+  mock.module("./attachmentService", () => realAttachmentService);
+  mock.module("./channelAgentCheckService", () => realChannelAgentCheckService);
+  mock.module("./channelService", () => realChannelService);
+  mock.module("./settingsService", () => realSettingsService);
+});
 
 function parseSsePayloads(raw: string) {
   return raw
@@ -53,6 +93,7 @@ test("stream chat emits live status metadata before assistant deltas", async () 
   const updatedRows: Array<Record<string, unknown>> = [];
 
   mock.module("db", () => ({
+    ...realDbSchema,
     agentSessions: {},
     agentTasks: {},
     channelModels: {},
@@ -143,6 +184,7 @@ test("stream chat emits live status metadata before assistant deltas", async () 
   }));
 
   mock.module("./channelService", () => ({
+    getChannels: async () => [],
     getResolvedChannelForConversation: async () => ({
       channel: {
         provider: "anthropic",
@@ -243,6 +285,7 @@ test("stream agent includes recent conversation context for follow-up turns", as
   const agentConfigs: Array<Record<string, unknown>> = [];
 
   mock.module("db", () => ({
+    ...realDbSchema,
     agentSessions: {},
     agentTasks: {},
     channelModels: {},
@@ -356,6 +399,7 @@ test("stream agent includes recent conversation context for follow-up turns", as
   }));
 
   mock.module("./channelService", () => ({
+    getChannels: async () => [],
     getResolvedChannelForConversation: async () => ({
       channel: {
         provider: "anthropic",
@@ -463,6 +507,7 @@ test("stream agent uses the conversation-selected channel and model", async () =
   const agentConfigs: Array<Record<string, unknown>> = [];
 
   mock.module("db", () => ({
+    ...realDbSchema,
     agentSessions: {},
     agentTasks: {},
     channelModels: {},
@@ -533,7 +578,11 @@ test("stream agent uses the conversation-selected channel and model", async () =
   }));
 
   mock.module("./channelService", () => ({
-    getResolvedChannelForConversation: async (_userId: string, conversation: Record<string, unknown>) => ({
+    getChannels: async () => [],
+    getResolvedChannelForConversation: async (
+      _userId: string,
+      conversation: Record<string, unknown>,
+    ) => ({
       channel: {
         id: conversation.channelId,
         provider: "anthropic",
@@ -575,7 +624,7 @@ test("stream agent uses the conversation-selected channel and model", async () =
 
   try {
     const { streamMessage } = await import(
-      `./messageService?agent-selected-model=${crypto.randomUUID()}`,
+      `./messageService?agent-selected-model=${crypto.randomUUID()}`
     );
     const stream = await streamMessage("user-1", {
       conversationId: "conv-1",
@@ -624,6 +673,7 @@ test("stream agent aborts stalled runs when no visible output arrives", async ()
   const agentConfigs: Array<Record<string, unknown>> = [];
 
   mock.module("db", () => ({
+    ...realDbSchema,
     agentSessions: {},
     agentTasks: {},
     channelModels: {},
@@ -699,6 +749,7 @@ test("stream agent aborts stalled runs when no visible output arrives", async ()
   }));
 
   mock.module("./channelService", () => ({
+    getChannels: async () => [],
     getResolvedChannelForConversation: async () => ({
       channel: {
         provider: "anthropic",
@@ -759,7 +810,8 @@ test("stream agent aborts stalled runs when no visible output arrives", async ()
       if (signal?.reason === "first_output_timeout") {
         yield {
           type: "error",
-          content: "模型长时间无响应（10s）已停止。可能当前渠道不支持 Agent 运行模式，请检查 Provider/Base URL/模型配置。",
+          content:
+            "模型长时间无响应（10s）已停止。可能当前渠道不支持 Agent 运行模式，请检查 Provider/Base URL/模型配置。",
         };
       }
     },
@@ -767,7 +819,7 @@ test("stream agent aborts stalled runs when no visible output arrives", async ()
 
   try {
     const { streamMessage } = await import(
-      `./messageService?agent-keepalive=${crypto.randomUUID()}`,
+      `./messageService?agent-keepalive=${crypto.randomUUID()}`
     );
     const stream = await streamMessage("user-1", {
       conversationId: "conv-1",
@@ -846,6 +898,7 @@ test("stream agent keeps running when meta keepalive arrives before visible outp
   const updatedRows: Array<Record<string, unknown>> = [];
 
   mock.module("db", () => ({
+    ...realDbSchema,
     agentSessions: {},
     agentTasks: {},
     channelModels: {},
@@ -921,6 +974,7 @@ test("stream agent keeps running when meta keepalive arrives before visible outp
   }));
 
   mock.module("./channelService", () => ({
+    getChannels: async () => [],
     getResolvedChannelForConversation: async () => ({
       channel: {
         provider: "anthropic",
@@ -1054,6 +1108,7 @@ test("stream agent fails fast when channel is incompatible with Claude Agent SDK
   const agentConfigs: Array<Record<string, unknown>> = [];
 
   mock.module("db", () => ({
+    ...realDbSchema,
     agentSessions: {},
     agentTasks: {},
     channelModels: {},
@@ -1129,6 +1184,7 @@ test("stream agent fails fast when channel is incompatible with Claude Agent SDK
   }));
 
   mock.module("./channelService", () => ({
+    getChannels: async () => [],
     getResolvedChannelForConversation: async () => ({
       channel: {
         provider: "anthropic",
@@ -1255,6 +1311,7 @@ test("regenerate falls back to the previous user message when assistant id is mi
   };
 
   mock.module("db", () => ({
+    ...realDbSchema,
     agentSessions: {},
     agentTasks: {},
     channelModels: {},
@@ -1356,6 +1413,7 @@ test("regenerate falls back to the previous user message when assistant id is mi
   }));
 
   mock.module("./channelService", () => ({
+    getChannels: async () => [],
     getResolvedChannelForConversation: async () => ({
       channel: {
         provider: "anthropic",
@@ -1449,6 +1507,7 @@ test("edit user message creates a new assistant reply when the user message is t
   }> = [];
 
   mock.module("db", () => ({
+    ...realDbSchema,
     agentSessions: {},
     agentTasks: {},
     channelModels: {},
@@ -1552,6 +1611,7 @@ test("edit user message creates a new assistant reply when the user message is t
   }));
 
   mock.module("./channelService", () => ({
+    getChannels: async () => [],
     getResolvedChannelForConversation: async () => ({
       channel: {
         provider: "anthropic",
@@ -1667,6 +1727,7 @@ test("edit agent user message streams the updated reply instead of returning a t
   };
 
   mock.module("db", () => ({
+    ...realDbSchema,
     agentSessions: {},
     agentTasks: {},
     channelModels: {},
@@ -1740,6 +1801,7 @@ test("edit agent user message streams the updated reply instead of returning a t
   }));
 
   mock.module("./channelService", () => ({
+    getChannels: async () => [],
     getResolvedChannelForConversation: async () => ({
       channel: {
         provider: "anthropic",

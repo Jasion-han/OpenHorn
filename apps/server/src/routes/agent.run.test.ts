@@ -1,4 +1,31 @@
-import { expect, mock, test } from "bun:test";
+import { afterAll, expect, mock, test } from "bun:test";
+// These `import * as` namespaces are LIVE views: once this file's in-test `mock.module(...)`
+// calls run, they would reflect the mocked exports. So snapshot each into a plain object at
+// module-eval time (before any test runs a mock) to capture the REAL modules. `mock.restore()`
+// does NOT unregister `mock.module()`, so re-register these real snapshots in afterAll to stop
+// this file's mocks leaking into later test files.
+import * as realAgentServiceNs from "../services/agentService";
+import * as realAgentTaskServiceNs from "../services/agentTaskService";
+import * as realAuthServiceNs from "../services/authService";
+import * as realAutoTitleServiceNs from "../services/autoTitleService";
+import * as realChannelAgentCheckServiceNs from "../services/channelAgentCheckService";
+import * as realChannelServiceNs from "../services/channelService";
+
+const realAgentService = { ...realAgentServiceNs };
+const realAgentTaskService = { ...realAgentTaskServiceNs };
+const realAuthService = { ...realAuthServiceNs };
+const realAutoTitleService = { ...realAutoTitleServiceNs };
+const realChannelAgentCheckService = { ...realChannelAgentCheckServiceNs };
+const realChannelService = { ...realChannelServiceNs };
+
+afterAll(() => {
+  mock.module("../services/authService", () => realAuthService);
+  mock.module("../services/agentService", () => realAgentService);
+  mock.module("../services/agentTaskService", () => realAgentTaskService);
+  mock.module("../services/channelService", () => realChannelService);
+  mock.module("../services/channelAgentCheckService", () => realChannelAgentCheckService);
+  mock.module("../services/autoTitleService", () => realAutoTitleService);
+});
 
 test("POST /sessions/:id/run returns compatibility error before starting SSE run", async () => {
   let runAgentCalled = false;

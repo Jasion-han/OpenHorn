@@ -4,14 +4,6 @@ import { eq } from "drizzle-orm";
 import { db } from "../db";
 import { getAttachmentsByIds, linkAttachmentsToMessage } from "./attachmentService";
 
-// In the full suite another test file may `mock.module("../db", ...)` with a partial
-// query-builder mock (the known "db.delete is not a function" baseline noise). These
-// DB-backed tests can only run against the real client, so detect the mock and skip;
-// they still fully validate ownership scoping when the file is run in isolation.
-function dbIsMocked() {
-  return typeof (db as { delete?: unknown }).delete !== "function";
-}
-
 async function seedUser(now: Date) {
   const userId = crypto.randomUUID();
   await db.insert(users).values({
@@ -64,7 +56,6 @@ async function seedConversationAttachment(conversationId: string, now: Date) {
 }
 
 test("getAttachmentsByIds returns only attachments owned by the given user", async () => {
-  if (dbIsMocked()) return;
   const now = new Date();
   const ownerId = await seedUser(now);
   const foreignId = await seedUser(now);
@@ -89,7 +80,6 @@ test("getAttachmentsByIds returns only attachments owned by the given user", asy
 });
 
 test("getAttachmentsByIds recognizes session-owned attachments", async () => {
-  if (dbIsMocked()) return;
   const now = new Date();
   const ownerId = await seedUser(now);
   const sessionId = crypto.randomUUID();
@@ -131,7 +121,6 @@ test("getAttachmentsByIds recognizes session-owned attachments", async () => {
 });
 
 test("linkAttachmentsToMessage links only attachments owned by the given user", async () => {
-  if (dbIsMocked()) return;
   const now = new Date();
   const ownerId = await seedUser(now);
   const foreignId = await seedUser(now);

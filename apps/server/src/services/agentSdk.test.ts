@@ -1,5 +1,17 @@
-import { expect, mock, test } from "bun:test";
+import { afterAll, expect, mock, test } from "bun:test";
+// The `import * as` namespace is a LIVE view: once this file's in-test `mock.module(...)` call
+// runs, it would reflect the mocked exports. So snapshot it into a plain object at module-eval
+// time (before any test runs a mock) to capture the REAL SDK. `mock.restore()` does NOT
+// unregister `mock.module()`, so re-register the real snapshot in afterAll to stop this file's
+// mock leaking into later test files.
+import * as realClaudeAgentSdkNs from "@anthropic-ai/claude-agent-sdk";
 import { convertSdkEvent, mergeAgentTextOutput } from "./agentSdk";
+
+const realClaudeAgentSdk = { ...realClaudeAgentSdkNs };
+
+afterAll(() => {
+  mock.module("@anthropic-ai/claude-agent-sdk", () => realClaudeAgentSdk);
+});
 
 test("convertSdkEvent: rewrites generic network errors to actionable guidance", () => {
   const result = convertSdkEvent({

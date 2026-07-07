@@ -4,14 +4,6 @@ import { and, eq } from "drizzle-orm";
 import { db } from "../db";
 import { deleteSettingValue, getSettingValues, setSettingValue } from "./settingsService";
 
-// In the full suite another test file may `mock.module("../db", ...)` with a partial
-// query-builder mock (the known "db.delete is not a function" baseline noise). This
-// DB-backed test can only run against the real client, so detect the mock and skip;
-// it still fully validates upsert behavior when the file is run in isolation.
-function dbIsMocked() {
-  return typeof (db as { delete?: unknown }).delete !== "function";
-}
-
 test("settings: set/get/delete value by key", async () => {
   const userId = crypto.randomUUID();
   const key = "chat.systemPrompt";
@@ -37,7 +29,6 @@ test("settings: set/get/delete value by key", async () => {
 });
 
 test("settings: repeated set upserts a single row with the latest value", async () => {
-  if (dbIsMocked()) return;
   const userId = crypto.randomUUID();
   const key = "chat.systemPrompt";
 
