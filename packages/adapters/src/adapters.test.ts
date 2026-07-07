@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { AnthropicAdapter, OpenAIAdapter } from "./adapters";
+import { AnthropicAdapter, GoogleAdapter, OpenAIAdapter } from "./adapters";
 import type { GenericToolDefinition } from "./types";
 
 type FetchInput = Parameters<typeof fetch>[0];
@@ -31,6 +31,23 @@ function mockFetch(response: Response) {
   globalThis.fetch = (async () => response) as unknown as typeof fetch;
   return () => {
     globalThis.fetch = original;
+  };
+}
+
+// Like `mockFetch` but records the arguments of each call so tests can assert on
+// how the request was formed (URL, headers, body).
+function mockFetchCapture(response: Response) {
+  const calls: Array<{ input: FetchInput; init: FetchInit }> = [];
+  const original = globalThis.fetch;
+  globalThis.fetch = (async (input: FetchInput, init: FetchInit) => {
+    calls.push({ input, init });
+    return response;
+  }) as unknown as typeof fetch;
+  return {
+    calls,
+    restore: () => {
+      globalThis.fetch = original;
+    },
   };
 }
 
@@ -291,6 +308,114 @@ test("AnthropicAdapter.chatStream throws on a mid-stream error event", async () 
     expect(chunks.join("")).toBe("partial");
     expect(caught).toBeDefined();
     expect(caught?.message).toBe("Provider API error: Overloaded");
+  } finally {
+    restore();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Google — safety-blocked streaming surfaces an error (no silent blank turn)
+// ---------------------------------------------------------------------------
+
+test("GoogleAdapter.chatStream throws when the generation is safety-blocked", async () => {
+  const restore = mockFetch(
+    sseResponse(['data: {"candidates":[{"content":{"parts":[]},"finishReason":"SAFETY"}]}\n\n']),
+  );
+  try {
+    const adapter = new GoogleAdapter("test-key", "https://example.com");
+    const chunks: string[] = [];
+    let caught: Error | null = null;
+    try {
+      for await (const chunk of adapter.chatStream({
+        model: "gemini-test",
+        messages: [{ role: "user", content: "hi" }],
+      })) {
+        chunks.push(chunk);
+      }
+    } catch (error) {
+      caught = error as Error;
+    }
+    expect(chunks.join("")).toBe("");
+    expect(caught).toBeDefined();
+    expect(caught?.message).toBe(
+      "Provider API error (200): Generation stopped by Gemini (finishReason: SAFETY)",
+    );
+  } finally {
+    restore();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Google — chat() blocked prompt produces a specific error
+// ---------------------------------------------------------------------------
+
+test("GoogleAdapter.chat throws a specific error when the prompt is blocked", async () => {
+  const restore = mockFetch(
+    jsonResponse({
+      promptFeedback: { blockReason: "SAFETY" },
+      candidates: [],
+    }),
+  );
+  try {
+    const adapter = new GoogleAdapter("test-key", "https://example.com");
+    await expect(
+      adapter.chat({
+        model: "gemini-test",
+        messages: [{ role: "user", content: "hi" }],
+      }),
+    ).rejects.toThrow("Prompt blocked by Gemini safety filters (blockReason: SAFETY)");
+  } finally {
+    restore();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Google — API key travels in the x-goog-api-key header, not the URL query
+// ---------------------------------------------------------------------------
+
+test("GoogleAdapter.chat sends the API key as a header, not a query param", async () => {
+  const capture = mockFetchCapture(
+    jsonResponse({
+      candidates: [{ content: { parts: [{ text: "hello" }] } }],
+      usageMetadata: { promptTokenCount: 2, candidatesTokenCount: 3, totalTokenCount: 5 },
+    }),
+  );
+  try {
+    const adapter = new GoogleAdapter("secret-key", "https://example.com");
+    const result = await adapter.chat({
+      model: "gemini-test",
+      messages: [{ role: "user", content: "hi" }],
+    });
+    expect(result.content).toBe("hello");
+    expect(capture.calls).toHaveLength(1);
+    const call = capture.calls[0];
+    const url = String(call.input);
+    expect(url.includes("key=")).toBe(false);
+    const headers = (call.init?.headers ?? {}) as Record<string, string>;
+    expect(headers["x-goog-api-key"]).toBe("secret-key");
+  } finally {
+    capture.restore();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Google — partial usage is reported when only one token count is present
+// ---------------------------------------------------------------------------
+
+test("GoogleAdapter.chat reports partial usage when only one token count exists", async () => {
+  const restore = mockFetch(
+    jsonResponse({
+      candidates: [{ content: { parts: [{ text: "hi" }] } }],
+      usageMetadata: { promptTokenCount: 7 },
+    }),
+  );
+  try {
+    const adapter = new GoogleAdapter("test-key", "https://example.com");
+    const result = await adapter.chat({
+      model: "gemini-test",
+      messages: [{ role: "user", content: "hi" }],
+    });
+    expect(result.usage).toEqual({ promptTokens: 7, completionTokens: 0, totalTokens: 7 });
   } finally {
     restore();
   }

@@ -1560,6 +1560,48 @@ function extractGeminiSystemInstruction(
   return parts.length > 0 ? { parts: parts.map((t) => ({ text: t })) } : undefined;
 }
 
+// Gemini finish reasons that mean the generation was stopped/blocked rather than
+// completing normally (STOP / MAX_TOKENS are the healthy ones).
+// See https://ai.google.dev/api/generate-content#FinishReason
+const GEMINI_BLOCKING_FINISH_REASONS = new Set([
+  "SAFETY",
+  "RECITATION",
+  "BLOCKLIST",
+  "PROHIBITED_CONTENT",
+  "SPII",
+  "OTHER",
+]);
+
+function extractGeminiBlock(data: Record<string, unknown>): {
+  blockReason: string | null;
+  finishReason: string | null;
+  hasCandidates: boolean;
+} {
+  const promptFeedback = isRecord(data.promptFeedback) ? data.promptFeedback : null;
+  const blockReason =
+    promptFeedback && typeof promptFeedback.blockReason === "string"
+      ? promptFeedback.blockReason
+      : null;
+  const candidates = Array.isArray(data.candidates) ? data.candidates : [];
+  const first = candidates[0];
+  const finishReason =
+    isRecord(first) && typeof first.finishReason === "string" ? first.finishReason : null;
+  return { blockReason, finishReason, hasCandidates: candidates.length > 0 };
+}
+
+// Returns a specific detail string when a Gemini generation was blocked (prompt
+// blocked or a safety/recitation finish reason), or null when it stopped for a
+// benign reason. Lets callers distinguish a block from a genuinely empty reply.
+function geminiBlockDetail(blockReason: string | null, finishReason: string | null): string | null {
+  if (blockReason) {
+    return `Prompt blocked by Gemini safety filters (blockReason: ${blockReason})`;
+  }
+  if (finishReason && GEMINI_BLOCKING_FINISH_REASONS.has(finishReason)) {
+    return `Generation stopped by Gemini (finishReason: ${finishReason})`;
+  }
+  return null;
+}
+
 export class GoogleAdapter implements ToolCallingAdapter {
   private apiKey: string;
   private baseUrl: string;
@@ -1571,7 +1613,13 @@ export class GoogleAdapter implements ToolCallingAdapter {
   }
 
   private modelUrl(model: string, method: string) {
-    return `${this.baseUrl}/v1beta/models/${model}:${method}?key=${this.apiKey}`;
+    return `${this.baseUrl}/v1beta/models/${model}:${method}`;
+  }
+
+  // Send the API key via the `x-goog-api-key` header instead of the URL query
+  // string so it doesn't leak into proxy / access logs.
+  private authHeaders(): Record<string, string> {
+    return { "Content-Type": "application/json", "x-goog-api-key": this.apiKey };
   }
 
   async chat(options: ChatOptions): Promise<ChatResponse> {
@@ -1595,7 +1643,7 @@ export class GoogleAdapter implements ToolCallingAdapter {
       for (let attempt = 0; attempt < 2; attempt++) {
         response = await fetch(url, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: this.authHeaders(),
           body,
           signal: timeout.signal,
         });
@@ -1630,26 +1678,37 @@ export class GoogleAdapter implements ToolCallingAdapter {
         : "";
 
     if (!content) {
-      throw new Error("Gemini API error: Missing response content");
+      const { blockReason, finishReason, hasCandidates } = extractGeminiBlock(data);
+      const detail =
+        geminiBlockDetail(blockReason, finishReason) ??
+        (hasCandidates ? "Empty response content from Gemini" : "Gemini returned no candidates");
+      throw new Error(formatProviderApiError(response.status, detail));
     }
 
     const usageRaw = isRecord(data.usageMetadata) ? data.usageMetadata : null;
     const promptTokens = usageRaw ? toFiniteNumber(usageRaw.promptTokenCount) : null;
     const completionTokens = usageRaw ? toFiniteNumber(usageRaw.candidatesTokenCount) : null;
+    const totalTokens = usageRaw ? toFiniteNumber(usageRaw.totalTokenCount) : null;
 
     return {
       id: "",
       model: options.model,
       content,
+      // Report whatever token counts are present (partial usage) rather than
+      // dropping usage entirely when only one count is available.
       usage:
-        promptTokens !== null && completionTokens !== null
-          ? { promptTokens, completionTokens, totalTokens: promptTokens + completionTokens }
+        promptTokens !== null || completionTokens !== null || totalTokens !== null
+          ? {
+              promptTokens: promptTokens ?? 0,
+              completionTokens: completionTokens ?? 0,
+              totalTokens: totalTokens ?? (promptTokens ?? 0) + (completionTokens ?? 0),
+            }
           : undefined,
     };
   }
 
   async *chatStream(options: ChatOptions): AsyncGenerator<string> {
-    const url = `${this.modelUrl(options.model, "streamGenerateContent")}&alt=sse`;
+    const url = `${this.modelUrl(options.model, "streamGenerateContent")}?alt=sse`;
     const systemInstruction = extractGeminiSystemInstruction(options.messages);
     const body = JSON.stringify({
       ...(systemInstruction ? { systemInstruction } : {}),
@@ -1671,7 +1730,7 @@ export class GoogleAdapter implements ToolCallingAdapter {
       for (let attempt = 0; attempt < 2; attempt++) {
         response = await fetch(url, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: this.authHeaders(),
           body,
           signal: timeout.signal,
         });
@@ -1698,6 +1757,12 @@ export class GoogleAdapter implements ToolCallingAdapter {
 
     const decoder = new TextDecoder();
     let buffer = "";
+    // Track block signals so a stream that yields no text because it was blocked
+    // (SAFETY / RECITATION / prompt blocked) surfaces an error instead of a
+    // silent blank assistant turn.
+    let sawText = false;
+    let blockReason: string | null = null;
+    let finishReason: string | null = null;
 
     try {
       while (true) {
@@ -1712,10 +1777,13 @@ export class GoogleAdapter implements ToolCallingAdapter {
         for (const line of lines) {
           if (line.startsWith("data: ")) {
             const raw = line.slice(6);
-            if (raw === "[DONE]") return;
+            if (raw === "[DONE]") break;
             try {
               const parsed = JSON.parse(raw);
               if (isRecord(parsed)) {
+                const block = extractGeminiBlock(parsed);
+                if (block.blockReason) blockReason = block.blockReason;
+                if (block.finishReason) finishReason = block.finishReason;
                 const candidates = Array.isArray(parsed.candidates) ? parsed.candidates : [];
                 const first = candidates[0];
                 if (
@@ -1725,6 +1793,7 @@ export class GoogleAdapter implements ToolCallingAdapter {
                 ) {
                   for (const part of first.content.parts as Array<Record<string, unknown>>) {
                     if (typeof part.text === "string" && part.text.length > 0) {
+                      sawText = true;
                       yield part.text;
                     }
                   }
@@ -1740,6 +1809,13 @@ export class GoogleAdapter implements ToolCallingAdapter {
       rethrowAbortReason(timeout.signal, error);
     } finally {
       timeout.cleanup();
+    }
+
+    if (!sawText) {
+      const detail = geminiBlockDetail(blockReason, finishReason);
+      if (detail) {
+        throw new Error(formatProviderApiError(response.status, detail));
+      }
     }
   }
 
@@ -1780,7 +1856,7 @@ export class GoogleAdapter implements ToolCallingAdapter {
       for (let attempt = 0; attempt < 2; attempt++) {
         response = await fetch(url, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: this.authHeaders(),
           body,
           signal: timeout.signal,
         });
@@ -1828,6 +1904,19 @@ export class GoogleAdapter implements ToolCallingAdapter {
 
     const finishReason =
       isRecord(first) && typeof first.finishReason === "string" ? first.finishReason : null;
+
+    // A blocked prompt yields no candidates (or a safety/recitation finish
+    // reason) with no text and no tool calls; throw so the agent loop can tell
+    // "blocked" apart from "model deliberately emitted nothing".
+    if (!text && toolCalls.length === 0) {
+      const { blockReason, hasCandidates } = extractGeminiBlock(data);
+      const detail = geminiBlockDetail(blockReason, finishReason);
+      if (detail || !hasCandidates) {
+        throw new Error(
+          formatProviderApiError(response.status, detail ?? "Gemini returned no candidates"),
+        );
+      }
+    }
 
     return { text, toolCalls, finishReason };
   }

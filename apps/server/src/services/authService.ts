@@ -34,8 +34,11 @@ export interface LoginInput {
 export async function register(input: RegisterInput) {
   const existing = await db.select().from(users).where(eq(users.email, input.email)).limit(1);
 
+  // Use a neutral, non-enumerable error instead of confirming the address is
+  // already taken. The DB unique constraint still prevents duplicate accounts;
+  // this only avoids leaking account existence via the API error message.
   if (existing.length > 0) {
-    throw new Error("Email already registered");
+    throw new Error("Unable to register with the provided details");
   }
 
   const passwordHash = await bcrypt.hash(input.password, 10);
