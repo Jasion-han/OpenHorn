@@ -1,10 +1,11 @@
-import { readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import {
   assertExistingPathInsideWorkspace,
   ensureParentDirExists,
   resolvePathInsideWorkspace,
   resolveWritePathInsideWorkspace,
+  writeFileNoFollow,
 } from "./workspace";
 
 export type FsEntry = {
@@ -96,6 +97,8 @@ export async function fsWriteText(input: {
     targetPath: input.filePath,
   });
   await ensureParentDirExists(resolved);
-  await writeFile(resolved, input.content, "utf8");
+  // O_NOFOLLOW on the final component closes the symlink TOCTOU window between
+  // the boundary check above and the write.
+  await writeFileNoFollow(resolved, input.content);
   return { ok: true };
 }

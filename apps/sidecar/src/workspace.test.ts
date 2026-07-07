@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -8,6 +8,7 @@ import {
   ForbiddenWorkspaceRootError,
   getForbiddenWorkspaceRoots,
   resolvePathInsideWorkspace,
+  writeFileNoFollow,
 } from "./workspace";
 
 describe("workspace path safety", () => {
@@ -37,6 +38,43 @@ describe("workspace path safety", () => {
     const resolved = resolvePathInsideWorkspace({ workspaceRoot, targetPath: "src/a.txt" });
     await assertExistingPathInsideWorkspace({ workspaceRoot, resolvedPath: resolved });
     expect(resolved.endsWith(path.join("src", "a.txt"))).toBe(true);
+  });
+});
+
+describe("writeFileNoFollow", () => {
+  test("writes a new regular file", async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), "openhorn-nf-"));
+    const target = path.join(dir, "new.txt");
+    await writeFileNoFollow(target, "hello");
+    expect(readFileSync(target, "utf8")).toBe("hello");
+  });
+
+  test("overwrites an existing regular file", async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), "openhorn-nf-"));
+    const target = path.join(dir, "a.txt");
+    writeFileSync(target, "old");
+    await writeFileNoFollow(target, "new");
+    expect(readFileSync(target, "utf8")).toBe("new");
+  });
+
+  test("refuses to follow a terminal symlink (TOCTOU guard)", async () => {
+    // Simulates a symlink swapped in as the final component after the
+    // workspace-boundary check: the write must fail rather than escape.
+    const dir = mkdtempSync(path.join(os.tmpdir(), "openhorn-nf-"));
+    const outside = path.join(dir, "secret.txt");
+    writeFileSync(outside, "ORIGINAL_SECRET");
+    const link = path.join(dir, "trap.txt");
+    symlinkSync(outside, link);
+
+    let threw = false;
+    try {
+      await writeFileNoFollow(link, "PWNED");
+    } catch {
+      threw = true;
+    }
+
+    expect(threw).toBe(true);
+    expect(readFileSync(outside, "utf8")).toBe("ORIGINAL_SECRET");
   });
 });
 

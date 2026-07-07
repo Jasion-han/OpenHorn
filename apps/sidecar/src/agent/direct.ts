@@ -1,6 +1,6 @@
 import { exec, execFile } from "node:child_process";
 import { lookup } from "node:dns/promises";
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import {
   Agent,
@@ -31,6 +31,7 @@ import {
   resolvePathInsideWorkspace,
   resolveWritePathInsideWorkspace,
   toWorkspaceRelative,
+  writeFileNoFollow,
 } from "../workspace";
 import {
   buildFileContext,
@@ -298,7 +299,7 @@ export async function executeTool(
     try {
       const resolved = await resolveWritePathInWorkspace(cwd, filePath);
       await mkdir(path.dirname(resolved), { recursive: true });
-      await writeFile(resolved, content, "utf-8");
+      await writeFileNoFollow(resolved, content);
       return `File written: ${filePath}`;
     } catch (err) {
       return `Error: ${err instanceof Error ? err.message : "write failed"}`;
@@ -316,7 +317,7 @@ export async function executeTool(
       const content = await readFile(resolved, "utf-8");
       if (!content.includes(oldStr)) return "Error: old_string not found in file";
       const updated = content.replace(oldStr, newStr);
-      await writeFile(resolved, updated, "utf-8");
+      await writeFileNoFollow(resolved, updated);
       return `File edited: ${filePath}`;
     } catch (err) {
       return `Error: ${err instanceof Error ? err.message : "edit failed"}`;

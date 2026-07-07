@@ -1,4 +1,5 @@
-import { mkdir, realpath, stat } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
+import { mkdir, open, realpath, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -139,8 +140,14 @@ export async function assertExistingPathInsideWorkspace(input: {
  * Returns the lexically-resolved (not symlink-followed) path that the
  * caller should pass to `writeFile`. We deliberately do not return the
  * realpath, because some callers want to keep the write inside the
- * workspace tree even if a non-escaping symlink is involved — but the
- * checks above guarantee no symlink leaves the workspace.
+ * workspace tree even if a non-escaping symlink is involved.
+ *
+ * NOTE: this is a check-then-use validation, so on its own it is subject to
+ * a symlink TOCTOU — a path component could be swapped for an escaping
+ * symlink between this check and the eventual write. To close that window,
+ * perform the actual write with `writeFileNoFollow` (below), which refuses
+ * to follow a terminal symlink. The intermediate directories were already
+ * realpath-validated here, so only the final component needs O_NOFOLLOW.
  */
 export async function resolveWritePathInsideWorkspace(input: {
   workspaceRoot: string;
@@ -197,6 +204,25 @@ export async function resolveWritePathInsideWorkspace(input: {
 
 export async function ensureParentDirExists(filePath: string) {
   await mkdir(path.dirname(filePath), { recursive: true });
+}
+
+/**
+ * Writes `content` to `filePath`, opening the final path component with
+ * O_NOFOLLOW so a terminal symlink cannot be followed. Paired with
+ * `resolveWritePathInsideWorkspace`: the resolver validates the path is inside
+ * the workspace, and this write refuses to follow a symlink that was swapped
+ * in after that check (symlink TOCTOU), failing with ELOOP instead of escaping.
+ * Regular new-file writes and overwrites of regular files behave normally.
+ */
+export async function writeFileNoFollow(filePath: string, content: string): Promise<void> {
+  const flags =
+    fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC | fsConstants.O_NOFOLLOW;
+  const handle = await open(filePath, flags, 0o666);
+  try {
+    await handle.writeFile(content, "utf8");
+  } finally {
+    await handle.close();
+  }
 }
 
 /**
