@@ -352,6 +352,63 @@ export function formatChannelLabel(
 }
 
 /**
+ * Labels for the Agent settings panel (default networking capability + Tavily
+ * search configuration). Product names ("Tavily", "Agent", "MCP", "Chat",
+ * "DuckDuckGo", "TAVILY_API_KEY") and raw server error messages stay English /
+ * verbatim per rule 3 above; everything else is user-facing Chinese copy. Common
+ * words (cancel/save) get their own keys here to match the per-namespace pattern
+ * used by the skill/channel dictionaries.
+ */
+export const agentSettingsLabels = {
+  // Section: default networking capability
+  "settings.agent.networking.title": "默认允许联网能力",
+  "settings.agent.networking.description":
+    "普通聊天会在需要最新信息时使用产品内置的实时能力；Agent 在此基础上叠加更多工具。默认渠道决定模型供应商，但不是实时能力的开关。",
+  "settings.agent.builtinRealtime.title": "内置实时能力",
+  "settings.agent.builtinRealtime.description":
+    "支持本地时间解析、结构化天气查询，以及无 provider 时的离线降级提示。",
+  "settings.agent.defaultChannel.title": "默认模型渠道",
+  "settings.agent.defaultChannel.description":
+    "用于 Chat/Agent 的基础模型调用；实时能力会在服务端先行路由，再进入模型。",
+  "settings.agent.defaultChannel.unset": "未设置默认渠道，请在左侧切换到「渠道」进行配置。",
+  // Section: Tavily search
+  "settings.agent.tavily.title": "默认允许联网搜索（Tavily）",
+  "settings.agent.tavily.description":
+    "用于 web_search / research 路由。只有在判断需要最新外部信息时才会触发。用户填写的 Tavily Key 优先级高于服务端全局 TAVILY_API_KEY。",
+  "settings.agent.tavily.userKeyTitle": "用户级 Tavily API Key",
+  "settings.agent.tavily.userKeyDescription": "留空则回落到部署默认 Key；填写后仅当前账号生效。",
+  "settings.agent.tavily.badge.disabled": "已关闭",
+  "settings.agent.tavily.badge.userOverride": "用户覆盖中",
+  "settings.agent.tavily.badge.serverDefault": "使用服务端默认",
+  "settings.agent.tavily.enableTitle": "启用 Tavily 搜索",
+  "settings.agent.tavily.enableDescription":
+    "关闭后不使用 Tavily，仅用免费的 DuckDuckGo 搜索（无需 Key）；开启并填写 Key 后用 Tavily。仅在需要最新信息时才会联网。",
+  // Footer buttons
+  "settings.agent.cancel": "取消",
+  "settings.agent.saving": "保存中...",
+  "settings.agent.save": "保存",
+  // Toasts
+  "settings.agent.notify.loadFailedTitle": "加载失败",
+  "settings.agent.notify.loadFailedBody": "无法加载 Agent 设置。",
+  "settings.agent.notify.savedTitle": "已保存",
+  "settings.agent.notify.tavilyKeyUpdatedBody": "Tavily API Key 已更新，将优先覆盖服务端默认 Key。",
+  "settings.agent.notify.tavilyKeyClearedBody": "已恢复使用服务端默认 Tavily Key。",
+  "settings.agent.notify.saveFailedTitle": "保存失败",
+  "settings.agent.notify.saveTavilyKeyFailedBody": "无法保存 Tavily Key。",
+  "settings.agent.notify.updatedTitle": "已更新",
+  "settings.agent.notify.tavilyEnabledBody": "Tavily 搜索已启用。",
+  "settings.agent.notify.tavilyDisabledBody": "Tavily 搜索已关闭。",
+  "settings.agent.notify.updateFailedTitle": "更新失败",
+  "settings.agent.notify.updateTavilyFailedBody": "无法更新 Tavily 状态。",
+} as const;
+
+type AgentSettingsLabelKey = keyof typeof agentSettingsLabels;
+
+export function getAgentSettingsLabel(key: AgentSettingsLabelKey): string {
+  return agentSettingsLabels[key];
+}
+
+/**
  * Labels for the composer slash-command panel (type `/` to open). Group titles
  * and built-in command names are user-facing Chinese copy; the literal trigger
  * "/" and tool words (MCP / Skill) stay English per rule 3 above.

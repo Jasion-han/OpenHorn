@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Badge, Button, Input, Label, SettingsCard, SettingsSection, Switch } from "ui";
 import { getGlobalDefaultChannel } from "../../lib/defaultChannel";
+import { getAgentSettingsLabel } from "../../lib/i18n/agent";
 import { notifyError, notifySuccess } from "../../lib/notify";
 import { createServerApi } from "../../lib/serverApi";
 import { BACKEND_UP_EVENT } from "../../stores/backendStatusStore";
@@ -70,7 +71,12 @@ export function AgentSettings() {
         enabledRaw == null ? true : String(enabledRaw).trim().toLowerCase() !== "false",
       );
     } catch (error) {
-      notifyError("加载失败", error instanceof Error ? error.message : "无法加载 Agent 设置。");
+      notifyError(
+        getAgentSettingsLabel("settings.agent.notify.loadFailedTitle"),
+        error instanceof Error
+          ? error.message
+          : getAgentSettingsLabel("settings.agent.notify.loadFailedBody"),
+      );
     } finally {
       setLoading(false);
     }
@@ -97,13 +103,18 @@ export function AgentSettings() {
       await api.settings.set(TAVILY_API_KEY_SETTING, tavilyApiKey.trim() || null);
       setSavedTavilyApiKey(tavilyApiKey.trim());
       notifySuccess(
-        "已保存",
+        getAgentSettingsLabel("settings.agent.notify.savedTitle"),
         tavilyApiKey.trim()
-          ? "Tavily API Key 已更新，将优先覆盖服务端默认 Key。"
-          : "已恢复使用服务端默认 Tavily Key。",
+          ? getAgentSettingsLabel("settings.agent.notify.tavilyKeyUpdatedBody")
+          : getAgentSettingsLabel("settings.agent.notify.tavilyKeyClearedBody"),
       );
     } catch (error) {
-      notifyError("保存失败", error instanceof Error ? error.message : "无法保存 Tavily Key。");
+      notifyError(
+        getAgentSettingsLabel("settings.agent.notify.saveFailedTitle"),
+        error instanceof Error
+          ? error.message
+          : getAgentSettingsLabel("settings.agent.notify.saveTavilyKeyFailedBody"),
+      );
     } finally {
       setSavingTavilyApiKey(false);
     }
@@ -115,10 +126,20 @@ export function AgentSettings() {
     setSavingTavilyEnabled(true);
     try {
       await api.settings.set(TAVILY_ENABLED_SETTING, next ? "true" : "false");
-      notifySuccess("已更新", next ? "Tavily 搜索已启用。" : "Tavily 搜索已关闭。");
+      notifySuccess(
+        getAgentSettingsLabel("settings.agent.notify.updatedTitle"),
+        next
+          ? getAgentSettingsLabel("settings.agent.notify.tavilyEnabledBody")
+          : getAgentSettingsLabel("settings.agent.notify.tavilyDisabledBody"),
+      );
     } catch (error) {
       setTavilyEnabled(!next);
-      notifyError("更新失败", error instanceof Error ? error.message : "无法更新 Tavily 状态。");
+      notifyError(
+        getAgentSettingsLabel("settings.agent.notify.updateFailedTitle"),
+        error instanceof Error
+          ? error.message
+          : getAgentSettingsLabel("settings.agent.notify.updateTavilyFailedBody"),
+      );
     } finally {
       setSavingTavilyEnabled(false);
     }
@@ -127,25 +148,29 @@ export function AgentSettings() {
   return (
     <div className="flex flex-col gap-8">
       <SettingsSection
-        title="默认允许联网能力"
-        description="普通聊天会在需要最新信息时使用产品内置的实时能力；Agent 在此基础上叠加更多工具。默认渠道决定模型供应商，但不是实时能力的开关。"
+        title={getAgentSettingsLabel("settings.agent.networking.title")}
+        description={getAgentSettingsLabel("settings.agent.networking.description")}
       >
         <SettingsCard divided={false} className="p-4">
           <div className="flex flex-col gap-3">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-sm font-medium">内置实时能力</p>
+                <p className="text-sm font-medium">
+                  {getAgentSettingsLabel("settings.agent.builtinRealtime.title")}
+                </p>
                 <p className="text-xs text-muted-foreground">
-                  支持本地时间解析、结构化天气查询，以及无 provider 时的离线降级提示。
+                  {getAgentSettingsLabel("settings.agent.builtinRealtime.description")}
                 </p>
               </div>
               <Badge variant="secondary">Product-owned</Badge>
             </div>
             <div className="flex items-center justify-between gap-3 rounded-xl border border-border/50 bg-background/60 p-3">
               <div>
-                <p className="text-sm font-medium">默认模型渠道</p>
+                <p className="text-sm font-medium">
+                  {getAgentSettingsLabel("settings.agent.defaultChannel.title")}
+                </p>
                 <p className="text-xs text-muted-foreground">
-                  用于 Chat/Agent 的基础模型调用；实时能力会在服务端先行路由，再进入模型。
+                  {getAgentSettingsLabel("settings.agent.defaultChannel.description")}
                 </p>
               </div>
               {defaultChannel ? (
@@ -160,7 +185,7 @@ export function AgentSettings() {
                 </Badge>
               ) : (
                 <p className="text-sm text-muted-foreground">
-                  未设置默认渠道，请在左侧切换到「渠道」进行配置。
+                  {getAgentSettingsLabel("settings.agent.defaultChannel.unset")}
                 </p>
               )}
             </div>
@@ -169,33 +194,42 @@ export function AgentSettings() {
       </SettingsSection>
 
       <SettingsSection
-        title="默认允许联网搜索（Tavily）"
-        description="用于 web_search / research 路由。只有在判断需要最新外部信息时才会触发。用户填写的 Tavily Key 优先级高于服务端全局 TAVILY_API_KEY。"
+        title={getAgentSettingsLabel("settings.agent.tavily.title")}
+        description={getAgentSettingsLabel("settings.agent.tavily.description")}
       >
         <SettingsCard divided={false} className="p-4">
           <div className="flex flex-col gap-3">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-sm font-medium">用户级 Tavily API Key</p>
+                <p className="text-sm font-medium">
+                  {getAgentSettingsLabel("settings.agent.tavily.userKeyTitle")}
+                </p>
                 <p className="text-xs text-muted-foreground">
-                  留空则回落到部署默认 Key；填写后仅当前账号生效。
+                  {getAgentSettingsLabel("settings.agent.tavily.userKeyDescription")}
                 </p>
               </div>
               {!tavilyEnabled ? (
-                <Badge variant="outline">已关闭</Badge>
+                <Badge variant="outline">
+                  {getAgentSettingsLabel("settings.agent.tavily.badge.disabled")}
+                </Badge>
               ) : savedTavilyApiKey ? (
-                <Badge variant="secondary">用户覆盖中</Badge>
+                <Badge variant="secondary">
+                  {getAgentSettingsLabel("settings.agent.tavily.badge.userOverride")}
+                </Badge>
               ) : (
-                <Badge variant="outline">使用服务端默认</Badge>
+                <Badge variant="outline">
+                  {getAgentSettingsLabel("settings.agent.tavily.badge.serverDefault")}
+                </Badge>
               )}
             </div>
 
             <div className="flex items-center justify-between rounded-xl border border-border/50 bg-background/60 p-3">
               <div>
-                <p className="text-sm font-medium">启用 Tavily 搜索</p>
+                <p className="text-sm font-medium">
+                  {getAgentSettingsLabel("settings.agent.tavily.enableTitle")}
+                </p>
                 <p className="text-xs text-muted-foreground">
-                  关闭后不使用 Tavily，仅用免费的 DuckDuckGo 搜索（无需 Key）；开启并填写 Key 后用
-                  Tavily。仅在需要最新信息时才会联网。
+                  {getAgentSettingsLabel("settings.agent.tavily.enableDescription")}
                 </p>
               </div>
               <Switch
@@ -222,13 +256,15 @@ export function AgentSettings() {
                 onClick={() => setTavilyApiKey(savedTavilyApiKey)}
                 disabled={savingTavilyApiKey}
               >
-                取消
+                {getAgentSettingsLabel("settings.agent.cancel")}
               </Button>
               <Button
                 onClick={() => void handleSaveTavilyApiKey()}
                 disabled={savingTavilyApiKey || tavilyApiKey === savedTavilyApiKey}
               >
-                {savingTavilyApiKey ? "保存中..." : "保存"}
+                {savingTavilyApiKey
+                  ? getAgentSettingsLabel("settings.agent.saving")
+                  : getAgentSettingsLabel("settings.agent.save")}
               </Button>
             </div>
           </div>
