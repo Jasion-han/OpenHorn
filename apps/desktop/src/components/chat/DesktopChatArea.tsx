@@ -1225,6 +1225,31 @@ export function DesktopChatArea() {
     };
   }, [currentConversation?.id]);
 
+  // Precompute editability once per `messages` change. `renderMessageRow` runs
+  // for every visible row on every streamed token, so calling the O(n)
+  // `getEditableMessageRound` per row was O(visibleRows × messages) per token.
+  // The set mirrors `getEditableMessageRound(...)` truthiness exactly: a
+  // non-draft user message whose following message (if any) is a matching
+  // non-draft assistant of the same mode.
+  const editableMessageIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (let i = 0; i < messages.length; i++) {
+      const userMessage = messages[i];
+      if (userMessage.role !== "user" || userMessage.id.startsWith("draft-")) continue;
+      const assistantMessage = messages[i + 1];
+      if (
+        assistantMessage &&
+        (assistantMessage.role !== "assistant" ||
+          assistantMessage.mode !== userMessage.mode ||
+          assistantMessage.id.startsWith("draft-"))
+      ) {
+        continue;
+      }
+      ids.add(userMessage.id);
+    }
+    return ids;
+  }, [messages]);
+
   const getEditableMessageRound = (messageId: string) => {
     const messageIndex = messages.findIndex((message) => message.id === messageId);
     if (messageIndex < 0) return null;
@@ -2220,7 +2245,7 @@ export function DesktopChatArea() {
           <MessageBubble
             message={message}
             isStreaming={isMessageStreaming}
-            canEdit={Boolean(getEditableMessageRound(message.id))}
+            canEdit={editableMessageIds.has(message.id)}
             canRetry={
               message.role === "assistant" && !isLoading && !isMessageStreaming && !isUploading
             }

@@ -48,8 +48,25 @@ function createPartialAgentRun(): ApiAgentRun {
 const STREAM_TAIL_WINDOW = 18;
 
 function getRollingTail(text: string, size = STREAM_TAIL_WINDOW) {
-  const chars = Array.from(text);
+  // Only the trailing `size` code points matter. Over-slice by UTF-16 code
+  // units first (×4 covers surrogate pairs even if the leading unit is a
+  // dangling half) so this stays O(size) instead of scanning the whole string.
+  const chars = Array.from(text.slice(-size * 4));
   return chars.slice(Math.max(0, chars.length - size)).join("");
+}
+
+// Shared streaming-delta updater so the in-view and background-cache branches
+// stay in sync (same content append + tail + pulse). Deriving the next tail
+// from the previously stored `streamTail` (a bounded suffix) instead of the
+// full accumulated content keeps `appendMessageDelta` O(delta) per token.
+function applyStreamDelta(message: Message, delta: string, updates?: Partial<Message>): Message {
+  return {
+    ...message,
+    ...updates,
+    content: `${message.content}${delta}`,
+    streamTail: getRollingTail(`${message.streamTail ?? ""}${delta}`),
+    streamPulseKey: (message.streamPulseKey ?? 0) + 1,
+  };
 }
 
 function applyAgentEventToRun(
@@ -699,23 +716,11 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
       if (found) {
         set((state) => ({
           messages: state.messages.map((message) =>
-            message.id === messageId
-              ? {
-                  ...message,
-                  ...updates,
-                  content: `${message.content}${delta}`,
-                  streamTail: getRollingTail(`${message.content}${delta}`),
-                  streamPulseKey: (message.streamPulseKey ?? 0) + 1,
-                }
-              : message,
+            message.id === messageId ? applyStreamDelta(message, delta, updates) : message,
           ),
         }));
       } else {
-        updateCachedMessage(messageId, (msg) => ({
-          ...msg,
-          ...updates,
-          content: `${msg.content}${delta}`,
-        }));
+        updateCachedMessage(messageId, (msg) => applyStreamDelta(msg, delta, updates));
       }
     },
 

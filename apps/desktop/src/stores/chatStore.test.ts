@@ -303,6 +303,30 @@ describe("desktop chat store", () => {
     });
   });
 
+  test("keeps a code-point-accurate rolling tail across a multi-token stream", async () => {
+    const { adapter } = createStubAdapter();
+    const store = createDesktopChatStore(adapter);
+
+    await store.getState().loadConversations();
+    await store.getState().selectConversation("conv-1");
+    const result = await store.getState().sendMessage({ content: "继续执行" });
+
+    // Total content exceeds the 18 code-point tail window, with a surrogate-pair
+    // emoji sitting right at the boundary so we prove pairs are not split.
+    for (const chunk of ["abcdefghij", "klmnopqrst", "🎉"]) {
+      store.getState().applyStreamEvent(result.assistantMessageId, {
+        type: "delta",
+        content: chunk,
+      });
+    }
+
+    expect(store.getState().messages[2]).toMatchObject({
+      content: "abcdefghijklmnopqrst🎉",
+      streamTail: "defghijklmnopqrst🎉",
+      streamPulseKey: 3,
+    });
+  });
+
   test("maps live status metadata onto the assistant message", async () => {
     const { adapter } = createStubAdapter();
     const store = createDesktopChatStore(adapter);
@@ -602,6 +626,38 @@ describe("desktop chat store message cache", () => {
     const evicted = store.getState().selectConversation("conv-0");
     expect(store.getState().isLoading).toBe(true);
     await evicted;
+  });
+
+  test("keeps streamTail/streamPulseKey in sync for a backgrounded streaming message", async () => {
+    const store = createDesktopChatStore(createManyConvAdapter(3));
+
+    await store.getState().loadConversations();
+    await store.getState().selectConversation("conv-0");
+    const result = await store.getState().sendMessage({ content: "继续执行" });
+
+    // First delta lands while conv-0 is in view (live messages branch).
+    store.getState().applyStreamEvent(result.assistantMessageId, {
+      type: "delta",
+      content: "第一段",
+    });
+
+    // Switch away → conv-0 (mid-stream) is pushed into the background cache.
+    await store.getState().selectConversation("conv-1");
+
+    // Second delta now routes through the cache-update branch; it must still
+    // advance streamTail + streamPulseKey, not just content.
+    store.getState().applyStreamEvent(result.assistantMessageId, {
+      type: "delta",
+      content: "第二段",
+    });
+
+    await store.getState().selectConversation("conv-0");
+    const streamed = store.getState().messages.find((m) => m.id === result.assistantMessageId);
+    expect(streamed).toMatchObject({
+      content: "第一段第二段",
+      streamTail: "第一段第二段",
+      streamPulseKey: 2,
+    });
   });
 
   test("reset clears the message cache", async () => {
