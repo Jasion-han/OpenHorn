@@ -270,6 +270,11 @@ const SCHEMA_DDL: string[] = [
   `CREATE INDEX IF NOT EXISTS agent_artifacts_run_idx ON agent_artifacts(run_id);`,
   `CREATE INDEX IF NOT EXISTS agent_events_session_idx ON agent_events(session_id);`,
   `CREATE INDEX IF NOT EXISTS mcp_servers_user_idx ON mcp_servers(user_id);`,
+  // Existing DBs may hold duplicate (user_id, key) settings rows from the old
+  // delete-then-insert code before the upsert fix. Remove dupes (keeping the
+  // latest = highest rowid) BEFORE creating the unique index below, otherwise
+  // CREATE UNIQUE INDEX fails and breaks startup. No-op on a fresh/empty DB.
+  `DELETE FROM settings WHERE rowid NOT IN (SELECT MAX(rowid) FROM settings GROUP BY user_id, key);`,
   `CREATE UNIQUE INDEX IF NOT EXISTS settings_user_key_unique ON settings(user_id, key);`,
 ];
 
