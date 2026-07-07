@@ -636,3 +636,62 @@ export function formatSidebarLabel(
   }
   return text;
 }
+
+/**
+ * Labels for the General settings panel (GeneralSettings): account info card and
+ * the custom-instructions (system prompt) editor. Product/mode words ("AI",
+ * "Agent") stay English within the copy per rule 3 above; raw user values
+ * (username / email) are rendered verbatim and never routed through here.
+ * Following the per-namespace convention used above, common words (cancel/save)
+ * get their own keys here rather than reusing other namespaces. The one
+ * interpolated string ({count} in the char-count badge) resolves via
+ * `formatGeneralSettingsLabel`.
+ */
+export const generalSettingsLabels = {
+  // Section: account info
+  "settings.general.account.title": "账户信息",
+  "settings.general.account.description": "管理你的账号显示信息（本地展示）。",
+  "settings.general.account.usernameFallback": "未设置用户名",
+  "settings.general.account.usernameLabel": "用户名",
+  "settings.general.account.emailLabel": "邮箱",
+  "settings.general.account.emailReadonly": "邮箱暂不支持修改",
+  "settings.general.account.save": "保存修改",
+  // Section: custom instructions (system prompt)
+  "settings.general.instructions.title": "自定义指令",
+  "settings.general.instructions.description":
+    "对所有对话与 Agent 会话生效，用于设置你的个人偏好与回答风格。",
+  "settings.general.instructions.charCount": "{count} 字符",
+  "settings.general.instructions.hint": "自定义 AI 的回答方式、语言与行为偏好。",
+  "settings.general.instructions.edit": "编辑",
+  "settings.general.instructions.placeholder":
+    "例如：你是一个专业的代码助手，请用中文回答所有问题...",
+  "settings.general.instructions.cancel": "取消",
+  "settings.general.instructions.saving": "保存中...",
+  "settings.general.instructions.save": "保存",
+  "settings.general.instructions.emptyState": "暂未设置，点击右上角「编辑」添加。",
+  // Toasts
+  "settings.general.notify.savedTitle": "已保存",
+  "settings.general.notify.promptSavedBody": "系统提示词已更新",
+} as const;
+
+type GeneralSettingsLabelKey = keyof typeof generalSettingsLabels;
+
+export function getGeneralSettingsLabel(key: GeneralSettingsLabelKey): string {
+  return generalSettingsLabels[key];
+}
+
+/**
+ * Resolves a general-settings label template, substituting `{name}` placeholders
+ * with the provided values. Used for the custom-instructions char-count badge
+ * ({count}).
+ */
+export function formatGeneralSettingsLabel(
+  key: GeneralSettingsLabelKey,
+  vars: Record<string, string | number>,
+): string {
+  let text: string = generalSettingsLabels[key];
+  for (const [name, value] of Object.entries(vars)) {
+    text = text.replaceAll(`{${name}}`, String(value));
+  }
+  return text;
+}
