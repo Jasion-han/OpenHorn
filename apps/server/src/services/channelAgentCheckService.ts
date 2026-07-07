@@ -1,10 +1,10 @@
 import { createAdapter } from "../agent-adapters";
+import { runClaudeAgentSdk } from "./agentSdk";
 import {
   getChannelRuntimeCredentialsById,
   getChannels,
   type ResolvedChannel,
 } from "./channelService";
-import { runClaudeAgentSdk } from "./agentSdk";
 import type { AgentCapabilityMode } from "./genericAgentTypes";
 import { classifyProviderError, type ProviderErrorKind } from "./providerErrorSummary";
 
@@ -23,6 +23,11 @@ export type AgentCheckResult =
       retryable?: boolean;
       rawError?: string;
     };
+
+// The project compiles with `strict: false`, so control-flow narrowing of this discriminated
+// union on the boolean `success` discriminant does not reduce the type. Callers guard on
+// `success` at runtime, then use this alias to access the failure fields with a precise cast.
+type AgentCheckFailure = Extract<AgentCheckResult, { success: false }>;
 
 export type AgentCheckAttempt = {
   channelId: string;
@@ -62,9 +67,7 @@ export function getAgentCapabilityModeFromSuccessResult(
   if (result.mode === "claude_sdk" || result.mode === "generic_tool_calling") {
     return result.mode;
   }
-  return (protocol || "").trim().toLowerCase() === "openai"
-    ? "generic_tool_calling"
-    : "claude_sdk";
+  return (protocol || "").trim().toLowerCase() === "openai" ? "generic_tool_calling" : "claude_sdk";
 }
 
 const AGENT_SDK_PROBE_TIMEOUT_MS = 20_000;
@@ -142,7 +145,8 @@ function writeCompatibilityCache(key: string, result: AgentCheckResult) {
 }
 
 function shouldRetryGenericProbeWithoutForcedToolChoice(error: unknown) {
-  const message = error instanceof Error ? error.message.toLowerCase() : String(error || "").toLowerCase();
+  const message =
+    error instanceof Error ? error.message.toLowerCase() : String(error || "").toLowerCase();
   if (!message.includes("tool_choice")) return false;
   return (
     message.includes("does not support being set to required") ||
@@ -160,10 +164,9 @@ function shouldRetryGenericProbeAfterFailure(error: string) {
   );
 }
 
-function buildChannelProbeOrder<T extends { id: string; name: string; enabled: boolean; isDefault: boolean }>(
-  channels: T[],
-  requestedChannelId: string | null,
-) {
+function buildChannelProbeOrder<
+  T extends { id: string; name: string; enabled: boolean; isDefault: boolean },
+>(channels: T[], requestedChannelId: string | null) {
   if (requestedChannelId) {
     const requested = channels.find((channel) => channel.id === requestedChannelId);
     return requested ? [requested] : [];
@@ -195,7 +198,10 @@ function buildModelProbeOrder(
   };
 
   push(requestedModelId);
-  push(channel.defaultModelId || channel.models.find((model) => model.isDefault && model.enabled)?.modelId);
+  push(
+    channel.defaultModelId ||
+      channel.models.find((model) => model.isDefault && model.enabled)?.modelId,
+  );
 
   for (const modelId of enabledModelIds) {
     push(modelId);
@@ -223,7 +229,8 @@ export function describeAgentRuntimeSelection(params: {
   const requestedModelId = params.requestedModelId?.trim() || null;
   const changedChannel =
     requestedChannelId !== null && requestedChannelId !== params.resolvedChannel.channel.id;
-  const changedModel = requestedModelId !== null && requestedModelId !== params.resolvedChannel.modelId;
+  const changedModel =
+    requestedModelId !== null && requestedModelId !== params.resolvedChannel.modelId;
 
   if (!changedChannel && !changedModel) {
     return `Using ${params.resolvedChannel.modelId}`;
@@ -305,12 +312,16 @@ export async function probeClaudeAgentSdkCompatibility(params: {
     return {
       success: false,
       error:
-        probeError === "未检测到真实 Bash 工具调用，当前渠道可能只支持普通对话，不兼容 Agent 工具执行。"
+        probeError ===
+        "未检测到真实 Bash 工具调用，当前渠道可能只支持普通对话，不兼容 Agent 工具执行。"
           ? AGENT_SDK_INCOMPATIBLE_ERROR
           : probeError,
     };
   } catch (error) {
-    if (abortController.signal.aborted && abortController.signal.reason === "compatibility_timeout") {
+    if (
+      abortController.signal.aborted &&
+      abortController.signal.reason === "compatibility_timeout"
+    ) {
       return { success: false, error: AGENT_SDK_INCOMPATIBLE_ERROR };
     }
 
@@ -365,7 +376,9 @@ export async function probeGenericToolCallingCompatibility(params: {
               },
             },
           ],
-          ...(forceToolChoice ? { toolChoice: { type: "tool" as const, name: GENERIC_TOOL_PROBE_NAME } } : {}),
+          ...(forceToolChoice
+            ? { toolChoice: { type: "tool" as const, name: GENERIC_TOOL_PROBE_NAME } }
+            : {}),
           requestTimeoutMs,
         });
 
@@ -381,7 +394,8 @@ export async function probeGenericToolCallingCompatibility(params: {
 
       const matchedCall = result.toolCalls.find(
         (toolCall) =>
-          toolCall.name === GENERIC_TOOL_PROBE_NAME && toolCall.input.marker === AGENT_SDK_PROBE_MARKER,
+          toolCall.name === GENERIC_TOOL_PROBE_NAME &&
+          toolCall.input.marker === AGENT_SDK_PROBE_MARKER,
       );
       if (!matchedCall) {
         return { success: false, error: GENERIC_TOOL_INCOMPATIBLE_ERROR };
@@ -474,9 +488,13 @@ export async function checkChannelAgentCompatibility(
   }
 
   const probePromise = (async (): Promise<AgentCheckResult> => {
-    const { channel, apiKey, isCliOAuth } = await getChannelRuntimeCredentialsById(userId, channelId, {
-      runtime: "agent_sdk",
-    });
+    const { channel, apiKey, isCliOAuth } = await getChannelRuntimeCredentialsById(
+      userId,
+      channelId,
+      {
+        runtime: "agent_sdk",
+      },
+    );
     const baseUrl = channel.baseUrl;
     if (!baseUrl) {
       return {
@@ -499,7 +517,10 @@ export async function checkChannelAgentCompatibility(
         baseUrl,
         protocol,
       });
-      return result.success ? result : normalizeAgentCheckFailure(result.error);
+      if (result.success) {
+        return result;
+      }
+      return normalizeAgentCheckFailure((result as AgentCheckFailure).error);
     }
 
     if (protocol === "anthropic") {
@@ -515,6 +536,8 @@ export async function checkChannelAgentCompatibility(
       if (claudeSdkResult.success) {
         return claudeSdkResult;
       }
+      // Guarded as a failure above; cast to the failure variant (see AgentCheckFailure note).
+      const claudeSdkFailure = claudeSdkResult as AgentCheckFailure;
 
       const genericResult = await probeGenericToolCallingCompatibility({
         apiKey,
@@ -525,12 +548,10 @@ export async function checkChannelAgentCompatibility(
       if (genericResult.success) {
         return genericResult;
       }
+      const genericFailure = genericResult as AgentCheckFailure;
 
       return normalizeAgentCheckFailure(
-        pickAnthropicCompatibilityFailure(
-          claudeSdkResult,
-          genericResult as Extract<AgentCheckResult, { success: false }>,
-        ).error,
+        pickAnthropicCompatibilityFailure(claudeSdkFailure, genericFailure).error,
       );
     }
 
@@ -540,7 +561,10 @@ export async function checkChannelAgentCompatibility(
       baseUrl,
       timeoutMs: options?.sdkTimeoutMs,
     });
-    return result.success ? result : normalizeAgentCheckFailure(result.error);
+    if (result.success) {
+      return result;
+    }
+    return normalizeAgentCheckFailure((result as AgentCheckFailure).error);
   })();
 
   if (options?.bypassCache) {
@@ -609,19 +633,21 @@ export async function resolveAgentRuntime(params: {
 
     const modelOrder = strictRequestedModel
       ? [requestedModelId!]
-      : buildModelProbeOrder(
-          channel,
-          isRequestedChannel ? requestedModelId : null,
-        );
+      : buildModelProbeOrder(channel, isRequestedChannel ? requestedModelId : null);
     if (modelOrder.length === 0) {
       continue;
     }
 
     for (const modelId of modelOrder) {
-      const compatibility = await checkChannelAgentCompatibility(params.userId, channel.id, modelId, {
-        sdkTimeoutMs: params.sdkTimeoutMs,
-        bypassCache: params.bypassCache,
-      });
+      const compatibility = await checkChannelAgentCompatibility(
+        params.userId,
+        channel.id,
+        modelId,
+        {
+          sdkTimeoutMs: params.sdkTimeoutMs,
+          bypassCache: params.bypassCache,
+        },
+      );
       if (compatibility.success) {
         attempts.push({
           channelId: channel.id,

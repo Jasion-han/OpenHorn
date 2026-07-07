@@ -1,5 +1,20 @@
 import { expect, test } from "bun:test";
+import type { PreparedAgentRuntimeContext } from "../services/agentService";
+import type {
+  AgentApprovalRecord,
+  AgentRunRecord,
+  AgentTaskDetail,
+  AgentTaskEventRecord,
+  CreateAgentRunInput,
+  CreateAgentTaskEventInput,
+} from "../services/agentTaskService";
+import type { AgentRuntimeResolution } from "../services/channelAgentCheckService";
+import type { ResolvedChannel } from "../services/channelService";
 import { createAgentRouter } from "./agent";
+
+// These test doubles return trimmed fixtures; the production dependency signatures expect the
+// full record types. Casting each return to its precise record type keeps the mocks readable
+// without reproducing every field (test-only, no `as any`).
 
 test("task execute re-probes compatibility with bypassCache before running", async () => {
   const runtimeCalls: Array<Record<string, unknown>> = [];
@@ -30,31 +45,33 @@ test("task execute re-probes compatibility with bypassCache before running", asy
       await next();
     },
     getAgentTaskById: async () => task,
-    getLatestApprovalForTask: async () => ({
-      id: "approval-1",
-      runId: "plan-run-1",
-      status: "approved",
-    }),
+    getLatestApprovalForTask: async () =>
+      ({
+        id: "approval-1",
+        runId: "plan-run-1",
+        status: "approved",
+      }) as AgentApprovalRecord,
     getLatestRunForTask: async (_userId: string, _taskId: string, phase?: string) =>
       phase === "planning"
-        ? {
+        ? ({
             id: "plan-run-1",
             taskId: "task-1",
             phase: "planning",
             status: "completed",
-          }
+          } as AgentRunRecord)
         : null,
-    getResolvedChannelForConversation: async () => ({
-      channel: {
-        id: "channel-1",
-        name: "Qwen Relay",
-        provider: "anthropic",
-        protocol: "anthropic",
-        baseUrl: "https://coding.dashscope.aliyuncs.com/apps/anthropic",
-      },
-      modelId: "qwen3.5-plus",
-      apiKey: "test-key",
-    }),
+    getResolvedChannelForConversation: async () =>
+      ({
+        channel: {
+          id: "channel-1",
+          name: "Qwen Relay",
+          provider: "anthropic",
+          protocol: "anthropic",
+          baseUrl: "https://coding.dashscope.aliyuncs.com/apps/anthropic",
+        },
+        modelId: "qwen3.5-plus",
+        apiKey: "test-key",
+      }) as ResolvedChannel,
     resolveAgentRuntime: async (params: Record<string, unknown>) => {
       runtimeCalls.push(params);
       return {
@@ -73,49 +90,59 @@ test("task execute re-probes compatibility with bypassCache before running", asy
         compatibility: { success: true as const, mode: "generic_tool_calling" as const },
         fallbackUsed: false,
         attempts: [],
-      };
+      } as AgentRuntimeResolution;
     },
-    getAgentTaskDetail: async () => ({
-      task,
-      runs: [],
-      planSteps: [
-        {
-          id: "step-1",
-          taskId: "task-1",
-          runId: "plan-run-1",
-          orderIndex: 0,
-          title: "Inspect the current task",
-          description: "Use the selected channel and model to run the task.",
-          status: "pending",
-        },
-      ],
-      approvals: [],
-      artifacts: [],
-      events: [],
-      runtime: null,
-    }),
-    createAgentRun: async (_userId: string, taskId: string, input: Record<string, unknown>) => ({
-      id: `${String(input.phase)}-run-1`,
-      taskId,
-      phase: input.phase,
-      status: input.status ?? "running",
-    }),
-    createAgentTaskEvent: async (_userId: string, taskId: string, runId: string, input: Record<string, unknown>) => {
+    getAgentTaskDetail: async () =>
+      ({
+        task,
+        runs: [],
+        planSteps: [
+          {
+            id: "step-1",
+            taskId: "task-1",
+            runId: "plan-run-1",
+            orderIndex: 0,
+            title: "Inspect the current task",
+            description: "Use the selected channel and model to run the task.",
+            status: "pending",
+          },
+        ],
+        approvals: [],
+        artifacts: [],
+        events: [],
+        runtime: null,
+      }) as AgentTaskDetail,
+    createAgentRun: async (_userId: string, taskId: string, input: CreateAgentRunInput) =>
+      ({
+        id: `${String(input.phase)}-run-1`,
+        taskId,
+        phase: input.phase,
+        status: input.status ?? "running",
+      }) as AgentRunRecord,
+    createAgentTaskEvent: async (
+      _userId: string,
+      taskId: string,
+      runId: string,
+      input: CreateAgentTaskEventInput,
+    ) => {
       const event = { taskId, runId, ...input };
       createdEvents.push(event);
-      return event;
+      // Test double: `createdAt` here is an optional Date vs the record's `string`, so the
+      // shapes don't directly overlap — widen through `unknown` (test-only, not `any`).
+      return event as unknown as AgentTaskEventRecord;
     },
     updateAgentTaskStatus: async () => task,
     updateAgentRunStatus: async () => null,
     updateAgentPlanStepStatuses: async () => [],
     createAgentArtifact: async () => null,
-    buildAgentRuntimeContext: async () => ({
-      channelId: "channel-1",
-      modelId: "qwen3.5-plus",
-      globalSystemPrompt: undefined,
-      liveSystemContext: undefined,
-      liveContext: { status: "offline", route: "direct_model" },
-    }),
+    buildAgentRuntimeContext: async () =>
+      ({
+        channelId: "channel-1",
+        modelId: "qwen3.5-plus",
+        globalSystemPrompt: undefined,
+        liveSystemContext: undefined,
+        liveContext: { status: "offline", route: "direct_model" },
+      }) as PreparedAgentRuntimeContext,
     getAgentCapabilityModeFromSuccessResult: () => "generic_tool_calling",
     runAgentWithConfig: async function* () {
       yield { type: "text", content: "Task finished." };
@@ -182,34 +209,23 @@ test("task execute preserves live search failure instead of falling back to mode
       await next();
     },
     getAgentTaskById: async () => task,
-    getLatestApprovalForTask: async () => ({
-      id: "approval-1",
-      runId: "plan-run-1",
-      status: "approved",
-    }),
+    getLatestApprovalForTask: async () =>
+      ({
+        id: "approval-1",
+        runId: "plan-run-1",
+        status: "approved",
+      }) as AgentApprovalRecord,
     getLatestRunForTask: async (_userId: string, _taskId: string, phase?: string) =>
       phase === "planning"
-        ? {
+        ? ({
             id: "plan-run-1",
             taskId: "task-1",
             phase: "planning",
             status: "completed",
-          }
+          } as AgentRunRecord)
         : null,
-    getResolvedChannelForConversation: async () => ({
-      channel: {
-        id: "channel-1",
-        name: "Qwen Relay",
-        provider: "anthropic",
-        protocol: "anthropic",
-        baseUrl: "https://coding.dashscope.aliyuncs.com/apps/anthropic",
-      },
-      modelId: "qwen3.5-plus",
-      apiKey: "test-key",
-    }),
-    resolveAgentRuntime: async () => ({
-      success: true as const,
-      resolvedChannel: {
+    getResolvedChannelForConversation: async () =>
+      ({
         channel: {
           id: "channel-1",
           name: "Qwen Relay",
@@ -219,40 +235,63 @@ test("task execute preserves live search failure instead of falling back to mode
         },
         modelId: "qwen3.5-plus",
         apiKey: "test-key",
-      },
-      compatibility: { success: true as const, mode: "generic_tool_calling" as const },
-      fallbackUsed: false,
-      attempts: [],
-    }),
-    getAgentTaskDetail: async () => ({
-      task,
-      runs: [],
-      planSteps: [
-        {
-          id: "step-1",
-          taskId: "task-1",
-          runId: "plan-run-1",
-          orderIndex: 0,
-          title: "Search the web",
-          description: "Use real web search before answering.",
-          status: "pending",
+      }) as ResolvedChannel,
+    resolveAgentRuntime: async () =>
+      ({
+        success: true as const,
+        resolvedChannel: {
+          channel: {
+            id: "channel-1",
+            name: "Qwen Relay",
+            provider: "anthropic",
+            protocol: "anthropic",
+            baseUrl: "https://coding.dashscope.aliyuncs.com/apps/anthropic",
+          },
+          modelId: "qwen3.5-plus",
+          apiKey: "test-key",
         },
-      ],
-      approvals: [],
-      artifacts: [],
-      events: [],
-      runtime: null,
-    }),
-    createAgentRun: async (_userId: string, taskId: string, input: Record<string, unknown>) => ({
-      id: `${String(input.phase)}-run-1`,
-      taskId,
-      phase: input.phase,
-      status: input.status ?? "running",
-    }),
-    createAgentTaskEvent: async (_userId: string, taskId: string, runId: string, input: Record<string, unknown>) => {
+        compatibility: { success: true as const, mode: "generic_tool_calling" as const },
+        fallbackUsed: false,
+        attempts: [],
+      }) as AgentRuntimeResolution,
+    getAgentTaskDetail: async () =>
+      ({
+        task,
+        runs: [],
+        planSteps: [
+          {
+            id: "step-1",
+            taskId: "task-1",
+            runId: "plan-run-1",
+            orderIndex: 0,
+            title: "Search the web",
+            description: "Use real web search before answering.",
+            status: "pending",
+          },
+        ],
+        approvals: [],
+        artifacts: [],
+        events: [],
+        runtime: null,
+      }) as AgentTaskDetail,
+    createAgentRun: async (_userId: string, taskId: string, input: CreateAgentRunInput) =>
+      ({
+        id: `${String(input.phase)}-run-1`,
+        taskId,
+        phase: input.phase,
+        status: input.status ?? "running",
+      }) as AgentRunRecord,
+    createAgentTaskEvent: async (
+      _userId: string,
+      taskId: string,
+      runId: string,
+      input: CreateAgentTaskEventInput,
+    ) => {
       const event = { taskId, runId, ...input };
       createdEvents.push(event);
-      return event;
+      // Test double: `createdAt` here is an optional Date vs the record's `string`, so the
+      // shapes don't directly overlap — widen through `unknown` (test-only, not `any`).
+      return event as unknown as AgentTaskEventRecord;
     },
     updateAgentTaskStatus: async (_userId: string, _taskId: string, status: string) => {
       taskStatuses.push(status);
@@ -345,31 +384,33 @@ test("task execute persists pre-execution runtime resolution failures as failed 
       await next();
     },
     getAgentTaskById: async () => task,
-    getLatestApprovalForTask: async () => ({
-      id: "approval-1",
-      runId: "plan-run-1",
-      status: "approved",
-    }),
+    getLatestApprovalForTask: async () =>
+      ({
+        id: "approval-1",
+        runId: "plan-run-1",
+        status: "approved",
+      }) as AgentApprovalRecord,
     getLatestRunForTask: async (_userId: string, _taskId: string, phase?: string) =>
       phase === "planning"
-        ? {
+        ? ({
             id: "plan-run-1",
             taskId: "task-1",
             phase: "planning",
             status: "completed",
-          }
+          } as AgentRunRecord)
         : null,
-    getResolvedChannelForConversation: async () => ({
-      channel: {
-        id: "channel-1",
-        name: "Qwen Relay",
-        provider: "anthropic",
-        protocol: "anthropic",
-        baseUrl: "https://coding.dashscope.aliyuncs.com/apps/anthropic",
-      },
-      modelId: "qwen3.5-plus",
-      apiKey: "test-key",
-    }),
+    getResolvedChannelForConversation: async () =>
+      ({
+        channel: {
+          id: "channel-1",
+          name: "Qwen Relay",
+          provider: "anthropic",
+          protocol: "anthropic",
+          baseUrl: "https://coding.dashscope.aliyuncs.com/apps/anthropic",
+        },
+        modelId: "qwen3.5-plus",
+        apiKey: "test-key",
+      }) as ResolvedChannel,
     resolveAgentRuntime: async () => ({
       success: false as const,
       error: "Provider API error (429): hour allocated quota exceeded.",
@@ -378,26 +419,27 @@ test("task execute persists pre-execution runtime resolution failures as failed 
       rawError: "Provider API error (429): hour allocated quota exceeded.",
       attempts: [],
     }),
-    getAgentTaskDetail: async () => ({
-      task,
-      runs: [],
-      planSteps: [
-        {
-          id: "step-1",
-          taskId: "task-1",
-          runId: "plan-run-1",
-          orderIndex: 0,
-          title: "Inspect the current task",
-          description: "Use the selected channel and model to run the task.",
-          status: "pending",
-        },
-      ],
-      approvals: [],
-      artifacts: [],
-      events: [],
-      runtime: null,
-    }),
-    createAgentRun: async (_userId: string, taskId: string, input: Record<string, unknown>) => {
+    getAgentTaskDetail: async () =>
+      ({
+        task,
+        runs: [],
+        planSteps: [
+          {
+            id: "step-1",
+            taskId: "task-1",
+            runId: "plan-run-1",
+            orderIndex: 0,
+            title: "Inspect the current task",
+            description: "Use the selected channel and model to run the task.",
+            status: "pending",
+          },
+        ],
+        approvals: [],
+        artifacts: [],
+        events: [],
+        runtime: null,
+      }) as AgentTaskDetail,
+    createAgentRun: async (_userId: string, taskId: string, input: CreateAgentRunInput) => {
       const run = {
         id: `${String(input.phase)}-run-${createdRuns.length + 1}`,
         taskId,
@@ -406,12 +448,19 @@ test("task execute persists pre-execution runtime resolution failures as failed 
         error: input.error ?? null,
       };
       createdRuns.push(run);
-      return run;
+      return run as AgentRunRecord;
     },
-    createAgentTaskEvent: async (_userId: string, taskId: string, runId: string, input: Record<string, unknown>) => {
+    createAgentTaskEvent: async (
+      _userId: string,
+      taskId: string,
+      runId: string,
+      input: CreateAgentTaskEventInput,
+    ) => {
       const event = { taskId, runId, ...input };
       createdEvents.push(event);
-      return event;
+      // Test double: `createdAt` here is an optional Date vs the record's `string`, so the
+      // shapes don't directly overlap — widen through `unknown` (test-only, not `any`).
+      return event as unknown as AgentTaskEventRecord;
     },
     updateAgentTaskStatus: async (_userId: string, _taskId: string, status: string) => {
       taskStatuses.push(status);
@@ -455,7 +504,9 @@ test("task execute persists pre-execution runtime resolution failures as failed 
   expect(taskStatuses).toContain("failed");
   expect(
     createdEvents.some(
-      (event) => event.type === "error" && event.content === "Provider API error (429): hour allocated quota exceeded.",
+      (event) =>
+        event.type === "error" &&
+        event.content === "Provider API error (429): hour allocated quota exceeded.",
     ),
   ).toBe(true);
   expect(
@@ -465,8 +516,14 @@ test("task execute persists pre-execution runtime resolution failures as failed 
         event.metadata &&
         typeof event.metadata === "object" &&
         (event.metadata as { status?: string; stage?: string }).status === "failed" &&
-        (event.metadata as { status?: string; stage?: string; errorCode?: string; retryable?: boolean }).stage ===
-          "runtime_resolution" &&
+        (
+          event.metadata as {
+            status?: string;
+            stage?: string;
+            errorCode?: string;
+            retryable?: boolean;
+          }
+        ).stage === "runtime_resolution" &&
         (
           event.metadata as {
             status?: string;

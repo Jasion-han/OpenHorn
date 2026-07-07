@@ -6,25 +6,31 @@ import { db } from "../db";
 import { generateId } from "../utils";
 import { runClaudeAgentSdk } from "./agentSdk";
 import {
-  resolveAgentRuntime,
-} from "./channelAgentCheckService";
-import { resolveAgentWorkingDirectory } from "./agentWorkspace";
-import { buildAttachmentPayloadFromIds } from "./attachmentService";
-import {
   AGENT_FIRST_OUTPUT_TIMEOUT_MS,
   AGENT_IDLE_TIMEOUT_MS,
   AGENT_TOTAL_TIMEOUT_MS,
   formatTimeoutSeconds,
 } from "./agentStreamTimeouts";
+import { resolveAgentWorkingDirectory } from "./agentWorkspace";
+import { buildAttachmentPayloadFromIds } from "./attachmentService";
+import { resolveAgentRuntime } from "./channelAgentCheckService";
 import { getResolvedChannelForConversation, getResolvedChannelForUser } from "./channelService";
+import { runGenericAgentRuntime } from "./genericAgentRuntime";
+import type { AgentCapabilityMode } from "./genericAgentTypes";
 import { buildLiveContext, type LiveContextResult } from "./liveCapabilities";
 import { classifyLiveRouteWithModel } from "./liveRouteClassifier";
 import { loadEnabledMcpServersForUser } from "./mcpLoader";
 import { mergeSystemPromptParts, RESPONSE_STYLE_GUARDRAILS } from "./responseStyle";
 import { TAVILY_API_KEY_SETTING, TAVILY_ENABLED_SETTING } from "./searchService";
 import { getSettingValues } from "./settingsService";
-import { runGenericAgentRuntime } from "./genericAgentRuntime";
-import type { AgentCapabilityMode } from "./genericAgentTypes";
+
+// The Anthropic image content block, derived from the SDK's own user-message content union so
+// we do not depend on the SDK's internal export paths. `media_type` is a specific string union
+// upstream, so the literal object below is cast to this precise type (no `as any`).
+type SdkImageBlockParam = Extract<
+  Extract<SDKUserMessage["message"]["content"], readonly unknown[]>[number],
+  { type: "image" }
+>;
 
 function adapterSupportsToolCalling(
   adapter: Awaited<ReturnType<typeof createAdapter>>,
@@ -161,7 +167,12 @@ export async function buildAgentRuntimeContext(params: {
       : db
           .select({ forceWebSearch: conversations.forceWebSearch })
           .from(conversations)
-          .where(and(eq(conversations.id, params.conversationId), eq(conversations.userId, params.userId)))
+          .where(
+            and(
+              eq(conversations.id, params.conversationId),
+              eq(conversations.userId, params.userId),
+            ),
+          )
           .limit(1)
           .then((rows) => rows[0]?.forceWebSearch ?? null);
   const resolvedChannelPromise = getResolvedChannelForConversation(params.userId, {
@@ -310,39 +321,41 @@ export async function* runAgentWithConfig(config: AgentRuntimeConfig): AsyncGene
   };
 
   try {
-    const runtimeResolution = await (
-      config.capabilityMode != null
-        ? (() => {
-            const requestedChannelId = config.channelId || null;
-            return (requestedChannelId
+    const runtimeResolution = await (config.capabilityMode != null
+      ? (() => {
+          const requestedChannelId = config.channelId || null;
+          return (
+            requestedChannelId
               ? getResolvedChannelForConversation(config.userId, {
                   channelId: requestedChannelId,
                   modelId: config.modelId ?? null,
                 })
               : getResolvedChannelForUser(config.userId, null)
-            ).then((resolvedChannel) =>
-              resolvedChannel
-                ? {
+          ).then((resolvedChannel) =>
+            resolvedChannel
+              ? {
+                  success: true as const,
+                  resolvedChannel,
+                  compatibility: {
                     success: true as const,
-                    resolvedChannel,
-                    compatibility: { success: true as const, mode: config.capabilityMode as AgentCapabilityMode },
-                    fallbackUsed: false,
-                    attempts: [],
-                  }
-                : {
-                    success: false as const,
-                    error: "未配置可用的默认渠道/默认模型。请先在设置中完成配置。",
-                    attempts: [],
+                    mode: config.capabilityMode as AgentCapabilityMode,
                   },
-            );
-          })()
-        : resolveAgentRuntime({
-            userId: config.userId,
-            requestedChannelId: config.channelId ?? null,
-            requestedModelId: config.modelId ?? null,
-            bypassCache: true,
-          })
-    );
+                  fallbackUsed: false,
+                  attempts: [],
+                }
+              : {
+                  success: false as const,
+                  error: "未配置可用的默认渠道/默认模型。请先在设置中完成配置。",
+                  attempts: [],
+                },
+          );
+        })()
+      : resolveAgentRuntime({
+          userId: config.userId,
+          requestedChannelId: config.channelId ?? null,
+          requestedModelId: config.modelId ?? null,
+          bypassCache: true,
+        }));
 
     if (runtimeResolution.success === false) {
       yield await emit({ type: "error", content: runtimeResolution.error });
@@ -410,10 +423,17 @@ export async function* runAgentWithConfig(config: AgentRuntimeConfig): AsyncGene
                 role: "user",
                 content: [
                   { type: "text", text: finalPrompt || " " },
-                  ...images.map((img) => ({
-                    type: "image",
-                    source: { type: "base64", media_type: img.fileType, data: img.dataBase64 },
-                  })),
+                  ...images.map(
+                    (img) =>
+                      ({
+                        type: "image",
+                        source: {
+                          type: "base64",
+                          media_type: img.fileType,
+                          data: img.dataBase64,
+                        },
+                      }) as SdkImageBlockParam,
+                  ),
                 ],
               },
             };
