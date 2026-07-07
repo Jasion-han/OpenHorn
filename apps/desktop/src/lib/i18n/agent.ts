@@ -695,3 +695,35 @@ export function formatGeneralSettingsLabel(
   }
   return text;
 }
+
+/**
+ * Labels for the Appearance settings panel (AppearanceSettings): theme-mode
+ * segmented control (options + description), the interface-zoom row with its
+ * platform-specific keyboard hint, and the local-persistence note. The zoom
+ * hints keep the raw shortcut glyphs (⌘, Ctrl) verbatim. There is no
+ * interpolation here, so no format helper is provided; the per-namespace
+ * convention used above is followed.
+ */
+export const appearanceSettingsLabels = {
+  // Section
+  "settings.appearance.title": "外观设置",
+  "settings.appearance.description": "自定义应用的视觉风格",
+  // Theme mode
+  "settings.appearance.theme.title": "主题模式",
+  "settings.appearance.theme.description": "选择应用的配色方案",
+  "settings.appearance.theme.light": "浅色",
+  "settings.appearance.theme.dark": "深色",
+  "settings.appearance.theme.system": "跟随系统",
+  // Interface zoom
+  "settings.appearance.zoom.title": "界面缩放",
+  "settings.appearance.zoom.hintMac": "使用 ⌘+ 放大、⌘- 缩小、⌘0 恢复默认大小",
+  "settings.appearance.zoom.hintOther": "使用 Ctrl++ 放大、Ctrl+- 缩小、Ctrl+0 恢复默认大小",
+  // Persistence note
+  "settings.appearance.persistNote": "提示：主题模式会保存到本地浏览器（仅影响当前设备）。",
+} as const;
+
+type AppearanceSettingsLabelKey = keyof typeof appearanceSettingsLabels;
+
+export function getAppearanceSettingsLabel(key: AppearanceSettingsLabelKey): string {
+  return appearanceSettingsLabels[key];
+}

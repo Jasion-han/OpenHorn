@@ -1,20 +1,21 @@
 import { useEffect, useMemo, useState } from "react";
 import { cn, SettingsCard, SettingsRow, SettingsSection, SettingsSegmentedControl } from "ui";
 
+import { getAppearanceSettingsLabel } from "../../lib/i18n/agent";
 import type { ThemeMode } from "../../lib/theme";
 import { readThemeMode, setThemeMode, THEME_MODE_CHANGE_EVENT } from "../../lib/theme";
 
 const THEME_OPTIONS: { value: ThemeMode; label: string }[] = [
-  { value: "light", label: "浅色" },
-  { value: "dark", label: "深色" },
-  { value: "system", label: "跟随系统" },
+  { value: "light", label: getAppearanceSettingsLabel("settings.appearance.theme.light") },
+  { value: "dark", label: getAppearanceSettingsLabel("settings.appearance.theme.dark") },
+  { value: "system", label: getAppearanceSettingsLabel("settings.appearance.theme.system") },
 ];
 
 function getZoomHint() {
   const isMac = typeof navigator !== "undefined" && navigator.userAgent.includes("Mac");
   return isMac
-    ? "使用 ⌘+ 放大、⌘- 缩小、⌘0 恢复默认大小"
-    : "使用 Ctrl++ 放大、Ctrl+- 缩小、Ctrl+0 恢复默认大小";
+    ? getAppearanceSettingsLabel("settings.appearance.zoom.hintMac")
+    : getAppearanceSettingsLabel("settings.appearance.zoom.hintOther");
 }
 
 export function AppearanceSettings() {
@@ -35,19 +36,25 @@ export function AppearanceSettings() {
   };
 
   return (
-    <SettingsSection title="外观设置" description="自定义应用的视觉风格">
+    <SettingsSection
+      title={getAppearanceSettingsLabel("settings.appearance.title")}
+      description={getAppearanceSettingsLabel("settings.appearance.description")}
+    >
       <SettingsCard>
         <SettingsSegmentedControl
-          label="主题模式"
-          description="选择应用的配色方案"
+          label={getAppearanceSettingsLabel("settings.appearance.theme.title")}
+          description={getAppearanceSettingsLabel("settings.appearance.theme.description")}
           value={themeMode}
           onValueChange={handleThemeChange}
           options={THEME_OPTIONS}
         />
-        <SettingsRow label="界面缩放" description={zoomHint} />
+        <SettingsRow
+          label={getAppearanceSettingsLabel("settings.appearance.zoom.title")}
+          description={zoomHint}
+        />
       </SettingsCard>
       <p className={cn("text-xs text-muted-foreground")}>
-        提示：主题模式会保存到本地浏览器（仅影响当前设备）。
+        {getAppearanceSettingsLabel("settings.appearance.persistNote")}
       </p>
     </SettingsSection>
   );
