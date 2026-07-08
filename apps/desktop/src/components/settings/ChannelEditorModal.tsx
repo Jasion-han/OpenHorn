@@ -20,7 +20,12 @@ import {
   SelectValue,
 } from "ui";
 import { getCredentialKey, listCredentialSources } from "../../lib/credentialApi";
-import { formatChannelLabel, getChannelLabel, getCredentialLabel } from "../../lib/i18n/agent";
+import {
+  formatChannelLabel,
+  getChannelLabel,
+  getCredentialLabel,
+  getProviderLabel,
+} from "../../lib/i18n/agent";
 import { createServerApi } from "../../lib/serverApi";
 import type { DetectedCredential } from "../../lib/sidecarClient";
 import { useSidecarStore } from "../../stores/sidecarStore";
@@ -33,7 +38,7 @@ const NEW_CHANNEL_KEY = "__new__";
 
 const CHANNEL_PROTOCOLS = {
   openai: {
-    label: "OpenAI 兼容",
+    label: getProviderLabel("provider.openaiCompatible"),
     baseUrl: "https://api.openai.com/v1",
   },
   anthropic: {
@@ -75,7 +80,7 @@ const COMMON_PROVIDER_PRESETS = [
   },
   {
     value: "qwen",
-    label: "通义千问",
+    label: getProviderLabel("provider.qwen"),
     protocol: "openai" as const,
     baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
   },
@@ -93,7 +98,7 @@ const COMMON_PROVIDER_PRESETS = [
   },
   {
     value: "doubao",
-    label: "豆包",
+    label: getProviderLabel("provider.doubao"),
     protocol: "openai" as const,
     baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
   },

@@ -9,6 +9,7 @@ import glmLogo from "../../../public/provider-logos/glm.ico";
 import kimiLogo from "../../../public/provider-logos/kimi.ico";
 import minimaxLogo from "../../../public/provider-logos/minimax.ico";
 import qwenLogo from "../../../public/provider-logos/qwen.png";
+import { getProviderLabel } from "../../lib/i18n/agent";
 
 type ProviderLogoProps = {
   provider: string | null | undefined;
@@ -31,7 +32,7 @@ const PROVIDER_LOGOS: Record<string, ProviderLogoSpec> = {
   glm: { src: glmLogo, label: "GLM" },
   minimax: { src: minimaxLogo, label: "MiniMax" },
   qwen: { src: qwenLogo, label: "Qwen" },
-  doubao: { src: doubaoLogo, label: "豆包" },
+  doubao: { src: doubaoLogo, label: getProviderLabel("provider.doubao") },
 };
 
 function normalizeProvider(provider: string) {
