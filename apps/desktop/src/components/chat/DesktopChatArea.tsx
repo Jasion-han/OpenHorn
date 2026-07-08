@@ -978,6 +978,7 @@ export function DesktopChatArea() {
 
       updateMessage(userMessageId, { id: prepared.userMessageId });
       updateMessage(assistantMessageId, { id: prepared.assistantMessageId });
+      setStreamingAssistantId(prepared.assistantMessageId);
 
       const sidecarClient = useSidecarStore.getState().client;
       if (!sidecarClient) {
