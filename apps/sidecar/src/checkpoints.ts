@@ -33,8 +33,10 @@ function normalizeRelPath(input: string) {
   return p;
 }
 
-export async function createCheckpointSession(workspaceRoot: string): Promise<CheckpointSession> {
-  const runId = generateId();
+export async function createCheckpointSession(
+  workspaceRoot: string,
+  runId: string = generateId(),
+): Promise<CheckpointSession> {
   const checkpointDir = path.join(workspaceRoot, ".openhorn", "snapshots", runId);
   await mkdir(path.join(checkpointDir, "files"), { recursive: true });
   await ensureGitignore(workspaceRoot);

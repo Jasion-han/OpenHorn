@@ -476,7 +476,10 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
 
         if (protocol === "anthropic") {
           const { runId, onEvent, guard } = initRun("claude");
-          const checkpoint = await createCheckpointSession(cwd);
+          // Key the snapshot dir by the SAME runId the client receives, so
+          // checkpoint.rollback (which looks up snapshots/<runId>) resolves the
+          // directory that was actually written.
+          const checkpoint = await createCheckpointSession(cwd, runId);
           guard(
             "Claude agent",
             runClaudeAgent({
@@ -534,7 +537,10 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
               attachments,
               skills: materializedSkills,
               requestApproval: async (approvalInput) => {
-                const approvalId = `approval-${Date.now()}`;
+                // Must be unique across concurrent runs on this connection:
+                // state.pendingApprovals is shared, so a time-only id would let
+                // two runs collide and resume the wrong resolver.
+                const approvalId = `approval-${runId}-${crypto.randomUUID()}`;
                 return new Promise<boolean>((resolve) => {
                   state.pendingApprovals.set(approvalId, resolve);
                   ws.send(
