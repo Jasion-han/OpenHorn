@@ -26,6 +26,22 @@ function sseResponse(chunks: string[]): Response {
   });
 }
 
+// Like `sseResponse` but enqueues raw byte chunks, so a test can split a
+// multi-byte UTF-8 character across the chunk boundary.
+function rawSseResponse(byteChunks: Uint8Array[]): Response {
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const chunk of byteChunks) {
+        controller.enqueue(chunk);
+      }
+      controller.close();
+    },
+  });
+  return new Response(stream, {
+    headers: { "Content-Type": "text/event-stream" },
+  });
+}
+
 function mockFetch(response: Response) {
   const original = globalThis.fetch;
   globalThis.fetch = (async () => response) as unknown as typeof fetch;
@@ -180,6 +196,74 @@ test("OpenAIAdapter streaming still honors explicit tool-call index", async () =
   }
 });
 
+test("OpenAIAdapter streaming does not double a tool name repeated across chunks", async () => {
+  // Some gateways resend the full function.name on every tool-call delta.
+  const restore = mockFetch(
+    sseResponse([
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_a","function":{"name":"get_weather","arguments":"{\\"city\\":"}}]}}]}\n\n',
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"get_weather","arguments":"\\"NYC\\"}"}}]}}]}\n\n',
+      'data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}\n\n',
+      "data: [DONE]\n\n",
+    ]),
+  );
+  try {
+    const adapter = new OpenAIAdapter("test-key", "https://example.com");
+    let result: { toolCalls: Array<{ id: string; name: string; input: unknown }> } | null = null;
+    for await (const event of adapter.runToolCallingTurnStream({
+      model: "gpt-test",
+      messages: [{ role: "user", content: "hi" }],
+      tools: parallelTools,
+    })) {
+      if (event.type === "done") result = event.result;
+    }
+    expect(result?.toolCalls).toHaveLength(1);
+    expect(result?.toolCalls[0]).toEqual({
+      id: "call_a",
+      name: "get_weather",
+      input: { city: "NYC" },
+    });
+  } finally {
+    restore();
+  }
+});
+
+test("OpenAIAdapter streaming keeps a later index-less fragment off an explicit index:0 slot", async () => {
+  // A stream that mixes explicit indices with index-less fragments carrying a
+  // fresh id: the synthetic slot must not collide with the real index:0 entry.
+  const restore = mockFetch(
+    sseResponse([
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_a","function":{"name":"get_weather","arguments":"{\\"city\\":\\"NYC\\"}"}}]}}]}\n\n',
+      'data: {"choices":[{"delta":{"tool_calls":[{"id":"call_b","function":{"name":"get_time","arguments":"{\\"tz\\":\\"UTC\\"}"}}]}}]}\n\n',
+      'data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}\n\n',
+      "data: [DONE]\n\n",
+    ]),
+  );
+  try {
+    const adapter = new OpenAIAdapter("test-key", "https://example.com");
+    let result: { toolCalls: Array<{ id: string; name: string; input: unknown }> } | null = null;
+    for await (const event of adapter.runToolCallingTurnStream({
+      model: "gpt-test",
+      messages: [{ role: "user", content: "hi" }],
+      tools: parallelTools,
+    })) {
+      if (event.type === "done") result = event.result;
+    }
+    expect(result?.toolCalls).toHaveLength(2);
+    expect(result?.toolCalls[0]).toEqual({
+      id: "call_a",
+      name: "get_weather",
+      input: { city: "NYC" },
+    });
+    expect(result?.toolCalls[1]).toEqual({
+      id: "call_b",
+      name: "get_time",
+      input: { tz: "UTC" },
+    });
+  } finally {
+    restore();
+  }
+});
+
 // ---------------------------------------------------------------------------
 // Truncated tool-call arguments with finish_reason "length" (Fix 3/4)
 // ---------------------------------------------------------------------------
@@ -313,6 +397,53 @@ test("AnthropicAdapter.chatStream throws on a mid-stream error event", async () 
   }
 });
 
+test("AnthropicAdapter.chatStream emits the final delta when the body has no trailing newline", async () => {
+  const restore = mockFetch(
+    sseResponse([
+      'data: {"type":"content_block_delta","delta":{"text":"Hello"}}\n\n',
+      // Final SSE line arrives WITHOUT a closing newline.
+      'data: {"type":"content_block_delta","delta":{"text":" world"}}',
+    ]),
+  );
+  try {
+    const adapter = new AnthropicAdapter("test-key", "https://example.com");
+    const chunks: string[] = [];
+    for await (const chunk of adapter.chatStream({
+      model: "claude-test",
+      messages: [{ role: "user", content: "hi" }],
+    })) {
+      chunks.push(chunk);
+    }
+    expect(chunks.join("")).toBe("Hello world");
+  } finally {
+    restore();
+  }
+});
+
+test("AnthropicAdapter.chatStream flushes a multi-byte char split across the final chunk", async () => {
+  const encoder = new TextEncoder();
+  const line1 = encoder.encode('data: {"type":"content_block_delta","delta":{"text":"Hi"}}\n\n');
+  // Final line ends in the 3-byte "世" and has no trailing newline.
+  const line2 = encoder.encode('data: {"type":"content_block_delta","delta":{"text":"世"}}');
+  const splitAt = line2.length - 1; // last byte of 世 lands alone in the final chunk
+  const chunkA = new Uint8Array([...line1, ...line2.slice(0, splitAt)]);
+  const chunkB = line2.slice(splitAt);
+  const restore = mockFetch(rawSseResponse([chunkA, chunkB]));
+  try {
+    const adapter = new AnthropicAdapter("test-key", "https://example.com");
+    const chunks: string[] = [];
+    for await (const chunk of adapter.chatStream({
+      model: "claude-test",
+      messages: [{ role: "user", content: "hi" }],
+    })) {
+      chunks.push(chunk);
+    }
+    expect(chunks.join("")).toBe("Hi世");
+  } finally {
+    restore();
+  }
+});
+
 // ---------------------------------------------------------------------------
 // Anthropic — parallel tool results coalesce into ONE user message
 // (avoids the "messages: roles must alternate" 400)
@@ -396,6 +527,29 @@ test("GoogleAdapter.chatStream throws when the generation is safety-blocked", as
     expect(caught?.message).toBe(
       "Provider API error (200): Generation stopped by Gemini (finishReason: SAFETY)",
     );
+  } finally {
+    restore();
+  }
+});
+
+test("GoogleAdapter.chatStream emits the final delta when the body has no trailing newline", async () => {
+  const restore = mockFetch(
+    sseResponse([
+      'data: {"candidates":[{"content":{"parts":[{"text":"Hello"}]}}]}\n\n',
+      // Final SSE line arrives WITHOUT a closing newline.
+      'data: {"candidates":[{"content":{"parts":[{"text":" world"}]}}]}',
+    ]),
+  );
+  try {
+    const adapter = new GoogleAdapter("test-key", "https://example.com");
+    const chunks: string[] = [];
+    for await (const chunk of adapter.chatStream({
+      model: "gemini-test",
+      messages: [{ role: "user", content: "hi" }],
+    })) {
+      chunks.push(chunk);
+    }
+    expect(chunks.join("")).toBe("Hello world");
   } finally {
     restore();
   }

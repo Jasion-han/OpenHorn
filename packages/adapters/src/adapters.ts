@@ -954,6 +954,12 @@ export class OpenAIAdapter implements ProviderAdapter {
         let index: number;
         if (typeof toolCall.index === "number") {
           index = toolCall.index;
+          // Keep the synthetic counter past every explicit index so a later
+          // index-less fragment can't be handed a slot that collides with a
+          // real `index:0` entry and merge two distinct calls.
+          if (index >= nextSyntheticToolCallKey) {
+            nextSyntheticToolCallKey = index + 1;
+          }
         } else if (hasNewId || lastToolCallKey === null) {
           index = nextSyntheticToolCallKey++;
         } else {
@@ -970,8 +976,11 @@ export class OpenAIAdapter implements ProviderAdapter {
         }
         const toolFunction = isRecord(toolCall.function) ? toolCall.function : null;
         if (toolFunction) {
-          if (typeof toolFunction.name === "string" && toolFunction.name.trim()) {
-            current.name += toolFunction.name;
+          // Some OpenAI-compat gateways repeat the full `function.name` on every
+          // tool-call delta; assign it once instead of concatenating so it isn't
+          // doubled ("bashbash…") and then failing canonicalizeToolName.
+          if (typeof toolFunction.name === "string" && toolFunction.name.trim() && !current.name) {
+            current.name = toolFunction.name;
           }
           if (typeof toolFunction.arguments === "string" && toolFunction.arguments.length > 0) {
             current.argumentsText += toolFunction.arguments;
@@ -1289,6 +1298,34 @@ export class AnthropicAdapter implements ProviderAdapter {
     const decoder = new TextDecoder();
     let buffer = "";
 
+    const emitLine = function* (line: string): Generator<string> {
+      if (!line.startsWith("data: ")) return;
+      const data = line.slice(6);
+      if (data === "[DONE]") return;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(data);
+      } catch {
+        // Skip invalid JSON
+        return;
+      }
+      if (!isRecord(parsed)) return;
+      // Anthropic emits mid-stream error events (overloaded/rate-limit);
+      // surface them instead of silently truncating the stream.
+      if (parsed.type === "error") {
+        const err = isRecord(parsed.error) ? parsed.error : null;
+        const message = err && typeof err.message === "string" ? err.message : "Streaming error";
+        throw new Error(formatProviderApiError(undefined, message));
+      }
+      if (parsed.type === "content_block_delta") {
+        const delta = isRecord(parsed.delta) ? parsed.delta : null;
+        const text = delta?.text;
+        if (typeof text === "string" && text.length > 0) {
+          yield text;
+        }
+      }
+    };
+
     try {
       while (true) {
         const { done, value } = await reader.read();
@@ -1300,33 +1337,15 @@ export class AnthropicAdapter implements ProviderAdapter {
         buffer = lines.pop() || "";
 
         for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          const data = line.slice(6);
-          if (data === "[DONE]") return;
-          let parsed: unknown;
-          try {
-            parsed = JSON.parse(data);
-          } catch {
-            // Skip invalid JSON
-            continue;
-          }
-          if (!isRecord(parsed)) continue;
-          // Anthropic emits mid-stream error events (overloaded/rate-limit);
-          // surface them instead of silently truncating the stream.
-          if (parsed.type === "error") {
-            const err = isRecord(parsed.error) ? parsed.error : null;
-            const message =
-              err && typeof err.message === "string" ? err.message : "Streaming error";
-            throw new Error(formatProviderApiError(undefined, message));
-          }
-          if (parsed.type === "content_block_delta") {
-            const delta = isRecord(parsed.delta) ? parsed.delta : null;
-            const text = delta?.text;
-            if (typeof text === "string" && text.length > 0) {
-              yield text;
-            }
-          }
+          yield* emitLine(line);
         }
+      }
+      // Flush the decoder (a multi-byte char may straddle the final chunk) and
+      // process any trailing line the body left without a closing newline, so
+      // the last delta is not dropped.
+      buffer += decoder.decode();
+      if (buffer.length > 0) {
+        yield* emitLine(buffer);
       }
     } catch (error) {
       rethrowAbortReason(timeout.signal, error);
@@ -1784,6 +1803,32 @@ export class GoogleAdapter implements ToolCallingAdapter {
     let blockReason: string | null = null;
     let finishReason: string | null = null;
 
+    const emitLine = function* (line: string): Generator<string> {
+      if (!line.startsWith("data: ")) return;
+      const raw = line.slice(6);
+      if (raw === "[DONE]") return;
+      try {
+        const parsed = JSON.parse(raw);
+        if (isRecord(parsed)) {
+          const block = extractGeminiBlock(parsed);
+          if (block.blockReason) blockReason = block.blockReason;
+          if (block.finishReason) finishReason = block.finishReason;
+          const candidates = Array.isArray(parsed.candidates) ? parsed.candidates : [];
+          const first = candidates[0];
+          if (isRecord(first) && isRecord(first.content) && Array.isArray(first.content.parts)) {
+            for (const part of first.content.parts as Array<Record<string, unknown>>) {
+              if (typeof part.text === "string" && part.text.length > 0) {
+                sawText = true;
+                yield part.text;
+              }
+            }
+          }
+        }
+      } catch {
+        // Skip invalid JSON
+      }
+    };
+
     try {
       while (true) {
         const { done, value } = await reader.read();
@@ -1795,35 +1840,15 @@ export class GoogleAdapter implements ToolCallingAdapter {
         buffer = lines.pop() || "";
 
         for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            const raw = line.slice(6);
-            if (raw === "[DONE]") break;
-            try {
-              const parsed = JSON.parse(raw);
-              if (isRecord(parsed)) {
-                const block = extractGeminiBlock(parsed);
-                if (block.blockReason) blockReason = block.blockReason;
-                if (block.finishReason) finishReason = block.finishReason;
-                const candidates = Array.isArray(parsed.candidates) ? parsed.candidates : [];
-                const first = candidates[0];
-                if (
-                  isRecord(first) &&
-                  isRecord(first.content) &&
-                  Array.isArray(first.content.parts)
-                ) {
-                  for (const part of first.content.parts as Array<Record<string, unknown>>) {
-                    if (typeof part.text === "string" && part.text.length > 0) {
-                      sawText = true;
-                      yield part.text;
-                    }
-                  }
-                }
-              }
-            } catch {
-              // Skip invalid JSON
-            }
-          }
+          yield* emitLine(line);
         }
+      }
+      // Flush the decoder (a multi-byte char may straddle the final chunk) and
+      // process any trailing line the body left without a closing newline, so
+      // the last delta is not dropped.
+      buffer += decoder.decode();
+      if (buffer.length > 0) {
+        yield* emitLine(buffer);
       }
     } catch (error) {
       rethrowAbortReason(timeout.signal, error);
