@@ -494,6 +494,10 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
       set({ isLoading: true, error: null });
       try {
         const messages = await adapter.loadMessages(conversationId);
+        // The user may have switched conversations while this awaited. Only
+        // apply the result (and clear the loading flag) if it's still current,
+        // otherwise we'd clobber the newly selected conversation's state/cache.
+        if (get().currentConversation?.id !== conversationId) return;
         set({ messages, isLoading: false });
       } catch (error) {
         set({ isLoading: false, error: toErrorMessage(error) });
