@@ -51,8 +51,38 @@ function signSessionToken(userId: string, tokenVersion: number): Promise<string>
     .sign(getJwtSecret());
 }
 
+// Basic email shape check: a non-empty local part, an `@`, and a domain part
+// containing a dot. Intentionally lax — full RFC 5322 validation is overkill and
+// rejects valid addresses; the goal here is just to catch obviously-bad input.
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 export async function register(input: RegisterInput) {
-  const existing = await db.select().from(users).where(eq(users.email, input.email)).limit(1);
+  // Validate before touching the DB. Prevents blank-password / empty-username
+  // accounts and unbounded field lengths.
+  const email = input.email?.trim() ?? "";
+  const username = input.username?.trim() ?? "";
+  const password = input.password ?? "";
+
+  if (!email || !EMAIL_RE.test(email)) {
+    throw new Error("A valid email is required");
+  }
+  if (email.length > 320) {
+    throw new Error("Email must be 320 characters or fewer");
+  }
+  if (!username) {
+    throw new Error("Username is required");
+  }
+  if (username.length > 64) {
+    throw new Error("Username must be 64 characters or fewer");
+  }
+  if (password.length < 6) {
+    throw new Error("Password must be at least 6 characters");
+  }
+  if (password.length > 128) {
+    throw new Error("Password must be 128 characters or fewer");
+  }
+
+  const existing = await db.select().from(users).where(eq(users.email, email)).limit(1);
 
   // Use a neutral, non-enumerable error instead of confirming the address is
   // already taken. The DB unique constraint still prevents duplicate accounts;
@@ -61,14 +91,14 @@ export async function register(input: RegisterInput) {
     throw new Error("Unable to register with the provided details");
   }
 
-  const passwordHash = await bcrypt.hash(input.password, 10);
+  const passwordHash = await bcrypt.hash(password, 10);
   const id = generateId();
   const now = new Date();
 
   await db.insert(users).values({
     id,
-    email: input.email,
-    username: input.username,
+    email,
+    username,
     passwordHash,
     tokenVersion: 0,
     createdAt: now,
@@ -77,7 +107,7 @@ export async function register(input: RegisterInput) {
 
   const token = await signSessionToken(id, 0);
 
-  return { token, user: { id, email: input.email, username: input.username } };
+  return { token, user: { id, email, username } };
 }
 
 export async function login(input: LoginInput) {
