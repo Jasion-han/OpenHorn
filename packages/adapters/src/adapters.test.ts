@@ -314,6 +314,62 @@ test("AnthropicAdapter.chatStream throws on a mid-stream error event", async () 
 });
 
 // ---------------------------------------------------------------------------
+// Anthropic — parallel tool results coalesce into ONE user message
+// (avoids the "messages: roles must alternate" 400)
+// ---------------------------------------------------------------------------
+
+test("AnthropicAdapter.runToolCallingTurn coalesces parallel tool results into one user message", async () => {
+  const capture = mockFetchCapture(
+    jsonResponse({
+      content: [{ type: "text", text: "done" }],
+      stop_reason: "end_turn",
+    }),
+  );
+  try {
+    const adapter = new AnthropicAdapter("test-key", "https://example.com");
+    await adapter.runToolCallingTurn({
+      model: "claude-test",
+      messages: [
+        { role: "user", content: "list and read" },
+        {
+          role: "assistant",
+          content: "",
+          toolCalls: [
+            { id: "call_a", name: "list_files", input: {} },
+            { id: "call_b", name: "read_file", input: { path: "/foo" } },
+          ],
+        },
+        { role: "tool", toolCallId: "call_a", name: "list_files", content: "a.txt" },
+        { role: "tool", toolCallId: "call_b", name: "read_file", content: "hello" },
+      ],
+      tools: [
+        { name: "list_files", description: "list", inputSchema: {} },
+        { name: "read_file", description: "read", inputSchema: {} },
+      ],
+    });
+    expect(capture.calls).toHaveLength(1);
+    const body = JSON.parse(String(capture.calls[0].init?.body));
+    // user, assistant(tool_use x2), then a SINGLE user message with two tool_result blocks
+    expect(body.messages).toHaveLength(3);
+    const toolResultMsg = body.messages[2];
+    expect(toolResultMsg.role).toBe("user");
+    expect(toolResultMsg.content).toHaveLength(2);
+    expect(toolResultMsg.content[0]).toEqual({
+      type: "tool_result",
+      tool_use_id: "call_a",
+      content: "a.txt",
+    });
+    expect(toolResultMsg.content[1]).toEqual({
+      type: "tool_result",
+      tool_use_id: "call_b",
+      content: "hello",
+    });
+  } finally {
+    capture.restore();
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Google — safety-blocked streaming surfaces an error (no silent blank turn)
 // ---------------------------------------------------------------------------
 

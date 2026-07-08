@@ -1343,54 +1343,65 @@ export class AnthropicAdapter implements ProviderAdapter {
         ? systemMessages.map((message) => message.content).join("\n\n")
         : undefined;
 
+    // Coalesce a run of adjacent tool-result messages into a SINGLE user message
+    // holding multiple tool_result blocks. Parallel tool calls (assistant + tool +
+    // tool) would otherwise map to two consecutive user messages, which Anthropic
+    // rejects with "messages: roles must alternate".
+    const mappedMessages: Array<Record<string, unknown>> = [];
+    for (const message of options.messages) {
+      if (message.role === "system") continue;
+      if (message.role === "user") {
+        mappedMessages.push({
+          role: "user",
+          content: [{ type: "text", text: message.content || " " }],
+        });
+        continue;
+      }
+      if (message.role === "assistant") {
+        const contentBlocks: Array<Record<string, unknown>> = [];
+        if (message.content) {
+          contentBlocks.push({ type: "text", text: message.content });
+        }
+        for (const toolCall of message.toolCalls || []) {
+          contentBlocks.push({
+            type: "tool_use",
+            id: toolCall.id,
+            name: toolCall.name,
+            input: toolCall.input,
+          });
+        }
+        mappedMessages.push({
+          role: "assistant",
+          content: contentBlocks.length > 0 ? contentBlocks : [{ type: "text", text: " " }],
+        });
+        continue;
+      }
+      if (message.role !== "tool") {
+        mappedMessages.push({
+          role: "user",
+          content: [{ type: "text", text: message.content || " " }],
+        });
+        continue;
+      }
+      const toolResultBlock = {
+        type: "tool_result",
+        tool_use_id: message.toolCallId,
+        content: message.content || " ",
+        ...(message.isError ? { is_error: true } : {}),
+      };
+      const last = mappedMessages[mappedMessages.length - 1];
+      const lastContent = last && Array.isArray(last.content) ? last.content : null;
+      if (last && last.role === "user" && lastContent && lastContent[0]?.type === "tool_result") {
+        lastContent.push(toolResultBlock);
+      } else {
+        mappedMessages.push({ role: "user", content: [toolResultBlock] });
+      }
+    }
+
     const body = JSON.stringify({
       model: options.model,
       ...(system ? { system } : {}),
-      messages: options.messages
-        .filter((message) => message.role !== "system")
-        .map((message) => {
-          if (message.role === "user") {
-            return {
-              role: "user",
-              content: [{ type: "text", text: message.content || " " }],
-            };
-          }
-          if (message.role === "assistant") {
-            const contentBlocks: Array<Record<string, unknown>> = [];
-            if (message.content) {
-              contentBlocks.push({ type: "text", text: message.content });
-            }
-            for (const toolCall of message.toolCalls || []) {
-              contentBlocks.push({
-                type: "tool_use",
-                id: toolCall.id,
-                name: toolCall.name,
-                input: toolCall.input,
-              });
-            }
-            return {
-              role: "assistant",
-              content: contentBlocks.length > 0 ? contentBlocks : [{ type: "text", text: " " }],
-            };
-          }
-          if (message.role !== "tool") {
-            return {
-              role: "user",
-              content: [{ type: "text", text: message.content || " " }],
-            };
-          }
-          return {
-            role: "user",
-            content: [
-              {
-                type: "tool_result",
-                tool_use_id: message.toolCallId,
-                content: message.content || " ",
-                ...(message.isError ? { is_error: true } : {}),
-              },
-            ],
-          };
-        }),
+      messages: mappedMessages,
       tools: options.tools.map((tool) => ({
         name: tool.name,
         description: tool.description,
@@ -1531,17 +1542,26 @@ function buildGeminiToolCallingContents(messages: GenericAgentConversationMessag
       if (parts.length === 0) parts.push({ text: " " });
       contents.push({ role: "model", parts });
     } else if (m.role === "tool") {
-      contents.push({
-        role: "user",
-        parts: [
-          {
-            functionResponse: {
-              name: m.name,
-              response: { content: m.content },
-            },
-          },
-        ],
-      });
+      // Coalesce a run of adjacent tool results into a single entry with multiple
+      // functionResponse parts, so parallel tool calls stay paired with the model
+      // turn instead of splitting into consecutive user entries that mis-pair.
+      const functionResponsePart = {
+        functionResponse: {
+          name: m.name,
+          response: { content: m.content },
+        },
+      };
+      const last = contents[contents.length - 1];
+      if (
+        last &&
+        last.role === "user" &&
+        last.parts.length > 0 &&
+        "functionResponse" in last.parts[0]
+      ) {
+        last.parts.push(functionResponsePart);
+      } else {
+        contents.push({ role: "user", parts: [functionResponsePart] });
+      }
     }
   }
   return contents;
