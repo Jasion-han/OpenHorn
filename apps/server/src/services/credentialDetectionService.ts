@@ -56,6 +56,29 @@ function detectEnvVar(envName: string, provider: CredentialProvider): Credential
   );
 }
 
+// Google's key is read from `GEMINI_API_KEY`, but `GOOGLE_API_KEY` is the more
+// common name (and what `.env.example` historically advertised). Accept it as an
+// alias, preferring a non-empty `GEMINI_API_KEY` when both are set.
+function resolveGoogleApiKey(): { name: string; value: string } | null {
+  const gemini = process.env.GEMINI_API_KEY;
+  if (typeof gemini === "string" && gemini.trim()) {
+    return { name: "GEMINI_API_KEY", value: gemini.trim() };
+  }
+  const google = process.env.GOOGLE_API_KEY;
+  if (typeof google === "string" && google.trim()) {
+    return { name: "GOOGLE_API_KEY", value: google.trim() };
+  }
+  return null;
+}
+
+// The detected source keeps the `env-gemini-api-key` id so `getCredential`
+// resolves it consistently regardless of which alias supplied the value.
+function detectGoogleEnvVar(): CredentialSource | null {
+  const resolved = resolveGoogleApiKey();
+  if (!resolved) return null;
+  return makeSource("env-gemini-api-key", "google", "env_var", resolved.name, "available");
+}
+
 // ---------------------------------------------------------------------------
 // Codex CLI (OpenAI OAuth)
 // ---------------------------------------------------------------------------
@@ -208,7 +231,7 @@ const DETECTION_CHAINS: Array<{
   },
   {
     provider: "google",
-    detectors: [() => detectEnvVar("GEMINI_API_KEY", "google"), () => detectGeminiCli()],
+    detectors: [() => detectGoogleEnvVar(), () => detectGeminiCli()],
   },
 ];
 
@@ -248,7 +271,8 @@ export async function getCredential(
     "env-anthropic-oauth-token": process.env.ANTHROPIC_OAUTH_TOKEN,
     "env-anthropic-api-key": process.env.ANTHROPIC_API_KEY,
     "env-openai-api-key": process.env.OPENAI_API_KEY,
-    "env-gemini-api-key": process.env.GEMINI_API_KEY,
+    // Mirror the detector alias: prefer GEMINI_API_KEY, fall back to GOOGLE_API_KEY.
+    "env-gemini-api-key": resolveGoogleApiKey()?.value,
   };
 
   if (sourceId in envMapping) {
