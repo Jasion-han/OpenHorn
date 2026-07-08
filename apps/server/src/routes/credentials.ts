@@ -1,4 +1,5 @@
-import { Hono } from "hono";
+import { Hono, type MiddlewareHandler } from "hono";
+import { getConnInfo } from "hono/bun";
 import { createAdapter } from "../agent-adapters";
 import { detectCredentialSources, getCredential } from "../services/credentialDetectionService";
 import { PROVIDER_PRESETS } from "../services/providerPresets";
@@ -7,6 +8,45 @@ import { requireUser, type UserEnv } from "../utils/requestUser";
 const credentials = new Hono<UserEnv>();
 
 credentials.use("*", requireUser);
+
+const LOOPBACK_ADDRESSES = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
+
+/**
+ * Loopback-only guard for the raw-secret endpoints.
+ *
+ * OpenHorn is single-user / local-desktop only: the desktop client always talks
+ * to the server over loopback. The endpoints below return host secrets (raw API
+ * keys / CLI OAuth tokens), so we enforce a loopback boundary here — even if the
+ * server is ever bound to a non-loopback interface, these secrets can never leak
+ * to a remote client. The peer address is obtained via Bun's `server.requestIP`
+ * (through hono/bun's `getConnInfo`), which is reliable under this stack.
+ *
+ * We fail closed: if the address is non-loopback OR cannot be determined, the
+ * request is rejected with 403. Set OPENHORN_ALLOW_REMOTE_CREDENTIALS=true to
+ * explicitly opt out of this restriction (not recommended).
+ */
+const requireLoopback: MiddlewareHandler<UserEnv> = async (c, next) => {
+  if (process.env.OPENHORN_ALLOW_REMOTE_CREDENTIALS === "true") {
+    return next();
+  }
+
+  let address: string | undefined;
+  try {
+    address = getConnInfo(c).remote.address;
+  } catch {
+    // Peer address not obtainable (e.g. not running under Bun) — fail closed.
+    address = undefined;
+  }
+
+  if (address && LOOPBACK_ADDRESSES.has(address)) {
+    return next();
+  }
+
+  return c.json({ error: "Credential sources are only accessible from the local machine" }, 403);
+};
+
+credentials.use("/sources/:id/key", requireLoopback);
+credentials.use("/sources/:id/test", requireLoopback);
 
 /**
  * GET /credentials/sources
