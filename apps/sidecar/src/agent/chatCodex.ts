@@ -24,6 +24,11 @@ export async function runCodexChat(input: RunCodexChatInput): Promise<void> {
     },
   );
 
+  // Drain stderr concurrently from the moment the child spawns. Codex can emit
+  // >64KB of JSON logs on stderr; if we only read it after exit, the pipe buffer
+  // fills, the child blocks on write, and our stdout reader.read() hangs forever.
+  const stderrPromise = new Response(proc.stderr).text();
+
   const reader = proc.stdout.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -64,7 +69,7 @@ export async function runCodexChat(input: RunCodexChatInput): Promise<void> {
 
   const exitCode = await proc.exited;
   if (exitCode !== 0) {
-    const stderr = await new Response(proc.stderr).text();
+    const stderr = await stderrPromise;
     const errMsg = stderr.trim().split("\n").filter(l => !l.includes("ERROR rmcp")).join("\n").trim();
     if (errMsg) {
       input.onEvent({ type: "error", content: errMsg });
