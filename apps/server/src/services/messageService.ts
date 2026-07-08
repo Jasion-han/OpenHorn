@@ -1927,7 +1927,9 @@ export async function completeChatFromSidecar(
       content: input.content,
       model: input.model || null,
     })
-    .where(eq(messages.id, input.assistantMessageId));
+    .where(
+      and(eq(messages.id, input.assistantMessageId), eq(messages.conversationId, conversation.id)),
+    );
 
   await db
     .update(conversations)
