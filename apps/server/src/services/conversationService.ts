@@ -182,48 +182,50 @@ export async function deleteConversation(userId: string, conversationId: string)
   const sessionIds = sessionRows.map((row) => row.id);
   const taskIds = taskRows.map((row) => row.id);
 
-  if (messageIds.length > 0) {
-    await db.delete(attachments).where(inArray(attachments.messageId, messageIds));
-  }
-
-  if (sessionIds.length > 0) {
-    await db.delete(attachments).where(inArray(attachments.sessionId, sessionIds));
-    await db.delete(agentEvents).where(inArray(agentEvents.sessionId, sessionIds));
-    await db
-      .delete(agentSessions)
-      .where(and(eq(agentSessions.userId, userId), inArray(agentSessions.id, sessionIds)));
-  }
-
-  if (taskIds.length > 0) {
-    const runRows = await db
-      .select({ id: agentRuns.id })
-      .from(agentRuns)
-      .where(inArray(agentRuns.taskId, taskIds));
-    const runIds = runRows.map((row) => row.id);
-
-    if (runIds.length > 0) {
-      await db.delete(agentPlanSteps).where(inArray(agentPlanSteps.runId, runIds));
-      await db.delete(agentTaskEvents).where(inArray(agentTaskEvents.runId, runIds));
-      await db.delete(agentApprovalRequests).where(inArray(agentApprovalRequests.runId, runIds));
-      await db.delete(agentArtifacts).where(inArray(agentArtifacts.runId, runIds));
-      await db.delete(agentRuns).where(inArray(agentRuns.id, runIds));
+  await db.transaction(async (tx) => {
+    if (messageIds.length > 0) {
+      await tx.delete(attachments).where(inArray(attachments.messageId, messageIds));
     }
 
-    await db.delete(agentPlanSteps).where(inArray(agentPlanSteps.taskId, taskIds));
-    await db.delete(agentTaskEvents).where(inArray(agentTaskEvents.taskId, taskIds));
-    await db.delete(agentApprovalRequests).where(inArray(agentApprovalRequests.taskId, taskIds));
-    await db.delete(agentArtifacts).where(inArray(agentArtifacts.taskId, taskIds));
-    await db
-      .delete(agentTasks)
-      .where(and(eq(agentTasks.userId, userId), inArray(agentTasks.id, taskIds)));
-  }
+    if (sessionIds.length > 0) {
+      await tx.delete(attachments).where(inArray(attachments.sessionId, sessionIds));
+      await tx.delete(agentEvents).where(inArray(agentEvents.sessionId, sessionIds));
+      await tx
+        .delete(agentSessions)
+        .where(and(eq(agentSessions.userId, userId), inArray(agentSessions.id, sessionIds)));
+    }
 
-  await db.delete(attachments).where(eq(attachments.conversationId, conversationId));
-  await db.delete(messages).where(eq(messages.conversationId, conversationId));
+    if (taskIds.length > 0) {
+      const runRows = await tx
+        .select({ id: agentRuns.id })
+        .from(agentRuns)
+        .where(inArray(agentRuns.taskId, taskIds));
+      const runIds = runRows.map((row) => row.id);
 
-  await db
-    .delete(conversations)
-    .where(and(eq(conversations.id, conversationId), eq(conversations.userId, userId)));
+      if (runIds.length > 0) {
+        await tx.delete(agentPlanSteps).where(inArray(agentPlanSteps.runId, runIds));
+        await tx.delete(agentTaskEvents).where(inArray(agentTaskEvents.runId, runIds));
+        await tx.delete(agentApprovalRequests).where(inArray(agentApprovalRequests.runId, runIds));
+        await tx.delete(agentArtifacts).where(inArray(agentArtifacts.runId, runIds));
+        await tx.delete(agentRuns).where(inArray(agentRuns.id, runIds));
+      }
+
+      await tx.delete(agentPlanSteps).where(inArray(agentPlanSteps.taskId, taskIds));
+      await tx.delete(agentTaskEvents).where(inArray(agentTaskEvents.taskId, taskIds));
+      await tx.delete(agentApprovalRequests).where(inArray(agentApprovalRequests.taskId, taskIds));
+      await tx.delete(agentArtifacts).where(inArray(agentArtifacts.taskId, taskIds));
+      await tx
+        .delete(agentTasks)
+        .where(and(eq(agentTasks.userId, userId), inArray(agentTasks.id, taskIds)));
+    }
+
+    await tx.delete(attachments).where(eq(attachments.conversationId, conversationId));
+    await tx.delete(messages).where(eq(messages.conversationId, conversationId));
+
+    await tx
+      .delete(conversations)
+      .where(and(eq(conversations.id, conversationId), eq(conversations.userId, userId)));
+  });
 
   return { success: true };
 }
