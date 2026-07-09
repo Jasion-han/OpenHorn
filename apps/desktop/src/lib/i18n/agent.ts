@@ -769,24 +769,3 @@ type SettingsViewLabelKey = keyof typeof settingsViewLabels;
 export function getSettingsViewLabel(key: SettingsViewLabelKey): string {
   return settingsViewLabels[key];
 }
-
-/**
- * Provider brand display names shared by the channel editor presets
- * (ChannelEditorModal) and the provider logo fallback (DesktopProviderLogo).
- * Most provider names stay English (OpenAI / Anthropic / Google / DeepSeek /
- * Kimi / GLM / MiniMax / Ollama) and are inlined verbatim as brand marks per
- * rule 3 above; only the entries whose brand names are Chinese are routed here
- * so no inline Chinese literal remains in components. "OpenAI 兼容" is the
- * OpenAI-compatible protocol label.
- */
-export const providerLabels = {
-  "provider.openaiCompatible": "OpenAI 兼容",
-  "provider.qwen": "通义千问",
-  "provider.doubao": "豆包",
-} as const;
-
-type ProviderLabelKey = keyof typeof providerLabels;
-
-export function getProviderLabel(key: ProviderLabelKey): string {
-  return providerLabels[key];
-}
