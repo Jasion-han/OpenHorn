@@ -40,6 +40,7 @@ import {
   imageUnsupportedFormatText,
   partitionImagesByFormat,
 } from "./attachments";
+import { sanitizeChildEnv } from "./childEnv";
 import type { AgentEvent } from "./events";
 import { buildIntentContext } from "./intent-context";
 import { capMcpTools, connectMcpTools } from "./mcp-tools";
@@ -49,6 +50,13 @@ import { buildAgentSystemPrompt } from "./system-prompt";
 export type RunDirectAgentInput = {
   apiKey: string;
   baseUrl?: string;
+  /**
+   * Channel protocol. Decides which wire API the model speaks. Absent or
+   * "openai" means OpenAI-compatible completions; "google" switches to
+   * Gemini's generative-language API. Without this, google channels were
+   * silently driven as openai-completions and every request failed.
+   */
+  protocol?: string;
   model: string;
   prompt: string;
   cwd: string;
@@ -190,6 +198,14 @@ async function assertFetchableUrl(rawUrl: string): Promise<string | null> {
 interface ExecuteToolOptions {
   permissionMode?: "default" | "full-access";
   tavilyApiKey?: string;
+  /**
+   * Extra roots that READ tools may reach outside the workspace — the enabled
+   * skills' real folders. The system prompt tells the model to read each
+   * skill's SKILL.md by absolute path; without this list every such read was
+   * rejected as an escape, making Agent Skills unusable on this runtime.
+   * Write/edit stay strictly workspace-bounded. Mirrors claude.ts.
+   */
+  readAllowRoots?: string[];
   requestApproval?: (input: {
     toolName: string;
     toolInput: Record<string, unknown>;
@@ -205,7 +221,20 @@ interface ExecuteToolOptions {
  * check. Throws on `..`/absolute/escape; callers turn the throw into a tool-error
  * string rather than crashing the agent. Mirrors claude.ts `checkSdkFsToolPath`.
  */
-function resolveReadPathInWorkspace(cwd: string, filePath: string): string {
+function resolveReadPathInWorkspace(
+  cwd: string,
+  filePath: string,
+  readAllowRoots: string[] = [],
+): string {
+  // Skills live outside the workspace and are read in place by absolute path.
+  // Check them first, exactly as claude.ts does for its Read tool.
+  if (readAllowRoots.length > 0) {
+    const abs = path.isAbsolute(filePath) ? path.resolve(filePath) : path.resolve(cwd, filePath);
+    for (const root of readAllowRoots) {
+      const r = path.resolve(root);
+      if (abs === r || abs.startsWith(`${r}${path.sep}`)) return abs;
+    }
+  }
   const relative = toWorkspaceRelative(cwd, filePath);
   return resolvePathInsideWorkspace({ workspaceRoot: cwd, targetPath: relative });
 }
@@ -247,7 +276,15 @@ export async function executeTool(
     return new Promise((resolve) => {
       exec(
         command,
-        { cwd, timeout: BASH_TIMEOUT_MS, maxBuffer: BASH_MAX_BUFFER },
+        {
+          cwd,
+          timeout: BASH_TIMEOUT_MS,
+          maxBuffer: BASH_MAX_BUFFER,
+          // Without this the command inherits OPENHORN_HANDSHAKE_TOKEN and
+          // every provider key — `printenv` would hand the model our own
+          // sidecar credentials.
+          env: sanitizeChildEnv(process.env),
+        },
         (err, stdout, stderr) => {
           const out = (stdout || "").trim();
           const errOut = (stderr || "").trim();
@@ -265,7 +302,7 @@ export async function executeTool(
     const filePath = typeof input.path === "string" ? input.path.trim() : "";
     if (!filePath) return "Error: path is required";
     try {
-      const resolved = resolveReadPathInWorkspace(cwd, filePath);
+      const resolved = resolveReadPathInWorkspace(cwd, filePath, options?.readAllowRoots);
       const content = await readFile(resolved, "utf-8");
       return content.length > MAX_READ_CHARS
         ? `${content.slice(0, MAX_READ_CHARS)}\n...(truncated)`
@@ -727,7 +764,8 @@ function isChatGptOAuthToken(key: string): boolean {
   }
 }
 
-function buildModel(input: RunDirectAgentInput, supportsVision: boolean): Model<Api> {
+/** Exported for tests: picks the wire API from the channel protocol. */
+export function buildModel(input: RunDirectAgentInput, supportsVision: boolean): Model<Api> {
   // Only advertise image input when the model is vision-capable; otherwise the
   // provider may reject the request or mis-handle the image modality.
   const modelInput: ("text" | "image")[] = supportsVision ? ["text", "image"] : ["text"];
@@ -744,6 +782,23 @@ function buildModel(input: RunDirectAgentInput, supportsVision: boolean): Model<
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
       contextWindow: 128_000,
       maxTokens: 16_384,
+    };
+  }
+  if (input.protocol === "google") {
+    return {
+      id: input.model,
+      name: input.model,
+      api: "google-generative-ai",
+      provider: "google",
+      baseUrl: (input.baseUrl || "https://generativelanguage.googleapis.com/v1beta").replace(
+        /\/$/,
+        "",
+      ),
+      reasoning: false,
+      input: modelInput,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: 1_000_000,
+      maxTokens: 8_192,
     };
   }
   const baseUrl = (input.baseUrl || "https://api.openai.com/v1").replace(/\/$/, "");
@@ -778,6 +833,9 @@ export async function runDirectAgent(input: RunDirectAgentInput): Promise<void> 
     tavilyApiKey: input.tavilyApiKey,
     requestApproval: input.requestApproval,
     webSearchEnabled: input.webSearchEnabled,
+    // Let READ tools reach each enabled skill's folder — the prompt built below
+    // points the model at these absolute paths.
+    readAllowRoots: (input.skills ?? []).map((skill) => skill.skillDir),
   });
   // Bridge enabled MCP servers into the tool set (best-effort). The Claude SDK
   // path gets MCP natively; here we connect and expose them as agent tools so

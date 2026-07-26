@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { __clearDuckDuckGoCache } from "shared/search";
 import { canonicalizeWorkspaceRoot } from "../workspace";
-import { executeTool, isBlockedIpAddress, runWebSearch } from "./direct";
+import { buildModel, executeTool, isBlockedIpAddress, runWebSearch } from "./direct";
 
 const noSleep = async () => {};
 
@@ -198,5 +198,89 @@ describe("web_fetch SSRF address classifier", () => {
     expect(isBlockedIpAddress("172.32.0.1")).toBe(false);
     expect(isBlockedIpAddress("example.com")).toBe(false);
     expect(isBlockedIpAddress("::ffff:8.8.8.8")).toBe(false);
+  });
+});
+
+// A google channel used to be driven as openai-completions because protocol
+// never reached buildModel — and the schema rejected "google" outright, so the
+// run failed before that even mattered. Both ends are now wired.
+describe("buildModel protocol routing", () => {
+  const base = {
+    apiKey: "k",
+    model: "m",
+    prompt: "p",
+    cwd: "/tmp",
+    abortController: new AbortController(),
+    requestApproval: async () => true,
+    onEvent: () => {},
+  };
+
+  test("google protocol selects the Gemini generative-language API", () => {
+    const model = buildModel({ ...base, protocol: "google" }, false);
+    expect(model.api).toBe("google-generative-ai");
+    expect(model.provider).toBe("google");
+    expect(model.baseUrl).toBe("https://generativelanguage.googleapis.com/v1beta");
+  });
+
+  test("google protocol honours a custom baseUrl and strips the trailing slash", () => {
+    const model = buildModel(
+      { ...base, protocol: "google", baseUrl: "https://relay.test/v1/" },
+      false,
+    );
+    expect(model.baseUrl).toBe("https://relay.test/v1");
+  });
+
+  test("openai protocol still selects openai-completions", () => {
+    const model = buildModel({ ...base, protocol: "openai" }, false);
+    expect(model.api).toBe("openai-completions");
+  });
+
+  test("an absent protocol defaults to openai-completions", () => {
+    const model = buildModel({ ...base }, false);
+    expect(model.api).toBe("openai-completions");
+  });
+});
+
+// The system prompt tells the model to read each skill's SKILL.md by ABSOLUTE
+// path, but those folders live outside the workspace. Without readAllowRoots
+// every such read was rejected, so Agent Skills silently did nothing on the
+// direct (OpenAI/generic) runtime.
+describe("read_file skill allow-roots", () => {
+  test("reads a SKILL.md that lives outside the workspace when its folder is allowed", async () => {
+    const cwd = await canonicalizeWorkspaceRoot(
+      mkdtempSync(path.join(os.tmpdir(), "openhorn-ws-")),
+    );
+    const skillDir = mkdtempSync(path.join(os.tmpdir(), "openhorn-skill-"));
+    const skillMd = path.join(skillDir, "SKILL.md");
+    writeFileSync(skillMd, "# Test Skill", "utf8");
+
+    const allowed = await executeTool("read_file", { path: skillMd }, cwd, {
+      readAllowRoots: [skillDir],
+    });
+    expect(allowed).toBe("# Test Skill");
+  });
+
+  test("still rejects the same path when no skill folder is allowed", async () => {
+    const cwd = await canonicalizeWorkspaceRoot(
+      mkdtempSync(path.join(os.tmpdir(), "openhorn-ws-")),
+    );
+    const skillDir = mkdtempSync(path.join(os.tmpdir(), "openhorn-skill-"));
+    const skillMd = path.join(skillDir, "SKILL.md");
+    writeFileSync(skillMd, "# Test Skill", "utf8");
+
+    const rejected = await executeTool("read_file", { path: skillMd }, cwd, {});
+    expect(rejected.startsWith("Error:")).toBe(true);
+  });
+
+  test("an allowed skill folder does not open up unrelated paths", async () => {
+    const cwd = await canonicalizeWorkspaceRoot(
+      mkdtempSync(path.join(os.tmpdir(), "openhorn-ws-")),
+    );
+    const skillDir = mkdtempSync(path.join(os.tmpdir(), "openhorn-skill-"));
+
+    const rejected = await executeTool("read_file", { path: "/etc/passwd" }, cwd, {
+      readAllowRoots: [skillDir],
+    });
+    expect(rejected.startsWith("Error:")).toBe(true);
   });
 });

@@ -88,7 +88,10 @@ export const AgentRunParamsSchema = z.object({
   apiKey: z.string().default(""),
   model: z.string().min(1),
   baseUrl: z.string().optional(),
-  protocol: z.enum(["anthropic", "openai", "codex_cli"]).optional(),
+  // "google" must be listed: the server's agent-capability check reports google
+  // channels as agent-capable, so rejecting it here made those runs fail at the
+  // schema before reaching a runtime.
+  protocol: z.enum(["anthropic", "openai", "google", "codex_cli"]).optional(),
   sdkSessionId: z.string().optional(),
   permissionMode: z.enum(["default", "full-access"]).optional(),
   systemPrompt: z.string().optional(),
