@@ -47,3 +47,24 @@ describe("sanitizeChildEnv", () => {
     expect(input.JWT_SECRET).toBe("jwt");
   });
 });
+
+// Every runtime that hands a model-controlled command to a child process must
+// route its env through sanitizeChildEnv. Unit-testing the helper alone does
+// not prove it is actually *called* — that gap is how direct.ts and claude.ts
+// leaked OPENHORN_HANDSHAKE_TOKEN while childEnv.test.ts stayed green.
+describe("child env hygiene is wired into every model-facing spawn path", () => {
+  const MODEL_FACING_RUNTIMES = [
+    "src/agent/direct.ts",
+    "src/agent/claude.ts",
+    "src/agent/codex.ts",
+    "src/agent/chatCodex.ts",
+    "src/agent/mcp-tools.ts",
+  ];
+
+  for (const relPath of MODEL_FACING_RUNTIMES) {
+    test(`${relPath} uses sanitizeChildEnv`, async () => {
+      const source = await Bun.file(new URL(`../../${relPath}`, import.meta.url)).text();
+      expect(source.includes("sanitizeChildEnv")).toBe(true);
+    });
+  }
+});

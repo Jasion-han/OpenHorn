@@ -16,6 +16,7 @@ import {
   imageUnsupportedFormatText,
   partitionImagesByFormat,
 } from "./attachments";
+import { sanitizeChildEnv } from "./childEnv";
 import { type AgentEvent, convertSdkEvent } from "./events";
 import { buildIntentContext } from "./intent-context";
 import { buildSkillsPromptSection, type MaterializedSkill } from "./skills";
@@ -186,19 +187,12 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
   // ANTHROPIC_API_KEY. Instead we hand the credentials to the SDK via
   // its `options.env` field, which the SDK uses for the spawned child
   // process exclusively. The current sidecar process's env stays clean.
-  const childEnv: Record<string, string | undefined> = {
-    ...process.env,
-  };
-  for (const key of Object.keys(childEnv)) {
-    if (
-      key.startsWith("CLAUDE") ||
-      key === "AI_AGENT" ||
-      key.startsWith("CODEX_COMPANION") ||
-      key.startsWith("TRELLIS_")
-    ) {
-      delete childEnv[key];
-    }
-  }
+  // Use the shared strip list rather than a local one: the SDK child gets a
+  // full Bash tool, so it must not inherit OPENHORN_HANDSHAKE_TOKEN (which
+  // would let it open its own sidecar connection) or any unrelated provider
+  // key. The Anthropic credentials this run legitimately needs are re-injected
+  // explicitly below, after stripping.
+  const childEnv: Record<string, string | undefined> = sanitizeChildEnv({ ...process.env });
   const isOAuthToken =
     input.apiKey?.startsWith("sk-ant-oat") || input.apiKey?.startsWith("__cli_oauth__");
   if (input.apiKey && !isOAuthToken) childEnv.ANTHROPIC_API_KEY = input.apiKey;
@@ -215,9 +209,23 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
             const filePath = extractTargetFilePath(toolName, data.tool_input);
             if (filePath) {
               try {
-                await ensureCheckpointBackup(input.checkpoint, filePath);
-              } catch {
-                // Best-effort: do not block tool execution on checkpoint failures.
+                // The SDK hands us an ABSOLUTE path; ensureCheckpointBackup
+                // takes a workspace-relative one and rejects anything starting
+                // with "/". Converting here is what makes the backup actually
+                // happen — without it every call threw and was swallowed below,
+                // leaving the manifest empty and rollback silently inert.
+                await ensureCheckpointBackup(
+                  input.checkpoint,
+                  toWorkspaceRelative(input.checkpoint.workspaceRoot, filePath),
+                );
+              } catch (error) {
+                // Best-effort: do not block tool execution on checkpoint
+                // failures — but log, so a systematic failure is visible
+                // instead of silently disabling rollback.
+                console.error(
+                  `[claude-agent] checkpoint backup failed for ${filePath}:`,
+                  error instanceof Error ? error.message : error,
+                );
               }
             }
             return { continue: true };
