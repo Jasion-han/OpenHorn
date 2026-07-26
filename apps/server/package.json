@@ -8,7 +8,8 @@
     "start": "bun run src/index.ts",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "reencrypt": "bun run src/scripts/reencryptChannelKeys.ts"
   },
   "dependencies": {
     "hono": "^4.0.0",
