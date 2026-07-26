@@ -809,3 +809,108 @@ test("all three adapters ignore SSE comment lines", async () => {
     }
   }
 });
+
+// --- Streaming token usage --------------------------------------------------
+// chatStream returns usage via the generator's return value, so `for await`
+// keeps yielding plain strings. Callers must drive the iterator manually.
+
+async function drainWithUsage<TReturn>(
+  stream: AsyncGenerator<string, TReturn>,
+): Promise<{ text: string; usage: TReturn }> {
+  const chunks: string[] = [];
+  while (true) {
+    const step: IteratorResult<string, TReturn> = await stream.next();
+    if (step.done === true) return { text: chunks.join(""), usage: step.value };
+    chunks.push(step.value);
+  }
+}
+
+test("OpenAIAdapter.chatStream returns usage from the final include_usage chunk", async () => {
+  const restore = mockFetch(
+    sseResponse([
+      'data: {"choices":[{"delta":{"content":"hi"}}]}\n\n',
+      'data: {"choices":[],"usage":{"prompt_tokens":11,"completion_tokens":4,"total_tokens":15}}\n\n',
+      "data: [DONE]\n\n",
+    ]),
+  );
+  try {
+    const adapter = new OpenAIAdapter("test-key", "https://example.com");
+    const { text, usage } = await drainWithUsage(
+      adapter.chatStream({ model: "gpt-test", messages: [{ role: "user", content: "hi" }] }),
+    );
+    expect(text).toBe("hi");
+    expect(usage).toEqual({ promptTokens: 11, completionTokens: 4, totalTokens: 15 });
+  } finally {
+    restore();
+  }
+});
+
+test("OpenAIAdapter.chatStream requests usage reporting", async () => {
+  const mocked = mockFetchCapture(sseResponse(["data: [DONE]\n\n"]));
+  try {
+    const adapter = new OpenAIAdapter("test-key", "https://example.com");
+    await drainWithUsage(
+      adapter.chatStream({ model: "gpt-test", messages: [{ role: "user", content: "hi" }] }),
+    );
+    const sentBody = String(mocked.calls[0]?.init?.body ?? "");
+    expect(sentBody.includes('"include_usage":true')).toBe(true);
+  } finally {
+    mocked.restore();
+  }
+});
+
+test("AnthropicAdapter.chatStream merges message_start and message_delta usage", async () => {
+  const restore = mockFetch(
+    sseResponse([
+      'data: {"type":"message_start","message":{"usage":{"input_tokens":20,"output_tokens":0}}}\n\n',
+      'data: {"type":"content_block_delta","delta":{"text":"hi"}}\n\n',
+      'data: {"type":"message_delta","usage":{"output_tokens":7}}\n\n',
+    ]),
+  );
+  try {
+    const adapter = new AnthropicAdapter("test-key", "https://example.com");
+    const { text, usage } = await drainWithUsage(
+      adapter.chatStream({ model: "claude-test", messages: [{ role: "user", content: "hi" }] }),
+    );
+    expect(text).toBe("hi");
+    // Anthropic never sends a total; it is derived.
+    expect(usage).toEqual({ promptTokens: 20, completionTokens: 7, totalTokens: 27 });
+  } finally {
+    restore();
+  }
+});
+
+test("GoogleAdapter.chatStream returns the last reported usageMetadata", async () => {
+  const restore = mockFetch(
+    sseResponse([
+      'data: {"candidates":[{"content":{"parts":[{"text":"hi"}]}}],"usageMetadata":{"promptTokenCount":5,"candidatesTokenCount":1,"totalTokenCount":6}}\n\n',
+      'data: {"candidates":[{"content":{"parts":[{"text":"!"}]}}],"usageMetadata":{"promptTokenCount":5,"candidatesTokenCount":2,"totalTokenCount":7}}\n\n',
+    ]),
+  );
+  try {
+    const adapter = new GoogleAdapter("test-key", "https://example.com");
+    const { text, usage } = await drainWithUsage(
+      adapter.chatStream({ model: "gemini-test", messages: [{ role: "user", content: "hi" }] }),
+    );
+    expect(text).toBe("hi!");
+    expect(usage).toEqual({ promptTokens: 5, completionTokens: 2, totalTokens: 7 });
+  } finally {
+    restore();
+  }
+});
+
+test("chatStream returns undefined usage when the provider reports none", async () => {
+  const restore = mockFetch(
+    sseResponse(['data: {"choices":[{"delta":{"content":"hi"}}]}\n\n', "data: [DONE]\n\n"]),
+  );
+  try {
+    const adapter = new OpenAIAdapter("test-key", "https://example.com");
+    const { text, usage } = await drainWithUsage(
+      adapter.chatStream({ model: "gpt-test", messages: [{ role: "user", content: "hi" }] }),
+    );
+    expect(text).toBe("hi");
+    expect(usage).toBe(undefined);
+  } finally {
+    restore();
+  }
+});

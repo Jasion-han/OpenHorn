@@ -20,20 +20,31 @@ export interface ChatOptions {
   streamTotalTimeoutMs?: number;
 }
 
+export interface ChatUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
 export interface ChatResponse {
   id: string;
   model: string;
   content: string;
-  usage?: {
-    promptTokens: number;
-    completionTokens: number;
-    totalTokens: number;
-  };
+  usage?: ChatUsage;
 }
 
 export interface ProviderAdapter {
   chat(options: ChatOptions): Promise<ChatResponse>;
-  chatStream(options: ChatOptions): AsyncGenerator<string>;
+  /**
+   * Yields text deltas and *returns* the turn's token usage when the provider
+   * reported it.
+   *
+   * The usage rides on the generator's return value rather than the yield
+   * stream so `for await (const chunk of stream)` keeps seeing plain strings.
+   * Callers that want the counts must drive the iterator by hand and read
+   * `value` from the `done: true` result.
+   */
+  chatStream(options: ChatOptions): AsyncGenerator<string, ChatUsage | undefined>;
 }
 
 import type {
@@ -240,6 +251,29 @@ export function extractStreamErrorMessage(parsed: unknown): string | null {
     return isRecord(err) && typeof err.message === "string" ? err.message : "Streaming error";
   }
   return null;
+}
+
+/**
+ * Builds a ChatUsage from whatever counts a provider reported, filling missing
+ * fields with 0 and deriving the total when it wasn't sent. Returns null when
+ * the payload carried no usage at all, so callers can tell "not reported" from
+ * "reported as zero".
+ */
+function buildChatUsage(
+  promptTokens: number | null,
+  completionTokens: number | null,
+  totalTokens: number | null,
+): ChatUsage | null {
+  if (promptTokens === null && completionTokens === null && totalTokens === null) {
+    return null;
+  }
+  const prompt = promptTokens ?? 0;
+  const completion = completionTokens ?? 0;
+  return {
+    promptTokens: prompt,
+    completionTokens: completion,
+    totalTokens: totalTokens ?? prompt + completion,
+  };
 }
 
 function rethrowAbortReason(signal: AbortSignal, error: unknown): never {
@@ -563,7 +597,8 @@ export class OpenAIAdapter implements ProviderAdapter {
     };
   }
 
-  async *chatStream(options: ChatOptions): AsyncGenerator<string> {
+  async *chatStream(options: ChatOptions): AsyncGenerator<string, ChatUsage | undefined> {
+    let streamUsage: ChatUsage | undefined;
     const url = `${this.baseUrl}/chat/completions`;
     const body = JSON.stringify({
       model: options.model,
@@ -585,6 +620,9 @@ export class OpenAIAdapter implements ProviderAdapter {
       temperature: options.temperature,
       max_tokens: options.maxTokens,
       stream: true,
+      // Ask for a final usage-only chunk. Gateways that don't understand this
+      // field ignore it, so we simply get no usage rather than an error.
+      stream_options: { include_usage: true },
     });
 
     const timeout = createStreamTimeoutSignal({
@@ -675,7 +713,7 @@ export class OpenAIAdapter implements ProviderAdapter {
     // Sniff the first chunk: if it looks like SSE ("data:" lines), parse as stream.
     try {
       const firstRead = await reader.read();
-      if (firstRead.done) return;
+      if (firstRead.done) return streamUsage;
 
       timeout.markChunk();
       const firstChunkText = decoder.decode(firstRead.value, { stream: true });
@@ -691,7 +729,7 @@ export class OpenAIAdapter implements ProviderAdapter {
           buffer += decoder.decode(value, { stream: true });
         }
         const raw = buffer.trim();
-        if (!raw) return;
+        if (!raw) return streamUsage;
         try {
           const data = JSON.parse(raw);
           const content =
@@ -702,7 +740,7 @@ export class OpenAIAdapter implements ProviderAdapter {
         } catch {
           yield raw;
         }
-        return;
+        return streamUsage;
       }
 
       const emitPayload = function* (data: string): Generator<string> {
@@ -711,6 +749,17 @@ export class OpenAIAdapter implements ProviderAdapter {
           parsed = JSON.parse(data);
         } catch {
           return; // Skip invalid JSON
+        }
+        // The include_usage chunk arrives last and carries an empty choices
+        // array, so record it before the delta handling below skips it.
+        if (isRecord(parsed) && isRecord(parsed.usage)) {
+          const u = parsed.usage;
+          streamUsage =
+            buildChatUsage(
+              toFiniteNumber(u.prompt_tokens),
+              toFiniteNumber(u.completion_tokens),
+              toFiniteNumber(u.total_tokens),
+            ) ?? streamUsage;
         }
         // A gateway that rate-limits or fails mid-response emits an error
         // payload here. Skipping it (the old behaviour) made the answer look
@@ -734,7 +783,7 @@ export class OpenAIAdapter implements ProviderAdapter {
         for (const data of payloads) {
           yield* emitPayload(data);
         }
-        if (sseDone) return;
+        if (sseDone) return streamUsage;
 
         const { done: streamDone, value } = await reader.read();
         if (streamDone) {
@@ -742,7 +791,7 @@ export class OpenAIAdapter implements ProviderAdapter {
           for (const data of remaining.payloads) {
             yield* emitPayload(data);
           }
-          if (remaining.done) return;
+          if (remaining.done) return streamUsage;
           break;
         }
         timeout.markChunk();
@@ -753,6 +802,7 @@ export class OpenAIAdapter implements ProviderAdapter {
     } finally {
       timeout.cleanup();
     }
+    return streamUsage;
   }
 
   async runToolCallingTurn(options: ToolCallingOptions): Promise<GenericAgentTurnResult> {
@@ -1268,7 +1318,9 @@ export class AnthropicAdapter implements ProviderAdapter {
     };
   }
 
-  async *chatStream(options: ChatOptions): AsyncGenerator<string> {
+  async *chatStream(options: ChatOptions): AsyncGenerator<string, ChatUsage | undefined> {
+    let promptTokens: number | null = null;
+    let completionTokens: number | null = null;
     const split = splitSystem(options.messages);
     const url = `${this.baseUrl}/v1/messages`;
     const body = JSON.stringify({
@@ -1360,6 +1412,20 @@ export class AnthropicAdapter implements ProviderAdapter {
       if (errorMessage) {
         throw new Error(formatProviderApiError(undefined, errorMessage));
       }
+      // Usage arrives in two places: message_start carries input_tokens, and
+      // the closing message_delta carries the final output_tokens. Merge them.
+      if (parsed.type === "message_start" && isRecord(parsed.message)) {
+        const u = isRecord(parsed.message.usage) ? parsed.message.usage : null;
+        if (u) {
+          promptTokens = toFiniteNumber(u.input_tokens) ?? promptTokens;
+          completionTokens = toFiniteNumber(u.output_tokens) ?? completionTokens;
+        }
+      }
+      if (parsed.type === "message_delta" && isRecord(parsed.usage)) {
+        const u = parsed.usage;
+        promptTokens = toFiniteNumber(u.input_tokens) ?? promptTokens;
+        completionTokens = toFiniteNumber(u.output_tokens) ?? completionTokens;
+      }
       if (parsed.type === "content_block_delta") {
         const delta = isRecord(parsed.delta) ? parsed.delta : null;
         const text = delta?.text;
@@ -1395,6 +1461,7 @@ export class AnthropicAdapter implements ProviderAdapter {
     } finally {
       timeout.cleanup();
     }
+    return buildChatUsage(promptTokens, completionTokens, null) ?? undefined;
   }
 
   async runToolCallingTurn(options: ToolCallingOptions): Promise<GenericAgentTurnResult> {
@@ -1789,7 +1856,8 @@ export class GoogleAdapter implements ToolCallingAdapter {
     };
   }
 
-  async *chatStream(options: ChatOptions): AsyncGenerator<string> {
+  async *chatStream(options: ChatOptions): AsyncGenerator<string, ChatUsage | undefined> {
+    let streamUsage: ChatUsage | undefined;
     const url = `${this.modelUrl(options.model, "streamGenerateContent")}?alt=sse`;
     const systemInstruction = extractGeminiSystemInstruction(options.messages);
     const body = JSON.stringify({
@@ -1861,6 +1929,17 @@ export class GoogleAdapter implements ToolCallingAdapter {
         throw new Error(formatProviderApiError(undefined, errorMessage));
       }
       if (isRecord(parsed)) {
+        // Gemini repeats usageMetadata on every chunk with running totals;
+        // the last one wins.
+        if (isRecord(parsed.usageMetadata)) {
+          const u = parsed.usageMetadata;
+          streamUsage =
+            buildChatUsage(
+              toFiniteNumber(u.promptTokenCount),
+              toFiniteNumber(u.candidatesTokenCount),
+              toFiniteNumber(u.totalTokenCount),
+            ) ?? streamUsage;
+        }
         const block = extractGeminiBlock(parsed);
         if (block.blockReason) blockReason = block.blockReason;
         if (block.finishReason) finishReason = block.finishReason;
@@ -1910,6 +1989,7 @@ export class GoogleAdapter implements ToolCallingAdapter {
         throw new Error(formatProviderApiError(response.status, detail));
       }
     }
+    return streamUsage;
   }
 
   async runToolCallingTurn(options: ToolCallingOptions): Promise<GenericAgentTurnResult> {
