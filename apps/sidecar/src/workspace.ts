@@ -85,6 +85,26 @@ export async function canonicalizeWorkspaceRoot(root: string): Promise<string> {
   return real;
 }
 
+/** Folder name used for the default workspace under the user's home dir. */
+export const DEFAULT_WORKSPACE_DIR_NAME = "OpenHorn Workspace";
+
+/**
+ * Resolves (and creates, if missing) the workspace used when the client did not
+ * pick one.
+ *
+ * This must return a root that `canonicalizeWorkspaceRoot` accepts. The previous
+ * default was "/tmp", which is on the deny-list — so setting the workspace
+ * always threw, the error was swallowed client-side, `workspaceRoot` stayed
+ * null, and the agent silently fell back to running in the user's HOME (also
+ * denied). A dedicated sub-directory keeps the default both valid and boring.
+ */
+export async function resolveDefaultWorkspaceRoot(homeDirOverride?: string): Promise<string> {
+  const home = homeDirOverride ?? os.homedir();
+  const target = path.join(home, DEFAULT_WORKSPACE_DIR_NAME);
+  await mkdir(target, { recursive: true });
+  return canonicalizeWorkspaceRoot(target);
+}
+
 function rootWithTrailingSep(workspaceRoot: string): string {
   return workspaceRoot.endsWith(path.sep) ? workspaceRoot : `${workspaceRoot}${path.sep}`;
 }

@@ -32,7 +32,7 @@ import {
   validateMethodParams,
   type WsRequest,
 } from "./protocol";
-import { canonicalizeWorkspaceRoot } from "./workspace";
+import { canonicalizeWorkspaceRoot, resolveDefaultWorkspaceRoot } from "./workspace";
 
 type ConnectionState = {
   authed: boolean;
@@ -229,8 +229,13 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
 
     switch (request.method) {
       case "workspace.setCurrent": {
-        const { root } = params as { root: string };
-        state.workspaceRoot = await canonicalizeWorkspaceRoot(root);
+        const { root } = params as { root?: string };
+        // An empty root means "use the default" — resolving it here (rather
+        // than hard-coding a path in the client) keeps the choice next to the
+        // deny-list that validates it.
+        state.workspaceRoot = root?.trim()
+          ? await canonicalizeWorkspaceRoot(root)
+          : await resolveDefaultWorkspaceRoot();
         ws.send(
           JSON.stringify(
             buildOkResponse(request.requestId, { workspaceRoot: state.workspaceRoot }),
@@ -375,7 +380,11 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
         return;
       }
       case "agent.run": {
-        const cwd = state.workspaceRoot || (await import("node:os")).default.homedir();
+        // Never fall back to the home directory: it is on the forbidden-roots
+        // list, so silently using it would hand the agent read/write over
+        // everything the user owns. The default workspace is a real, allowed
+        // directory instead.
+        const cwd = state.workspaceRoot || (await resolveDefaultWorkspaceRoot());
         const {
           prompt,
           apiKey,
@@ -468,6 +477,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
               cwd,
               abortController,
               attachments,
+              conversationHistory,
               onEvent,
             }),
           );
@@ -524,6 +534,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
             runDirectAgent({
               apiKey: resolvedApiKey,
               baseUrl,
+              protocol,
               model,
               prompt,
               cwd,

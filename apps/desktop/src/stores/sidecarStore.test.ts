@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { SidecarClient, type SidecarEndpoint } from "../lib/sidecarClient";
+import type { SidecarClient, SidecarEndpoint } from "../lib/sidecarClient";
 import { createDesktopSidecarStore, type SidecarPlatform } from "./sidecarStore";
 
 /**
@@ -92,8 +92,22 @@ describe("sidecarStore", () => {
     expect(store.getState().status).toBe("ready");
     expect(store.getState().endpoint?.port).toBe(12345);
     expect(store.getState().client).toBeDefined();
-    // We should have seen starting → connecting → ready in order.
-    expect(transitions).toEqual(["starting", "connecting", "ready"]);
+    // We should have seen starting → connecting → ready in order. Later
+    // notifications come from the default-workspace handshake, which updates
+    // workspaceRoot without moving status off "ready".
+    expect(transitions.slice(0, 3)).toEqual(["starting", "connecting", "ready"]);
+  });
+
+  // start() must leave a usable workspace behind. It previously asked for
+  // "/tmp", which the sidecar rejects as a forbidden root, so workspaceRoot
+  // stayed null and the agent silently ran in the user's home directory.
+  test("start hands the sidecar an empty root so it resolves its own default", async () => {
+    const { store, fakeClient } = createStore();
+
+    await store.getState().start();
+
+    expect(fakeClient.setWorkspaceCalls).toEqual([""]);
+    expect(store.getState().workspaceRoot).toBe("");
   });
 
   test("start records an error when startSidecar IPC rejects", async () => {
@@ -160,6 +174,8 @@ describe("sidecarStore", () => {
     const fakeClient = new FakeClient();
     const { store, calls } = createStore({}, fakeClient);
     await store.getState().start();
+    // Drop the default-workspace call start() makes; this test is about pick.
+    fakeClient.setWorkspaceCalls.length = 0;
 
     const picked = await store.getState().pickAndSetWorkspace();
 
@@ -178,12 +194,14 @@ describe("sidecarStore", () => {
       fakeClient,
     );
     await store.getState().start();
+    // Drop the default-workspace call start() makes; this test asserts that a
+    // cancelled dialog adds no further calls.
+    fakeClient.setWorkspaceCalls.length = 0;
 
     const result = await store.getState().pickAndSetWorkspace();
 
     expect(result).toBe(null);
     expect(fakeClient.setWorkspaceCalls).toEqual([]);
-    expect(store.getState().workspaceRoot).toBe(null);
   });
 
   test("setWorkspace records lastError when the sidecar rejects the root", async () => {

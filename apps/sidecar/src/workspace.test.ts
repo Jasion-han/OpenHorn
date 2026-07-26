@@ -5,8 +5,10 @@ import path from "node:path";
 import {
   assertExistingPathInsideWorkspace,
   canonicalizeWorkspaceRoot,
+  DEFAULT_WORKSPACE_DIR_NAME,
   ForbiddenWorkspaceRootError,
   getForbiddenWorkspaceRoots,
+  resolveDefaultWorkspaceRoot,
   resolvePathInsideWorkspace,
   writeFileNoFollow,
 } from "./workspace";
@@ -116,5 +118,22 @@ describe("forbidden workspace roots", () => {
     const real = await canonicalizeWorkspaceRoot(root);
     expect(typeof real).toBe("string");
     expect(real.length > 0).toBe(true);
+  });
+
+  // The old default ("/tmp") is itself on the deny-list, so the default path
+  // could never be set. Whatever we default to must survive canonicalization.
+  test("resolveDefaultWorkspaceRoot returns a root the deny-list accepts", async () => {
+    const fakeHome = mkdtempSync(path.join(os.tmpdir(), "openhorn-home-"));
+    const root = await resolveDefaultWorkspaceRoot(fakeHome);
+    expect(root.endsWith(DEFAULT_WORKSPACE_DIR_NAME)).toBe(true);
+    // Creating it is part of the contract — callers pass it straight to realpath.
+    const real = await canonicalizeWorkspaceRoot(root);
+    expect(real).toBe(root);
+  });
+
+  test("the default workspace is not the home directory itself", async () => {
+    const fakeHome = mkdtempSync(path.join(os.tmpdir(), "openhorn-home-"));
+    const root = await resolveDefaultWorkspaceRoot(fakeHome);
+    expect(root === fakeHome).toBe(false);
   });
 });

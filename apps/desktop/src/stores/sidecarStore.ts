@@ -53,9 +53,9 @@ export interface SidecarState {
   setWorkspace: (root: string) => Promise<void>;
   /**
    * Guarantees a workspace root is set before a run, falling back to the saved
-   * one or the default (/tmp). Without this, a failed/raced default-workspace
-   * setup leaves workspaceRoot null, which silently drops Agent Skills and
-   * makes the sidecar cwd fall back to the home directory.
+   * one or to the sidecar-resolved default. Without this, a failed/raced
+   * default-workspace setup leaves workspaceRoot null, which silently drops
+   * Agent Skills.
    */
   ensureWorkspace: () => Promise<string | null>;
   markUnsupported: (reason: string) => void;
@@ -207,12 +207,24 @@ export function createDesktopSidecarStore(options: CreateSidecarStoreOptions) {
       reconnectAttempts = 0;
       set({ status: "ready", client });
 
+      // Read the saved root separately: an unavailable localStorage must not be
+      // mistaken for "setting the workspace failed".
+      let saved: string | null = null;
       try {
-        const saved = localStorage.getItem(WORKSPACE_STORAGE_KEY);
-        const targetDir = saved || "/tmp";
-        const result = await client.setWorkspace(targetDir);
-        set({ workspaceRoot: result.workspaceRoot });
+        saved = localStorage.getItem(WORKSPACE_STORAGE_KEY);
       } catch {}
+      try {
+        // Empty string = "sidecar picks its default workspace". Hard-coding
+        // /tmp here used to guarantee failure: /tmp is on the sidecar's
+        // forbidden-roots list, so this call always threw, the error was
+        // swallowed, and workspaceRoot stayed null.
+        const result = await client.setWorkspace(saved || "");
+        set({ workspaceRoot: result.workspaceRoot });
+      } catch (error) {
+        // Surface it: a workspace that never gets set disables Agent Skills and
+        // file tools, and used to do so with no visible symptom.
+        set({ lastError: error instanceof Error ? error.message : String(error) });
+      }
     },
 
     async stop() {
@@ -284,13 +296,14 @@ export function createDesktopSidecarStore(options: CreateSidecarStoreOptions) {
 
     async ensureWorkspace() {
       const { client, status } = get();
-      // Pick the target: current store value, else the saved one, else /tmp.
+      // Pick the target: current store value, else the saved one, else let the
+      // sidecar resolve its default (empty string).
       let target = get().workspaceRoot;
       if (!target) {
         try {
           target = localStorage.getItem(WORKSPACE_STORAGE_KEY);
         } catch {}
-        target = target || "/tmp";
+        target = target || "";
       }
       // ALWAYS re-push to the sidecar before a run. The sidecar may have
       // restarted and reset its workspace to null (cwd then falls back to the
