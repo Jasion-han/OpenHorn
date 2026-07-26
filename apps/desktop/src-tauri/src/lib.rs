@@ -226,6 +226,43 @@ fn start_sidecar_internal<R: tauri::Runtime>(
         endpoint: endpoint.clone(),
     });
 
+    // Keep draining the child's event stream after startup. Previously `rx` was
+    // dropped here, so we never learned that the sidecar had died: the handle
+    // stayed in `state` forever, the early-return at the top of this function
+    // kept handing out a dead endpoint, and every webview reconnect attempt hit
+    // a closed port. The only way out was restarting the whole app.
+    //
+    // Clearing the slot on Terminated makes the webview's existing reconnect
+    // path (which calls start_sidecar again) respawn the child instead.
+    {
+        use tauri_plugin_shell::process::CommandEvent;
+        let app_handle = app.clone();
+        tauri::async_runtime::spawn(async move {
+            while let Some(event) = rx.recv().await {
+                match event {
+                    CommandEvent::Stderr(bytes) => {
+                        log::warn!("sidecar stderr: {}", String::from_utf8_lossy(&bytes));
+                    }
+                    CommandEvent::Terminated(status) => {
+                        log::warn!("sidecar terminated unexpectedly: {status:?}");
+                        if let Some(state) = app_handle.try_state::<SidecarState>() {
+                            let mut guard = state.inner.lock().unwrap();
+                            // Only clear when the stored entry is still this
+                            // child; a concurrent restart may already have
+                            // replaced it with a healthy one.
+                            if guard.as_ref().map(|r| r.endpoint.port) == Some(port) {
+                                *guard = None;
+                                remove_endpoint_file();
+                            }
+                        }
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+        });
+    }
+
     Ok(endpoint)
 }
 
