@@ -6,6 +6,7 @@ import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark, oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
+import { getDomainBadge } from "../../lib/domainBadge";
 import { normalizeExternalUrl } from "../../lib/normalizeExternalUrl";
 import { THEME_MODE_CHANGE_EVENT } from "../../lib/theme";
 import styles from "./desktop-markdown.module.css";
@@ -295,7 +296,9 @@ function DesktopMarkdownMessageImpl({ content }: { content: string }) {
       try {
         domain = new URL(normalizedHref).hostname;
       } catch {}
-      const faviconUrl = domain ? `https://www.google.com/s2/favicons?sz=16&domain=${domain}` : "";
+      // Derived locally on purpose — see lib/domainBadge.ts. Fetching real
+      // favicons would disclose every linked hostname to a third party.
+      const badge = domain ? getDomainBadge(domain) : null;
       const handleClick = (e: React.MouseEvent) => {
         e.preventDefault();
         // Stop here so App.tsx's global click interceptor does not also fire
@@ -309,17 +312,17 @@ function DesktopMarkdownMessageImpl({ content }: { content: string }) {
       };
       return (
         <a href={normalizedHref} onClick={handleClick} className={styles.richLink} {...props}>
-          {faviconUrl ? (
-            <img
-              src={faviconUrl}
-              alt=""
-              width={16}
-              height={16}
+          {badge ? (
+            <span
+              aria-hidden="true"
               className={styles.linkFavicon}
-              onError={(e) => {
-                (e.target as HTMLImageElement).style.display = "none";
+              style={{
+                backgroundColor: `hsl(${badge.hue} 62% ${badge.lightness}%)`,
+                color: "hsl(0 0% 100%)",
               }}
-            />
+            >
+              {badge.letter}
+            </span>
           ) : (
             <span className={styles.linkFaviconFallback}>🌐</span>
           )}
