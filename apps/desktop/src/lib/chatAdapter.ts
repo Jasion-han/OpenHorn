@@ -1,10 +1,10 @@
-import { createServerApi, readErrorMessage, type ServerApi } from "./serverApi";
 import type {
   ApiAgentRun,
   ApiCitation,
   ApiConversation,
   ApiLiveMetadata,
   ApiMessage,
+  ApiMessageUsage,
   Channel,
   ChannelModel,
   Conversation,
@@ -14,6 +14,7 @@ import type {
   SendMessageInput,
   UpdateConversationInput,
 } from "../types/chat";
+import { createServerApi, readErrorMessage, type ServerApi } from "./serverApi";
 
 export interface ChatAdapter {
   listChannels: () => Promise<Channel[]>;
@@ -114,6 +115,7 @@ function mapMessage(message: ApiMessage): Message {
   const agentRun = parseJsonValue<ApiAgentRun>(message.agentRun);
   const liveMetadata = parseJsonValue<ApiLiveMetadata>(message.liveMetadata);
   const citations = parseJsonValue<ApiCitation[]>(message.citations);
+  const usage = parseJsonValue<ApiMessageUsage>(message.usage);
 
   return {
     id: message.id,
@@ -129,6 +131,7 @@ function mapMessage(message: ApiMessage): Message {
     liveRoute: liveMetadata?.route,
     liveLabel: liveMetadata?.label,
     citations,
+    usage,
     createdAt: new Date(message.createdAt),
   };
 }

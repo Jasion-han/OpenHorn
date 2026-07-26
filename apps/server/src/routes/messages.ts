@@ -12,6 +12,30 @@ import {
 } from "../services/messageService";
 import { requireUser, type UserEnv } from "../utils/requestUser";
 
+/**
+ * Validates the client-supplied token usage. The desktop app forwards whatever
+ * the provider reported, so coerce it here rather than trusting the shape:
+ * anything missing or non-finite drops the whole object instead of persisting
+ * a half-filled record.
+ */
+function parseUsagePayload(
+  raw: unknown,
+): { promptTokens: number; completionTokens: number; totalTokens: number } | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const value = raw as Record<string, unknown>;
+  const toCount = (input: unknown) => {
+    const n = typeof input === "number" ? input : Number(input);
+    return Number.isFinite(n) && n >= 0 ? Math.floor(n) : null;
+  };
+  const promptTokens = toCount(value.promptTokens);
+  const completionTokens = toCount(value.completionTokens);
+  const totalTokens = toCount(value.totalTokens);
+  if (promptTokens === null || completionTokens === null || totalTokens === null) {
+    return undefined;
+  }
+  return { promptTokens, completionTokens, totalTokens };
+}
+
 const messages = new Hono<UserEnv>();
 
 messages.use("*", requireUser);
@@ -181,6 +205,7 @@ messages.post("/chat/complete", async (c) => {
       conversationId: body.conversationId,
       content: body.content || "",
       model: body.model,
+      usage: parseUsagePayload(body.usage),
     });
     return c.json({ success: true });
   } catch (error) {
@@ -201,10 +226,7 @@ messages.post("/sync-sidecar", async (c) => {
     const result = await syncSidecarMessages(user.id, body);
     return c.json(result);
   } catch (error) {
-    return c.json(
-      { error: error instanceof Error ? error.message : "Failed to sync" },
-      400,
-    );
+    return c.json({ error: error instanceof Error ? error.message : "Failed to sync" }, 400);
   }
 });
 

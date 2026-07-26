@@ -1648,6 +1648,12 @@ export interface CompleteChatInput {
   conversationId: string;
   content: string;
   model?: string;
+  /** Token counts for the turn. Absent when the provider did not report them. */
+  usage?: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+  };
 }
 
 export async function completeChatFromSidecar(
@@ -1661,6 +1667,7 @@ export async function completeChatFromSidecar(
     .set({
       content: input.content,
       model: input.model || null,
+      usage: input.usage ? JSON.stringify(input.usage) : null,
     })
     .where(
       and(eq(messages.id, input.assistantMessageId), eq(messages.conversationId, conversation.id)),

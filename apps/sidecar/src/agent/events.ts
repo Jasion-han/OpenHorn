@@ -5,6 +5,13 @@ export type AgentEvent =
   | { type: "tool_start"; toolName?: string; toolInput?: unknown }
   | { type: "tool_result"; content?: string }
   | { type: "user_message"; userMessageId: string }
+  /** Token counts for the turn, emitted just before `done` when the provider reported them. */
+  | {
+      type: "usage";
+      promptTokens: number;
+      completionTokens: number;
+      totalTokens: number;
+    }
   | { type: "done" }
   | { type: "error"; content: string };
 

@@ -981,6 +981,11 @@ export function DesktopChatArea() {
       }
 
       let chatContent = "";
+      let chatUsage: {
+        promptTokens: number;
+        completionTokens: number;
+        totalTokens: number;
+      } | null = null;
       await new Promise<void>((resolve, reject) => {
         sidecarClient
           .chatStream({
@@ -995,6 +1000,19 @@ export function DesktopChatArea() {
                 useChatStore
                   .getState()
                   .appendMessageDelta(prepared.assistantMessageId, event.content || "");
+                return;
+              }
+              // Token counts arrive once, right before done. Not every provider
+              // (or gateway) reports them, so this stays optional throughout.
+              if (event.type === "execution_event" && event.eventType === "usage") {
+                const meta = event.metadata as Record<string, unknown> | undefined;
+                if (meta) {
+                  chatUsage = {
+                    promptTokens: Number(meta.promptTokens) || 0,
+                    completionTokens: Number(meta.completionTokens) || 0,
+                    totalTokens: Number(meta.totalTokens) || 0,
+                  };
+                }
               }
             },
             onError: (message) => {
@@ -1014,6 +1032,7 @@ export function DesktopChatArea() {
         conversationId,
         content: chatContent,
         model: prepared.model,
+        usage: chatUsage ?? undefined,
       });
 
       setStreaming(false);

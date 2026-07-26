@@ -75,6 +75,7 @@ export interface ServerApi {
       conversationId: string;
       content: string;
       model?: string;
+      usage?: { promptTokens: number; completionTokens: number; totalTokens: number };
     }) => Promise<{ success: boolean }>;
   };
   channels: {

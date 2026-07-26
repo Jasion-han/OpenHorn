@@ -137,12 +137,16 @@ interface SidecarAgentEvent {
     | "tool_start"
     | "tool_result"
     | "user_message"
+    | "usage"
     | "done"
     | "error";
   content?: string;
   toolName?: string;
   toolInput?: unknown;
   userMessageId?: string;
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -186,6 +190,18 @@ export function projectSidecarAgentEvent(runId: string, raw: unknown): AgentTask
         runId,
         eventType: "final_text",
         content: typeof event.content === "string" ? event.content : "",
+      };
+    case "usage":
+      return {
+        type: "execution_event",
+        taskId: runId,
+        runId,
+        eventType: "usage",
+        metadata: {
+          promptTokens: event.promptTokens ?? 0,
+          completionTokens: event.completionTokens ?? 0,
+          totalTokens: event.totalTokens ?? 0,
+        },
       };
     case "thinking":
       return {

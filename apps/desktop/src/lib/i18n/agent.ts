@@ -541,6 +541,8 @@ export const chatLabels = {
   "chat.action.delete": "删除",
   "chat.action.deleteConfirm": "确认删除",
   "chat.action.deleteConfirmDesc": "确定要删除这条消息吗？此操作无法撤销。",
+  // Token usage (only shown when the provider reported counts)
+  "chat.usage.tooltip": "本轮消耗的 token 总数（输入 + 输出）",
   // Agent mode availability
   "chat.agentUnavailableTitle": "Agent 当前不可用",
   "chat.agentUnavailableReason": "请先配置可用模型后再使用 Agent 模式。",

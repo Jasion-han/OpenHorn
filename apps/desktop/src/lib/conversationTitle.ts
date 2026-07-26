@@ -38,3 +38,14 @@ export function formatMessageTime(date: Date): string {
 export function formatConversationTime(date: Date): string {
   return formatMessageTime(date);
 }
+
+/**
+ * Compact token count for the message meta line: 1234 -> "1.2k".
+ * Kept short so it can sit next to the timestamp without wrapping.
+ */
+export function formatTokenCount(total: number): string {
+  if (!Number.isFinite(total) || total < 0) return "0";
+  if (total < 1000) return String(Math.floor(total));
+  const thousands = total / 1000;
+  return thousands < 10 ? `${thousands.toFixed(1)}k` : `${Math.round(thousands)}k`;
+}

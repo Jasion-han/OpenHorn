@@ -86,6 +86,7 @@ const SCHEMA_DDL: string[] = [
 	    context_paths TEXT,
 	    live_metadata TEXT,
 	    citations TEXT,
+	    usage TEXT,
 	    created_at INTEGER NOT NULL,
 	    FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
 	  );`,
@@ -524,6 +525,15 @@ async function ensureMessageCitationsColumn(): Promise<void> {
   }
 }
 
+async function ensureMessageUsageColumn(): Promise<void> {
+  const result = await client.execute(`PRAGMA table_info('messages');`);
+  const rows = getRows(result);
+  const hasColumn = hasColumnNamed(rows, "usage");
+  if (!hasColumn) {
+    await client.execute(`ALTER TABLE messages ADD COLUMN usage TEXT;`);
+  }
+}
+
 async function ensureMcpServerUserIdColumn(): Promise<void> {
   const result = await client.execute(`PRAGMA table_info('mcp_servers');`);
   const rows = getRows(result);
@@ -778,6 +788,7 @@ async function ensureDeleteSemanticsForeignKeys(): Promise<boolean> {
       context_paths TEXT,
       live_metadata TEXT,
       citations TEXT,
+      usage TEXT,
       created_at INTEGER NOT NULL,
       FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
     );`);
@@ -795,6 +806,7 @@ async function ensureDeleteSemanticsForeignKeys(): Promise<boolean> {
         context_paths,
         live_metadata,
         citations,
+        usage,
         created_at
       FROM messages;`);
 
@@ -994,6 +1006,10 @@ export async function bootstrapDatabase(): Promise<void> {
   await ensureMessageContextPathsColumn();
   await ensureMessageLiveMetadataColumn();
   await ensureMessageCitationsColumn();
+  // Must run before ensureDeleteSemanticsForeignKeys: that migration does
+  // `SELECT ... usage ... FROM messages`, which fails on a database that
+  // predates this column.
+  await ensureMessageUsageColumn();
   await ensureMcpServerUserIdColumn();
   await ensureAgentEventsTable();
   await ensureAgentSessionModelIdColumn();

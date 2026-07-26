@@ -117,6 +117,12 @@ export interface ApiMessageAttachmentMeta {
   previewUrl?: string;
 }
 
+export interface ApiMessageUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
 export interface ApiMessage {
   id: string;
   conversationId: string;
@@ -128,6 +134,8 @@ export interface ApiMessage {
   agentRun: string | null;
   liveMetadata: string | null;
   citations: string | null;
+  /** JSON blob of ApiMessageUsage, or null when the provider reported none. */
+  usage: string | null;
   attachmentsMeta?: ApiMessageAttachmentMeta[];
   createdAt: string;
 }
@@ -208,6 +216,8 @@ export interface Message {
   liveRoute?: ApiLiveRoute;
   liveLabel?: string;
   citations?: ApiCitation[];
+  /** Token counts for the turn; absent when the provider did not report them. */
+  usage?: ApiMessageUsage;
   streamTail?: string;
   streamPulseKey?: number;
   createdAt: Date;

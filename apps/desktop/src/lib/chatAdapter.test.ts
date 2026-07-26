@@ -110,6 +110,11 @@ function createStubServerApi() {
                 url: "https://example.com/doc",
               },
             ]),
+            usage: JSON.stringify({
+              promptTokens: 12,
+              completionTokens: 8,
+              totalTokens: 20,
+            }),
             attachmentsMeta: [
               {
                 id: "att-1",

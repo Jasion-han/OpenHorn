@@ -2,7 +2,8 @@ import { Bot, MessageSquare } from "lucide-react";
 import { memo } from "react";
 import { cn } from "ui";
 import { sanitizeDisplayContent } from "../../lib/citations";
-import { formatMessageTime } from "../../lib/conversationTitle";
+import { formatMessageTime, formatTokenCount } from "../../lib/conversationTitle";
+import { getChatLabel } from "../../lib/i18n/agent";
 import { findKnownSlashToken, type SlashCommandType } from "../../lib/slashToken";
 import type { Message } from "../../types/chat";
 import { AgentRunPanel } from "./DesktopAgentRunPanel";
@@ -181,6 +182,12 @@ function MessageBubbleImpl({
         )}
       >
         {formatMessageTime(message.createdAt)}
+        {message.usage ? (
+          <span title={getChatLabel("chat.usage.tooltip")}>
+            {" · "}
+            {formatTokenCount(message.usage.totalTokens)} tokens
+          </span>
+        ) : null}
       </span>
       <MessageActionBar
         message={message}

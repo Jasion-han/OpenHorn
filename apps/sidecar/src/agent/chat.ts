@@ -14,7 +14,6 @@ export type RunChatStreamInput = {
 export async function runChatStream(input: RunChatStreamInput): Promise<void> {
   const adapter = createAdapter(input.protocol, input.apiKey, input.baseUrl);
 
-  let content = "";
   try {
     const stream = adapter.chatStream({
       model: input.model,
@@ -23,9 +22,24 @@ export async function runChatStream(input: RunChatStreamInput): Promise<void> {
       signal: input.abortController.signal,
     });
 
-    for await (const chunk of stream) {
+    // Drive the iterator by hand: chatStream reports token usage through the
+    // generator's return value, which `for await` discards.
+    while (true) {
+      const step = await stream.next();
+      if (step.done) {
+        const usage = step.value;
+        if (usage) {
+          input.onEvent({
+            type: "usage",
+            promptTokens: usage.promptTokens,
+            completionTokens: usage.completionTokens,
+            totalTokens: usage.totalTokens,
+          });
+        }
+        break;
+      }
+      const chunk = step.value;
       if (typeof chunk !== "string" || chunk.length === 0) continue;
-      content += chunk;
       input.onEvent({ type: "text", content: chunk });
     }
   } catch (error) {

@@ -95,6 +95,8 @@ export const messages = sqliteTable(
     contextPaths: text("context_paths"),
     liveMetadata: text("live_metadata"),
     citations: text("citations"),
+    /** JSON: { promptTokens, completionTokens, totalTokens }. Null when the provider reported none. */
+    usage: text("usage"),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
   },
   (table) => [index("messages_conversation_created_idx").on(table.conversationId, table.createdAt)],
