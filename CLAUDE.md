@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-OpenHorn is a self-hostable AI workspace for chat, agent execution, and provider routing. Turborepo + pnpm monorepo with four apps and four shared packages.
+OpenHorn is a self-hostable AI workspace for chat, agent execution, and provider routing. Turborepo + pnpm monorepo with three apps and four shared packages.
 
 | App | Stack | Port | Runtime |
 |-----|-------|------|---------|
