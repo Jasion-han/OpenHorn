@@ -19,11 +19,22 @@ export function isDefaultConversationTitle(title: string): boolean {
   return /^新会话( \d{2}-\d{2} \d{2}:\d{2})?$/.test(title.trim());
 }
 
-/** "MM-DD HH:mm" — the format previously appended to titles, now shown standalone. */
-export function formatConversationTime(date: Date): string {
+/**
+ * "YYYY-MM-DD HH:mm" — full timestamp for individual messages.
+ * Returns "" for an unparseable date so the UI renders nothing rather than
+ * "NaN-NaN-NaN NaN:NaN".
+ */
+export function formatMessageTime(date: Date): string {
+  if (Number.isNaN(date.getTime())) return "";
+  const yyyy = date.getFullYear();
   const mm = String(date.getMonth() + 1).padStart(2, "0");
   const dd = String(date.getDate()).padStart(2, "0");
   const hh = String(date.getHours()).padStart(2, "0");
   const min = String(date.getMinutes()).padStart(2, "0");
-  return `${mm}-${dd} ${hh}:${min}`;
+  return `${yyyy}-${mm}-${dd} ${hh}:${min}`;
+}
+
+/** "YYYY-MM-DD HH:mm" — shown in the chat header. */
+export function formatConversationTime(date: Date): string {
+  return formatMessageTime(date);
 }

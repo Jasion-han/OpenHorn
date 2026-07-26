@@ -3,6 +3,7 @@ import {
   DEFAULT_CONVERSATION_TITLE,
   displayConversationTitle,
   formatConversationTime,
+  formatMessageTime,
   isDefaultConversationTitle,
 } from "./conversationTitle";
 
@@ -47,8 +48,26 @@ describe("isDefaultConversationTitle", () => {
 });
 
 describe("formatConversationTime", () => {
-  test("formats as zero-padded MM-DD HH:mm", () => {
-    // 2026-03-05 09:07 local time
-    expect(formatConversationTime(new Date(2026, 2, 5, 9, 7))).toBe("03-05 09:07");
+  test("formats as YYYY-MM-DD HH:mm", () => {
+    expect(formatConversationTime(new Date(2026, 2, 5, 9, 7))).toBe("2026-03-05 09:07");
+  });
+});
+
+describe("formatMessageTime", () => {
+  test("formats as YYYY-MM-DD HH:mm", () => {
+    expect(formatMessageTime(new Date(2026, 2, 5, 9, 7))).toBe("2026-03-05 09:07");
+  });
+
+  test("handles midnight", () => {
+    expect(formatMessageTime(new Date(2026, 0, 1, 0, 0))).toBe("2026-01-01 00:00");
+  });
+
+  test("handles afternoon time", () => {
+    expect(formatMessageTime(new Date(2026, 6, 7, 13, 27))).toBe("2026-07-07 13:27");
+  });
+
+  // A malformed createdAt would otherwise render as "NaN-NaN-NaN NaN:NaN".
+  test("returns an empty string for an invalid date", () => {
+    expect(formatMessageTime(new Date("not a date"))).toBe("");
   });
 });

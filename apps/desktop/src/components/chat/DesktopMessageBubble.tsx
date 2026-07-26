@@ -2,6 +2,7 @@ import { Bot, MessageSquare } from "lucide-react";
 import { memo } from "react";
 import { cn } from "ui";
 import { sanitizeDisplayContent } from "../../lib/citations";
+import { formatMessageTime } from "../../lib/conversationTitle";
 import { findKnownSlashToken, type SlashCommandType } from "../../lib/slashToken";
 import type { Message } from "../../types/chat";
 import { AgentRunPanel } from "./DesktopAgentRunPanel";
@@ -173,6 +174,14 @@ function MessageBubbleImpl({
             </section>
           )}
       </div>
+      <span
+        className={cn(
+          "mt-1 text-[10px] leading-none text-muted-foreground/40",
+          isAssistant ? "self-start" : "self-end",
+        )}
+      >
+        {formatMessageTime(message.createdAt)}
+      </span>
       <MessageActionBar
         message={message}
         copyValue={displayContent}

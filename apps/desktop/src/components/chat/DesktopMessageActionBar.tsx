@@ -1,4 +1,4 @@
-import { Check, Copy, Pencil, RefreshCw, Trash2 } from "lucide-react";
+import { Pencil, RefreshCw, Trash2 } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { cn } from "ui";
 import { getChatLabel } from "../../lib/i18n/agent";
@@ -61,8 +61,6 @@ export function MessageActionBar({
   const [copied, setCopied] = useState(false);
   const copyResetTimerRef = useRef<number | null>(null);
 
-  // Clear the pending "copied" reset on unmount so we don't setState on an
-  // unmounted component if the user switches conversations within 2s of copying.
   useEffect(() => {
     return () => {
       if (copyResetTimerRef.current !== null) {
@@ -103,7 +101,27 @@ export function MessageActionBar({
         onClick={() => void handleCopy()}
         title={copied ? getChatLabel("chat.action.copied") : getChatLabel("chat.action.copy")}
       >
-        {copied ? <Check size={13} /> : <Copy size={13} />}
+        {/* Decorative: the enclosing button already carries the accessible name. */}
+        <svg
+          aria-hidden="true"
+          width={13}
+          height={13}
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={2}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          {copied ? (
+            <polyline points="20 6 9 17 4 12" />
+          ) : (
+            <>
+              <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
+              <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+            </>
+          )}
+        </svg>
       </IconActionButton>
       {message.role === "assistant" && (
         <IconActionButton

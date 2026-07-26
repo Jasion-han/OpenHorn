@@ -539,6 +539,8 @@ export const chatLabels = {
   "chat.action.copied": "已复制",
   "chat.action.regenerate": "重新生成",
   "chat.action.delete": "删除",
+  "chat.action.deleteConfirm": "确认删除",
+  "chat.action.deleteConfirmDesc": "确定要删除这条消息吗？此操作无法撤销。",
   // Agent mode availability
   "chat.agentUnavailableTitle": "Agent 当前不可用",
   "chat.agentUnavailableReason": "请先配置可用模型后再使用 Agent 模式。",

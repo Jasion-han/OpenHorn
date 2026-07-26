@@ -1,7 +1,17 @@
 import { defaultRangeExtractor, type Range, useVirtualizer } from "@tanstack/react-virtual";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { fileKey } from "shared/format";
-import { Button, cn, Textarea } from "ui";
+import {
+  Button,
+  cn,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  Textarea,
+} from "ui";
 import { useSidecarAgentRun } from "../../hooks/useSidecarAgentRun";
 import { filesToAttachmentParts } from "../../lib/attachmentParts";
 import { uploadAttachments } from "../../lib/attachments";
@@ -175,7 +185,6 @@ export function DesktopChatArea() {
   const setComposerMode = useChatStore((state) => state.setComposerMode);
   const addMessage = useChatStore((state) => state.addMessage);
   const autoTitleConversation = useChatStore((state) => state.autoTitleConversation);
-  const sendMessage = useChatStore((state) => state.sendMessage);
   const applyStreamEvent = useChatStore((state) => state.applyStreamEvent);
   const loadMessages = useChatStore((state) => state.loadMessages);
   const loadConversations = useChatStore((state) => state.loadConversations);
@@ -842,14 +851,6 @@ export function DesktopChatArea() {
     }
 
     let attachmentIds: string[] | undefined;
-    let attachmentsMeta:
-      | Array<{
-          id: string;
-          fileName: string;
-          fileType: string;
-          fileSize: number;
-        }>
-      | undefined;
 
     try {
       addMessage({
@@ -948,12 +949,6 @@ export function DesktopChatArea() {
           files,
         });
         attachmentIds = upload.attachments.map((attachment) => attachment.id);
-        attachmentsMeta = upload.attachments.map((attachment) => ({
-          id: attachment.id,
-          fileName: attachment.fileName,
-          fileType: attachment.fileType,
-          fileSize: attachment.fileSize,
-        }));
         updateMessage(userMessageId, {
           attachments: attachmentIds,
           attachmentsMeta: localAttachmentMeta.map((local, index) => {
@@ -1062,11 +1057,21 @@ export function DesktopChatArea() {
     }
   };
 
-  const handleDeleteMessage = async (messageId: string) => {
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [deleteInFlight, setDeleteInFlight] = useState(false);
+
+  const confirmDeleteMessage = async () => {
+    // Guard against a second click while the first delete is still in flight —
+    // pendingDeleteId isn't cleared until `finally`, so the button stays live.
+    if (!pendingDeleteId || deleteInFlight) return;
+    setDeleteInFlight(true);
     try {
-      await deleteMessage(messageId);
+      await deleteMessage(pendingDeleteId);
     } catch (error) {
       setError(error instanceof Error ? error.message : "Delete message failed");
+    } finally {
+      setDeleteInFlight(false);
+      setPendingDeleteId(null);
     }
   };
 
@@ -1439,7 +1444,7 @@ export function DesktopChatArea() {
             canDelete={!message.id.startsWith("draft-")}
             onEdit={() => handleStartEdit(message)}
             onRetry={() => void handleRetryMessage(message.id)}
-            onDelete={() => void handleDeleteMessage(message.id)}
+            onDelete={() => setPendingDeleteId(message.id)}
             assistantWidth={ASSISTANT_BUBBLE_WIDTH}
             userMaxWidth={USER_BUBBLE_MAX_WIDTH}
             knownCommands={knownSlashCommands}
@@ -1661,6 +1666,38 @@ export function DesktopChatArea() {
           }
         />
       )}
+      <Dialog
+        open={pendingDeleteId !== null}
+        onOpenChange={(open) => {
+          if (!open && !deleteInFlight) setPendingDeleteId(null);
+        }}
+      >
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>{getChatLabel("chat.action.deleteConfirm")}</DialogTitle>
+            <DialogDescription>{getChatLabel("chat.action.deleteConfirmDesc")}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={deleteInFlight}
+              onClick={() => setPendingDeleteId(null)}
+            >
+              {getChatLabel("chat.edit.cancel")}
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              autoFocus
+              disabled={deleteInFlight}
+              onClick={() => void confirmDeleteMessage()}
+            >
+              {getChatLabel("chat.action.delete")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
