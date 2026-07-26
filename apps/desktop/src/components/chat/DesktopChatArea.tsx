@@ -487,6 +487,13 @@ export function DesktopChatArea() {
   }, [messages]);
 
   const getEditableMessageRound = (messageId: string) => {
+    // Read from the store, not the render closure. MessageBubble's memo
+    // comparator deliberately ignores onEdit/onRetry/onDelete, so a bubble whose
+    // own message did not change keeps the callbacks from the render it first
+    // appeared in — and those closed over the message list as it looked back
+    // then. Judging editability against that stale snapshot silently misfires
+    // once the conversation has moved on.
+    const messages = useChatStore.getState().messages;
     const messageIndex = messages.findIndex((message) => message.id === messageId);
     if (messageIndex < 0) return null;
 
@@ -560,7 +567,9 @@ export function DesktopChatArea() {
     }
   };
 
-  const runNewConversation = () => {
+  const runNewConversation = useCallback(() => {
+    // Reads the store imperatively, so this stays correct without depending on
+    // channels — which lets everything downstream keep a stable identity.
     const state = useChatStore.getState();
     const defaultChannel = getGlobalDefaultChannel(state.channels);
     void createConversation(DEFAULT_CONVERSATION_TITLE, {
@@ -569,26 +578,33 @@ export function DesktopChatArea() {
     })
       .then(() => setActiveView("chat"))
       .catch(() => {});
-  };
+  }, [createConversation, setActiveView]);
 
-  // Plain consts (not memoized): recomputed each render, which is cheap and
-  // avoids stale closures over the latest store state inside the handlers.
-  const builtinCommands: Array<{ id: string; name: string; subtitle: string; run: () => void }> = [
-    {
-      id: "new-conversation",
-      name: getSlashLabel("slash.command.newConversation"),
-      subtitle: getSlashLabel("slash.command.newConversation.desc"),
-      run: runNewConversation,
-    },
-    {
-      id: "open-settings",
-      name: getSlashLabel("slash.command.openSettings"),
-      subtitle: getSlashLabel("slash.command.openSettings.desc"),
-      run: () => openSettings(),
-    },
-  ];
+  // Memoized because `slashItems` and `slashHighlight` derive from this on every
+  // keystroke; a fresh array here would defeat both of their caches.
+  const builtinCommands: Array<{ id: string; name: string; subtitle: string; run: () => void }> =
+    useMemo(
+      () => [
+        {
+          id: "new-conversation",
+          name: getSlashLabel("slash.command.newConversation"),
+          subtitle: getSlashLabel("slash.command.newConversation.desc"),
+          run: runNewConversation,
+        },
+        {
+          id: "open-settings",
+          name: getSlashLabel("slash.command.openSettings"),
+          subtitle: getSlashLabel("slash.command.openSettings.desc"),
+          run: () => openSettings(),
+        },
+      ],
+      [runNewConversation, openSettings],
+    );
 
-  const buildSlashItems = (): Array<SlashPanelItem & { run?: () => void }> => {
+  // Recomputed only when the panel state or its data sources change. This used
+  // to run on every render — i.e. on every keystroke — walking the full skill
+  // and MCP lists, and handing DesktopComposer a brand-new array each time.
+  const slashItems: Array<SlashPanelItem & { run?: () => void }> = useMemo(() => {
     if (!slashOpen) return [];
     const q = slashQuery.toLowerCase();
     const items: Array<SlashPanelItem & { run?: () => void }> = [];
@@ -621,14 +637,13 @@ export function DesktopChatArea() {
       });
     }
     return items;
-  };
-  const slashItems = buildSlashItems();
+  }, [slashOpen, slashQuery, slashSkills, slashMcps, builtinCommands]);
 
   // The `/<name>` token span to paint blue, anywhere in the input, but only when
   // it matches a *recognized* command (enabled skill / enabled MCP server /
   // built-in command id or name). Unrecognized `/xxx` is not highlighted. Reuses
   // the slash data already fetched for the panel — no extra requests.
-  const slashHighlight: SlashHighlightRange | null = (() => {
+  const slashHighlight: SlashHighlightRange | null = useMemo(() => {
     const recognized = new Map(knownSlashCommands);
     for (const c of builtinCommands) {
       recognized.set(c.name.toLowerCase(), "command");
@@ -636,7 +651,7 @@ export function DesktopChatArea() {
     }
     const token = findKnownSlashToken(input, recognized);
     return token ? { start: token.start, len: token.end - token.start } : null;
-  })();
+  }, [input, knownSlashCommands, builtinCommands]);
 
   const handleInputChange = (value: string) => {
     setInput(value);
@@ -1097,6 +1112,8 @@ export function DesktopChatArea() {
   const handleRetryMessage = async (messageId: string) => {
     if (!currentConversation) return;
 
+    // Same stale-closure hazard as getEditableMessageRound: read live state.
+    const messages = useChatStore.getState().messages;
     const messageIndex = messages.findIndex((message) => message.id === messageId);
     const assistantMessage = messageIndex >= 0 ? messages[messageIndex] : null;
     if (!assistantMessage || assistantMessage.role !== "assistant") return;
