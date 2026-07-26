@@ -4,7 +4,7 @@ import type {
   PermissionMode,
   SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
-import type { AgentEvent } from "./agentService";
+import type { AgentEvent } from "./genericAgentTypes";
 
 type SdkMessage = {
   type: string;

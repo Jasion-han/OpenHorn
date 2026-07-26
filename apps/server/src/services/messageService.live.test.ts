@@ -9,8 +9,6 @@ import * as realDbSchemaNs from "db";
 import * as realAgentAdaptersNs from "../agent-adapters";
 import * as realDbNs from "../db";
 import * as realUtilsNs from "../utils";
-import * as realAgentServiceNs from "./agentService";
-import * as realAgentStreamTimeoutsNs from "./agentStreamTimeouts";
 import * as realAgentTaskServiceNs from "./agentTaskService";
 import * as realAttachmentServiceNs from "./attachmentService";
 import * as realChannelAgentCheckServiceNs from "./channelAgentCheckService";
@@ -21,8 +19,6 @@ const realDbSchema = { ...realDbSchemaNs };
 const realDb = { ...realDbNs };
 const realAgentAdapters = { ...realAgentAdaptersNs };
 const realUtils = { ...realUtilsNs };
-const realAgentService = { ...realAgentServiceNs };
-const realAgentStreamTimeouts = { ...realAgentStreamTimeoutsNs };
 const realAgentTaskService = { ...realAgentTaskServiceNs };
 const realAttachmentService = { ...realAttachmentServiceNs };
 const realChannelAgentCheckService = { ...realChannelAgentCheckServiceNs };
@@ -34,8 +30,6 @@ afterAll(() => {
   mock.module("../db", () => realDb);
   mock.module("../agent-adapters", () => realAgentAdapters);
   mock.module("../utils", () => realUtils);
-  mock.module("./agentService", () => realAgentService);
-  mock.module("./agentStreamTimeouts", () => realAgentStreamTimeouts);
   mock.module("./agentTaskService", () => realAgentTaskService);
   mock.module("./attachmentService", () => realAttachmentService);
   mock.module("./channelAgentCheckService", () => realChannelAgentCheckService);
@@ -209,10 +203,6 @@ test("stream chat emits live status metadata before assistant deltas", async () 
 
   mock.module("./settingsService", () => ({
     getSettingValues: async () => ({ "chat.systemPrompt": "Global prompt" }),
-  }));
-
-  mock.module("./agentService", () => ({
-    runAgentWithConfig: async function* () {},
   }));
 
   try {
@@ -430,10 +420,6 @@ test("regenerate falls back to the previous user message when assistant id is mi
     getSettingValues: async () => ({ "chat.systemPrompt": "Global prompt" }),
   }));
 
-  mock.module("./agentService", () => ({
-    runAgentWithConfig: async function* () {},
-  }));
-
   try {
     const { regenerateMessage } = await import("./messageService");
     const stream = await regenerateMessage("user-1", "missing-assistant-id", {
@@ -626,10 +612,6 @@ test("edit user message creates a new assistant reply when the user message is t
 
   mock.module("./settingsService", () => ({
     getSettingValues: async () => ({ "chat.systemPrompt": "Global prompt" }),
-  }));
-
-  mock.module("./agentService", () => ({
-    runAgentWithConfig: async function* () {},
   }));
 
   try {

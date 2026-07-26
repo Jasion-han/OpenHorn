@@ -1,12 +1,11 @@
 import { attachments, conversations, messages } from "db";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { type ChatContentPart, type ChatMessage, createAdapter } from "../agent-adapters";
-import { buildTaskMessageSummary } from "./agentTaskMessage";
 import { db } from "../db";
 import { generateId } from "../utils";
 import { createSseStream } from "../utils/sse";
-import { type AgentRuntimeConfig, runAgentWithConfig } from "./agentService";
-import { mergeAgentTextOutput } from "./agentSdk";
+import { buildAgentPlan } from "./agentPlanBuilder";
+import { buildTaskMessageSummary } from "./agentTaskMessage";
 import type {
   AgentTaskComplexity,
   AgentTaskDetail,
@@ -14,16 +13,10 @@ import type {
   AgentTaskUxMode,
 } from "./agentTaskService";
 import { buildAttachmentPayloadFromIds, linkAttachmentsToMessage } from "./attachmentService";
-import {
-  getAgentCapabilityModeFromSuccessResult,
-  resolveAgentRuntime,
-} from "./channelAgentCheckService";
 import { getResolvedChannelForConversation } from "./channelService";
-import { createAgentStreamTimeoutGuard } from "./agentStreamTimeouts";
-import { buildAgentPlan } from "./agentPlanBuilder";
 import { buildLiveContext, type LiveContextResult, toStoredLiveMetadata } from "./liveCapabilities";
-import { mergeSystemPromptParts, RESPONSE_STYLE_GUARDRAILS } from "./responseStyle";
 import { classifyLiveRouteWithModel } from "./liveRouteClassifier";
+import { mergeSystemPromptParts, RESPONSE_STYLE_GUARDRAILS } from "./responseStyle";
 import {
   type SearchCitation,
   TAVILY_API_KEY_SETTING,
@@ -32,7 +25,6 @@ import {
 import { getSettingValues } from "./settingsService";
 
 const GLOBAL_SYSTEM_PROMPT_KEY = "chat.systemPrompt";
-const AGENT_RECENT_CONTEXT_LIMIT = 8;
 // Hard safety backstop for chat-mode model context. `getMessages` intentionally
 // stays unbounded (it also feeds the UI message list), and the per-conversation
 // `contextLength` column is a token budget (default 4096), not a message count —
@@ -219,7 +211,11 @@ function parseAgentRunData(value: string | null | undefined): AgentRunData | nul
 
 function getTaskFinalResultCitations(detail: AgentTaskDetail) {
   const finalResult = detail.artifacts.find((artifact) => artifact.type === "final_result") ?? null;
-  if (!finalResult?.metadata || typeof finalResult.metadata !== "object" || Array.isArray(finalResult.metadata)) {
+  if (
+    !finalResult?.metadata ||
+    typeof finalResult.metadata !== "object" ||
+    Array.isArray(finalResult.metadata)
+  ) {
     return undefined;
   }
 
@@ -530,14 +526,6 @@ function appendChatMessage(
   chatMessages.push({ role, content: normalized });
 }
 
-function buildAgentRunSummary(steps: AgentRunStep[], error?: string) {
-  const toolCount = steps.filter((step) => step.type === "tool_start").length;
-  if (error) {
-    return toolCount > 0 ? `Agent 运行失败，已调用 ${toolCount} 个工具` : "Agent 运行失败";
-  }
-  return toolCount > 0 ? `Agent 已调用 ${toolCount} 个工具` : "Agent 已完成本轮执行";
-}
-
 function buildEffectiveSystemPrompt(
   systemPrompt: string | null | undefined,
   liveContext: LiveContextResult,
@@ -567,261 +555,6 @@ function buildCitationsPayload(citations?: SearchCitation[]): CitationsPayload |
   return {
     type: "citations",
     citations,
-  };
-}
-
-function buildRecentAgentConversationHistory(
-  conversationMessages: Array<{ role: string; content: string | null | undefined }>,
-  limit = AGENT_RECENT_CONTEXT_LIMIT,
-): NonNullable<AgentRuntimeConfig["conversationHistory"]> {
-  return conversationMessages
-    .filter(
-      (
-        message,
-      ): message is {
-        role: "user" | "assistant";
-        content: string;
-      } => {
-        if (message.role !== "user" && message.role !== "assistant") return false;
-        if (typeof message.content !== "string") return false;
-        const content = message.content.trim();
-        if (!content) return false;
-        if (message.role === "assistant" && /^Error:\s*/i.test(content)) return false;
-        return true;
-      },
-    )
-    .slice(-limit)
-    .map((message) => ({
-      role: message.role,
-      content: message.content.trim(),
-    }));
-}
-
-function excludeCurrentPromptFromHistory(
-  history: NonNullable<AgentRuntimeConfig["conversationHistory"]>,
-  prompt: string,
-) {
-  const trimmedPrompt = prompt.trim();
-  if (!trimmedPrompt || history.length === 0) return history;
-  const last = history[history.length - 1];
-  if (last?.role === "user" && last.content === trimmedPrompt) {
-    return history.slice(0, -1);
-  }
-  return history;
-}
-
-async function runAgentAndStream({
-  send,
-  config,
-}: {
-  send: (payload: Record<string, unknown>) => void;
-  config: Parameters<typeof runAgentWithConfig>[0];
-}): Promise<{ responseContent: string; agentRun: AgentRunData }> {
-  let responseContent = "";
-  let agentError: string | undefined;
-  const steps: AgentRunStep[] = [];
-  const abortController = config.abortController || new AbortController();
-  const timeoutGuard = createAgentStreamTimeoutGuard(abortController);
-
-  try {
-    for await (const event of runAgentWithConfig({ ...config, abortController })) {
-      if (event.type === "meta") {
-        timeoutGuard.markActivity?.();
-      } else {
-        timeoutGuard.markVisibleOutput();
-      }
-
-      if (event.type === "thought") {
-        steps.push({
-          type: "tool_result",
-          toolName: "Thinking",
-          content: event.content,
-        });
-        send({ type: "agent_event", event });
-        continue;
-      }
-
-      if (event.type === "text") {
-        const chunk = event.content || "";
-        if (!chunk) continue;
-        responseContent = mergeAgentTextOutput(responseContent, chunk);
-        send({ type: "delta", content: chunk });
-        continue;
-      }
-
-      if (event.type === "tool_start" || event.type === "tool_result") {
-        steps.push({
-          type: event.type,
-          toolName: event.toolName,
-          content: event.content,
-          toolInput: event.toolInput,
-        });
-        send({ type: "agent_event", event });
-        continue;
-      }
-
-      if (event.type === "error") {
-        agentError = event.content || "Agent error";
-        steps.push({ type: "error", content: agentError });
-        send({ type: "agent_event", event });
-      }
-    }
-  } finally {
-    timeoutGuard.cleanup();
-  }
-
-  const agentRun: AgentRunData = {
-    status: agentError ? "failed" : "completed",
-    summary: buildAgentRunSummary(steps, agentError),
-    error: agentError,
-    steps,
-  };
-
-  return { responseContent, agentRun };
-}
-
-async function streamConversationAgentReply(params: {
-  userId: string;
-  send: (payload: Record<string, unknown>) => void;
-  conversationId: string;
-  prompt: string;
-  attachmentIds?: string[];
-  channelId?: string | null;
-  modelId?: string | null;
-  forceWebSearch?: boolean | null;
-  abortController?: AbortController;
-  conversationHistory?: Array<{
-    role: string;
-    content: string | null | undefined;
-  }>;
-}) {
-  const runtimeResolution = await resolveAgentRuntime({
-    userId: params.userId,
-    requestedChannelId: params.channelId ?? null,
-    requestedModelId: params.modelId ?? null,
-    bypassCache: true,
-  });
-  const resolvedChannel = runtimeResolution.success ? runtimeResolution.resolvedChannel : null;
-  const effectiveModelId = resolvedChannel?.modelId ?? params.modelId ?? null;
-  const failImmediately = (
-    error: string,
-  ): {
-    responseContent: string;
-    agentRun: AgentRunData;
-    modelId: string | null;
-    liveMetadata: null;
-    citations: null;
-  } => {
-    params.send({ type: "agent_event", event: { type: "error", content: error } });
-    params.send({ type: "delta", content: `Error: ${error}` });
-
-    const steps: AgentRunStep[] = [{ type: "error", content: error }];
-    const agentRun: AgentRunData = {
-      status: "failed",
-      summary: buildAgentRunSummary(steps, error),
-      error,
-      steps,
-    };
-    return {
-      responseContent: `Error: ${error}`,
-      agentRun,
-      modelId: effectiveModelId,
-      liveMetadata: null,
-      citations: null,
-    };
-  };
-
-  if (!resolvedChannel) {
-    return failImmediately(
-      runtimeResolution.success === false
-        ? runtimeResolution.error
-        : "未配置可用的默认渠道/默认模型。请先在设置中完成配置。",
-    );
-  }
-  const successfulResolution = runtimeResolution as Extract<
-    Awaited<ReturnType<typeof resolveAgentRuntime>>,
-    { success: true }
-  >;
-
-  const settingsPromise = getSettingValues(params.userId, [
-    GLOBAL_SYSTEM_PROMPT_KEY,
-    TAVILY_API_KEY_SETTING,
-    TAVILY_ENABLED_SETTING,
-  ]);
-  const settings = await settingsPromise;
-  const compatibility = successfulResolution.compatibility;
-  const classifier = resolvedChannel
-    ? (prompt: string) =>
-        classifyLiveRouteWithModel({
-          protocol: resolvedChannel.channel.protocol,
-          apiKey: resolvedChannel.apiKey,
-          baseUrl: resolvedChannel.channel.baseUrl,
-          modelId: resolvedChannel.modelId,
-          prompt,
-        })
-    : undefined;
-  // When the user's prompt clearly targets the local workspace (mentions
-  // "仓库", "repo", "项目", etc.), suppress live web search even if
-  // forceWebSearch is on. The route classifier sometimes mis-classifies
-  // these as needing web_search because topic keywords look research-y,
-  // causing the agent to waste time fetching irrelevant web results
-  // instead of inspecting the workspace directly.
-  const promptTargetsWorkspace =
-    /(仓库|代码库|工作区|项目|源码|目录|repo|repository|codebase|workspace|readme|package\.json|tsconfig|src\/|apps\/)/i.test(
-      params.prompt,
-    );
-  const liveContext = await buildLiveContext({
-    prompt: params.prompt,
-    userSettings: settings,
-    tavilyEnvKey: process.env.TAVILY_API_KEY ?? null,
-    forceWebSearch: promptTargetsWorkspace
-      ? false
-      : params.forceWebSearch == null
-        ? true
-        : Boolean(params.forceWebSearch),
-    classifier,
-  });
-
-  params.send(buildLiveStatusPayload(liveContext));
-  const citationsPayload = buildCitationsPayload(liveContext.citations);
-  if (citationsPayload) {
-    params.send(citationsPayload);
-  }
-
-  const { responseContent: streamedContent, agentRun } = await runAgentAndStream({
-    send: params.send,
-    config: {
-      userId: params.userId,
-      prompt: params.prompt,
-      conversationHistory: excludeCurrentPromptFromHistory(
-        buildRecentAgentConversationHistory(params.conversationHistory || []),
-        params.prompt,
-      ),
-      attachmentIds: params.attachmentIds || [],
-      channelId: params.channelId ?? resolvedChannel?.channel.id ?? null,
-      modelId: params.modelId ?? resolvedChannel?.modelId ?? null,
-      capabilityMode: getAgentCapabilityModeFromSuccessResult(
-        compatibility,
-        resolvedChannel?.channel.protocol,
-      ),
-      globalSystemPrompt: settings[GLOBAL_SYSTEM_PROMPT_KEY] || undefined,
-      liveSystemContext: liveContext.systemContext,
-      abortController: params.abortController,
-    },
-  });
-
-  let responseContent = streamedContent;
-  if (!responseContent.trim() && agentRun.error) {
-    responseContent = `Error: ${agentRun.error}`;
-    params.send({ type: "delta", content: responseContent });
-  }
-
-  return {
-    responseContent,
-    agentRun,
-    modelId: effectiveModelId,
-    liveMetadata: serializeLiveMetadata(liveContext),
-    citations: serializeCitations(liveContext.citations),
   };
 }
 
@@ -940,7 +673,9 @@ export async function getMessagesForUserWithAttachments(userId: string, conversa
       result
         .filter((message) => message.role === "assistant" && message.mode === "agent")
         .map((message) => parseAgentRunData(message.agentRun)?.taskId)
-        .filter((taskId): taskId is string => typeof taskId === "string" && taskId.trim().length > 0),
+        .filter(
+          (taskId): taskId is string => typeof taskId === "string" && taskId.trim().length > 0,
+        ),
     ),
   );
 
@@ -1236,7 +971,11 @@ export async function streamMessage(
     }
 
     const conversationMessages = await getMessages(input.conversationId);
-    const chatMessages = await buildChatMessages(userId, conversationMessages, effectiveSystemPrompt);
+    const chatMessages = await buildChatMessages(
+      userId,
+      conversationMessages,
+      effectiveSystemPrompt,
+    );
 
     if (!resolvedChannel) {
       const message = conversation.channelId
@@ -1725,10 +1464,7 @@ export async function syncSidecarMessages(
   },
 ) {
   const conversation = await db.query.conversations.findFirst({
-    where: and(
-      eq(conversations.id, input.conversationId),
-      eq(conversations.userId, userId),
-    ),
+    where: and(eq(conversations.id, input.conversationId), eq(conversations.userId, userId)),
   });
   if (!conversation) throw new Error("Conversation not found");
 
@@ -1891,8 +1627,7 @@ export async function prepareChatForSidecar(
   });
 
   const settings = await getSettingValues(userId, [GLOBAL_SYSTEM_PROMPT_KEY]);
-  const baseSystemPrompt =
-    conversation.systemPrompt || settings[GLOBAL_SYSTEM_PROMPT_KEY] || null;
+  const baseSystemPrompt = conversation.systemPrompt || settings[GLOBAL_SYSTEM_PROMPT_KEY] || null;
 
   const conversationMessages = await getMessages(input.conversationId);
   const chatMessages = await buildChatMessages(userId, conversationMessages, baseSystemPrompt);
