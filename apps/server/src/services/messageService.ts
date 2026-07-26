@@ -12,7 +12,12 @@ import type {
   AgentTaskRecord,
   AgentTaskUxMode,
 } from "./agentTaskService";
-import { buildAttachmentPayloadFromIds, linkAttachmentsToMessage } from "./attachmentService";
+import {
+  buildAttachmentPayloadFromIds,
+  LOCAL_ATTACHMENT_PATH_PREFIX,
+  linkAttachmentsToMessage,
+  removeAttachmentFiles,
+} from "./attachmentService";
 import { getResolvedChannelForConversation } from "./channelService";
 import { buildLiveContext, type LiveContextResult, toStoredLiveMetadata } from "./liveCapabilities";
 import { classifyLiveRouteWithModel } from "./liveRouteClassifier";
@@ -859,10 +864,18 @@ export async function deleteMessage(userId: string, messageId: string) {
     throw new Error("Conversation not found");
   }
 
+  // Read the blob paths before the rows go away; unlink only after commit.
+  const attachmentFileRows = await db
+    .select({ filePath: attachments.filePath })
+    .from(attachments)
+    .where(eq(attachments.messageId, messageId));
+
   await db.transaction(async (tx) => {
     await tx.delete(attachments).where(eq(attachments.messageId, messageId));
     await tx.delete(messages).where(eq(messages.id, messageId));
   });
+
+  await removeAttachmentFiles(attachmentFileRows.map((row) => row.filePath).filter(Boolean));
 
   return { success: true };
 }
@@ -1430,7 +1443,7 @@ async function insertSidecarAttachmentMeta(
       sessionId: null,
       messageId: userMessageId,
       fileName: item.fileName,
-      filePath: `local:${item.fileName}`,
+      filePath: `${LOCAL_ATTACHMENT_PATH_PREFIX}${item.fileName}`,
       fileType:
         typeof item.fileType === "string" && item.fileType.length > 0
           ? item.fileType

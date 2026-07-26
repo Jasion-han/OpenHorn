@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { agentSessions, attachments, conversations } from "db";
 import { eq, inArray } from "drizzle-orm";
@@ -8,6 +8,12 @@ import { generateId } from "../utils";
 import { formatAttachmentContext, parseAttachmentContent } from "./attachmentParser";
 
 export const MAX_ATTACHMENT_SIZE = 20 * 1024 * 1024;
+
+/**
+ * Marker prefix used as `filePath` for attachments that were only ever
+ * referenced by a local sidecar run. No blob exists on this server for them.
+ */
+export const LOCAL_ATTACHMENT_PATH_PREFIX = "local:";
 
 const ALLOWED_MIME_TYPES = new Set([
   "image/png",
@@ -239,4 +245,42 @@ export async function buildAttachmentContextFromIds(attachmentIds: string[], use
   const payload = await buildAttachmentPayloadFromIds(attachmentIds, userId);
   // Back-compat: include only text context (images are represented as blocks elsewhere).
   return payload.textContext;
+}
+
+/**
+ * Deletes attachment blobs from disk.
+ *
+ * MUST be called *after* the transaction that removed the rows has committed:
+ * a rolled-back transaction leaves the rows in place, and files deleted early
+ * could not be restored. Losing the reverse case (rows gone, file left behind)
+ * only wastes disk, which is why every failure here is swallowed and logged.
+ *
+ * Callers collect the paths inside the transaction — once the rows are gone
+ * there is no way to find the files again.
+ */
+export async function removeAttachmentFiles(filePaths: string[]): Promise<void> {
+  for (const filePath of filePaths) {
+    if (!filePath) continue;
+    // Sidecar-run attachments store a `local:<name>` marker rather than a real
+    // path: the file lives on the user's machine and was never uploaded here.
+    if (filePath.startsWith(LOCAL_ATTACHMENT_PATH_PREFIX)) continue;
+    try {
+      await unlink(filePath);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException)?.code;
+      // Already gone is the expected outcome of a retry, not a problem.
+      if (code === "ENOENT") continue;
+      console.error(`[attachments] failed to delete ${filePath}:`, error);
+    }
+  }
+}
+
+/** Reads the on-disk paths for the given attachment ids, before their rows are deleted. */
+export async function collectAttachmentFilePaths(attachmentIds: string[]): Promise<string[]> {
+  if (attachmentIds.length === 0) return [];
+  const rows = await db
+    .select({ filePath: attachments.filePath })
+    .from(attachments)
+    .where(inArray(attachments.id, attachmentIds));
+  return rows.map((row) => row.filePath).filter((p): p is string => Boolean(p));
 }

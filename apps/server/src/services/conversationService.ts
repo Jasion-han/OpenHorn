@@ -11,9 +11,10 @@ import {
   conversations,
   messages,
 } from "db";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, or } from "drizzle-orm";
 import { db } from "../db";
 import { generateId } from "../utils";
+import { removeAttachmentFiles } from "./attachmentService";
 
 export interface CreateConversationInput {
   title: string;
@@ -182,6 +183,24 @@ export async function deleteConversation(userId: string, conversationId: string)
   const sessionIds = sessionRows.map((row) => row.id);
   const taskIds = taskRows.map((row) => row.id);
 
+  // Collect the blob paths BEFORE the transaction removes the rows — afterwards
+  // there is no way to find the files again. The unlink itself happens after
+  // commit, so a rolled-back delete cannot destroy files it did not remove.
+  const attachmentConditions = [eq(attachments.conversationId, conversationId)];
+  if (messageIds.length > 0) {
+    attachmentConditions.push(inArray(attachments.messageId, messageIds));
+  }
+  if (sessionIds.length > 0) {
+    attachmentConditions.push(inArray(attachments.sessionId, sessionIds));
+  }
+  const attachmentFileRows = await db
+    .select({ filePath: attachments.filePath })
+    .from(attachments)
+    .where(or(...attachmentConditions));
+  const attachmentFilePaths = [
+    ...new Set(attachmentFileRows.map((row) => row.filePath).filter(Boolean)),
+  ];
+
   await db.transaction(async (tx) => {
     if (messageIds.length > 0) {
       await tx.delete(attachments).where(inArray(attachments.messageId, messageIds));
@@ -226,6 +245,8 @@ export async function deleteConversation(userId: string, conversationId: string)
       .delete(conversations)
       .where(and(eq(conversations.id, conversationId), eq(conversations.userId, userId)));
   });
+
+  await removeAttachmentFiles(attachmentFilePaths);
 
   return { success: true };
 }
