@@ -630,3 +630,182 @@ test("GoogleAdapter.chat reports partial usage when only one token count exists"
     restore();
   }
 });
+
+// --- Cross-protocol SSE consistency -----------------------------------------
+// The SSE spec makes the space after `data:` optional, and real gateways do
+// emit `data:{...}`. Anthropic and Google used to hard-code `"data: "`, so the
+// same relay streamed fine on OpenAI and returned an empty reply on the other
+// two. All three now share `parseSseDataLine`.
+
+test("OpenAIAdapter.chatStream accepts data: without a following space", async () => {
+  const restore = mockFetch(
+    sseResponse(['data:{"choices":[{"delta":{"content":"tight"}}]}\n\n', "data:[DONE]\n\n"]),
+  );
+  try {
+    const adapter = new OpenAIAdapter("test-key", "https://example.com");
+    const chunks: string[] = [];
+    for await (const chunk of adapter.chatStream({
+      model: "gpt-test",
+      messages: [{ role: "user", content: "hi" }],
+    })) {
+      chunks.push(chunk);
+    }
+    expect(chunks.join("")).toBe("tight");
+  } finally {
+    restore();
+  }
+});
+
+test("AnthropicAdapter.chatStream accepts data: without a following space", async () => {
+  const restore = mockFetch(
+    sseResponse(['data:{"type":"content_block_delta","delta":{"text":"tight"}}\n\n']),
+  );
+  try {
+    const adapter = new AnthropicAdapter("test-key", "https://example.com");
+    const chunks: string[] = [];
+    for await (const chunk of adapter.chatStream({
+      model: "claude-test",
+      messages: [{ role: "user", content: "hi" }],
+    })) {
+      chunks.push(chunk);
+    }
+    expect(chunks.join("")).toBe("tight");
+  } finally {
+    restore();
+  }
+});
+
+test("GoogleAdapter.chatStream accepts data: without a following space", async () => {
+  const restore = mockFetch(
+    sseResponse(['data:{"candidates":[{"content":{"parts":[{"text":"tight"}]}}]}\n\n']),
+  );
+  try {
+    const adapter = new GoogleAdapter("test-key", "https://example.com");
+    const chunks: string[] = [];
+    for await (const chunk of adapter.chatStream({
+      model: "gemini-test",
+      messages: [{ role: "user", content: "hi" }],
+    })) {
+      chunks.push(chunk);
+    }
+    expect(chunks.join("")).toBe("tight");
+  } finally {
+    restore();
+  }
+});
+
+test("AnthropicAdapter.chatStream tolerates CRLF line endings", async () => {
+  const restore = mockFetch(
+    sseResponse(['data: {"type":"content_block_delta","delta":{"text":"crlf"}}\r\n\r\n']),
+  );
+  try {
+    const adapter = new AnthropicAdapter("test-key", "https://example.com");
+    const chunks: string[] = [];
+    for await (const chunk of adapter.chatStream({
+      model: "claude-test",
+      messages: [{ role: "user", content: "hi" }],
+    })) {
+      chunks.push(chunk);
+    }
+    expect(chunks.join("")).toBe("crlf");
+  } finally {
+    restore();
+  }
+});
+
+// A gateway that rate-limits part-way through emits an error payload. OpenAI
+// used to swallow it, so the answer just stopped mid-sentence with no error.
+test("OpenAIAdapter.chatStream throws on a mid-stream error payload", async () => {
+  const restore = mockFetch(
+    sseResponse([
+      'data: {"choices":[{"delta":{"content":"partial"}}]}\n\n',
+      'data: {"error":{"message":"Rate limit exceeded"}}\n\n',
+    ]),
+  );
+  try {
+    const adapter = new OpenAIAdapter("test-key", "https://example.com");
+    const chunks: string[] = [];
+    let caught: Error | null = null;
+    try {
+      for await (const chunk of adapter.chatStream({
+        model: "gpt-test",
+        messages: [{ role: "user", content: "hi" }],
+      })) {
+        chunks.push(chunk);
+      }
+    } catch (error) {
+      caught = error as Error;
+    }
+    expect(chunks.join("")).toBe("partial");
+    expect(caught).toBeDefined();
+    expect(caught?.message).toBe("Provider API error: Rate limit exceeded");
+  } finally {
+    restore();
+  }
+});
+
+test("GoogleAdapter.chatStream throws on a mid-stream error payload", async () => {
+  const restore = mockFetch(
+    sseResponse([
+      'data: {"candidates":[{"content":{"parts":[{"text":"partial"}]}}]}\n\n',
+      'data: {"error":{"message":"Quota exceeded"}}\n\n',
+    ]),
+  );
+  try {
+    const adapter = new GoogleAdapter("test-key", "https://example.com");
+    const chunks: string[] = [];
+    let caught: Error | null = null;
+    try {
+      for await (const chunk of adapter.chatStream({
+        model: "gemini-test",
+        messages: [{ role: "user", content: "hi" }],
+      })) {
+        chunks.push(chunk);
+      }
+    } catch (error) {
+      caught = error as Error;
+    }
+    expect(chunks.join("")).toBe("partial");
+    expect(caught).toBeDefined();
+    expect(caught?.message).toBe("Provider API error: Quota exceeded");
+  } finally {
+    restore();
+  }
+});
+
+// `:` comment lines are keep-alives; every protocol must ignore them.
+test("all three adapters ignore SSE comment lines", async () => {
+  const cases: Array<[string, () => AsyncGenerator<string>]> = [];
+  const openai = new OpenAIAdapter("test-key", "https://example.com");
+  const anthropic = new AnthropicAdapter("test-key", "https://example.com");
+  const google = new GoogleAdapter("test-key", "https://example.com");
+  cases.push([
+    "openai",
+    () => openai.chatStream({ model: "m", messages: [{ role: "user", content: "hi" }] }),
+  ]);
+  cases.push([
+    "anthropic",
+    () => anthropic.chatStream({ model: "m", messages: [{ role: "user", content: "hi" }] }),
+  ]);
+  cases.push([
+    "google",
+    () => google.chatStream({ model: "m", messages: [{ role: "user", content: "hi" }] }),
+  ]);
+
+  const payloads: Record<string, string> = {
+    openai: 'data: {"choices":[{"delta":{"content":"ok"}}]}\n\n',
+    anthropic: 'data: {"type":"content_block_delta","delta":{"text":"ok"}}\n\n',
+    google: 'data: {"candidates":[{"content":{"parts":[{"text":"ok"}]}}]}\n\n',
+  };
+
+  for (const [name, run] of cases) {
+    const restore = mockFetch(sseResponse([": keep-alive\n\n", payloads[name] as string]));
+    try {
+      const chunks: string[] = [];
+      for await (const chunk of run()) chunks.push(chunk);
+      expect(chunks.join("")).toBe("ok");
+    } finally {
+      restore();
+    }
+  }
+});

@@ -205,6 +205,43 @@ function createStreamTimeoutSignal(options?: {
   };
 }
 
+/**
+ * Extracts the payload from a single SSE line, or null when the line carries
+ * none (blank line, `:` comment, or a non-`data` field).
+ *
+ * Shared by all three protocols so they agree on the wire format. The spec
+ * makes the space after `data:` optional, and gateways do emit `data:{...}`.
+ * Anthropic and Google used to hard-code `"data: "`, which silently dropped
+ * *every* event from such a gateway while OpenAI handled it fine — the same
+ * relay would stream on one protocol and return an empty reply on another.
+ */
+export function parseSseDataLine(rawLine: string): string | null {
+  const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+  const trimmed = line.trim();
+  if (!trimmed || trimmed.startsWith(":")) return null;
+  if (!trimmed.startsWith("data:")) return null;
+  return trimmed.slice(5).trimStart();
+}
+
+/**
+ * Detects a mid-stream error payload (`{"error": {...}}` / `{"type":"error"}`)
+ * and returns its message. Gateways emit these when they hit a rate limit or
+ * upstream failure part-way through a response; ignoring them makes the answer
+ * look like it simply stopped mid-sentence.
+ */
+export function extractStreamErrorMessage(parsed: unknown): string | null {
+  if (!isRecord(parsed)) return null;
+  const err = parsed.error;
+  if (isRecord(err) && typeof err.message === "string" && err.message.trim()) {
+    return err.message;
+  }
+  if (typeof err === "string" && err.trim()) return err;
+  if (parsed.type === "error") {
+    return isRecord(err) && typeof err.message === "string" ? err.message : "Streaming error";
+  }
+  return null;
+}
+
 function rethrowAbortReason(signal: AbortSignal, error: unknown): never {
   if (signal.aborted && signal.reason instanceof Error) {
     throw signal.reason;
@@ -622,12 +659,8 @@ export class OpenAIAdapter implements ProviderAdapter {
       let done = false;
 
       for (const rawLine of lines) {
-        const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
-        const trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith(":")) continue;
-        if (!trimmed.startsWith("data:")) continue;
-
-        const data = trimmed.slice(5).trimStart();
+        const data = parseSseDataLine(rawLine);
+        if (data === null) continue;
         if (data === "[DONE]") {
           done = true;
           break;
@@ -672,16 +705,34 @@ export class OpenAIAdapter implements ProviderAdapter {
         return;
       }
 
+      const emitPayload = function* (data: string): Generator<string> {
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(data);
+        } catch {
+          return; // Skip invalid JSON
+        }
+        // A gateway that rate-limits or fails mid-response emits an error
+        // payload here. Skipping it (the old behaviour) made the answer look
+        // like it just stopped mid-sentence.
+        const errorMessage = extractStreamErrorMessage(parsed);
+        if (errorMessage) {
+          throw new Error(formatProviderApiError(undefined, errorMessage));
+        }
+        if (!isRecord(parsed)) return;
+        const choices = Array.isArray(parsed.choices) ? parsed.choices : [];
+        const first = isRecord(choices[0]) ? (choices[0] as Record<string, unknown>) : null;
+        const delta = first && isRecord(first.delta) ? first.delta : null;
+        const content = delta?.content;
+        if (typeof content === "string" && content.length > 0) {
+          yield content;
+        }
+      };
+
       while (true) {
         const { payloads, done: sseDone } = consumeSseBuffer();
         for (const data of payloads) {
-          try {
-            const parsed = JSON.parse(data);
-            const content = parsed.choices[0]?.delta?.content;
-            if (content) yield content;
-          } catch {
-            // Skip invalid JSON
-          }
+          yield* emitPayload(data);
         }
         if (sseDone) return;
 
@@ -689,13 +740,7 @@ export class OpenAIAdapter implements ProviderAdapter {
         if (streamDone) {
           const remaining = consumeSseBuffer(true);
           for (const data of remaining.payloads) {
-            try {
-              const parsed = JSON.parse(data);
-              const content = parsed.choices[0]?.delta?.content;
-              if (content) yield content;
-            } catch {
-              // Skip invalid JSON
-            }
+            yield* emitPayload(data);
           }
           if (remaining.done) return;
           break;
@@ -1299,9 +1344,8 @@ export class AnthropicAdapter implements ProviderAdapter {
     let buffer = "";
 
     const emitLine = function* (line: string): Generator<string> {
-      if (!line.startsWith("data: ")) return;
-      const data = line.slice(6);
-      if (data === "[DONE]") return;
+      const data = parseSseDataLine(line);
+      if (data === null || data === "[DONE]") return;
       let parsed: unknown;
       try {
         parsed = JSON.parse(data);
@@ -1312,10 +1356,9 @@ export class AnthropicAdapter implements ProviderAdapter {
       if (!isRecord(parsed)) return;
       // Anthropic emits mid-stream error events (overloaded/rate-limit);
       // surface them instead of silently truncating the stream.
-      if (parsed.type === "error") {
-        const err = isRecord(parsed.error) ? parsed.error : null;
-        const message = err && typeof err.message === "string" ? err.message : "Streaming error";
-        throw new Error(formatProviderApiError(undefined, message));
+      const errorMessage = extractStreamErrorMessage(parsed);
+      if (errorMessage) {
+        throw new Error(formatProviderApiError(undefined, errorMessage));
       }
       if (parsed.type === "content_block_delta") {
         const delta = isRecord(parsed.delta) ? parsed.delta : null;
@@ -1804,28 +1847,33 @@ export class GoogleAdapter implements ToolCallingAdapter {
     let finishReason: string | null = null;
 
     const emitLine = function* (line: string): Generator<string> {
-      if (!line.startsWith("data: ")) return;
-      const raw = line.slice(6);
-      if (raw === "[DONE]") return;
+      const raw = parseSseDataLine(line);
+      if (raw === null || raw === "[DONE]") return;
+      let parsed: unknown;
       try {
-        const parsed = JSON.parse(raw);
-        if (isRecord(parsed)) {
-          const block = extractGeminiBlock(parsed);
-          if (block.blockReason) blockReason = block.blockReason;
-          if (block.finishReason) finishReason = block.finishReason;
-          const candidates = Array.isArray(parsed.candidates) ? parsed.candidates : [];
-          const first = candidates[0];
-          if (isRecord(first) && isRecord(first.content) && Array.isArray(first.content.parts)) {
-            for (const part of first.content.parts as Array<Record<string, unknown>>) {
-              if (typeof part.text === "string" && part.text.length > 0) {
-                sawText = true;
-                yield part.text;
-              }
+        parsed = JSON.parse(raw);
+      } catch {
+        return; // Skip invalid JSON
+      }
+      // Surface mid-stream errors rather than ending the turn silently.
+      const errorMessage = extractStreamErrorMessage(parsed);
+      if (errorMessage) {
+        throw new Error(formatProviderApiError(undefined, errorMessage));
+      }
+      if (isRecord(parsed)) {
+        const block = extractGeminiBlock(parsed);
+        if (block.blockReason) blockReason = block.blockReason;
+        if (block.finishReason) finishReason = block.finishReason;
+        const candidates = Array.isArray(parsed.candidates) ? parsed.candidates : [];
+        const first = candidates[0];
+        if (isRecord(first) && isRecord(first.content) && Array.isArray(first.content.parts)) {
+          for (const part of first.content.parts as Array<Record<string, unknown>>) {
+            if (typeof part.text === "string" && part.text.length > 0) {
+              sawText = true;
+              yield part.text;
             }
           }
         }
-      } catch {
-        // Skip invalid JSON
       }
     };
 
