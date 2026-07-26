@@ -8,18 +8,6 @@
       "recommended": true
     }
   },
-  "overrides": [
-    {
-      "includes": ["apps/web/src/**"],
-      "linter": {
-        "rules": {
-          "correctness": {
-            "useExhaustiveDependencies": "off"
-          }
-        }
-      }
-    }
-  ],
   "css": {
     "parser": {
       "tailwindDirectives": true

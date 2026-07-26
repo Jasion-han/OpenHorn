@@ -3,10 +3,10 @@
 OpenHorn is a self-hostable AI workspace for chat, agent execution, provider routing, and optional live web search.
 
 It combines:
-- a Next.js web client
+- a Tauri desktop client
 - a Bun + Hono API server
 - an Agent mode backed by the Claude Agent SDK
-- optional desktop and sidecar apps for local workflows
+- a local sidecar runtime for workspace-bounded agent execution
 
 ## What It Does
 
@@ -20,15 +20,15 @@ It combines:
 
 ## Apps
 
-- `apps/web`: Next.js frontend
 - `apps/server`: Bun API server
 - `apps/desktop`: desktop shell
 - `apps/sidecar`: local sidecar service
 
 ## Tech Stack
 
-- Next.js 15
+- Tauri 2
 - React 19
+- Vite
 - Bun
 - Hono
 - Drizzle ORM
@@ -78,13 +78,11 @@ pnpm dev
 Or run services separately:
 
 ```bash
-pnpm dev:web
 pnpm dev:server
 pnpm dev:desktop
 ```
 
 Default local ports:
-- Web: `3001`
 - Server: `3000`
 
 ## Useful Commands
@@ -102,13 +100,6 @@ Server-specific:
 pnpm --filter server dev
 pnpm --filter server exec tsc --noEmit
 pnpm --filter server exec bun test
-```
-
-Web-specific:
-
-```bash
-pnpm --filter web dev
-pnpm --filter web exec tsc --noEmit
 ```
 
 ## Live Search

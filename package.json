@@ -2,12 +2,10 @@
   "name": "openhorn",
   "private": true,
   "scripts": {
-    "dev:web": "pnpm --filter web dev",
     "dev:desktop": "pnpm --filter desktop dev",
     "dev:server": "pnpm --filter server dev",
     "dev": "turbo dev",
     "build": "turbo build",
-    "build:web": "pnpm --filter web build",
     "build:server": "pnpm --filter server build",
     "build:desktop": "pnpm --filter desktop build",
     "lint": "biome lint .",

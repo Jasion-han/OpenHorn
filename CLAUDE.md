@@ -8,7 +8,6 @@ OpenHorn is a self-hostable AI workspace for chat, agent execution, and provider
 
 | App | Stack | Port | Runtime |
 |-----|-------|------|---------|
-| `apps/web` | Next.js 15, React 19, Zustand | 3001 | Node |
 | `apps/server` | Hono 4, Drizzle ORM, LibSQL | 3000 | Bun |
 | `apps/desktop` | Tauri 2, React 19, Vite | — | Rust + Bun |
 | `apps/sidecar` | WebSocket agent runtime | dynamic | Bun |
@@ -20,7 +19,6 @@ Shared packages: `packages/shared` (DTO types), `packages/db` (Drizzle schema), 
 ```bash
 pnpm install                        # Install all deps
 pnpm dev                            # Start everything via Turbo
-pnpm dev:web                        # Web only
 pnpm dev:server                     # Server only
 pnpm dev:desktop                    # Desktop (Tauri) only
 
@@ -33,9 +31,6 @@ pnpm format                         # Biome auto-fix formatting
 pnpm --filter server exec bun test              # Run all server tests
 pnpm --filter server exec bun test <file>        # Run single test file
 pnpm --filter server exec tsc --noEmit           # Server type check
-
-# Web
-pnpm --filter web exec tsc --noEmit              # Web type check
 
 # Desktop
 pnpm --filter desktop exec bun test             # Desktop tests
@@ -58,8 +53,6 @@ docker compose up --build                       # Server container
 
 **Desktop ↔ Sidecar:** Tauri spawns sidecar as a child process with a random handshake token. Sidecar runs on loopback WebSocket only. All file operations are workspace-bounded with symlink-aware path validation.
 
-**Desktop and Web are intentionally independent component trees** — do not assume they stay aligned.
-
 **Agent event flow:** SDK events → `AgentEvent` objects → SSE/WebSocket → UI. Desktop uses real-time execution stream (not polling fallback).
 
 **Database has two definitions per table** — both must be updated together:
@@ -73,9 +66,9 @@ docker compose up --build                       # Server container
 - **Git staging:** Always `git add <path> <path>...` — never `git add .` or `git add -A` (repo has long-lived uncommitted changes)
 - **Sidecar recompile:** After changing `apps/sidecar/src/`, run `pnpm --filter sidecar run compile:tauri:host` or `cargo check` will fail
 - **Chinese UI text:** Must go through `apps/desktop/src/lib/i18n/agent.ts` dictionary — no inline Chinese strings in components, no fallback strings
-- **Server baseline noise:** ~15 pre-existing test failures (`db.delete is not a function` etc.) — check if the failure count changes, not the total
+- **Server tests are green** — the old `db.delete is not a function` baseline is fixed. Bun's `mock.module()` is process-global and cannot be unregistered, so any test that mocks `../db` MUST snapshot the real module at evaluation time (`{...realDbNs}`) and restore it in `afterAll`, or every later test in the process breaks. See `channelService.agent-check-baseurl.test.ts`
 - **Desktop test matchers:** Only `toBe`/`toBeDefined`/`toEqual`/`toHaveLength`/`toMatchObject` — no `.not`/`toBeNull`/`toBeLessThanOrEqual` (limited `bun-test.d.ts`)
-- **Biome config:** 2-space indent, 100-char line width; `useExhaustiveDependencies` off only in `apps/web/src/**`
+- **Biome config:** 2-space indent, 100-char line width
 - **No Jest/Vitest** — all tests use `bun test`
 
 ## Detailed Documentation
