@@ -8,6 +8,11 @@ type ForeignKeyExpectation = {
   onDelete: string;
 };
 
+/** True for `CREATE INDEX` / `CREATE UNIQUE INDEX` statements in SCHEMA_DDL. */
+export function isCreateIndexStatement(statement: string): boolean {
+  return /^\s*CREATE\s+(UNIQUE\s+)?INDEX\b/i.test(statement);
+}
+
 const SCHEMA_DDL: string[] = [
   `CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
@@ -605,7 +610,12 @@ async function tableHasExpectedForeignKeys(
   );
 }
 
-async function ensureDeleteSemanticsForeignKeys(): Promise<void> {
+/**
+ * Returns true when it actually rebuilt tables, so the caller can replay the
+ * index DDL — SQLite drops a table's indexes along with the table, and this
+ * migration recreates 7 core tables via DROP TABLE.
+ */
+async function ensureDeleteSemanticsForeignKeys(): Promise<boolean> {
   const expectations: Array<{ tableName: string; foreignKeys: ForeignKeyExpectation[] }> = [
     {
       tableName: "channel_models",
@@ -695,7 +705,7 @@ async function ensureDeleteSemanticsForeignKeys(): Promise<void> {
     expectations.map((item) => tableHasExpectedForeignKeys(item.tableName, item.foreignKeys)),
   );
   if (matches.every(Boolean)) {
-    return;
+    return false;
   }
 
   await client.execute("PRAGMA foreign_keys=OFF;");
@@ -912,6 +922,7 @@ async function ensureDeleteSemanticsForeignKeys(): Promise<void> {
     await client.execute("ALTER TABLE channel_models__migrated RENAME TO channel_models;");
 
     await client.execute("COMMIT;");
+    return true;
   } catch (error) {
     await client.execute("ROLLBACK;");
     throw error;
@@ -992,5 +1003,17 @@ export async function bootstrapDatabase(): Promise<void> {
   await ensureAgentTaskRequiresPlanApprovalColumn();
   await ensureAgentTaskAutoStartColumn();
   await ensureAttachmentsSessionIdColumn();
-  await ensureDeleteSemanticsForeignKeys();
+
+  // Runs LAST and rebuilds 7 core tables with DROP TABLE + RENAME. SQLite drops
+  // a table's indexes with the table, and the SCHEMA_DDL pass above already
+  // ran — so without replaying the index DDL here, a database that just took
+  // this migration would full-table-scan every query for the rest of the
+  // process's life (until the next restart re-created them).
+  if (await ensureDeleteSemanticsForeignKeys()) {
+    for (const stmt of SCHEMA_DDL) {
+      if (isCreateIndexStatement(stmt)) {
+        await client.execute(stmt);
+      }
+    }
+  }
 }
