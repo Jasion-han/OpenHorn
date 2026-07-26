@@ -14,6 +14,7 @@ export type RunCodexAgentInput = {
   cwd: string;
   abortController: AbortController;
   attachments?: AttachmentPart[];
+  conversationHistory?: Array<{ role: "user" | "assistant"; content: string }>;
   onEvent: (event: AgentEvent) => void;
 };
 
@@ -54,7 +55,8 @@ function buildCodexEnv(): NodeJS.ProcessEnv {
   return sanitizeChildEnv({ ...process.env });
 }
 
-function mapCodexEvent(msg: JsonRpcMessage): AgentEvent | null {
+/** Exported for tests: maps a codex app-server JSON-RPC message to an AgentEvent. */
+export function mapCodexEvent(msg: JsonRpcMessage): AgentEvent | null {
   const method = msg.method;
   if (!method) return null;
   const params = (msg.params ?? {}) as Record<string, unknown>;
@@ -112,8 +114,17 @@ function mapCodexEvent(msg: JsonRpcMessage): AgentEvent | null {
 
 export async function runCodexAgent(input: RunCodexAgentInput): Promise<void> {
   const { model, cwd, abortController, onEvent } = input;
+  // Prepend conversation history so the turn carries context (same pattern as
+  // direct.ts — codex app-server takes a single input turn, not a message list).
+  let seededPrompt = input.prompt;
+  if (input.conversationHistory && input.conversationHistory.length > 0) {
+    const historyBlock = input.conversationHistory
+      .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
+      .join("\n\n");
+    seededPrompt = `${historyBlock}\n\n---\n\nUser: ${input.prompt}`;
+  }
   // Inject attachment context (file text now; image placeholders until phase B).
-  const prompt = appendAttachmentContext(input.prompt, input.attachments);
+  const prompt = appendAttachmentContext(seededPrompt, input.attachments);
   // Do not log prompt content (user data); a length marker is enough.
   console.error(`[codex-agent] starting: model=${model} cwd=${cwd} promptLen=${prompt.length}`);
 
@@ -196,7 +207,6 @@ export async function runCodexAgent(input: RunCodexAgentInput): Promise<void> {
     let threadStarted = false;
     let done = false;
     let resolved = false;
-    let pendingText = "";
 
     const settle = () => {
       if (resolved) return;
@@ -207,17 +217,6 @@ export async function runCodexAgent(input: RunCodexAgentInput): Promise<void> {
     const finish = async (event?: AgentEvent) => {
       if (done) return;
       done = true;
-      if (pendingText) {
-        const chars = Array.from(pendingText);
-        const chunkSize = 8;
-        for (let i = 0; i < chars.length; i += chunkSize) {
-          onEvent({ type: "final_text", content: chars.slice(i, i + chunkSize).join("") });
-          if (i + chunkSize < chars.length) {
-            await new Promise((r) => setTimeout(r, 15));
-          }
-        }
-        pendingText = "";
-      }
       if (event) onEvent(event);
       onEvent({ type: "done" });
       cleanup();
@@ -270,15 +269,10 @@ export async function runCodexAgent(input: RunCodexAgentInput): Promise<void> {
           finish(event.type === "error" ? event : undefined);
           return;
         }
-        if (event.type === "text") {
-          pendingText += event.content;
-        } else if (event.type === "tool_start") {
-          if (pendingText) {
-            onEvent({ type: "thinking", content: pendingText });
-          }
-          pendingText = "";
-          onEvent(event);
-        } else if (event.type !== "done") {
+        // Forward text deltas straight through: the UI appends them to the
+        // message body as they arrive. Buffering here would mean nothing
+        // reaches the UI until the turn ends.
+        if (event.type !== "done") {
           onEvent(event);
         }
       }

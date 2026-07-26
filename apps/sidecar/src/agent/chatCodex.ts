@@ -1,3 +1,4 @@
+import { sanitizeChildEnv } from "./childEnv";
 import type { AgentEvent } from "./events";
 
 export type RunCodexChatInput = {
@@ -10,17 +11,32 @@ export type RunCodexChatInput = {
 export async function runCodexChat(input: RunCodexChatInput): Promise<void> {
   const codexPath = await findCodexBinary();
   if (!codexPath) {
-    input.onEvent({ type: "error", content: "未找到 Codex CLI，请先安装: npm install -g @openai/codex" });
+    input.onEvent({
+      type: "error",
+      content: "未找到 Codex CLI，请先安装: npm install -g @openai/codex",
+    });
     return;
   }
 
   const proc = Bun.spawn(
-    [codexPath, "exec", input.prompt, "--model", input.model, "--json", "-c", "approval_policy=\"never\""],
+    [
+      codexPath,
+      "exec",
+      input.prompt,
+      "--model",
+      input.model,
+      "--json",
+      "-c",
+      'approval_policy="never"',
+    ],
     {
       stdin: new Blob([""]),
       stdout: "pipe",
       stderr: "pipe",
       signal: input.abortController.signal,
+      // Codex runs with approval_policy="never" and a full shell — it must not
+      // inherit our handshake token or provider keys. Mirrors codex.ts.
+      env: sanitizeChildEnv({ ...process.env }),
     },
   );
 
@@ -70,7 +86,12 @@ export async function runCodexChat(input: RunCodexChatInput): Promise<void> {
   const exitCode = await proc.exited;
   if (exitCode !== 0) {
     const stderr = await stderrPromise;
-    const errMsg = stderr.trim().split("\n").filter(l => !l.includes("ERROR rmcp")).join("\n").trim();
+    const errMsg = stderr
+      .trim()
+      .split("\n")
+      .filter((l) => !l.includes("ERROR rmcp"))
+      .join("\n")
+      .trim();
     if (errMsg) {
       input.onEvent({ type: "error", content: errMsg });
       return;
@@ -87,7 +108,7 @@ async function findCodexBinary(): Promise<string | null> {
   }
   try {
     const proc = Bun.spawn(["which", "codex"], { stdout: "pipe", stderr: "pipe" });
-    if (await proc.exited === 0) {
+    if ((await proc.exited) === 0) {
       const path = (await new Response(proc.stdout).text()).trim();
       if (path) return path;
     }
