@@ -5,6 +5,14 @@ import { generateId } from "../utils";
 
 type LegacyAgentSessionRow = typeof agentSessions.$inferSelect;
 
+/**
+ * Either the root db handle or a transaction handle. The legacy migration runs
+ * every step inside one transaction so a failure part-way through cannot leave
+ * a half-built conversation behind (which the next request would then migrate
+ * a second time).
+ */
+type DbOrTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
+
 type AgentRunStep = {
   type: "tool_start" | "tool_result" | "error";
   toolName?: string;
@@ -46,6 +54,7 @@ function mapLegacyStatus(status: string | null | undefined): AgentRunData["statu
 }
 
 async function insertMigratedAssistantMessage(params: {
+  tx: DbOrTx;
   conversationId: string;
   session: LegacyAgentSessionRow;
   content: string;
@@ -61,7 +70,7 @@ async function insertMigratedAssistantMessage(params: {
     legacySessionId: params.session.id,
   };
 
-  await db.insert(messages).values({
+  await params.tx.insert(messages).values({
     id: generateId(),
     conversationId: params.conversationId,
     role: "assistant",
@@ -75,10 +84,11 @@ async function insertMigratedAssistantMessage(params: {
 }
 
 async function migrateSessionEventsToConversation(
+  tx: DbOrTx,
   session: LegacyAgentSessionRow,
   conversationId: string,
 ) {
-  const rows = await db
+  const rows = await tx
     .select()
     .from(agentEvents)
     .where(eq(agentEvents.sessionId, session.id))
@@ -92,6 +102,7 @@ async function migrateSessionEventsToConversation(
   const flushAssistant = async (createdAt: Date) => {
     if (!assistantText.trim() && steps.length === 0 && !errorText) return;
     await insertMigratedAssistantMessage({
+      tx,
       conversationId,
       session,
       content: assistantText,
@@ -108,7 +119,7 @@ async function migrateSessionEventsToConversation(
   for (const row of rows) {
     if (row.type === "user") {
       await flushAssistant(assistantCreatedAt);
-      await db.insert(messages).values({
+      await tx.insert(messages).values({
         id: generateId(),
         conversationId,
         role: "user",
@@ -157,39 +168,66 @@ async function migrateSessionEventsToConversation(
 
 async function migrateLegacySession(userId: string, session: LegacyAgentSessionRow) {
   const conversationId = generateId();
-  await db.insert(conversations).values({
-    id: conversationId,
-    userId,
-    channelId: session.channelId || null,
-    modelId: session.modelId || null,
-    title: session.title,
-    systemPrompt: null,
-    contextLength: 4096,
-    defaultMode: "agent",
-    lastMode: "agent",
-    isPinned: false,
-    runStatus: session.status || null,
-    createdAt: session.createdAt,
-    updatedAt: session.updatedAt,
+  // One transaction for all three steps (create conversation → copy events →
+  // mark the session migrated). Previously a failure between them left an
+  // orphan conversation whose session still had conversationId = NULL, so the
+  // next request migrated it again and duplicated the whole thread.
+  await db.transaction(async (tx) => {
+    await tx.insert(conversations).values({
+      id: conversationId,
+      userId,
+      channelId: session.channelId || null,
+      modelId: session.modelId || null,
+      title: session.title,
+      systemPrompt: null,
+      contextLength: 4096,
+      defaultMode: "agent",
+      lastMode: "agent",
+      isPinned: false,
+      runStatus: session.status || null,
+      createdAt: session.createdAt,
+      updatedAt: session.updatedAt,
+    });
+
+    await migrateSessionEventsToConversation(tx, session, conversationId);
+
+    await tx
+      .update(agentSessions)
+      .set({ conversationId })
+      .where(and(eq(agentSessions.id, session.id), eq(agentSessions.userId, userId)));
   });
-
-  await migrateSessionEventsToConversation(session, conversationId);
-
-  await db
-    .update(agentSessions)
-    .set({ conversationId })
-    .where(and(eq(agentSessions.id, session.id), eq(agentSessions.userId, userId)));
 }
 
-export async function ensureLegacyAgentSessionsMigrated(userId: string) {
-  const sessions = await db
-    .select()
-    .from(agentSessions)
-    .where(and(eq(agentSessions.userId, userId), isNull(agentSessions.conversationId)))
-    .orderBy(asc(agentSessions.createdAt));
+/**
+ * In-flight migrations keyed by user. Two concurrent reads (the desktop client
+ * fires /conversations and /conversations/:id together) would otherwise both
+ * select the same conversationId-IS-NULL rows and migrate each one twice,
+ * producing duplicate conversations and duplicate messages.
+ */
+const migrationsInFlight = new Map<string, Promise<void>>();
 
-  for (const session of sessions) {
-    await migrateLegacySession(userId, session);
+export async function ensureLegacyAgentSessionsMigrated(userId: string) {
+  const running = migrationsInFlight.get(userId);
+  if (running) return running;
+
+  const task = (async () => {
+    const sessions = await db
+      .select()
+      .from(agentSessions)
+      .where(and(eq(agentSessions.userId, userId), isNull(agentSessions.conversationId)))
+      .orderBy(asc(agentSessions.createdAt));
+
+    for (const session of sessions) {
+      await migrateLegacySession(userId, session);
+    }
+  })();
+
+  migrationsInFlight.set(userId, task);
+  try {
+    await task;
+  } finally {
+    // Always release: a failed migration must be retryable on the next request.
+    migrationsInFlight.delete(userId);
   }
 }
 
