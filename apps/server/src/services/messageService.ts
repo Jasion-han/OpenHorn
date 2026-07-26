@@ -214,6 +214,17 @@ function parseAgentRunData(value: string | null | undefined): AgentRunData | nul
   }
 }
 
+/**
+ * True once a task can no longer change. Used to skip pointless re-syncs on the
+ * read path — see getMessagesForUserWithAttachments.
+ *
+ * A message whose stored agentRun has no taskStatus predates this field (or was
+ * never synced), so it is deliberately treated as non-terminal and still synced.
+ */
+export function isTerminalTaskStatus(status: AgentRunData["taskStatus"]): boolean {
+  return status === "completed" || status === "failed" || status === "cancelled";
+}
+
 function getTaskFinalResultCitations(detail: AgentTaskDetail) {
   const finalResult = detail.artifacts.find((artifact) => artifact.type === "final_result") ?? null;
   if (
@@ -237,6 +248,7 @@ export async function syncTaskBackedMessages(userId: string, taskId: string): Pr
   const candidateMessages = await db
     .select({
       id: messages.id,
+      content: messages.content,
       agentRun: messages.agentRun,
     })
     .from(messages)
@@ -248,24 +260,40 @@ export async function syncTaskBackedMessages(userId: string, taskId: string): Pr
       ),
     );
 
-  const targetIds = candidateMessages
-    .filter((message) => parseAgentRunData(message.agentRun)?.taskId === taskId)
-    .map((message) => message.id);
+  const targets = candidateMessages.filter(
+    (message) => parseAgentRunData(message.agentRun)?.taskId === taskId,
+  );
 
-  if (targetIds.length === 0) return;
+  if (targets.length === 0) return;
+
+  const nextContent = buildTaskMessageSummary(detail);
+  const nextAgentRun = JSON.stringify(buildTaskBackedAgentRun(detail));
+
+  // Skip the write when nothing actually changed. This runs on a read path, so
+  // an unconditional UPDATE turns every message fetch into a write — and bumps
+  // rows that no client will render any differently.
+  const staleTargets = targets.filter(
+    (message) => message.content !== nextContent || message.agentRun !== nextAgentRun,
+  );
+  if (staleTargets.length === 0) return;
 
   await db
     .update(messages)
     .set({
-      content: buildTaskMessageSummary(detail),
-      agentRun: JSON.stringify(buildTaskBackedAgentRun(detail)),
+      content: nextContent,
+      agentRun: nextAgentRun,
       citations: (() => {
         const citations = getTaskFinalResultCitations(detail);
         return citations && citations.length > 0 ? JSON.stringify(citations) : null;
       })(),
       liveMetadata: null,
     })
-    .where(inArray(messages.id, targetIds));
+    .where(
+      inArray(
+        messages.id,
+        staleTargets.map((message) => message.id),
+      ),
+    );
 }
 
 async function planTaskForTurn(userId: string, task: AgentTaskRecord) {
@@ -673,11 +701,20 @@ export async function getMessagesForUserWithAttachments(userId: string, conversa
   await getConversationForUser(userId, conversationId);
   let result = await getMessages(conversationId);
 
+  // Only tasks that might still change are worth re-syncing. A task that has
+  // already been recorded as completed/failed/cancelled can never produce a
+  // different summary, so re-reading it on every message fetch costs 8 queries
+  // (6 for the detail, 1 scan, 1 write) and changes nothing. A conversation of
+  // 20 finished agent turns used to spend ~160 queries — plus a write — every
+  // time it was opened.
   const taskIds = Array.from(
     new Set(
       result
         .filter((message) => message.role === "assistant" && message.mode === "agent")
-        .map((message) => parseAgentRunData(message.agentRun)?.taskId)
+        .map((message) => parseAgentRunData(message.agentRun))
+        .filter((run): run is AgentRunData => run !== null)
+        .filter((run) => !isTerminalTaskStatus(run.taskStatus))
+        .map((run) => run.taskId)
         .filter(
           (taskId): taskId is string => typeof taskId === "string" && taskId.trim().length > 0,
         ),
