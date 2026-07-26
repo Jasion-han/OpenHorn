@@ -1,8 +1,11 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { sanitizeChildEnv } from "shared/child-env";
 
 const execFileAsync = promisify(execFile);
 const MAX_BUFFER_BYTES = 1024 * 1024;
+// A hung command must not pin the worker forever.
+const COMMAND_TIMEOUT_MS = 120_000;
 const MAX_OUTPUT_LINES = 40;
 const OUTPUT_HEAD_LINES = 20;
 const OUTPUT_TAIL_LINES = 10;
@@ -47,8 +50,12 @@ export async function executeBashTool(params: {
   try {
     const result = await execFileAsync("bash", ["-lc", command], {
       cwd: params.cwd,
-      env: process.env,
+      // The command is model-generated and runs with a full shell. Passing
+      // process.env wholesale would hand it ENCRYPTION_KEY / JWT_SECRET / every
+      // provider key — a single `printenv` would exfiltrate them.
+      env: sanitizeChildEnv(process.env),
       maxBuffer: MAX_BUFFER_BYTES,
+      timeout: COMMAND_TIMEOUT_MS,
     });
     return {
       command,
