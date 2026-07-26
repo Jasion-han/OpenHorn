@@ -1,48 +1,17 @@
 import crypto from "node:crypto";
 
-const ALGORITHM = "aes-256-gcm";
-const IV_LENGTH = 16;
-
-function getKey(): Buffer {
-  const key = process.env.ENCRYPTION_KEY;
-  if (!key) {
-    throw new Error("ENCRYPTION_KEY is not set");
-  }
-  return crypto.createHash("sha256").update(key).digest();
-}
-
-export function encrypt(text: string): string {
-  const iv = crypto.randomBytes(IV_LENGTH);
-  const key = getKey();
-  const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
-
-  let encrypted = cipher.update(text, "utf8", "hex");
-  encrypted += cipher.final("hex");
-
-  const tag = cipher.getAuthTag();
-
-  return `${iv.toString("hex")}:${tag.toString("hex")}:${encrypted}`;
-}
-
-export function decrypt(encryptedText: string): string {
-  const parts = encryptedText.split(":");
-  if (parts.length !== 3) {
-    throw new Error("Invalid encrypted text format");
-  }
-
-  const iv = Buffer.from(parts[0], "hex");
-  const tag = Buffer.from(parts[1], "hex");
-  const encrypted = parts[2];
-
-  const key = getKey();
-  const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
-  decipher.setAuthTag(tag);
-
-  let decrypted = decipher.update(encrypted, "hex", "utf8");
-  decrypted += decipher.final("utf8");
-
-  return decrypted;
-}
+/**
+ * Encrypt/decrypt used to live here as a byte-for-byte duplicate of
+ * `apps/server/src/utils.ts`. Nothing imported this copy, but keeping two
+ * independent implementations of the same ciphertext format was a live hazard:
+ * upgrading one (the server side now derives its key with scrypt and tags
+ * ciphertexts `v2:`) would leave the other silently writing data the first
+ * could not read — with no type error and no test failure to catch it.
+ *
+ * The server module is the single source of truth. Anything that needs to
+ * encrypt must go through it, so that key derivation and the ciphertext format
+ * can only ever change in one place.
+ */
 
 export function generateId(): string {
   return crypto.randomUUID();
