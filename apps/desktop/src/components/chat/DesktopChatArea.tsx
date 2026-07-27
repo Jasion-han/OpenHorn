@@ -1216,6 +1216,12 @@ export function DesktopChatArea() {
           channelId: currentConversation.channelId!,
           modelId: effectiveModel.ok ? effectiveModel.modelId : "",
           assistantMessageId: messageId,
+          // Regenerating REPLACES this round. Without these ids the sidecar's
+          // persist step falls back to inserting a fresh user+assistant pair, so
+          // every retry duplicated the question in the thread. (The edit-and-resend
+          // path below already passed them; retry was the odd one out.)
+          existingUserMessageId: userMessage.id,
+          existingAssistantMessageId: messageId,
           prompt: retrySendContent,
           displayContent: userMessage.content,
           permissionMode: fullAccessEnabled ? "full-access" : "default",
