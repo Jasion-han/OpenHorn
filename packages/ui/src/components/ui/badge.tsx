@@ -11,8 +11,10 @@ const badgeVariants = cva(
         default: "border-transparent bg-primary text-primary-foreground hover:bg-primary/80",
         secondary:
           "border-transparent bg-secondary text-secondary-foreground hover:bg-secondary/80",
+        // Same reasoning as the destructive button, and it matters more here:
+        // badge text is xs, so it needs the darker fill to stay readable.
         destructive:
-          "border-transparent bg-destructive text-destructive-foreground hover:bg-destructive/80",
+          "border-transparent bg-destructive text-destructive-foreground hover:bg-destructive/80 dark:bg-destructive/85",
         outline: "text-foreground",
       },
     },
