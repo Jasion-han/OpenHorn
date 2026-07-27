@@ -405,6 +405,8 @@ export const channelLabels = {
   "settings.channel.picker.syncFailedGenericBody": "无法同步模型列表",
   "settings.channel.picker.modelUpdatedTitle": "模型已更新",
   "settings.channel.picker.modelUpdatedBody": "已保存到当前对话",
+  // Same picker opened from the welcome screen, where no conversation exists yet
+  "settings.channel.picker.modelUpdatedDraftBody": "新会话将使用该模型",
   "settings.channel.picker.updateFailedTitle": "更新失败",
   "settings.channel.picker.updateFailedBody": "无法更新模型选择",
 } as const;
@@ -569,7 +571,7 @@ export const chatLabels = {
   "chat.welcome.suggestion1": "帮我总结这份文档的要点",
   "chat.welcome.suggestion2": "查一下今天值得关注的科技新闻",
   "chat.welcome.suggestion3": "读一下这个项目的代码，说说架构",
-  "chat.welcome.noModel": "未配置默认模型，去设置",
+  "chat.welcome.noModel": "选择模型",
   "chat.welcome.startFailedTitle": "无法开始会话",
   "chat.welcome.startFailedBody": "创建会话失败，请稍后重试",
   // Inline edit buttons

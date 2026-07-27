@@ -55,14 +55,27 @@ function buildOptions(channels: Channel[]): ModelGroup[] {
 export function DesktopModelPickerModal(props: {
   opened: boolean;
   onClose: () => void;
-  conversationId: string;
+  /**
+   * Where the pick goes. The picker itself is conversation-agnostic: the chat
+   * area writes it to the open conversation, the welcome screen holds it until
+   * the conversation is created.
+   */
+  onSelect: (selection: { channelId: string; modelId: string }) => void | Promise<void>;
+  /** Only changes the confirmation wording — a draft has no conversation to save to. */
+  appliesTo?: "conversation" | "draft";
   current?: { channelId: string; modelId: string } | null;
   conversationFixReason?: string | null;
 }) {
-  const { opened, onClose, conversationId, current, conversationFixReason } = props;
+  const {
+    opened,
+    onClose,
+    onSelect,
+    appliesTo = "conversation",
+    current,
+    conversationFixReason,
+  } = props;
   const channels = useChatStore((state) => state.channels);
   const loadChannels = useChatStore((state) => state.loadChannels);
-  const updateConversation = useChatStore((state) => state.updateConversation);
   const openSettings = useDesktopShellStore((state) => state.openSettings);
 
   const [query, setQuery] = useState("");
@@ -333,10 +346,14 @@ export function DesktopModelPickerModal(props: {
   const handleSelect = async (channelId: string, modelId: string) => {
     setBusy(true);
     try {
-      await updateConversation(conversationId, { channelId, modelId });
+      await onSelect({ channelId, modelId });
       notifySuccess(
         getChannelLabel("settings.channel.picker.modelUpdatedTitle"),
-        getChannelLabel("settings.channel.picker.modelUpdatedBody"),
+        getChannelLabel(
+          appliesTo === "draft"
+            ? "settings.channel.picker.modelUpdatedDraftBody"
+            : "settings.channel.picker.modelUpdatedBody",
+        ),
       );
       onClose();
     } catch (error) {

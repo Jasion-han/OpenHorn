@@ -1701,7 +1701,9 @@ export function DesktopChatArea() {
             setModelPickerOpen(false);
             setTimeout(() => inputRef.current?.focus(), 100);
           }}
-          conversationId={currentConversation.id}
+          onSelect={(selection) =>
+            useChatStore.getState().updateConversation(currentConversation.id, selection)
+          }
           conversationFixReason={
             !effectiveModel.ok && effectiveModel.scope === "conversation"
               ? effectiveModel.reason

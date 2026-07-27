@@ -21,6 +21,7 @@ import { useChatStore } from "../../stores/chatStore";
 import { useDesktopShellStore } from "../../stores/desktopShellStore";
 import { DesktopAttachmentPreviewItem } from "./DesktopAttachmentPreviewItem";
 import { ACCEPT_FILES } from "./DesktopComposer";
+import { DesktopModelPickerModal } from "./DesktopModelPickerModal";
 import { DesktopProviderLogo } from "./DesktopProviderLogo";
 
 const SUGGESTION_KEYS = [
@@ -39,6 +40,12 @@ const SUGGESTION_KEYS = [
 export function DesktopWelcomeScreen() {
   const [draft, setDraft] = useState("");
   const [attachments, setAttachments] = useState<File[]>([]);
+  const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  // A pick made before the conversation exists has nowhere to be persisted, so
+  // it is held here and passed to createConversation.
+  const [pickedModel, setPickedModel] = useState<{ channelId: string; modelId: string } | null>(
+    null,
+  );
   // Matches the server's default for a fresh conversation; sent along at
   // creation so the very first message already honours it.
   const [forceWebSearch, setForceWebSearch] = useState(true);
@@ -53,11 +60,14 @@ export function DesktopWelcomeScreen() {
   const sidebarCollapsed = useDesktopShellStore((state) => state.sidebarCollapsed);
   const setSidebarCollapsed = useDesktopShellStore((state) => state.setSidebarCollapsed);
   const setPendingPrompt = useDesktopShellStore((state) => state.setPendingPrompt);
-  const openSettings = useDesktopShellStore((state) => state.openSettings);
   const fullAccessEnabled = useDesktopShellStore((state) => state.fullAccessEnabled);
   const toggleFullAccess = useDesktopShellStore((state) => state.toggleFullAccess);
 
   const defaultChannel = getGlobalDefaultChannel(channels);
+  const selection = pickedModel ?? defaultChannel ?? null;
+  const selectedProvider = pickedModel
+    ? (channels.find((channel) => channel.id === pickedModel.channelId)?.provider ?? null)
+    : (defaultChannel?.provider ?? null);
 
   const start = async (prompt: string) => {
     const trimmed = prompt.trim();
@@ -72,8 +82,8 @@ export function DesktopWelcomeScreen() {
       // corrected afterwards: by the time the await resumes, the chat area has
       // already sent the message.
       await createConversation(DEFAULT_CONVERSATION_TITLE, {
-        channelId: defaultChannel?.channelId ?? null,
-        modelId: defaultChannel?.modelId ?? null,
+        channelId: selection?.channelId ?? null,
+        modelId: selection?.modelId ?? null,
         defaultMode: composerMode,
         forceWebSearch,
       });
@@ -209,22 +219,23 @@ export function DesktopWelcomeScreen() {
 
                 <button
                   type="button"
-                  onClick={() => openSettings("channels")}
+                  onClick={() => setModelPickerOpen(true)}
                   className={cn(
                     "flex min-w-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors",
-                    defaultChannel
+                    selection
                       ? "text-muted-foreground hover:bg-accent hover:text-foreground"
                       : "text-orange-600 hover:bg-orange-500/10 hover:text-orange-700",
                   )}
                   aria-label="Model"
                   title="Model"
                 >
-                  {defaultChannel ? (
-                    <DesktopProviderLogo provider={defaultChannel.provider} className="size-4" />
+                  {selectedProvider ? (
+                    <DesktopProviderLogo provider={selectedProvider} className="size-4" />
                   ) : null}
                   <span className="max-w-[220px] truncate">
-                    {defaultChannel?.modelId ?? getChatLabel("chat.welcome.noModel")}
+                    {selection?.modelId ?? getChatLabel("chat.welcome.noModel")}
                   </span>
+                  <ChevronDown className="size-3" />
                 </button>
 
                 <button
@@ -302,6 +313,18 @@ export function DesktopWelcomeScreen() {
           </div>
         </div>
       </div>
+
+      {modelPickerOpen && (
+        <DesktopModelPickerModal
+          opened={modelPickerOpen}
+          onClose={() => setModelPickerOpen(false)}
+          onSelect={(next) => setPickedModel(next)}
+          appliesTo="draft"
+          current={
+            selection ? { channelId: selection.channelId, modelId: selection.modelId } : null
+          }
+        />
+      )}
     </div>
   );
 }
