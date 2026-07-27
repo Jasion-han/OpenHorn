@@ -44,7 +44,8 @@ export type SlashHighlightRange = {
   len: number;
 };
 
-const ACCEPT_FILES = "image/png,image/jpeg,image/webp,application/pdf,text/plain,text/markdown";
+export const ACCEPT_FILES =
+  "image/png,image/jpeg,image/webp,application/pdf,text/plain,text/markdown";
 
 export function DesktopComposer({
   value,

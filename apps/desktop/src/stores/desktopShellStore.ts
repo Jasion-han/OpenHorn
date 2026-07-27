@@ -16,12 +16,26 @@ export interface DesktopShellState {
   sidebarCollapsed: boolean;
   settingsTab: DesktopSettingsTab;
   fullAccessEnabled: boolean;
+  /**
+   * Draft composed on the welcome screen before any conversation existed. The
+   * welcome screen creates the conversation and parks it here; the chat area
+   * picks it up once that conversation is current and sends it. Deliberately not
+   * persisted — a draft that outlived a restart would send itself unprompted,
+   * and File handles do not survive serialization anyway.
+   *
+   * Mode and web-search are NOT carried here: they seed the conversation at
+   * creation time. Correcting them afterwards would be too late — the store
+   * update inside `createConversation` flushes the chat area's effects (and
+   * hence the send) before the welcome screen's `await` even resumes.
+   */
+  pendingPrompt: { text: string; files: File[] } | null;
 
   setActiveView: (view: DesktopActiveView) => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
   setSettingsTab: (tab: DesktopSettingsTab) => void;
   openSettings: (tab?: DesktopSettingsTab) => void;
   toggleFullAccess: () => void;
+  setPendingPrompt: (prompt: { text: string; files: File[] } | null) => void;
   reset: () => void;
 }
 
@@ -30,6 +44,7 @@ const INITIAL_STATE = {
   sidebarCollapsed: false,
   settingsTab: "channels" as DesktopSettingsTab,
   fullAccessEnabled: false,
+  pendingPrompt: null as { text: string; files: File[] } | null,
 };
 
 export function createDesktopShellStore() {
@@ -46,6 +61,7 @@ export function createDesktopShellStore() {
             settingsTab,
           }),
         toggleFullAccess: () => set((state) => ({ fullAccessEnabled: !state.fullAccessEnabled })),
+        setPendingPrompt: (pendingPrompt) => set({ pendingPrompt }),
         reset: () => set({ ...INITIAL_STATE }),
       }),
       {

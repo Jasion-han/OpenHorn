@@ -560,8 +560,18 @@ export const chatLabels = {
     "未检测到 Tavily Key，需要最新信息时的联网搜索可能无法使用。请在设置中填写或配置服务端 TAVILY_API_KEY。",
   "chat.search.disabledTitle": "实时搜索已关闭",
   "chat.search.disabledBody": "在设置中启用 Tavily 搜索后，系统才会在需要最新信息时联网。",
-  // Empty state
-  "chat.emptyState": "在左侧选择一个会话，或创建新会话开始交流",
+  // Welcome screen (DesktopWelcomeScreen) — shown when no conversation is selected.
+  // "Chat"/"Agent" stay English to match the composer's mode chip.
+  "chat.welcome.title": "今天想做点什么？",
+  "chat.welcome.subtitle": "输入你的问题，我会为你新建一个会话",
+  "chat.welcome.placeholder": "描述你的任务，回车开始",
+  "chat.welcome.suggestionsHeading": "试试这些",
+  "chat.welcome.suggestion1": "帮我总结这份文档的要点",
+  "chat.welcome.suggestion2": "查一下今天值得关注的科技新闻",
+  "chat.welcome.suggestion3": "读一下这个项目的代码，说说架构",
+  "chat.welcome.noModel": "未配置默认模型，去设置",
+  "chat.welcome.startFailedTitle": "无法开始会话",
+  "chat.welcome.startFailedBody": "创建会话失败，请稍后重试",
   // Inline edit buttons
   "chat.edit.cancel": "取消",
   "chat.edit.confirm": "确认",
@@ -574,8 +584,6 @@ export const chatLabels = {
   "chat.runtime.executing": "本地 Agent 正在执行...",
   // Composer mode toggle disabled fallback (DesktopComposer)
   "chat.composer.modeUnavailable": "当前不可用",
-  // Chat header fallback title when no conversation is selected (DesktopChatHeader)
-  "chat.header.noConversation": "会话",
 } as const;
 
 type ChatLabelKey = keyof typeof chatLabels;

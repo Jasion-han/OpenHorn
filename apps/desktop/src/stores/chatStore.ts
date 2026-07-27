@@ -150,7 +150,12 @@ export interface ChatState {
   selectConversation: (conversationId: string) => Promise<void>;
   createConversation: (
     title: string,
-    options?: { channelId?: string | null; modelId?: string | null },
+    options?: {
+      channelId?: string | null;
+      modelId?: string | null;
+      defaultMode?: ChatMode;
+      forceWebSearch?: boolean;
+    },
   ) => Promise<Conversation>;
   updateConversation: (conversationId: string, updates: Partial<Conversation>) => Promise<void>;
   deleteConversation: (conversationId: string) => Promise<void>;
@@ -394,6 +399,8 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
         title,
         channelId: options?.channelId,
         modelId: options?.modelId,
+        defaultMode: options?.defaultMode,
+        forceWebSearch: options?.forceWebSearch,
       });
 
       set((state) => ({

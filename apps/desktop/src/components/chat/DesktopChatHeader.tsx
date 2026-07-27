@@ -1,11 +1,12 @@
 import { PanelLeft, PanelLeftClose } from "lucide-react";
 import { Button } from "ui";
 import { displayConversationTitle, formatConversationTime } from "../../lib/conversationTitle";
-import { getChatLabel } from "../../lib/i18n/agent";
 import { useDesktopShellStore } from "../../stores/desktopShellStore";
 import type { Conversation } from "../../types/chat";
 
-export function DesktopChatHeader({ conversation }: { conversation: Conversation | null }) {
+// Only rendered for an open conversation — the "nothing selected" state is now
+// DesktopWelcomeScreen, which carries its own sidebar toggle.
+export function DesktopChatHeader({ conversation }: { conversation: Conversation }) {
   const sidebarCollapsed = useDesktopShellStore((state) => state.sidebarCollapsed);
   const setSidebarCollapsed = useDesktopShellStore((state) => state.setSidebarCollapsed);
 
@@ -20,16 +21,6 @@ export function DesktopChatHeader({ conversation }: { conversation: Conversation
       {sidebarCollapsed ? <PanelLeft size={18} /> : <PanelLeftClose size={18} />}
     </Button>
   );
-
-  if (!conversation) {
-    return (
-      <div className="mb-3 flex items-center justify-between gap-2">
-        {sidebarToggle}
-        <span className="font-semibold">{getChatLabel("chat.header.noConversation")}</span>
-        <div />
-      </div>
-    );
-  }
 
   return (
     <div className="mb-3 flex items-center justify-between gap-2">

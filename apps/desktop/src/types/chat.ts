@@ -238,6 +238,9 @@ export interface CreateConversationInput {
   title: string;
   channelId?: string | null;
   modelId?: string | null;
+  /** Seeds both defaultMode and lastMode server-side. */
+  defaultMode?: ChatMode;
+  forceWebSearch?: boolean;
 }
 
 export interface UpdateConversationInput {

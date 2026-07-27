@@ -47,6 +47,7 @@ import { DesktopComposer, type SlashHighlightRange, type SlashPanelItem } from "
 import { MessageBubble } from "./DesktopMessageBubble";
 import { DesktopModelPickerModal } from "./DesktopModelPickerModal";
 import { DesktopSidecarRuntimePanel } from "./DesktopSidecarRuntimePanel";
+import { DesktopWelcomeScreen } from "./DesktopWelcomeScreen";
 
 const PAGE_PAD = "16px";
 const COMPOSER_PAD_BOTTOM = "env(safe-area-inset-bottom, 0px)";
@@ -210,6 +211,9 @@ export function DesktopChatArea() {
     { type: "bottom" } | { type: "message"; id: string } | null
   >(null);
   const [streamingAssistantId, setStreamingAssistantId] = useState<string | null>(null);
+  const autoSendRef = useRef(false);
+  const pendingPrompt = useDesktopShellStore((state) => state.pendingPrompt);
+  const setPendingPrompt = useDesktopShellStore((state) => state.setPendingPrompt);
   const fullAccessEnabled = useDesktopShellStore((state) => state.fullAccessEnabled);
   const toggleFullAccess = useDesktopShellStore((state) => state.toggleFullAccess);
   const createConversation = useChatStore((state) => state.createConversation);
@@ -1091,6 +1095,31 @@ export function DesktopChatArea() {
     }
   };
 
+  // Draft handed over by the welcome screen: it created the conversation, we own
+  // the send. Two steps because `handleSend` reads `input` from state — the value
+  // has to be committed and re-rendered before the send can pick it up.
+  useEffect(() => {
+    if (!pendingPrompt || !currentConversation) return;
+    setPendingPrompt(null);
+    setInput(pendingPrompt.text);
+    if (pendingPrompt.files.length > 0) setPendingAttachments(pendingPrompt.files);
+    autoSendRef.current = true;
+  }, [pendingPrompt, currentConversation, setPendingPrompt]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: handleSend is re-created every render; adding it would re-run this on every render
+  useEffect(() => {
+    if (!autoSendRef.current) return;
+    if (!input.trim() && pendingAttachments.length === 0) return;
+    if (canSend) {
+      autoSendRef.current = false;
+      void handleSend();
+      return;
+    }
+    // No usable model — leave the draft in the composer rather than dropping it,
+    // and stop waiting so it never fires later on its own.
+    if (!effectiveModel.ok) autoSendRef.current = false;
+  }, [canSend, input, pendingAttachments, effectiveModel.ok]);
+
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [deleteInFlight, setDeleteInFlight] = useState(false);
 
@@ -1433,16 +1462,7 @@ export function DesktopChatArea() {
   };
 
   if (!currentConversation) {
-    return (
-      <div className="flex flex-1 flex-col overflow-x-hidden">
-        <div style={{ padding: PAGE_PAD, paddingBottom: "8px" }}>
-          <DesktopChatHeader conversation={null} />
-        </div>
-        <div className="flex flex-1 items-center justify-center">
-          <p className="text-sm text-muted-foreground">{getChatLabel("chat.emptyState")}</p>
-        </div>
-      </div>
-    );
+    return <DesktopWelcomeScreen />;
   }
 
   const renderMessageRow = (message: Message) => (
