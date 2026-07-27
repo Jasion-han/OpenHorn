@@ -2,7 +2,11 @@
   max-width: 100%;
   overflow-wrap: anywhere;
   word-break: break-word;
-  line-height: 1.55;
+  /* Answers are mostly CJK, where 1.55 packs the lines too tightly — and a model
+     habitually writes "**小标题**\n正文\n→ 来源" as ONE paragraph with soft
+     breaks, so those lines are separated by nothing but this value. Styling the
+     <br> instead does not work: WebKit ignores display/margin on it. */
+  line-height: 1.85;
 }
 
 /* The first block never pushes the bubble open with a top margin. */
@@ -18,8 +22,9 @@
   display: none;
 }
 
+
 .root p + p {
-  margin-top: 0.8em;
+  margin-top: 0.9em;
 }
 
 .root ul,
@@ -46,7 +51,7 @@
 .root h2,
 .root h3,
 .root h4 {
-  margin: 1.2em 0 0.5em;
+  margin: 1.5em 0 0.6em;
   font-weight: 700;
   line-height: 1.3;
 }
