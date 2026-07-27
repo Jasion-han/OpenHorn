@@ -157,6 +157,13 @@ export interface ChatState {
       forceWebSearch?: boolean;
     },
   ) => Promise<Conversation>;
+  /**
+   * "新会话" as a UI state, not a database row: deselects the current
+   * conversation so the welcome screen takes over. The row is created only when
+   * the first message is actually sent, so browsing away from a conversation
+   * never leaves an empty one behind.
+   */
+  startNewConversation: () => void;
   updateConversation: (conversationId: string, updates: Partial<Conversation>) => Promise<void>;
   deleteConversation: (conversationId: string) => Promise<void>;
   autoTitleConversation: (
@@ -436,6 +443,16 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
       });
 
       return conversation;
+    },
+
+    startNewConversation() {
+      const outgoing = get().currentConversation;
+      if (!outgoing) return;
+      // Same hazard as createConversation: unpersisted content lives only in
+      // `messages`, so park it before the welcome screen takes over.
+      const outgoingMessages = get().messages.filter((m) => m.conversationId === outgoing.id);
+      if (outgoingMessages.length > 0) cacheSet(outgoing.id, outgoingMessages);
+      set({ currentConversation: null, messages: [], error: null });
     },
 
     async updateConversation(conversationId, updates) {

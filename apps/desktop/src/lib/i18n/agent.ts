@@ -637,10 +637,6 @@ export const sidebarLabels = {
   "sidebar.deleteDialog.cancel": "取消",
   "sidebar.deleteDialog.confirm": "删除",
   // Toasts
-  "sidebar.notify.createdTitle": "已创建",
-  "sidebar.notify.createdBody": "新会话已创建",
-  "sidebar.notify.createFailedTitle": "创建失败",
-  "sidebar.notify.createFailedBody": "无法创建会话",
   "sidebar.notify.deletedTitle": "已删除",
   "sidebar.notify.deletedBody": "会话已删除",
   "sidebar.notify.deleteFailedTitle": "删除失败",

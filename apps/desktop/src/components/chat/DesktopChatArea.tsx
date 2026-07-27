@@ -16,11 +16,7 @@ import { useSidecarAgentRun } from "../../hooks/useSidecarAgentRun";
 import { filesToAttachmentParts } from "../../lib/attachmentParts";
 import { uploadAttachments } from "../../lib/attachments";
 import { getDesktopBackendBase } from "../../lib/backendBase";
-import {
-  DEFAULT_CONVERSATION_TITLE,
-  isDefaultConversationTitle,
-} from "../../lib/conversationTitle";
-import { getGlobalDefaultChannel } from "../../lib/defaultChannel";
+import { isDefaultConversationTitle } from "../../lib/conversationTitle";
 import { getEffectiveModelForConversation } from "../../lib/effectiveModel";
 import { getChatLabel, getSlashLabel } from "../../lib/i18n/agent";
 import {
@@ -216,7 +212,6 @@ export function DesktopChatArea() {
   const setPendingPrompt = useDesktopShellStore((state) => state.setPendingPrompt);
   const fullAccessEnabled = useDesktopShellStore((state) => state.fullAccessEnabled);
   const toggleFullAccess = useDesktopShellStore((state) => state.toggleFullAccess);
-  const createConversation = useChatStore((state) => state.createConversation);
   const openSettings = useDesktopShellStore((state) => state.openSettings);
   const setActiveView = useDesktopShellStore((state) => state.setActiveView);
   const [slashOpen, setSlashOpen] = useState(false);
@@ -572,17 +567,11 @@ export function DesktopChatArea() {
   };
 
   const runNewConversation = useCallback(() => {
-    // Reads the store imperatively, so this stays correct without depending on
-    // channels — which lets everything downstream keep a stable identity.
-    const state = useChatStore.getState();
-    const defaultChannel = getGlobalDefaultChannel(state.channels);
-    void createConversation(DEFAULT_CONVERSATION_TITLE, {
-      channelId: defaultChannel?.channelId ?? null,
-      modelId: defaultChannel?.modelId ?? null,
-    })
-      .then(() => setActiveView("chat"))
-      .catch(() => {});
-  }, [createConversation, setActiveView]);
+    // Deselects rather than creating: the welcome screen takes over and the row
+    // is created by the first message actually sent.
+    useChatStore.getState().startNewConversation();
+    setActiveView("chat");
+  }, [setActiveView]);
 
   // Memoized because `slashItems` and `slashHighlight` derive from this on every
   // keystroke; a fresh array here would defeat both of their caches.

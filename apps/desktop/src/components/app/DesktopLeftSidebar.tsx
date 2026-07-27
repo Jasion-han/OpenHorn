@@ -32,8 +32,7 @@ import {
   ScrollArea,
 } from "ui";
 import { getDesktopBackendBase } from "../../lib/backendBase";
-import { DEFAULT_CONVERSATION_TITLE, displayConversationTitle } from "../../lib/conversationTitle";
-import { getGlobalDefaultChannel } from "../../lib/defaultChannel";
+import { displayConversationTitle } from "../../lib/conversationTitle";
 import { formatSidebarLabel, getSidebarLabel, type SidebarLabelKey } from "../../lib/i18n/agent";
 import { hideNotification, notifyError, notifyErrorOnce, notifySuccess } from "../../lib/notify";
 import { useAuthStore } from "../../stores/authStore";
@@ -182,7 +181,6 @@ export function DesktopLeftSidebar() {
   // The search field is collapsed behind an icon (Qoder-style) so the resting
   // sidebar is just "new conversation + the list".
   const [searchOpen, setSearchOpen] = useState(false);
-  const [creating, setCreating] = useState(false);
   const [pinnedOpen, setPinnedOpen] = useState(true);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
@@ -201,7 +199,7 @@ export function DesktopLeftSidebar() {
 
   const conversations = useChatStore((state) => state.conversations);
   const currentConversation = useChatStore((state) => state.currentConversation);
-  const createConversation = useChatStore((state) => state.createConversation);
+  const startNewConversation = useChatStore((state) => state.startNewConversation);
   const selectConversation = useChatStore((state) => state.selectConversation);
   const updateConversation = useChatStore((state) => state.updateConversation);
   const deleteConversation = useChatStore((state) => state.deleteConversation);
@@ -215,7 +213,7 @@ export function DesktopLeftSidebar() {
         return;
       }
       event.preventDefault();
-      void handleCreateConversation();
+      handleCreateConversation();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
@@ -229,30 +227,11 @@ export function DesktopLeftSidebar() {
     );
   }, [conversations, query]);
 
-  const handleCreateConversation = async () => {
-    setCreating(true);
-    try {
-      const prevId = useChatStore.getState().currentConversation?.id;
-      const defaultChannel = getGlobalDefaultChannel(useChatStore.getState().channels);
-      const conv = await createConversation(DEFAULT_CONVERSATION_TITLE, {
-        channelId: defaultChannel?.channelId ?? null,
-        modelId: defaultChannel?.modelId ?? null,
-      });
-      setActiveView("chat");
-      if (conv && conv.id !== prevId) {
-        notifySuccess(
-          getSidebarLabel("sidebar.notify.createdTitle"),
-          getSidebarLabel("sidebar.notify.createdBody"),
-        );
-      }
-    } catch (error) {
-      notifyError(
-        getSidebarLabel("sidebar.notify.createFailedTitle"),
-        error instanceof Error ? error.message : getSidebarLabel("sidebar.notify.createFailedBody"),
-      );
-    } finally {
-      setCreating(false);
-    }
+  // Opens the welcome screen rather than creating a row up front — the
+  // conversation is created by the first message that is actually sent.
+  const handleCreateConversation = () => {
+    startNewConversation();
+    setActiveView("chat");
   };
 
   const handleDeleteConversation = async (conversation: Conversation) => {
@@ -392,8 +371,7 @@ export function DesktopLeftSidebar() {
           <Button
             variant="outline"
             className="w-full justify-start gap-2 px-3 titlebar-no-drag"
-            onClick={() => void handleCreateConversation()}
-            disabled={creating}
+            onClick={handleCreateConversation}
           >
             <Plus size={16} />
             <span className="flex-1 text-left">{getSidebarLabel("sidebar.newConversation")}</span>
