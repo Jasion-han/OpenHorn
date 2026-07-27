@@ -37,7 +37,7 @@ import { getGlobalDefaultChannel } from "../../lib/defaultChannel";
 import { formatSidebarLabel, getSidebarLabel, type SidebarLabelKey } from "../../lib/i18n/agent";
 import { hideNotification, notifyError, notifyErrorOnce, notifySuccess } from "../../lib/notify";
 import { useAuthStore } from "../../stores/authStore";
-import { BACKEND_UP_EVENT, useBackendStatusStore } from "../../stores/backendStatusStore";
+import { useBackendStatusStore } from "../../stores/backendStatusStore";
 import { useChatStore } from "../../stores/chatStore";
 import { useDesktopShellStore } from "../../stores/desktopShellStore";
 import type { Conversation } from "../../types/chat";
@@ -201,26 +201,12 @@ export function DesktopLeftSidebar() {
 
   const conversations = useChatStore((state) => state.conversations);
   const currentConversation = useChatStore((state) => state.currentConversation);
-  const loadChannels = useChatStore((state) => state.loadChannels);
-  const loadConversations = useChatStore((state) => state.loadConversations);
   const createConversation = useChatStore((state) => state.createConversation);
   const selectConversation = useChatStore((state) => state.selectConversation);
   const updateConversation = useChatStore((state) => state.updateConversation);
   const deleteConversation = useChatStore((state) => state.deleteConversation);
   const reset = useChatStore((state) => state.reset);
   const backendBase = getDesktopBackendBase();
-
-  useEffect(() => {
-    void Promise.allSettled([loadChannels(), loadConversations()]);
-  }, [loadChannels, loadConversations]);
-
-  useEffect(() => {
-    const onUp = () => {
-      void Promise.allSettled([loadChannels(), loadConversations()]);
-    };
-    window.addEventListener(BACKEND_UP_EVENT, onUp);
-    return () => window.removeEventListener(BACKEND_UP_EVENT, onUp);
-  }, [loadChannels, loadConversations]);
 
   // ⌘N / Ctrl+N — the shortcut advertised next to the new-conversation button.
   useEffect(() => {
@@ -308,7 +294,7 @@ export function DesktopLeftSidebar() {
         getSidebarLabel("sidebar.notify.saveFailedTitle"),
         error instanceof Error ? error.message : getSidebarLabel("sidebar.notify.saveFailedBody"),
       );
-      void loadConversations();
+      void useChatStore.getState().loadConversations();
     }
   };
 
