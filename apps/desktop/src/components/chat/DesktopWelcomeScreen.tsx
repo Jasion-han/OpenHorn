@@ -13,6 +13,7 @@ import { useEffect, useRef, useState } from "react";
 import { fileKey } from "shared/format";
 import { Button, cn, Textarea } from "ui";
 import { getDesktopBackendBase } from "../../lib/backendBase";
+import { pickPlaceholder } from "../../lib/composerPlaceholder";
 import { DEFAULT_CONVERSATION_TITLE } from "../../lib/conversationTitle";
 import { getGlobalDefaultChannel } from "../../lib/defaultChannel";
 import { getChatLabel } from "../../lib/i18n/agent";
@@ -39,6 +40,29 @@ const DEFAULT_SUGGESTION_KEYS = [
 ] as const;
 
 const DEFAULT_SUGGESTIONS = DEFAULT_SUGGESTION_KEYS.map((key) => getChatLabel(key));
+
+/**
+ * The placeholder is a rotating pool, not a fixed line — same behaviour as the
+ * in-conversation composer, which re-draws one every time an empty box is
+ * focused. It is the one bit of the screen that reacts before you have typed
+ * anything, so it reads as alive rather than as a static form field.
+ */
+const PLACEHOLDER_KEYS = [
+  "chat.welcome.placeholder1",
+  "chat.welcome.placeholder2",
+  "chat.welcome.placeholder3",
+  "chat.welcome.placeholder4",
+  "chat.welcome.placeholder5",
+  "chat.welcome.placeholder6",
+  "chat.welcome.placeholder7",
+  "chat.welcome.placeholder8",
+  "chat.welcome.placeholder9",
+  "chat.welcome.placeholder10",
+  "chat.welcome.placeholder11",
+  "chat.welcome.placeholder12",
+] as const;
+
+export const WELCOME_PLACEHOLDERS = PLACEHOLDER_KEYS.map((key) => getChatLabel(key));
 
 interface WelcomeSuggestionsResult {
   items: string[];
@@ -91,6 +115,8 @@ export function DesktopWelcomeScreen() {
   const [forceWebSearch, setForceWebSearch] = useState(true);
   const [starting, setStarting] = useState(false);
   const [suggestions, setSuggestions] = useState<string[]>(DEFAULT_SUGGESTIONS);
+  // Drawn once per mount, then re-drawn on every focus of the empty box below.
+  const [placeholder, setPlaceholder] = useState(() => pickPlaceholder(WELCOME_PLACEHOLDERS));
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -195,6 +221,15 @@ export function DesktopWelcomeScreen() {
     });
   };
 
+  // Only while the box is empty: with text in it the placeholder is invisible,
+  // so redrawing would just be churn. Bound to click as well as focus because
+  // the box is auto-focused on arrival — focus alone would fire once and never
+  // again, and the point is that every click brings a different line.
+  const rerollPlaceholder = () => {
+    if (draft.length > 0) return;
+    setPlaceholder((prev) => pickPlaceholder(WELCOME_PLACEHOLDERS, prev));
+  };
+
   const hasInput = draft.length > 0 || attachments.length > 0;
 
   // Clears the whole input, attachments included — it sits above the composer as
@@ -202,6 +237,7 @@ export function DesktopWelcomeScreen() {
   const clearInput = () => {
     setDraft("");
     setAttachments([]);
+    setPlaceholder((prev) => pickPlaceholder(WELCOME_PLACEHOLDERS, prev));
     textareaRef.current?.focus();
   };
 
@@ -263,7 +299,9 @@ export function DesktopWelcomeScreen() {
                 disabled={starting}
                 onChange={(event) => setDraft(event.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder={getChatLabel("chat.welcome.placeholder")}
+                onFocus={rerollPlaceholder}
+                onClick={rerollPlaceholder}
+                placeholder={placeholder}
                 // The right padding is constant rather than applied only when the
                 // clear button shows — otherwise the text would reflow the moment
                 // the first character is typed.

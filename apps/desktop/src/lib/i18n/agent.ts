@@ -566,7 +566,20 @@ export const chatLabels = {
   // "Chat"/"Agent" stay English to match the composer's mode chip.
   "chat.welcome.title": "今天想做点什么？",
   "chat.welcome.subtitle": "输入你的问题，我会为你新建一个会话",
-  "chat.welcome.placeholder": "描述你的任务，回车开始",
+  // The input placeholder is drawn from this pool and re-drawn every time the
+  // empty box is focused, mirroring the in-conversation composer.
+  "chat.welcome.placeholder1": "描述你的任务，回车开始",
+  "chat.welcome.placeholder2": "把想法丢进来，我来把它变成结果",
+  "chat.welcome.placeholder3": "一句话说清目标，剩下的交给我",
+  "chat.welcome.placeholder4": "今天想解决什么问题？",
+  "chat.welcome.placeholder5": "先说个方向，我来铺路",
+  "chat.welcome.placeholder6": "从一个粗糙的念头开始就行",
+  "chat.welcome.placeholder7": "有什么想查、想写、想理清的？",
+  "chat.welcome.placeholder8": "把难题摆出来，我们拆开看",
+  "chat.welcome.placeholder9": "想做的事，写一行就够了",
+  "chat.welcome.placeholder10": "需要初稿、方案，还是先聊聊？",
+  "chat.welcome.placeholder11": "复杂的事，我帮你变成清晰的步骤",
+  "chat.welcome.placeholder12": "问吧，然后我们再往深里走一层",
   "chat.welcome.suggestion1": "帮我总结这份文档的要点",
   "chat.welcome.suggestion2": "查一下今天值得关注的科技新闻",
   "chat.welcome.suggestion3": "读一下这个项目的代码，说说架构",
