@@ -13,21 +13,18 @@ export function DesktopShellLayout({
   const sidebarCollapsed = useDesktopShellStore((state) => state.sidebarCollapsed);
 
   return (
-    <div className="flex h-dvh w-dvw overflow-hidden bg-gradient-to-br from-background via-background to-muted/20">
+    <div className="flex h-dvh w-dvw overflow-hidden bg-background">
+      {/* Flush panes divided by a hairline (rather than two floating cards): the
+          sidebar carries a faint tint, the content pane stays plain. */}
       {!sidebarCollapsed && (
-        <div className="w-[320px] shrink-0 p-2">
-          <div className="h-full overflow-hidden rounded-2xl border border-border/50 bg-background/70 shadow-minimal backdrop-blur-sm">
-            <DesktopLeftSidebar />
-          </div>
+        <div className="w-[272px] shrink-0 overflow-hidden border-r border-border/60 bg-muted/60">
+          <DesktopLeftSidebar />
         </div>
       )}
 
-      <div className={cn("flex-1 min-w-0 p-2", !sidebarCollapsed && "pl-0")}>
+      <div className="min-w-0 flex-1">
         <div
-          className={cn(
-            "h-full min-h-0 overflow-hidden rounded-2xl border border-border/50 bg-background/70 shadow-minimal backdrop-blur-sm",
-            isCompact ? "p-4" : "p-2",
-          )}
+          className={cn("h-full min-h-0 overflow-hidden", isCompact ? "p-4" : "p-2")}
           style={{ paddingTop: "calc(0.5rem + env(safe-area-inset-top, 0px))" }}
         >
           <div

@@ -3,9 +3,11 @@ import {
   ChevronRight,
   LogOut,
   MoreHorizontal,
+  PanelLeftClose,
   Pencil,
   Pin,
   Plus,
+  Search,
   Settings,
   Trash2,
 } from "lucide-react";
@@ -172,6 +174,9 @@ const ConversationRow = memo(
 
 export function DesktopLeftSidebar() {
   const [query, setQuery] = useState("");
+  // The search field is collapsed behind an icon (Qoder-style) so the resting
+  // sidebar is just "new conversation + the list".
+  const [searchOpen, setSearchOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [pinnedOpen, setPinnedOpen] = useState(true);
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -180,6 +185,7 @@ export function DesktopLeftSidebar() {
 
   const activeView = useDesktopShellStore((state) => state.activeView);
   const setActiveView = useDesktopShellStore((state) => state.setActiveView);
+  const setSidebarCollapsed = useDesktopShellStore((state) => state.setSidebarCollapsed);
   const openSettings = useDesktopShellStore((state) => state.openSettings);
   const user = useAuthStore((state) => state.user);
   const logout = useAuthStore((state) => state.logout);
@@ -210,6 +216,19 @@ export function DesktopLeftSidebar() {
     window.addEventListener(BACKEND_UP_EVENT, onUp);
     return () => window.removeEventListener(BACKEND_UP_EVENT, onUp);
   }, [loadChannels, loadConversations]);
+
+  // ⌘N / Ctrl+N — the shortcut advertised next to the new-conversation button.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key.toLowerCase() !== "n" || !(event.metaKey || event.ctrlKey) || event.shiftKey) {
+        return;
+      }
+      event.preventDefault();
+      void handleCreateConversation();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  });
 
   const filteredConversations = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
@@ -328,12 +347,22 @@ export function DesktopLeftSidebar() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex items-center justify-between border-b border-border/50 px-3 py-2">
-        <div className="min-w-0">
-          <div className="truncate text-sm font-semibold leading-5">OpenHorn</div>
-          <div className="flex items-center gap-2">
-            {backendStatus === "down" && <Badge variant="destructive">offline</Badge>}
-            {backendStatus === "down" && (
+      <div className="flex items-center justify-between gap-1 px-2 py-2">
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          className="titlebar-no-drag"
+          aria-label={getSidebarLabel("sidebar.collapse")}
+          title={getSidebarLabel("sidebar.collapse")}
+          onClick={() => setSidebarCollapsed(true)}
+        >
+          <PanelLeftClose size={17} />
+        </Button>
+
+        <div className="flex min-w-0 items-center gap-1">
+          {backendStatus === "down" && (
+            <>
+              <Badge variant="destructive">offline</Badge>
               <Button
                 size="sm"
                 variant="outline"
@@ -343,60 +372,58 @@ export function DesktopLeftSidebar() {
               >
                 {retrying ? "Retrying…" : "Retry"}
               </Button>
-            )}
-          </div>
+            </>
+          )}
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="titlebar-no-drag"
+            aria-label={getSidebarLabel("sidebar.searchToggle")}
+            title={getSidebarLabel("sidebar.searchToggle")}
+            onClick={() => {
+              setSearchOpen(!searchOpen);
+              setQuery("");
+            }}
+          >
+            <Search size={17} />
+          </Button>
         </div>
-
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              className="flex w-auto items-center gap-1 px-2 titlebar-no-drag"
-            >
-              <div className="flex h-7 w-7 items-center justify-center rounded-full bg-muted text-xs font-semibold">
-                {user?.username?.slice(0, 1)?.toUpperCase() || "U"}
-              </div>
-              <ChevronDown size={14} />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-44">
-            <DropdownMenuLabel>{user?.username || "User"}</DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              className="text-destructive focus:text-destructive"
-              onClick={() => void handleLogout()}
-            >
-              <LogOut size={16} />
-              {getSidebarLabel("sidebar.logout")}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
       </div>
 
       <div className="min-h-0 flex-1 overflow-hidden">
-        <div className="flex h-full flex-col gap-2 p-2">
+        <div className="flex h-full flex-col gap-2 px-2 pb-2">
           <Button
-            className="w-full"
+            variant="outline"
+            className="w-full justify-start gap-2 px-3 titlebar-no-drag"
             onClick={() => void handleCreateConversation()}
             disabled={creating}
           >
             <Plus size={16} />
-            {getSidebarLabel("sidebar.newConversation")}
+            <span className="flex-1 text-left">{getSidebarLabel("sidebar.newConversation")}</span>
+            <kbd className="text-[11px] font-normal text-muted-foreground">⌘N</kbd>
           </Button>
 
-          <Input
-            placeholder={getSidebarLabel("sidebar.searchPlaceholder")}
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-          />
+          {searchOpen && (
+            <Input
+              autoFocus
+              placeholder={getSidebarLabel("sidebar.searchPlaceholder")}
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  setQuery("");
+                  setSearchOpen(false);
+                }
+              }}
+            />
+          )}
 
           <ScrollArea className="flex-1 min-h-0">
             <div className="flex flex-col gap-1 py-1">
               {pinned.length > 0 && (
                 <div>
-                  <div className="flex items-center justify-between px-2 py-1">
-                    <span className="text-xs font-semibold text-muted-foreground">
+                  <div className="flex items-center justify-between px-3 pb-1 pt-2">
+                    <span className="text-[11px] font-medium text-muted-foreground/80">
                       {getSidebarLabel("sidebar.pinnedHeading")}
                     </span>
                     <Button
@@ -448,7 +475,7 @@ export function DesktopLeftSidebar() {
 
               {groups.map((group) => (
                 <div key={group.label}>
-                  <p className="px-2 py-1 text-xs font-semibold text-muted-foreground">
+                  <p className="px-3 pb-1 pt-2 text-[11px] font-medium text-muted-foreground/80">
                     {getSidebarLabel(group.label)}
                   </p>
                   {group.items.map((conversation) =>
@@ -497,23 +524,56 @@ export function DesktopLeftSidebar() {
         </div>
       </div>
 
-      <div className="border-t border-border/50 px-2 pt-3 pb-5">
-        <div className="flex h-[56px] items-center justify-center">
-          <button
-            type="button"
-            aria-label="Settings"
-            title="Settings"
-            onClick={() => openSettings("channels")}
-            className={cn(
-              "titlebar-no-drag inline-flex h-10 w-10 items-center justify-center rounded-xl transition-colors",
-              activeView === "settings"
-                ? "bg-foreground/[0.08] text-foreground"
-                : "text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground",
-            )}
-          >
-            <Settings size={18} />
-          </button>
-        </div>
+      <div className="flex items-center gap-1 border-t border-border/50 px-2 py-2">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className="titlebar-no-drag flex min-w-0 flex-1 items-center gap-2 rounded-[10px] px-1.5 py-1.5 text-left transition-colors hover:bg-foreground/[0.04]"
+            >
+              <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold">
+                {user?.username?.slice(0, 1)?.toUpperCase() || "U"}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-[13px] font-medium leading-4">
+                  {user?.username || "User"}
+                </div>
+                {user?.email && (
+                  <div className="truncate text-[11px] leading-4 text-muted-foreground">
+                    {user.email}
+                  </div>
+                )}
+              </div>
+              <ChevronDown size={13} className="shrink-0 text-muted-foreground" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" side="top" className="w-44">
+            <DropdownMenuLabel>{user?.username || "User"}</DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              className="text-destructive focus:text-destructive"
+              onClick={() => void handleLogout()}
+            >
+              <LogOut size={16} />
+              {getSidebarLabel("sidebar.logout")}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        <button
+          type="button"
+          aria-label={getSidebarLabel("sidebar.settings")}
+          title={getSidebarLabel("sidebar.settings")}
+          onClick={() => openSettings("channels")}
+          className={cn(
+            "titlebar-no-drag inline-flex size-8 shrink-0 items-center justify-center rounded-[10px] transition-colors",
+            activeView === "settings"
+              ? "bg-foreground/[0.08] text-foreground"
+              : "text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground",
+          )}
+        >
+          <Settings size={17} />
+        </button>
       </div>
 
       <Dialog

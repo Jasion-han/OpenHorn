@@ -600,10 +600,15 @@ export const sidebarLabels = {
   "sidebar.logout": "退出登录",
   // New-conversation button (distinct from DEFAULT_CONVERSATION_TITLE)
   "sidebar.newConversation": "新会话",
-  // Search
+  // Search — the field is collapsed behind an icon button until opened
   "sidebar.searchPlaceholder": "搜索会话...",
+  "sidebar.searchToggle": "搜索会话",
+  // Sidebar chrome (collapse toggle, settings entry in the bottom account row)
+  "sidebar.collapse": "收起侧栏",
+  "sidebar.settings": "设置",
   // Section header
   "sidebar.pinnedHeading": "置顶",
+  "sidebar.conversationsHeading": "会话",
   // Date-group headers
   "sidebar.group.today": "今天",
   "sidebar.group.yesterday": "昨天",
