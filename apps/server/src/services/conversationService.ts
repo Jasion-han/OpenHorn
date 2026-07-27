@@ -11,7 +11,7 @@ import {
   conversations,
   messages,
 } from "db";
-import { and, desc, eq, inArray, notExists, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, ne, notExists, or, sql } from "drizzle-orm";
 import { db } from "../db";
 import { generateId } from "../utils";
 import { removeAttachmentFiles } from "./attachmentService";
@@ -24,6 +24,13 @@ export interface CreateConversationInput {
   contextLength?: number;
   defaultMode?: "chat" | "agent" | null;
   forceWebSearch?: boolean;
+  /**
+   * Conversation the caller refuses to have reused. The blank-conversation reuse
+   * below only sees persisted messages; a client showing unsaved content (an
+   * optimistic send, a run that failed before persisting) passes its id here so
+   * that content is never taken over and wiped.
+   */
+  excludeConversationId?: string;
 }
 
 export interface UpdateConversationInput {
@@ -79,7 +86,11 @@ export async function getConversationById(userId: string, conversationId: string
  * just made and never used. Renamed-but-empty conversations are excluded: the
  * title is user intent and must not be silently taken over.
  */
-async function findReusableBlankConversation(userId: string, title: string) {
+async function findReusableBlankConversation(
+  userId: string,
+  title: string,
+  excludeConversationId?: string,
+) {
   const rows = await db
     .select()
     .from(conversations)
@@ -87,6 +98,7 @@ async function findReusableBlankConversation(userId: string, title: string) {
       and(
         eq(conversations.userId, userId),
         eq(conversations.title, title),
+        excludeConversationId ? ne(conversations.id, excludeConversationId) : undefined,
         notExists(
           db
             .select({ one: sql`1` })
@@ -112,7 +124,11 @@ export async function createConversation(userId: string, input: CreateConversati
   // currently showing, but that guard cannot see blank conversations left behind by
   // an earlier session — after a reload every entry point would mint another one.
   // Enforcing it here covers every caller instead of every call site.
-  const reusable = await findReusableBlankConversation(userId, input.title);
+  const reusable = await findReusableBlankConversation(
+    userId,
+    input.title,
+    input.excludeConversationId,
+  );
   if (reusable) {
     // Adopt this call's settings: the caller may have picked a different model or
     // mode than the blank conversation was created with.

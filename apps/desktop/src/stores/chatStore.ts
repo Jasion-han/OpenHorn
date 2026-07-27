@@ -385,14 +385,15 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
     async createConversation(title, options) {
       const state = get();
       const cur = state.currentConversation;
-      if (cur) {
-        const hasRealMessages = state.messages.some(
-          (m) => m.conversationId === cur.id && !m.id.startsWith("draft-"),
-        );
-        if (!hasRealMessages) {
-          // 当前已是空会话，复用它而不是再建一个空会话
-          return cur;
-        }
+      // Anything on screen counts as content — including optimistic drafts and a
+      // run that failed before persisting. Those are invisible to the server's
+      // blank-conversation check, so the current conversation is excluded from
+      // reuse whenever it holds any of them; otherwise "新会话" would silently
+      // wipe what the user is looking at instead of opening a new one.
+      const curHasContent = cur ? state.messages.some((m) => m.conversationId === cur.id) : false;
+      if (cur && !curHasContent) {
+        // 当前已是空会话，复用它而不是再建一个空会话
+        return cur;
       }
 
       const conversation = await adapter.createConversation({
@@ -401,19 +402,34 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
         modelId: options?.modelId,
         defaultMode: options?.defaultMode,
         forceWebSearch: options?.forceWebSearch,
+        excludeConversationId: curHasContent ? cur?.id : undefined,
       });
+
+      // Park the outgoing conversation's messages in the cache before switching
+      // away. Unpersisted content (an optimistic send, a run that failed before
+      // it was written) only lives in `messages`, so without this it would be
+      // gone for good the moment the new conversation takes over.
+      const outgoing = get().currentConversation;
+      if (outgoing && outgoing.id !== conversation.id) {
+        const outgoingMessages = get().messages.filter((m) => m.conversationId === outgoing.id);
+        if (outgoingMessages.length > 0) cacheSet(outgoing.id, outgoingMessages);
+      }
 
       set((state) => {
         // The server reuses an existing blank conversation instead of piling up
         // duplicates (空会话不重复创建), so the returned row may already be in the
         // list — replace it in place rather than prepending a second copy.
         const known = state.conversations.some((item) => item.id === conversation.id);
+        // Clearing messages is only right when moving to a *different*
+        // conversation. Landing back on the current one means these messages
+        // still belong to it.
+        const isSameConversation = state.currentConversation?.id === conversation.id;
         return {
           conversations: known
             ? state.conversations.map((item) => (item.id === conversation.id ? conversation : item))
             : [conversation, ...state.conversations],
           currentConversation: conversation,
-          messages: [],
+          messages: isSameConversation ? state.messages : [],
           composerMode: conversation.lastMode,
           selectedChannelId: conversation.channelId || state.selectedChannelId,
         };

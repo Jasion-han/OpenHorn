@@ -134,6 +134,70 @@ test("a conversation that already has a message never blocks creating a new one"
   }
 });
 
+test("excludeConversationId protects a conversation whose content is not persisted yet", async () => {
+  const userId = await seedUser();
+  try {
+    // The client is showing this one with an optimistic / failed-run message that
+    // never reached the DB, so from the server's side it still looks blank.
+    const showing = await createConversation(userId, { title: DEFAULT_TITLE });
+
+    const next = await createConversation(userId, {
+      title: DEFAULT_TITLE,
+      excludeConversationId: showing.id,
+    });
+
+    expect(next.id === showing.id).toBe(false);
+
+    const rows = await db
+      .select({ id: conversations.id })
+      .from(conversations)
+      .where(eq(conversations.userId, userId));
+    expect(rows).toHaveLength(2);
+  } finally {
+    await cleanup(userId);
+  }
+});
+
+test("excludeConversationId still allows reusing a different blank conversation", async () => {
+  const userId = await seedUser();
+  try {
+    const older = await createConversation(userId, { title: DEFAULT_TITLE });
+    // Give `older` a message so the next create is forced to make a second row.
+    const now = new Date();
+    const messageId = crypto.randomUUID();
+    await db.insert(messages).values({
+      id: messageId,
+      conversationId: older.id,
+      role: "user",
+      content: "hello",
+      model: null,
+      mode: "chat",
+      attachments: null,
+      agentRun: null,
+      createdAt: now,
+    });
+    const blank = await createConversation(userId, { title: DEFAULT_TITLE });
+    // Now drop the message so `older` is blank again; `blank` is the one on screen.
+    await db.delete(messages).where(eq(messages.id, messageId));
+
+    const next = await createConversation(userId, {
+      title: DEFAULT_TITLE,
+      excludeConversationId: blank.id,
+    });
+
+    // Excluding the on-screen one must not force a brand-new row when another
+    // genuinely blank conversation is available.
+    expect(next.id).toBe(older.id);
+    const rows = await db
+      .select({ id: conversations.id })
+      .from(conversations)
+      .where(eq(conversations.userId, userId));
+    expect(rows).toHaveLength(2);
+  } finally {
+    await cleanup(userId);
+  }
+});
+
 test("a renamed blank conversation is not hijacked by the next default-titled create", async () => {
   const userId = await seedUser();
   try {

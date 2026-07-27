@@ -241,6 +241,11 @@ export interface CreateConversationInput {
   /** Seeds both defaultMode and lastMode server-side. */
   defaultMode?: ChatMode;
   forceWebSearch?: boolean;
+  /**
+   * Conversation that must not be reused as the "blank" one — set when it holds
+   * content the server cannot see (optimistic drafts, an unpersisted failed run).
+   */
+  excludeConversationId?: string;
 }
 
 export interface UpdateConversationInput {
