@@ -11,7 +11,7 @@ import { DesktopAgentTaskMetaLine } from "./DesktopAgentTaskMetaLine";
 import { DesktopCitationList } from "./DesktopCitationList";
 import { SLASH_ICONS } from "./DesktopComposer";
 import { LiveStatusBadge } from "./DesktopLiveStatusBadge";
-import { DesktopMarkdownMessage } from "./DesktopMarkdownMessage";
+import { DesktopMarkdownMessage, stripLeadingThematicBreak } from "./DesktopMarkdownMessage";
 import { MessageActionBar } from "./DesktopMessageActionBar";
 import { DesktopMessageAttachments } from "./DesktopMessageAttachments";
 import { DesktopStreamingMarkdownMessage } from "./DesktopStreamingMarkdownMessage";
@@ -65,7 +65,7 @@ function MessageBubbleImpl({
   const label = message.mode === "agent" ? "Agent" : "Chat";
   const badgeIcon = message.mode === "agent" ? <Bot size={12} /> : <MessageSquare size={12} />;
   const displayContent = isAssistant
-    ? sanitizeDisplayContent(message.content, message.citations)
+    ? stripLeadingThematicBreak(sanitizeDisplayContent(message.content, message.citations))
     : message.content;
   const hasAssistantText = isAssistant && Boolean((displayContent || "").trim());
   const isAssistantPlaceholder = isAssistant && isMessageStreaming && !hasAssistantText;

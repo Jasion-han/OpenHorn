@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { getLanguageMeta, shouldHighlightEagerly } from "./DesktopMarkdownMessage";
+import {
+  getLanguageMeta,
+  shouldHighlightEagerly,
+  stripLeadingThematicBreak,
+} from "./DesktopMarkdownMessage";
 
 describe("getLanguageMeta", () => {
   test("maps known aliases to a canonical prism syntax", () => {
@@ -48,5 +52,32 @@ describe("shouldHighlightEagerly", () => {
 
   test("highlights at the char-count boundary", () => {
     expect(shouldHighlightEagerly("x".repeat(2000), 1)).toBe(true);
+  });
+});
+
+describe("stripLeadingThematicBreak", () => {
+  test("removes a rule the answer opens with", () => {
+    expect(stripLeadingThematicBreak("---\n\n# 今日要闻\n\n正文")).toBe("# 今日要闻\n\n正文");
+  });
+
+  test("accepts the other thematic-break spellings", () => {
+    expect(stripLeadingThematicBreak("***\n正文")).toBe("正文");
+    expect(stripLeadingThematicBreak("___\n正文")).toBe("正文");
+    expect(stripLeadingThematicBreak("-----\n正文")).toBe("正文");
+  });
+
+  test("keeps rules that separate sections", () => {
+    const content = "# 标题\n\n第一段\n\n---\n\n第二段";
+    expect(stripLeadingThematicBreak(content)).toBe(content);
+  });
+
+  test("leaves content that merely starts with a dash alone", () => {
+    expect(stripLeadingThematicBreak("- 第一项\n- 第二项")).toBe("- 第一项\n- 第二项");
+    expect(stripLeadingThematicBreak("-- 不是分隔线")).toBe("-- 不是分隔线");
+  });
+
+  test("leaves ordinary text untouched", () => {
+    expect(stripLeadingThematicBreak("你好")).toBe("你好");
+    expect(stripLeadingThematicBreak("")).toBe("");
   });
 });

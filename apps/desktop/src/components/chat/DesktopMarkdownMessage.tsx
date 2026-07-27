@@ -43,6 +43,18 @@ const LANGUAGE_META: Record<string, { label: string; syntax: string; accent: str
   yml: { label: "YAML", syntax: "yaml", accent: "#db2777" },
 };
 
+/**
+ * Drops a thematic break the answer opens with.
+ *
+ * Models habitually start a formatted reply with `---`, which renders as a rule
+ * immediately under whatever the bubble already draws above the body (the agent
+ * panel's divider), reading as two stacked lines. Only a *leading* break is
+ * removed; rules between sections are meaningful and stay.
+ */
+export function stripLeadingThematicBreak(content: string): string {
+  return content.replace(/^\s*(?:-{3,}|\*{3,}|_{3,})[ \t]*(?:\r?\n)+/, "");
+}
+
 export function getLanguageMeta(language: string | undefined) {
   const normalized = (language || "text").trim().toLowerCase();
   return (
