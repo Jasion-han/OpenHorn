@@ -66,16 +66,16 @@
  * a normal title bar, the inset would just be dead space.
  */
 :root[data-titlebar="overlay"] .titlebar-traffic-light-inset {
-  /* Sits on the traffic lights' row: they are centred in a 30px band measured
-     from the very top of the window, so the strip matches that band exactly and
-     centres its own content in it. Any top padding of our own would push the
-     toggle below them; too little and it rides above. */
+  /* Sits on the traffic lights' row. Measured on a real window via the
+     accessibility API: the buttons are 16x16 at y=8 from the window top (centre
+     16px) and span x=8..70. So the strip is a 32px band centring its own content
+     — a 28px control then lands dead on 16px — and starts past x=70. */
   display: flex;
   align-items: center;
   padding-left: 80px;
   padding-top: 0;
   padding-bottom: 0;
-  min-height: 30px;
+  min-height: 32px;
 }
 
 /* ===== Proma-aligned utilities ===== */
