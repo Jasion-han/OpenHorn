@@ -17,6 +17,24 @@ import { DesktopMessageAttachments } from "./DesktopMessageAttachments";
 import { DesktopStreamingMarkdownMessage } from "./DesktopStreamingMarkdownMessage";
 import { TypingIndicator } from "./DesktopTypingIndicator";
 
+/**
+ * Which single live indicator an agent answer shows while it is running.
+ *
+ * There must never be two at once: "leading" is the pre-output placeholder shown
+ * above the (still empty) body, "trailing" is the working line shown under the
+ * body once output has started. Returning one value makes that exclusivity a
+ * property of the function rather than of two independent JSX conditions.
+ */
+export function resolveAgentLiveIndicator(input: {
+  isAgentAssistant: boolean;
+  isStreaming: boolean;
+  hasText: boolean;
+  stepCount: number;
+}): "leading" | "trailing" | "none" {
+  if (!input.isAgentAssistant || !input.isStreaming) return "none";
+  return input.hasText || input.stepCount > 0 ? "trailing" : "leading";
+}
+
 function MessageBubbleImpl({
   message,
   isStreaming,
@@ -52,16 +70,21 @@ function MessageBubbleImpl({
   const hasAssistantText = isAssistant && Boolean((displayContent || "").trim());
   const isAssistantPlaceholder = isAssistant && isMessageStreaming && !hasAssistantText;
   const isFlatAgentAssistant = isAssistant && message.mode === "agent";
+  const liveIndicator = resolveAgentLiveIndicator({
+    isAgentAssistant: isFlatAgentAssistant,
+    isStreaming: isMessageStreaming,
+    hasText: hasAssistantText,
+    stepCount: message.agentRun?.steps?.length ?? 0,
+  });
   const processPanel = isAssistant ? (
-    message.mode === "agent" &&
-    isMessageStreaming &&
-    !hasAssistantText &&
-    !message.agentRun?.steps?.length ? (
+    liveIndicator === "leading" ? (
       <section className="mt-0.5 px-1 pt-0 pb-1">
         <DesktopAgentTaskMetaLine text={message.agentRun?.summary?.trim() || "Thinking"} active />
       </section>
     ) : (
-      <AgentRunPanel run={message.agentRun} />
+      // The panel's own "no steps yet" placeholder would sit next to the trailing
+      // "Working" line — suppress it whenever that line is the active indicator.
+      <AgentRunPanel run={message.agentRun} hideIdleIndicator={liveIndicator === "trailing"} />
     )
   ) : null;
 

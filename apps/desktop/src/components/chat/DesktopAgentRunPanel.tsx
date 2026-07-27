@@ -3,7 +3,18 @@ import type { ApiAgentRun } from "../../types/chat";
 import { DesktopAgentTaskMetaLine } from "./DesktopAgentTaskMetaLine";
 import { InlineClampStep } from "./DesktopInlineClampStep";
 
-export function AgentRunPanel({ run }: { run?: ApiAgentRun }) {
+export function AgentRunPanel({
+  run,
+  hideIdleIndicator = false,
+}: {
+  run?: ApiAgentRun;
+  /**
+   * Suppress the "no steps yet" placeholder below. Set by the bubble when it is
+   * already showing its own live indicator — two of them at once read as two
+   * concurrent activities.
+   */
+  hideIdleIndicator?: boolean;
+}) {
   if (!run) return null;
   const toolCount = run.steps.filter((step) => step.type === "tool_start").length;
   const hasThinking = run.steps.some((step) => step.type === "text");
@@ -15,6 +26,7 @@ export function AgentRunPanel({ run }: { run?: ApiAgentRun }) {
   // otherwise render nothing — causing a brief blank when switching back to an
   // active conversation. Show a minimal working indicator instead.
   if (!run.error && toolCount === 0 && !hasThinking && isInProgress) {
+    if (hideIdleIndicator) return null;
     return (
       <section className="mt-0.5 px-1 pt-0 pb-1">
         <DesktopAgentTaskMetaLine text={run.summary?.trim() || "Working"} active />
