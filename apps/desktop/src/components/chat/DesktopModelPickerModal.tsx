@@ -22,6 +22,18 @@ import { DesktopProviderLogo } from "./DesktopProviderLogo";
 
 const api = createServerApi();
 
+/**
+ * Badge shades for this dialog.
+ *
+ * The stock `default` variant paints `bg-primary`, which in dark mode is
+ * near-white — the two least important labels in the panel ended up being the
+ * brightest things in it, and "已选" and "默认" sat next to each other in
+ * opposite polarities. Both now tint the foreground colour instead, so they
+ * stay legible in either theme and rank below the row they annotate.
+ */
+const BADGE_STRONG = "border-transparent bg-foreground/[0.16] text-foreground";
+const BADGE_SOFT = "border-foreground/25 bg-transparent text-muted-foreground";
+
 type ModelGroup = {
   channel: Channel;
   models: Channel["models"];
@@ -380,13 +392,15 @@ export function DesktopModelPickerModal(props: {
 
         <div className="flex flex-col gap-3">
           {conversationFixReason && (
-            <div className="rounded-xl border border-orange-200 bg-orange-50 p-3 shadow-minimal">
+            <div className="rounded-xl border border-orange-200 bg-orange-50 p-3 shadow-minimal dark:border-orange-400/25 dark:bg-orange-400/10">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="text-sm font-semibold text-orange-800">
+                  <p className="text-sm font-semibold text-orange-800 dark:text-orange-200">
                     {getChannelLabel("settings.channel.picker.fixNoticeTitle")}
                   </p>
-                  <p className="break-words text-sm text-orange-700">{conversationFixReason}</p>
+                  <p className="break-words text-sm text-orange-700 dark:text-orange-300/90">
+                    {conversationFixReason}
+                  </p>
                 </div>
                 <p className="shrink-0 text-xs text-muted-foreground">
                   Set a default model in Settings (gear) → Channels
@@ -415,141 +429,165 @@ export function DesktopModelPickerModal(props: {
           </div>
 
           <div className="flex h-[440px] gap-3">
-            {/* Left pane: channel list (single-select) */}
-            <ScrollArea className="h-full w-[260px] shrink-0 border-r">
-              <div className="flex flex-col gap-1.5 pr-3">
-                {filtered.map(({ channel, models, isChannelDisabled, needsDefaultModel }) => {
-                  const isActive = activeGroup?.channel.id === channel.id;
-                  const hasSelected =
-                    current?.channelId === channel.id &&
-                    models.some((model) => current?.modelId === model.modelId);
+            {/* Left pane: channel list (single-select). Its own recessed surface
+                rather than a bare divider — the two panes are a "pick a channel,
+                then pick its model" sequence, and a panel edge says that where a
+                hairline between two identical backgrounds did not. */}
+            <div className="w-[260px] shrink-0 overflow-hidden rounded-lg border border-foreground/[0.08] bg-foreground/[0.02]">
+              <ScrollArea className="h-full">
+                <div className="flex flex-col gap-1.5 p-2">
+                  {filtered.map(({ channel, models, isChannelDisabled, needsDefaultModel }) => {
+                    const isActive = activeGroup?.channel.id === channel.id;
+                    const hasSelected =
+                      current?.channelId === channel.id &&
+                      models.some((model) => current?.modelId === model.modelId);
 
-                  return (
-                    <button
-                      type="button"
-                      key={channel.id}
-                      className={cn(
-                        "flex w-full select-none flex-col gap-1.5 rounded-md border px-3 py-2 text-left transition-colors",
-                        isActive ? "border-primary bg-accent" : "hover:bg-accent",
-                      )}
-                      onClick={() => setSelectedChannelId(channel.id)}
-                    >
-                      <div className="flex items-center gap-2">
-                        <Badge
-                          variant="secondary"
-                          className="shrink-0 gap-1"
-                          title={channel.provider}
-                        >
-                          <DesktopProviderLogo provider={channel.provider} className="size-4" />
-                          <span className="sr-only">{channel.provider}</span>
-                        </Badge>
-                        <span className="truncate text-sm font-semibold">{channel.name}</span>
-                      </div>
-
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        {hasSelected && (
-                          <Badge>{getChannelLabel("settings.channel.picker.badge.selected")}</Badge>
+                    return (
+                      <button
+                        type="button"
+                        key={channel.id}
+                        className={cn(
+                          "flex w-full select-none flex-col gap-1.5 rounded-md border px-3 py-2 text-left transition-colors",
+                          // Neither `bg-accent` nor `border-primary` is usable
+                          // here: in dark mode accent resolves to 40% grey and
+                          // primary to near-white, so the selected row came out as
+                          // a light slab behind a white outline. Tinting with the
+                          // foreground colour instead keeps one rule working in
+                          // both themes and stays inside the panel's value range.
+                          isActive
+                            ? "border-foreground/25 bg-foreground/[0.08]"
+                            : "border-foreground/[0.07] hover:bg-foreground/[0.05]",
                         )}
-                        {channel.isDefault && (
-                          <Badge variant="outline">
-                            {getChannelLabel("settings.channel.badge.default")}
+                        onClick={() => setSelectedChannelId(channel.id)}
+                      >
+                        <div className="flex items-center gap-2">
+                          <Badge
+                            variant="secondary"
+                            className="shrink-0 gap-1"
+                            title={channel.provider}
+                          >
+                            <DesktopProviderLogo provider={channel.provider} className="size-4" />
+                            <span className="sr-only">{channel.provider}</span>
                           </Badge>
-                        )}
-                        {needsDefaultModel && (
-                          <Badge variant="outline" className="border-orange-400 text-orange-600">
-                            {getChannelLabel("settings.channel.badge.missingDefaultModel")}
-                          </Badge>
-                        )}
-                        {isChannelDisabled && (
-                          <Badge variant="secondary">
-                            {getChannelLabel("settings.channel.badge.disabled")}
-                          </Badge>
-                        )}
-                        <span className="text-xs text-muted-foreground">
-                          {formatChannelLabel("settings.channel.picker.modelCount", {
-                            count: models.length,
-                          })}
-                        </span>
-                      </div>
-                    </button>
-                  );
-                })}
-
-                {filtered.length === 0 && (
-                  <div className="flex flex-col items-center gap-2 py-8">
-                    <p className="text-sm text-muted-foreground">
-                      {getChannelLabel("settings.channel.picker.noMatch")}
-                    </p>
-                    <Button variant="outline" onClick={() => setQuery("")}>
-                      {getChannelLabel("settings.channel.picker.clearSearch")}
-                    </Button>
-                  </div>
-                )}
-              </div>
-            </ScrollArea>
-
-            {/* Right pane: models of the active channel */}
-            <ScrollArea className="h-full flex-1">
-              <div className="flex flex-col gap-1.5 pr-3">
-                {activeGroup && activeGroup.models.length === 0 && (
-                  <p className="px-1 text-sm text-muted-foreground">
-                    {getChannelLabel("settings.channel.picker.noModelsHint")}
-                  </p>
-                )}
-
-                {activeGroup?.models.map((model) => {
-                  const channel = activeGroup.channel;
-                  const selected =
-                    current?.channelId === channel.id && current?.modelId === model.modelId;
-                  const isModelDisabled = !model.enabled;
-                  const disabled = busy || activeGroup.isChannelDisabled || isModelDisabled;
-
-                  return (
-                    <button
-                      type="button"
-                      key={`${channel.id}:${model.modelId}`}
-                      className={cn(
-                        "w-full rounded-md border px-3 py-2 text-left transition-colors",
-                        disabled ? "cursor-not-allowed opacity-60" : "hover:bg-accent",
-                        selected && "border-primary bg-accent",
-                      )}
-                      disabled={disabled}
-                      onClick={() => {
-                        if (disabled) return;
-                        void handleSelect(channel.id, model.modelId);
-                      }}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-medium">
-                            {model.displayName || model.modelId}
-                          </p>
-                          <p className="truncate text-xs text-muted-foreground">{model.modelId}</p>
+                          <span className="truncate text-sm font-semibold">{channel.name}</span>
                         </div>
 
-                        <div className="flex shrink-0 items-center gap-1.5">
-                          {model.isDefault && (
-                            <Badge variant="secondary">
-                              {getChannelLabel("settings.channel.badge.default")}
-                            </Badge>
-                          )}
-                          {isModelDisabled && (
-                            <Badge variant="secondary">
-                              {getChannelLabel("settings.channel.badge.disabled")}
-                            </Badge>
-                          )}
-                          {selected && (
-                            <Badge>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {hasSelected && (
+                            <Badge className={BADGE_STRONG}>
                               {getChannelLabel("settings.channel.picker.badge.selected")}
                             </Badge>
                           )}
+                          {channel.isDefault && (
+                            <Badge variant="outline" className={BADGE_SOFT}>
+                              {getChannelLabel("settings.channel.badge.default")}
+                            </Badge>
+                          )}
+                          {needsDefaultModel && (
+                            <Badge
+                              variant="outline"
+                              className="border-orange-400 text-orange-600 dark:border-orange-400/40 dark:text-orange-300"
+                            >
+                              {getChannelLabel("settings.channel.badge.missingDefaultModel")}
+                            </Badge>
+                          )}
+                          {isChannelDisabled && (
+                            <Badge variant="outline" className={BADGE_SOFT}>
+                              {getChannelLabel("settings.channel.badge.disabled")}
+                            </Badge>
+                          )}
+                          <span className="text-xs text-muted-foreground">
+                            {formatChannelLabel("settings.channel.picker.modelCount", {
+                              count: models.length,
+                            })}
+                          </span>
                         </div>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            </ScrollArea>
+                      </button>
+                    );
+                  })}
+
+                  {filtered.length === 0 && (
+                    <div className="flex flex-col items-center gap-2 py-8">
+                      <p className="text-sm text-muted-foreground">
+                        {getChannelLabel("settings.channel.picker.noMatch")}
+                      </p>
+                      <Button variant="outline" onClick={() => setQuery("")}>
+                        {getChannelLabel("settings.channel.picker.clearSearch")}
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              </ScrollArea>
+            </div>
+
+            {/* Right pane: models of the active channel. Same frame as the left
+                one — a bordered column next to an unbounded one left the models
+                floating in the dialog with no edge of their own. */}
+            <div className="min-w-0 flex-1 overflow-hidden rounded-lg border border-foreground/[0.08]">
+              <ScrollArea className="h-full">
+                <div className="flex flex-col gap-1.5 p-2">
+                  {activeGroup && activeGroup.models.length === 0 && (
+                    <p className="px-1 text-sm text-muted-foreground">
+                      {getChannelLabel("settings.channel.picker.noModelsHint")}
+                    </p>
+                  )}
+
+                  {activeGroup?.models.map((model) => {
+                    const channel = activeGroup.channel;
+                    const selected =
+                      current?.channelId === channel.id && current?.modelId === model.modelId;
+                    const isModelDisabled = !model.enabled;
+                    const disabled = busy || activeGroup.isChannelDisabled || isModelDisabled;
+
+                    return (
+                      <button
+                        type="button"
+                        key={`${channel.id}:${model.modelId}`}
+                        className={cn(
+                          "w-full rounded-md border border-foreground/[0.07] px-3 py-2 text-left transition-colors",
+                          disabled ? "cursor-not-allowed opacity-60" : "hover:bg-foreground/[0.05]",
+                          selected && "border-foreground/25 bg-foreground/[0.08]",
+                        )}
+                        disabled={disabled}
+                        onClick={() => {
+                          if (disabled) return;
+                          void handleSelect(channel.id, model.modelId);
+                        }}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-medium">
+                              {model.displayName || model.modelId}
+                            </p>
+                            <p className="truncate text-xs text-muted-foreground">
+                              {model.modelId}
+                            </p>
+                          </div>
+
+                          <div className="flex shrink-0 items-center gap-1.5">
+                            {model.isDefault && (
+                              <Badge variant="outline" className={BADGE_SOFT}>
+                                {getChannelLabel("settings.channel.badge.default")}
+                              </Badge>
+                            )}
+                            {isModelDisabled && (
+                              <Badge variant="outline" className={BADGE_SOFT}>
+                                {getChannelLabel("settings.channel.badge.disabled")}
+                              </Badge>
+                            )}
+                            {selected && (
+                              <Badge className={BADGE_STRONG}>
+                                {getChannelLabel("settings.channel.picker.badge.selected")}
+                              </Badge>
+                            )}
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </ScrollArea>
+            </div>
           </div>
         </div>
       </DialogContent>
