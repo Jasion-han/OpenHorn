@@ -317,10 +317,7 @@ export function DesktopWelcomeScreen() {
             </div>
           </div>
 
-          <div className="mt-5 flex flex-col">
-            <p className="px-3 pb-1 text-[11px] font-medium text-muted-foreground/80">
-              {getChatLabel("chat.welcome.suggestionsHeading")}
-            </p>
+          <div className="mt-4 flex flex-col">
             {suggestions.map((text) => (
               <button
                 key={text}

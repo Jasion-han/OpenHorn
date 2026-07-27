@@ -567,7 +567,6 @@ export const chatLabels = {
   "chat.welcome.title": "今天想做点什么？",
   "chat.welcome.subtitle": "输入你的问题，我会为你新建一个会话",
   "chat.welcome.placeholder": "描述你的任务，回车开始",
-  "chat.welcome.suggestionsHeading": "试试这些",
   "chat.welcome.suggestion1": "帮我总结这份文档的要点",
   "chat.welcome.suggestion2": "查一下今天值得关注的科技新闻",
   "chat.welcome.suggestion3": "读一下这个项目的代码，说说架构",
