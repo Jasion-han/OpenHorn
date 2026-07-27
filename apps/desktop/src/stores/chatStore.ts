@@ -687,6 +687,10 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
           id: event.messageId || messageId,
           model: event.model,
           agentRun: doneRun,
+          // The bubble reveals its timestamp only once the answer is finished, so
+          // stamp it here instead of waiting for the next reload to carry the
+          // server's value. Regenerating replaces it with the new time.
+          updatedAt: new Date(),
         });
         get().completeStreamingMessage(event.messageId || messageId);
         return;

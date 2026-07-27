@@ -138,6 +138,8 @@ export interface ApiMessage {
   usage: string | null;
   attachmentsMeta?: ApiMessageAttachmentMeta[];
   createdAt: string;
+  /** Set when the answer finished being produced; null for pre-existing rows. */
+  updatedAt?: string | null;
 }
 
 export interface ApiAgentCheckResult {
@@ -221,6 +223,12 @@ export interface Message {
   streamTail?: string;
   streamPulseKey?: number;
   createdAt: Date;
+  /**
+   * When the answer finished being produced. Regenerating moves this forward
+   * while createdAt stays put, so the thread keeps its order. The bubble shows
+   * this in preference to createdAt.
+   */
+  updatedAt?: Date;
 }
 
 export type ChatStreamEvent =

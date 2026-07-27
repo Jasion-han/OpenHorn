@@ -98,6 +98,13 @@ export const messages = sqliteTable(
     /** JSON: { promptTokens, completionTokens, totalTokens }. Null when the provider reported none. */
     usage: text("usage"),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+    /**
+     * Last time the answer was re-produced (regenerate / edit-and-resend). Null
+     * until that happens. Kept separate from createdAt because reads order by
+     * createdAt — bumping it would move a re-generated mid-conversation answer to
+     * the end of the thread.
+     */
+    updatedAt: integer("updated_at", { mode: "timestamp" }),
   },
   (table) => [index("messages_conversation_created_idx").on(table.conversationId, table.createdAt)],
 );

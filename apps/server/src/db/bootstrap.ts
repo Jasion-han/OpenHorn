@@ -88,6 +88,7 @@ const SCHEMA_DDL: string[] = [
 	    citations TEXT,
 	    usage TEXT,
 	    created_at INTEGER NOT NULL,
+	    updated_at INTEGER,
 	    FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
 	  );`,
 
@@ -531,6 +532,15 @@ async function ensureMessageUsageColumn(): Promise<void> {
   const hasColumn = hasColumnNamed(rows, "usage");
   if (!hasColumn) {
     await client.execute(`ALTER TABLE messages ADD COLUMN usage TEXT;`);
+  }
+}
+
+async function ensureMessageUpdatedAtColumn(): Promise<void> {
+  const result = await client.execute(`PRAGMA table_info('messages');`);
+  const rows = getRows(result);
+  const hasColumn = hasColumnNamed(rows, "updated_at");
+  if (!hasColumn) {
+    await client.execute(`ALTER TABLE messages ADD COLUMN updated_at INTEGER;`);
   }
 }
 
@@ -1010,6 +1020,7 @@ export async function bootstrapDatabase(): Promise<void> {
   // `SELECT ... usage ... FROM messages`, which fails on a database that
   // predates this column.
   await ensureMessageUsageColumn();
+  await ensureMessageUpdatedAtColumn();
   await ensureMcpServerUserIdColumn();
   await ensureAgentEventsTable();
   await ensureAgentSessionModelIdColumn();

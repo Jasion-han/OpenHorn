@@ -205,6 +205,9 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
     // newer run for this message) from overwriting the new run's result.
     const persistOnce = async (assistantContent: string, agentRun: unknown, model: string) => {
       if (!shouldPersist()) return;
+      // Reconciliation below may rename the optimistic id to the persisted one,
+      // so track which id the finally-block should stamp.
+      let stampId = input.assistantMessageId;
       try {
         // Only reuse ids that are already persisted (real server ids). Optimistic
         // temp-/draft- ids don't exist server-side, so fall back to insert.
@@ -236,6 +239,7 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
             userMessageId: res.userMessageId,
             assistantMessageId: res.assistantMessageId,
           });
+          stampId = res.assistantMessageId;
         }
       } catch {
         // Best-effort: a persistence failure must not affect the UI.
@@ -243,6 +247,9 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
         // Server row is now fresh (or we tried) — the stale-DB guard is no longer
         // needed for these ids.
         useChatStore.getState().unmarkMessagesActive(activeRunIds);
+        // The bubble only shows a timestamp once the answer is finished; stamp it
+        // now rather than waiting for the next reload to carry the server value.
+        useChatStore.getState().updateMessage(stampId, { updatedAt: new Date() });
       }
     };
 

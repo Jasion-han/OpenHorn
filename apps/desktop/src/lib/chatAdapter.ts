@@ -133,6 +133,7 @@ function mapMessage(message: ApiMessage): Message {
     citations,
     usage,
     createdAt: new Date(message.createdAt),
+    updatedAt: message.updatedAt ? new Date(message.updatedAt) : undefined,
   };
 }
 

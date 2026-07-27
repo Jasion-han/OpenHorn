@@ -475,6 +475,7 @@ async function applyTaskBackedAgentTurnToMessage(params: {
       agentRun: JSON.stringify(agentRun),
       liveMetadata: null,
       citations: null,
+      updatedAt: new Date(),
     })
     .where(eq(messages.id, params.assistantMessageId));
 
@@ -1113,6 +1114,7 @@ export async function streamMessage(
         model: resolvedChannel.modelId,
         liveMetadata: serializeLiveMetadata(liveContext),
         citations: serializeCitations(liveContext.citations),
+        updatedAt: new Date(),
       })
       .where(eq(messages.id, assistantMessageId));
 
@@ -1299,6 +1301,7 @@ export async function editUserMessage(
         model: resolvedChannel.modelId,
         liveMetadata: serializeLiveMetadata(liveContext),
         citations: serializeCitations(liveContext.citations),
+        updatedAt: new Date(),
       })
       .where(eq(messages.id, assistantMessageId));
 
@@ -1455,6 +1458,7 @@ export async function regenerateMessage(
         model: resolvedChannel.modelId,
         liveMetadata: serializeLiveMetadata(liveContext),
         citations: serializeCitations(liveContext.citations),
+        updatedAt: new Date(),
       })
       .where(eq(messages.id, assistantMessageId));
 
@@ -1548,6 +1552,7 @@ export async function syncSidecarMessages(
           agentRun: input.agentRun ? JSON.stringify(input.agentRun) : null,
           liveMetadata: null,
           citations: null,
+          updatedAt: new Date(),
         })
         .where(eq(messages.id, input.assistantMessageId));
       if (Array.isArray(input.attachmentsMeta)) {
@@ -1718,6 +1723,7 @@ export async function completeChatFromSidecar(
       content: input.content,
       model: input.model || null,
       usage: input.usage ? JSON.stringify(input.usage) : null,
+      updatedAt: new Date(),
     })
     .where(
       and(eq(messages.id, input.assistantMessageId), eq(messages.conversationId, conversation.id)),

@@ -190,28 +190,31 @@ function MessageBubbleImpl({
             );
           })()
         ) : null}
-        {isFlatAgentAssistant &&
-          isMessageStreaming &&
-          (hasAssistantText || (message.agentRun?.steps?.length ?? 0) > 0) && (
-            <section className="mt-0.5 px-1 pt-0 pb-1">
-              <DesktopAgentTaskMetaLine text="Working" active />
-            </section>
-          )}
-      </div>
-      <span
-        className={cn(
-          "mt-1 text-[10px] leading-none text-muted-foreground/40",
-          isAssistant ? "self-start" : "self-end",
+        {liveIndicator === "trailing" && (
+          <section className="mt-0.5 px-1 pt-0 pb-1">
+            <DesktopAgentTaskMetaLine text="Working" active />
+          </section>
         )}
-      >
-        {formatMessageTime(message.createdAt)}
-        {message.usage ? (
-          <span title={getChatLabel("chat.usage.tooltip")}>
-            {" · "}
-            {formatTokenCount(message.usage.totalTokens)} tokens
-          </span>
-        ) : null}
-      </span>
+      </div>
+      {/* The timestamp is the moment the answer finished, so it only appears once
+          the stream ends. `updatedAt` moves forward on regenerate while createdAt
+          stays put (the thread is ordered by createdAt). */}
+      {!isMessageStreaming && (
+        <span
+          className={cn(
+            "mt-1 text-[10px] leading-none text-muted-foreground/40",
+            isAssistant ? "self-start" : "self-end",
+          )}
+        >
+          {formatMessageTime(message.updatedAt ?? message.createdAt)}
+          {message.usage ? (
+            <span title={getChatLabel("chat.usage.tooltip")}>
+              {" · "}
+              {formatTokenCount(message.usage.totalTokens)} tokens
+            </span>
+          ) : null}
+        </span>
+      )}
       <MessageActionBar
         message={message}
         copyValue={displayContent}
