@@ -279,11 +279,16 @@ export function DesktopWelcomeScreen() {
                 aria-label={getChatLabel("chat.welcome.clearInput")}
                 title={getChatLabel("chat.welcome.clearInput")}
                 className={cn(
-                  "absolute right-[13px] top-0 inline-flex size-[22px] items-center justify-center rounded-full text-muted-foreground/60 transition-all duration-150 ease-out hover:bg-foreground/[0.06] hover:text-foreground",
+                  "group absolute right-[13px] top-0 inline-flex size-[22px] items-center justify-center rounded-full text-muted-foreground/60 transition-all duration-150 ease-out hover:bg-foreground/[0.06] hover:text-foreground",
                   hasInput ? "scale-100 opacity-100" : "pointer-events-none scale-90 opacity-0",
                 )}
               >
-                <X className="size-[15px]" />
+                {/* Rotating the glyph rather than the button keeps the circular
+                    hover backdrop still and the hit area unchanged. A ✕ is
+                    symmetric every 90°, so a quarter turn is only visible while it
+                    is in flight; the slight scale gives the resting hover state a
+                    difference you can actually see too. */}
+                <X className="size-[15px] transition-transform duration-300 ease-out group-hover:rotate-90 group-hover:scale-110" />
               </button>
             </div>
 
