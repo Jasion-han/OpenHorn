@@ -66,8 +66,10 @@ export function createDesktopShellStore() {
       }),
       {
         name: "openhorn.desktop.shell",
+        // sidebarCollapsed is deliberately NOT persisted: collapsing is a
+        // temporary "give me room" gesture, so every launch starts expanded
+        // rather than reopening into whatever state the last session ended in.
         partialize: (state) => ({
-          sidebarCollapsed: state.sidebarCollapsed,
           settingsTab: state.settingsTab,
           fullAccessEnabled: state.fullAccessEnabled,
         }),
