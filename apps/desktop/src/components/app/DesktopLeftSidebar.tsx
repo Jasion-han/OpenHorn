@@ -42,6 +42,11 @@ import { useChatStore } from "../../stores/chatStore";
 import { useDesktopShellStore } from "../../stores/desktopShellStore";
 import type { Conversation } from "../../types/chat";
 
+// The shortcut hint next to the new-conversation button. The handler accepts both
+// modifiers, so the label follows the platform instead of always showing ⌘.
+const NEW_CONVERSATION_SHORTCUT_LABEL =
+  typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘ N" : "Ctrl N";
+
 type DateGroupKey = Extract<
   SidebarLabelKey,
   "sidebar.group.today" | "sidebar.group.yesterday" | "sidebar.group.earlier"
@@ -400,7 +405,9 @@ export function DesktopLeftSidebar() {
           >
             <Plus size={16} />
             <span className="flex-1 text-left">{getSidebarLabel("sidebar.newConversation")}</span>
-            <kbd className="text-[11px] font-normal text-muted-foreground">⌘N</kbd>
+            <kbd className="font-sans text-xs font-normal tracking-wide text-muted-foreground/70">
+              {NEW_CONVERSATION_SHORTCUT_LABEL}
+            </kbd>
           </Button>
 
           {searchOpen && (
