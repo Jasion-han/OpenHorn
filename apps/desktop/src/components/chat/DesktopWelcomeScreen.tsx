@@ -8,9 +8,10 @@ import {
   Sparkles,
 } from "lucide-react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { fileKey } from "shared/format";
 import { Button, cn, Textarea } from "ui";
+import { getDesktopBackendBase } from "../../lib/backendBase";
 import { DEFAULT_CONVERSATION_TITLE } from "../../lib/conversationTitle";
 import { getGlobalDefaultChannel } from "../../lib/defaultChannel";
 import { getChatLabel } from "../../lib/i18n/agent";
@@ -23,11 +24,33 @@ import { ACCEPT_FILES } from "./DesktopComposer";
 import { DesktopModelPickerModal } from "./DesktopModelPickerModal";
 import { DesktopProviderLogo } from "./DesktopProviderLogo";
 
-const SUGGESTION_KEYS = [
+/**
+ * Shown immediately on every visit. Personalised suggestions replace them only
+ * once the server already has a cached set — generating costs a model
+ * round-trip, which must never sit in front of the first paint.
+ */
+const DEFAULT_SUGGESTION_KEYS = [
   "chat.welcome.suggestion1",
   "chat.welcome.suggestion2",
   "chat.welcome.suggestion3",
 ] as const;
+
+const DEFAULT_SUGGESTIONS = DEFAULT_SUGGESTION_KEYS.map((key) => getChatLabel(key));
+
+async function fetchWelcomeSuggestions(): Promise<string[]> {
+  try {
+    const response = await fetch(`${getDesktopBackendBase()}/settings/welcome-suggestions`, {
+      credentials: "include",
+    });
+    if (!response.ok) return [];
+    const data = (await response.json()) as { suggestions?: unknown };
+    if (!Array.isArray(data.suggestions)) return [];
+    return data.suggestions.filter((item): item is string => typeof item === "string");
+  } catch {
+    // Offline or backend down — the defaults stay.
+    return [];
+  }
+}
 
 /**
  * Landing view for "no conversation selected". Instead of a dead-end hint it
@@ -49,6 +72,7 @@ export function DesktopWelcomeScreen() {
   // creation so the very first message already honours it.
   const [forceWebSearch, setForceWebSearch] = useState(true);
   const [starting, setStarting] = useState(false);
+  const [suggestions, setSuggestions] = useState<string[]>(DEFAULT_SUGGESTIONS);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const user = useAuthStore((state) => state.user);
@@ -59,6 +83,19 @@ export function DesktopWelcomeScreen() {
   const setPendingPrompt = useDesktopShellStore((state) => state.setPendingPrompt);
   const fullAccessEnabled = useDesktopShellStore((state) => state.fullAccessEnabled);
   const toggleFullAccess = useDesktopShellStore((state) => state.toggleFullAccess);
+
+  // Fire-and-forget: the defaults are already on screen, so a slow or failed
+  // response costs nothing. The request also nudges the server to regenerate a
+  // stale set for the next visit.
+  useEffect(() => {
+    let cancelled = false;
+    void fetchWelcomeSuggestions().then((items) => {
+      if (!cancelled && items.length > 0) setSuggestions(items);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const defaultChannel = getGlobalDefaultChannel(channels);
   const selection = pickedModel ?? defaultChannel ?? null;
@@ -280,17 +317,20 @@ export function DesktopWelcomeScreen() {
             </div>
           </div>
 
-          <div className="mt-4 flex flex-col">
-            {SUGGESTION_KEYS.map((key) => (
+          <div className="mt-5 flex flex-col">
+            <p className="px-3 pb-1 text-[11px] font-medium text-muted-foreground/80">
+              {getChatLabel("chat.welcome.suggestionsHeading")}
+            </p>
+            {suggestions.map((text) => (
               <button
-                key={key}
+                key={text}
                 type="button"
                 disabled={starting}
-                onClick={() => void start(getChatLabel(key))}
+                onClick={() => void start(text)}
                 className="flex items-center gap-2.5 rounded-[10px] px-3 py-2 text-left text-sm text-foreground/70 transition-colors hover:bg-foreground/[0.04] hover:text-foreground disabled:pointer-events-none disabled:opacity-60"
               >
                 <MessageSquare className="size-3.5 shrink-0 text-muted-foreground" />
-                <span className="truncate">{getChatLabel(key)}</span>
+                <span className="truncate">{text}</span>
               </button>
             ))}
           </div>

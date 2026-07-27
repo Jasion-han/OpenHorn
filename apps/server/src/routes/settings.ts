@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { TAVILY_API_KEY_SETTING, TAVILY_ENABLED_SETTING } from "../services/searchService";
 import { deleteSettingValue, getSettingValues, setSettingValue } from "../services/settingsService";
+import { getWelcomeSuggestions } from "../services/welcomeSuggestionService";
 import { requireUser, type UserEnv } from "../utils/requestUser";
 import { isRecord } from "../utils/typeGuards";
 
@@ -22,6 +23,16 @@ settings.get("/", async (c) => {
   const keys = parseKeysQuery(c.req.query("keys"));
   const values = await getSettingValues(user.id, keys);
   return c.json({ settings: values });
+});
+
+// Read-only and deliberately non-blocking: returns whatever is cached and lets
+// the service schedule a refresh in the background, so the welcome screen never
+// waits on a model round-trip.
+settings.get("/welcome-suggestions", async (c) => {
+  const user = c.get("user");
+
+  const result = await getWelcomeSuggestions(user.id);
+  return c.json(result);
 });
 
 settings.get("/search-status", async (c) => {
