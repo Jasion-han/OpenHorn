@@ -356,9 +356,12 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
         // draft alongside the persisted copy and render the whole exchange
         // twice. Drop any draft whose (role, content) already exists in the DB;
         // only genuinely in-flight drafts (not yet persisted) survive.
-        const dbSignatures = new Set(dbMessages.map((m) => `${m.role} ${(m.content || "").trim()}`));
+        const dbSignatures = new Set(
+          dbMessages.map((m) => `${m.role}\u0000${(m.content || "").trim()}`),
+        );
         const drafts = current.filter(
-          (m) => !dbIds.has(m.id) && !dbSignatures.has(`${m.role} ${(m.content || "").trim()}`),
+          (m) =>
+            !dbIds.has(m.id) && !dbSignatures.has(`${m.role}\u0000${(m.content || "").trim()}`),
         );
         const merged = drafts.length > 0 ? [...dbMerged, ...drafts] : dbMerged;
 
