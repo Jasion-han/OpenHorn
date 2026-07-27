@@ -58,6 +58,26 @@
   app-region: no-drag;
 }
 
+/*
+ * macOS overlay title bar: the webview extends under the window chrome, so the
+ * top-left corner belongs to the traffic lights. Rows that start at the very top
+ * carry this helper to shift their content clear of them. Only active when the
+ * shell marks the document (Tauri + macOS) — in a browser, or on a platform with
+ * a normal title bar, the inset would just be dead space.
+ */
+:root[data-titlebar="overlay"] .titlebar-traffic-light-inset {
+  /* Sits on the traffic lights' row: they are centred in a 30px band measured
+     from the very top of the window, so the strip matches that band exactly and
+     centres its own content in it. Any top padding of our own would push the
+     toggle below them; too little and it rides above. */
+  display: flex;
+  align-items: center;
+  padding-left: 80px;
+  padding-top: 0;
+  padding-bottom: 0;
+  min-height: 30px;
+}
+
 /* ===== Proma-aligned utilities ===== */
 
 .shadow-minimal {

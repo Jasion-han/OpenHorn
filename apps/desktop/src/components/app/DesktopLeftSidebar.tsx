@@ -338,7 +338,13 @@ export function DesktopLeftSidebar() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex items-center justify-between gap-1 px-2 py-2">
+      {/* Also the window's drag handle under the macOS overlay title bar — there
+          is no native bar left to grab. Tauri only starts a drag when the event
+          target itself carries the attribute, so the buttons stay clickable. */}
+      <div
+        data-tauri-drag-region
+        className="titlebar-traffic-light-inset flex items-center justify-between gap-1 px-2 pb-2 pt-2"
+      >
         <Button
           variant="ghost"
           size="icon-sm"

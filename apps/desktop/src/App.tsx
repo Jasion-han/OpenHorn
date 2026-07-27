@@ -6,7 +6,7 @@ import { DesktopChatArea } from "./components/chat/DesktopChatArea";
 import { SettingsView } from "./components/settings/SettingsView";
 import { ThemeListener } from "./components/theme/ThemeListener";
 import { UNAUTHORIZED_EVENT } from "./lib/serverApi";
-import { getTauriSidecarPlatform } from "./lib/tauriBridge";
+import { getTauriSidecarPlatform, hasOverlayTitleBar } from "./lib/tauriBridge";
 import { useAuthStore } from "./stores/authStore";
 import { useChatStore } from "./stores/chatStore";
 import { useDesktopShellStore } from "./stores/desktopShellStore";
@@ -20,6 +20,15 @@ export function App() {
   const bootstrapAuth = useAuthStore((state) => state.bootstrap);
   const logout = useAuthStore((state) => state.logout);
   const resetChat = useChatStore((state) => state.reset);
+
+  // Marks the document so the traffic-light inset (and only it) applies. Set once
+  // here rather than probed per component — the window style cannot change at
+  // runtime.
+  useEffect(() => {
+    if (hasOverlayTitleBar()) {
+      document.documentElement.dataset.titlebar = "overlay";
+    }
+  }, []);
 
   useEffect(() => {
     const handleLinkClick = (e: MouseEvent) => {

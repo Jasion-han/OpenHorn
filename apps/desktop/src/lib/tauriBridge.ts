@@ -24,6 +24,16 @@ export function isDesktopRuntime(): boolean {
 }
 
 /**
+ * True when the window uses the macOS overlay title bar (see the window builder
+ * in src-tauri): the webview reaches the top of the window, so the frontend owns
+ * both the drag behaviour and keeping the traffic-light corner clear.
+ */
+export function hasOverlayTitleBar(): boolean {
+  if (!isTauriRuntime() || typeof navigator === "undefined") return false;
+  return /Mac/i.test(navigator.platform);
+}
+
+/**
  * An MCP server discovered in (or parsed from) an existing client config on
  * the user's machine, already normalised into OpenHorn's shape.
  */

@@ -1207,10 +1207,22 @@ pub fn run() {
             }
 
             let url = WebviewUrl::default();
-            WebviewWindowBuilder::new(app, "main", url)
+            let builder = WebviewWindowBuilder::new(app, "main", url)
                 .title("OpenHorn")
                 .inner_size(1200.0, 800.0)
-                .resizable(true)
+                .resizable(true);
+
+            // macOS: let the webview run under the title bar so the sidebar reaches
+            // the top of the window and the sidebar toggle can sit beside the
+            // traffic lights. The frontend reserves that corner (see the
+            // `titlebar-traffic-light-inset` helper) and marks the strip draggable,
+            // since there is no native bar left to drag by.
+            #[cfg(target_os = "macos")]
+            let builder = builder
+                .title_bar_style(tauri::TitleBarStyle::Overlay)
+                .hidden_title(true);
+
+            builder
                 .on_navigation(|url| {
                     let s = url.as_str();
                     if s.starts_with("http://localhost") || s.starts_with("https://localhost") || s.starts_with("tauri://") {

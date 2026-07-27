@@ -1,10 +1,11 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Baseline permissions plus sidecar/dialog access for the desktop agent runtime",
+  "description": "Baseline permissions plus sidecar/dialog access for the desktop agent runtime. core:window:default does NOT include start-dragging, which leaves data-tauri-drag-region silently inert — and with the macOS overlay title bar there is no native bar left to drag the window by, so it is granted explicitly.",
   "windows": ["main"],
   "permissions": [
     "core:default",
+    "core:window:allow-start-dragging",
     "dialog:allow-open",
     {
       "identifier": "shell:allow-execute",

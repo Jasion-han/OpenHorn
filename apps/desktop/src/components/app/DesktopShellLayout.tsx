@@ -54,11 +54,14 @@ export function DesktopShellLayout({
           half lives inside the sidebar and is reachable everywhere, so an expand
           button owned by individual views left whichever view lacked one
           (settings) with no way back.
+
+          Top padding stays a class so the overlay-title-bar rule can zero it; an
+          inline style would win over the stylesheet.
         */}
         {sidebarCollapsed && (
           <div
-            className="shrink-0 px-2 pb-1"
-            style={{ paddingTop: "calc(0.5rem + env(safe-area-inset-top, 0px))" }}
+            data-tauri-drag-region
+            className="titlebar-traffic-light-inset shrink-0 px-2 pb-1 pt-2"
           >
             <Button
               variant="ghost"
