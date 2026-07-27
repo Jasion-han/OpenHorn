@@ -13,7 +13,7 @@ import { useEffect, useRef, useState } from "react";
 import { fileKey } from "shared/format";
 import { Button, cn, Textarea } from "ui";
 import { getDesktopBackendBase } from "../../lib/backendBase";
-import { pickPlaceholder } from "../../lib/composerPlaceholder";
+import { charCount, pickPlaceholder, takeChars } from "../../lib/composerPlaceholder";
 import { DEFAULT_CONVERSATION_TITLE } from "../../lib/conversationTitle";
 import { getGlobalDefaultChannel } from "../../lib/defaultChannel";
 import { getChatLabel } from "../../lib/i18n/agent";
@@ -63,6 +63,30 @@ const PLACEHOLDER_KEYS = [
 ] as const;
 
 export const WELCOME_PLACEHOLDERS = PLACEHOLDER_KEYS.map((key) => getChatLabel(key));
+
+/**
+ * The placeholder types itself in, rests, rewinds character by character, and
+ * types the *same* line again. Only a click on the box draws a different one —
+ * a line that swapped itself out on a timer would read as a slideshow demanding
+ * attention rather than as an idle input.
+ *
+ * Erasing runs faster than typing: a rewind that takes as long as the write
+ * feels like a mistake being corrected instead of a loop resetting.
+ */
+const PLACEHOLDER_TYPE_MS = 42;
+const PLACEHOLDER_ERASE_MS = 26;
+/** Long enough to actually read the line before it starts rewinding. */
+const PLACEHOLDER_HOLD_MS = 2400;
+/** Beat on the empty box, so the restart reads as deliberate. */
+const PLACEHOLDER_REST_MS = 700;
+
+function prefersReducedMotion(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
+}
 
 interface WelcomeSuggestionsResult {
   items: string[];
@@ -116,7 +140,14 @@ export function DesktopWelcomeScreen() {
   const [starting, setStarting] = useState(false);
   const [suggestions, setSuggestions] = useState<string[]>(DEFAULT_SUGGESTIONS);
   // Drawn once per mount, then re-drawn on every focus of the empty box below.
-  const [placeholder, setPlaceholder] = useState(() => pickPlaceholder(WELCOME_PLACEHOLDERS));
+  // `draw` counts the redraws: it makes each draw a distinct value even when the
+  // same line comes up twice, so the typewriter below always replays.
+  const [placeholder, setPlaceholder] = useState(() => ({
+    text: pickPlaceholder(WELCOME_PLACEHOLDERS),
+    draw: 0,
+  }));
+  const [revealed, setRevealed] = useState(0);
+  const [erasing, setErasing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -155,6 +186,34 @@ export function DesktopWelcomeScreen() {
       for (const timer of timers) window.clearTimeout(timer);
     };
   }, []);
+
+  // The type → hold → rewind → restart loop. Each step schedules exactly one
+  // timeout and then re-enters through its own state change, so there is no
+  // interval to leak and no state updater doing side effects (they must stay
+  // pure — React may call them twice).
+  useEffect(() => {
+    const total = charCount(placeholder.text);
+    if (prefersReducedMotion()) {
+      // A perpetual animation is exactly what this preference asks to be spared:
+      // show the line, leave it alone.
+      setRevealed(total);
+      return;
+    }
+    // With text in the box the placeholder is invisible; running the loop anyway
+    // would re-render on every keystroke-length tick for nothing.
+    if (draft.length > 0) return;
+
+    const step = erasing
+      ? revealed > 0
+        ? { delay: PLACEHOLDER_ERASE_MS, run: () => setRevealed((n) => n - 1) }
+        : { delay: PLACEHOLDER_REST_MS, run: () => setErasing(false) }
+      : revealed < total
+        ? { delay: PLACEHOLDER_TYPE_MS, run: () => setRevealed((n) => n + 1) }
+        : { delay: PLACEHOLDER_HOLD_MS, run: () => setErasing(true) };
+
+    const timer = window.setTimeout(step.run, step.delay);
+    return () => window.clearTimeout(timer);
+  }, [placeholder, revealed, erasing, draft.length]);
 
   const defaultChannel = getGlobalDefaultChannel(channels);
   const selection = pickedModel ?? defaultChannel ?? null;
@@ -225,9 +284,19 @@ export function DesktopWelcomeScreen() {
   // so redrawing would just be churn. Bound to click as well as focus because
   // the box is auto-focused on arrival — focus alone would fire once and never
   // again, and the point is that every click brings a different line.
+  // Swaps in a different line and restarts the loop from an empty box.
+  const drawPlaceholder = () => {
+    setPlaceholder((prev) => ({
+      text: pickPlaceholder(WELCOME_PLACEHOLDERS, prev.text),
+      draw: prev.draw + 1,
+    }));
+    setRevealed(0);
+    setErasing(false);
+  };
+
   const rerollPlaceholder = () => {
     if (draft.length > 0) return;
-    setPlaceholder((prev) => pickPlaceholder(WELCOME_PLACEHOLDERS, prev));
+    drawPlaceholder();
   };
 
   const hasInput = draft.length > 0 || attachments.length > 0;
@@ -237,7 +306,7 @@ export function DesktopWelcomeScreen() {
   const clearInput = () => {
     setDraft("");
     setAttachments([]);
-    setPlaceholder((prev) => pickPlaceholder(WELCOME_PLACEHOLDERS, prev));
+    drawPlaceholder();
     textareaRef.current?.focus();
   };
 
@@ -301,7 +370,7 @@ export function DesktopWelcomeScreen() {
                 onKeyDown={handleKeyDown}
                 onFocus={rerollPlaceholder}
                 onClick={rerollPlaceholder}
-                placeholder={placeholder}
+                placeholder={takeChars(placeholder.text, revealed)}
                 // The right padding is constant rather than applied only when the
                 // clear button shows — otherwise the text would reflow the moment
                 // the first character is typed.
