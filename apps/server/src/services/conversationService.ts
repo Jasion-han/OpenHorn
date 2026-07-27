@@ -11,7 +11,7 @@ import {
   conversations,
   messages,
 } from "db";
-import { and, desc, eq, inArray, or } from "drizzle-orm";
+import { and, desc, eq, inArray, notExists, or, sql } from "drizzle-orm";
 import { db } from "../db";
 import { generateId } from "../utils";
 import { removeAttachmentFiles } from "./attachmentService";
@@ -73,12 +73,62 @@ export async function getConversationById(userId: string, conversationId: string
   return result.length > 0 ? result[0] : null;
 }
 
+/**
+ * A conversation is reusable when it still carries the caller's untouched
+ * default title and holds no messages at all — i.e. it is the blank one the user
+ * just made and never used. Renamed-but-empty conversations are excluded: the
+ * title is user intent and must not be silently taken over.
+ */
+async function findReusableBlankConversation(userId: string, title: string) {
+  const rows = await db
+    .select()
+    .from(conversations)
+    .where(
+      and(
+        eq(conversations.userId, userId),
+        eq(conversations.title, title),
+        notExists(
+          db
+            .select({ one: sql`1` })
+            .from(messages)
+            .where(eq(messages.conversationId, conversations.id)),
+        ),
+      ),
+    )
+    .orderBy(desc(conversations.updatedAt))
+    .limit(1);
+
+  return rows[0] ?? null;
+}
+
 export async function createConversation(userId: string, input: CreateConversationInput) {
   const id = generateId();
   const now = new Date();
   const model = normalizeConversationModelInput(input);
   const defaultMode = input.defaultMode === "chat" ? "chat" : "agent";
   const forceWebSearch = input.forceWebSearch === undefined ? true : Boolean(input.forceWebSearch);
+
+  // 空会话不重复创建。The client keeps an in-memory guard for the conversation it is
+  // currently showing, but that guard cannot see blank conversations left behind by
+  // an earlier session — after a reload every entry point would mint another one.
+  // Enforcing it here covers every caller instead of every call site.
+  const reusable = await findReusableBlankConversation(userId, input.title);
+  if (reusable) {
+    // Adopt this call's settings: the caller may have picked a different model or
+    // mode than the blank conversation was created with.
+    const adopted = {
+      channelId: model.channelId,
+      modelId: model.modelId,
+      systemPrompt: input.systemPrompt || null,
+      contextLength: input.contextLength || 4096,
+      defaultMode,
+      lastMode: defaultMode,
+      forceWebSearch,
+      updatedAt: now,
+    };
+    await db.update(conversations).set(adopted).where(eq(conversations.id, reusable.id));
+    return { ...reusable, ...adopted };
+  }
 
   await db.insert(conversations).values({
     id,

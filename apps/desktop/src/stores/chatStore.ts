@@ -403,13 +403,21 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
         forceWebSearch: options?.forceWebSearch,
       });
 
-      set((state) => ({
-        conversations: [conversation, ...state.conversations],
-        currentConversation: conversation,
-        messages: [],
-        composerMode: conversation.lastMode,
-        selectedChannelId: conversation.channelId || state.selectedChannelId,
-      }));
+      set((state) => {
+        // The server reuses an existing blank conversation instead of piling up
+        // duplicates (空会话不重复创建), so the returned row may already be in the
+        // list — replace it in place rather than prepending a second copy.
+        const known = state.conversations.some((item) => item.id === conversation.id);
+        return {
+          conversations: known
+            ? state.conversations.map((item) => (item.id === conversation.id ? conversation : item))
+            : [conversation, ...state.conversations],
+          currentConversation: conversation,
+          messages: [],
+          composerMode: conversation.lastMode,
+          selectedChannelId: conversation.channelId || state.selectedChannelId,
+        };
+      });
 
       return conversation;
     },
