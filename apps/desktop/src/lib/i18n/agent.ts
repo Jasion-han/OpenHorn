@@ -573,6 +573,7 @@ export const chatLabels = {
   "chat.welcome.suggestion4": "把这段内容整理成一份清单",
   "chat.welcome.suggestion5": "帮我起草一封邮件",
   "chat.welcome.noModel": "选择模型",
+  "chat.welcome.clearInput": "清空输入",
   "chat.welcome.startFailedTitle": "无法开始会话",
   "chat.welcome.startFailedBody": "创建会话失败，请稍后重试",
   // Inline edit buttons

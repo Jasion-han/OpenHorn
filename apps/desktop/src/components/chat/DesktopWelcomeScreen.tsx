@@ -6,6 +6,7 @@ import {
   Paperclip,
   ShieldOff,
   Sparkles,
+  X,
 } from "lucide-react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useEffect, useRef, useState } from "react";
@@ -194,6 +195,16 @@ export function DesktopWelcomeScreen() {
     });
   };
 
+  const hasInput = draft.length > 0 || attachments.length > 0;
+
+  // Clears the whole input, attachments included — it sits above the composer as
+  // a "start over", not as a per-field reset.
+  const clearInput = () => {
+    setDraft("");
+    setAttachments([]);
+    textareaRef.current?.focus();
+  };
+
   const canSubmit = (Boolean(draft.trim()) || attachments.length > 0) && !starting;
 
   return (
@@ -243,7 +254,7 @@ export function DesktopWelcomeScreen() {
               </div>
             )}
 
-            <div className="px-[15px] pb-2">
+            <div className="relative px-[15px] pb-2">
               <Textarea
                 autoFocus
                 ref={textareaRef}
@@ -253,8 +264,27 @@ export function DesktopWelcomeScreen() {
                 onChange={(event) => setDraft(event.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder={getChatLabel("chat.welcome.placeholder")}
-                className="min-h-[72px] max-h-[200px] resize-none border-0 bg-transparent p-0 text-sm leading-5 shadow-none placeholder:text-muted-foreground/70 focus-visible:ring-0"
+                // The right padding is constant rather than applied only when the
+                // clear button shows — otherwise the text would reflow the moment
+                // the first character is typed.
+                className="min-h-[72px] max-h-[200px] resize-none border-0 bg-transparent p-0 pr-7 text-sm leading-5 shadow-none placeholder:text-muted-foreground/70 focus-visible:ring-0"
               />
+              {/* Always mounted so it can fade *out* as well as in; visibility and
+                  hit-testing are driven by the same `hasInput` flag. */}
+              <button
+                type="button"
+                aria-hidden={!hasInput}
+                tabIndex={hasInput ? 0 : -1}
+                onClick={clearInput}
+                aria-label={getChatLabel("chat.welcome.clearInput")}
+                title={getChatLabel("chat.welcome.clearInput")}
+                className={cn(
+                  "absolute right-[13px] top-0 inline-flex size-[22px] items-center justify-center rounded-full text-muted-foreground/60 transition-all duration-150 ease-out hover:bg-foreground/[0.06] hover:text-foreground",
+                  hasInput ? "scale-100 opacity-100" : "pointer-events-none scale-90 opacity-0",
+                )}
+              >
+                <X className="size-[15px]" />
+              </button>
             </div>
 
             <div className="flex h-[40px] items-center justify-between gap-4 px-2 py-[5px]">
