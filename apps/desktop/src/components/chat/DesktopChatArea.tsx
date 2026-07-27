@@ -16,6 +16,7 @@ import { useSidecarAgentRun } from "../../hooks/useSidecarAgentRun";
 import { filesToAttachmentParts } from "../../lib/attachmentParts";
 import { uploadAttachments } from "../../lib/attachments";
 import { getDesktopBackendBase } from "../../lib/backendBase";
+import { pickPlaceholder as pickFromPool } from "../../lib/composerPlaceholder";
 import { isDefaultConversationTitle } from "../../lib/conversationTitle";
 import { getEffectiveModelForConversation } from "../../lib/effectiveModel";
 import { getChatLabel, getSlashLabel } from "../../lib/i18n/agent";
@@ -85,19 +86,7 @@ type DesktopSearchStatus = {
   source: "user" | "server" | "none" | "disabled";
 };
 
-function pickPlaceholder(avoid?: string) {
-  if (PLACEHOLDERS.length === 0) return "";
-  if (PLACEHOLDERS.length === 1) return PLACEHOLDERS[0] ?? "";
-  let next = PLACEHOLDERS[Math.floor(Math.random() * PLACEHOLDERS.length)] ?? "";
-  if (avoid && PLACEHOLDERS.length > 1) {
-    let tries = 0;
-    while (next === avoid && tries < 4) {
-      next = PLACEHOLDERS[Math.floor(Math.random() * PLACEHOLDERS.length)] ?? next;
-      tries += 1;
-    }
-  }
-  return next;
-}
+const pickPlaceholder = (avoid?: string) => pickFromPool(PLACEHOLDERS, avoid);
 
 async function fetchDesktopSearchStatus(): Promise<DesktopSearchStatus> {
   const response = await fetch(`${getDesktopBackendBase()}/settings/search-status`, {
