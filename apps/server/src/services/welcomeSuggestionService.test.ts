@@ -1,9 +1,9 @@
-import { expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { conversations, settings, users } from "db";
 import { eq } from "drizzle-orm";
 import { db } from "../db";
 import { setSettingValue } from "./settingsService";
-import { getWelcomeSuggestions } from "./welcomeSuggestionService";
+import { dropEchoes, getWelcomeSuggestions } from "./welcomeSuggestionService";
 
 const SETTING_KEY = "welcome.suggestions";
 
@@ -125,4 +125,29 @@ test("ignores a corrupted cache entry instead of throwing", async () => {
   } finally {
     await cleanup(userId);
   }
+});
+
+describe("dropEchoes", () => {
+  test("drops a suggestion restating the conversation the user just created", () => {
+    // The exact pair observed in the app: neither string contains the other, so a
+    // substring check would have let this through.
+    expect(dropEchoes(["分析特斯拉本周股价走势"], ["特斯拉股价走势如何"])).toEqual([]);
+    expect(dropEchoes(["整理今天AI科技要闻"], ["整理科技要闻"])).toEqual([]);
+  });
+
+  test("keeps suggestions that head somewhere new", () => {
+    const kept = dropEchoes(["给我一个Claude SDK示例", "帮我查下本周汇率"], ["特斯拉股价走势如何"]);
+    expect(kept).toEqual(["给我一个Claude SDK示例", "帮我查下本周汇率"]);
+  });
+
+  test("only compares against the most recent handful of titles", () => {
+    const olderTitles = ["a", "b", "c", "d", "e", "特斯拉股价走势如何"];
+    // The matching title sits at index 5, past the cut-off, so the older topic is
+    // allowed to come round again.
+    expect(dropEchoes(["分析特斯拉本周股价走势"], olderTitles)).toHaveLength(1);
+  });
+
+  test("ignores punctuation and case differences", () => {
+    expect(dropEchoes(["Claude SDK 用法？"], ["claude sdk用法"])).toEqual([]);
+  });
 });

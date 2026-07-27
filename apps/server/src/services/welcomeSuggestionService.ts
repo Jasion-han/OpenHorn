@@ -86,6 +86,48 @@ function parseModelOutput(content: string): string[] {
   return out;
 }
 
+/** Comparison form: punctuation, spaces and case carry no meaning here. */
+function normalizeForCompare(text: string): string {
+  return text.replace(/[\s\p{P}\p{S}]/gu, "").toLowerCase();
+}
+
+function bigrams(text: string): Set<string> {
+  const out = new Set<string>();
+  for (let i = 0; i < text.length - 1; i += 1) out.add(text.slice(i, i + 2));
+  return out;
+}
+
+/**
+ * Dice coefficient over character bigrams. Substring checks are not enough for
+ * CJK: "特斯拉股价走势如何" and "分析特斯拉本周股价走势" contain neither one another
+ * yet are plainly the same request.
+ */
+function similarity(a: string, b: string): number {
+  const left = bigrams(normalizeForCompare(a));
+  const right = bigrams(normalizeForCompare(b));
+  if (left.size === 0 || right.size === 0) return 0;
+  let shared = 0;
+  for (const gram of left) if (right.has(gram)) shared += 1;
+  return (2 * shared) / (left.size + right.size);
+}
+
+/** Above this, a suggestion is just restating something already in the list. */
+const ECHO_SIMILARITY = 0.5;
+/** Only the most recent handful count as "already done" — older ones may recur. */
+const ECHO_TITLE_COUNT = 5;
+
+/**
+ * Drops suggestions that echo what the user just did. The context feeding
+ * generation is the recent conversation titles, so the model happily proposes
+ * the very task whose conversation it is reading.
+ */
+export function dropEchoes(items: string[], recentTitles: string[]): string[] {
+  const recent = recentTitles.slice(0, ECHO_TITLE_COUNT);
+  return items.filter(
+    (item) => !recent.some((title) => similarity(item, title) >= ECHO_SIMILARITY),
+  );
+}
+
 function buildPrompt(titles: string[]): string {
   return [
     "下面是一位用户最近的对话标题，反映了他平时在做的事：",
@@ -96,6 +138,7 @@ function buildPrompt(titles: string[]): string {
     "- 每条独立成行，不要编号、不要符号前缀、不要引号",
     `- 每条不超过 ${MAX_SUGGESTION_LENGTH} 个字，是一句可以直接发给助手的话`,
     "- 三条之间方向不同，不要互相重复",
+    "- 不要复述上面已经出现过的标题，写他还没做过的下一步",
     "- 只输出这三行，不要任何其他内容",
   ].join("\n");
 }
@@ -156,7 +199,7 @@ export async function refreshWelcomeSuggestions(userId: string): Promise<string[
     // built-in defaults rather than storing something generic.
     if (titles.length === 0) return [];
 
-    const items = await generate(userId, titles);
+    const items = dropEchoes(await generate(userId, titles), titles);
     if (items.length === 0) return [];
 
     const payload: CachedSuggestions = { items, generatedAt: Date.now(), seed };

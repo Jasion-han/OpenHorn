@@ -37,20 +37,35 @@ const DEFAULT_SUGGESTION_KEYS = [
 
 const DEFAULT_SUGGESTIONS = DEFAULT_SUGGESTION_KEYS.map((key) => getChatLabel(key));
 
-async function fetchWelcomeSuggestions(): Promise<string[]> {
+interface WelcomeSuggestionsResult {
+  items: string[];
+  /** The server scheduled a regeneration; a newer set will exist shortly. */
+  stale: boolean;
+}
+
+async function fetchWelcomeSuggestions(): Promise<WelcomeSuggestionsResult> {
   try {
     const response = await fetch(`${getDesktopBackendBase()}/settings/welcome-suggestions`, {
       credentials: "include",
     });
-    if (!response.ok) return [];
-    const data = (await response.json()) as { suggestions?: unknown };
-    if (!Array.isArray(data.suggestions)) return [];
-    return data.suggestions.filter((item): item is string => typeof item === "string");
+    if (!response.ok) return { items: [], stale: false };
+    const data = (await response.json()) as { suggestions?: unknown; stale?: unknown };
+    const items = Array.isArray(data.suggestions)
+      ? data.suggestions.filter((item): item is string => typeof item === "string")
+      : [];
+    return { items, stale: data.stale === true };
   } catch {
     // Offline or backend down — the defaults stay.
-    return [];
+    return { items: [], stale: false };
   }
 }
+
+/**
+ * When the first read reports a scheduled regeneration, check back a couple of
+ * times so a set that finishes generating while the user is still looking at
+ * this screen actually appears — instead of waiting for the next visit.
+ */
+const STALE_RECHECK_DELAYS_MS = [8000, 20000];
 
 /**
  * Landing view for "no conversation selected". Instead of a dead-end hint it
@@ -89,11 +104,25 @@ export function DesktopWelcomeScreen() {
   // stale set for the next visit.
   useEffect(() => {
     let cancelled = false;
-    void fetchWelcomeSuggestions().then((items) => {
-      if (!cancelled && items.length > 0) setSuggestions(items);
+    const timers: number[] = [];
+
+    const load = async () => {
+      const { items, stale } = await fetchWelcomeSuggestions();
+      if (cancelled) return;
+      if (items.length > 0) setSuggestions(items);
+      return stale;
+    };
+
+    void load().then((stale) => {
+      if (cancelled || !stale) return;
+      for (const delay of STALE_RECHECK_DELAYS_MS) {
+        timers.push(window.setTimeout(() => void load(), delay));
+      }
     });
+
     return () => {
       cancelled = true;
+      for (const timer of timers) window.clearTimeout(timer);
     };
   }, []);
 
