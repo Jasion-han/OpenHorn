@@ -615,6 +615,7 @@ export const sidebarLabels = {
   "sidebar.searchToggle": "搜索会话",
   // Sidebar chrome (collapse toggle, settings entry in the bottom account row)
   "sidebar.collapse": "收起侧栏",
+  "sidebar.expand": "展开侧栏",
   "sidebar.settings": "设置",
   // Section header
   "sidebar.pinnedHeading": "置顶",

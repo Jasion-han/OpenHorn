@@ -3,7 +3,6 @@ import {
   CornerDownLeft,
   Globe,
   MessageSquare,
-  PanelLeft,
   Paperclip,
   ShieldOff,
   Sparkles,
@@ -14,7 +13,7 @@ import { fileKey } from "shared/format";
 import { Button, cn, Textarea } from "ui";
 import { DEFAULT_CONVERSATION_TITLE } from "../../lib/conversationTitle";
 import { getGlobalDefaultChannel } from "../../lib/defaultChannel";
-import { getChatLabel, getSidebarLabel } from "../../lib/i18n/agent";
+import { getChatLabel } from "../../lib/i18n/agent";
 import { notifyError } from "../../lib/notify";
 import { useAuthStore } from "../../stores/authStore";
 import { useChatStore } from "../../stores/chatStore";
@@ -57,8 +56,6 @@ export function DesktopWelcomeScreen() {
   const createConversation = useChatStore((state) => state.createConversation);
   const composerMode = useChatStore((state) => state.composerMode);
   const setComposerMode = useChatStore((state) => state.setComposerMode);
-  const sidebarCollapsed = useDesktopShellStore((state) => state.sidebarCollapsed);
-  const setSidebarCollapsed = useDesktopShellStore((state) => state.setSidebarCollapsed);
   const setPendingPrompt = useDesktopShellStore((state) => state.setPendingPrompt);
   const fullAccessEnabled = useDesktopShellStore((state) => state.fullAccessEnabled);
   const toggleFullAccess = useDesktopShellStore((state) => state.toggleFullAccess);
@@ -120,20 +117,6 @@ export function DesktopWelcomeScreen() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {sidebarCollapsed && (
-        <div className="px-1 pt-1">
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            className="titlebar-no-drag"
-            aria-label={getSidebarLabel("sidebar.collapse")}
-            onClick={() => setSidebarCollapsed(false)}
-          >
-            <PanelLeft size={18} />
-          </Button>
-        </div>
-      )}
-
       <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-6 pb-16">
         <div className="w-full max-w-[720px]">
           <div className="mb-7 flex flex-col items-center text-center">
