@@ -570,6 +570,8 @@ export const chatLabels = {
   "chat.welcome.suggestion1": "帮我总结这份文档的要点",
   "chat.welcome.suggestion2": "查一下今天值得关注的科技新闻",
   "chat.welcome.suggestion3": "读一下这个项目的代码，说说架构",
+  "chat.welcome.suggestion4": "把这段内容整理成一份清单",
+  "chat.welcome.suggestion5": "帮我起草一封邮件",
   "chat.welcome.noModel": "选择模型",
   "chat.welcome.startFailedTitle": "无法开始会话",
   "chat.welcome.startFailedBody": "创建会话失败，请稍后重试",

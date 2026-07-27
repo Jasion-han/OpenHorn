@@ -33,6 +33,8 @@ const DEFAULT_SUGGESTION_KEYS = [
   "chat.welcome.suggestion1",
   "chat.welcome.suggestion2",
   "chat.welcome.suggestion3",
+  "chat.welcome.suggestion4",
+  "chat.welcome.suggestion5",
 ] as const;
 
 const DEFAULT_SUGGESTIONS = DEFAULT_SUGGESTION_KEYS.map((key) => getChatLabel(key));

@@ -16,7 +16,12 @@ import { getSettingValues, setSettingValue } from "./settingsService";
 
 const SETTING_KEY = "welcome.suggestions";
 const TTL_MS = 12 * 60 * 60 * 1000;
-export const SUGGESTION_COUNT = 3;
+export const SUGGESTION_COUNT = 5;
+/**
+ * Ask for a few extra: the echo filter below removes anything restating a recent
+ * conversation, and without slack a couple of drops would leave the row short.
+ */
+const GENERATE_COUNT = SUGGESTION_COUNT + 2;
 /** Long enough to be a real task, short enough for one line in the UI. */
 const MAX_SUGGESTION_LENGTH = 24;
 /** How many recent titles describe "what this user works on". */
@@ -81,7 +86,7 @@ function parseModelOutput(content: string): string[] {
   for (const line of content.split(/\r?\n/)) {
     const item = normalizeSuggestion(line);
     if (item && !out.includes(item)) out.push(item);
-    if (out.length === SUGGESTION_COUNT) break;
+    if (out.length === GENERATE_COUNT) break;
   }
   return out;
 }
@@ -134,12 +139,12 @@ function buildPrompt(titles: string[]): string {
     "",
     titles.map((title) => `- ${title}`).join("\n"),
     "",
-    `请据此写 ${SUGGESTION_COUNT} 条他接下来可能想做的任务，作为新会话的输入建议。要求：`,
+    `请据此写 ${GENERATE_COUNT} 条他接下来可能想做的任务，作为新会话的输入建议。要求：`,
     "- 每条独立成行，不要编号、不要符号前缀、不要引号",
     `- 每条不超过 ${MAX_SUGGESTION_LENGTH} 个字，是一句可以直接发给助手的话`,
-    "- 三条之间方向不同，不要互相重复",
+    "- 每条方向都不同，不要互相重复",
     "- 不要复述上面已经出现过的标题，写他还没做过的下一步",
-    "- 只输出这三行，不要任何其他内容",
+    `- 只输出这 ${GENERATE_COUNT} 行，不要任何其他内容`,
   ].join("\n");
 }
 
@@ -156,7 +161,7 @@ async function tryChannel(userId: string, channelId: string, titles: string[]): 
   const response = await adapter.chat({
     model: resolved.modelId,
     messages: [{ role: "user", content: buildPrompt(titles) }],
-    maxTokens: 200,
+    maxTokens: 320,
   });
 
   return parseModelOutput(response.content ?? "");
@@ -199,7 +204,7 @@ export async function refreshWelcomeSuggestions(userId: string): Promise<string[
     // built-in defaults rather than storing something generic.
     if (titles.length === 0) return [];
 
-    const items = dropEchoes(await generate(userId, titles), titles);
+    const items = dropEchoes(await generate(userId, titles), titles).slice(0, SUGGESTION_COUNT);
     if (items.length === 0) return [];
 
     const payload: CachedSuggestions = { items, generatedAt: Date.now(), seed };
