@@ -91,6 +91,7 @@ export function DesktopWelcomeScreen() {
   const [starting, setStarting] = useState(false);
   const [suggestions, setSuggestions] = useState<string[]>(DEFAULT_SUGGESTIONS);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const user = useAuthStore((state) => state.user);
   const channels = useChatStore((state) => state.channels);
@@ -181,6 +182,18 @@ export function DesktopWelcomeScreen() {
     });
   };
 
+  // A suggestion is a starting point, not a command: it fills the box and hands
+  // the caret back so it can be edited before sending.
+  const applySuggestion = (text: string) => {
+    setDraft(text);
+    queueMicrotask(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(text.length, text.length);
+    });
+  };
+
   const canSubmit = (Boolean(draft.trim()) || attachments.length > 0) && !starting;
 
   return (
@@ -233,6 +246,7 @@ export function DesktopWelcomeScreen() {
             <div className="px-[15px] pb-2">
               <Textarea
                 autoFocus
+                ref={textareaRef}
                 value={draft}
                 rows={3}
                 disabled={starting}
@@ -354,7 +368,7 @@ export function DesktopWelcomeScreen() {
                 key={text}
                 type="button"
                 disabled={starting}
-                onClick={() => void start(text)}
+                onClick={() => applySuggestion(text)}
                 className="flex items-center gap-2.5 rounded-[10px] px-3 py-2 text-left text-sm text-foreground/70 transition-colors hover:bg-foreground/[0.04] hover:text-foreground disabled:pointer-events-none disabled:opacity-60"
               >
                 <MessageSquare className="size-3.5 shrink-0 text-muted-foreground" />
