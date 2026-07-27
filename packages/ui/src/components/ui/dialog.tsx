@@ -18,7 +18,10 @@ const DialogOverlay = React.forwardRef<
   <DialogPrimitive.Overlay
     ref={ref}
     className={cn(
-      "fixed inset-0 z-[100] bg-black/80 titlebar-no-drag data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
+      // Dimming alone cannot separate a near-black panel from a near-black page.
+      // Blurring what is behind it does: the backdrop loses its detail, so the
+      // dialog reads as the only in-focus surface and needs less brute contrast.
+      "fixed inset-0 z-[100] bg-black/60 backdrop-blur-[3px] titlebar-no-drag data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
       className,
     )}
     {...props}
@@ -35,7 +38,15 @@ const DialogContent = React.forwardRef<
     <DialogPrimitive.Content
       ref={ref}
       className={cn(
-        "fixed left-[50%] top-[50%] z-[100] grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-6 shadow-lg duration-200 titlebar-no-drag data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:rounded-lg",
+        // Edge and elevation come from one layered box-shadow instead of a
+        // border: a hairline ring, a top inset highlight so the panel catches
+        // light like a raised surface, and a wide soft drop shadow. In dark mode
+        // the surface also lifts off `background` — at the page's own colour it
+        // read as a hole rather than something floating above it.
+        "fixed left-[50%] top-[50%] z-[100] grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 bg-background p-6 duration-200 titlebar-no-drag",
+        "shadow-[0_0_0_1px_hsl(0_0%_0%/0.08),0_24px_48px_-12px_hsl(0_0%_0%/0.25)]",
+        "dark:bg-[hsl(0_0%_11%)] dark:shadow-[0_0_0_1px_hsl(0_0%_100%/0.12),inset_0_1px_0_0_hsl(0_0%_100%/0.07),0_40px_80px_-20px_hsl(0_0%_0%/0.9)]",
+        "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:rounded-lg",
         className,
       )}
       {...props}
