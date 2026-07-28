@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { charCount, pickPlaceholder, takeChars } from "./composerPlaceholder";
+import { charCount, pickPlaceholder, takeChars, tickMsFor } from "./composerPlaceholder";
 
 const POOL = ["a", "b", "c"];
 
@@ -26,6 +26,29 @@ describe("pickPlaceholder", () => {
       if (pickPlaceholder(POOL, "a") !== "a") differed += 1;
     }
     expect(differed > 0).toBe(true);
+  });
+});
+
+describe("tickMsFor", () => {
+  test("a narrow character takes half the time of a wide one", () => {
+    expect(tickMsFor("a", 42)).toBe(21);
+    expect(tickMsFor("描", 42)).toBe(42);
+  });
+
+  test("the two pools end up taking comparable wall time for a comparable width", () => {
+    // The whole point: a 12-character Chinese line and a 24-character English
+    // one are about the same width on screen, so they must animate for about
+    // the same duration. With a flat per-character delay the English one took
+    // twice as long and read as sluggish next to the other composer.
+    const cost = (text: string) =>
+      Array.from(text).reduce((sum, char) => sum + tickMsFor(char, 42), 0);
+    const chinese = "从一个粗糙的念头开始就行"; // 12 wide characters
+    expect(cost(chinese)).toBe(cost("a".repeat(charCount(chinese) * 2)));
+  });
+
+  test("punctuation and spaces count as narrow", () => {
+    expect(tickMsFor(" ", 42)).toBe(21);
+    expect(tickMsFor("?", 42)).toBe(21);
   });
 });
 
