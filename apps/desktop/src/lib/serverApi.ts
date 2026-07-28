@@ -57,6 +57,8 @@ export interface ServerApi {
       assistantContent: string;
       model?: string;
       agentRun?: unknown;
+      /** Token counts for the turn. Absent when the runtime did not report them. */
+      usage?: { promptTokens: number; completionTokens: number; totalTokens: number };
       // Local-run attachments never reach the server as files; this metadata is
       // stored so the user's bubble keeps its attachment chips across reloads.
       attachmentsMeta?: Array<{ fileName: string; fileType?: string; fileSize?: number }>;

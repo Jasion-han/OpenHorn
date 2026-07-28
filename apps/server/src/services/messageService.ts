@@ -1506,6 +1506,12 @@ export async function syncSidecarMessages(
     model?: string;
     mode?: string;
     agentRun?: unknown;
+    /**
+     * Token counts for the turn. Optional throughout: not every runtime reports
+     * them, and an older desktop build won't send them at all — so a missing
+     * value means "not reported", never "zero".
+     */
+    usage?: { promptTokens: number; completionTokens: number; totalTokens: number };
     // Metadata-only attachment info for local (sidecar) runs — see
     // insertSidecarAttachmentMeta. When provided on an in-place update, it
     // replaces the user message's existing attachment rows.
@@ -1550,6 +1556,9 @@ export async function syncSidecarMessages(
           content: input.assistantContent,
           model: input.model || null,
           agentRun: input.agentRun ? JSON.stringify(input.agentRun) : null,
+          // Regenerate re-runs the turn, so the previous count is stale — clear
+          // it when the new run reported nothing rather than leaving the old one.
+          usage: input.usage ? JSON.stringify(input.usage) : null,
           liveMetadata: null,
           citations: null,
           updatedAt: new Date(),
@@ -1604,6 +1613,7 @@ export async function syncSidecarMessages(
     mode: input.mode || "agent",
     attachments: null,
     agentRun: input.agentRun ? JSON.stringify(input.agentRun) : null,
+    usage: input.usage ? JSON.stringify(input.usage) : null,
     liveMetadata: null,
     citations: null,
     createdAt: new Date(now.getTime() + 1),

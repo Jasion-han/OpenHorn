@@ -223,7 +223,12 @@ messages.post("/sync-sidecar", async (c) => {
     if (!body?.conversationId || !body?.userContent) {
       return c.json({ error: "conversationId and userContent are required" }, 400);
     }
-    const result = await syncSidecarMessages(user.id, body);
+    // Same coercion as chat-complete: the client forwards whatever the runtime
+    // reported, so the shape is validated here rather than trusted.
+    const result = await syncSidecarMessages(user.id, {
+      ...body,
+      usage: parseUsagePayload(body.usage),
+    });
     return c.json(result);
   } catch (error) {
     return c.json({ error: error instanceof Error ? error.message : "Failed to sync" }, 400);

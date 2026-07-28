@@ -203,6 +203,13 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
     // run keeps the user's message — and its failure state — in the DB. Idempotent
     // via shouldPersist, which also blocks a disowned run (regenerate started a
     // newer run for this message) from overwriting the new run's result.
+    // Token counts for the turn. The SDK reports them once, on its terminal
+    // `result` message, so they land here shortly before `done` — captured in
+    // the run closure rather than in the store because their only consumer is
+    // the persistence call below.
+    let runUsage: { promptTokens: number; completionTokens: number; totalTokens: number } | null =
+      null;
+
     const persistOnce = async (assistantContent: string, agentRun: unknown, model: string) => {
       if (!shouldPersist()) return;
       // Reconciliation below may rename the optimistic id to the persisted one,
@@ -222,6 +229,7 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
           assistantContent,
           model,
           agentRun: agentRun ?? undefined,
+          usage: runUsage ?? undefined,
           attachmentsMeta: input.attachmentsMeta,
           ...(updateInPlace
             ? {
@@ -403,6 +411,19 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
                 type: "delta",
                 content: event.content,
               });
+              return;
+            }
+            // Held for persistence rather than rendered: the bubble shows the
+            // token count only after the row is saved, from the stored value.
+            if (event.type === "execution_event" && event.eventType === "usage") {
+              const meta = event.metadata as Record<string, unknown> | undefined;
+              if (meta) {
+                runUsage = {
+                  promptTokens: Number(meta.promptTokens) || 0,
+                  completionTokens: Number(meta.completionTokens) || 0,
+                  totalTokens: Number(meta.totalTokens) || 0,
+                };
+              }
               return;
             }
             if (

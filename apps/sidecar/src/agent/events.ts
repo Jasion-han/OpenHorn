@@ -84,8 +84,43 @@ export function convertSdkEvent(message: SdkMessage): AgentEvent | AgentEvent[] 
   }
 
   if (message.type === "result") {
-    return null;
+    return convertResultUsage(message);
   }
 
   return null;
+}
+
+function toCount(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+/**
+ * Token counts for the whole agent turn, carried on the SDK's terminal `result`
+ * message.
+ *
+ * `promptTokens` sums the cached buckets alongside `input_tokens`. Anthropic
+ * reports cache reads/writes separately and `input_tokens` counts only what was
+ * NOT served from cache — for an agent loop, where every step resends the whole
+ * transcript, that field alone reports a small fraction of what the turn
+ * actually processed. The panel is there to show the size of the turn, so it
+ * gets the full input.
+ */
+export function convertResultUsage(message: SdkMessage): AgentEvent | null {
+  const usage = message.usage;
+  if (!usage || typeof usage !== "object") return null;
+  const raw = usage as Record<string, unknown>;
+
+  const promptTokens =
+    toCount(raw.input_tokens) +
+    toCount(raw.cache_creation_input_tokens) +
+    toCount(raw.cache_read_input_tokens);
+  const completionTokens = toCount(raw.output_tokens);
+  if (promptTokens === 0 && completionTokens === 0) return null;
+
+  return {
+    type: "usage",
+    promptTokens,
+    completionTokens,
+    totalTokens: promptTokens + completionTokens,
+  };
 }
