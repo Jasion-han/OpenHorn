@@ -1,4 +1,47 @@
 /**
+ * The one placeholder pool, shared by the welcome screen and the composer.
+ * They are the same control in two places: two pools would drift in voice,
+ * and a user who saw one style on arrival and another a moment later would
+ * read it as two different products.
+ *
+ * English on purpose. Mixing it with the Chinese chrome around it reads as an
+ * untranslated string rather than as a choice, so the copy commits to one
+ * language throughout — deliberately, not by omission.
+ */
+export const COMPOSER_PLACEHOLDERS = [
+  "Start with a spark — I will shape the rest.",
+  "What should we build, refine, or rethink today?",
+  "Drop a thought. I will turn it into something real.",
+  "Give me a direction, I will find the path.",
+  "Ask anything. Then push it one level deeper.",
+  "Sketch the idea. I will fill in the lines.",
+  "Let us turn a question into a plan.",
+  "Pitch the headline. I will write the story.",
+  "Take the blank page. I will bring the motion.",
+  "Name the problem. I will cut through it.",
+  "Start messy. End elegant.",
+  "One prompt away from clarity.",
+  "Tell me the goal, I will map the route.",
+  "What would you love to ship this week?",
+  "Let us turn curiosity into momentum.",
+  "If you can imagine it, we can draft it.",
+  "Give me the vibe. I will deliver the words.",
+  "Turn a rough idea into a sharp answer.",
+  "Ask for bold. I will keep it grounded.",
+  "What do you wish existed right now?",
+  "We can brainstorm or go straight to done.",
+  "Write less. Say more.",
+  "A single line can unlock the whole plan.",
+  "Let us design the next move.",
+  "Bring the question. Leave with the output.",
+  "Make it clear, make it quick, make it real.",
+  "Want a first draft that actually works?",
+  "Turn complexity into clean steps.",
+  "Take a breath — then type the dream.",
+  "If it matters, put it here.",
+] as const;
+
+/**
  * Picks a placeholder at random from `pool`, preferring one different from
  * `avoid` so two consecutive draws rarely look like nothing changed.
  *

@@ -16,6 +16,7 @@ import { useSidecarAgentRun } from "../../hooks/useSidecarAgentRun";
 import { filesToAttachmentParts } from "../../lib/attachmentParts";
 import { uploadAttachments } from "../../lib/attachments";
 import { getDesktopBackendBase } from "../../lib/backendBase";
+import { COMPOSER_PLACEHOLDERS } from "../../lib/composerPlaceholder";
 import { isDefaultConversationTitle } from "../../lib/conversationTitle";
 import { getEffectiveModelForConversation } from "../../lib/effectiveModel";
 import { getChatLabel, getSlashLabel } from "../../lib/i18n/agent";
@@ -47,38 +48,6 @@ import { DesktopWelcomeScreen } from "./DesktopWelcomeScreen";
 
 const PAGE_PAD = "16px";
 const COMPOSER_PAD_BOTTOM = "env(safe-area-inset-bottom, 0px)";
-const PLACEHOLDERS = [
-  "Start with a spark — I will shape the rest.",
-  "What should we build, refine, or rethink today?",
-  "Drop a thought. I will turn it into something real.",
-  "Give me a direction, I will find the path.",
-  "Ask anything. Then push it one level deeper.",
-  "Sketch the idea. I will fill in the lines.",
-  "Let us turn a question into a plan.",
-  "Pitch the headline. I will write the story.",
-  "Take the blank page. I will bring the motion.",
-  "Name the problem. I will cut through it.",
-  "Start messy. End elegant.",
-  "One prompt away from clarity.",
-  "Tell me the goal, I will map the route.",
-  "What would you love to ship this week?",
-  "Let us turn curiosity into momentum.",
-  "If you can imagine it, we can draft it.",
-  "Give me the vibe. I will deliver the words.",
-  "Turn a rough idea into a sharp answer.",
-  "Ask for bold. I will keep it grounded.",
-  "What do you wish existed right now?",
-  "We can brainstorm or go straight to done.",
-  "Write less. Say more.",
-  "A single line can unlock the whole plan.",
-  "Let us design the next move.",
-  "Bring the question. Leave with the output.",
-  "Make it clear, make it quick, make it real.",
-  "Want a first draft that actually works?",
-  "Turn complexity into clean steps.",
-  "Take a breath — then type the dream.",
-  "If it matters, put it here.",
-];
 
 type DesktopSearchStatus = {
   configured: boolean;
@@ -1621,7 +1590,7 @@ export function DesktopChatArea() {
           onSlashSelect={handleSlashSelect}
           onSlashHover={setSlashIndex}
           onSlashClose={() => setSlashOpen(false)}
-          placeholderPool={PLACEHOLDERS}
+          placeholderPool={COMPOSER_PLACEHOLDERS}
           placeholderResetKey={currentConversation?.id ?? null}
           attachments={pendingAttachments}
           disabled={isUploading}
