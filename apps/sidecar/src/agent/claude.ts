@@ -1,5 +1,6 @@
 import path from "node:path";
 import type { CanUseTool, HookCallbackMatcher } from "@anthropic-ai/claude-agent-sdk";
+import embeddedCliPath from "@anthropic-ai/claude-agent-sdk/embed";
 import type { AttachmentPart } from "shared/types";
 import { modelSupportsVision } from "shared/vision";
 import { type CheckpointSession, ensureCheckpointBackup, finalizeCheckpoint } from "../checkpoints";
@@ -162,7 +163,21 @@ export function buildNetworkAllowedDomains(baseUrl: string | undefined): string[
   return Array.from(new Set([userHost ?? DEFAULT_ANTHROPIC_HOST, DEFAULT_ANTHROPIC_HOST]));
 }
 
+/**
+ * The Claude Code CLI the SDK spawns. Prefer the one the SDK ships over
+ * whatever happens to be on PATH: it is the build the SDK was tested against,
+ * and its version is what decides how much of the prompt the tool schemas eat.
+ * A 2.1.x CLI defers only built-in tools; the SDK's own 2.2.0 defers MCP
+ * schemas too, which is the difference between 9,827 and 2,233 prompt tokens
+ * for a one-line question with six MCP servers enabled.
+ *
+ * `@anthropic-ai/claude-agent-sdk/embed` is the SDK's answer for compiled Bun
+ * binaries: the bundler embeds cli.js into $bunfs and the import extracts it to
+ * a temp dir, since a child process can't read the parent's $bunfs. PATH stays
+ * as the fallback so a missing embed degrades instead of killing the run.
+ */
 async function findClaudeBinary(): Promise<string> {
+  if (embeddedCliPath) return embeddedCliPath;
   const { execSync } = await import("node:child_process");
   try {
     return execSync("which claude", { timeout: 5000 }).toString().trim();
@@ -254,8 +269,19 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
     .filter(Boolean)
     .join("\n\n");
 
-  // Build tools list, conditionally including web tools
-  const sdkTools: string[] = ["Read", "Grep", "Glob", "Write", "Edit", "Bash"];
+  // Build tools list, conditionally including web tools.
+  //
+  // `ToolSearch` is Claude Code's deferred tool loading: with it present, tool
+  // schemas (built-in AND every MCP server's) stay out of the prompt prefix and
+  // are pulled in on demand. `tools` is an allowlist, so leaving it out is what
+  // forced every MCP schema into every request — measured at 20,118 prompt
+  // tokens for a one-line question with 6 MCP servers enabled, versus 2,243
+  // with it. Because schemas are re-sent on every agent-loop iteration, the
+  // saving compounds on tool-using turns (40,428 -> 7,853 for a single fetch).
+  // Claude Code turns itself off when the model can't do tool_reference blocks
+  // or when ANTHROPIC_BASE_URL is a non-first-party host, and binaries too old
+  // to know the name ignore it, so it degrades to today's behavior on its own.
+  const sdkTools: string[] = ["Read", "Grep", "Glob", "Write", "Edit", "Bash", "ToolSearch"];
   if (input.webSearchEnabled !== false) {
     sdkTools.push("WebFetch", "WebSearch");
   }
