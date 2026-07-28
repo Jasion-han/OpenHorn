@@ -313,10 +313,37 @@
 .root table {
   display: block;
   width: 100%;
-  margin: 0.5em 0;
+  /* Wider bottom margin than top: a table that overflows puts its scrollbar
+     inside this box, and at 0.5em the bar sat right on top of the next
+     paragraph. */
+  margin: 0.5em 0 1.15em;
   overflow-x: auto;
   border-collapse: collapse;
   font-size: 0.9em;
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--muted-foreground) / 0.28) transparent;
+}
+
+/* Matches the code block's scrollbar (see .codeScroll) instead of leaving the
+   platform default, which renders as a heavy opaque bar. */
+.root table::-webkit-scrollbar {
+  height: 8px;
+}
+
+.root table::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.root table::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted-foreground) / 0.24);
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+}
+
+.root table::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.38);
+  background-clip: padding-box;
 }
 
 .root thead tr {
