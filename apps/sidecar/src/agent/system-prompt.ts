@@ -22,6 +22,13 @@ export function buildAgentSystemPrompt(opts?: {
   cwd?: string;
   /** Active permission posture, so the model knows when it may act vs must ask. */
   permissionMode?: "default" | "full-access";
+  /**
+   * Whether this runtime actually registered a page-fetching tool. The
+   * "read the links the user gave you" rule is only injected when it is true —
+   * telling a model to fetch when it has no fetch tool invites it to claim it
+   * read a page it never opened.
+   */
+  webFetchAvailable?: boolean;
   /** Extra runtime-specific lines appended after the shared rules. */
   extra?: string;
 }): string {
@@ -68,6 +75,15 @@ export function buildAgentSystemPrompt(opts?: {
     "- Do not fabricate. If you don't know or couldn't confirm, say so plainly instead of inventing facts, file contents, command output, links, dates, or `file:line` references.",
     "",
     "# Web search & freshness",
+    opts?.webFetchAvailable
+      ? "- When the user's message contains a URL, open and read it before answering. A link the user took the trouble to paste is part of the question, not decoration — answering from the domain name, the URL slug, or what you remember about that page is a failure even when your general knowledge is right. Let what you actually read correct you where it disagrees with what you would have said."
+      : null,
+    opts?.webFetchAvailable
+      ? "- Fetch EVERY URL in the message — count them first, then make sure that many were fetched. You may not sample, pick the ones that look most authoritative, or drop one as redundant; a forum thread or issue comment is often exactly the context the user is missing. If your fetch tool caps how many URLs one call takes, call it again until all of them are covered."
+      : null,
+    opts?.webFetchAvailable
+      ? "- Skip a link only if the user told you not to open it. If a fetch fails or returns nothing usable, name that link and answer without it. Never state or imply you read a page you did not fetch — if you say \"based on the three links\", exactly three must have come back from your tools; otherwise say which ones you actually read."
+      : null,
     '- Search results are ranked by relevance, NOT by date. For recent / latest / "today\'s" requests, open the actual sources with a fetch tool and read each item\'s real publish date before including it.',
     "- Always show each item's real publish date and a real source link. Never present older content as if it were published today; if you cannot confirm a date, drop the item or flag it as undated. Lead with the freshest authoritative sources.",
     "",

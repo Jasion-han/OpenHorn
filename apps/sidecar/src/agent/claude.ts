@@ -243,6 +243,9 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
     buildAgentSystemPrompt({
       cwd: input.cwd,
       permissionMode: input.permissionMode ?? "full-access",
+      // Mirrors the `sdkTools` condition below, which is what actually decides
+      // whether WebFetch exists for this run.
+      webFetchAvailable: input.webSearchEnabled !== false,
       extra: buildSkillsPromptSection(input.skills ?? [], "Read"),
     }),
     input.systemPrompt,

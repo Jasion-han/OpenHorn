@@ -881,6 +881,8 @@ export async function runDirectAgent(input: RunDirectAgentInput): Promise<void> 
     buildAgentSystemPrompt({
       cwd: input.cwd,
       permissionMode: input.permissionMode,
+      // Same condition `buildTools` uses to register `web_fetch`.
+      webFetchAvailable: input.webSearchEnabled !== false,
       extra: buildSkillsPromptSection(input.skills ?? [], "read_file"),
     }),
     input.systemPrompt,
