@@ -15,6 +15,15 @@ describe("extractToolUrls", () => {
     expect(extractToolUrls({ url: " https://a.example " })).toEqual(["https://a.example"]);
   });
 
+  test("accepts `urls` given as a bare string, which models actually send", () => {
+    // Seen in the run history: `tavily_extract` declares `urls` as an array, but
+    // a call fetching one page passed the URL directly. Tool arguments are
+    // model-generated, so the declared shape is a convention, not a guarantee.
+    expect(extractToolUrls({ urls: "https://code.claude.com/docs" })).toEqual([
+      "https://code.claude.com/docs",
+    ]);
+  });
+
   test("drops blanks and non-strings", () => {
     expect(extractToolUrls({ urls: ["https://a.example", "   ", 42, null] })).toEqual([
       "https://a.example",

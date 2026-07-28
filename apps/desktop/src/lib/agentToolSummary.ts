@@ -10,20 +10,28 @@
  * panel's 3-line clamp shows them in full rather than truncating one string.
  */
 /**
- * The pages a tool call targets, in order. `urls` (array) and `url` (string) are
- * the two shapes in use — MCP fetchers take a batch, built-in ones take one.
- * The run panel renders one row per URL, so this returns a list rather than a
- * joined string: three URLs crammed into one wrapped paragraph is unreadable,
- * and the panel's clamp would cut mid-URL.
+ * The pages a tool call targets, in order. The run panel renders one row per
+ * URL, so this returns a list rather than a joined string: several URLs crammed
+ * into one wrapped paragraph is unreadable, and the panel's clamp would cut
+ * mid-URL.
+ *
+ * Three shapes occur in practice. `url` is the single-page form (`web_fetch`,
+ * `WebFetch` — their schemas take exactly one). `urls` is the batch form
+ * (`tavily_extract`). And `urls` ALSO arrives as a bare string: the parameter is
+ * declared as an array, but a model asked to fetch one page has been seen
+ * passing the URL directly. Tool arguments are model-generated, so the shape is
+ * a convention rather than a guarantee — accept both.
  */
 export function extractToolUrls(toolInput: unknown): string[] {
   if (!toolInput || typeof toolInput !== "object") return [];
   const input = toolInput as Record<string, unknown>;
   const raw = Array.isArray(input.urls)
     ? input.urls
-    : typeof input.url === "string"
-      ? [input.url]
-      : [];
+    : typeof input.urls === "string"
+      ? [input.urls]
+      : typeof input.url === "string"
+        ? [input.url]
+        : [];
   return raw
     .filter((item): item is string => typeof item === "string")
     .map((url) => url.trim())
