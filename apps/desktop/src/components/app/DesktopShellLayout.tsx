@@ -54,9 +54,6 @@ export function DesktopShellLayout({
           half lives inside the sidebar and is reachable everywhere, so an expand
           button owned by individual views left whichever view lacked one
           (settings) with no way back.
-
-          Top padding stays a class so the overlay-title-bar rule can zero it; an
-          inline style would win over the stylesheet.
         */}
         {sidebarCollapsed && (
           <div
@@ -76,14 +73,18 @@ export function DesktopShellLayout({
           </div>
         )}
 
-        <div
-          className={cn("min-h-0 flex-1 overflow-hidden", isCompact ? "p-4" : "p-2")}
-          style={
-            sidebarCollapsed
-              ? undefined
-              : { paddingTop: "calc(0.5rem + env(safe-area-inset-top, 0px))" }
-          }
-        >
+        {/*
+          The traffic lights sit over the sidebar, so the sidebar was the only
+          thing reserving a draggable strip. With it expanded the entire right
+          half of the window had no drag region at all — the window could only
+          be moved by that one top-left corner. This is the right pane's half of
+          the same band. No traffic-light inset here (they are over the sidebar),
+          and it lines the content up with the collapsed state, which already
+          reserved the same 32px above its content.
+        */}
+        {!sidebarCollapsed && <div data-tauri-drag-region className="h-8 shrink-0" />}
+
+        <div className={cn("min-h-0 flex-1 overflow-hidden", isCompact ? "p-4" : "p-2")}>
           <div
             className={cn(
               "h-full min-h-0 min-w-0 w-full overflow-x-hidden",
