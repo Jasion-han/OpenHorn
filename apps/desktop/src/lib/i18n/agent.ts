@@ -601,12 +601,24 @@ export const chatLabels = {
   "chat.runtime.executing": "本地 Agent 正在执行...",
   // Composer mode toggle disabled fallback (DesktopComposer)
   "chat.composer.modeUnavailable": "当前不可用",
+  // Agent run panel: one batched fetch call that targeted several pages. The
+  // count is the headline — "did it read all of my links" is what a reader of
+  // this panel is checking — with the URLs listed underneath it.
+  "chat.agent.fetchTargets": "{count} 个链接",
 } as const;
 
 type ChatLabelKey = keyof typeof chatLabels;
 
 export function getChatLabel(key: ChatLabelKey): string {
   return chatLabels[key];
+}
+
+export function formatChatLabel(key: ChatLabelKey, vars: Record<string, string | number>): string {
+  let text: string = chatLabels[key];
+  for (const [name, value] of Object.entries(vars)) {
+    text = text.replaceAll(`{${name}}`, String(value));
+  }
+  return text;
 }
 
 /**

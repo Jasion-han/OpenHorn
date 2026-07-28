@@ -1,4 +1,6 @@
 import { cn } from "ui";
+import { extractToolUrls, summarizeToolInput } from "../../lib/agentToolSummary";
+import { formatChatLabel } from "../../lib/i18n/agent";
 import type { ApiAgentRun } from "../../types/chat";
 import { DesktopAgentTaskMetaLine } from "./DesktopAgentTaskMetaLine";
 import { InlineClampStep } from "./DesktopInlineClampStep";
@@ -54,45 +56,6 @@ export function AgentRunPanel({
     if (normalized.includes("write")) return "Write";
     if (normalized.includes("browser")) return "Browser";
     return normalized.charAt(0).toUpperCase() + normalized.slice(1);
-  };
-
-  const summarizeToolInput = (toolInput: unknown) => {
-    if (!toolInput || typeof toolInput !== "object") return null;
-    const input = toolInput as Record<string, unknown>;
-    const query =
-      typeof input.query === "string"
-        ? input.query
-        : typeof input.q === "string"
-          ? input.q
-          : typeof input.search_query === "string"
-            ? input.search_query
-            : null;
-    if (query?.trim()) return query.trim();
-
-    const command =
-      typeof input.command === "string"
-        ? input.command
-        : typeof input.cmd === "string"
-          ? input.cmd
-          : null;
-    if (command?.trim()) return command.trim();
-
-    const path =
-      typeof input.path === "string"
-        ? input.path
-        : typeof input.file_path === "string"
-          ? input.file_path
-          : null;
-    if (path?.trim()) return path.trim();
-
-    const url = typeof input.url === "string" ? input.url : null;
-    if (url?.trim()) return url.trim();
-
-    try {
-      return JSON.stringify(toolInput);
-    } catch {
-      return null;
-    }
   };
 
   const summarizeToolResult = (content: string | null | undefined) => {
@@ -213,6 +176,38 @@ export function AgentRunPanel({
                 : step.content?.trim() || summarizeToolInput(step.toolInput);
 
           if (step.type === "tool_result" && !detail) return null;
+
+          // A batched fetch (`urls: [...]`) is ONE call against several pages, so
+          // it renders as one node with the pages nested under it. Listing the
+          // URLs as sibling rows read as three separate calls; running them
+          // together into one wrapped paragraph read as URL soup. The count goes
+          // in the header because "did it open all of my links" is the question
+          // this panel exists to answer.
+          if (step.type === "tool_start") {
+            const urls = extractToolUrls(step.toolInput);
+            if (urls.length > 1) {
+              return (
+                <div key={stepKey}>
+                  <InlineClampStep
+                    label={label || "Tool"}
+                    detail={formatChatLabel("chat.agent.fetchTargets", { count: urls.length })}
+                    isResult={false}
+                    tone="default"
+                    maxLines={3}
+                  />
+                  <div className="flex flex-col gap-0.5 pb-1 pl-6 text-sm leading-6">
+                    {urls.map((url) => (
+                      // `break-all`: a long URL must stay readable in full rather
+                      // than be cut — these are what the reader is verifying.
+                      <span key={url} className="break-all text-foreground opacity-32">
+                        {url}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              );
+            }
+          }
 
           if (step.type === "tool_start" || step.type === "tool_result") {
             return (
