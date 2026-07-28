@@ -1,0 +1,6 @@
+[test]
+# Runs before any test file, which is what makes it possible to redirect
+# DATABASE_URL away from the real development database — db/index.ts reads the
+# variable at module scope, so nothing set from inside a test file is early
+# enough. See src/test-setup.ts.
+preload = ["./src/test-setup.ts"]
