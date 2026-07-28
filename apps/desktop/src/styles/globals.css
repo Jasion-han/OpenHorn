@@ -11,6 +11,17 @@ html,
 body,
 #root {
   height: 100%;
+  /* The app fills the window and scrolls only inside its own panes, so the
+     document itself never has anything to scroll. WKWebView still rubber-bands
+     it when a scroll gesture continues past the top of an inner container —
+     which slid the whole UI down and exposed the window background. */
+  overscroll-behavior: none;
+}
+
+/* Keeps a scroll that reaches the end of a pane from chaining up to the
+   document, which is what triggers the bounce in the first place. */
+body {
+  overflow: hidden;
 }
 
 @layer base {
