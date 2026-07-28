@@ -64,7 +64,9 @@ describe("buildSkillsPromptSection", () => {
     expect(claudeSection?.includes("SKILL.md:")).toBe(true);
     expect(claudeSection?.includes("PDF Tool")).toBe(true);
     expect(claudeSection?.includes("`Read`")).toBe(true);
-    expect(claudeSection?.includes("Folder:")).toBe(true);
+    // The folder is the SKILL.md path minus the filename, so it is not spelled
+    // out a second time — that duplicated every absolute path in the prompt.
+    expect(claudeSection?.includes("Folder:")).toBe(false);
 
     const directSection = buildSkillsPromptSection(materialized, "read_file");
     expect(directSection?.includes("`read_file`")).toBe(true);

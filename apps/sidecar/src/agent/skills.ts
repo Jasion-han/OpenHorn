@@ -115,16 +115,18 @@ export function buildSkillsPromptSection(
     "How to use skills:",
     "- Treat each skill's description as its trigger. Before starting a task, check it against the skills below; a skill applies whenever the request falls within what its description covers.",
     `- When a skill applies, FIRST open its SKILL.md with the \`${readTool}\` tool and read it in full, THEN do the task by following those instructions. For that task they are authoritative — they take precedence over your default approach.`,
-    "- A SKILL.md may reference other files (templates, references, scripts). Those live in the same folder as the SKILL.md (see each skill's Folder path below). Open or run them with your file and shell tools only when its instructions tell you to — don't read them eagerly.",
+    "- A SKILL.md may reference other files (templates, references, scripts). Those live in the same folder as that skill's SKILL.md. Open or run them with your file and shell tools only when its instructions tell you to — don't read them eagerly.",
     "- If more than one skill could apply, pick the most specific. If none apply, just proceed normally.",
     "- Never announce, mention, or explain that you are using a skill, and don't ask permission to load one — silently read it and do the work.",
     "",
     "Available skills:",
   ];
+  // Only the SKILL.md path — the folder is that path minus the filename, so a
+  // separate `Folder:` line spent a second copy of every absolute path for
+  // nothing. At ~34 skills that was ~700 prompt tokens, re-sent on every turn.
   for (const skill of materialized) {
     lines.push(`- ${skill.name} — ${skill.description || "(no description provided)"}`);
     lines.push(`  SKILL.md: ${skill.skillMdPath}`);
-    lines.push(`  Folder: ${skill.skillDir}`);
   }
   return lines.join("\n");
 }
