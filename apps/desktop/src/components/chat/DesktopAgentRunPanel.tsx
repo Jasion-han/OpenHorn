@@ -51,6 +51,9 @@ export function AgentRunPanel({
     if (normalized.includes("bash") || normalized.includes("terminal") || normalized === "shell") {
       return "Bash";
     }
+    // Claude Code's deferred-tool lookup, not a web search. Must beat the
+    // fuzzy `includes("search")` below or it shows up as "Search".
+    if (normalized === "toolsearch") return "Tool lookup";
     if (normalized.includes("search")) return "Search";
     if (normalized.includes("fetch")) return "Fetch";
     if (normalized.includes("read")) return "Read";
