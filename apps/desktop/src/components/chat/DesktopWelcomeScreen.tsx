@@ -18,6 +18,7 @@ import { DEFAULT_CONVERSATION_TITLE } from "../../lib/conversationTitle";
 import { getGlobalDefaultChannel } from "../../lib/defaultChannel";
 import { getChatLabel } from "../../lib/i18n/agent";
 import { notifyError } from "../../lib/notify";
+import { welcomeTitleKeyFor } from "../../lib/welcomeHero";
 import { useAuthStore } from "../../stores/authStore";
 import { useChatStore } from "../../stores/chatStore";
 import { useDesktopShellStore } from "../../stores/desktopShellStore";
@@ -257,8 +258,8 @@ export function DesktopWelcomeScreen() {
             </div>
             <h1 className="text-[28px] font-semibold leading-tight tracking-tight">
               {user?.username
-                ? `${user.username}，${getChatLabel("chat.welcome.title")}`
-                : getChatLabel("chat.welcome.title")}
+                ? `${user.username}，${getChatLabel(welcomeTitleKeyFor(new Date().getHours()))}`
+                : getChatLabel(welcomeTitleKeyFor(new Date().getHours()))}
             </h1>
             <p className="mt-2 text-sm text-muted-foreground">
               {getChatLabel("chat.welcome.subtitle")}

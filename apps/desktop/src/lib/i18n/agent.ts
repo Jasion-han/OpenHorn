@@ -564,8 +564,20 @@ export const chatLabels = {
   "chat.search.disabledBody": "在设置中启用 Tavily 搜索后，系统才会在需要最新信息时联网。",
   // Welcome screen (DesktopWelcomeScreen) — shown when no conversation is selected.
   // "Chat"/"Agent" stay English to match the composer's mode chip.
-  "chat.welcome.title": "今天想做点什么？",
-  "chat.welcome.subtitle": "输入你的问题，我会为你新建一个会话",
+  // Hero copy. Four lines rather than one because a blank screen at 2am is not
+  // the same room as a blank screen at 10am, and saying so is what keeps the
+  // line from being read once and then skipped forever. Each is a short image
+  // followed by a clause that exhales — the trailing beat is what makes it read
+  // as relaxed instead of as an announcement. The name is prefixed by the
+  // caller, so these start mid-sentence.
+  "chat.welcome.title.lateNight": "夜深了，正是安静的时候。",
+  "chat.welcome.title.morning": "天刚亮，今天还空着。",
+  "chat.welcome.title.afternoon": "午后很长，不必着急。",
+  "chat.welcome.title.evening": "夜色落下来了，时间还早。",
+  // An invitation, not an instruction. The previous line ("输入你的问题，我会为你
+  // 新建一个会话") spent itself explaining that a conversation record gets
+  // created — plumbing the reader has no stake in.
+  "chat.welcome.subtitle": "一句话就够，写得糙也没关系",
   // The input placeholder is drawn from this pool and re-drawn every time the
   // empty box is focused, mirroring the in-conversation composer.
   "chat.welcome.placeholder1": "描述你的任务，回车开始",
