@@ -61,5 +61,12 @@ apps/desktop/src-tauri/binaries/
 
 # AI framework generated files
 AGENTS.md
-skills/
+# skills/ 下混着两类东西：外部同步来的 skill（`skills-lock.json` 登记，实际是
+# 指向已被忽略的 .agents/ 的符号链接）和手写的项目文档 skills/openhorn/。原来
+# 一条 `skills/` 把两类一起排除，导致 CLAUDE.md 当正式文档引用的 openhorn/ 从
+# 未入库——换台机器 clone 下来那些引用全是死链。
+# 必须写 `skills/*` 而不是 `skills/`：git 不允许在父目录已被排除的情况下重新
+# 包含子项，写成 `skills/` 会让下面这条 `!` 完全失效。
+skills/*
+!skills/openhorn/
 skills-lock.json
