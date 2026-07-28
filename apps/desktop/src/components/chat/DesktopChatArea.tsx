@@ -16,7 +16,6 @@ import { useSidecarAgentRun } from "../../hooks/useSidecarAgentRun";
 import { filesToAttachmentParts } from "../../lib/attachmentParts";
 import { uploadAttachments } from "../../lib/attachments";
 import { getDesktopBackendBase } from "../../lib/backendBase";
-import { pickPlaceholder as pickFromPool } from "../../lib/composerPlaceholder";
 import { isDefaultConversationTitle } from "../../lib/conversationTitle";
 import { getEffectiveModelForConversation } from "../../lib/effectiveModel";
 import { getChatLabel, getSlashLabel } from "../../lib/i18n/agent";
@@ -85,8 +84,6 @@ type DesktopSearchStatus = {
   configured: boolean;
   source: "user" | "server" | "none" | "disabled";
 };
-
-const pickPlaceholder = (avoid?: string) => pickFromPool(PLACEHOLDERS, avoid);
 
 async function fetchDesktopSearchStatus(): Promise<DesktopSearchStatus> {
   const response = await fetch(`${getDesktopBackendBase()}/settings/search-status`, {
@@ -188,7 +185,6 @@ export function DesktopChatArea() {
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [pendingAttachments, setPendingAttachments] = useState<File[]>([]);
   const [isUploading, setIsUploading] = useState(false);
-  const [placeholder, setPlaceholder] = useState(() => pickPlaceholder());
   const viewportRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const pendingPreviewUrlsRef = useRef<Map<string, string[]>>(new Map());
@@ -429,12 +425,6 @@ export function DesktopChatArea() {
   }, [currentConversation?.id, slashOpen]);
 
   useEffect(() => {
-    if (!input.trim()) {
-      setPlaceholder((prev) => pickPlaceholder(prev));
-    }
-  }, [currentConversation?.id, input]);
-
-  useEffect(() => {
     return () => {
       for (const urls of pendingPreviewUrlsRef.current.values()) {
         for (const url of urls) {
@@ -546,12 +536,6 @@ export function DesktopChatArea() {
 
     if (terminalEvent) {
       applyStreamEvent(messageId, terminalEvent);
-    }
-  };
-
-  const handleInputFocus = () => {
-    if (!input.trim()) {
-      setPlaceholder((prev) => pickPlaceholder(prev));
     }
   };
 
@@ -1637,7 +1621,8 @@ export function DesktopChatArea() {
           onSlashSelect={handleSlashSelect}
           onSlashHover={setSlashIndex}
           onSlashClose={() => setSlashOpen(false)}
-          placeholder={placeholder}
+          placeholderPool={PLACEHOLDERS}
+          placeholderResetKey={currentConversation?.id ?? null}
           attachments={pendingAttachments}
           disabled={isUploading}
           onAddAttachments={handleAddAttachments}
@@ -1670,7 +1655,6 @@ export function DesktopChatArea() {
           onToggleFullAccess={toggleFullAccess}
           forceWebSearch={forceWebSearch}
           onToggleWebSearch={() => void handleToggleWebSearch()}
-          onInputFocus={handleInputFocus}
           streaming={isStreaming}
           canSubmit={canSend}
           onStop={() => void handleStop()}

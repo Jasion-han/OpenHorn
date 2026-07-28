@@ -18,6 +18,7 @@ import type {
 import { useEffect, useRef, useState } from "react";
 import { fileKey } from "shared/format";
 import { Button, cn, Textarea, Tooltip, TooltipContent, TooltipTrigger } from "ui";
+import { usePlaceholderTypewriter } from "../../hooks/usePlaceholderTypewriter";
 import type { ChatMode } from "../../types/chat";
 import { DesktopAttachmentPreviewItem } from "./DesktopAttachmentPreviewItem";
 import { DesktopComposerModeChip } from "./DesktopComposerModeChip";
@@ -51,7 +52,8 @@ export function DesktopComposer({
   value,
   onChange,
   onKeyDown,
-  placeholder,
+  placeholderPool,
+  placeholderResetKey = null,
   attachments,
   disabled,
   onAddAttachments,
@@ -69,7 +71,6 @@ export function DesktopComposer({
   onToggleFullAccess,
   forceWebSearch,
   onToggleWebSearch,
-  onInputFocus,
   streaming,
   canSubmit,
   onStop,
@@ -86,7 +87,9 @@ export function DesktopComposer({
   value: string;
   onChange: (value: string) => void;
   onKeyDown: (event: ReactKeyboardEvent<HTMLTextAreaElement>) => void;
-  placeholder: string;
+  placeholderPool: readonly string[];
+  /** Draws a different line when this changes — the conversation id. */
+  placeholderResetKey?: string | null;
   attachments: File[];
   disabled: boolean;
   onAddAttachments: (files: File[]) => void;
@@ -104,7 +107,6 @@ export function DesktopComposer({
   onToggleFullAccess?: () => void;
   forceWebSearch: boolean;
   onToggleWebSearch: () => void;
-  onInputFocus?: () => void;
   streaming: boolean;
   canSubmit: boolean;
   onStop: () => void | Promise<void>;
@@ -119,10 +121,28 @@ export function DesktopComposer({
   onSlashClose?: () => void;
 }) {
   const [dragActive, setDragActive] = useState(false);
+  // Owned here rather than by the chat area on purpose: a tick lands every
+  // ~21ms, and holding the state one level up re-rendered the whole message
+  // list that often. Same loop as the welcome screen, so the two boxes animate
+  // identically.
+  const { text: placeholderText, reroll: drawPlaceholder } = usePlaceholderTypewriter(
+    placeholderPool,
+    value.length > 0,
+  );
+  const lastResetKeyRef = useRef<string | null>(placeholderResetKey);
   const slashContainerRef = useRef<HTMLDivElement>(null);
   const slashPointerRef = useRef<{ x: number; y: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const highlightBackdropRef = useRef<HTMLDivElement>(null);
+
+  // Arriving in a different conversation draws a different line. Guarded by a
+  // ref rather than a trimmed dependency list so `value` stays honestly
+  // declared without its every keystroke swapping the line mid-animation.
+  useEffect(() => {
+    if (lastResetKeyRef.current === placeholderResetKey) return;
+    lastResetKeyRef.current = placeholderResetKey;
+    if (value.length === 0) drawPlaceholder();
+  }, [placeholderResetKey, value, drawPlaceholder]);
 
   // Keep the highlight backdrop scrolled in lock-step with the textarea so the
   // painted (colored) text stays aligned with the caret on multi-line input.
@@ -343,8 +363,15 @@ export function DesktopComposer({
               onChange={(event) => onChange(event.target.value)}
               onScroll={(event) => syncBackdropScroll(event.currentTarget)}
               onPaste={handlePaste}
-              onFocus={() => onInputFocus?.()}
-              placeholder={placeholder}
+              // Click as well as focus: the box is often already focused, and
+              // every click should still bring a different line.
+              onFocus={() => {
+                if (value.length === 0) drawPlaceholder();
+              }}
+              onClick={() => {
+                if (value.length === 0) drawPlaceholder();
+              }}
+              placeholder={placeholderText}
               rows={1}
               className="relative z-[1] min-h-[36px] max-h-[160px] resize-none border-0 bg-transparent p-0 text-sm leading-5 text-transparent caret-foreground shadow-none placeholder:text-muted-foreground/70 focus-visible:ring-0 disabled:cursor-default disabled:opacity-100"
               onKeyDown={onKeyDown}
