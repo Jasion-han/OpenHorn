@@ -69,4 +69,6 @@ AGENTS.md
 # 包含子项，写成 `skills/` 会让下面这条 `!` 完全失效。
 skills/*
 !skills/openhorn/
-skills-lock.json
+# skills-lock.json 有意入库：它是唯一记录「本项目预期有哪些外部 skill、从哪同步」
+# 的清单，内容本身不进仓库，清单要进。（此处原本列着忽略它，但它一直是已跟踪
+# 状态——.gitignore 对已跟踪文件无效，那行从来没生效过。）
