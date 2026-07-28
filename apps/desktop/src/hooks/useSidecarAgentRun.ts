@@ -257,7 +257,14 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
         useChatStore.getState().unmarkMessagesActive(activeRunIds);
         // The bubble only shows a timestamp once the answer is finished; stamp it
         // now rather than waiting for the next reload to carry the server value.
-        useChatStore.getState().updateMessage(stampId, { updatedAt: new Date() });
+        // Token counts ride along for the same reason: they were just written to
+        // the row, but the in-memory message is still the optimistic object the
+        // run built, so without this the count only appears after navigating
+        // away and back.
+        useChatStore.getState().updateMessage(stampId, {
+          updatedAt: new Date(),
+          ...(runUsage ? { usage: runUsage } : {}),
+        });
       }
     };
 
