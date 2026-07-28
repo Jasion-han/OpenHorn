@@ -18,9 +18,9 @@ import type {
 import { useEffect, useRef, useState } from "react";
 import { fileKey } from "shared/format";
 import { Button, cn, Textarea, Tooltip, TooltipContent, TooltipTrigger } from "ui";
-import { getChatLabel } from "../../lib/i18n/agent";
 import type { ChatMode } from "../../types/chat";
 import { DesktopAttachmentPreviewItem } from "./DesktopAttachmentPreviewItem";
+import { DesktopComposerModeChip } from "./DesktopComposerModeChip";
 import { DesktopProviderLogo } from "./DesktopProviderLogo";
 
 export type SlashPanelItem = {
@@ -118,9 +118,7 @@ export function DesktopComposer({
   onSlashHover?: (index: number) => void;
   onSlashClose?: () => void;
 }) {
-  const [modeMenuOpen, setModeMenuOpen] = useState(false);
   const [dragActive, setDragActive] = useState(false);
-  const modeMenuRef = useRef<HTMLDivElement>(null);
   const slashContainerRef = useRef<HTMLDivElement>(null);
   const slashPointerRef = useRef<{ x: number; y: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -187,31 +185,6 @@ export function DesktopComposer({
   };
 
   const modeDisabled = disabled || streaming;
-  const alternateMode: ChatMode = mode === "chat" ? "agent" : "chat";
-  const alternateModeDisabled = alternateMode === "agent" && !agentModeAvailable;
-
-  useEffect(() => {
-    if (!modeMenuOpen) return;
-
-    const handlePointerDown = (event: MouseEvent) => {
-      if (!modeMenuRef.current?.contains(event.target as Node)) {
-        setModeMenuOpen(false);
-      }
-    };
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setModeMenuOpen(false);
-      }
-    };
-
-    document.addEventListener("mousedown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [modeMenuOpen]);
 
   useEffect(() => {
     if (!slashOpen) return;
@@ -400,58 +373,13 @@ export function DesktopComposer({
               </TooltipContent>
             </Tooltip>
 
-            <div ref={modeMenuRef} className="relative inline-flex flex-col items-center">
-              {modeMenuOpen && !modeDisabled && (
-                <div className="pointer-events-none absolute bottom-full left-0 right-0 z-20 mb-1 flex justify-center">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (alternateModeDisabled) return;
-                      onModeChange(alternateMode);
-                      setModeMenuOpen(false);
-                    }}
-                    disabled={alternateModeDisabled}
-                    className={cn(
-                      "pointer-events-auto flex w-full items-center justify-center gap-1.5 rounded-[10px] px-2.5 py-1 text-xs",
-                      alternateModeDisabled
-                        ? "cursor-not-allowed bg-muted/80 text-muted-foreground opacity-70 ring-1 ring-border/25"
-                        : "bg-accent/88 text-foreground shadow-[0_10px_24px_rgba(15,23,42,0.12)] ring-1 ring-border/25 backdrop-blur-md transition-colors hover:bg-accent",
-                    )}
-                    title={
-                      alternateModeDisabled
-                        ? (agentModeDisabledReason ?? getChatLabel("chat.composer.modeUnavailable"))
-                        : undefined
-                    }
-                  >
-                    <span>{alternateMode === "chat" ? "Chat" : "Agent"}</span>
-                    <ChevronDown className="size-3 shrink-0 opacity-0" aria-hidden="true" />
-                  </button>
-                </div>
-              )}
-
-              <button
-                type="button"
-                disabled={modeDisabled}
-                onClick={() => {
-                  if (modeDisabled) return;
-                  setModeMenuOpen((open) => !open);
-                }}
-                className={cn(
-                  "flex min-w-[68px] items-center justify-center gap-1.5 rounded-[10px] px-2.5 py-1 text-xs transition-colors",
-                  modeMenuOpen
-                    ? "bg-accent/80 text-foreground"
-                    : "text-muted-foreground hover:text-foreground hover:bg-accent",
-                  modeDisabled && "opacity-60 pointer-events-none",
-                )}
-                aria-label="Mode"
-                title="Mode"
-              >
-                <span className="truncate">{mode === "chat" ? "Chat" : "Agent"}</span>
-                <ChevronDown
-                  className={cn("size-3 transition-transform", modeMenuOpen && "rotate-180")}
-                />
-              </button>
-            </div>
+            <DesktopComposerModeChip
+              mode={mode}
+              onModeChange={onModeChange}
+              disabled={modeDisabled}
+              agentAvailable={agentModeAvailable}
+              agentDisabledReason={agentModeDisabledReason}
+            />
 
             <button
               type="button"

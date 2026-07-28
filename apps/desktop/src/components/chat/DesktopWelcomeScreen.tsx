@@ -23,6 +23,7 @@ import { useChatStore } from "../../stores/chatStore";
 import { useDesktopShellStore } from "../../stores/desktopShellStore";
 import { DesktopAttachmentPreviewItem } from "./DesktopAttachmentPreviewItem";
 import { ACCEPT_FILES } from "./DesktopComposer";
+import { DesktopComposerModeChip } from "./DesktopComposerModeChip";
 import { DesktopModelPickerModal } from "./DesktopModelPickerModal";
 import { DesktopProviderLogo } from "./DesktopProviderLogo";
 
@@ -413,16 +414,7 @@ export function DesktopWelcomeScreen() {
                   <Paperclip className="size-5" />
                 </Button>
 
-                <button
-                  type="button"
-                  onClick={() => setComposerMode(composerMode === "chat" ? "agent" : "chat")}
-                  className="flex min-w-[68px] items-center justify-center gap-1.5 rounded-[10px] px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                  aria-label="Mode"
-                  title="Mode"
-                >
-                  <span className="truncate">{composerMode === "chat" ? "Chat" : "Agent"}</span>
-                  <ChevronDown className="size-3" />
-                </button>
+                <DesktopComposerModeChip mode={composerMode} onModeChange={setComposerMode} />
 
                 <button
                   type="button"
@@ -504,14 +496,17 @@ export function DesktopWelcomeScreen() {
             </div>
           </div>
 
-          <div className="mt-4 flex flex-col">
+          {/* `items-start`: without it these stretch to the full column width, so
+              the hit area (and the hover highlight) ran far past the text and a
+              click on empty space to the right still filled the box. */}
+          <div className="mt-4 flex flex-col items-start">
             {suggestions.map((text) => (
               <button
                 key={text}
                 type="button"
                 disabled={starting}
                 onClick={() => applySuggestion(text)}
-                className="flex items-center gap-2.5 rounded-[10px] px-3 py-2 text-left text-sm text-foreground/70 transition-colors hover:bg-foreground/[0.04] hover:text-foreground disabled:pointer-events-none disabled:opacity-60"
+                className="flex max-w-full items-center gap-2.5 rounded-[10px] px-3 py-2 text-left text-sm text-foreground/70 transition-colors hover:bg-foreground/[0.04] hover:text-foreground disabled:pointer-events-none disabled:opacity-60"
               >
                 <MessageSquare className="size-3.5 shrink-0 text-muted-foreground" />
                 <span className="truncate">{text}</span>
