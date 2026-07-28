@@ -1,3 +1,4 @@
+import { CornerDownRight } from "lucide-react";
 import { cn } from "ui";
 import { extractToolUrls, summarizeToolInput } from "../../lib/agentToolSummary";
 import { formatChatLabel } from "../../lib/i18n/agent";
@@ -195,13 +196,20 @@ export function AgentRunPanel({
                     tone="default"
                     maxLines={3}
                   />
-                  <div className="flex flex-col gap-0.5 pb-1 pl-6 text-sm leading-6">
+                  <div className="flex flex-col gap-0.5 pb-1 pl-4 text-sm leading-6">
                     {urls.map((url) => (
-                      // `break-all`: a long URL must stay readable in full rather
-                      // than be cut — these are what the reader is verifying.
-                      <span key={url} className="break-all text-foreground opacity-32">
-                        {url}
-                      </span>
+                      <div key={url} className="flex items-start gap-1.5">
+                        {/* Corner glyph marking the row as belonging to the call
+                            above. `mt-[7px]` sits it on the text's baseline row
+                            rather than the line box's top. */}
+                        <CornerDownRight
+                          aria-hidden="true"
+                          className="mt-[7px] size-3 shrink-0 text-foreground opacity-25"
+                        />
+                        {/* `break-all`: a long URL must stay readable in full
+                            rather than be cut — it is what the reader verifies. */}
+                        <span className="min-w-0 break-all text-foreground opacity-32">{url}</span>
+                      </div>
                     ))}
                   </div>
                 </div>
