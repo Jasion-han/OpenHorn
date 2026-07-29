@@ -99,7 +99,11 @@ export function ChannelSettings() {
 
   const sortedChannels = useMemo(() => channels.slice().sort(sortChannels), [channels]);
 
-  const loadChannelList = async (options?: { preserveExpanded?: boolean }) => {
+  // Callers used to pass `{ preserveExpanded: true }` here, which this function
+  // never read. Nothing to preserve: `expandedChannelId` is local state and
+  // reloading only replaces the channel array, so the expansion survives on its
+  // own. The option promised a reset path that never existed.
+  const loadChannelList = async () => {
     setLoading(true);
     try {
       await loadChannels();
@@ -115,6 +119,10 @@ export function ChannelSettings() {
     }
   };
 
+  // Mount-only load. `loadChannelList` is redeclared every render, so taking
+  // biome's fix would fire a request on every render — an unbounded refetch loop
+  // against the channels endpoint.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: mount-only; the dep is unstable by identity
   useEffect(() => {
     void loadChannelList();
   }, []);
@@ -174,7 +182,7 @@ export function ChannelSettings() {
   };
 
   const handleEditorSaved = async (channelId: string, notice: SettingsNotice) => {
-    await loadChannelList({ preserveExpanded: true });
+    await loadChannelList();
     setExpandedChannelId(channelId);
     if (notice.kind === "error") {
       notifyError(notice.title, notice.message);
@@ -262,7 +270,7 @@ export function ChannelSettings() {
   const handleFetchModels = async (channelId: string) => {
     await runChannelAction(`fetch:${channelId}`, async () => {
       const result = await api.channels.fetchModels(channelId);
-      await loadChannelList({ preserveExpanded: true });
+      await loadChannelList();
       setExpandedChannelId(channelId);
       const outcome = applyFetchModelsOutcome(channelId, result);
       if (!outcome.ok) {
@@ -328,7 +336,7 @@ export function ChannelSettings() {
   const handleSetDefaultChannel = async (channelId: string) => {
     await runChannelAction(`default:${channelId}`, async () => {
       await api.channels.setDefault(channelId);
-      await loadChannelList({ preserveExpanded: true });
+      await loadChannelList();
       notifySuccess(
         getChannelLabel("settings.channel.notify.updatedTitle"),
         getChannelLabel("settings.channel.notify.defaultChannelUpdatedBody"),
@@ -345,7 +353,7 @@ export function ChannelSettings() {
         isDefault: model.isDefault,
       })),
     });
-    await loadChannelList({ preserveExpanded: true });
+    await loadChannelList();
     setExpandedChannelId(channel.id);
   };
 
@@ -365,7 +373,7 @@ export function ChannelSettings() {
   const handleSetDefaultModel = async (channel: Channel, modelId: string) => {
     await runChannelAction(`default-model:${channel.id}:${modelId}`, async () => {
       await api.channels.setDefaultModel(channel.id, modelId);
-      await loadChannelList({ preserveExpanded: true });
+      await loadChannelList();
       setExpandedChannelId(channel.id);
       notifySuccess(
         getChannelLabel("settings.channel.notify.updatedTitle"),

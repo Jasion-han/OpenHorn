@@ -274,7 +274,6 @@ describe("sidecarStore", () => {
       stopSidecar: async () => undefined,
       pickWorkspaceDir: async () => null,
     };
-    const fakeClient = new FakeClient();
     // Inject the fake client. We do this by temporarily recreating
     // the store through the public factory with attachPlatform(real)
     // mimicking what App bootstrap does.

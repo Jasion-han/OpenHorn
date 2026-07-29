@@ -109,19 +109,6 @@ export function AgentRunPanel({
 
   const displayTitle =
     toolCount > 0 ? `Execution · ${toolCount} ${toolCount === 1 ? "tool" : "tools"}` : "Execution";
-  const activeStartKey = (() => {
-    if (run.status !== "running" && run.status !== "partial") return null;
-    for (let index = run.steps.length - 1; index >= 0; index -= 1) {
-      const step = run.steps[index];
-      if (!step) continue;
-      if (step.type === "tool_result" || step.type === "error") return null;
-      if (step.type === "tool_start") {
-        return `${step.type}-${step.toolName || ""}-${step.content || ""}-${JSON.stringify(step.toolInput ?? null)}`;
-      }
-    }
-    return null;
-  })();
-
   return (
     <details
       className="mt-2 text-sm"
@@ -156,6 +143,7 @@ export function AgentRunPanel({
             const raw = (step.content ?? "").trim();
             if (!raw) return null;
             return (
+              // biome-ignore lint/suspicious/noArrayIndexKey: run steps are append-only, so a step's index is its identity
               <div key={`text-${stepIndex}`}>
                 <span className="relative flex items-start gap-2 py-0.5 text-sm leading-6 text-muted-foreground/50">
                   <span
