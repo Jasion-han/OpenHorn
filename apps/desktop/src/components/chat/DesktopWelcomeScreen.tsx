@@ -12,6 +12,7 @@ import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useEffect, useRef, useState } from "react";
 import { fileKey } from "shared/format";
 import { Button, cn, Textarea } from "ui";
+import { useClockTick } from "../../hooks/useClockTick";
 import { usePlaceholderTypewriter } from "../../hooks/usePlaceholderTypewriter";
 import { getDesktopBackendBase } from "../../lib/backendBase";
 import { DEFAULT_CONVERSATION_TITLE } from "../../lib/conversationTitle";
@@ -248,26 +249,9 @@ export function DesktopWelcomeScreen() {
 
   const canSubmit = (Boolean(draft.trim()) || attachments.length > 0) && !starting;
 
-  // The hero line is picked from the clock, so reading it once at mount would
-  // strand a window left open all morning on the phrase it launched with.
-  // Wake on the hour rather than polling — that is the only moment the line can
-  // change — and reschedule from inside the callback so the chain survives an
-  // hour that resolves to the same phrase.
-  const [hour, setHour] = useState(() => new Date().getHours());
-  useEffect(() => {
-    let timer = 0;
-    const scheduleNextHour = () => {
-      const now = new Date();
-      const untilNextHour =
-        (60 - now.getMinutes()) * 60_000 - now.getSeconds() * 1000 - now.getMilliseconds();
-      timer = window.setTimeout(() => {
-        setHour(new Date().getHours());
-        scheduleNextHour();
-      }, untilNextHour + 1_000);
-    };
-    scheduleNextHour();
-    return () => window.clearTimeout(timer);
-  }, []);
+  // Reading the hour during render would strand a window left open all morning
+  // on the phrase it launched with.
+  const hour = useClockTick("hour").getHours();
 
   return (
     <div className="flex h-full min-h-0 flex-col">
