@@ -28,6 +28,15 @@ export function DesktopMessageAttachments({
   attachments: MessageAttachmentMeta[];
   className?: string;
 }) {
+  // Above the early return, not next to their first use: a render that bails out
+  // must still call the same hooks in the same order as one that does not. The
+  // only call site currently guards on a non-empty list, so the component is
+  // unmounted rather than re-rendered when attachments go away — which is what
+  // keeps this from crashing today. That is the caller's shape, not a guarantee
+  // this component makes, and a second call site without the guard would break it.
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
+
   if (!attachments || attachments.length === 0) return null;
 
   const imageAttachments = attachments.filter((att) => isImageType(att.fileType));
@@ -36,9 +45,6 @@ export function DesktopMessageAttachments({
   const imagesForPreview = imageAttachments
     .map((att) => ({ att, src: getImageSrc(att) }))
     .filter((x): x is { att: MessageAttachmentMeta; src: string } => Boolean(x.src));
-
-  const [lightboxOpen, setLightboxOpen] = useState(false);
-  const [activeIndex, setActiveIndex] = useState(0);
 
   const openAt = (idx: number) => {
     setActiveIndex(Math.max(0, Math.min(idx, Math.max(0, imagesForPreview.length - 1))));
