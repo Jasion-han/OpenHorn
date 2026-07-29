@@ -9,7 +9,9 @@ test("buildAgentPlan creates a compact plan for a quick summary task", () => {
 
   expect(plan).toHaveLength(3);
   expect(plan[0]?.status).toBe("ready");
-  expect(plan.some((step) => step.title.includes("Collect current external information"))).toBe(false);
+  expect(plan.some((step) => step.title.includes("Collect current external information"))).toBe(
+    false,
+  );
   expect(plan.some((step) => step.title.includes("Inspect the workspace"))).toBe(false);
 });
 
@@ -33,8 +35,12 @@ test("buildAgentPlan does not treat current workspace phrasing as external-lates
   });
 
   expect(plan.some((step) => step.title === "Collect current external information")).toBe(false);
-  expect(plan.some((step) => step.title === "Gather supporting information and evidence")).toBe(false);
-  expect(plan.some((step) => step.title === "Inspect the workspace and affected code paths")).toBe(true);
+  expect(plan.some((step) => step.title === "Gather supporting information and evidence")).toBe(
+    false,
+  );
+  expect(plan.some((step) => step.title === "Inspect the workspace and affected code paths")).toBe(
+    true,
+  );
 });
 
 test("buildAgentPlan adds attachment context for file-backed tasks", () => {
@@ -45,7 +51,9 @@ test("buildAgentPlan adds attachment context for file-backed tasks", () => {
   });
 
   expect(plan.length).toBeGreaterThanOrEqual(4);
-  expect(plan.some((step) => step.title === "Read attachments and extract relevant context")).toBe(true);
+  expect(plan.some((step) => step.title === "Read attachments and extract relevant context")).toBe(
+    true,
+  );
   expect(plan.some((step) => /Verify outcome|Review quality/.test(step.title))).toBe(true);
 });
 
@@ -57,7 +65,9 @@ test("buildAgentPlan adds workspace inspection and validation for code tasks", (
 
   expect(plan.length).toBeGreaterThanOrEqual(4);
   expect(plan.length).toBeLessThanOrEqual(6);
-  expect(plan.some((step) => step.title === "Inspect the workspace and affected code paths")).toBe(true);
+  expect(plan.some((step) => step.title === "Inspect the workspace and affected code paths")).toBe(
+    true,
+  );
   expect(plan.some((step) => step.title === "Validate changes and check risks")).toBe(true);
   expect(plan.at(-1)?.title).toBe("Package the final change summary");
 });

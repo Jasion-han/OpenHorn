@@ -27,11 +27,7 @@ describe("checkSdkFsToolPath", () => {
     );
     writeFileSync(path.join(root, "a.txt"), "hello");
 
-    const result = await checkSdkFsToolPath(
-      "Read",
-      { file_path: path.join(root, "a.txt") },
-      root,
-    );
+    const result = await checkSdkFsToolPath("Read", { file_path: path.join(root, "a.txt") }, root);
     expect(result).toBe(null);
   });
 
@@ -40,11 +36,7 @@ describe("checkSdkFsToolPath", () => {
       mkdtempSync(path.join(os.tmpdir(), "openhorn-claude-")),
     );
 
-    const result = await checkSdkFsToolPath(
-      "Read",
-      { file_path: "/etc/passwd" },
-      root,
-    );
+    const result = await checkSdkFsToolPath("Read", { file_path: "/etc/passwd" }, root);
     expect(result).not.toBe(null);
   });
 
@@ -53,11 +45,7 @@ describe("checkSdkFsToolPath", () => {
       mkdtempSync(path.join(os.tmpdir(), "openhorn-claude-")),
     );
 
-    const result = await checkSdkFsToolPath(
-      "Read",
-      { file_path: "../escape.txt" },
-      root,
-    );
+    const result = await checkSdkFsToolPath("Read", { file_path: "../escape.txt" }, root);
     expect(result).not.toBe(null);
   });
 
@@ -73,11 +61,7 @@ describe("checkSdkFsToolPath", () => {
     writeFileSync(target, "ORIGINAL");
     symlinkSync(target, path.join(root, "trap.txt"));
 
-    const result = await checkSdkFsToolPath(
-      "Write",
-      { file_path: "trap.txt" },
-      root,
-    );
+    const result = await checkSdkFsToolPath("Write", { file_path: "trap.txt" }, root);
     expect(result).not.toBe(null);
   });
 
@@ -91,11 +75,7 @@ describe("checkSdkFsToolPath", () => {
     mkdirSync(outside);
     symlinkSync(outside, path.join(root, "escape"));
 
-    const result = await checkSdkFsToolPath(
-      "Edit",
-      { file_path: "escape/new.txt" },
-      root,
-    );
+    const result = await checkSdkFsToolPath("Edit", { file_path: "escape/new.txt" }, root);
     expect(result).not.toBe(null);
   });
 
@@ -113,11 +93,7 @@ describe("checkSdkFsToolPath", () => {
     );
     mkdirSync(path.join(root, "src"));
 
-    const result = await checkSdkFsToolPath(
-      "Write",
-      { file_path: "src/new.ts" },
-      root,
-    );
+    const result = await checkSdkFsToolPath("Write", { file_path: "src/new.ts" }, root);
     expect(result).toBe(null);
   });
 });

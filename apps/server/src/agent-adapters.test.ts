@@ -22,11 +22,9 @@ test("OpenAIAdapter chat aborts slow requests with a timeout", async () => {
   globalThis.fetch = ((_: FetchInput, init?: FetchInit) =>
     new Promise((_, reject) => {
       const signal = init?.signal as AbortSignal | undefined;
-      signal?.addEventListener(
-        "abort",
-        () => reject(signal.reason ?? new Error("aborted")),
-        { once: true },
-      );
+      signal?.addEventListener("abort", () => reject(signal.reason ?? new Error("aborted")), {
+        once: true,
+      });
     })) as unknown as typeof fetch;
 
   try {
@@ -50,9 +48,7 @@ test("OpenAIAdapter chatStream aborts when streamed output goes idle", async () 
     const encoder = new TextEncoder();
     const stream = new ReadableStream({
       start(controller) {
-        controller.enqueue(
-          encoder.encode('data: {"choices":[{"delta":{"content":"hi"}}]}\n\n'),
-        );
+        controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"hi"}}]}\n\n'));
         signal?.addEventListener(
           "abort",
           () => controller.error(signal.reason ?? new Error("aborted")),
@@ -100,9 +96,7 @@ test("OpenAIAdapter chatStream parses SSE streams that start with comment lines"
     const stream = new ReadableStream({
       start(controller) {
         controller.enqueue(encoder.encode(": OPENROUTER PROCESSING\n\n"));
-        controller.enqueue(
-          encoder.encode('data: {"choices":[{"delta":{"content":"hi"}}]}\n\n'),
-        );
+        controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"hi"}}]}\n\n'));
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));
         controller.close();
       },
@@ -196,7 +190,7 @@ test("OpenAIAdapter runToolCallingTurn parses structured tool calls", async () =
                   type: "function",
                   function: {
                     name: "bash",
-                    arguments: "{\"command\":\"pwd\"}",
+                    arguments: '{"command":"pwd"}',
                   },
                 },
               ],
@@ -239,7 +233,7 @@ test("OpenAIAdapter runToolCallingTurn parses structured tool calls", async () =
 
 test("OpenAIAdapter runToolCallingTurn canonicalizes tool aliases against declared tools", async () => {
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = ((async () =>
+  globalThis.fetch = (async () =>
     new Response(
       JSON.stringify({
         choices: [
@@ -254,7 +248,7 @@ test("OpenAIAdapter runToolCallingTurn canonicalizes tool aliases against declar
                   type: "function",
                   function: {
                     name: "bash_tool",
-                    arguments: "{\"command\":\"pwd\"}",
+                    arguments: '{"command":"pwd"}',
                   },
                 },
               ],
@@ -267,7 +261,7 @@ test("OpenAIAdapter runToolCallingTurn canonicalizes tool aliases against declar
           "Content-Type": "application/json",
         },
       },
-    )) as unknown) as typeof fetch;
+    )) as unknown as typeof fetch;
 
   try {
     const adapter = new OpenAIAdapter("test-key", "https://example.com");
@@ -422,7 +416,8 @@ test("AnthropicAdapter runToolCallingTurn retries with auto tool choice when for
       return new Response(
         JSON.stringify({
           error: {
-            message: "tool_choice does not support being set to required or object in thinking mode",
+            message:
+              "tool_choice does not support being set to required or object in thinking mode",
           },
         }),
         {

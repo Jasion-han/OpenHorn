@@ -325,8 +325,7 @@ async function main() {
         content: string;
       }>,
     (result) =>
-      result.content?.includes("hello from e2e") ||
-      `unexpected content: ${JSON.stringify(result)}`,
+      result.content?.includes("hello from e2e") || `unexpected content: ${JSON.stringify(result)}`,
   );
 
   await expectResolve("fs.write new file inside workspace succeeds", () =>

@@ -28,9 +28,9 @@ describe("createTextStreamSmoother", () => {
     await smoother.finish();
 
     expect(emissions[emissions.length - 1]).toBe("你好世界");
-    expect(emissions.every((text, index) => index === 0 || text.startsWith(emissions[index - 1] || ""))).toBe(
-      true,
-    );
+    expect(
+      emissions.every((text, index) => index === 0 || text.startsWith(emissions[index - 1] || "")),
+    ).toBe(true);
   });
 
   test("bypasses pacing for short text", () => {

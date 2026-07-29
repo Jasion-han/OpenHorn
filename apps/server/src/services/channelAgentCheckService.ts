@@ -127,7 +127,10 @@ function normalizeAgentCheckFailure(error: string): Extract<AgentCheckResult, { 
 // protocol) naturally misses a stale success/failure verdict instead of routing on it.
 // The apiKey is hashed (never stored or logged in plaintext).
 function computeChannelIdentityFingerprint(apiKey: string, baseUrl: string, protocol: string) {
-  return createHash("sha1").update(`${apiKey}\u0000${baseUrl}\u0000${protocol}`).digest("hex").slice(0, 12);
+  return createHash("sha1")
+    .update(`${apiKey}\u0000${baseUrl}\u0000${protocol}`)
+    .digest("hex")
+    .slice(0, 12);
 }
 
 function getCompatibilityCacheKey(

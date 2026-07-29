@@ -59,9 +59,7 @@ export function normalizeDescription(description: string): string {
  * each skill's SKILL.md exists and surface its path. A skill whose SKILL.md is
  * missing is skipped (never throws) so one bad entry can't break the run.
  */
-export async function resolveSkills(
-  metas: SkillMeta[] | undefined,
-): Promise<MaterializedSkill[]> {
+export async function resolveSkills(metas: SkillMeta[] | undefined): Promise<MaterializedSkill[]> {
   if (!metas || metas.length === 0) return [];
 
   const materialized: MaterializedSkill[] = [];

@@ -14,9 +14,7 @@ function scoreDirectory(dir: string) {
   return score;
 }
 
-export function resolveAgentWorkingDirectory(
-  options: ResolveAgentWorkingDirectoryOptions = {},
-) {
+export function resolveAgentWorkingDirectory(options: ResolveAgentWorkingDirectoryOptions = {}) {
   const startDir = resolve(options.startDir || process.cwd());
   const maxAscendLevels = options.maxAscendLevels ?? 6;
 

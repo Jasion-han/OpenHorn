@@ -5,7 +5,15 @@ export type AnthropicProbeResult =
   | {
       success: false;
       error: string;
-      reason: "auth" | "model" | "not_found" | "rate_limit" | "server" | "request" | "timeout" | "network";
+      reason:
+        | "auth"
+        | "model"
+        | "not_found"
+        | "rate_limit"
+        | "server"
+        | "request"
+        | "timeout"
+        | "network";
     };
 
 function normalizeBaseUrl(baseUrl: string): string {

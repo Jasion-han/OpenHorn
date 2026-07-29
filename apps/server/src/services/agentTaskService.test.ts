@@ -44,7 +44,10 @@ async function cleanupTestUser(userId: string) {
   await db.delete(agentPlanSteps).where(eq(agentPlanSteps.taskId, "__missing__"));
   await db.delete(agentRuns).where(eq(agentRuns.taskId, "__missing__"));
 
-  const tasks = await db.select({ id: agentTasks.id }).from(agentTasks).where(eq(agentTasks.userId, userId));
+  const tasks = await db
+    .select({ id: agentTasks.id })
+    .from(agentTasks)
+    .where(eq(agentTasks.userId, userId));
   for (const task of tasks) {
     await db.delete(agentTaskEvents).where(eq(agentTaskEvents.taskId, task.id));
     await db.delete(agentArtifacts).where(eq(agentArtifacts.taskId, task.id));
@@ -79,8 +82,15 @@ test("agentTaskService persists tasks, plans, approvals, and task detail", async
 
     const planSteps = await setAgentPlanSteps(userId, task.id, planningRun.id, {
       steps: [
-        { title: "Inspect current implementation", description: "Review routes, services, and data model." },
-        { title: "Draft execution plan", description: "Break the task into reviewable milestones.", status: "ready" },
+        {
+          title: "Inspect current implementation",
+          description: "Review routes, services, and data model.",
+        },
+        {
+          title: "Draft execution plan",
+          description: "Break the task into reviewable milestones.",
+          status: "ready",
+        },
       ],
     });
 

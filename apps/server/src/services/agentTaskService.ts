@@ -434,13 +434,7 @@ function buildTaskInsight(params: {
   const previewText = clipInsightText(previewSource?.text ?? null);
   const summary = previewText;
 
-  if (
-    !highlight &&
-    !previewText &&
-    !latestRun &&
-    !latestApproval &&
-    !latestFinalResult
-  ) {
+  if (!highlight && !previewText && !latestRun && !latestApproval && !latestFinalResult) {
     return null;
   }
 
@@ -500,7 +494,10 @@ function getEventRuntime(event: AgentTaskEventRecord): AgentTaskRuntimeRecord | 
   };
 }
 
-function deriveTaskRuntime(task: AgentTaskRecord, events: AgentTaskEventRecord[]): AgentTaskRuntimeRecord | null {
+function deriveTaskRuntime(
+  task: AgentTaskRecord,
+  events: AgentTaskEventRecord[],
+): AgentTaskRuntimeRecord | null {
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index];
     if (!event) continue;
@@ -604,10 +601,7 @@ export async function createAgentTask(userId: string, input: CreateAgentTaskInpu
   return mapTask((await assertTaskRow(userId, id)) as typeof agentTasks.$inferSelect);
 }
 
-export async function listAgentTasks(
-  userId: string,
-  filter?: { conversationId?: string },
-) {
+export async function listAgentTasks(userId: string, filter?: { conversationId?: string }) {
   const conditions = [eq(agentTasks.userId, userId)];
   if (filter?.conversationId) {
     conditions.push(eq(agentTasks.conversationId, filter.conversationId));
@@ -623,7 +617,11 @@ export async function listAgentTasks(
 
   const taskIds = rows.map((row) => row.id);
   const [runRows, approvalRows, artifactRows] = await Promise.all([
-    db.select().from(agentRuns).where(inArray(agentRuns.taskId, taskIds)).orderBy(desc(agentRuns.createdAt)),
+    db
+      .select()
+      .from(agentRuns)
+      .where(inArray(agentRuns.taskId, taskIds))
+      .orderBy(desc(agentRuns.createdAt)),
     db
       .select()
       .from(agentApprovalRequests)
@@ -672,11 +670,7 @@ export async function getAgentTaskById(userId: string, taskId: string) {
   return task ? mapTask(task) : null;
 }
 
-export async function updateAgentTask(
-  userId: string,
-  taskId: string,
-  input: UpdateAgentTaskInput,
-) {
+export async function updateAgentTask(userId: string, taskId: string, input: UpdateAgentTaskInput) {
   const existing = await assertTaskRow(userId, taskId);
 
   if (existing.status === "running" || existing.status === "planning") {
@@ -787,9 +781,9 @@ export async function updateAgentRunStatus(
       status,
       summary: updates?.summary ?? run.summary ?? null,
       error: updates?.error ?? run.error ?? null,
-      startedAt: updates?.startedAt === undefined ? run.startedAt ?? null : updates.startedAt,
+      startedAt: updates?.startedAt === undefined ? (run.startedAt ?? null) : updates.startedAt,
       completedAt:
-        updates?.completedAt === undefined ? run.completedAt ?? null : updates.completedAt,
+        updates?.completedAt === undefined ? (run.completedAt ?? null) : updates.completedAt,
       updatedAt: now,
     })
     .where(eq(agentRuns.id, runId));
@@ -997,11 +991,7 @@ export async function createAgentArtifact(
     createdAt: now,
     updatedAt: now,
   });
-  const rows = await db
-    .select()
-    .from(agentArtifacts)
-    .where(eq(agentArtifacts.id, id))
-    .limit(1);
+  const rows = await db.select().from(agentArtifacts).where(eq(agentArtifacts.id, id)).limit(1);
   return mapArtifact(rows[0] as typeof agentArtifacts.$inferSelect);
 }
 
@@ -1036,11 +1026,7 @@ export async function createAgentTaskEvent(
     metadata: stringifyJson(input.metadata),
     createdAt,
   });
-  const rows = await db
-    .select()
-    .from(agentTaskEvents)
-    .where(eq(agentTaskEvents.id, id))
-    .limit(1);
+  const rows = await db.select().from(agentTaskEvents).where(eq(agentTaskEvents.id, id)).limit(1);
   return mapTaskEvent(rows[0] as typeof agentTaskEvents.$inferSelect);
 }
 
@@ -1068,7 +1054,11 @@ export async function getLatestRunForTask(userId: string, taskId: string, phase?
 export async function getAgentTaskDetail(userId: string, taskId: string): Promise<AgentTaskDetail> {
   const task = await assertTaskRow(userId, taskId);
   const [runs, planSteps, approvals, artifacts, events] = await Promise.all([
-    db.select().from(agentRuns).where(eq(agentRuns.taskId, taskId)).orderBy(desc(agentRuns.createdAt)),
+    db
+      .select()
+      .from(agentRuns)
+      .where(eq(agentRuns.taskId, taskId))
+      .orderBy(desc(agentRuns.createdAt)),
     db
       .select()
       .from(agentPlanSteps)

@@ -26,14 +26,16 @@ test("summarizeProviderError falls back to status message when text is empty", (
 });
 
 test("classifyProviderError normalizes quota errors for agent usage", () => {
-  expect(classifyProviderError("Provider API error (429): hour allocated quota exceeded.")).toEqual({
-    kind: "quota_exhausted",
-    raw: "Provider API error (429): hour allocated quota exceeded.",
-    summary: "Provider API error (429): hour allocated quota exceeded.",
-    userMessage: "配额不足或触发限流：小时配额已耗尽。",
-    status: 429,
-    retryable: true,
-  });
+  expect(classifyProviderError("Provider API error (429): hour allocated quota exceeded.")).toEqual(
+    {
+      kind: "quota_exhausted",
+      raw: "Provider API error (429): hour allocated quota exceeded.",
+      summary: "Provider API error (429): hour allocated quota exceeded.",
+      userMessage: "配额不足或触发限流：小时配额已耗尽。",
+      status: 429,
+      retryable: true,
+    },
+  );
 });
 
 test("classifyProviderError normalizes ssl handshake failures", () => {
@@ -49,7 +51,8 @@ test("classifyProviderError normalizes ssl handshake failures", () => {
     kind: "ssl_handshake_failed",
     raw: html.trim(),
     summary: "525: SSL handshake failed",
-    userMessage: "TLS/SSL 握手失败：204152.xyz | 525: SSL 握手失败。请检查 Base URL、证书链或中转服务。",
+    userMessage:
+      "TLS/SSL 握手失败：204152.xyz | 525: SSL 握手失败。请检查 Base URL、证书链或中转服务。",
     status: 525,
     retryable: false,
   });

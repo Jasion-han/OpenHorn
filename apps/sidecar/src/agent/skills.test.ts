@@ -21,7 +21,11 @@ describe("resolveSkills", () => {
     writeSkillDir(skillDir, "---\nname: PDF Tool\n---\n\n# PDF\nSteps");
 
     const materialized = await resolveSkills([
-      { name: "PDF Tool", description: "Handle PDFs.  Use when the user\nmentions PDFs.", path: skillDir },
+      {
+        name: "PDF Tool",
+        description: "Handle PDFs.  Use when the user\nmentions PDFs.",
+        path: skillDir,
+      },
     ]);
 
     expect(materialized.length).toBe(1);

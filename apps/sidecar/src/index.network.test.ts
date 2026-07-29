@@ -50,7 +50,9 @@ async function startSidecar(envOverrides: Record<string, string> = {}): Promise<
     child.once("exit", onExit);
 
     setTimeout(() => {
-      reject(new Error(`sidecar did not announce port within 5s\nstdout=${stdout}\nstderr=${stderr}`));
+      reject(
+        new Error(`sidecar did not announce port within 5s\nstdout=${stdout}\nstderr=${stderr}`),
+      );
     }, 5000);
   });
 
@@ -69,19 +71,15 @@ async function startSidecar(envOverrides: Record<string, string> = {}): Promise<
 
 describe("sidecar network hardening", () => {
   test("refuses to start when OPENHORN_HOST is not loopback", async () => {
-    const child = spawn(
-      process.execPath,
-      ["run", SIDECAR_ENTRY],
-      {
-        env: {
-          ...process.env,
-          OPENHORN_HANDSHAKE_TOKEN: "x",
-          OPENHORN_HOST: "0.0.0.0",
-          OPENHORN_PORT: "0",
-        },
-        stdio: ["ignore", "pipe", "pipe"],
+    const child = spawn(process.execPath, ["run", SIDECAR_ENTRY], {
+      env: {
+        ...process.env,
+        OPENHORN_HANDSHAKE_TOKEN: "x",
+        OPENHORN_HOST: "0.0.0.0",
+        OPENHORN_PORT: "0",
       },
-    );
+      stdio: ["ignore", "pipe", "pipe"],
+    });
 
     const exitCode: number = await new Promise((resolve) => {
       child.once("exit", (code) => resolve(code ?? -1));

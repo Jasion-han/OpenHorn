@@ -173,7 +173,13 @@ export function buildAgentPlan(input: AgentPlanBuilderInput): AgentPlanBuilderSt
     );
   }
 
-  if (steps.length < 3 || complexity === "deep" || signals.code || signals.research || signals.writing) {
+  if (
+    steps.length < 3 ||
+    complexity === "deep" ||
+    signals.code ||
+    signals.research ||
+    signals.writing
+  ) {
     steps.push(
       createStep(
         signals.code

@@ -131,13 +131,7 @@ function detectClaudeCode(): CredentialSource | null {
       `security find-generic-password -a "${user}" -s "Claude Code-credentials" 2>/dev/null`,
       { stdio: "pipe", timeout: 5000 },
     );
-    return makeSource(
-      "cli-claude-code",
-      "anthropic",
-      "cli_oauth",
-      "Claude Code",
-      "available",
-    );
+    return makeSource("cli-claude-code", "anthropic", "cli_oauth", "Claude Code", "available");
   } catch {
     return null;
   }
