@@ -507,7 +507,7 @@ export class OpenAIAdapter implements ProviderAdapter {
   constructor(apiKey: string, baseUrl?: string) {
     this.apiKey = apiKey;
     const raw = baseUrl || "https://api.openai.com/v1";
-    this.baseUrl = normalizeBaseUrl(raw) + "/v1";
+    this.baseUrl = `${normalizeBaseUrl(raw)}/v1`;
   }
 
   async chat(options: ChatOptions): Promise<ChatResponse> {
@@ -1206,12 +1206,13 @@ export class OpenAIAdapter implements ProviderAdapter {
 }
 
 export class AnthropicAdapter implements ProviderAdapter {
-  private apiKey: string;
   private baseUrl: string;
+  // The key is never kept as a field: everything downstream reads `authHeader`,
+  // which the constructor derives once. Storing it too meant a second copy of a
+  // secret living on the instance for no reader.
   private authHeader: Record<string, string>;
 
   constructor(apiKey: string, baseUrl?: string) {
-    this.apiKey = apiKey;
     const raw = baseUrl || "https://api.anthropic.com";
     this.baseUrl = raw.replace(/\/+$/, "").replace(/\/v1$/, "");
     this.authHeader = apiKey.startsWith("sk-ant-oat")
