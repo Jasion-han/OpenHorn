@@ -578,7 +578,7 @@ export const chatLabels = {
   // An invitation, not an instruction. The previous line ("输入你的问题，我会为你
   // 新建一个会话") spent itself explaining that a conversation record gets
   // created — plumbing the reader has no stake in.
-  "chat.welcome.subtitle": "一句话就够，写得糙也没关系",
+  "chat.welcome.subtitle": "念头是碎的，说出来才慢慢连成句",
   // The input placeholder is drawn from this pool and re-drawn every time the
   // empty box is focused, mirroring the in-conversation composer.
   "chat.welcome.placeholder1": "描述你的任务，回车开始",
