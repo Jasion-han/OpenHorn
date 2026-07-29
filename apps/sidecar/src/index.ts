@@ -22,7 +22,7 @@ function isChatGptOAuthToken(key: string): boolean {
   }
 }
 
-import path from "node:path";
+import type { ChatMessage } from "adapters";
 import { fsList, fsReadText, fsWriteText } from "./fs";
 import {
   buildErrorResponse,
@@ -282,7 +282,12 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
           baseUrl?: string;
           protocol: string;
           model: string;
-          messages: Array<{ role: string; content: unknown }>;
+          // Asserted straight to the shape runChatStream needs. The wire payload
+          // is already being asserted here, so widening it to
+          // `{ role: string; content: unknown }` bought no safety — it only
+          // forced an `as any` at the call site, which switched checking off for
+          // every field rather than just the two that are genuinely unverified.
+          messages: ChatMessage[];
         };
 
         let resolvedApiKey = apiKey;
@@ -338,9 +343,12 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
           typeof lastUserMessage?.content === "string"
             ? lastUserMessage.content
             : Array.isArray(lastUserMessage?.content)
-              ? (lastUserMessage.content as any[])
+              ? // Narrowed to the two fields this actually reads. `any[]` turned
+                // off checking on `p.type` and `p.text` as well, so a renamed
+                // field would have gone silently to an empty prompt.
+                (lastUserMessage.content as Array<{ type?: string; text?: string }>)
                   .filter((p) => p.type === "text")
-                  .map((p) => p.text)
+                  .map((p) => p.text ?? "")
                   .join("")
               : "";
 
@@ -364,7 +372,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
             baseUrl,
             protocol,
             model,
-            messages: messages as any,
+            messages,
             abortController,
             onEvent,
           })

@@ -32,7 +32,7 @@
  *   holds one; our concurrency-limit test exercises the 429).
  */
 
-import { mkdtempSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -53,7 +53,9 @@ const results: Result[] = [];
 
 function ok(name: string, detail?: string) {
   results.push({ name, ok: true, detail });
-  console.log(`${ANSI.green}  ok${ANSI.reset}  ${name}${detail ? ` ${ANSI.gray}(${detail})${ANSI.reset}` : ""}`);
+  console.log(
+    `${ANSI.green}  ok${ANSI.reset}  ${name}${detail ? ` ${ANSI.gray}(${detail})${ANSI.reset}` : ""}`,
+  );
 }
 
 function fail(name: string, detail: string) {
@@ -167,10 +169,7 @@ class Client {
   }
 }
 
-function connect(
-  endpoint: Endpoint,
-  opts: { origin?: string | null } = {},
-): Promise<Client> {
+function connect(endpoint: Endpoint, opts: { origin?: string | null } = {}): Promise<Client> {
   return new Promise((resolve, reject) => {
     // Bun's WebSocket constructor accepts a second `headers` option.
     // origin: null → no Origin header → sidecar still accepts (see allow-list)
@@ -257,21 +256,15 @@ async function main() {
   // -------------------------------------------------------------------
 
   // Foreign Origin should be rejected BEFORE the WS upgrade completes.
-  await expectReject(
-    "foreign Origin rejected at upgrade",
-    async () => {
-      await connect(endpoint, { origin: "https://attacker.example.com" });
-    },
-  );
+  await expectReject("foreign Origin rejected at upgrade", async () => {
+    await connect(endpoint, { origin: "https://attacker.example.com" });
+  });
 
   // Wrong token -> handshake RPC should reject.
   const c1 = await connect(endpoint, { origin: "tauri://localhost" });
-  await expectReject(
-    "handshake rejects wrong token",
-    async () => {
-      await c1.request("auth.handshake", { token: "wrong" });
-    },
-  );
+  await expectReject("handshake rejects wrong token", async () => {
+    await c1.request("auth.handshake", { token: "wrong" });
+  });
   c1.close();
 
   // -------------------------------------------------------------------
@@ -279,9 +272,8 @@ async function main() {
   // -------------------------------------------------------------------
 
   const client = await connect(endpoint, { origin: "tauri://localhost" });
-  await expectResolve(
-    "handshake succeeds with correct token",
-    () => client.request("auth.handshake", { token: endpoint.token }),
+  await expectResolve("handshake succeeds with correct token", () =>
+    client.request("auth.handshake", { token: endpoint.token }),
   );
 
   // -------------------------------------------------------------------
@@ -310,9 +302,8 @@ async function main() {
   const workspace = mkdtempSync(path.join(tmpdir(), "openhorn-e2e-"));
   writeFileSync(path.join(workspace, "hello.txt"), "hello from e2e");
 
-  await expectResolve(
-    "workspace.setCurrent /tmp/<mkdtemp> accepted",
-    () => client.request("workspace.setCurrent", { root: workspace }),
+  await expectResolve("workspace.setCurrent /tmp/<mkdtemp> accepted", () =>
+    client.request("workspace.setCurrent", { root: workspace }),
   );
 
   await expectResolve(
@@ -321,8 +312,7 @@ async function main() {
     (result) => {
       const entries = (result as { entries: Array<{ name: string }> }).entries;
       return (
-        (Array.isArray(entries) &&
-          entries.some((e) => e.name === "hello.txt")) ||
+        (Array.isArray(entries) && entries.some((e) => e.name === "hello.txt")) ||
         `unexpected entries: ${JSON.stringify(entries)}`
       );
     },
@@ -335,17 +325,15 @@ async function main() {
         content: string;
       }>,
     (result) =>
-      (result.content && result.content.includes("hello from e2e")) ||
+      result.content?.includes("hello from e2e") ||
       `unexpected content: ${JSON.stringify(result)}`,
   );
 
-  await expectResolve(
-    "fs.write new file inside workspace succeeds",
-    () =>
-      client.request("fs.write", {
-        path: "nested/fresh.txt",
-        content: "written by e2e",
-      }),
+  await expectResolve("fs.write new file inside workspace succeeds", () =>
+    client.request("fs.write", {
+      path: "nested/fresh.txt",
+      content: "written by e2e",
+    }),
   );
 
   // -------------------------------------------------------------------

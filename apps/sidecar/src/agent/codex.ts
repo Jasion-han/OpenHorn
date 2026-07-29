@@ -237,7 +237,10 @@ export async function runCodexAgent(input: RunCodexAgentInput): Promise<void> {
       });
     }
 
-    const rl = createInterface({ input: proc.stdout!, crlfDelay: Number.POSITIVE_INFINITY });
+    // Checked rather than asserted: if the spawn ever loses its pipe, this says
+    // so instead of throwing a TypeError from inside readline.
+    if (!proc.stdout) throw new Error("codex process was spawned without stdout");
+    const rl = createInterface({ input: proc.stdout, crlfDelay: Number.POSITIVE_INFINITY });
 
     rl.on("line", (line) => {
       if (!line.trim()) return;
@@ -248,11 +251,15 @@ export async function runCodexAgent(input: RunCodexAgentInput): Promise<void> {
         return;
       }
 
-      if (typeof msg.id === "number" && pendingResponses.has(msg.id)) {
-        const handler = pendingResponses.get(msg.id)!;
-        pendingResponses.delete(msg.id);
-        handler(msg);
-        return;
+      // One lookup instead of has-then-get-with-assertion: the map is keyed by
+      // request id, and a hit is the proof the handler exists.
+      if (typeof msg.id === "number") {
+        const handler = pendingResponses.get(msg.id);
+        if (handler) {
+          pendingResponses.delete(msg.id);
+          handler(msg);
+          return;
+        }
       }
 
       if (typeof msg.id === "number" && msg.method) {
