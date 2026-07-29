@@ -31,6 +31,7 @@ import {
   Input,
   ScrollArea,
 } from "ui";
+import { useClockTick } from "../../hooks/useClockTick";
 import { getDesktopBackendBase } from "../../lib/backendBase";
 import { displayConversationTitle } from "../../lib/conversationTitle";
 import { formatSidebarLabel, getSidebarLabel, type SidebarLabelKey } from "../../lib/i18n/agent";
@@ -51,12 +52,18 @@ type DateGroupKey = Extract<
   "sidebar.group.today" | "sidebar.group.yesterday" | "sidebar.group.earlier"
 >;
 
-function groupByCreatedAt(
+// `now` is a parameter rather than a `new Date()` inside, so the caller is forced
+// to supply a reading that re-renders when the day turns — and so the boundary
+// arithmetic, which is where the off-by-one lives, is testable without a clock.
+export function groupByCreatedAt(
   items: Conversation[],
+  now: Date,
 ): Array<{ label: DateGroupKey; items: Conversation[] }> {
-  const now = new Date();
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  const yesterdayStart = todayStart - 86_400_000;
+  // Calendar arithmetic, not minus-24-hours: on a DST day the previous midnight
+  // is 23 or 25 hours back, and a fixed offset would put an hour of yesterday
+  // into "earlier".
+  const yesterdayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1).getTime();
 
   const today: Conversation[] = [];
   const yesterday: Conversation[] = [];
@@ -177,6 +184,10 @@ const ConversationRow = memo(
 );
 
 export function DesktopLeftSidebar() {
+  // Regroups when the day turns. Without it a window left open overnight keeps
+  // labelling yesterday's conversations "today" until some unrelated interaction
+  // happens to re-render the list.
+  const today = useClockTick("day");
   const [query, setQuery] = useState("");
   // The search field is collapsed behind an icon (Qoder-style) so the resting
   // sidebar is just "new conversation + the list".
@@ -313,7 +324,7 @@ export function DesktopLeftSidebar() {
 
   const pinned = filteredConversations.filter((conversation) => conversation.isPinned);
   const rest = filteredConversations.filter((conversation) => !conversation.isPinned);
-  const groups = groupByCreatedAt(rest);
+  const groups = groupByCreatedAt(rest, today);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
