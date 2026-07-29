@@ -6,7 +6,19 @@ describe("welcomeTitleKeyFor", () => {
   test("covers the whole day with no gap and no overlap", () => {
     const seen = new Set<string>();
     for (let hour = 0; hour < 24; hour += 1) seen.add(welcomeTitleKeyFor(hour));
-    expect(seen.size).toBe(4);
+    expect(seen.size).toBe(5);
+  });
+
+  test("no phrase has to stretch across more than a few hours", () => {
+    // The bug this replaces: one line owned 5am–11am, so "the day just broke"
+    // was still on screen at 11. Six hours is the widest a single mood can sit
+    // without going stale on someone who left the window open.
+    const spans = new Map<string, number>();
+    for (let hour = 0; hour < 24; hour += 1) {
+      const key = welcomeTitleKeyFor(hour);
+      spans.set(key, (spans.get(key) ?? 0) + 1);
+    }
+    for (const hours of spans.values()) expect(hours <= 6).toBe(true);
   });
 
   test("boundaries land on the later phrase, not the earlier one", () => {
@@ -15,7 +27,9 @@ describe("welcomeTitleKeyFor", () => {
     expect(welcomeTitleKeyFor(0)).toBe("chat.welcome.title.lateNight");
     expect(welcomeTitleKeyFor(4)).toBe("chat.welcome.title.lateNight");
     expect(welcomeTitleKeyFor(5)).toBe("chat.welcome.title.morning");
-    expect(welcomeTitleKeyFor(11)).toBe("chat.welcome.title.morning");
+    expect(welcomeTitleKeyFor(8)).toBe("chat.welcome.title.morning");
+    expect(welcomeTitleKeyFor(9)).toBe("chat.welcome.title.forenoon");
+    expect(welcomeTitleKeyFor(11)).toBe("chat.welcome.title.forenoon");
     expect(welcomeTitleKeyFor(12)).toBe("chat.welcome.title.afternoon");
     expect(welcomeTitleKeyFor(17)).toBe("chat.welcome.title.afternoon");
     expect(welcomeTitleKeyFor(18)).toBe("chat.welcome.title.evening");

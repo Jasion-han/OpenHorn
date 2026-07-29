@@ -572,6 +572,7 @@ export const chatLabels = {
   // caller, so these start mid-sentence.
   "chat.welcome.title.lateNight": "夜深了，正是安静的时候。",
   "chat.welcome.title.morning": "天刚亮，今天还空着。",
+  "chat.welcome.title.forenoon": "日头高了，上午还长着。",
   "chat.welcome.title.afternoon": "午后很长，不必着急。",
   "chat.welcome.title.evening": "夜色落下来了，时间还早。",
   // An invitation, not an instruction. The previous line ("输入你的问题，我会为你
