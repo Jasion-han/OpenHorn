@@ -2,8 +2,8 @@ import { describe, expect, test } from "bun:test";
 import type { AgentTaskStreamEvent } from "./agentTaskStream";
 import {
   projectSidecarAgentEvent,
-  SidecarClient,
   type SidecarApprovalRequest,
+  SidecarClient,
   type SidecarWebSocketLike,
 } from "./sidecarClient";
 

@@ -1,5 +1,5 @@
-import { getGlobalDefaultChannel } from "./defaultChannel";
 import type { Channel, Conversation } from "../types/chat";
+import { getGlobalDefaultChannel } from "./defaultChannel";
 
 export type EffectiveModelResult =
   | {

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { createDesktopChatStore } from "./chatStore";
 import type { ChatAdapter } from "../lib/chatAdapter";
 import type { Channel, Conversation, Message } from "../types/chat";
+import { createDesktopChatStore } from "./chatStore";
 
 function createStubAdapter() {
   let sendInput: unknown;
