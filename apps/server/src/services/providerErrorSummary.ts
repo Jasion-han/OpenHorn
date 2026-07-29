@@ -65,7 +65,7 @@ function summarizeKnownProviderError(text: string) {
 
   const title = extractHtmlTitle(normalized);
   if (title) {
-    const cloudflareTitle = title.match(/\b(\d{3})\s*:\s*([^\|]+)\s*$/);
+    const cloudflareTitle = title.match(/\b(\d{3})\s*:\s*([^|]+)\s*$/);
     if (cloudflareTitle?.[1] && cloudflareTitle?.[2]) {
       return `${cloudflareTitle[1]}: ${cloudflareTitle[2].trim()}`;
     }
@@ -148,7 +148,8 @@ export function classifyProviderError(
   },
 ): ProviderErrorInfo {
   const raw = typeof text === "string" ? text.trim() : "";
-  const summary = summarizeKnownProviderError(raw) || buildFallbackSummary(options?.status, options?.fallback);
+  const summary =
+    summarizeKnownProviderError(raw) || buildFallbackSummary(options?.status, options?.fallback);
   const detail = extractMeaningfulDetail(raw, summary);
   const normalized = normalizeWhitespace(raw || summary);
   const lower = normalized.toLowerCase();
@@ -164,13 +165,15 @@ export function classifyProviderError(
   ) {
     let userMessage = normalized;
     if (lower.includes("claude agent sdk")) {
-      userMessage = "该渠道支持普通聊天接口，但不兼容 Claude Agent SDK，无法用于 Agent 模式。它仍可用于普通聊天。";
+      userMessage =
+        "该渠道支持普通聊天接口，但不兼容 Claude Agent SDK，无法用于 Agent 模式。它仍可用于普通聊天。";
     } else if (
       normalized.includes("当前 Agent 工具运行协议") ||
       lower.includes("tool execution") ||
       lower.includes("tool-calling protocol")
     ) {
-      userMessage = "该渠道支持普通聊天接口，但不兼容当前 Agent 工具运行协议，无法用于 Agent 模式。它仍可用于普通聊天。";
+      userMessage =
+        "该渠道支持普通聊天接口，但不兼容当前 Agent 工具运行协议，无法用于 Agent 模式。它仍可用于普通聊天。";
     }
     return {
       kind: "protocol_incompatible",
@@ -202,7 +205,11 @@ export function classifyProviderError(
       kind: "ssl_handshake_failed",
       raw: raw || summary,
       summary,
-      userMessage: buildUserMessage("TLS/SSL 握手失败", detail, "请检查 Base URL、证书链或中转服务。"),
+      userMessage: buildUserMessage(
+        "TLS/SSL 握手失败",
+        detail,
+        "请检查 Base URL、证书链或中转服务。",
+      ),
       status: status ?? 525,
       retryable: false,
     };

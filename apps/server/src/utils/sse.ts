@@ -70,8 +70,11 @@ export function createSseStream(
   const stream = new ReadableStream({
     start(controller) {
       streamController = controller;
-      while (pendingChunks.length > 0) {
-        controller.enqueue(pendingChunks.shift()!);
+      // Drained in one splice rather than shift-until-empty: the queue is
+      // emptied atomically, so the loop cannot see a chunk that another
+      // enqueue path appended while it was running.
+      for (const chunk of pendingChunks.splice(0)) {
+        controller.enqueue(chunk);
       }
       if (shouldCloseOnStart) {
         controller.close();

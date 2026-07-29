@@ -396,7 +396,9 @@ export async function probeGenericToolCallingCompatibility(params: {
           requestTimeoutMs,
         });
 
-      let result;
+      // Typed off the function instead of left bare: an untyped `let` is `any`,
+      // which would silently disable checking on every use of `result` below.
+      let result: Awaited<ReturnType<typeof runInitialTurn>>;
       try {
         result = await runInitialTurn(true);
       } catch (error) {
@@ -655,8 +657,12 @@ export async function resolveAgentRuntime(params: {
     }
 
     const isRequestedChannel = channel.id === requestedChannelId;
-    const strictRequestedModel = isRequestedChannel && requestedModelId !== null;
-    if (strictRequestedModel && !hasEnabledModel(channel, requestedModelId)) {
+    // Holds the id itself rather than a boolean: a boolean throws away the
+    // narrowing, which is why the probe order below used to need a non-null
+    // assertion to get the value back.
+    const strictRequestedModelId =
+      isRequestedChannel && requestedModelId !== null ? requestedModelId : null;
+    if (strictRequestedModelId !== null && !hasEnabledModel(channel, strictRequestedModelId)) {
       return {
         success: false,
         error: "当前会话选择的模型不存在或已被禁用，请重新选择模型。",
@@ -667,9 +673,10 @@ export async function resolveAgentRuntime(params: {
       };
     }
 
-    const modelOrder = strictRequestedModel
-      ? [requestedModelId!]
-      : buildModelProbeOrder(channel, isRequestedChannel ? requestedModelId : null);
+    const modelOrder =
+      strictRequestedModelId !== null
+        ? [strictRequestedModelId]
+        : buildModelProbeOrder(channel, isRequestedChannel ? requestedModelId : null);
     if (modelOrder.length === 0) {
       continue;
     }

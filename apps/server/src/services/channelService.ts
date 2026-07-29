@@ -121,7 +121,9 @@ function normalizeBaseUrl(baseUrl: string): string {
 
 function isDashScopeCodingBaseUrl(baseUrl: string): boolean {
   try {
-    return new URL(normalizeBaseUrl(baseUrl)).hostname.toLowerCase() === "coding.dashscope.aliyuncs.com";
+    return (
+      new URL(normalizeBaseUrl(baseUrl)).hostname.toLowerCase() === "coding.dashscope.aliyuncs.com"
+    );
   } catch {
     return false;
   }
@@ -749,9 +751,7 @@ export async function deleteChannel(userId: string, channelId: string) {
       .where(and(eq(agentTasks.userId, userId), eq(agentTasks.channelId, channelId)));
 
     await tx.delete(channelModels).where(eq(channelModels.channelId, channelId));
-    await tx
-      .delete(channels)
-      .where(and(eq(channels.id, channelId), eq(channels.userId, userId)));
+    await tx.delete(channels).where(and(eq(channels.id, channelId), eq(channels.userId, userId)));
   });
 
   return { success: true };
@@ -1023,7 +1023,7 @@ export async function testChannel(userId: string, channelId: string): Promise<Ch
     const channel = await getOwnedChannelItem(userId, channelId);
     const row = await getOwnedChannelRow(userId, channelId);
     const protocol = normalizeProtocol(row.protocol, channel.provider);
-    let apiKey = decrypt(row.apiKey);
+    const apiKey = decrypt(row.apiKey);
     const baseUrl = row.baseUrl || getDefaultBaseUrl(protocol);
 
     if (apiKey.startsWith("__cli_oauth__:")) {

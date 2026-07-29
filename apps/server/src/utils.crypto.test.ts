@@ -47,7 +47,11 @@ describe("encrypt / decrypt", () => {
 
   test("the same plaintext encrypts differently each time (random IV)", () => {
     withSecret(() => {
-      expect(encrypt("same") === encrypt("same")).toBe(false);
+      // Bound to two names on purpose: the two calls look identical but are not
+      // — encrypt draws a fresh IV each time, which is exactly what this asserts.
+      const first = encrypt("same");
+      const second = encrypt("same");
+      expect(first === second).toBe(false);
     });
   });
 

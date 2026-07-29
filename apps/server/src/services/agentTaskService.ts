@@ -502,7 +502,9 @@ function getEventRuntime(event: AgentTaskEventRecord): AgentTaskRuntimeRecord | 
 
 function deriveTaskRuntime(task: AgentTaskRecord, events: AgentTaskEventRecord[]): AgentTaskRuntimeRecord | null {
   for (let index = events.length - 1; index >= 0; index -= 1) {
-    const runtime = getEventRuntime(events[index]!);
+    const event = events[index];
+    if (!event) continue;
+    const runtime = getEventRuntime(event);
     if (runtime) return runtime;
   }
 

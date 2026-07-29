@@ -87,10 +87,16 @@ test("agentTaskService persists tasks, plans, approvals, and task detail", async
     expect(planSteps).toHaveLength(2);
     expect(planSteps[1]?.status).toBe("ready");
 
+    // Pulled out and checked rather than asserted with `!`: if the plan ever
+    // comes back short, this says so instead of failing with a TypeError on
+    // undefined several lines into the next call.
+    const [firstStep, secondStep] = planSteps;
+    if (!firstStep || !secondStep) throw new Error("expected two plan steps");
+
     const updatedSteps = await updateAgentPlanStepStatuses(userId, {
       steps: [
-        { id: planSteps[0]!.id, status: "completed" },
-        { id: planSteps[1]!.id, status: "running" },
+        { id: firstStep.id, status: "completed" },
+        { id: secondStep.id, status: "running" },
       ],
     });
 
