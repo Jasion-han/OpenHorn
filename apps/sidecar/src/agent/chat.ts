@@ -1,4 +1,4 @@
-import { createAdapter, type ChatMessage } from "adapters";
+import { type ChatMessage, createAdapter } from "adapters";
 import type { AgentEvent } from "./events";
 
 export type RunChatStreamInput = {

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
-import { client } from "./index";
 import { bootstrapDatabase } from "./bootstrap";
+import { client } from "./index";
 
 type ForeignKeyRow = {
   table?: string;
