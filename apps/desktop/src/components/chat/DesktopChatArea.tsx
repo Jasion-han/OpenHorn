@@ -208,7 +208,10 @@ export function DesktopChatArea() {
       }
       void loadConversations();
     }
-  }, [sidecarRun.isBusy, autoTitleConversation]);
+    // `setStreaming` and `loadConversations` are zustand actions selected off the
+    // store, so their identity never changes — adding them cannot re-trigger this.
+    // `autoTitleConversation` was already listed, which is the standing proof.
+  }, [sidecarRun.isBusy, autoTitleConversation, setStreaming, loadConversations]);
 
   const effectiveModel = getEffectiveModelForConversation(channels, currentConversation);
   const agentModeSupported = effectiveModel.ok;
@@ -290,11 +293,20 @@ export function DesktopChatArea() {
     rangeExtractor,
   });
 
+  // The id is a trigger, not an input: switching conversations must re-arm the
+  // scroll and refocus the composer. Taking biome's fix and dropping it would
+  // leave this running once at mount, so the second conversation you open never
+  // scrolls to the bottom and never gets focus.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: dep is a trigger, not read in body
   useEffect(() => {
     pendingScrollTargetRef.current = { type: "bottom" };
     queueMicrotask(() => inputRef.current?.focus());
   }, [currentConversation?.id]);
 
+  // `messages`, the conversation id and `editingMessageId` are triggers: they say
+  // "the list just changed shape, re-run the pending scroll", which is why the
+  // body reads refs instead of them.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: deps are triggers, not read in body
   useLayoutEffect(() => {
     const viewportEl = viewportRef.current;
     const pending = pendingScrollTargetRef.current;
@@ -341,11 +353,18 @@ export function DesktopChatArea() {
     virtualizer,
   ]);
 
+  // Do NOT take biome's fix here. It wants `sidecarRun.clearError` added, but
+  // useSidecarAgentRun returns a bare object literal with an inline arrow — a new
+  // identity every render. As a dependency it would run this effect on every
+  // render, wiping `streamingAssistantId` mid-stream and killing the live output.
+  // The id is a trigger: reset the run state when you switch conversations.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: dep is a trigger; clearError is unstable by identity
   useEffect(() => {
     setStreamingAssistantId(null);
     sidecarRun.clearError();
   }, [currentConversation?.id]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: dep is a trigger — drop a half-attached file when you leave the conversation
   useEffect(() => {
     setPendingAttachments([]);
   }, [currentConversation?.id]);
@@ -393,6 +412,10 @@ export function DesktopChatArea() {
     };
   }, [currentConversation?.id, slashOpen]);
 
+  // Cleanup-only: the id is what decides *when* to revoke, which is the whole
+  // point — object URLs for a conversation you have left would otherwise leak
+  // for as long as the window stays open.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: dep is a trigger, not read in body
   useEffect(() => {
     return () => {
       for (const urls of pendingPreviewUrlsRef.current.values()) {
@@ -1144,6 +1167,9 @@ export function DesktopChatArea() {
           resolveSkillMcpSlash(userMessage.content);
         await sidecarRun.startRun({
           conversationId: currentConversation.id,
+          // Guarded: `isSidecarRetry` is only truthy when channelId is, so this is
+          // non-null at runtime. TypeScript cannot narrow through the alias.
+          // biome-ignore lint/style/noNonNullAssertion: guarded by isSidecarRetry above
           channelId: currentConversation.channelId!,
           modelId: effectiveModel.ok ? effectiveModel.modelId : "",
           assistantMessageId: messageId,
@@ -1306,6 +1332,8 @@ export function DesktopChatArea() {
           await resolveRunSettings(forceWebSearch);
         await sidecarRun.startRun({
           conversationId: currentConversation.id,
+          // Same guarantee as the retry path, via `useSidecarForEdit`.
+          // biome-ignore lint/style/noNonNullAssertion: guarded by useSidecarForEdit above
           channelId: currentConversation.channelId!,
           modelId: effectiveModel.ok ? effectiveModel.modelId : "",
           assistantMessageId,
