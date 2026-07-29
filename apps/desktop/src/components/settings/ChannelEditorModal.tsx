@@ -280,6 +280,13 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
     }
   }, [sidecarClient, sidecarStatus]);
 
+  // Do NOT take biome's fix. Three of the four functions it wants added
+  // (prefillCreate, prefillFromChannel, pickInitialChannelId) are plain arrows
+  // redeclared every render, so as dependencies they would re-run this on every
+  // render — and this effect resets the form: setQuery(""), setActiveKey(...),
+  // prefill. The modal would wipe itself as you typed in it.
+  // The deps listed are the real triggers: reopen, or point at a different channel.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: listed deps are triggers; the rest are unstable by identity
   useEffect(() => {
     if (!opened) return;
     loadEnvSources();

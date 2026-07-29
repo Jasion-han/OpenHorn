@@ -28,6 +28,10 @@ export function DesktopStreamingMarkdownMessage({
     };
   }, []);
 
+  // `pulseKey` is a trigger the parent bumps to restart the stream animation for
+  // the same content — the body has no reason to read it, but dropping it would
+  // make a re-run request a no-op.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: dep is a trigger, not read in body
   useLayoutEffect(() => {
     const nextContent = content || "";
     const smoother = smootherRef.current;

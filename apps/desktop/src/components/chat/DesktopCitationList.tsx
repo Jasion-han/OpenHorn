@@ -23,6 +23,7 @@ export function DesktopCitationList({
       <div className="mt-1.5 flex flex-col gap-1.5">
         {citations.map((citation, index) => (
           <a
+            // biome-ignore lint/suspicious/noArrayIndexKey: the url is the identity; the index only separates a source cited twice
             key={`${citation.url}-${index}`}
             href={normalizeExternalUrl(citation.url)}
             rel="noreferrer"

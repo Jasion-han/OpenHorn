@@ -68,6 +68,9 @@ export function DesktopProviderLogo({ provider, className, title }: ProviderLogo
   const spec = normalized ? PROVIDER_LOGOS[normalized] : undefined;
   const [imageFailed, setImageFailed] = useState(false);
 
+  // The src is a trigger: a new logo deserves a fresh attempt. Drop the dep and
+  // one broken image would keep every later provider stuck on the fallback.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: dep is a trigger, not read in body
   useEffect(() => {
     setImageFailed(false);
   }, [spec?.src]);

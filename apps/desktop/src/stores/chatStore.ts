@@ -525,16 +525,20 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
         return result;
       }
 
+      // Captured before the callback: the guard above narrows `result.title` to a
+      // string, but that narrowing does not survive into a closure, which is why
+      // both uses previously needed a non-null assertion.
+      const nextTitle = result.title;
       const nextUpdatedAt = new Date();
       set((state) => ({
         conversations: state.conversations.map((conversation) =>
           conversation.id === conversationId
-            ? { ...conversation, title: result.title!, updatedAt: nextUpdatedAt }
+            ? { ...conversation, title: nextTitle, updatedAt: nextUpdatedAt }
             : conversation,
         ),
         currentConversation:
           state.currentConversation?.id === conversationId
-            ? { ...state.currentConversation, title: result.title!, updatedAt: nextUpdatedAt }
+            ? { ...state.currentConversation, title: nextTitle, updatedAt: nextUpdatedAt }
             : state.currentConversation,
       }));
 

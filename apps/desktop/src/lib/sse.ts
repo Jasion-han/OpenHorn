@@ -2,7 +2,9 @@ import type { ChatStreamEvent } from "../types/chat";
 
 export type SseEvent = { type?: string; [key: string]: unknown };
 
-export function parseSseLines<T extends SseEvent = ChatStreamEvent>(buffer: string): {
+export function parseSseLines<T extends SseEvent = ChatStreamEvent>(
+  buffer: string,
+): {
   events: T[];
   rest: string;
 } {
@@ -18,17 +20,15 @@ export function parseSseLines<T extends SseEvent = ChatStreamEvent>(buffer: stri
     try {
       events.push(JSON.parse(payload) as T);
     } catch {
-      continue;
+      // A malformed frame is dropped rather than thrown: one bad payload in a
+      // batch must not take the surviving events down with it.
     }
   }
 
   return { events, rest };
 }
 
-export async function readSseStream(
-  response: Response,
-  onEvent: (event: ChatStreamEvent) => void,
-) {
+export async function readSseStream(response: Response, onEvent: (event: ChatStreamEvent) => void) {
   return readTypedSseStream(response, onEvent);
 }
 

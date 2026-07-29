@@ -601,12 +601,19 @@ export function McpSettings() {
                   const meta = [row.type !== "stdio" ? row.type : null, row.description]
                     .filter(Boolean)
                     .join(" · ");
+                  // Wrapping the control makes the whole row clickable, but a
+                  // screen reader still needs the pairing spelled out — without
+                  // it the checkbox announces itself with no name at all.
+                  const checkboxId = `mcp-import-row-${idx}`;
                   return (
                     <label
+                      // biome-ignore lint/suspicious/noArrayIndexKey: index only disambiguates rows that are identical in name and signature
                       key={`${row.name}-${row.signature}-${idx}`}
+                      htmlFor={checkboxId}
                       className="flex cursor-pointer items-start gap-3 rounded-lg px-2 py-2 hover:bg-muted/50"
                     >
                       <Checkbox
+                        id={checkboxId}
                         className="mt-0.5"
                         checked={selectedRows.has(idx)}
                         onCheckedChange={() => toggleRow(idx)}
