@@ -248,6 +248,27 @@ export function DesktopWelcomeScreen() {
 
   const canSubmit = (Boolean(draft.trim()) || attachments.length > 0) && !starting;
 
+  // The hero line is picked from the clock, so reading it once at mount would
+  // strand a window left open all morning on the phrase it launched with.
+  // Wake on the hour rather than polling — that is the only moment the line can
+  // change — and reschedule from inside the callback so the chain survives an
+  // hour that resolves to the same phrase.
+  const [hour, setHour] = useState(() => new Date().getHours());
+  useEffect(() => {
+    let timer = 0;
+    const scheduleNextHour = () => {
+      const now = new Date();
+      const untilNextHour =
+        (60 - now.getMinutes()) * 60_000 - now.getSeconds() * 1000 - now.getMilliseconds();
+      timer = window.setTimeout(() => {
+        setHour(new Date().getHours());
+        scheduleNextHour();
+      }, untilNextHour + 1_000);
+    };
+    scheduleNextHour();
+    return () => window.clearTimeout(timer);
+  }, []);
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-6 pb-16">
@@ -258,8 +279,8 @@ export function DesktopWelcomeScreen() {
             </div>
             <h1 className="text-[28px] font-semibold leading-tight tracking-tight">
               {user?.username
-                ? `${user.username}，${getChatLabel(welcomeTitleKeyFor(new Date().getHours()))}`
-                : getChatLabel(welcomeTitleKeyFor(new Date().getHours()))}
+                ? `${user.username}，${getChatLabel(welcomeTitleKeyFor(hour))}`
+                : getChatLabel(welcomeTitleKeyFor(hour))}
             </h1>
             <p className="mt-2 text-sm text-muted-foreground">
               {getChatLabel("chat.welcome.subtitle")}
