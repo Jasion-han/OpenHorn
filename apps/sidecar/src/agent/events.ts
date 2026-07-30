@@ -90,8 +90,35 @@ export function convertSdkEvent(message: SdkMessage): AgentEvent | AgentEvent[] 
   return null;
 }
 
-function toCount(value: unknown): number {
+export function toCount(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+/**
+ * The one place a `usage` event gets built, so every runtime agrees on what the
+ * two numbers mean and on when there is nothing worth reporting.
+ *
+ * `promptTokens` is the WHOLE input the turn processed, cache included. Each
+ * runtime has to reach that figure its own way, because the providers disagree
+ * on whether their "input" field already counts the cache:
+ *   - Anthropic / pi-ai exclude it, so the cache buckets get added (see
+ *     `convertResultUsage`, and direct.ts).
+ *   - Codex includes it, so adding `cachedInputTokens` would count it twice
+ *     (verified on codex-cli 0.145.0: totalTokens === inputTokens + outputTokens
+ *     with cachedInputTokens well above zero).
+ *
+ * All-zero means "the provider said nothing" rather than "this turn was free" —
+ * gateways routinely omit usage entirely. Returning null keeps the bubble
+ * showing no token line at all instead of a confident `0 tokens`.
+ */
+export function buildUsageEvent(promptTokens: number, completionTokens: number): AgentEvent | null {
+  if (promptTokens === 0 && completionTokens === 0) return null;
+  return {
+    type: "usage",
+    promptTokens,
+    completionTokens,
+    totalTokens: promptTokens + completionTokens,
+  };
 }
 
 /**
@@ -115,12 +142,6 @@ export function convertResultUsage(message: SdkMessage): AgentEvent | null {
     toCount(raw.cache_creation_input_tokens) +
     toCount(raw.cache_read_input_tokens);
   const completionTokens = toCount(raw.output_tokens);
-  if (promptTokens === 0 && completionTokens === 0) return null;
 
-  return {
-    type: "usage",
-    promptTokens,
-    completionTokens,
-    totalTokens: promptTokens + completionTokens,
-  };
+  return buildUsageEvent(promptTokens, completionTokens);
 }

@@ -41,7 +41,7 @@ import {
   partitionImagesByFormat,
 } from "./attachments";
 import { sanitizeChildEnv } from "./childEnv";
-import type { AgentEvent } from "./events";
+import { type AgentEvent, buildUsageEvent, toCount } from "./events";
 import { buildIntentContext } from "./intent-context";
 import { capMcpTools, connectMcpTools } from "./mcp-tools";
 import { buildSkillsPromptSection, type MaterializedSkill } from "./skills";
@@ -892,6 +892,11 @@ export async function runDirectAgent(input: RunDirectAgentInput): Promise<void> 
     .join("\n\n");
 
   let turnCount = 0;
+  // Summed across turns, not read off the last one. An agent loop is many model
+  // calls, and pi reports each turn's own counts — reporting only the final turn
+  // would bill a ten-step run as a one-step one.
+  let promptTokens = 0;
+  let completionTokens = 0;
   const agent = new Agent({
     initialState: {
       model,
@@ -906,8 +911,18 @@ export async function runDirectAgent(input: RunDirectAgentInput): Promise<void> 
   // Map pi-agent-core events to our AgentEvent format
   agent.subscribe((event: PiAgentEvent) => {
     switch (event.type) {
-      case "turn_end":
+      case "turn_end": {
         turnCount++;
+        // pi's `input` has the cache buckets taken OUT of it (see its
+        // openai-completions provider: `input = prompt_tokens - cacheRead -
+        // cacheWrite`), so they go back in here to make this the whole input the
+        // model processed — the same figure the Anthropic path reports.
+        if (event.message.role === "assistant") {
+          const used = event.message.usage;
+          promptTokens +=
+            toCount(used?.input) + toCount(used?.cacheRead) + toCount(used?.cacheWrite);
+          completionTokens += toCount(used?.output);
+        }
         if (turnCount >= MAX_TURNS) {
           input.onEvent({
             type: "error",
@@ -916,6 +931,7 @@ export async function runDirectAgent(input: RunDirectAgentInput): Promise<void> 
           agent.abort();
         }
         break;
+      }
       case "message_update": {
         // Extract text deltas from the assistant message event stream
         const ame = event.assistantMessageEvent;
@@ -994,6 +1010,10 @@ export async function runDirectAgent(input: RunDirectAgentInput): Promise<void> 
   } finally {
     input.abortController.signal.removeEventListener("abort", onAbort);
     await mcpCleanup?.();
+    // In the `finally` so a cancelled or failed run still reports what it spent
+    // — those turns cost the same as the ones that finished.
+    const usage = buildUsageEvent(promptTokens, completionTokens);
+    if (usage) input.onEvent(usage);
     input.onEvent({ type: "done" });
   }
 }

@@ -5,7 +5,7 @@ import { createInterface } from "node:readline";
 import type { AttachmentPart } from "shared/types";
 import { appendAttachmentContext } from "./attachments";
 import { sanitizeChildEnv } from "./childEnv";
-import type { AgentEvent } from "./events";
+import { type AgentEvent, buildUsageEvent, toCount } from "./events";
 import { buildAgentSystemPrompt } from "./system-prompt";
 
 export type RunCodexAgentInput = {
@@ -53,6 +53,39 @@ function sendNotification(proc: ChildProcess, method: string, params?: unknown) 
  */
 function buildCodexEnv(): NodeJS.ProcessEnv {
   return sanitizeChildEnv({ ...process.env });
+}
+
+/**
+ * Token counts out of a `thread/tokenUsage/updated` notification, or null for
+ * any other message.
+ *
+ * Shape verified against codex-cli 0.145.0:
+ *   { threadId, turnId, tokenUsage: { total: {...}, last: {...},
+ *                                     modelContextWindow } }
+ * where each bucket is `{ totalTokens, inputTokens, cachedInputTokens,
+ * cacheWriteInputTokens, outputTokens, reasoningOutputTokens }`.
+ *
+ * Reads `total`, not `last`: a run opens its own thread, so `total` is exactly
+ * this run and already spans the agent's internal steps. `last` would report
+ * only the final one.
+ *
+ * `cachedInputTokens` is deliberately NOT added — it is a subset of
+ * `inputTokens`, not a sibling bucket (the probe showed
+ * totalTokens === inputTokens + outputTokens while cachedInputTokens was 4480).
+ * Codex differs from Anthropic here, and adding it would inflate every cached
+ * turn.
+ */
+export function readCodexUsage(
+  msg: JsonRpcMessage,
+): { promptTokens: number; completionTokens: number } | null {
+  if (msg.method !== "thread/tokenUsage/updated") return null;
+  const params = (msg.params ?? {}) as Record<string, unknown>;
+  const tokenUsage = (params.tokenUsage ?? {}) as Record<string, unknown>;
+  const total = (tokenUsage.total ?? {}) as Record<string, unknown>;
+  return {
+    promptTokens: toCount(total.inputTokens),
+    completionTokens: toCount(total.outputTokens),
+  };
 }
 
 /** Exported for tests: maps a codex app-server JSON-RPC message to an AgentEvent. */
@@ -207,6 +240,10 @@ export async function runCodexAgent(input: RunCodexAgentInput): Promise<void> {
     let threadStarted = false;
     let done = false;
     let resolved = false;
+    // Assigned, not accumulated: codex's `total` bucket is already cumulative
+    // over the thread, so each notification supersedes the previous one.
+    let usagePromptTokens = 0;
+    let usageCompletionTokens = 0;
 
     const settle = () => {
       if (resolved) return;
@@ -218,6 +255,11 @@ export async function runCodexAgent(input: RunCodexAgentInput): Promise<void> {
       if (done) return;
       done = true;
       if (event) onEvent(event);
+      // Reported for cancelled and failed runs too — those turns were still
+      // billed. `thread/tokenUsage/updated` arrives before `turn/completed`, so
+      // by here the counts are in.
+      const usage = buildUsageEvent(usagePromptTokens, usageCompletionTokens);
+      if (usage) onEvent(usage);
       onEvent({ type: "done" });
       cleanup();
       // Resolve only after the child has actually exited so teardown never
@@ -270,6 +312,14 @@ export async function runCodexAgent(input: RunCodexAgentInput): Promise<void> {
       if (msg.method === "turn/started") {
         threadStarted = true;
       }
+
+      const usage = readCodexUsage(msg);
+      if (usage) {
+        usagePromptTokens = usage.promptTokens;
+        usageCompletionTokens = usage.completionTokens;
+        return;
+      }
+
       const event = mapCodexEvent(msg);
       if (event) {
         if ((event.type === "done" || event.type === "error") && threadStarted) {
