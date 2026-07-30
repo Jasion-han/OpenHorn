@@ -23,16 +23,31 @@ import { DesktopProviderLogo } from "./DesktopProviderLogo";
 const api = createServerApi();
 
 /**
- * Badge shades for this dialog.
+ * Selection colour for this dialog.
  *
- * The stock `default` variant paints `bg-primary`, which in dark mode is
- * near-white — the two least important labels in the panel ended up being the
- * brightest things in it, and "已选" and "默认" sat next to each other in
- * opposite polarities. Both now tint the foreground colour instead, so they
- * stay legible in either theme and rank below the row they annotate.
+ * The palette in tokens.css is entirely achromatic, so "selected" used to be
+ * drawn as a grey fill — the same visual language as "disabled". The selected
+ * channel read as the one you *couldn't* pick. Blue is the accent this app
+ * already uses for informational state (orange warns, green confirms), so
+ * selection borrows it rather than introducing a fourth hue.
+ *
+ * Stated per-theme rather than via `bg-primary`, which resolves to near-white
+ * in dark mode and would put the least important label on the brightest chip.
  */
-const BADGE_STRONG = "border-transparent bg-foreground/[0.16] text-foreground";
-const BADGE_SOFT = "border-foreground/25 bg-transparent text-muted-foreground";
+const SELECTED_SURFACE =
+  "border-blue-500 bg-blue-50 dark:border-blue-400/70 dark:bg-blue-400/[0.14]";
+
+/** The one state worth reading at a glance: solid, not an outline. */
+const BADGE_SELECTED = "border-transparent bg-blue-600 text-white dark:bg-blue-500";
+/** Secondary state, still coloured — an outline in the same hue. */
+const BADGE_DEFAULT =
+  "border-blue-500/45 bg-transparent text-blue-700 dark:border-blue-400/45 dark:text-blue-300";
+/**
+ * Grey survives here on purpose: this badge means the row genuinely is
+ * unavailable, which is the one thing grey should say. Kept a step darker than
+ * `muted-foreground` so it stays readable rather than fading out.
+ */
+const BADGE_DISABLED = "border-foreground/25 bg-transparent text-foreground/70";
 
 type ModelGroup = {
   channel: Channel;
@@ -448,14 +463,8 @@ export function DesktopModelPickerModal(props: {
                         key={channel.id}
                         className={cn(
                           "flex w-full select-none flex-col gap-1.5 rounded-md border px-3 py-2 text-left transition-colors",
-                          // Neither `bg-accent` nor `border-primary` is usable
-                          // here: in dark mode accent resolves to 40% grey and
-                          // primary to near-white, so the selected row came out as
-                          // a light slab behind a white outline. Tinting with the
-                          // foreground colour instead keeps one rule working in
-                          // both themes and stays inside the panel's value range.
                           isActive
-                            ? "border-foreground/25 bg-foreground/[0.08]"
+                            ? SELECTED_SURFACE
                             : "border-foreground/[0.07] hover:bg-foreground/[0.05]",
                         )}
                         onClick={() => setSelectedChannelId(channel.id)}
@@ -469,17 +478,25 @@ export function DesktopModelPickerModal(props: {
                             <DesktopProviderLogo provider={channel.provider} className="size-4" />
                             <span className="sr-only">{channel.provider}</span>
                           </Badge>
-                          <span className="truncate text-sm font-semibold">{channel.name}</span>
+                          {/* Wraps instead of truncating: several channels are
+                              named by their base URL, and an ellipsis fell
+                              exactly on the port — `192.168.0.113:80…` hid the
+                              one character that told two of them apart. Two
+                              lines is enough for any of them and keeps the rows
+                              a predictable height. */}
+                          <span className="line-clamp-2 break-all text-sm font-semibold">
+                            {channel.name}
+                          </span>
                         </div>
 
                         <div className="flex flex-wrap items-center gap-1.5">
                           {hasSelected && (
-                            <Badge className={BADGE_STRONG}>
+                            <Badge className={BADGE_SELECTED}>
                               {getChannelLabel("settings.channel.picker.badge.selected")}
                             </Badge>
                           )}
                           {channel.isDefault && (
-                            <Badge variant="outline" className={BADGE_SOFT}>
+                            <Badge variant="outline" className={BADGE_DEFAULT}>
                               {getChannelLabel("settings.channel.badge.default")}
                             </Badge>
                           )}
@@ -492,11 +509,11 @@ export function DesktopModelPickerModal(props: {
                             </Badge>
                           )}
                           {isChannelDisabled && (
-                            <Badge variant="outline" className={BADGE_SOFT}>
+                            <Badge variant="outline" className={BADGE_DISABLED}>
                               {getChannelLabel("settings.channel.badge.disabled")}
                             </Badge>
                           )}
-                          <span className="text-xs text-muted-foreground">
+                          <span className="text-xs text-foreground/60">
                             {formatChannelLabel("settings.channel.picker.modelCount", {
                               count: models.length,
                             })}
@@ -546,7 +563,7 @@ export function DesktopModelPickerModal(props: {
                         className={cn(
                           "w-full rounded-md border border-foreground/[0.07] px-3 py-2 text-left transition-colors",
                           disabled ? "cursor-not-allowed opacity-60" : "hover:bg-foreground/[0.05]",
-                          selected && "border-foreground/25 bg-foreground/[0.08]",
+                          selected && SELECTED_SURFACE,
                         )}
                         disabled={disabled}
                         onClick={() => {
@@ -556,27 +573,33 @@ export function DesktopModelPickerModal(props: {
                       >
                         <div className="flex items-center justify-between gap-2">
                           <div className="min-w-0">
-                            <p className="truncate text-sm font-medium">
+                            <p className="break-all text-sm font-medium">
                               {model.displayName || model.modelId}
                             </p>
-                            <p className="truncate text-xs text-muted-foreground">
-                              {model.modelId}
-                            </p>
+                            {/* Only when it adds something. Most channels report
+                                no separate display name, so this line was
+                                repeating the title verbatim — two identical
+                                strings stacked, the second one greyed out. */}
+                            {model.displayName && model.displayName !== model.modelId && (
+                              <p className="break-all text-xs text-foreground/60">
+                                {model.modelId}
+                              </p>
+                            )}
                           </div>
 
                           <div className="flex shrink-0 items-center gap-1.5">
                             {model.isDefault && (
-                              <Badge variant="outline" className={BADGE_SOFT}>
+                              <Badge variant="outline" className={BADGE_DEFAULT}>
                                 {getChannelLabel("settings.channel.badge.default")}
                               </Badge>
                             )}
                             {isModelDisabled && (
-                              <Badge variant="outline" className={BADGE_SOFT}>
+                              <Badge variant="outline" className={BADGE_DISABLED}>
                                 {getChannelLabel("settings.channel.badge.disabled")}
                               </Badge>
                             )}
                             {selected && (
-                              <Badge className={BADGE_STRONG}>
+                              <Badge className={BADGE_SELECTED}>
                                 {getChannelLabel("settings.channel.picker.badge.selected")}
                               </Badge>
                             )}
