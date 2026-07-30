@@ -33,8 +33,19 @@ function prefersReducedMotion(): boolean {
  *
  * `paused` is the "box has text in it" signal: the placeholder is invisible
  * then, so running the loop would re-render on every tick for nothing.
+ *
+ * `settled` is for when the box is empty but something else on screen is already
+ * moving — an answer streaming in. Two animations competing for the eye makes the
+ * idle one read as noise. It differs from `paused` in where it stops: `paused`
+ * freezes wherever the loop happens to be, which is fine while invisible but
+ * would strand a half-typed line on screen here. This rests on the whole line,
+ * the same place `prefers-reduced-motion` parks it.
  */
-export function usePlaceholderTypewriter(pool: readonly string[], paused: boolean) {
+export function usePlaceholderTypewriter(
+  pool: readonly string[],
+  paused: boolean,
+  settled = false,
+) {
   // `draw` counts the redraws: it makes each draw a distinct value even when the
   // same line comes up twice, so the effect below always replays.
   const [placeholder, setPlaceholder] = useState(() => ({
@@ -50,7 +61,7 @@ export function usePlaceholderTypewriter(pool: readonly string[], paused: boolea
   // pure — React may call them twice).
   useEffect(() => {
     const total = charCount(placeholder.text);
-    if (prefersReducedMotion()) {
+    if (prefersReducedMotion() || settled) {
       // A perpetual animation is exactly what this preference asks to be spared:
       // show the line, leave it alone.
       setRevealed(total);
@@ -74,7 +85,7 @@ export function usePlaceholderTypewriter(pool: readonly string[], paused: boolea
 
     const timer = window.setTimeout(step.run, step.delay);
     return () => window.clearTimeout(timer);
-  }, [placeholder, revealed, erasing, paused]);
+  }, [placeholder, revealed, erasing, paused, settled]);
 
   /**
    * Swaps in a different line and restarts the loop from an empty box.

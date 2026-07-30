@@ -125,9 +125,14 @@ export function DesktopComposer({
   // ~21ms, and holding the state one level up re-rendered the whole message
   // list that often. Same loop as the welcome screen, so the two boxes animate
   // identically.
+  // Held still while an answer streams in: the box is empty then, so the
+  // placeholder is on screen typing and rewinding itself right next to the text
+  // actually arriving above it. Two things moving at once and only one of them
+  // means anything.
   const { text: placeholderText, reroll: drawPlaceholder } = usePlaceholderTypewriter(
     placeholderPool,
     value.length > 0,
+    streaming,
   );
   const lastResetKeyRef = useRef<string | null>(placeholderResetKey);
   const slashContainerRef = useRef<HTMLDivElement>(null);
