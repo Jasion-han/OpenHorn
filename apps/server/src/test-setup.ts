@@ -17,10 +17,21 @@ import path from "node:path";
  * fires before the test files — and therefore before `db/index.ts` reads the
  * variable at module scope. Setting it inside a test file would be too late.
  *
- * `DATABASE_URL` set in the environment still wins, so pointing a run at a
- * specific database stays possible.
+ * The redirect is unconditional, and deliberately does NOT defer to an existing
+ * `DATABASE_URL`. It used to, which left the original hole open through a second
+ * door: bun loads `.env` from the working directory, and the repo-root `.env`
+ * sets `DATABASE_URL=file:./data/openhorn.db`. Run from `apps/server` the
+ * variable is unset and the redirect fired; run from the repo root it was
+ * already set, the guard skipped, and the suite wrote to the real database
+ * again — silently, and in the direction that loses data.
+ *
+ * An ambient `.env` value cannot be told apart from a deliberate choice, so the
+ * opt-out moved to a name nothing sets by accident.
  */
-if (!process.env.DATABASE_URL) {
+const explicit = process.env.OPENHORN_TEST_DATABASE_URL;
+if (explicit) {
+  process.env.DATABASE_URL = explicit;
+} else {
   // A fixed path wiped on the way in, rather than a fresh mkdtemp each run:
   // bun test does not fire `process.on("exit")` handlers, so anything created
   // per-run just accumulates in the temp directory. This way at most one file
@@ -30,10 +41,10 @@ if (!process.env.DATABASE_URL) {
     if (existsSync(p)) rmSync(p, { force: true });
   }
   process.env.DATABASE_URL = `file:${file}`;
-
-  // The fresh file has no tables. bootstrapDatabase() is the same runtime
-  // migration the server runs on boot, so tests get the authoritative schema
-  // rather than whatever the dev database happened to have.
-  const { bootstrapDatabase } = await import("./db/bootstrap");
-  await bootstrapDatabase();
 }
+
+// The fresh file has no tables. bootstrapDatabase() is the same runtime
+// migration the server runs on boot, so tests get the authoritative schema
+// rather than whatever the dev database happened to have.
+const { bootstrapDatabase } = await import("./db/bootstrap");
+await bootstrapDatabase();
