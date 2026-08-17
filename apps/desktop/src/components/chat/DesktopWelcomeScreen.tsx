@@ -19,15 +19,19 @@ import { DEFAULT_CONVERSATION_TITLE } from "../../lib/conversationTitle";
 import { getGlobalDefaultChannel } from "../../lib/defaultChannel";
 import { getChatLabel } from "../../lib/i18n/agent";
 import { notifyError } from "../../lib/notify";
+import { createServerApi } from "../../lib/serverApi";
 import { welcomeTitleKeyFor } from "../../lib/welcomeHero";
 import { useAuthStore } from "../../stores/authStore";
 import { useChatStore } from "../../stores/chatStore";
 import { useDesktopShellStore } from "../../stores/desktopShellStore";
+import { useSidecarStore } from "../../stores/sidecarStore";
 import { DesktopAttachmentPreviewItem } from "./DesktopAttachmentPreviewItem";
 import { ACCEPT_FILES } from "./DesktopComposer";
 import { DesktopComposerModeChip } from "./DesktopComposerModeChip";
 import { DesktopModelPickerModal } from "./DesktopModelPickerModal";
 import { DesktopProviderLogo } from "./DesktopProviderLogo";
+
+const welcomeApi = createServerApi();
 
 /**
  * Shown immediately on every visit. Personalised suggestions replace them only
@@ -123,6 +127,7 @@ export function DesktopWelcomeScreen() {
     WELCOME_PLACEHOLDERS,
     draft.length > 0,
   );
+  const [acpModels, setAcpModels] = useState<Array<{ id: string; name: string }>>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -134,6 +139,33 @@ export function DesktopWelcomeScreen() {
   const setPendingPrompt = useDesktopShellStore((state) => state.setPendingPrompt);
   const fullAccessEnabled = useDesktopShellStore((state) => state.fullAccessEnabled);
   const toggleFullAccess = useDesktopShellStore((state) => state.toggleFullAccess);
+
+  const handleAcpChannelSelect = async (channelId: string) => {
+    const sidecar = useSidecarStore.getState();
+    if (!sidecar.client || sidecar.status !== "ready") return null;
+
+    try {
+      const credResult = await welcomeApi.channels.getCredentials(channelId);
+      if (credResult.credentials.protocol !== "acp") return null;
+      const config = JSON.parse(credResult.credentials.apiKey) as {
+        command?: string;
+        args?: string[];
+        env?: Record<string, string>;
+      };
+      if (!config.command) return null;
+
+      await useSidecarStore.getState().ensureWorkspace();
+      const result = await sidecar.client.preconnectAcp({
+        acpAgent: { command: config.command, args: config.args, env: config.env },
+      });
+      if (result.models?.length) {
+        setAcpModels(result.models);
+      }
+      return { models: result.models || [], agentInfo: result.agentInfo };
+    } catch {
+      return null;
+    }
+  };
 
   // Fire-and-forget: the defaults are already on screen, so a slow or failed
   // response costs nothing. The request also nudges the server to regenerate a
@@ -465,6 +497,8 @@ export function DesktopWelcomeScreen() {
           current={
             selection ? { channelId: selection.channelId, modelId: selection.modelId } : null
           }
+          acpModels={acpModels}
+          onAcpChannelSelect={handleAcpChannelSelect}
         />
       )}
     </div>
