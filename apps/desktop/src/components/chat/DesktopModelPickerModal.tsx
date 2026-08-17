@@ -103,6 +103,8 @@ export function DesktopModelPickerModal(props: {
    * can pre-connect to the agent and populate its dynamic model list.
    */
   onAcpChannelSelect?: (channelId: string) => void;
+  /** True while the ACP preconnect handshake is in progress. */
+  acpPreconnecting?: boolean;
 }) {
   const {
     opened,
@@ -113,6 +115,7 @@ export function DesktopModelPickerModal(props: {
     conversationFixReason,
     acpModels,
     onAcpChannelSelect,
+    acpPreconnecting,
   } = props;
   const channels = useChatStore((state) => state.channels);
   const loadChannels = useChatStore((state) => state.loadChannels);
@@ -581,11 +584,24 @@ export function DesktopModelPickerModal(props: {
             <div className="min-w-0 flex-1 overflow-hidden rounded-lg border border-foreground/[0.08]">
               <ScrollArea className="h-full">
                 <div className="flex flex-col gap-1.5 p-2">
-                  {activeGroup && activeGroup.models.length === 0 && (
-                    <p className="px-1 text-sm text-muted-foreground">
-                      {getChannelLabel("settings.channel.picker.noModelsHint")}
-                    </p>
-                  )}
+                  {activeGroup &&
+                    activeGroup.channel.protocol === "acp" &&
+                    acpPreconnecting &&
+                    activeGroup.models.length === 0 && (
+                      <div className="flex items-center gap-2 px-1 py-4">
+                        <RefreshCw size={14} className="animate-spin text-muted-foreground" />
+                        <p className="text-sm text-muted-foreground">
+                          {getChannelLabel("settings.channel.editor.acpConnecting")}
+                        </p>
+                      </div>
+                    )}
+                  {activeGroup &&
+                    activeGroup.models.length === 0 &&
+                    !(activeGroup.channel.protocol === "acp" && acpPreconnecting) && (
+                      <p className="px-1 text-sm text-muted-foreground">
+                        {getChannelLabel("settings.channel.picker.noModelsHint")}
+                      </p>
+                    )}
 
                   {activeGroup?.models.map((model) => {
                     const channel = activeGroup.channel;

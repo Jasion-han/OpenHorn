@@ -353,6 +353,7 @@ export const channelLabels = {
   "settings.channel.editor.acpArgsPlaceholder": "例如：--acp",
   "settings.channel.editor.acpEnvLabel": "环境变量（KEY=VALUE，每行一个）",
   "settings.channel.editor.acpEnvPlaceholder": "例如：GEMINI_API_KEY=xxxx",
+  "settings.channel.editor.acpConnecting": "正在连接 ACP Agent...",
   "settings.channel.editor.acpCommandRequired": "请填写 ACP agent 的启动命令",
   "settings.channel.editor.localAuthHint":
     "Sidecar 将自动使用检测到的本地认证，无需手动填写 API Key。",

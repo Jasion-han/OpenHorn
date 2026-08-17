@@ -29,7 +29,7 @@ export interface ApiChannel {
   userId: string;
   name: string;
   provider: string;
-  protocol: "openai" | "anthropic" | "google";
+  protocol: "openai" | "anthropic" | "google" | "acp";
   baseUrl: string | null;
   enabled: boolean;
   isDefault: boolean;

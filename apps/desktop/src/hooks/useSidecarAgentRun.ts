@@ -94,6 +94,8 @@ export interface SidecarAgentRunApi {
   sdkSessionId: string | null;
   /** Dynamic model list from ACP agent's session config options. */
   acpAvailableModels: AcpAvailableModel[];
+  /** True while the ACP preconnect handshake is in progress. */
+  acpPreconnecting: boolean;
 
   /**
    * Kicks off a sidecar agent run bound to the given assistant message.
@@ -146,6 +148,7 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
   const [rollbackError, setRollbackError] = useState<string | null>(null);
   const [sdkSessionId, setSdkSessionId] = useState<string | null>(null);
   const [acpAvailableModels, setAcpAvailableModels] = useState<AcpAvailableModel[]>([]);
+  const [acpPreconnecting, setAcpPreconnecting] = useState(false);
   const runRef = useRef<ActiveSidecarRun | null>(null);
   // Runs the sidecar wrote a rollback manifest for (checkpoint.ready). Only
   // these may become a rollback target — offering rollback on a run that never
@@ -694,12 +697,19 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
   const preconnect = async (channelId: string): Promise<void> => {
     const sidecar = useSidecarStore.getState();
     const client = sidecar.client;
-    if (!client || sidecar.status !== "ready") return;
+    if (!client || sidecar.status !== "ready") {
+      console.error("[acp-preconnect] sidecar not ready:", sidecar.status);
+      return;
+    }
 
+    setAcpPreconnecting(true);
     try {
       const credResult = await api.channels.getCredentials(channelId);
       const credentials = credResult.credentials;
-      if (credentials.protocol !== "acp") return;
+      if (credentials.protocol !== "acp") {
+        console.error("[acp-preconnect] not acp protocol:", credentials.protocol);
+        return;
+      }
 
       let acpAgent: { command: string; args?: string[]; env?: Record<string, string> };
       try {
@@ -708,9 +718,13 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
           args?: string[];
           env?: Record<string, string>;
         };
-        if (!parsed.command || typeof parsed.command !== "string") return;
+        if (!parsed.command || typeof parsed.command !== "string") {
+          console.error("[acp-preconnect] missing or invalid command in config:", parsed);
+          return;
+        }
         acpAgent = { command: parsed.command, args: parsed.args, env: parsed.env };
-      } catch {
+      } catch (err) {
+        console.error("[acp-preconnect] config parse failed", err);
         return;
       }
 
@@ -748,8 +762,10 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
       if (result.models && result.models.length > 0) {
         setAcpAvailableModels(result.models);
       }
-    } catch {
-      // Silent degradation: models will be fetched during the first startRun.
+    } catch (err) {
+      console.error("[acp-preconnect] failed:", err);
+    } finally {
+      setAcpPreconnecting(false);
     }
   };
 
@@ -763,6 +779,7 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
     rollbackError,
     sdkSessionId,
     acpAvailableModels,
+    acpPreconnecting,
     startRun,
     respondToApproval,
     cancel,
