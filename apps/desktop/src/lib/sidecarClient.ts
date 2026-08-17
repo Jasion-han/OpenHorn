@@ -147,7 +147,10 @@ interface SidecarAgentEvent {
     | "user_message"
     | "usage"
     | "done"
-    | "error";
+    | "error"
+    | "tool_call_detail"
+    | "plan"
+    | "agent_info";
   content?: string;
   toolName?: string;
   toolInput?: unknown;
@@ -155,6 +158,21 @@ interface SidecarAgentEvent {
   promptTokens?: number;
   completionTokens?: number;
   totalTokens?: number;
+  contextSize?: number;
+  cost?: { amount: number; currency: string };
+  // tool_call_detail fields
+  toolCallId?: string;
+  title?: string;
+  kind?: string;
+  status?: string;
+  locations?: Array<{ path: string; line?: number }>;
+  rawInput?: Record<string, unknown>;
+  diff?: { path: string; oldText: string | null; newText: string };
+  // plan fields
+  entries?: Array<{ content: string; priority: string; status: string }>;
+  // agent_info fields
+  agentName?: string;
+  agentVersion?: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -209,6 +227,8 @@ export function projectSidecarAgentEvent(runId: string, raw: unknown): AgentTask
           promptTokens: event.promptTokens ?? 0,
           completionTokens: event.completionTokens ?? 0,
           totalTokens: event.totalTokens ?? 0,
+          contextSize: event.contextSize,
+          cost: event.cost,
         },
       };
     case "thinking":
@@ -235,6 +255,42 @@ export function projectSidecarAgentEvent(runId: string, raw: unknown): AgentTask
         runId,
         eventType: "tool_result",
         content: typeof event.content === "string" ? event.content : "",
+      };
+    case "tool_call_detail":
+      return {
+        type: "execution_event",
+        taskId: runId,
+        runId,
+        eventType: "tool_call_detail",
+        metadata: {
+          toolCallId: event.toolCallId,
+          title: event.title,
+          kind: event.kind,
+          status: event.status,
+          locations: event.locations,
+          rawInput: event.rawInput,
+          diff: event.diff,
+          content: event.content,
+        },
+      };
+    case "plan":
+      return {
+        type: "execution_event",
+        taskId: runId,
+        runId,
+        eventType: "plan",
+        metadata: { entries: event.entries ?? [] },
+      };
+    case "agent_info":
+      return {
+        type: "execution_event",
+        taskId: runId,
+        runId,
+        eventType: "agent_info",
+        metadata: {
+          agentName: event.agentName,
+          agentVersion: event.agentVersion,
+        },
       };
     case "done":
       return { type: "done", taskId: runId, runId };

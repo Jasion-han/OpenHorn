@@ -1,10 +1,297 @@
 import { CornerDownRight } from "lucide-react";
+import { useState } from "react";
 import { cn } from "ui";
 import { extractToolUrls, summarizeToolInput } from "../../lib/agentToolSummary";
-import { formatChatLabel } from "../../lib/i18n/agent";
-import type { ApiAgentRun } from "../../types/chat";
+import { formatChatLabel, getChatLabel } from "../../lib/i18n/agent";
+import type { ApiAgentRun, ApiAgentRunStep } from "../../types/chat";
 import { DesktopAgentTaskMetaLine } from "./DesktopAgentTaskMetaLine";
 import { InlineClampStep } from "./DesktopInlineClampStep";
+
+// --- ACP kind label ---
+function kindLabel(kind: string | undefined): string {
+  switch (kind) {
+    case "read":
+      return getChatLabel("chat.agent.kind.read");
+    case "edit":
+      return getChatLabel("chat.agent.kind.edit");
+    case "execute":
+      return getChatLabel("chat.agent.kind.execute");
+    case "search":
+      return getChatLabel("chat.agent.kind.search");
+    case "think":
+      return getChatLabel("chat.agent.kind.think");
+    case "fetch":
+      return getChatLabel("chat.agent.kind.fetch");
+    case "delete":
+      return getChatLabel("chat.agent.kind.delete");
+    case "move":
+      return getChatLabel("chat.agent.kind.move");
+    default:
+      return getChatLabel("chat.agent.kind.other");
+  }
+}
+
+// --- ACP status badge ---
+function statusBadge(status: string | undefined): {
+  label: string;
+  className: string;
+} {
+  switch (status) {
+    case "pending":
+      return {
+        label: getChatLabel("chat.agent.status.pending"),
+        className: "text-muted-foreground/50",
+      };
+    case "in_progress":
+      return {
+        label: getChatLabel("chat.agent.status.in_progress"),
+        className: "text-blue-600",
+      };
+    case "completed":
+      return {
+        label: getChatLabel("chat.agent.status.completed"),
+        className: "text-emerald-600",
+      };
+    case "failed":
+      return {
+        label: getChatLabel("chat.agent.status.failed"),
+        className: "text-red-600",
+      };
+    default:
+      return {
+        label: status ?? "",
+        className: "text-muted-foreground/50",
+      };
+  }
+}
+
+// --- Simple diff preview (red/green text, no Shiki/CodeMirror) ---
+function DiffPreview({
+  diff,
+}: {
+  diff: { path: string; oldText: string | null; newText: string };
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const isNewFile = diff.oldText === null || diff.oldText === "";
+  const fileName = diff.path.split("/").pop() ?? diff.path;
+
+  // Build a simple line-level diff for display.
+  const oldLines = isNewFile ? [] : (diff.oldText ?? "").split("\n");
+  const newLines = diff.newText.split("\n");
+  // Only show first 20 lines by default; expand to show all.
+  const maxPreview = 20;
+  const totalLines = oldLines.length + newLines.length;
+  const needsTruncation = totalLines > maxPreview && !expanded;
+
+  return (
+    <div className="mt-1 ml-3.5 overflow-hidden rounded border border-border/30 text-xs">
+      <div className="flex items-center justify-between bg-muted/30 px-2 py-0.5">
+        <span className="truncate font-mono text-muted-foreground/70">{fileName}</span>
+        {isNewFile && (
+          <span className="ml-2 shrink-0 text-emerald-600/70">
+            {getChatLabel("chat.agent.diff.newFile")}
+          </span>
+        )}
+      </div>
+      <pre className="overflow-x-auto p-1.5 font-mono leading-5">
+        {!isNewFile &&
+          (needsTruncation ? oldLines.slice(0, Math.floor(maxPreview / 2)) : oldLines).map(
+            (line, i) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: diff lines are positional
+              <div key={`old-${i}`} className="text-red-600/60">
+                <span className="mr-1 select-none">-</span>
+                {line}
+              </div>
+            ),
+          )}
+        {(needsTruncation ? newLines.slice(0, Math.floor(maxPreview / 2)) : newLines).map(
+          (line, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: diff lines are positional
+            <div key={`new-${i}`} className="text-emerald-600/60">
+              <span className="mr-1 select-none">+</span>
+              {line}
+            </div>
+          ),
+        )}
+      </pre>
+      {totalLines > maxPreview && (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="w-full border-t border-border/20 bg-muted/20 px-2 py-0.5 text-center text-xs text-foreground/50 transition-colors hover:text-foreground/70"
+        >
+          {expanded ? "Less" : `+${totalLines - maxPreview} lines`}
+        </button>
+      )}
+    </div>
+  );
+}
+
+// --- ACP plan step rendering ---
+function PlanStep({
+  entries,
+}: {
+  entries: Array<{ content: string; priority: string; status: string }>;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  if (entries.length === 0) return null;
+
+  const previewCount = 3;
+  const visible = expanded ? entries : entries.slice(0, previewCount);
+
+  const priorityClass = (p: string) => {
+    switch (p) {
+      case "high":
+        return "text-red-600/70";
+      case "medium":
+        return "text-amber-600/70";
+      case "low":
+        return "text-muted-foreground/50";
+      default:
+        return "text-muted-foreground/50";
+    }
+  };
+
+  const statusIcon = (s: string) => {
+    switch (s) {
+      case "completed":
+        return "done";
+      case "in_progress":
+        return "...";
+      default:
+        return "";
+    }
+  };
+
+  return (
+    <div className="py-0.5 text-sm leading-6 text-foreground/42">
+      <span className="relative flex items-start gap-2">
+        <span
+          aria-hidden="true"
+          className="mt-[8px] h-1.5 w-1.5 shrink-0 rounded-full bg-current"
+          style={{ opacity: 0.2 }}
+        />
+        <span className="min-w-0 flex-1">
+          <span className="font-medium">{getChatLabel("chat.agent.plan.heading")}</span>
+          <div className="mt-0.5 flex flex-col gap-0.5 pl-1">
+            {visible.map((entry, i) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: plan entries are positional
+              <div key={`plan-${i}`} className="flex items-start gap-1.5">
+                <span className={cn("shrink-0 text-xs leading-6", priorityClass(entry.priority))}>
+                  {entry.priority === "high"
+                    ? getChatLabel("chat.agent.plan.high")
+                    : entry.priority === "low"
+                      ? getChatLabel("chat.agent.plan.low")
+                      : ""}
+                </span>
+                <span className="min-w-0 text-foreground/50">{entry.content}</span>
+                {statusIcon(entry.status) && (
+                  <span className="shrink-0 text-xs text-emerald-600/60">
+                    {statusIcon(entry.status)}
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+          {entries.length > previewCount && (
+            <button
+              type="button"
+              onClick={() => setExpanded((v) => !v)}
+              className="mt-0.5 pl-1 text-xs text-foreground/40 transition-colors hover:text-foreground/60"
+            >
+              {expanded ? "Less" : `+${entries.length - previewCount} more`}
+            </button>
+          )}
+        </span>
+      </span>
+    </div>
+  );
+}
+
+// --- ACP context usage bar ---
+function ContextUsageBar({
+  contextUsage,
+}: {
+  contextUsage: { used: number; size: number; cost?: { amount: number; currency: string } };
+}) {
+  if (contextUsage.size <= 0) return null;
+  const percent = Math.min(100, Math.round((contextUsage.used / contextUsage.size) * 100));
+  const usedK = Math.round(contextUsage.used / 1000);
+  const sizeK = Math.round(contextUsage.size / 1000);
+
+  return (
+    <div className="flex items-center gap-2 px-1 py-0.5 text-xs text-muted-foreground/60">
+      <div className="h-1.5 w-20 overflow-hidden rounded-full bg-muted/40">
+        <div
+          className={cn(
+            "h-full rounded-full transition-all",
+            percent > 80 ? "bg-amber-500/60" : "bg-blue-500/40",
+          )}
+          style={{ width: `${percent}%` }}
+        />
+      </div>
+      <span>
+        {formatChatLabel("chat.agent.contextUsage", {
+          used: `${usedK}k`,
+          size: `${sizeK}k`,
+          percent,
+        })}
+      </span>
+      {contextUsage.cost && (
+        <span className="text-muted-foreground/40">
+          {formatChatLabel("chat.agent.contextCost", {
+            amount: contextUsage.cost.amount.toFixed(3),
+            currency: contextUsage.cost.currency,
+          })}
+        </span>
+      )}
+    </div>
+  );
+}
+
+// --- Tool detail step (ACP-specific) ---
+function ToolDetailStep({ step }: { step: ApiAgentRunStep }) {
+  const title = step.toolName || kindLabel(step.kind);
+  const badge = statusBadge(step.status);
+  const detail = step.content || summarizeToolInput(step.toolInput);
+
+  return (
+    <div className="py-0.5 text-sm leading-6 text-foreground/42">
+      <span className="relative flex items-start gap-2">
+        <span
+          aria-hidden="true"
+          className="absolute left-0 top-[8px] h-1.5 w-1.5 rounded-full bg-current opacity-20"
+        />
+        <div className="min-w-0 flex-1 pl-3.5">
+          <span>
+            <span className="text-foreground/60">{kindLabel(step.kind)}</span>
+            {title !== kindLabel(step.kind) && (
+              <span className="text-foreground/42">{` ${title}`}</span>
+            )}
+            <span className={cn("ml-1.5 text-xs", badge.className)}>{badge.label}</span>
+          </span>
+          {detail && <span className="text-foreground opacity-32">{` · ${detail}`}</span>}
+          {/* File path chips */}
+          {step.locations && step.locations.length > 0 && (
+            <div className="mt-0.5 flex flex-wrap gap-1">
+              {step.locations.map((loc) => (
+                <span
+                  key={`${loc.path}:${loc.line ?? ""}`}
+                  className="inline-flex items-center rounded bg-muted/30 px-1.5 py-0 font-mono text-xs text-foreground/40"
+                >
+                  {loc.path.split("/").pop()}
+                  {loc.line != null && `:${loc.line}`}
+                </span>
+              ))}
+            </div>
+          )}
+          {/* Diff preview */}
+          {step.diff && <DiffPreview diff={step.diff} />}
+        </div>
+      </span>
+    </div>
+  );
+}
 
 export function AgentRunPanel({
   run,
@@ -19,16 +306,24 @@ export function AgentRunPanel({
   hideIdleIndicator?: boolean;
 }) {
   if (!run) return null;
-  const toolCount = run.steps.filter((step) => step.type === "tool_start").length;
+  const toolCount = run.steps.filter(
+    (step) => step.type === "tool_start" || step.type === "tool_detail",
+  ).length;
   const hasThinking = run.steps.some((step) => step.type === "text");
   const isInProgress = run.status === "partial" || run.status === "running";
-  const shouldRender = Boolean(run.error) || toolCount > 0 || hasThinking || isInProgress;
+  const shouldRender =
+    Boolean(run.error) ||
+    toolCount > 0 ||
+    hasThinking ||
+    isInProgress ||
+    Boolean(run.agentInfo) ||
+    Boolean(run.contextUsage);
   if (!shouldRender) return null;
 
   // An in-progress run that has not yet produced any steps, text, or error would
   // otherwise render nothing — causing a brief blank when switching back to an
   // active conversation. Show a minimal working indicator instead.
-  if (!run.error && toolCount === 0 && !hasThinking && isInProgress) {
+  if (!run.error && toolCount === 0 && !hasThinking && isInProgress && !run.agentInfo) {
     if (hideIdleIndicator) return null;
     return (
       <section className="mt-0.5 px-1 pt-0 pb-1">
@@ -109,6 +404,12 @@ export function AgentRunPanel({
 
   const displayTitle =
     toolCount > 0 ? `Execution · ${toolCount} ${toolCount === 1 ? "tool" : "tools"}` : "Execution";
+
+  // Agent info line for the header (ACP only).
+  const agentLabel = run.agentInfo
+    ? `${run.agentInfo.name}${run.agentInfo.version ? ` v${run.agentInfo.version}` : ""}`
+    : null;
+
   return (
     <details
       className="mt-2 text-sm"
@@ -129,16 +430,36 @@ export function AgentRunPanel({
               <span className={cn("text-muted-foreground/70", statusClassName)}>
                 &middot; {statusLabel}
               </span>
+              {agentLabel && (
+                <span className="ml-1.5 text-xs text-muted-foreground/40">{agentLabel}</span>
+              )}
             </span>
           </div>
         </div>
       </summary>
 
       <div className="mt-2 flex flex-col gap-2.5">
+        {/* Context usage bar (ACP only) */}
+        {run.contextUsage && <ContextUsageBar contextUsage={run.contextUsage} />}
         {run.error && <DesktopAgentTaskMetaLine text={run.error} tone="danger" />}
         {run.steps.map((step, stepIndex) => {
+          // --- ACP tool_detail step ---
+          if (step.type === "tool_detail") {
+            return <ToolDetailStep key={`detail-${step.toolCallId || stepIndex}`} step={step} />;
+          }
+
+          // --- ACP plan step ---
+          if (step.type === "plan" && step.planEntries) {
+            return (
+              // biome-ignore lint/suspicious/noArrayIndexKey: run steps are append-only
+              <PlanStep key={`plan-${stepIndex}`} entries={step.planEntries} />
+            );
+          }
+
           if (step.type === "text") {
-            const isLastText = !run.steps.slice(stepIndex + 1).some((s) => s.type === "tool_start");
+            const isLastText = !run.steps
+              .slice(stepIndex + 1)
+              .some((s) => s.type === "tool_start" || s.type === "tool_detail");
             if (isLastText && run.status === "completed") return null;
             const raw = (step.content ?? "").trim();
             if (!raw) return null;

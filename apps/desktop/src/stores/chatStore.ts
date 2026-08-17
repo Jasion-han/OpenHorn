@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { type ChatAdapter, createChatAdapter } from "../lib/chatAdapter";
 import type {
   ApiAgentRun,
+  ApiAgentRunStep,
   ApiCitation,
   Channel,
   ChatMode,
@@ -88,6 +89,87 @@ function applyAgentEventToRun(
           toolInput: event.toolInput,
         },
       ],
+    };
+  }
+
+  if (event.type === "tool_call_detail") {
+    const meta = event.toolInput as Record<string, unknown> | undefined;
+    if (!meta) return base;
+    const toolCallId = typeof meta.toolCallId === "string" ? meta.toolCallId : undefined;
+    const existingIdx = toolCallId
+      ? base.steps.findIndex((s) => s.type === "tool_detail" && s.toolCallId === toolCallId)
+      : -1;
+    const step: ApiAgentRunStep = {
+      type: "tool_detail",
+      toolCallId,
+      toolName: typeof meta.title === "string" ? meta.title : undefined,
+      kind: typeof meta.kind === "string" ? meta.kind : undefined,
+      status: typeof meta.status === "string" ? meta.status : "pending",
+      locations: Array.isArray(meta.locations)
+        ? (meta.locations as Array<{ path: string; line?: number }>)
+        : undefined,
+      diff:
+        meta.diff && typeof meta.diff === "object"
+          ? (meta.diff as { path: string; oldText: string | null; newText: string })
+          : undefined,
+      content: typeof meta.content === "string" ? meta.content : undefined,
+      toolInput:
+        meta.rawInput && typeof meta.rawInput === "object"
+          ? (meta.rawInput as Record<string, unknown>)
+          : undefined,
+    };
+    if (existingIdx >= 0) {
+      // Merge update into existing step (status/locations/diff may change).
+      const updatedSteps = [...base.steps];
+      const existing = updatedSteps[existingIdx];
+      updatedSteps[existingIdx] = {
+        ...existing,
+        ...step,
+        // Preserve title from the original tool_call if the update omits it.
+        toolName: step.toolName || existing.toolName,
+      };
+      return { ...base, summary: "Working", steps: updatedSteps };
+    }
+    return { ...base, summary: "Working", steps: [...base.steps, step] };
+  }
+
+  if (event.type === "plan") {
+    const meta = event.toolInput as Record<string, unknown> | undefined;
+    const entries = Array.isArray(meta?.entries)
+      ? (meta.entries as Array<{ content: string; priority: string; status: string }>)
+      : [];
+    return {
+      ...base,
+      planEntries: entries,
+      steps: [...base.steps, { type: "plan", planEntries: entries }],
+    };
+  }
+
+  if (event.type === "agent_info") {
+    const meta = event.toolInput as Record<string, unknown> | undefined;
+    if (!meta) return base;
+    return {
+      ...base,
+      agentInfo: {
+        name: typeof meta.agentName === "string" ? meta.agentName : "",
+        version: typeof meta.agentVersion === "string" ? meta.agentVersion : "",
+      },
+    };
+  }
+
+  if (event.type === "context_usage") {
+    const meta = event.toolInput as Record<string, unknown> | undefined;
+    if (!meta) return base;
+    return {
+      ...base,
+      contextUsage: {
+        used: typeof meta.used === "number" ? meta.used : 0,
+        size: typeof meta.size === "number" ? meta.size : 0,
+        cost:
+          meta.cost && typeof meta.cost === "object"
+            ? (meta.cost as { amount: number; currency: string })
+            : undefined,
+      },
     };
   }
 

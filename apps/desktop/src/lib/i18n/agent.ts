@@ -631,6 +631,31 @@ export const chatLabels = {
   // count is the headline — "did it read all of my links" is what a reader of
   // this panel is checking — with the URLs listed underneath it.
   "chat.agent.fetchTargets": "{count} 个链接",
+  // ACP tool call kind labels (UI display for tool_call_detail.kind)
+  "chat.agent.kind.read": "Read",
+  "chat.agent.kind.edit": "Edit",
+  "chat.agent.kind.execute": "Execute",
+  "chat.agent.kind.search": "Search",
+  "chat.agent.kind.think": "Think",
+  "chat.agent.kind.fetch": "Fetch",
+  "chat.agent.kind.delete": "Delete",
+  "chat.agent.kind.move": "Move",
+  "chat.agent.kind.other": "Tool",
+  // ACP tool call status labels
+  "chat.agent.status.pending": "Pending",
+  "chat.agent.status.in_progress": "Running",
+  "chat.agent.status.completed": "Done",
+  "chat.agent.status.failed": "Failed",
+  // ACP plan section
+  "chat.agent.plan.heading": "Plan",
+  "chat.agent.plan.high": "High",
+  "chat.agent.plan.medium": "Medium",
+  "chat.agent.plan.low": "Low",
+  // ACP context usage
+  "chat.agent.contextUsage": "{used} / {size} ({percent}%)",
+  "chat.agent.contextCost": "Cost: {amount} {currency}",
+  // ACP diff
+  "chat.agent.diff.newFile": "New file",
 } as const;
 
 type ChatLabelKey = keyof typeof chatLabels;

@@ -8,7 +8,13 @@ import { classifyBashCommandRisk } from "../shell-risk";
 import { toWorkspaceRelative } from "../workspace";
 import { appendAttachmentContext } from "./attachments";
 import { sanitizeChildEnv } from "./childEnv";
-import { type AgentEvent, buildUsageEvent, toCount } from "./events";
+import {
+  type AgentEvent,
+  type AgentToolDiff,
+  type AgentToolLocation,
+  buildUsageEvent,
+  toCount,
+} from "./events";
 
 export type AcpAgentConfig = {
   command: string;
@@ -56,7 +62,12 @@ type TurnState = {
   checkpoint: CheckpointSession;
   /** Pending session/request_permission resolvers, so cancel can answer them all. */
   pendingPermissions: Set<(response: acp.RequestPermissionResponse) => void>;
-  usage: { promptTokens: number; completionTokens: number };
+  usage: {
+    promptTokens: number;
+    completionTokens: number;
+    contextSize?: number;
+    cost?: { amount: number; currency: string };
+  };
 };
 
 type AcpEntry = {
@@ -70,6 +81,8 @@ type AcpEntry = {
   lastUsedAt: number;
   turn: TurnState | null;
   dead: boolean;
+  /** Agent identity from initialize response, emitted once per turn. */
+  agentInfo?: { name: string; version: string };
 };
 
 /** Live agent processes keyed by ACP session id (one process per conversation). */
@@ -139,8 +152,43 @@ function contentBlockText(content: acp.ContentBlock): string {
   return content.type === "text" ? content.text : "";
 }
 
-/** Exported for tests: maps one ACP session/update to an AgentEvent. */
-export function mapAcpUpdate(update: acp.SessionUpdate): AgentEvent | null {
+/** Extract diff entries from ACP tool call content array. */
+function extractToolCallDiff(
+  content: Array<{ type: string; path?: string; oldText?: string | null; newText?: string }>,
+): AgentToolDiff | undefined {
+  for (const item of content) {
+    if (item.type === "diff" && typeof item.path === "string" && typeof item.newText === "string") {
+      return {
+        path: item.path,
+        oldText: item.oldText ?? null,
+        newText: item.newText,
+      };
+    }
+  }
+  return undefined;
+}
+
+/** Extract text content from ACP tool call content array. */
+function extractToolCallText(content: Array<{ type: string; content?: acp.ContentBlock }>): string {
+  return content
+    .map((item) => (item.type === "content" && item.content ? contentBlockText(item.content) : ""))
+    .filter(Boolean)
+    .join("\n");
+}
+
+/** Extract locations from ACP tool call. */
+function extractLocations(
+  locations?: Array<{ path: string; line?: number }>,
+): AgentToolLocation[] | undefined {
+  if (!locations || locations.length === 0) return undefined;
+  return locations.map((loc) => ({
+    path: loc.path,
+    ...(loc.line != null ? { line: loc.line } : {}),
+  }));
+}
+
+/** Exported for tests: maps one ACP session/update to an AgentEvent (or array). */
+export function mapAcpUpdate(update: acp.SessionUpdate): AgentEvent | AgentEvent[] | null {
   switch (update.sessionUpdate) {
     case "agent_message_chunk": {
       const text = contentBlockText(update.content);
@@ -150,27 +198,86 @@ export function mapAcpUpdate(update: acp.SessionUpdate): AgentEvent | null {
       const text = contentBlockText(update.content);
       return text ? { type: "thinking", content: text } : null;
     }
-    case "tool_call":
-      return {
+    case "tool_call": {
+      const rawInput =
+        update.rawInput && typeof update.rawInput === "object"
+          ? (update.rawInput as Record<string, unknown>)
+          : undefined;
+      const contentArr = (update.content ?? []) as Array<{
+        type: string;
+        path?: string;
+        oldText?: string | null;
+        newText?: string;
+        content?: acp.ContentBlock;
+      }>;
+      const events: AgentEvent[] = [
+        {
+          type: "tool_call_detail",
+          toolCallId: update.toolCallId,
+          title: update.title || update.kind || "tool",
+          kind: update.kind ?? undefined,
+          status: update.status ?? "pending",
+          locations: extractLocations(
+            update.locations as Array<{ path: string; line?: number }> | undefined,
+          ),
+          rawInput,
+          diff: extractToolCallDiff(contentArr),
+          content: extractToolCallText(contentArr) || undefined,
+        },
+      ];
+      // Also emit the legacy tool_start so non-ACP-aware renderers still work.
+      events.push({
         type: "tool_start",
         toolName: update.title || update.kind || "tool",
-        toolInput:
-          update.rawInput && typeof update.rawInput === "object"
-            ? (update.rawInput as Record<string, unknown>)
-            : undefined,
-      };
-    case "tool_call_update": {
-      if (update.status !== "completed" && update.status !== "failed") return null;
-      const text = (update.content ?? [])
-        .map((item) => (item.type === "content" ? contentBlockText(item.content) : ""))
-        .filter(Boolean)
-        .join("\n");
-      return { type: "tool_result", content: text || undefined };
+        toolInput: rawInput,
+      });
+      return events;
     }
+    case "tool_call_update": {
+      const contentArr = (update.content ?? []) as Array<{
+        type: string;
+        path?: string;
+        oldText?: string | null;
+        newText?: string;
+        content?: acp.ContentBlock;
+      }>;
+      const text = extractToolCallText(contentArr);
+      const events: AgentEvent[] = [
+        {
+          type: "tool_call_detail",
+          toolCallId: update.toolCallId,
+          title: update.title || "",
+          kind: update.kind ?? undefined,
+          status: update.status ?? "in_progress",
+          locations: extractLocations(
+            update.locations as Array<{ path: string; line?: number }> | undefined,
+          ),
+          diff: extractToolCallDiff(contentArr),
+          content: text || undefined,
+        },
+      ];
+      // Emit legacy tool_result only when the tool call reaches a terminal status.
+      if (update.status === "completed" || update.status === "failed") {
+        events.push({ type: "tool_result", content: text || undefined });
+      }
+      return events;
+    }
+    case "plan":
+      return {
+        type: "plan",
+        entries: ((update as unknown as { entries?: unknown[] }).entries ?? []).map((entry) => {
+          const e = entry as { content?: string; priority?: string; status?: string };
+          return {
+            content: e.content ?? "",
+            priority: e.priority ?? "medium",
+            status: e.status ?? "pending",
+          };
+        }),
+      };
     default:
-      // Plans, mode changes, slash-command lists, unknown extensions: the ACP
-      // surface is wider than AgentEvent — unknown updates are dropped, not
-      // errors (lenient-read rule from the client-implementations research).
+      // Mode changes, slash-command lists, unknown extensions: the ACP surface
+      // is wider than AgentEvent — unknown updates are dropped, not errors
+      // (lenient-read rule from the client-implementations research).
       return null;
   }
 }
@@ -185,9 +292,12 @@ export function mapAcpUpdate(update: acp.SessionUpdate): AgentEvent | null {
  *  - Gemini CLI's private `_meta.token_count { input_tokens, output_tokens }`
  *    carried on the notification.
  */
-export function readAcpUsage(
-  notification: acp.SessionNotification,
-): { promptTokens: number; completionTokens: number } | null {
+export function readAcpUsage(notification: acp.SessionNotification): {
+  promptTokens: number;
+  completionTokens: number;
+  contextSize?: number;
+  cost?: { amount: number; currency: string };
+} | null {
   const meta = (notification._meta ?? {}) as Record<string, unknown>;
   const tokenCount = meta.token_count as Record<string, unknown> | undefined;
   if (tokenCount && typeof tokenCount === "object") {
@@ -197,7 +307,27 @@ export function readAcpUsage(
     };
   }
   if (notification.update.sessionUpdate === "usage_update") {
-    return { promptTokens: toCount(notification.update.used), completionTokens: 0 };
+    const update = notification.update as {
+      used?: unknown;
+      size?: unknown;
+      cost?: { amount?: unknown; currency?: unknown };
+    };
+    const contextSize = toCount(update.size) || undefined;
+    let cost: { amount: number; currency: string } | undefined;
+    if (
+      update.cost &&
+      typeof update.cost === "object" &&
+      typeof update.cost.amount === "number" &&
+      typeof update.cost.currency === "string"
+    ) {
+      cost = { amount: update.cost.amount, currency: update.cost.currency };
+    }
+    return {
+      promptTokens: toCount(update.used),
+      completionTokens: 0,
+      contextSize,
+      cost,
+    };
   }
   return null;
 }
@@ -437,6 +567,20 @@ async function createEntry(input: RunAcpAgentInput): Promise<AcpEntry> {
     }
     const session = await Promise.race([builder.start(), earlyExit]);
 
+    // Capture agentInfo from the initialize response for the UI.
+    const agentInfo =
+      init.agentInfo &&
+      typeof init.agentInfo === "object" &&
+      typeof (init.agentInfo as { name?: unknown }).name === "string"
+        ? {
+            name: (init.agentInfo as { name: string }).name,
+            version:
+              typeof (init.agentInfo as { version?: unknown }).version === "string"
+                ? (init.agentInfo as { version: string }).version
+                : "",
+          }
+        : undefined;
+
     const entry: AcpEntry = {
       configKey: configKeyOf(config, cwd),
       cwd,
@@ -448,6 +592,7 @@ async function createEntry(input: RunAcpAgentInput): Promise<AcpEntry> {
       lastUsedAt: Date.now(),
       turn: null,
       dead: false,
+      agentInfo,
     };
     holder.entry = entry;
     // Handshake survived — from here on, an exit means the running entry died.
@@ -542,6 +687,15 @@ export async function runAcpAgent(input: RunAcpAgentInput): Promise<void> {
   };
   abortController.signal.addEventListener("abort", handleAbort, { once: true });
 
+  // Emit agent_info at the start of the turn so the UI can display it.
+  if (entry.agentInfo) {
+    onEvent({
+      type: "agent_info",
+      agentName: entry.agentInfo.name,
+      agentVersion: entry.agentInfo.version,
+    });
+  }
+
   try {
     const promptDone = entry.session.prompt(promptText);
     // The stop message below is the real completion signal; this catch only
@@ -590,14 +744,40 @@ export async function runAcpAgent(input: RunAcpAgentInput): Promise<void> {
         // Assigned, not accumulated: both known shapes report totals that
         // supersede the previous notification.
         turn.usage = usage;
+        // Emit a context_usage event to the UI so it can show the live bar.
+        onEvent({
+          type: "usage",
+          promptTokens: usage.promptTokens,
+          completionTokens: usage.completionTokens,
+          totalTokens: usage.promptTokens + usage.completionTokens,
+          contextSize: usage.contextSize,
+          cost: usage.cost,
+        });
         continue;
       }
-      const event = mapAcpUpdate(message.update);
-      if (event) onEvent(event);
+      const mapped = mapAcpUpdate(message.update);
+      if (mapped) {
+        // mapAcpUpdate may return a single event or an array (e.g. tool_call
+        // emits both tool_call_detail and legacy tool_start).
+        if (Array.isArray(mapped)) {
+          for (const event of mapped) onEvent(event);
+        } else {
+          onEvent(mapped);
+        }
+      }
     }
 
     const usage = buildUsageEvent(turn.usage.promptTokens, turn.usage.completionTokens);
-    if (usage) onEvent(usage);
+    if (usage) {
+      // Carry contextSize and cost onto the final usage event.
+      if (turn.usage.contextSize || turn.usage.cost) {
+        (
+          usage as { contextSize?: number; cost?: { amount: number; currency: string } }
+        ).contextSize = turn.usage.contextSize;
+        (usage as { cost?: { amount: number; currency: string } }).cost = turn.usage.cost;
+      }
+      onEvent(usage);
+    }
   } finally {
     abortController.signal.removeEventListener("abort", handleAbort);
     if (cancelTimer) clearTimeout(cancelTimer);

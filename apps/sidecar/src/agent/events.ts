@@ -1,3 +1,16 @@
+/** A file location referenced by a tool call (ACP `locations[]`). */
+export interface AgentToolLocation {
+  path: string;
+  line?: number;
+}
+
+/** A file diff produced by a tool call (ACP `content[]{type:"diff"}`). */
+export interface AgentToolDiff {
+  path: string;
+  oldText: string | null;
+  newText: string;
+}
+
 export type AgentEvent =
   | { type: "text"; content: string }
   | { type: "final_text"; content: string }
@@ -11,9 +24,36 @@ export type AgentEvent =
       promptTokens: number;
       completionTokens: number;
       totalTokens: number;
+      /** ACP usage_update: context window total size. */
+      contextSize?: number;
+      /** ACP usage_update: cumulative session cost. */
+      cost?: { amount: number; currency: string };
     }
   | { type: "done" }
-  | { type: "error"; content: string };
+  | { type: "error"; content: string }
+  /** ACP-specific: rich tool call with lifecycle status, kind, locations, diff. */
+  | {
+      type: "tool_call_detail";
+      toolCallId: string;
+      title: string;
+      kind?: string;
+      status: string;
+      locations?: AgentToolLocation[];
+      rawInput?: Record<string, unknown>;
+      diff?: AgentToolDiff;
+      content?: string;
+    }
+  /** ACP-specific: agent execution plan (full replacement on each emission). */
+  | {
+      type: "plan";
+      entries: Array<{ content: string; priority: string; status: string }>;
+    }
+  /** ACP-specific: agent identity from initialize response. */
+  | {
+      type: "agent_info";
+      agentName: string;
+      agentVersion: string;
+    };
 
 type SdkMessage = {
   type: string;

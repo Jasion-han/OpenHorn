@@ -600,11 +600,6 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
 
         {
           const { runId, onEvent, guard } = initRun("direct");
-          // Same rationale as the Claude branch: key the snapshot dir by the
-          // SAME runId the client receives, so checkpoint.rollback (which
-          // looks up snapshots/<runId>) resolves the directory that was
-          // actually written.
-          const checkpoint = await createCheckpointSession(cwd, runId);
           guard(
             "Direct agent",
             runDirectAgent({
@@ -615,12 +610,6 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
               prompt,
               cwd,
               abortController,
-              checkpoint,
-              // See the Claude branch: gates the desktop rollback button on a
-              // manifest actually existing for this run.
-              onCheckpointReady: () => {
-                ws.send(JSON.stringify(buildEvent("checkpoint.ready", { runId })));
-              },
               conversationHistory,
               permissionMode,
               systemPrompt,

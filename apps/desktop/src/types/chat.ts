@@ -59,10 +59,18 @@ export interface ApiConversation {
 }
 
 export interface ApiAgentRunStep {
-  type: "tool_start" | "tool_result" | "error" | "text";
+  type: "tool_start" | "tool_result" | "error" | "text" | "tool_detail" | "plan";
   toolName?: string;
   content?: string;
   toolInput?: unknown;
+  /** ACP tool_call_detail fields */
+  toolCallId?: string;
+  kind?: string;
+  status?: string;
+  locations?: Array<{ path: string; line?: number }>;
+  diff?: { path: string; oldText: string | null; newText: string };
+  /** ACP plan entries (for type "plan") */
+  planEntries?: Array<{ content: string; priority: string; status: string }>;
 }
 
 export interface ApiAgentRun {
@@ -90,6 +98,16 @@ export interface ApiAgentRun {
   latestApprovalId?: string | null;
   latestApprovalType?: "plan_approval" | "tool_approval" | null;
   latestApprovalStatus?: "pending" | "approved" | "rejected" | null;
+  /** ACP agent identity from initialize response. */
+  agentInfo?: { name: string; version: string };
+  /** ACP context usage (session-level occupancy + optional cost). */
+  contextUsage?: {
+    used: number;
+    size: number;
+    cost?: { amount: number; currency: string };
+  };
+  /** ACP plan entries (latest full replacement). */
+  planEntries?: Array<{ content: string; priority: string; status: string }>;
 }
 
 export type ApiLiveStatus = "live" | "offline";

@@ -483,6 +483,22 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
                   completionTokens: Number(meta.completionTokens) || 0,
                   totalTokens: Number(meta.totalTokens) || 0,
                 };
+                // ACP usage_update carries context window size and cost — surface
+                // them as a context_usage agent event so the run panel can show a
+                // live occupancy bar.
+                if (meta.contextSize || meta.cost) {
+                  useChatStore.getState().applyStreamEvent(input.assistantMessageId, {
+                    type: "agent_event",
+                    event: {
+                      type: "context_usage",
+                      toolInput: {
+                        used: Number(meta.promptTokens) || 0,
+                        size: Number(meta.contextSize) || 0,
+                        cost: meta.cost,
+                      },
+                    },
+                  });
+                }
               }
               return;
             }
@@ -491,13 +507,20 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
               event.eventType !== "final_text" &&
               event.eventType !== "text"
             ) {
+              // For ACP-specific event types (tool_call_detail, plan, agent_info),
+              // the data lives in metadata rather than toolInput — pass it through
+              // as toolInput so applyAgentEventToRun can read it uniformly.
+              const useMetadata =
+                event.eventType === "tool_call_detail" ||
+                event.eventType === "plan" ||
+                event.eventType === "agent_info";
               useChatStore.getState().applyStreamEvent(input.assistantMessageId, {
                 type: "agent_event",
                 event: {
                   type: event.eventType ?? "",
                   content: event.content,
                   toolName: event.toolName,
-                  toolInput: event.toolInput,
+                  toolInput: useMetadata ? event.metadata : event.toolInput,
                 },
               });
               return;
