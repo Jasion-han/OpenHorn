@@ -127,7 +127,10 @@ export interface SidecarAgentRunApi {
    * `sdkSessionId`. Silently degrades on failure — the model list is fetched
    * during the first `startRun` instead.
    */
-  preconnect: (channelId: string) => Promise<void>;
+  preconnect: (channelId: string) => Promise<{
+    models: AcpAvailableModel[];
+    agentInfo?: { name: string; version: string };
+  } | null>;
 }
 
 /**
@@ -694,7 +697,12 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
     }
   };
 
-  const preconnect = async (channelId: string): Promise<void> => {
+  const preconnect = async (
+    channelId: string,
+  ): Promise<{
+    models: AcpAvailableModel[];
+    agentInfo?: { name: string; version: string };
+  } | null> => {
     // Wait for sidecar to become ready (up to 10 seconds). On Tauri startup
     // the sidecar may still be in "starting"/"connecting" state when the user
     // clicks an ACP channel, so an immediate bail-out would cause preconnect
@@ -732,7 +740,7 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
       });
       if (!client) {
         console.error("[acp-preconnect] sidecar not ready after wait");
-        return;
+        return null;
       }
     }
 
@@ -742,7 +750,7 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
       const credentials = credResult.credentials;
       if (credentials.protocol !== "acp") {
         console.error("[acp-preconnect] not acp protocol:", credentials.protocol);
-        return;
+        return null;
       }
 
       let acpAgent: { command: string; args?: string[]; env?: Record<string, string> };
@@ -754,12 +762,12 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
         };
         if (!parsed.command || typeof parsed.command !== "string") {
           console.error("[acp-preconnect] missing or invalid command in config:", parsed);
-          return;
+          return null;
         }
         acpAgent = { command: parsed.command, args: parsed.args, env: parsed.env };
       } catch (err) {
         console.error("[acp-preconnect] config parse failed", err);
-        return;
+        return null;
       }
 
       // Fetch enabled MCP servers — same as startRun.
@@ -796,8 +804,10 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
       if (result.models && result.models.length > 0) {
         setAcpAvailableModels(result.models);
       }
+      return { models: result.models || [], agentInfo: result.agentInfo };
     } catch (err) {
       console.error("[acp-preconnect] failed:", err);
+      return null;
     } finally {
       setAcpPreconnecting(false);
     }

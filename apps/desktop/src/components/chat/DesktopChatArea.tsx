@@ -1712,8 +1712,9 @@ export function DesktopChatArea() {
                 : null
           }
           acpModels={sidecarRun.acpAvailableModels}
-          acpPreconnecting={sidecarRun.acpPreconnecting}
-          onAcpChannelSelect={(channelId) => void sidecarRun.preconnect(channelId)}
+          onAcpChannelSelect={async (channelId) => {
+            return await sidecarRun.preconnect(channelId);
+          }}
         />
       )}
       <Dialog

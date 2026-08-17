@@ -101,10 +101,13 @@ export function DesktopModelPickerModal(props: {
   /**
    * Called when the user selects an ACP channel in the left pane so the caller
    * can pre-connect to the agent and populate its dynamic model list.
+   * Returns the resolved models (and optionally agentInfo) so the modal can
+   * manage its own loading state without relying on parent re-renders.
    */
-  onAcpChannelSelect?: (channelId: string) => void;
-  /** True while the ACP preconnect handshake is in progress. */
-  acpPreconnecting?: boolean;
+  onAcpChannelSelect?: (channelId: string) => Promise<{
+    models: Array<{ id: string; name: string }>;
+    agentInfo?: { name: string; version: string };
+  } | null>;
 }) {
   const {
     opened,
@@ -115,7 +118,6 @@ export function DesktopModelPickerModal(props: {
     conversationFixReason,
     acpModels,
     onAcpChannelSelect,
-    acpPreconnecting,
   } = props;
   const channels = useChatStore((state) => state.channels);
   const loadChannels = useChatStore((state) => state.loadChannels);
@@ -126,23 +128,38 @@ export function DesktopModelPickerModal(props: {
   const [selectedChannelId, setSelectedChannelId] = useState<string | null>(
     current?.channelId ?? null,
   );
+  // Modal-local ACP model state: avoids relying on parent prop propagation
+  // through React Dialog, which can skip re-renders during reconciliation.
+  const [acpDynamicModels, setAcpDynamicModels] = useState<Array<{ id: string; name: string }>>([]);
+  const [acpLoading, setAcpLoading] = useState(false);
 
   useEffect(() => {
-    if (!opened) return;
+    if (!opened) {
+      // Reset modal-local ACP state when the dialog closes so re-opening
+      // starts fresh (or picks up the parent's cached models).
+      setAcpDynamicModels([]);
+      setAcpLoading(false);
+      return;
+    }
     setQuery("");
     setSelectedChannelId(current?.channelId ?? null);
+    // Seed modal-local models from the parent prop — if a previous turn already
+    // populated the list, the user sees it immediately without another preconnect.
+    if (acpModels && acpModels.length > 0) {
+      setAcpDynamicModels(acpModels);
+    }
     void loadChannels();
-  }, [opened, current?.channelId, loadChannels]);
+  }, [opened, current?.channelId, loadChannels, acpModels]);
 
   const groups = useMemo(() => {
     const base = buildOptions(channels);
-    if (!acpModels || acpModels.length === 0) return base;
+    if (acpDynamicModels.length === 0) return base;
     // For ACP channels, replace static models with the dynamic list from the
     // agent session's config options, so the user sees exactly what the agent
     // supports and can switch at runtime.
     return base.map((group) => {
       if (group.channel.protocol !== "acp") return group;
-      const dynamicModels: Channel["models"] = acpModels.map((m) => ({
+      const dynamicModels: Channel["models"] = acpDynamicModels.map((m) => ({
         id: m.id,
         channelId: group.channel.id,
         modelId: m.id,
@@ -154,7 +171,7 @@ export function DesktopModelPickerModal(props: {
       }));
       return { ...group, models: dynamicModels };
     });
-  }, [channels, acpModels]);
+  }, [channels, acpDynamicModels]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -506,7 +523,17 @@ export function DesktopModelPickerModal(props: {
                         onClick={() => {
                           setSelectedChannelId(channel.id);
                           if (channel.protocol === "acp" && onAcpChannelSelect) {
-                            onAcpChannelSelect(channel.id);
+                            setAcpLoading(true);
+                            void onAcpChannelSelect(channel.id)
+                              .then((result) => {
+                                if (result && result.models.length > 0) {
+                                  setAcpDynamicModels(result.models);
+                                }
+                                setAcpLoading(false);
+                              })
+                              .catch(() => {
+                                setAcpLoading(false);
+                              });
                           }
                         }}
                       >
@@ -586,8 +613,8 @@ export function DesktopModelPickerModal(props: {
                 <div className="flex flex-col gap-1.5 p-2">
                   {activeGroup &&
                     activeGroup.channel.protocol === "acp" &&
-                    acpPreconnecting &&
-                    (!acpModels || acpModels.length === 0) && (
+                    acpLoading &&
+                    acpDynamicModels.length === 0 && (
                       <div className="flex items-center gap-2 px-1 py-4">
                         <RefreshCw size={14} className="animate-spin text-muted-foreground" />
                         <p className="text-sm text-muted-foreground">
@@ -597,7 +624,7 @@ export function DesktopModelPickerModal(props: {
                     )}
                   {activeGroup &&
                     activeGroup.models.length === 0 &&
-                    !(activeGroup.channel.protocol === "acp" && acpPreconnecting) && (
+                    !(activeGroup.channel.protocol === "acp" && acpLoading) && (
                       <p className="px-1 text-sm text-muted-foreground">
                         {getChannelLabel("settings.channel.picker.noModelsHint")}
                       </p>
@@ -609,8 +636,8 @@ export function DesktopModelPickerModal(props: {
                     // spinner is visible.
                     if (
                       activeGroup.channel.protocol === "acp" &&
-                      acpPreconnecting &&
-                      (!acpModels || acpModels.length === 0)
+                      acpLoading &&
+                      acpDynamicModels.length === 0
                     ) {
                       return null;
                     }
