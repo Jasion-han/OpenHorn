@@ -364,6 +364,30 @@ export function DesktopChatArea() {
     sidecarRun.clearError();
   }, [currentConversation?.id]);
 
+  // ACP preconnect: when the conversation uses an ACP channel, pre-connect to
+  // the agent so the model list is available before the first message is sent.
+  // The ref tracks which channelId we already preconnected for so we don't
+  // re-spawn on every render or channels-load cycle.
+  const acpPreconnectRef = useRef<string | null>(null);
+
+  // Reset preconnect tracking when conversation changes — a different
+  // conversation may warrant re-reading models even if it uses the same channel.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: conversationId is a trigger
+  useEffect(() => {
+    acpPreconnectRef.current = null;
+  }, [currentConversation?.id]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: sidecarRun.preconnect is unstable by identity
+  useEffect(() => {
+    const channelId = currentConversation?.channelId;
+    if (!channelId) return;
+    if (acpPreconnectRef.current === channelId) return;
+    const channel = channels.find((c) => c.id === channelId);
+    if (!channel || channel.protocol !== "acp") return;
+    acpPreconnectRef.current = channelId;
+    void sidecarRun.preconnect(channelId);
+  }, [currentConversation?.channelId, channels]);
+
   // biome-ignore lint/correctness/useExhaustiveDependencies: dep is a trigger — drop a half-attached file when you leave the conversation
   useEffect(() => {
     setPendingAttachments([]);

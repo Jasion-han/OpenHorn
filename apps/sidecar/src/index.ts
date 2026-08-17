@@ -1,4 +1,4 @@
-import { runAcpAgent } from "./agent/acp";
+import { preconnectAcpAgent, runAcpAgent } from "./agent/acp";
 import { runChatStream } from "./agent/chat";
 import { runCodexChat } from "./agent/chatCodex";
 import { runClaudeAgent } from "./agent/claude";
@@ -644,6 +644,20 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
           );
         }
 
+        return;
+      }
+      case "acp.preconnect": {
+        const cwd = state.workspaceRoot || (await resolveDefaultWorkspaceRoot());
+        const { acpAgent, mcpServers } = params as {
+          acpAgent: { command: string; args?: string[]; env?: Record<string, string> };
+          mcpServers?: Record<string, Record<string, unknown>>;
+        };
+        const preconnectResult = await preconnectAcpAgent({
+          agent: acpAgent,
+          cwd,
+          mcpServers,
+        });
+        ws.send(JSON.stringify(buildOkResponse(request.requestId, preconnectResult)));
         return;
       }
       case "mcp.test": {

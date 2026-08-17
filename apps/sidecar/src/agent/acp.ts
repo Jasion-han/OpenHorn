@@ -566,7 +566,14 @@ function stderrHint(entry: AcpEntry): string {
   return tail ? `\n${tail}` : "";
 }
 
-async function createEntry(input: RunAcpAgentInput): Promise<AcpEntry> {
+/** Minimum input to spawn an ACP agent and establish a session. */
+type CreateEntryInput = {
+  agent: AcpAgentConfig;
+  cwd: string;
+  mcpServers?: Record<string, Record<string, unknown>>;
+};
+
+async function createEntry(input: CreateEntryInput): Promise<AcpEntry> {
   const { agent: config, cwd } = input;
   const child = spawn(config.command, config.args ?? [], {
     cwd,
@@ -712,6 +719,43 @@ async function createEntry(input: RunAcpAgentInput): Promise<AcpEntry> {
     killProcessTree(child, "SIGKILL");
     throw error;
   }
+}
+
+/**
+ * Pre-connects to an ACP agent: spawns the process, completes initialize +
+ * session/new, and returns the session id, dynamic model list, and agent
+ * identity. If a live idle entry with the same config already exists, reuses
+ * it instead of spawning a second process.
+ *
+ * The entry stays alive in the entries Map (10 min idle TTL). The subsequent
+ * `runAcpAgent` call reuses it via the returned `sessionId`.
+ */
+export async function preconnectAcpAgent(input: CreateEntryInput): Promise<{
+  sessionId: string;
+  models: Array<{ id: string; name: string }>;
+  agentInfo?: { name: string; version: string };
+}> {
+  const configKey = configKeyOf(input.agent, input.cwd);
+
+  // Reuse existing idle entry with matching config.
+  for (const entry of entries.values()) {
+    if (!entry.dead && entry.configKey === configKey && !entry.turn) {
+      entry.lastUsedAt = Date.now();
+      return {
+        sessionId: entry.sessionId,
+        models: entry.availableModels ?? [],
+        agentInfo: entry.agentInfo,
+      };
+    }
+  }
+
+  const entry = await createEntry(input);
+  entries.set(entry.sessionId, entry);
+  return {
+    sessionId: entry.sessionId,
+    models: entry.availableModels ?? [],
+    agentInfo: entry.agentInfo,
+  };
 }
 
 export async function runAcpAgent(input: RunAcpAgentInput): Promise<void> {

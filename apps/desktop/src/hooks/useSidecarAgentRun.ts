@@ -118,6 +118,14 @@ export interface SidecarAgentRunApi {
 
   /** Clears the last error (e.g. when switching conversations). */
   clearError: () => void;
+
+  /**
+   * Pre-connects to the ACP agent for the given channel: spawns the process,
+   * completes initialize + session/new, and populates `acpAvailableModels` and
+   * `sdkSessionId`. Silently degrades on failure — the model list is fetched
+   * during the first `startRun` instead.
+   */
+  preconnect: (channelId: string) => Promise<void>;
 }
 
 /**
@@ -683,6 +691,68 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
     }
   };
 
+  const preconnect = async (channelId: string): Promise<void> => {
+    const sidecar = useSidecarStore.getState();
+    const client = sidecar.client;
+    if (!client || sidecar.status !== "ready") return;
+
+    try {
+      const credResult = await api.channels.getCredentials(channelId);
+      const credentials = credResult.credentials;
+      if (credentials.protocol !== "acp") return;
+
+      let acpAgent: { command: string; args?: string[]; env?: Record<string, string> };
+      try {
+        const parsed = JSON.parse(credentials.apiKey) as {
+          command?: string;
+          args?: string[];
+          env?: Record<string, string>;
+        };
+        if (!parsed.command || typeof parsed.command !== "string") return;
+        acpAgent = { command: parsed.command, args: parsed.args, env: parsed.env };
+      } catch {
+        return;
+      }
+
+      // Fetch enabled MCP servers — same as startRun.
+      let mcpServers: Record<string, Record<string, unknown>> | undefined;
+      try {
+        const { servers } = await api.mcp.listServers();
+        const map: Record<string, Record<string, unknown>> = {};
+        for (const server of (servers || []) as Array<{
+          name: string;
+          type: string;
+          config: Record<string, unknown> | null;
+          isEnabled: boolean;
+        }>) {
+          if (!server.isEnabled) continue;
+          map[server.name] = normalizeMcpServerConfig(server.type, server.config);
+        }
+        if (Object.keys(map).length > 0) mcpServers = map;
+      } catch {
+        // MCP is additive; ignore load failures.
+      }
+
+      // Ensure the workspace is set so the sidecar has a cwd.
+      try {
+        await useSidecarStore.getState().ensureWorkspace();
+      } catch {
+        // ignore
+      }
+
+      const result = await client.preconnectAcp({ acpAgent, mcpServers });
+
+      if (result.sessionId) {
+        setSdkSessionId(result.sessionId);
+      }
+      if (result.models && result.models.length > 0) {
+        setAcpAvailableModels(result.models);
+      }
+    } catch {
+      // Silent degradation: models will be fetched during the first startRun.
+    }
+  };
+
   return {
     activeRun,
     pendingApproval,
@@ -698,5 +768,6 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
     cancel,
     rollbackLast,
     clearError: () => setLastError(null),
+    preconnect,
   };
 }

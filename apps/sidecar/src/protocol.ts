@@ -128,6 +128,15 @@ export const McpTestParamsSchema = z.object({
   config: z.record(z.unknown()),
 });
 
+export const AcpPreconnectParamsSchema = z.object({
+  acpAgent: z.object({
+    command: z.string().min(1),
+    args: z.array(z.string()).optional(),
+    env: z.record(z.string()).optional(),
+  }),
+  mcpServers: z.record(z.record(z.unknown())).optional(),
+});
+
 export const ChatStreamParamsSchema = z.object({
   apiKey: z.string().default(""),
   baseUrl: z.string().optional(),
@@ -167,6 +176,8 @@ export function validateMethodParams(method: string, params: unknown): unknown {
       return AgentRunParamsSchema.parse(params);
     case "agent.cancel":
       return AgentCancelParamsSchema.parse(params);
+    case "acp.preconnect":
+      return AcpPreconnectParamsSchema.parse(params);
     case "mcp.test":
       return McpTestParamsSchema.parse(params);
     case "checkpoint.rollback":

@@ -530,6 +530,28 @@ export class SidecarClient {
     return result as SidecarMcpTestResult;
   }
 
+  /**
+   * Pre-connects to an ACP agent: spawns the process, completes the ACP
+   * handshake, and returns the session id, dynamic model list, and agent
+   * identity. If an idle entry for the same config already exists inside the
+   * sidecar, it is reused without spawning a second process.
+   */
+  async preconnectAcp(params: {
+    acpAgent: { command: string; args?: string[]; env?: Record<string, string> };
+    mcpServers?: Record<string, Record<string, unknown>>;
+  }): Promise<{
+    sessionId: string;
+    models: Array<{ id: string; name: string }>;
+    agentInfo?: { name: string; version: string };
+  }> {
+    const result = await this.request("acp.preconnect", params);
+    return result as {
+      sessionId: string;
+      models: Array<{ id: string; name: string }>;
+      agentInfo?: { name: string; version: string };
+    };
+  }
+
   async detectCredentials(): Promise<DetectedCredential[]> {
     const result = await this.request("auth.detectCredentials", {});
     return (result as { credentials: DetectedCredential[] }).credentials;
