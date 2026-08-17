@@ -1,3 +1,4 @@
+import { runAcpAgent } from "./agent/acp";
 import { runChatStream } from "./agent/chat";
 import { runCodexChat } from "./agent/chatCodex";
 import { runClaudeAgent } from "./agent/claude";
@@ -408,6 +409,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
           mcpServers,
           attachments,
           skills,
+          acpAgent,
         } = params as {
           prompt: string;
           apiKey: string;
@@ -423,6 +425,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
           mcpServers?: Record<string, Record<string, unknown>>;
           attachments?: import("shared/types").AttachmentPart[];
           skills?: import("./agent/skills").SkillMeta[];
+          acpAgent?: { command: string; args?: string[]; env?: Record<string, string> };
         };
 
         let resolvedApiKey = apiKey;
@@ -471,9 +474,10 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
         // Skills are read IN PLACE from their real folders (Claude-style): the
         // run carries each skill's name/description + absolute folder path. Each
         // runtime builds its own Level-1 prompt block naming its real read tool.
-        // Skills target the Claude + direct runtimes (codex_cli is out of scope).
+        // Skills target the Claude + direct runtimes (codex_cli and acp are out of scope).
         const usesCodex = protocol === "codex_cli" || forceCodexCli;
-        const materializedSkills = usesCodex ? [] : await resolveSkills(skills);
+        const materializedSkills =
+          usesCodex || protocol === "acp" ? [] : await resolveSkills(skills);
 
         if (protocol === "codex_cli" || forceCodexCli) {
           const { onEvent, guard } = initRun("codex");
@@ -487,6 +491,60 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
               attachments,
               conversationHistory,
               onEvent,
+            }),
+          );
+          return;
+        }
+
+        if (protocol === "acp") {
+          const { runId, onEvent, guard } = initRun("acp");
+          if (!acpAgent?.command) {
+            onEvent({ type: "error", content: "ACP 渠道缺少 agent 启动命令，请检查渠道配置" });
+            onEvent({ type: "done" });
+            return;
+          }
+          // Same rationale as the Claude branch: key the snapshot dir by the
+          // SAME runId the client receives so checkpoint.rollback resolves the
+          // directory that was actually written.
+          const checkpoint = await createCheckpointSession(cwd, runId);
+          guard(
+            "ACP agent",
+            runAcpAgent({
+              agent: acpAgent,
+              prompt,
+              cwd,
+              abortController,
+              checkpoint,
+              // The desktop stores the ACP session id in the same per-conversation
+              // slot the Claude runtime uses for SDK resume.
+              acpSessionId: sdkSessionId,
+              conversationHistory,
+              attachments,
+              mcpServers,
+              requestApproval: async (approvalInput) => {
+                const approvalId = `approval-${runId}-${crypto.randomUUID()}`;
+                return new Promise<boolean>((resolve) => {
+                  state.pendingApprovals.set(approvalId, resolve);
+                  ws.send(
+                    JSON.stringify(
+                      buildEvent("approval.request", {
+                        runId,
+                        toolUseId: approvalId,
+                        toolName: approvalInput.toolName,
+                        toolInput: approvalInput.toolInput,
+                        decisionReason: approvalInput.decisionReason,
+                      }),
+                    ),
+                  );
+                });
+              },
+              onEvent,
+              onSessionId: (sid) => {
+                ws.send(JSON.stringify(buildEvent("agent.session", { runId, sdkSessionId: sid })));
+              },
+              onCheckpointReady: () => {
+                ws.send(JSON.stringify(buildEvent("checkpoint.ready", { runId })));
+              },
             }),
           );
           return;
@@ -526,7 +584,12 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
                 });
               },
               onEvent,
-              onCheckpointReady: () => {},
+              // Only fires when the run actually backed up files (manifest
+              // written) — the desktop uses it to gate the rollback button, so
+              // a chat-only run never offers a rollback that would ENOENT.
+              onCheckpointReady: () => {
+                ws.send(JSON.stringify(buildEvent("checkpoint.ready", { runId })));
+              },
               onSdkSessionId: (sid) => {
                 ws.send(JSON.stringify(buildEvent("agent.session", { runId, sdkSessionId: sid })));
               },
@@ -537,6 +600,11 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
 
         {
           const { runId, onEvent, guard } = initRun("direct");
+          // Same rationale as the Claude branch: key the snapshot dir by the
+          // SAME runId the client receives, so checkpoint.rollback (which
+          // looks up snapshots/<runId>) resolves the directory that was
+          // actually written.
+          const checkpoint = await createCheckpointSession(cwd, runId);
           guard(
             "Direct agent",
             runDirectAgent({
@@ -547,6 +615,12 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
               prompt,
               cwd,
               abortController,
+              checkpoint,
+              // See the Claude branch: gates the desktop rollback button on a
+              // manifest actually existing for this run.
+              onCheckpointReady: () => {
+                ws.send(JSON.stringify(buildEvent("checkpoint.ready", { runId })));
+              },
               conversationHistory,
               permissionMode,
               systemPrompt,

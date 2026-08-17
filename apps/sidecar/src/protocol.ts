@@ -91,7 +91,17 @@ export const AgentRunParamsSchema = z.object({
   // "google" must be listed: the server's agent-capability check reports google
   // channels as agent-capable, so rejecting it here made those runs fail at the
   // schema before reaching a runtime.
-  protocol: z.enum(["anthropic", "openai", "google", "codex_cli"]).optional(),
+  protocol: z.enum(["anthropic", "openai", "google", "codex_cli", "acp"]).optional(),
+  // Local ACP agent binary for protocol "acp": spawn command + args + extra env
+  // (auth keys travel here, e.g. GEMINI_API_KEY). Zod strips unknown keys, so
+  // the field must be declared or the desktop's config never reaches the run.
+  acpAgent: z
+    .object({
+      command: z.string().min(1),
+      args: z.array(z.string()).optional(),
+      env: z.record(z.string()).optional(),
+    })
+    .optional(),
   sdkSessionId: z.string().optional(),
   permissionMode: z.enum(["default", "full-access"]).optional(),
   systemPrompt: z.string().optional(),
