@@ -39,6 +39,21 @@ export function getEffectiveModelForConversation(
       };
     }
 
+    // ACP channels use dynamic models from configOptions (in-memory), not the
+    // DB's channel_models table. The seed model is just a placeholder — the real
+    // model list comes from the ACP session at runtime. Skip DB validation.
+    if (channel.protocol === "acp") {
+      return {
+        ok: true,
+        channelId: channel.id,
+        provider: channel.provider,
+        modelId: conversation.modelId,
+        modelDisplayName: conversation.modelId,
+        label: `${channel.name} · ${conversation.modelId}`,
+        source: "conversation",
+      };
+    }
+
     const model = channel.models.find((item) => item.modelId === conversation.modelId);
     if (!model) {
       return {
