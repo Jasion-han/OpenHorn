@@ -587,7 +587,7 @@ export function DesktopModelPickerModal(props: {
                   {activeGroup &&
                     activeGroup.channel.protocol === "acp" &&
                     acpPreconnecting &&
-                    activeGroup.models.length === 0 && (
+                    (!acpModels || acpModels.length === 0) && (
                       <div className="flex items-center gap-2 px-1 py-4">
                         <RefreshCw size={14} className="animate-spin text-muted-foreground" />
                         <p className="text-sm text-muted-foreground">
@@ -604,6 +604,16 @@ export function DesktopModelPickerModal(props: {
                     )}
 
                   {activeGroup?.models.map((model) => {
+                    // While ACP is preconnecting and dynamic models haven't
+                    // arrived yet, hide the seed model so only the loading
+                    // spinner is visible.
+                    if (
+                      activeGroup.channel.protocol === "acp" &&
+                      acpPreconnecting &&
+                      (!acpModels || acpModels.length === 0)
+                    ) {
+                      return null;
+                    }
                     const channel = activeGroup.channel;
                     const selected =
                       current?.channelId === channel.id && current?.modelId === model.modelId;
