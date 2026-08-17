@@ -388,6 +388,19 @@ export function DesktopChatArea() {
     void sidecarRun.preconnect(channelId);
   }, [currentConversation?.channelId, channels]);
 
+  // App-level ACP preconnect: when channels are loaded and any ACP channel
+  // exists, preconnect in the background so models are ready when the user
+  // opens the model picker. Fires at most once per mount.
+  const acpStartupPreconnectedRef = useRef(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: sidecarRun.preconnect is unstable by identity
+  useEffect(() => {
+    if (acpStartupPreconnectedRef.current) return;
+    const acpChannel = channels.find((c) => c.protocol === "acp" && c.enabled);
+    if (!acpChannel) return;
+    acpStartupPreconnectedRef.current = true;
+    void sidecarRun.preconnect(acpChannel.id);
+  }, [channels]);
+
   // biome-ignore lint/correctness/useExhaustiveDependencies: dep is a trigger — drop a half-attached file when you leave the conversation
   useEffect(() => {
     setPendingAttachments([]);

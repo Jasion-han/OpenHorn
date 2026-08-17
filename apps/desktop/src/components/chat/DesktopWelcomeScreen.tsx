@@ -169,6 +169,19 @@ export function DesktopWelcomeScreen() {
     }
   };
 
+  // App-level ACP preconnect: when channels are loaded and any ACP channel
+  // exists, preconnect in the background so models are ready when the user
+  // opens the model picker. Fires at most once per mount.
+  const acpStartupPreconnectedRef = useRef(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: handleAcpChannelSelect is unstable by identity
+  useEffect(() => {
+    if (acpStartupPreconnectedRef.current) return;
+    const acpChannel = channels.find((c) => c.protocol === "acp" && c.enabled);
+    if (!acpChannel) return;
+    acpStartupPreconnectedRef.current = true;
+    void handleAcpChannelSelect(acpChannel.id);
+  }, [channels]);
+
   // Fire-and-forget: the defaults are already on screen, so a slow or failed
   // response costs nothing. The request also nudges the server to regenerate a
   // stale set for the next visit.
