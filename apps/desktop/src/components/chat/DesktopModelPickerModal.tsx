@@ -97,7 +97,7 @@ export function DesktopModelPickerModal(props: {
    * these instead of the static `channel.models` list. The user's selection gets
    * forwarded to the agent via `session/set_config_option` on the next turn.
    */
-  acpModels?: Array<{ id: string; name: string }>;
+  acpModels?: Array<{ id: string; name: string; description?: string }>;
   /**
    * Called when the user selects an ACP channel in the left pane so the caller
    * can pre-connect to the agent and populate its dynamic model list.
@@ -105,7 +105,7 @@ export function DesktopModelPickerModal(props: {
    * manage its own loading state without relying on parent re-renders.
    */
   onAcpChannelSelect?: (channelId: string) => Promise<{
-    models: Array<{ id: string; name: string }>;
+    models: Array<{ id: string; name: string; description?: string }>;
     agentInfo?: { name: string; version: string };
   } | null>;
 }) {
@@ -130,7 +130,9 @@ export function DesktopModelPickerModal(props: {
   );
   // Modal-local ACP model state: avoids relying on parent prop propagation
   // through React Dialog, which can skip re-renders during reconciliation.
-  const [acpDynamicModels, setAcpDynamicModels] = useState<Array<{ id: string; name: string }>>([]);
+  const [acpDynamicModels, setAcpDynamicModels] = useState<
+    Array<{ id: string; name: string; description?: string }>
+  >([]);
   const [acpLoading, setAcpLoading] = useState(false);
 
   useEffect(() => {
@@ -173,6 +175,16 @@ export function DesktopModelPickerModal(props: {
       return { ...group, models: dynamicModels };
     });
   }, [channels, acpDynamicModels]);
+
+  // Lookup map for ACP model descriptions — keyed by model id so the render
+  // loop can display the description without changing Channel["models"] shape.
+  const acpDescriptionMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const m of acpDynamicModels) {
+      if (m.description) map.set(m.id, m.description);
+    }
+    return map;
+  }, [acpDynamicModels]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -675,6 +687,14 @@ export function DesktopModelPickerModal(props: {
                             {model.displayName && model.displayName !== model.modelId && (
                               <p className="break-all text-xs text-foreground/60">
                                 {model.modelId}
+                              </p>
+                            )}
+                            {/* ACP agents provide a human-readable description for
+                                each model (e.g. "Best for everyday, complex tasks").
+                                Show it as a muted line below the name/id. */}
+                            {channel.protocol === "acp" && acpDescriptionMap.get(model.modelId) && (
+                              <p className="mt-0.5 text-xs text-muted-foreground">
+                                {acpDescriptionMap.get(model.modelId)}
                               </p>
                             )}
                           </div>

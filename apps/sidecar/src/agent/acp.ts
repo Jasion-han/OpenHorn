@@ -20,6 +20,7 @@ import {
 interface AcpModelOption {
   id: string;
   name: string;
+  description?: string;
 }
 
 /**
@@ -57,17 +58,28 @@ function extractModelConfig(
   const models: AcpModelOption[] = [];
   for (const item of rawOptions) {
     if (!item || typeof item !== "object") continue;
-    // Flat option: { value, name }
+    // Flat option: { value, name, description? }
     if (typeof (item as { value?: unknown }).value === "string") {
-      const flat = item as { value: string; name?: string };
-      models.push({ id: flat.value, name: flat.name || flat.value });
+      const flat = item as { value: string; name?: string; description?: string | null };
+      models.push({
+        id: flat.value,
+        name: flat.name || flat.value,
+        ...(flat.description ? { description: flat.description } : {}),
+      });
     }
-    // Grouped option: { name, options: [{value, name}...] }
+    // Grouped option: { name, options: [{value, name, description?}...] }
     else if (Array.isArray((item as { options?: unknown }).options)) {
-      const group = item as { name?: string; options: Array<{ value?: string; name?: string }> };
+      const group = item as {
+        name?: string;
+        options: Array<{ value?: string; name?: string; description?: string | null }>;
+      };
       for (const sub of group.options) {
         if (typeof sub.value === "string") {
-          models.push({ id: sub.value, name: sub.name || sub.value });
+          models.push({
+            id: sub.value,
+            name: sub.name || sub.value,
+            ...(sub.description ? { description: sub.description } : {}),
+          });
         }
       }
     }
@@ -732,7 +744,7 @@ async function createEntry(input: CreateEntryInput): Promise<AcpEntry> {
  */
 export async function preconnectAcpAgent(input: CreateEntryInput): Promise<{
   sessionId: string;
-  models: Array<{ id: string; name: string }>;
+  models: Array<{ id: string; name: string; description?: string }>;
   agentInfo?: { name: string; version: string };
 }> {
   const configKey = configKeyOf(input.agent, input.cwd);

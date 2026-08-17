@@ -127,7 +127,9 @@ export function DesktopWelcomeScreen() {
     WELCOME_PLACEHOLDERS,
     draft.length > 0,
   );
-  const [acpModels, setAcpModels] = useState<Array<{ id: string; name: string }>>([]);
+  const [acpModels, setAcpModels] = useState<
+    Array<{ id: string; name: string; description?: string }>
+  >([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 

@@ -81,6 +81,7 @@ export interface SidecarAgentRunInput {
 export interface AcpAvailableModel {
   id: string;
   name: string;
+  description?: string;
 }
 
 export interface SidecarAgentRunApi {
@@ -499,7 +500,9 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
             // ACP dynamic model list — update the hook state so the model picker
             // can show agent-provided models instead of the static channel list.
             if (event.type === "execution_event" && event.eventType === "available_models") {
-              const meta = event.metadata as { models?: Array<{ id: string; name: string }> };
+              const meta = event.metadata as {
+                models?: Array<{ id: string; name: string; description?: string }>;
+              };
               if (Array.isArray(meta?.models)) {
                 setAcpAvailableModels(meta.models);
               }

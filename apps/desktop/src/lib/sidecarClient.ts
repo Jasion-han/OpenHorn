@@ -175,7 +175,7 @@ interface SidecarAgentEvent {
   agentName?: string;
   agentVersion?: string;
   // available_models fields
-  models?: Array<{ id: string; name: string }>;
+  models?: Array<{ id: string; name: string; description?: string }>;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -541,13 +541,13 @@ export class SidecarClient {
     mcpServers?: Record<string, Record<string, unknown>>;
   }): Promise<{
     sessionId: string;
-    models: Array<{ id: string; name: string }>;
+    models: Array<{ id: string; name: string; description?: string }>;
     agentInfo?: { name: string; version: string };
   }> {
     const result = await this.request("acp.preconnect", params);
     return result as {
       sessionId: string;
-      models: Array<{ id: string; name: string }>;
+      models: Array<{ id: string; name: string; description?: string }>;
       agentInfo?: { name: string; version: string };
     };
   }
