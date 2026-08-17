@@ -135,21 +135,22 @@ export function DesktopModelPickerModal(props: {
 
   useEffect(() => {
     if (!opened) {
-      // Reset modal-local ACP state when the dialog closes so re-opening
-      // starts fresh (or picks up the parent's cached models).
       setAcpDynamicModels([]);
       setAcpLoading(false);
       return;
     }
     setQuery("");
     setSelectedChannelId(current?.channelId ?? null);
-    // Seed modal-local models from the parent prop — if a previous turn already
-    // populated the list, the user sees it immediately without another preconnect.
-    if (acpModels && acpModels.length > 0) {
+    void loadChannels();
+  }, [opened, current?.channelId, loadChannels]);
+
+  // Seed modal-local models from the parent prop separately so an acpModels
+  // update (from a background preconnect) doesn't reset selectedChannelId.
+  useEffect(() => {
+    if (opened && acpModels && acpModels.length > 0) {
       setAcpDynamicModels(acpModels);
     }
-    void loadChannels();
-  }, [opened, current?.channelId, loadChannels, acpModels]);
+  }, [opened, acpModels]);
 
   const groups = useMemo(() => {
     const base = buildOptions(channels);
