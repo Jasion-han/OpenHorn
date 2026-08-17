@@ -92,6 +92,12 @@ export function DesktopModelPickerModal(props: {
   appliesTo?: "conversation" | "draft";
   current?: { channelId: string; modelId: string } | null;
   conversationFixReason?: string | null;
+  /**
+   * Dynamic models from an ACP agent session. When provided, ACP channels show
+   * these instead of the static `channel.models` list. The user's selection gets
+   * forwarded to the agent via `session/set_config_option` on the next turn.
+   */
+  acpModels?: Array<{ id: string; name: string }>;
 }) {
   const {
     opened,
@@ -100,6 +106,7 @@ export function DesktopModelPickerModal(props: {
     appliesTo = "conversation",
     current,
     conversationFixReason,
+    acpModels,
   } = props;
   const channels = useChatStore((state) => state.channels);
   const loadChannels = useChatStore((state) => state.loadChannels);
@@ -118,7 +125,27 @@ export function DesktopModelPickerModal(props: {
     void loadChannels();
   }, [opened, current?.channelId, loadChannels]);
 
-  const groups = useMemo(() => buildOptions(channels), [channels]);
+  const groups = useMemo(() => {
+    const base = buildOptions(channels);
+    if (!acpModels || acpModels.length === 0) return base;
+    // For ACP channels, replace static models with the dynamic list from the
+    // agent session's config options, so the user sees exactly what the agent
+    // supports and can switch at runtime.
+    return base.map((group) => {
+      if (group.channel.protocol !== "acp") return group;
+      const dynamicModels: Channel["models"] = acpModels.map((m) => ({
+        id: m.id,
+        channelId: group.channel.id,
+        modelId: m.id,
+        displayName: m.name,
+        enabled: true,
+        isDefault: false,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }));
+      return { ...group, models: dynamicModels };
+    });
+  }, [channels, acpModels]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();

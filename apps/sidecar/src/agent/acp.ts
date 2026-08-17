@@ -16,6 +16,66 @@ import {
   toCount,
 } from "./events";
 
+/** A model option from the ACP session's config options. */
+interface AcpModelOption {
+  id: string;
+  name: string;
+}
+
+/**
+ * Extracts available models from ACP session config options.
+ *
+ * Looks for config options with category "model" or id "model" that have
+ * `type: "select"`. Options may be flat or grouped (SessionConfigSelectGroup).
+ *
+ * Returns `{ configId, models }` — the configId is needed to call
+ * `session/set_config_option` later.
+ */
+function extractModelConfig(
+  configOptions:
+    | Array<{
+        id?: string;
+        name?: string;
+        category?: string | null;
+        type?: string;
+        currentValue?: unknown;
+        options?: unknown;
+      }>
+    | null
+    | undefined,
+): { configId: string; models: AcpModelOption[] } | null {
+  if (!configOptions || configOptions.length === 0) return null;
+  // Prefer category "model", fallback to id "model"
+  const opt =
+    configOptions.find((o) => o.category === "model" && o.type === "select") ??
+    configOptions.find((o) => o.id === "model" && o.type === "select");
+  if (!opt || !opt.id) return null;
+
+  const rawOptions = opt.options;
+  if (!Array.isArray(rawOptions)) return null;
+
+  const models: AcpModelOption[] = [];
+  for (const item of rawOptions) {
+    if (!item || typeof item !== "object") continue;
+    // Flat option: { value, name }
+    if (typeof (item as { value?: unknown }).value === "string") {
+      const flat = item as { value: string; name?: string };
+      models.push({ id: flat.value, name: flat.name || flat.value });
+    }
+    // Grouped option: { name, options: [{value, name}...] }
+    else if (Array.isArray((item as { options?: unknown }).options)) {
+      const group = item as { name?: string; options: Array<{ value?: string; name?: string }> };
+      for (const sub of group.options) {
+        if (typeof sub.value === "string") {
+          models.push({ id: sub.value, name: sub.name || sub.value });
+        }
+      }
+    }
+  }
+
+  return models.length > 0 ? { configId: opt.id, models } : null;
+}
+
 export type AcpAgentConfig = {
   command: string;
   args?: string[];
@@ -85,6 +145,10 @@ type AcpEntry = {
   dead: boolean;
   /** Agent identity from initialize response, emitted once per turn. */
   agentInfo?: { name: string; version: string };
+  /** ACP model config option id (for set_config_option calls). */
+  modelConfigId?: string;
+  /** Dynamic model list from ACP session config options. */
+  availableModels?: AcpModelOption[];
 };
 
 /** Live agent processes keyed by ACP session id (one process per conversation). */
@@ -276,6 +340,24 @@ export function mapAcpUpdate(update: acp.SessionUpdate): AgentEvent | AgentEvent
           };
         }),
       };
+    case "config_option_update": {
+      // Extract model config from the updated options and emit available_models.
+      const configUpdate = update as unknown as {
+        configOptions?: Array<{
+          id?: string;
+          name?: string;
+          category?: string | null;
+          type?: string;
+          currentValue?: unknown;
+          options?: unknown;
+        }>;
+      };
+      const mc = extractModelConfig(configUpdate.configOptions);
+      if (mc) {
+        return { type: "available_models", models: mc.models };
+      }
+      return null;
+    }
     default:
       // Mode changes, slash-command lists, unknown extensions: the ACP surface
       // is wider than AgentEvent — unknown updates are dropped, not errors
@@ -583,6 +665,22 @@ async function createEntry(input: RunAcpAgentInput): Promise<AcpEntry> {
           }
         : undefined;
 
+    // Extract model config options from session/new response.
+    const sessionResponse = session.newSessionResponse;
+    const modelConfig = extractModelConfig(
+      sessionResponse.configOptions as
+        | Array<{
+            id?: string;
+            name?: string;
+            category?: string | null;
+            type?: string;
+            currentValue?: unknown;
+            options?: unknown;
+          }>
+        | null
+        | undefined,
+    );
+
     const entry: AcpEntry = {
       configKey: configKeyOf(config, cwd),
       cwd,
@@ -595,6 +693,8 @@ async function createEntry(input: RunAcpAgentInput): Promise<AcpEntry> {
       turn: null,
       dead: false,
       agentInfo,
+      modelConfigId: modelConfig?.configId,
+      availableModels: modelConfig?.models,
     };
     holder.entry = entry;
     // Handshake survived — from here on, an exit means the running entry died.
@@ -698,6 +798,54 @@ export async function runAcpAgent(input: RunAcpAgentInput): Promise<void> {
     });
   }
 
+  // Emit available models from session config options.
+  if (entry.availableModels && entry.availableModels.length > 0) {
+    onEvent({ type: "available_models", models: entry.availableModels });
+  }
+
+  // If the user selected a specific model (from the ACP model picker), apply it
+  // via session/set_config_option before the prompt. Only call when the model
+  // matches a known option to avoid spurious errors on placeholder values.
+  if (input.model && entry.modelConfigId && entry.availableModels) {
+    const isKnownModel = entry.availableModels.some((m) => m.id === input.model);
+    if (isKnownModel) {
+      try {
+        const resp = await entry.connection.agent.request(
+          acp.AGENT_METHODS.session_set_config_option,
+          {
+            sessionId: entry.sessionId,
+            configId: entry.modelConfigId,
+            value: input.model,
+          },
+        );
+        // Update the entry's available models from the response.
+        const updatedConfig = extractModelConfig(
+          (resp as { configOptions?: unknown }).configOptions as
+            | Array<{
+                id?: string;
+                name?: string;
+                category?: string | null;
+                type?: string;
+                currentValue?: unknown;
+                options?: unknown;
+              }>
+            | null
+            | undefined,
+        );
+        if (updatedConfig) {
+          entry.modelConfigId = updatedConfig.configId;
+          entry.availableModels = updatedConfig.models;
+        }
+      } catch (error) {
+        // Best-effort: a failed set_config_option must not block the prompt.
+        console.error(
+          "[acp-agent] set_config_option failed:",
+          error instanceof Error ? error.message : error,
+        );
+      }
+    }
+  }
+
   try {
     const promptDone = entry.session.prompt(promptText);
     // The stop message below is the real completion signal; this catch only
@@ -761,10 +909,14 @@ export async function runAcpAgent(input: RunAcpAgentInput): Promise<void> {
       if (mapped) {
         // mapAcpUpdate may return a single event or an array (e.g. tool_call
         // emits both tool_call_detail and legacy tool_start).
-        if (Array.isArray(mapped)) {
-          for (const event of mapped) onEvent(event);
-        } else {
-          onEvent(mapped);
+        const events = Array.isArray(mapped) ? mapped : [mapped];
+        for (const event of events) {
+          // When a config_option_update arrives with model changes, update the
+          // entry so future turns see the refreshed list.
+          if (event.type === "available_models") {
+            entry.availableModels = event.models;
+          }
+          onEvent(event);
         }
       }
     }

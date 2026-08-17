@@ -1687,6 +1687,7 @@ export function DesktopChatArea() {
                   }
                 : null
           }
+          acpModels={sidecarRun.acpAvailableModels}
         />
       )}
       <Dialog

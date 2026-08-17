@@ -150,7 +150,8 @@ interface SidecarAgentEvent {
     | "error"
     | "tool_call_detail"
     | "plan"
-    | "agent_info";
+    | "agent_info"
+    | "available_models";
   content?: string;
   toolName?: string;
   toolInput?: unknown;
@@ -173,6 +174,8 @@ interface SidecarAgentEvent {
   // agent_info fields
   agentName?: string;
   agentVersion?: string;
+  // available_models fields
+  models?: Array<{ id: string; name: string }>;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -291,6 +294,14 @@ export function projectSidecarAgentEvent(runId: string, raw: unknown): AgentTask
           agentName: event.agentName,
           agentVersion: event.agentVersion,
         },
+      };
+    case "available_models":
+      return {
+        type: "execution_event",
+        taskId: runId,
+        runId,
+        eventType: "available_models",
+        metadata: { models: event.models ?? [] },
       };
     case "done":
       return { type: "done", taskId: runId, runId };

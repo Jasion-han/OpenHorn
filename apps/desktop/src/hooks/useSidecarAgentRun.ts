@@ -77,6 +77,12 @@ export interface SidecarAgentRunInput {
   attachmentsMeta?: Array<{ fileName: string; fileType?: string; fileSize?: number }>;
 }
 
+/** A model option dynamically provided by an ACP agent session. */
+export interface AcpAvailableModel {
+  id: string;
+  name: string;
+}
+
 export interface SidecarAgentRunApi {
   activeRun: ActiveSidecarRun | null;
   pendingApproval: SidecarApprovalRequest | null;
@@ -86,6 +92,8 @@ export interface SidecarAgentRunApi {
   isRollingBack: boolean;
   rollbackError: string | null;
   sdkSessionId: string | null;
+  /** Dynamic model list from ACP agent's session config options. */
+  acpAvailableModels: AcpAvailableModel[];
 
   /**
    * Kicks off a sidecar agent run bound to the given assistant message.
@@ -129,6 +137,7 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
   const [isRollingBack, setIsRollingBack] = useState(false);
   const [rollbackError, setRollbackError] = useState<string | null>(null);
   const [sdkSessionId, setSdkSessionId] = useState<string | null>(null);
+  const [acpAvailableModels, setAcpAvailableModels] = useState<AcpAvailableModel[]>([]);
   const runRef = useRef<ActiveSidecarRun | null>(null);
   // Runs the sidecar wrote a rollback manifest for (checkpoint.ready). Only
   // these may become a rollback target — offering rollback on a run that never
@@ -473,6 +482,15 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
               });
               return;
             }
+            // ACP dynamic model list — update the hook state so the model picker
+            // can show agent-provided models instead of the static channel list.
+            if (event.type === "execution_event" && event.eventType === "available_models") {
+              const meta = event.metadata as { models?: Array<{ id: string; name: string }> };
+              if (Array.isArray(meta?.models)) {
+                setAcpAvailableModels(meta.models);
+              }
+              return;
+            }
             // Held for persistence rather than rendered: the bubble shows the
             // token count only after the row is saved, from the stored value.
             if (event.type === "execution_event" && event.eventType === "usage") {
@@ -674,6 +692,7 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
     isRollingBack,
     rollbackError,
     sdkSessionId,
+    acpAvailableModels,
     startRun,
     respondToApproval,
     cancel,

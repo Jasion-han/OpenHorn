@@ -53,6 +53,11 @@ export type AgentEvent =
       type: "agent_info";
       agentName: string;
       agentVersion: string;
+    }
+  /** ACP-specific: dynamic model list from session config options. */
+  | {
+      type: "available_models";
+      models: Array<{ id: string; name: string }>;
     };
 
 type SdkMessage = {
