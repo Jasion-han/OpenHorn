@@ -1,4 +1,4 @@
-export type AgentCapabilityMode = "claude_sdk" | "generic_tool_calling";
+export type AgentCapabilityMode = "claude_sdk" | "generic_tool_calling" | "acp";
 
 export type GenericToolDefinition = {
   name: string;

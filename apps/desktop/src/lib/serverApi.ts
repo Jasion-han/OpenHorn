@@ -86,7 +86,7 @@ export interface ServerApi {
     create: (data: {
       name: string;
       provider: string;
-      protocol?: "openai" | "anthropic" | "google";
+      protocol?: "openai" | "anthropic" | "google" | "acp";
       apiKey: string;
       baseUrl?: string;
       enabled?: boolean;
@@ -97,7 +97,7 @@ export interface ServerApi {
       data: {
         name?: string;
         provider?: string;
-        protocol?: "openai" | "anthropic" | "google";
+        protocol?: "openai" | "anthropic" | "google" | "acp";
         apiKey?: string;
         baseUrl?: string;
         enabled?: boolean;
@@ -134,7 +134,7 @@ export interface ServerApi {
         apiKey: string;
         baseUrl: string | null;
         modelId: string;
-        protocol: "openai" | "anthropic" | "google";
+        protocol: "openai" | "anthropic" | "google" | "acp";
         isCliOAuth?: boolean;
       };
     }>;

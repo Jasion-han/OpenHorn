@@ -2098,6 +2098,12 @@ export class GoogleAdapter implements ToolCallingAdapter {
 
 export function createAdapter(protocol: string, apiKey: string, baseUrl?: string): ProviderAdapter {
   const normalized = (protocol || "").trim().toLowerCase() as AdapterProtocol | string;
+  if (normalized === "acp") {
+    // An ACP channel stores a local agent launch config, not provider
+    // credentials — falling through to the OpenAI adapter would send that
+    // config as a bearer token. Fail loudly at the single chokepoint instead.
+    throw new Error("ACP 渠道仅支持桌面端 Agent 模式，不支持对话补全接口");
+  }
   if (normalized === "anthropic") {
     return new AnthropicAdapter(apiKey, baseUrl);
   }

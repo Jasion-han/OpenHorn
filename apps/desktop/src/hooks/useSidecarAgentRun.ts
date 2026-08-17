@@ -130,11 +130,18 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
   const [rollbackError, setRollbackError] = useState<string | null>(null);
   const [sdkSessionId, setSdkSessionId] = useState<string | null>(null);
   const runRef = useRef<ActiveSidecarRun | null>(null);
+  // Runs the sidecar wrote a rollback manifest for (checkpoint.ready). Only
+  // these may become a rollback target — offering rollback on a run that never
+  // touched a file would ENOENT in the sidecar and surface as a raw error.
+  const checkpointRunIdsRef = useRef<Set<string>>(new Set());
 
   const syncRun = (run: ActiveSidecarRun | null) => {
     if (run === null && runRef.current) {
-      // A run just finished; remember its id for rollback.
-      setLastFinishedRunId(runRef.current.runId);
+      // A run just finished; remember its id for rollback — but only when the
+      // sidecar reported a checkpoint manifest for it (see checkpointRunIdsRef).
+      if (checkpointRunIdsRef.current.has(runRef.current.runId)) {
+        setLastFinishedRunId(runRef.current.runId);
+      }
     }
     runRef.current = run;
     setActiveRun(run);
@@ -286,7 +293,7 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
       apiKey: string;
       baseUrl: string | null;
       modelId: string;
-      protocol: "openai" | "anthropic" | "google";
+      protocol: "openai" | "anthropic" | "google" | "acp";
     };
     try {
       const result = await api.channels.getCredentials(input.channelId);
@@ -306,7 +313,11 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
       return;
     }
 
-    if (credentials.protocol !== "anthropic" && credentials.protocol !== "openai") {
+    if (
+      credentials.protocol !== "anthropic" &&
+      credentials.protocol !== "openai" &&
+      credentials.protocol !== "acp"
+    ) {
       // Same as above: skip entirely if a newer run took over during the await.
       if (!ownsMessage()) return;
       setIsBusy(false);
@@ -320,13 +331,47 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
       return;
     }
 
+    // ACP channels carry the local agent launch config JSON-encoded in the
+    // apiKey slot (encrypted at rest server-side). Parse it here; a broken
+    // config fails the run with a actionable message instead of a spawn error.
+    let acpAgent: { command: string; args?: string[]; env?: Record<string, string> } | undefined;
+    if (credentials.protocol === "acp") {
+      try {
+        const parsed = JSON.parse(credentials.apiKey) as {
+          command?: string;
+          args?: string[];
+          env?: Record<string, string>;
+        };
+        if (!parsed.command || typeof parsed.command !== "string") {
+          throw new Error("missing command");
+        }
+        acpAgent = { command: parsed.command, args: parsed.args, env: parsed.env };
+      } catch {
+        if (!ownsMessage()) return;
+        setIsBusy(false);
+        const message = "ACP 渠道配置无效：缺少 agent 启动命令，请在渠道设置中重新配置";
+        setLastError(message);
+        useChatStore.getState().applyStreamEvent(input.assistantMessageId, {
+          type: "error",
+          message,
+        });
+        persistFailure(message, input.modelId || credentials.modelId);
+        return;
+      }
+    }
+
     // Both the Claude Agent SDK (anthropic) and the pi-agent-core "direct"
     // runtime (openai) consume MCP servers, so fetch them for either protocol.
     // Best-effort: a failure here must not block the run. Each enabled server is
     // reshaped into the SDK's format (keyed by name) with its transport type
     // normalized to stdio/sse/http — see normalizeMcpServerConfig.
     let mcpServers: Record<string, Record<string, unknown>> | undefined;
-    if (credentials.protocol === "anthropic" || credentials.protocol === "openai") {
+    // ACP agents also consume MCP servers (passed through session/new).
+    if (
+      credentials.protocol === "anthropic" ||
+      credentials.protocol === "openai" ||
+      credentials.protocol === "acp"
+    ) {
       try {
         const { servers } = await api.mcp.listServers();
         const map: Record<string, Record<string, unknown>> = {};
@@ -379,10 +424,13 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
     try {
       runId = await client.runAgent({
         prompt: input.prompt,
-        apiKey: credentials.apiKey,
+        // The acp config was already parsed into acpAgent — don't resend the
+        // raw JSON in the apiKey slot.
+        apiKey: credentials.protocol === "acp" ? "" : credentials.apiKey,
         model: input.modelId || credentials.modelId,
         baseUrl: credentials.baseUrl ?? undefined,
         protocol: credentials.protocol,
+        acpAgent,
         sdkSessionId: input.sdkSessionId ?? sdkSessionId ?? undefined,
         permissionMode: input.permissionMode,
         systemPrompt: input.systemPrompt,
@@ -394,6 +442,11 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
         attachments: input.attachments,
         onSdkSessionId: (sessionId) => {
           setSdkSessionId(sessionId);
+        },
+        onCheckpointReady: (ckptRunId) => {
+          // Keyed by runId, so a superseded run's late signal can't taint the
+          // new run — no ownership guard needed.
+          checkpointRunIdsRef.current.add(ckptRunId);
         },
         onEvent: (() => {
           return (event: import("../lib/agentTaskStream").AgentTaskStreamEvent) => {
@@ -466,7 +519,9 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
                 assistantMsg?.agentRun ?? undefined,
                 input.modelId || credentials.modelId,
               );
-              if (credentials.protocol !== "anthropic") {
+              // Claude and ACP runs write checkpoints; other runtimes have no
+              // rollback manifest so the button must not be offered.
+              if (credentials.protocol !== "anthropic" && credentials.protocol !== "acp") {
                 setLastFinishedRunId(null);
               }
               syncRun(null);

@@ -168,7 +168,7 @@ export interface Channel {
   userId: string;
   name: string;
   provider: string;
-  protocol: "openai" | "anthropic" | "google";
+  protocol: "openai" | "anthropic" | "google" | "acp";
   baseUrl?: string;
   enabled: boolean;
   isDefault: boolean;

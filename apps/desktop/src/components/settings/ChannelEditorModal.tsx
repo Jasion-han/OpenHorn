@@ -1,5 +1,5 @@
 import { Plus, Search, Wand2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Badge,
   Button,
@@ -18,6 +18,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
+  Textarea,
 } from "ui";
 import { getCredentialKey, listCredentialSources } from "../../lib/credentialApi";
 import { formatChannelLabel, getChannelLabel, getCredentialLabel } from "../../lib/i18n/agent";
@@ -43,6 +44,10 @@ const CHANNEL_PROTOCOLS = {
   google: {
     label: "Google",
     baseUrl: "https://generativelanguage.googleapis.com",
+  },
+  acp: {
+    label: "ACP Agent",
+    baseUrl: "",
   },
 } as const;
 
@@ -109,6 +114,12 @@ const COMMON_PROVIDER_PRESETS = [
     protocol: "openai" as const,
     baseUrl: "http://localhost:11434/v1",
   },
+  {
+    value: "acp",
+    label: getChannelLabel("settings.channel.editor.acpPresetLabel"),
+    protocol: "acp" as const,
+    baseUrl: "",
+  },
 ] as const;
 
 type NoticeKind = "success" | "error" | "warn";
@@ -149,6 +160,10 @@ function inferProtocolFromProvider(
   baseUrl: string | null | undefined,
   fallback: ChannelProtocol = "openai",
 ): ChannelProtocol {
+  // Exact provider match only: "acp" is too short a token to substring-match
+  // against arbitrary baseUrls without false positives.
+  if (normalizeCompareText(provider).toLowerCase() === "acp") return "acp";
+
   const normalized = `${normalizeCompareText(provider)} ${normalizeCompareText(baseUrl)}`
     .trim()
     .toLowerCase();
@@ -185,6 +200,12 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
   const [baseUrl, setBaseUrl] = useState<string>(CHANNEL_PROTOCOLS.openai.baseUrl);
   const [enabled, setEnabled] = useState(true);
   const [apiKey, setApiKey] = useState("");
+  // ACP channels: local agent launch config, JSON-encoded into the apiKey slot
+  // on save. args/env are edited one-per-line.
+  const [acpCommand, setAcpCommand] = useState("");
+  const [acpArgs, setAcpArgs] = useState("");
+  const [acpEnv, setAcpEnv] = useState("");
+  const acpPrefillTargetRef = useRef<string | null>(null);
   const [envKeySources, setEnvKeySources] = useState<
     Array<{ id: string; provider: string; sourceName: string }>
   >([]);
@@ -231,8 +252,38 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
     setBaseUrl(CHANNEL_PROTOCOLS.openai.baseUrl);
     setEnabled(true);
     setApiKey("");
+    setAcpCommand("");
+    setAcpArgs("");
+    setAcpEnv("");
+    acpPrefillTargetRef.current = null;
     setAuthSource("manual");
     setFormNotice(null);
+  };
+
+  // The stored ACP config lives encrypted server-side (the list API only says
+  // hasApiKey), so editing an acp channel fetches the decrypted config to fill
+  // the form. The ref guards against a stale response landing after the user
+  // switched to another channel.
+  const prefillAcpConfig = async (channelId: string) => {
+    acpPrefillTargetRef.current = channelId;
+    try {
+      const { credentials } = await api.channels.getCredentials(channelId);
+      if (acpPrefillTargetRef.current !== channelId) return;
+      const parsed = JSON.parse(credentials.apiKey) as {
+        command?: string;
+        args?: string[];
+        env?: Record<string, string>;
+      };
+      setAcpCommand(parsed.command || "");
+      setAcpArgs((parsed.args || []).join("\n"));
+      setAcpEnv(
+        Object.entries(parsed.env || {})
+          .map(([key, value]) => `${key}=${value}`)
+          .join("\n"),
+      );
+    } catch {
+      // Leave the fields blank; saving with a new command overwrites cleanly.
+    }
   };
 
   const prefillFromChannel = (channel: Channel) => {
@@ -248,6 +299,13 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
     );
     setEnabled(Boolean(channel.enabled));
     setApiKey(channel.hasApiKey ? API_KEY_MASK : "");
+    setAcpCommand("");
+    setAcpArgs("");
+    setAcpEnv("");
+    acpPrefillTargetRef.current = null;
+    if (channel.protocol === "acp") {
+      void prefillAcpConfig(channel.id);
+    }
     setFormNotice(null);
   };
 
@@ -364,13 +422,41 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
     });
   }, [sidecarCredentials, provider, baseUrl]);
 
-  const canSubmitCreate =
-    authSource === "local"
+  const isAcp =
+    inferProtocolFromProvider(provider, baseUrl, activeChannel?.protocol || "openai") === "acp";
+
+  /** Serializes the ACP form fields into the JSON stored in the apiKey slot. */
+  const buildAcpConfigJson = () => {
+    const args = acpArgs
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+    const env: Record<string, string> = {};
+    for (const line of acpEnv.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      const eq = trimmed.indexOf("=");
+      if (eq <= 0) continue;
+      env[trimmed.slice(0, eq).trim()] = trimmed.slice(eq + 1).trim();
+    }
+    return JSON.stringify({
+      command: acpCommand.trim(),
+      ...(args.length > 0 ? { args } : {}),
+      ...(Object.keys(env).length > 0 ? { env } : {}),
+    });
+  };
+
+  const canSubmitCreate = isAcp
+    ? Boolean(normalizeCompareText(name)) && Boolean(normalizeCompareText(acpCommand))
+    : authSource === "local"
       ? Boolean(normalizeCompareText(name)) && matchingSidecarCredentials.length > 0
       : Boolean(normalizeCompareText(name)) &&
         Boolean(normalizeCompareText(apiKey)) &&
         apiKey.trim() !== API_KEY_MASK;
-  const canSubmitEdit = Boolean(activeChannel?.id) && Boolean(normalizeCompareText(name));
+  const canSubmitEdit =
+    Boolean(activeChannel?.id) &&
+    Boolean(normalizeCompareText(name)) &&
+    (!isAcp || Boolean(normalizeCompareText(acpCommand)));
 
   const handleSubmit = async () => {
     if (saving) return;
@@ -398,7 +484,16 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
       return;
     }
 
-    if (isCreate && authSource === "manual") {
+    if (isAcp && !normalizeCompareText(acpCommand)) {
+      setFormNotice({
+        kind: "error",
+        title: getChannelLabel("settings.channel.editor.saveErrorTitle"),
+        message: getChannelLabel("settings.channel.editor.acpCommandRequired"),
+      });
+      return;
+    }
+
+    if (isCreate && !isAcp && authSource === "manual") {
       if (!trimmedApiKey || trimmedApiKey === API_KEY_MASK) {
         setFormNotice({
           kind: "error",
@@ -409,7 +504,7 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
       }
     }
 
-    if (isCreate && authSource === "local" && matchingSidecarCredentials.length === 0) {
+    if (isCreate && !isAcp && authSource === "local" && matchingSidecarCredentials.length === 0) {
       setFormNotice({
         kind: "error",
         title: getChannelLabel("settings.channel.editor.createErrorTitle"),
@@ -423,8 +518,9 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
 
     try {
       if (isCreate) {
-        const resolvedApiKey =
-          authSource === "local" && matchingSidecarCredentials.length > 0
+        const resolvedApiKey = isAcp
+          ? buildAcpConfigJson()
+          : authSource === "local" && matchingSidecarCredentials.length > 0
             ? `__sidecar_auto__:${matchingSidecarCredentials[0].source}`
             : trimmedApiKey;
 
@@ -433,7 +529,7 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
           provider: trimmedProvider,
           protocol: inferProtocolFromProvider(trimmedProvider, trimmedBaseUrl, "openai"),
           apiKey: resolvedApiKey,
-          baseUrl: trimmedBaseUrl || undefined,
+          baseUrl: isAcp ? undefined : trimmedBaseUrl || undefined,
           enabled,
         });
 
@@ -487,7 +583,11 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
       if (Boolean(enabled) !== Boolean(activeChannel.enabled)) {
         payload.enabled = enabled;
       }
-      if (trimmedApiKey && trimmedApiKey !== API_KEY_MASK) {
+      if (isAcp) {
+        // The masked-key diff below can't compare against the stored JSON, so
+        // an acp edit always rewrites the config from the form fields.
+        payload.apiKey = buildAcpConfigJson();
+      } else if (trimmedApiKey && trimmedApiKey !== API_KEY_MASK) {
         payload.apiKey = trimmedApiKey;
       }
 
@@ -677,35 +777,82 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
                   </div>
                 </div>
 
-                <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="channel-base-url">Base URL</Label>
-                  <div className="flex gap-2">
-                    <Input
-                      id="channel-base-url"
-                      value={baseUrl}
-                      onChange={(event) => setBaseUrl(event.target.value)}
-                      placeholder={getChannelLabel("settings.channel.editor.baseUrlPlaceholder")}
-                      className="flex-1"
-                    />
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon"
-                      title={getChannelLabel("settings.channel.editor.fillDefaultBaseUrl")}
-                      onClick={() => setBaseUrl(suggestedBaseUrl)}
-                    >
-                      <Wand2 size={16} />
-                    </Button>
+                {isAcp && (
+                  <div className="flex flex-col gap-3">
+                    <p className="text-xs text-muted-foreground">
+                      {getChannelLabel("settings.channel.editor.acpHint")}
+                    </p>
+                    <div className="flex flex-col gap-1.5">
+                      <Label htmlFor="channel-acp-command">
+                        {getChannelLabel("settings.channel.editor.acpCommandLabel")} *
+                      </Label>
+                      <Input
+                        id="channel-acp-command"
+                        placeholder={getChannelLabel(
+                          "settings.channel.editor.acpCommandPlaceholder",
+                        )}
+                        value={acpCommand}
+                        onChange={(event) => setAcpCommand(event.target.value)}
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                      <Label htmlFor="channel-acp-args">
+                        {getChannelLabel("settings.channel.editor.acpArgsLabel")}
+                      </Label>
+                      <Textarea
+                        id="channel-acp-args"
+                        rows={2}
+                        placeholder={getChannelLabel("settings.channel.editor.acpArgsPlaceholder")}
+                        value={acpArgs}
+                        onChange={(event) => setAcpArgs(event.target.value)}
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                      <Label htmlFor="channel-acp-env">
+                        {getChannelLabel("settings.channel.editor.acpEnvLabel")}
+                      </Label>
+                      <Textarea
+                        id="channel-acp-env"
+                        rows={3}
+                        placeholder={getChannelLabel("settings.channel.editor.acpEnvPlaceholder")}
+                        value={acpEnv}
+                        onChange={(event) => setAcpEnv(event.target.value)}
+                      />
+                    </div>
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    {formatChannelLabel("settings.channel.editor.suggestedBaseUrl", {
-                      url: suggestedBaseUrl,
-                    })}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {getChannelLabel("settings.channel.editor.baseUrlHint")}
-                  </p>
-                </div>
+                )}
+
+                {!isAcp && (
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="channel-base-url">Base URL</Label>
+                    <div className="flex gap-2">
+                      <Input
+                        id="channel-base-url"
+                        value={baseUrl}
+                        onChange={(event) => setBaseUrl(event.target.value)}
+                        placeholder={getChannelLabel("settings.channel.editor.baseUrlPlaceholder")}
+                        className="flex-1"
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        title={getChannelLabel("settings.channel.editor.fillDefaultBaseUrl")}
+                        onClick={() => setBaseUrl(suggestedBaseUrl)}
+                      >
+                        <Wand2 size={16} />
+                      </Button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {formatChannelLabel("settings.channel.editor.suggestedBaseUrl", {
+                        url: suggestedBaseUrl,
+                      })}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {getChannelLabel("settings.channel.editor.baseUrlHint")}
+                    </p>
+                  </div>
+                )}
 
                 <div className="flex items-center gap-2">
                   <Checkbox
@@ -718,58 +865,61 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
                   </Label>
                 </div>
 
-                {isCreate && sidecarStatus === "ready" && matchingSidecarCredentials.length > 0 && (
-                  <div className="flex flex-col gap-1.5">
-                    <Label>{getCredentialLabel("channel.selectAuth")}</Label>
-                    <Select
-                      value={authSource}
-                      onValueChange={(v) => setAuthSource(v as "manual" | "local")}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="manual">
-                          {getCredentialLabel("channel.authManual")}
-                        </SelectItem>
-                        <SelectItem value="local">
-                          {getCredentialLabel("channel.authFromLocal")}
-                        </SelectItem>
-                      </SelectContent>
-                    </Select>
-                    {authSource === "local" && (
-                      <div className="mt-1 flex flex-col gap-1">
-                        {matchingSidecarCredentials.map((cred) => {
-                          const sourceLabel =
-                            cred.source === "codex_cli"
-                              ? "Codex CLI (ChatGPT Plus)"
-                              : cred.source === "claude_code"
-                                ? "Claude Code"
-                                : cred.source === "gemini_cli"
-                                  ? "Gemini CLI"
-                                  : cred.source;
-                          return (
-                            <div
-                              key={`${cred.provider}-${cred.source}`}
-                              className="flex items-center gap-2 rounded border border-green-200 bg-green-50 px-2 py-1.5 text-xs dark:border-green-800 dark:bg-green-900/20"
-                            >
-                              <span className="text-green-600 dark:text-green-400">✓</span>
-                              <span className="font-medium">{sourceLabel}</span>
-                              {cred.email && (
-                                <span className="text-neutral-500">({cred.email})</span>
-                              )}
-                            </div>
-                          );
-                        })}
-                        <p className="text-xs text-muted-foreground">
-                          {getChannelLabel("settings.channel.editor.localAuthHint")}
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                )}
+                {!isAcp &&
+                  isCreate &&
+                  sidecarStatus === "ready" &&
+                  matchingSidecarCredentials.length > 0 && (
+                    <div className="flex flex-col gap-1.5">
+                      <Label>{getCredentialLabel("channel.selectAuth")}</Label>
+                      <Select
+                        value={authSource}
+                        onValueChange={(v) => setAuthSource(v as "manual" | "local")}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="manual">
+                            {getCredentialLabel("channel.authManual")}
+                          </SelectItem>
+                          <SelectItem value="local">
+                            {getCredentialLabel("channel.authFromLocal")}
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                      {authSource === "local" && (
+                        <div className="mt-1 flex flex-col gap-1">
+                          {matchingSidecarCredentials.map((cred) => {
+                            const sourceLabel =
+                              cred.source === "codex_cli"
+                                ? "Codex CLI (ChatGPT Plus)"
+                                : cred.source === "claude_code"
+                                  ? "Claude Code"
+                                  : cred.source === "gemini_cli"
+                                    ? "Gemini CLI"
+                                    : cred.source;
+                            return (
+                              <div
+                                key={`${cred.provider}-${cred.source}`}
+                                className="flex items-center gap-2 rounded border border-green-200 bg-green-50 px-2 py-1.5 text-xs dark:border-green-800 dark:bg-green-900/20"
+                              >
+                                <span className="text-green-600 dark:text-green-400">✓</span>
+                                <span className="font-medium">{sourceLabel}</span>
+                                {cred.email && (
+                                  <span className="text-neutral-500">({cred.email})</span>
+                                )}
+                              </div>
+                            );
+                          })}
+                          <p className="text-xs text-muted-foreground">
+                            {getChannelLabel("settings.channel.editor.localAuthHint")}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
-                {!(isCreate && authSource === "local") && (
+                {!isAcp && !(isCreate && authSource === "local") && (
                   <div className="flex flex-col gap-1.5">
                     <Label htmlFor="channel-api-key">
                       API Key {isCreate && authSource === "manual" && "*"}

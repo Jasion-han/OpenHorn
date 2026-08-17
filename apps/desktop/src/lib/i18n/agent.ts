@@ -46,6 +46,7 @@ export const agentPanelLabels = {
   planSectionHeading: "执行计划",
   approvalSubmitting: "提交中...",
   approvalSubmitFailed: "提交失败",
+  rollbackHint: "本次执行修改了文件，可一键还原",
 } as const;
 
 /**
@@ -341,6 +342,18 @@ export const channelLabels = {
   "settings.channel.editor.baseUrlHint":
     "会根据 provider 与 Base URL 自动判断兼容链路；中转服务填写兼容类型即可。",
   "settings.channel.editor.enableLabel": "启用该渠道",
+  // Channel editor modal — ACP local agent channels
+  "settings.channel.editor.acpPresetLabel": "ACP Agent（本地）",
+  "settings.channel.editor.acpHint":
+    "ACP 渠道通过本地 agent 二进制运行（Agent Client Protocol），仅支持 Agent 模式，不支持普通对话。",
+  "settings.channel.editor.acpCommandLabel": "启动命令",
+  "settings.channel.editor.acpCommandPlaceholder":
+    "例如：claude-agent-acp 或 /usr/local/bin/gemini",
+  "settings.channel.editor.acpArgsLabel": "启动参数（每行一个）",
+  "settings.channel.editor.acpArgsPlaceholder": "例如：--acp",
+  "settings.channel.editor.acpEnvLabel": "环境变量（KEY=VALUE，每行一个）",
+  "settings.channel.editor.acpEnvPlaceholder": "例如：GEMINI_API_KEY=xxxx",
+  "settings.channel.editor.acpCommandRequired": "请填写 ACP agent 的启动命令",
   "settings.channel.editor.localAuthHint":
     "Sidecar 将自动使用检测到的本地认证，无需手动填写 API Key。",
   "settings.channel.editor.apiKeyPlaceholderCreate": "输入 API Key",

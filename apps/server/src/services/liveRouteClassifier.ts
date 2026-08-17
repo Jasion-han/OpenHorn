@@ -4,7 +4,9 @@ import type { LiveRouteType } from "./liveCapabilities";
 const LIVE_ROUTE_CLASSIFIER_TIMEOUT_MS = 1_200;
 
 export async function classifyLiveRouteWithModel(params: {
-  protocol: "openai" | "anthropic" | "google";
+  // Any channel protocol; createAdapter throws for non-chat protocols (acp)
+  // and the catch below degrades that to "no live route" — the right outcome.
+  protocol: string;
   apiKey: string;
   baseUrl?: string | null;
   modelId: string;

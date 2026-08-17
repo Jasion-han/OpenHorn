@@ -1,4 +1,7 @@
-export type ChannelProtocol = "openai" | "anthropic" | "google";
+// "acp" is a local-agent channel: it stores an ACP agent launch config
+// (command/args/env, JSON-encoded in the apiKey slot) instead of provider
+// credentials, and only the desktop agent runtime consumes it.
+export type ChannelProtocol = "openai" | "anthropic" | "google" | "acp";
 export type Provider = string;
 
 export interface Channel {

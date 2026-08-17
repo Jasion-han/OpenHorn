@@ -65,7 +65,11 @@ export function getAgentCapabilityModeFromSuccessResult(
   result: { success: true; mode?: AgentCapabilityMode },
   protocol: string | null | undefined,
 ): AgentCapabilityMode {
-  if (result.mode === "claude_sdk" || result.mode === "generic_tool_calling") {
+  if (
+    result.mode === "claude_sdk" ||
+    result.mode === "generic_tool_calling" ||
+    result.mode === "acp"
+  ) {
     return result.mode;
   }
   return (protocol || "").trim().toLowerCase() === "openai" ? "generic_tool_calling" : "claude_sdk";
@@ -504,6 +508,12 @@ export async function checkChannelAgentCompatibility(
   );
   const baseUrl = channel.baseUrl;
   const protocol = (channel.protocol || "").trim().toLowerCase();
+
+  if (protocol === "acp") {
+    // ACP channels are agent-only by definition; the agent binary lives on the
+    // user's machine, so there is nothing the server can probe here.
+    return { success: true, mode: "acp" };
+  }
 
   const cacheKey = getCompatibilityCacheKey(
     userId,

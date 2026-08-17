@@ -93,11 +93,19 @@ export interface SidecarRunAgentInput {
    * sidecar reads SKILL.md and scripts directly from `path`.
    */
   skills?: Array<{ name: string; description: string; path: string }>;
+  /** Local ACP agent launch config; required when protocol is "acp". */
+  acpAgent?: { command: string; args?: string[]; env?: Record<string, string> };
   onEvent: (event: AgentTaskStreamEvent) => void | Promise<void>;
   onApproval: (request: SidecarApprovalRequest) => void | Promise<void>;
   onError: (message: string) => void;
   onDone: (runId: string) => void;
   onSdkSessionId?: (sessionId: string) => void;
+  /**
+   * Fires when the sidecar wrote a rollback manifest for this run — i.e. the
+   * run actually mutated files. Absence means a rollback would ENOENT, so the
+   * UI must not offer one.
+   */
+  onCheckpointReady?: (runId: string) => void;
 }
 
 interface PendingRequest {
@@ -278,6 +286,7 @@ export class SidecarClient {
       onError: (message: string) => void;
       onDone: (runId: string) => void;
       onSdkSessionId?: (sessionId: string) => void;
+      onCheckpointReady?: (runId: string) => void;
     }
   >();
   private closePromise: Promise<void> | null = null;
@@ -369,11 +378,13 @@ export class SidecarClient {
       conversationHistory,
       attachments,
       skills,
+      acpAgent,
       onEvent,
       onApproval,
       onError,
       onDone,
       onSdkSessionId,
+      onCheckpointReady,
     } = input;
     const result = (await this.request("agent.run", {
       prompt,
@@ -390,9 +401,17 @@ export class SidecarClient {
       ...(conversationHistory && conversationHistory.length > 0 ? { conversationHistory } : {}),
       ...(attachments && attachments.length > 0 ? { attachments } : {}),
       ...(skills && skills.length > 0 ? { skills } : {}),
+      ...(acpAgent ? { acpAgent } : {}),
     })) as { runId: string };
     const runId = result.runId;
-    this.runHandlers.set(runId, { onEvent, onApproval, onError, onDone, onSdkSessionId });
+    this.runHandlers.set(runId, {
+      onEvent,
+      onApproval,
+      onError,
+      onDone,
+      onSdkSessionId,
+      onCheckpointReady,
+    });
     return runId;
   }
 
@@ -571,6 +590,10 @@ export class SidecarClient {
     }
 
     if (event.event === "checkpoint.ready") {
+      if (!isRecord(event.data)) return;
+      const runId = typeof event.data.runId === "string" ? event.data.runId : null;
+      if (!runId) return;
+      this.runHandlers.get(runId)?.onCheckpointReady?.(runId);
       return;
     }
 

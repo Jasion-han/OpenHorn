@@ -6,7 +6,7 @@ import { probeAnthropicModel } from "./anthropicProbe";
 import { summarizeProviderError } from "./providerErrorSummary";
 
 type ChannelRow = typeof channels.$inferSelect;
-export type ChannelProtocol = "openai" | "anthropic" | "google";
+export type ChannelProtocol = "openai" | "anthropic" | "google" | "acp";
 
 export interface ChannelModelItem {
   id: string;
@@ -86,12 +86,15 @@ const PROTOCOL_DEFAULT_BASE_URLS: Record<ChannelProtocol, string> = {
   anthropic: "https://api.anthropic.com",
   openai: "https://api.openai.com/v1",
   google: "https://generativelanguage.googleapis.com",
+  // Local ACP agent channels have no HTTP endpoint.
+  acp: "",
 };
 
 function inferProtocolFromProvider(provider: string | null | undefined): ChannelProtocol {
   const normalized = (provider || "").trim().toLowerCase();
   if (normalized === "anthropic") return "anthropic";
   if (normalized === "google" || normalized === "gemini") return "google";
+  if (normalized === "acp") return "acp";
   return "openai";
 }
 
@@ -103,6 +106,7 @@ function normalizeProtocol(
   if (normalized === "anthropic") return "anthropic";
   if (normalized === "google" || normalized === "gemini") return "google";
   if (normalized === "openai") return "openai";
+  if (normalized === "acp") return "acp";
   return inferProtocolFromProvider(fallbackProvider);
 }
 
@@ -187,6 +191,12 @@ function normalizeAgentSdkRuntimeBaseUrl(baseUrl: string): string {
 }
 
 function normalizeChannelBaseUrl(protocol: ChannelProtocol, baseUrl: string): string {
+  if (protocol === "acp") {
+    // Local agent channels have no HTTP endpoint; the OpenAI-compatible
+    // fallthrough would fabricate "/v1" out of the empty string.
+    return "";
+  }
+
   if (protocol === "anthropic") {
     // Store whatever user provides (root or /v1); runtime/API normalizers handle both.
     return normalizeBaseUrl(baseUrl);
@@ -609,7 +619,8 @@ export async function createChannel(userId: string, input: CreateChannelInput) {
     provider,
     protocol,
     apiKey: encrypt(input.apiKey.trim()),
-    baseUrl: normalizeChannelBaseUrl(protocol, input.baseUrl || getDefaultBaseUrl(protocol) || ""),
+    baseUrl:
+      normalizeChannelBaseUrl(protocol, input.baseUrl || getDefaultBaseUrl(protocol) || "") || null,
     enabled: input.enabled ?? true,
     isDefault: shouldSetDefault,
     createdAt: now,
@@ -891,6 +902,43 @@ export async function fetchChannelModels(
   const channel = await getOwnedChannelRow(userId, channelId);
   const protocol = normalizeProtocol(channel.protocol, channel.provider);
   const apiKey = decrypt(channel.apiKey);
+
+  if (protocol === "acp") {
+    // No provider endpoint to probe: the ACP agent self-manages its models.
+    // Seed a single entry named after the agent binary so the model selector
+    // has something to offer, then leave the set alone on later syncs.
+    const existingModels = await listChannelModels(userId, channelId);
+    if (existingModels.length > 0) {
+      return { success: true, models: existingModels };
+    }
+    let agentName = "acp-agent";
+    try {
+      const config = JSON.parse(apiKey) as { command?: string };
+      const base = (config.command || "").split("/").pop();
+      if (base) agentName = base;
+    } catch {
+      // keep the fallback name — the config is validated at run time
+    }
+    const now = new Date();
+    await db.transaction(async (tx) => {
+      await tx.insert(channelModels).values({
+        id: generateId(),
+        channelId,
+        modelId: agentName,
+        displayName: agentName,
+        enabled: true,
+        isDefault: true,
+        createdAt: now,
+        updatedAt: now,
+      });
+      await tx
+        .update(channels)
+        .set({ model: agentName, updatedAt: now })
+        .where(eq(channels.id, channelId));
+    });
+    return { success: true, models: await listChannelModels(userId, channelId) };
+  }
+
   const baseUrl = channel.baseUrl || getDefaultBaseUrl(protocol);
 
   if (!baseUrl) {
@@ -1023,6 +1071,11 @@ export async function testChannel(userId: string, channelId: string): Promise<Ch
     const channel = await getOwnedChannelItem(userId, channelId);
     const row = await getOwnedChannelRow(userId, channelId);
     const protocol = normalizeProtocol(row.protocol, channel.provider);
+    if (protocol === "acp") {
+      // Nothing to probe server-side: the agent binary lives on the user's
+      // machine and only the desktop sidecar can launch it.
+      return { success: true };
+    }
     const apiKey = decrypt(row.apiKey);
     const baseUrl = row.baseUrl || getDefaultBaseUrl(protocol);
 
@@ -1308,9 +1361,13 @@ export async function getChannelRuntimeCredentialsById(
     row.baseUrl || channel.baseUrl || getDefaultBaseUrl(channel.protocol) || "";
 
   const runtimeBaseUrl =
-    options?.runtime === "agent_sdk" && channel.protocol === "anthropic"
-      ? normalizeAgentSdkRuntimeBaseUrl(storedOrDefaultBaseUrl)
-      : getRuntimeBaseUrl(channel.protocol, storedOrDefaultBaseUrl);
+    channel.protocol === "acp"
+      ? // Local agent channels have no HTTP endpoint; the generic normalizer
+        // would fabricate "/v1" out of the empty string.
+        ""
+      : options?.runtime === "agent_sdk" && channel.protocol === "anthropic"
+        ? normalizeAgentSdkRuntimeBaseUrl(storedOrDefaultBaseUrl)
+        : getRuntimeBaseUrl(channel.protocol, storedOrDefaultBaseUrl);
 
   const channelWithRuntimeBaseUrl: ChannelItem = {
     ...channel,
