@@ -518,6 +518,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
               // The desktop stores the ACP session id in the same per-conversation
               // slot the Claude runtime uses for SDK resume.
               acpSessionId: sdkSessionId,
+              model,
               conversationHistory,
               attachments,
               mcpServers,

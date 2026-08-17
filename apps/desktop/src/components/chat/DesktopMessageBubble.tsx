@@ -207,7 +207,7 @@ function MessageBubbleImpl({
           )}
         >
           {formatMessageTime(message.updatedAt ?? message.createdAt)}
-          {message.usage ? (
+          {message.usage && !message.agentRun?.contextUsage ? (
             <span title={getChatLabel("chat.usage.tooltip")}>
               {" · "}
               {formatTokenCount(message.usage.totalTokens)} tokens

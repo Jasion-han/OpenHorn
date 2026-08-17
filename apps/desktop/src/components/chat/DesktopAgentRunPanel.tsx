@@ -411,10 +411,7 @@ export function AgentRunPanel({
     : null;
 
   return (
-    <details
-      className="mt-2 text-sm"
-      open={run.status === "running" || run.status === "partial" || undefined}
-    >
+    <div className="mt-2 text-sm">
       <style>{`
         @keyframes agentMetaTextFlow {
           0% { background-position: 130% 50%; text-shadow: 0 0 0 rgba(15,23,42,0); }
@@ -422,141 +419,145 @@ export function AgentRunPanel({
           100% { background-position: -30% 50%; text-shadow: 0 0 0 rgba(15,23,42,0); }
         }
       `}</style>
-      <summary className="list-none cursor-pointer">
-        <div className="flex items-center justify-between gap-3 border-b border-border/35 pb-1.5">
-          <div className="flex min-w-0 items-center gap-2">
-            <span className="truncate text-sm leading-6 text-muted-foreground">
-              {displayTitle}{" "}
-              <span className={cn("text-muted-foreground/70", statusClassName)}>
-                &middot; {statusLabel}
-              </span>
-              {agentLabel && (
-                <span className="ml-1.5 text-xs text-muted-foreground/40">{agentLabel}</span>
-              )}
-            </span>
-          </div>
-        </div>
-      </summary>
-
-      <div className="mt-2 flex flex-col gap-2.5">
-        {/* Context usage bar (ACP only) */}
-        {run.contextUsage && <ContextUsageBar contextUsage={run.contextUsage} />}
-        {run.error && <DesktopAgentTaskMetaLine text={run.error} tone="danger" />}
-        {run.steps.map((step, stepIndex) => {
-          // --- ACP tool_detail step ---
-          if (step.type === "tool_detail") {
-            return <ToolDetailStep key={`detail-${step.toolCallId || stepIndex}`} step={step} />;
-          }
-
-          // --- ACP plan step ---
-          if (step.type === "plan" && step.planEntries) {
-            return (
-              // biome-ignore lint/suspicious/noArrayIndexKey: run steps are append-only
-              <PlanStep key={`plan-${stepIndex}`} entries={step.planEntries} />
-            );
-          }
-
-          if (step.type === "text") {
-            const isLastText = !run.steps
-              .slice(stepIndex + 1)
-              .some((s) => s.type === "tool_start" || s.type === "tool_detail");
-            if (isLastText && run.status === "completed") return null;
-            const raw = (step.content ?? "").trim();
-            if (!raw) return null;
-            return (
-              // biome-ignore lint/suspicious/noArrayIndexKey: run steps are append-only, so a step's index is its identity
-              <div key={`text-${stepIndex}`}>
-                <span className="relative flex items-start gap-2 py-0.5 text-sm leading-6 text-muted-foreground/50">
-                  <span
-                    aria-hidden="true"
-                    className="mt-[8px] h-1.5 w-1.5 shrink-0 rounded-full bg-current"
-                    style={{ opacity: 0.2 }}
-                  />
-                  <span className="min-w-0 italic">{raw}</span>
+      <details open={run.status === "running" || run.status === "partial" || undefined}>
+        <summary className="list-none cursor-pointer">
+          <div className="flex items-center justify-between gap-3 border-b border-border/35 pb-1.5">
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="truncate text-sm leading-6 text-muted-foreground">
+                {displayTitle}{" "}
+                <span className={cn("text-muted-foreground/70", statusClassName)}>
+                  &middot; {statusLabel}
                 </span>
-              </div>
-            );
-          }
+                {agentLabel && (
+                  <span className="ml-1.5 text-xs text-muted-foreground/40">{agentLabel}</span>
+                )}
+              </span>
+            </div>
+          </div>
+        </summary>
 
-          const stepKey = `${step.type}-${step.toolName || ""}-${stepIndex}`;
-          const isActive = false;
-          const label = step.type === "error" ? "Error" : presentToolLabel(step.toolName);
-          const detail =
-            step.type === "tool_start"
-              ? summarizeToolInput(step.toolInput)
-              : step.type === "tool_result"
-                ? summarizeToolResult(step.content)
-                : step.content?.trim() || summarizeToolInput(step.toolInput);
+        <div className="mt-2 flex flex-col gap-2.5">
+          {run.error && <DesktopAgentTaskMetaLine text={run.error} tone="danger" />}
+          {run.steps.map((step, stepIndex) => {
+            // --- ACP tool_detail step ---
+            if (step.type === "tool_detail") {
+              return <ToolDetailStep key={`detail-${step.toolCallId || stepIndex}`} step={step} />;
+            }
 
-          if (step.type === "tool_result" && !detail) return null;
-
-          // A batched fetch (`urls: [...]`) is ONE call against several pages, so
-          // it renders as one node with the pages nested under it. Listing the
-          // URLs as sibling rows read as three separate calls; running them
-          // together into one wrapped paragraph read as URL soup. The count goes
-          // in the header because "did it open all of my links" is the question
-          // this panel exists to answer.
-          if (step.type === "tool_start") {
-            const urls = extractToolUrls(step.toolInput);
-            if (urls.length > 1) {
+            // --- ACP plan step ---
+            if (step.type === "plan" && step.planEntries) {
               return (
-                <div key={stepKey}>
-                  <InlineClampStep
-                    label={label || "Tool"}
-                    detail={formatChatLabel("chat.agent.fetchTargets", { count: urls.length })}
-                    isResult={false}
-                    tone="default"
-                    maxLines={3}
-                  />
-                  <div className="flex flex-col gap-0.5 pb-1 pl-4 text-sm leading-6">
-                    {urls.map((url) => (
-                      <div key={url} className="flex items-start gap-1.5">
-                        {/* Corner glyph marking the row as belonging to the call
-                            above. `mt-[7px]` sits it on the text's baseline row
-                            rather than the line box's top. */}
-                        <CornerDownRight
-                          aria-hidden="true"
-                          className="mt-[7px] size-3 shrink-0 text-foreground opacity-25"
-                        />
-                        {/* `break-all`: a long URL must stay readable in full
-                            rather than be cut — it is what the reader verifies. */}
-                        <span className="min-w-0 break-all text-foreground opacity-32">{url}</span>
-                      </div>
-                    ))}
-                  </div>
+                // biome-ignore lint/suspicious/noArrayIndexKey: run steps are append-only
+                <PlanStep key={`plan-${stepIndex}`} entries={step.planEntries} />
+              );
+            }
+
+            if (step.type === "text") {
+              const isLastText = !run.steps
+                .slice(stepIndex + 1)
+                .some((s) => s.type === "tool_start" || s.type === "tool_detail");
+              if (isLastText && run.status === "completed") return null;
+              const raw = (step.content ?? "").trim();
+              if (!raw) return null;
+              return (
+                // biome-ignore lint/suspicious/noArrayIndexKey: run steps are append-only, so a step's index is its identity
+                <div key={`text-${stepIndex}`}>
+                  <span className="relative flex items-start gap-2 py-0.5 text-sm leading-6 text-muted-foreground/50">
+                    <span
+                      aria-hidden="true"
+                      className="mt-[8px] h-1.5 w-1.5 shrink-0 rounded-full bg-current"
+                      style={{ opacity: 0.2 }}
+                    />
+                    <span className="min-w-0 italic">{raw}</span>
+                  </span>
                 </div>
               );
             }
-          }
 
-          if (step.type === "tool_start" || step.type === "tool_result") {
+            const stepKey = `${step.type}-${step.toolName || ""}-${stepIndex}`;
+            const isActive = false;
+            const label = step.type === "error" ? "Error" : presentToolLabel(step.toolName);
+            const detail =
+              step.type === "tool_start"
+                ? summarizeToolInput(step.toolInput)
+                : step.type === "tool_result"
+                  ? summarizeToolResult(step.content)
+                  : step.content?.trim() || summarizeToolInput(step.toolInput);
+
+            if (step.type === "tool_result" && !detail) return null;
+
+            // A batched fetch (`urls: [...]`) is ONE call against several pages, so
+            // it renders as one node with the pages nested under it. Listing the
+            // URLs as sibling rows read as three separate calls; running them
+            // together into one wrapped paragraph read as URL soup. The count goes
+            // in the header because "did it open all of my links" is the question
+            // this panel exists to answer.
+            if (step.type === "tool_start") {
+              const urls = extractToolUrls(step.toolInput);
+              if (urls.length > 1) {
+                return (
+                  <div key={stepKey}>
+                    <InlineClampStep
+                      label={label || "Tool"}
+                      detail={formatChatLabel("chat.agent.fetchTargets", { count: urls.length })}
+                      isResult={false}
+                      tone="default"
+                      maxLines={3}
+                    />
+                    <div className="flex flex-col gap-0.5 pb-1 pl-4 text-sm leading-6">
+                      {urls.map((url) => (
+                        <div key={url} className="flex items-start gap-1.5">
+                          {/* Corner glyph marking the row as belonging to the call
+                            above. `mt-[7px]` sits it on the text's baseline row
+                            rather than the line box's top. */}
+                          <CornerDownRight
+                            aria-hidden="true"
+                            className="mt-[7px] size-3 shrink-0 text-foreground opacity-25"
+                          />
+                          {/* `break-all`: a long URL must stay readable in full
+                            rather than be cut — it is what the reader verifies. */}
+                          <span className="min-w-0 break-all text-foreground opacity-32">
+                            {url}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              }
+            }
+
+            if (step.type === "tool_start" || step.type === "tool_result") {
+              return (
+                <InlineClampStep
+                  key={stepKey}
+                  label={label || "Tool"}
+                  detail={detail}
+                  isResult={step.type === "tool_result"}
+                  tone={step.type === "tool_result" ? "success" : "default"}
+                  maxLines={3}
+                />
+              );
+            }
+
+            const text = step.type === "error" ? label : label || detail;
+
+            if (!text && !detail) return null;
+
             return (
-              <InlineClampStep
+              <DesktopAgentTaskMetaLine
                 key={stepKey}
-                label={label || "Tool"}
-                detail={detail}
-                isResult={step.type === "tool_result"}
-                tone={step.type === "tool_result" ? "success" : "default"}
-                maxLines={3}
+                text={text ?? detail ?? "Tool"}
+                subtext={detail}
+                active={isActive}
+                tone={step.type === "error" ? "danger" : "default"}
               />
             );
-          }
-
-          const text = step.type === "error" ? label : label || detail;
-
-          if (!text && !detail) return null;
-
-          return (
-            <DesktopAgentTaskMetaLine
-              key={stepKey}
-              text={text ?? detail ?? "Tool"}
-              subtext={detail}
-              active={isActive}
-              tone={step.type === "error" ? "danger" : "default"}
-            />
-          );
-        })}
-      </div>
-    </details>
+          })}
+        </div>
+      </details>
+      {/* Context usage bar — always visible even when steps are collapsed (ACP only) */}
+      {run.contextUsage && <ContextUsageBar contextUsage={run.contextUsage} />}
+    </div>
   );
 }

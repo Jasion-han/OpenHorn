@@ -30,6 +30,8 @@ export type RunAcpAgentInput = {
   checkpoint: CheckpointSession;
   /** ACP session id from a previous turn (carried via the sdkSessionId slot). */
   acpSessionId?: string;
+  /** User-selected model id from the channel model list (informational). */
+  model?: string;
   conversationHistory?: Array<{ role: "user" | "assistant"; content: string }>;
   attachments?: AttachmentPart[];
   mcpServers?: Record<string, Record<string, unknown>>;
