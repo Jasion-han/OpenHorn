@@ -98,6 +98,11 @@ export function DesktopModelPickerModal(props: {
    * forwarded to the agent via `session/set_config_option` on the next turn.
    */
   acpModels?: Array<{ id: string; name: string }>;
+  /**
+   * Called when the user selects an ACP channel in the left pane so the caller
+   * can pre-connect to the agent and populate its dynamic model list.
+   */
+  onAcpChannelSelect?: (channelId: string) => void;
 }) {
   const {
     opened,
@@ -107,6 +112,7 @@ export function DesktopModelPickerModal(props: {
     current,
     conversationFixReason,
     acpModels,
+    onAcpChannelSelect,
   } = props;
   const channels = useChatStore((state) => state.channels);
   const loadChannels = useChatStore((state) => state.loadChannels);
@@ -494,7 +500,12 @@ export function DesktopModelPickerModal(props: {
                             ? SELECTED_SURFACE
                             : "border-foreground/[0.07] hover:bg-foreground/[0.05]",
                         )}
-                        onClick={() => setSelectedChannelId(channel.id)}
+                        onClick={() => {
+                          setSelectedChannelId(channel.id);
+                          if (channel.protocol === "acp" && onAcpChannelSelect) {
+                            onAcpChannelSelect(channel.id);
+                          }
+                        }}
                       >
                         <div className="flex items-center gap-2">
                           <Badge
