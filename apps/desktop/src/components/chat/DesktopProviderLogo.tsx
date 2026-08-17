@@ -1,3 +1,4 @@
+import { Bot } from "lucide-react";
 import { useEffect, useState } from "react";
 import { cn } from "ui";
 import chatgptLogo from "../../../public/provider-logos/chatgpt.svg";
@@ -77,6 +78,19 @@ export function DesktopProviderLogo({ provider, className, title }: ProviderLogo
 
   const fallbackTitle = title || provider || "Unknown provider";
   const initial = normalized ? normalized.slice(0, 1).toUpperCase() : "?";
+
+  if (normalized === "acp" && !spec) {
+    return (
+      <span
+        role="img"
+        aria-label={fallbackTitle}
+        title={title || "ACP Agent"}
+        className={cn("inline-flex size-4 shrink-0 items-center justify-center", className)}
+      >
+        <Bot className="size-full text-muted-foreground" />
+      </span>
+    );
+  }
 
   if (spec && !imageFailed) {
     return (

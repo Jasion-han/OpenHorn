@@ -150,6 +150,23 @@ function normalizeCompareBaseUrl(value: string | null | undefined) {
   return normalizeCompareText(value).replace(/\/+$/, "");
 }
 
+/**
+ * Infer the real provider from an ACP agent command string.
+ * Falls back to "acp" for unrecognized agents.
+ */
+function inferAcpProvider(command: string): string {
+  const cmd = command.trim().toLowerCase();
+  if (cmd.includes("claude")) return "anthropic";
+  if (cmd.includes("codex")) return "openai";
+  if (cmd.includes("gemini")) return "google";
+  if (cmd.includes("goose")) return "goose";
+  if (cmd.includes("cursor")) return "cursor";
+  if (cmd.includes("kimi")) return "kimi";
+  if (cmd.includes("mistral") || cmd.includes("vibe")) return "mistral";
+  if (cmd.includes("copilot")) return "github";
+  return "acp";
+}
+
 function getProviderPreset(provider: string | null | undefined) {
   const normalized = normalizeCompareText(provider).toLowerCase();
   return COMMON_PROVIDER_PRESETS.find((item) => item.value === normalized) || null;
@@ -524,10 +541,12 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
             ? `__sidecar_auto__:${matchingSidecarCredentials[0].source}`
             : trimmedApiKey;
 
+        const resolvedProvider = isAcp ? inferAcpProvider(acpCommand) : trimmedProvider;
+
         const { channel } = await api.channels.create({
           name: trimmedName,
-          provider: trimmedProvider,
-          protocol: inferProtocolFromProvider(trimmedProvider, trimmedBaseUrl, "openai"),
+          provider: resolvedProvider,
+          protocol: inferProtocolFromProvider(resolvedProvider, trimmedBaseUrl, "openai"),
           apiKey: resolvedApiKey,
           baseUrl: isAcp ? undefined : trimmedBaseUrl || undefined,
           enabled,
@@ -559,18 +578,22 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
 
       const payload: Parameters<typeof api.channels.update>[1] = {};
 
+      const effectiveProvider = isAcp ? inferAcpProvider(acpCommand) : trimmedProvider;
+
       if (normalizeCompareText(trimmedName) !== normalizeCompareText(activeChannel.name)) {
         payload.name = trimmedName;
       }
-      if (normalizeCompareText(trimmedProvider) !== normalizeCompareText(activeChannel.provider)) {
-        payload.provider = trimmedProvider;
+      if (
+        normalizeCompareText(effectiveProvider) !== normalizeCompareText(activeChannel.provider)
+      ) {
+        payload.provider = effectiveProvider;
       }
       if (
-        inferProtocolFromProvider(trimmedProvider, trimmedBaseUrl, activeChannel.protocol) !==
+        inferProtocolFromProvider(effectiveProvider, trimmedBaseUrl, activeChannel.protocol) !==
         activeChannel.protocol
       ) {
         payload.protocol = inferProtocolFromProvider(
-          trimmedProvider,
+          effectiveProvider,
           trimmedBaseUrl,
           activeChannel.protocol,
         );
