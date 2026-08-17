@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import type { AttachmentPart } from "shared/types";
 import { normalizeMcpServerConfig } from "../lib/mcpServerConfig";
 import { createServerApi } from "../lib/serverApi";
-import type { SidecarApprovalRequest } from "../lib/sidecarClient";
+import type { SidecarApprovalRequest, SidecarClient } from "../lib/sidecarClient";
 import { discoverSkills, skillsDisabledList } from "../lib/tauriBridge";
 import { useChatStore } from "../stores/chatStore";
 import { useSidecarStore } from "../stores/sidecarStore";
@@ -695,11 +695,45 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
   };
 
   const preconnect = async (channelId: string): Promise<void> => {
+    // Wait for sidecar to become ready (up to 10 seconds). On Tauri startup
+    // the sidecar may still be in "starting"/"connecting" state when the user
+    // clicks an ACP channel, so an immediate bail-out would cause preconnect
+    // to never trigger.
     const sidecar = useSidecarStore.getState();
-    const client = sidecar.client;
+    let client: SidecarClient | null = sidecar.client;
     if (!client || sidecar.status !== "ready") {
-      console.error("[acp-preconnect] sidecar not ready:", sidecar.status);
-      return;
+      client = await new Promise<SidecarClient | null>((resolve) => {
+        const unsub = useSidecarStore.subscribe((state) => {
+          if (state.status === "ready" && state.client) {
+            unsub();
+            resolve(state.client);
+          }
+          if (state.status === "error" || state.status === "unsupported") {
+            unsub();
+            resolve(null);
+          }
+        });
+        // Check the current value — subscribe may register after the state
+        // already transitioned to ready.
+        const current = useSidecarStore.getState();
+        if (current.status === "ready" && current.client) {
+          unsub();
+          resolve(current.client);
+        }
+        if (current.status === "error" || current.status === "unsupported") {
+          unsub();
+          resolve(null);
+        }
+        // Timeout: give up after 10 seconds and degrade silently.
+        setTimeout(() => {
+          unsub();
+          resolve(null);
+        }, 10_000);
+      });
+      if (!client) {
+        console.error("[acp-preconnect] sidecar not ready after wait");
+        return;
+      }
     }
 
     setAcpPreconnecting(true);
