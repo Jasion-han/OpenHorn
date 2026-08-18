@@ -805,10 +805,11 @@ export async function runAcpAgent(input: RunAcpAgentInput): Promise<void> {
     input.onSessionId(entry.sessionId);
   }
 
-  // History is only replayed into the prompt when the ACP session itself is
-  // fresh (process died or first turn) — a live session already has context.
+  // Replay conversation history into the prompt so the agent has context from
+  // prior turns in this OpenHorn conversation. Always inject when history is
+  // present — a preconnected or reused ACP session has no OpenHorn context.
   let promptText = input.prompt;
-  if (isNewSession && input.conversationHistory && input.conversationHistory.length > 0) {
+  if (input.conversationHistory && input.conversationHistory.length > 0) {
     const historyBlock = input.conversationHistory
       .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
       .join("\n\n");
