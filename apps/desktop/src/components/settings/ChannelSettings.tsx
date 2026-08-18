@@ -491,12 +491,18 @@ export function ChannelSettings() {
                         <DesktopProviderLogo provider={channel.provider} />
                         <span className="sr-only">{channel.provider}</span>
                       </Badge>
-                      {channel.defaultModelId && (
-                        <Badge variant="outline">{channel.defaultModelId}</Badge>
+                      {channel.protocol === "acp" ? (
+                        <span className="break-all">ACP 本地 Agent</span>
+                      ) : (
+                        <>
+                          {channel.defaultModelId && (
+                            <Badge variant="outline">{channel.defaultModelId}</Badge>
+                          )}
+                          <span className="break-all">
+                            {channel.baseUrl || getChannelLabel("settings.channel.baseUrlUnset")}
+                          </span>
+                        </>
                       )}
-                      <span className="break-all">
-                        {channel.baseUrl || getChannelLabel("settings.channel.baseUrlUnset")}
-                      </span>
                     </div>
                   </div>
 
