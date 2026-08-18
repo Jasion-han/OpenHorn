@@ -177,13 +177,13 @@ export function buildNetworkAllowedDomains(baseUrl: string | undefined): string[
  * as the fallback so a missing embed degrades instead of killing the run.
  */
 async function findClaudeBinary(): Promise<string> {
-  if (embeddedCliPath) return embeddedCliPath;
   const { execSync } = await import("node:child_process");
   try {
-    return execSync("which claude", { timeout: 5000 }).toString().trim();
-  } catch {
-    return "claude";
-  }
+    const systemClaude = execSync("which claude", { timeout: 5000 }).toString().trim();
+    if (systemClaude) return systemClaude;
+  } catch {}
+  if (embeddedCliPath) return embeddedCliPath;
+  return "claude";
 }
 
 let cachedSdk: typeof import("@anthropic-ai/claude-agent-sdk") | null = null;
@@ -210,7 +210,7 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
   const childEnv: Record<string, string | undefined> = sanitizeChildEnv({ ...process.env });
   const isOAuthToken =
     input.apiKey?.startsWith("sk-ant-oat") || input.apiKey?.startsWith("__cli_oauth__");
-  if (input.apiKey) childEnv.ANTHROPIC_API_KEY = input.apiKey;
+  if (input.apiKey && !isOAuthToken) childEnv.ANTHROPIC_API_KEY = input.apiKey;
   if (input.baseUrl && !isOAuthToken) childEnv.ANTHROPIC_BASE_URL = input.baseUrl;
 
   const hooks: Partial<Record<string, HookCallbackMatcher[]>> = {
