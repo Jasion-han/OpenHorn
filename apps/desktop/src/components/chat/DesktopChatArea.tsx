@@ -1460,6 +1460,17 @@ export function DesktopChatArea() {
     } catch {
       // ignore reload failures after stop
     }
+    const msgs = useChatStore.getState().messages;
+    const orphans = msgs.filter(
+      (m) => m.role === "assistant" && !m.content?.trim(),
+    );
+    for (const orphan of orphans) {
+      try {
+        await deleteMessage(orphan.id);
+      } catch {
+        // best-effort: draft IDs don't exist server-side, ignore 404s
+      }
+    }
     queueMicrotask(() => inputRef.current?.focus());
   };
 
