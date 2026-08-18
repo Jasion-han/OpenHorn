@@ -668,7 +668,13 @@ export function ChannelSettings() {
                   </div>
                 )}
 
-                {isExpanded && (
+                {isExpanded && channel.protocol === "acp" && (
+                  <div className="rounded-lg border border-dashed border-border/60 px-3 py-4 text-sm text-muted-foreground">
+                    模型列表由 ACP Agent 在运行时动态提供，无需手动配置。
+                  </div>
+                )}
+
+                {isExpanded && channel.protocol !== "acp" && (
                   <div className="flex flex-col gap-2">
                     <div className="flex flex-col gap-2 rounded-lg border border-dashed border-border/60 p-3">
                       <div className="flex items-center justify-between gap-3">
