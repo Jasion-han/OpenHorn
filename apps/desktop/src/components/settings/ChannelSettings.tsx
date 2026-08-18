@@ -38,6 +38,7 @@ import { formatChannelLabel, getChannelLabel } from "../../lib/i18n/agent";
 import { notifyError, notifySuccess, notifyWarning } from "../../lib/notify";
 import { createServerApi } from "../../lib/serverApi";
 import { useChatStore } from "../../stores/chatStore";
+import { useSidecarStore } from "../../stores/sidecarStore";
 import type { ApiAgentCheckResult, Channel, ChannelModel } from "../../types/chat";
 import { DesktopProviderLogo } from "../chat/DesktopProviderLogo";
 import { ChannelEditorModal, type SettingsNotice } from "./ChannelEditorModal";
@@ -96,6 +97,10 @@ export function ChannelSettings() {
   const [channelNotice, setChannelNotice] = useState<
     Record<string, { kind: "error" | "warn"; title?: string; message: string }>
   >({});
+  const [acpModels, setAcpModels] = useState<
+    Array<{ id: string; name: string; description?: string }>
+  >([]);
+  const [acpModelsLoading, setAcpModelsLoading] = useState(false);
 
   const sortedChannels = useMemo(() => channels.slice().sort(sortChannels), [channels]);
 
@@ -126,6 +131,42 @@ export function ChannelSettings() {
   useEffect(() => {
     void loadChannelList();
   }, []);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only re-fetch when the expanded channel changes
+  useEffect(() => {
+    if (!expandedChannelId) return;
+    const channel = sortedChannels.find((c) => c.id === expandedChannelId);
+    if (!channel || channel.protocol !== "acp") {
+      setAcpModels([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setAcpModelsLoading(true);
+      try {
+        const creds = await api.channels.getCredentials(channel.id);
+        const parsed = JSON.parse(creds.credentials.apiKey) as {
+          command?: string;
+          args?: string[];
+          env?: Record<string, string>;
+        };
+        if (!parsed.command || cancelled) return;
+        const client = useSidecarStore.getState().client;
+        if (!client) return;
+        const result = await client.preconnectAcp({
+          acpAgent: { command: parsed.command, args: parsed.args, env: parsed.env },
+        });
+        if (!cancelled) setAcpModels(result.models);
+      } catch {
+        if (!cancelled) setAcpModels([]);
+      } finally {
+        if (!cancelled) setAcpModelsLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [expandedChannelId]);
 
   const applyFetchModelsOutcome = (
     channelId: string,
@@ -669,8 +710,45 @@ export function ChannelSettings() {
                 )}
 
                 {isExpanded && channel.protocol === "acp" && (
-                  <div className="rounded-lg border border-dashed border-border/60 px-3 py-4 text-sm text-muted-foreground">
-                    模型列表由 ACP Agent 在运行时动态提供，无需手动配置。
+                  <div className="flex flex-col gap-2">
+                    <div className="rounded-lg border border-dashed border-border/60 p-3">
+                      <p className="text-sm font-medium">模型</p>
+                      <p className="text-xs text-muted-foreground">
+                        由 ACP Agent 动态提供，无需手动配置
+                      </p>
+                    </div>
+                    {acpModelsLoading ? (
+                      <div className="flex items-center gap-2 rounded-lg border border-dashed border-border/60 px-3 py-4 text-sm text-muted-foreground">
+                        <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                        <span>正在获取模型列表…</span>
+                      </div>
+                    ) : acpModels.length === 0 ? (
+                      <div className="rounded-lg border border-dashed border-border/60 px-3 py-4 text-sm text-muted-foreground">
+                        未获取到模型，请确认 Agent 已正确配置。
+                      </div>
+                    ) : (
+                      <div className="max-h-[400px] overflow-y-auto rounded-md">
+                        <div className="flex flex-col gap-2 pr-1">
+                          {acpModels.map((model) => (
+                            <div
+                              key={model.id}
+                              className="flex items-center gap-3 rounded-lg border border-border/60 px-3 py-2"
+                            >
+                              <div className="min-w-0">
+                                <p className="truncate text-sm font-medium">
+                                  {model.name || model.id}
+                                </p>
+                                {model.description && (
+                                  <p className="truncate text-xs text-muted-foreground">
+                                    {model.description}
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
