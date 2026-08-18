@@ -738,11 +738,10 @@ export function ChannelSettings() {
                                 <p className="truncate text-sm font-medium">
                                   {model.name || model.id}
                                 </p>
-                                {model.description && (
-                                  <p className="truncate text-xs text-muted-foreground">
-                                    {model.description}
-                                  </p>
-                                )}
+                                <p className="truncate text-xs text-muted-foreground">
+                                  {model.id}
+                                  {model.description ? ` · ${model.description}` : ""}
+                                </p>
                               </div>
                             </div>
                           ))}
