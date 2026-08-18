@@ -711,12 +711,6 @@ export function ChannelSettings() {
 
                 {isExpanded && channel.protocol === "acp" && (
                   <div className="flex flex-col gap-2">
-                    <div className="rounded-lg border border-dashed border-border/60 p-3">
-                      <p className="text-sm font-medium">模型</p>
-                      <p className="text-xs text-muted-foreground">
-                        由 ACP Agent 动态提供，无需手动配置
-                      </p>
-                    </div>
                     {acpModelsLoading ? (
                       <div className="flex items-center gap-2 rounded-lg border border-dashed border-border/60 px-3 py-4 text-sm text-muted-foreground">
                         <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
