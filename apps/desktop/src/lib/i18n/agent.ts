@@ -57,6 +57,7 @@ export const credentialLabels = {
   "settings.credentialSources.description":
     "自动检测本地已登录的 AI CLI，用订阅额度认证，免 API key。",
   "settings.credentialSources.detected": "已检测到",
+  "settings.credentialSources.localDetected": "本地已检测到",
   "settings.credentialSources.notDetected": "未检测到",
   "settings.credentialSources.expired": "已过期",
   "settings.credentialSources.available": "可用",
@@ -77,8 +78,7 @@ export const credentialLabels = {
   "settings.credentialSources.createChannel": "一键创建渠道",
   "settings.credentialSources.creating": "创建中...",
   "settings.credentialSources.createFailed": "创建失败",
-  // "Sidecar" is a product name kept English inside the Chinese copy (per rule 3).
-  "settings.credentialSources.sidecarNotReady": "Sidecar 未就绪，无法扫描本地认证",
+  "settings.credentialSources.sidecarNotReady": "本地运行时未就绪，无法扫描认证",
   // Env-var identifiers (OPENAI_API_KEY / ANTHROPIC_API_KEY / GEMINI_API_KEY) and
   // "AI CLI" stay verbatim inside the copy.
   "settings.credentialSources.emptyState":

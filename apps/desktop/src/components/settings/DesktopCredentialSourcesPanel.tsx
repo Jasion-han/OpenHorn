@@ -159,7 +159,7 @@ export function DesktopCredentialSourcesPanel() {
       {sidecarStatus === "ready" && sidecarCredentials.length > 0 && (
         <div className="space-y-2">
           <h4 className="text-sm font-medium text-neutral-600 dark:text-neutral-300">
-            Sidecar {getCredentialLabel("settings.credentialSources.detected")}
+            {getCredentialLabel("settings.credentialSources.localDetected")}
           </h4>
           {sidecarCredentials.map((cred) => {
             const key = `${cred.provider}-${cred.source}`;
