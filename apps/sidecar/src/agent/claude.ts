@@ -210,7 +210,7 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
   const childEnv: Record<string, string | undefined> = sanitizeChildEnv({ ...process.env });
   const isOAuthToken =
     input.apiKey?.startsWith("sk-ant-oat") || input.apiKey?.startsWith("__cli_oauth__");
-  if (input.apiKey && !isOAuthToken) childEnv.ANTHROPIC_API_KEY = input.apiKey;
+  if (input.apiKey) childEnv.ANTHROPIC_API_KEY = input.apiKey;
   if (input.baseUrl && !isOAuthToken) childEnv.ANTHROPIC_BASE_URL = input.baseUrl;
 
   const hooks: Partial<Record<string, HookCallbackMatcher[]>> = {

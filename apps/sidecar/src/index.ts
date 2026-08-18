@@ -1,3 +1,10 @@
+// The SDK's embedded Claude CLI refuses to launch inside a Claude Code session
+// (CLAUDECODE=1, AI_AGENT). When pnpm dev is started from a Claude Code
+// terminal, the sidecar binary inherits these variables. Strip them at process
+// level so the SDK's child process never sees them.
+delete process.env.CLAUDECODE;
+delete process.env.AI_AGENT;
+
 import { preconnectAcpAgent, runAcpAgent } from "./agent/acp";
 import { runChatStream } from "./agent/chat";
 import { runCodexChat } from "./agent/chatCodex";
