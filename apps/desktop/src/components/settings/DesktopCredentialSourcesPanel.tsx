@@ -130,7 +130,10 @@ export function DesktopCredentialSourcesPanel() {
   };
 
   const envSources = sources.filter((s) => s.sourceType === "env_var");
-  const cliSources = sources.filter((s) => s.sourceType === "cli_oauth");
+  const sidecarProviders = new Set(sidecarCredentials.map((c) => c.provider));
+  const cliSources = sources.filter(
+    (s) => s.sourceType === "cli_oauth" && !sidecarProviders.has(s.provider),
+  );
 
   return (
     <div className="space-y-4">
