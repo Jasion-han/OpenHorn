@@ -46,6 +46,15 @@ import { ChannelEditorModal, type SettingsNotice } from "./ChannelEditorModal";
 const api = createServerApi();
 const NEW_CHANNEL_KEY = "__new__";
 
+const ACP_MODEL_DISPLAY: Record<string, string> = {
+  default: "Opus 5 (1M context) · 推荐",
+  "opus[1m]": "Opus 5 (1M context)",
+  "claude-fable-5[1m]": "Fable 5 (1M context)",
+  sonnet: "Sonnet 5",
+  haiku: "Haiku 4.5",
+  "claude-opus-4-6[1m]": "Opus 4.6 (1M context)",
+};
+
 function sortChannels(a: Channel, b: Channel) {
   if (a.isDefault !== b.isDefault) return a.isDefault ? -1 : 1;
   if (a.enabled !== b.enabled) return a.enabled ? -1 : 1;
@@ -736,11 +745,10 @@ export function ChannelSettings() {
                             >
                               <div className="min-w-0">
                                 <p className="truncate text-sm font-medium">
-                                  {model.name || model.id}
+                                  {ACP_MODEL_DISPLAY[model.id] || model.name || model.id}
                                 </p>
                                 <p className="truncate text-xs text-muted-foreground">
                                   {model.id}
-                                  {model.description ? ` · ${model.description}` : ""}
                                 </p>
                               </div>
                             </div>
