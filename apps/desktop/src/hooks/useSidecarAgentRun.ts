@@ -154,6 +154,7 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
   const [acpAvailableModels, setAcpAvailableModels] = useState<AcpAvailableModel[]>([]);
   const [acpPreconnecting, setAcpPreconnecting] = useState(false);
   const runRef = useRef<ActiveSidecarRun | null>(null);
+  const cancelledRef = useRef(false);
   // Runs the sidecar wrote a rollback manifest for (checkpoint.ready). Only
   // these may become a rollback target — offering rollback on a run that never
   // touched a file would ENOENT in the sidecar and surface as a raw error.
@@ -178,6 +179,7 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
       setLastError("本地运行尚未就绪");
       return;
     }
+    cancelledRef.current = false;
 
     // Run-ownership guard. Regenerate re-uses the SAME assistant message id:
     // the retry path clears the bubble and calls startRun again while the old
@@ -242,10 +244,13 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
       null;
 
     const persistOnce = async (assistantContent: string, agentRun: unknown, model: string) => {
+      if (cancelledRef.current) return;
       if (!shouldPersist()) return;
       // Reconciliation below may rename the optimistic id to the persisted one,
       // so track which id the finally-block should stamp.
       let stampId = input.assistantMessageId;
+      let persistedUserMsgId: string | undefined;
+      let persistedAssistantMsgId: string | undefined;
       try {
         // Only reuse ids that are already persisted (real server ids). Optimistic
         // temp-/draft- ids don't exist server-side, so fall back to insert.
@@ -269,9 +274,23 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
               }
             : {}),
         });
+        // If cancel() fired while syncSidecar was in flight, undo the
+        // persistence immediately so the empty round doesn't resurface
+        // when the user revisits this conversation.
+        if (cancelledRef.current && res?.userMessageId && res?.assistantMessageId) {
+          try {
+            await api.messages.delete(res.assistantMessageId);
+            await api.messages.delete(res.userMessageId);
+          } catch {
+            // best-effort undo
+          }
+          return;
+        }
         // Align the optimistic draft ids with the persisted ids so revisiting
         // the conversation doesn't duplicate the round.
         if (res?.userMessageId && res?.assistantMessageId) {
+          persistedUserMsgId = res.userMessageId;
+          persistedAssistantMsgId = res.assistantMessageId;
           useChatStore.getState().reconcileSidecarMessageIds({
             conversationId: input.conversationId,
             assistantDraftId: input.assistantMessageId,
@@ -283,19 +302,23 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
       } catch {
         // Best-effort: a persistence failure must not affect the UI.
       } finally {
-        // Server row is now fresh (or we tried) — the stale-DB guard is no longer
-        // needed for these ids.
-        useChatStore.getState().unmarkMessagesActive(activeRunIds);
-        // The bubble only shows a timestamp once the answer is finished; stamp it
-        // now rather than waiting for the next reload to carry the server value.
-        // Token counts ride along for the same reason: they were just written to
-        // the row, but the in-memory message is still the optimistic object the
-        // run built, so without this the count only appears after navigating
-        // away and back.
-        useChatStore.getState().updateMessage(stampId, {
-          updatedAt: new Date(),
-          ...(runUsage ? { usage: runUsage } : {}),
-        });
+        if (!cancelledRef.current) {
+          // Server row is now fresh (or we tried) — the stale-DB guard is no longer
+          // needed for these ids.
+          useChatStore.getState().unmarkMessagesActive(activeRunIds);
+          // The bubble only shows a timestamp once the answer is finished; stamp it
+          // now rather than waiting for the next reload to carry the server value.
+          // Token counts ride along for the same reason: they were just written to
+          // the row, but the in-memory message is still the optimistic object the
+          // run built, so without this the count only appears after navigating
+          // away and back.
+          useChatStore.getState().updateMessage(stampId, {
+            updatedAt: new Date(),
+            ...(runUsage ? { usage: runUsage } : {}),
+          });
+        } else {
+          useChatStore.getState().unmarkMessagesActive(activeRunIds);
+        }
       }
     };
 
@@ -669,6 +692,11 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
   const cancel = async (): Promise<void> => {
     const run = runRef.current;
     if (!run) return;
+    // Set synchronously BEFORE any await so that persistOnce (which may
+    // already be queued on the microtask queue) sees the flag and bails out
+    // instead of writing an empty assistant message to the DB.
+    cancelledRef.current = true;
+    claimRunOwnership([run.messageId]);
     const client = useSidecarStore.getState().client;
     if (!client) return;
     try {
