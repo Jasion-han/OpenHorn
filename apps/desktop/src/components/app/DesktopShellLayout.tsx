@@ -82,9 +82,7 @@ export function DesktopShellLayout({
           and it lines the content up with the collapsed state, which already
           reserved the same 32px above its content.
         */}
-        {!sidebarCollapsed && <div data-tauri-drag-region className="h-1 shrink-0" />}
-
-        <div className={cn("min-h-0 flex-1 overflow-hidden", isCompact ? "p-4" : "p-2")}>
+        <div data-tauri-drag-region className={cn("min-h-0 flex-1 overflow-hidden", isCompact ? "p-4" : "p-2")}>
           <div
             className={cn(
               "h-full min-h-0 min-w-0 w-full overflow-x-hidden",

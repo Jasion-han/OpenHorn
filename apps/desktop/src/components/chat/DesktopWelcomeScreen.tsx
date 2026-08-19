@@ -302,7 +302,6 @@ export function DesktopWelcomeScreen() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div data-tauri-drag-region className="shrink-0" style={{ height: "16px" }} />
       <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-6 pb-16">
         <div className="w-full max-w-[720px]">
           <div className="mb-7 flex flex-col items-center text-center">
