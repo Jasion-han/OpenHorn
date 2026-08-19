@@ -177,18 +177,13 @@ export function buildNetworkAllowedDomains(baseUrl: string | undefined): string[
  * as the fallback so a missing embed degrades instead of killing the run.
  */
 async function findClaudeBinary(): Promise<string> {
-  const { execSync, existsSync } = await import("node:child_process");
-  const { existsSync: fsExists } = await import("node:fs");
-  const candidates = ["/opt/homebrew/bin/claude", "/usr/local/bin/claude"];
-  for (const p of candidates) {
-    if (fsExists(p)) return p;
-  }
-  try {
-    const systemClaude = execSync("which claude", { timeout: 5000 }).toString().trim();
-    if (systemClaude) return systemClaude;
-  } catch {}
   if (embeddedCliPath) return embeddedCliPath;
-  return "claude";
+  const { execSync } = await import("node:child_process");
+  try {
+    return execSync("which claude", { timeout: 5000 }).toString().trim();
+  } catch {
+    return "claude";
+  }
 }
 
 let cachedSdk: typeof import("@anthropic-ai/claude-agent-sdk") | null = null;
@@ -215,8 +210,18 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
   const childEnv: Record<string, string | undefined> = sanitizeChildEnv({ ...process.env });
   const isOAuthToken =
     input.apiKey?.startsWith("sk-ant-oat") || input.apiKey?.startsWith("__cli_oauth__");
-  if (input.apiKey) childEnv.ANTHROPIC_API_KEY = input.apiKey;
+  if (input.apiKey && !isOAuthToken) childEnv.ANTHROPIC_API_KEY = input.apiKey;
   if (input.baseUrl && !isOAuthToken) childEnv.ANTHROPIC_BASE_URL = input.baseUrl;
+  // OAuth runs rely on the CLI's own credential discovery (macOS keychain).
+  // sanitizeChildEnv strips all CLAUDE* vars, but the CLI needs them to locate
+  // its config/credentials. Restore the safe, non-secret ones.
+  if (isOAuthToken) {
+    childEnv.CLAUDE_CODE_ENTRYPOINT = "cli";
+  }
+  // Always prevent nesting detection in the spawned CLI.
+  delete childEnv.CLAUDECODE;
+  delete childEnv.AI_AGENT;
+  delete childEnv.CLAUDE_CODE_CHILD_SESSION;
 
   const hooks: Partial<Record<string, HookCallbackMatcher[]>> = {
     PreToolUse: [
