@@ -177,7 +177,12 @@ export function buildNetworkAllowedDomains(baseUrl: string | undefined): string[
  * as the fallback so a missing embed degrades instead of killing the run.
  */
 async function findClaudeBinary(): Promise<string> {
-  const { execSync } = await import("node:child_process");
+  const { execSync, existsSync } = await import("node:child_process");
+  const { existsSync: fsExists } = await import("node:fs");
+  const candidates = ["/opt/homebrew/bin/claude", "/usr/local/bin/claude"];
+  for (const p of candidates) {
+    if (fsExists(p)) return p;
+  }
   try {
     const systemClaude = execSync("which claude", { timeout: 5000 }).toString().trim();
     if (systemClaude) return systemClaude;
@@ -210,7 +215,7 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
   const childEnv: Record<string, string | undefined> = sanitizeChildEnv({ ...process.env });
   const isOAuthToken =
     input.apiKey?.startsWith("sk-ant-oat") || input.apiKey?.startsWith("__cli_oauth__");
-  if (input.apiKey && !isOAuthToken) childEnv.ANTHROPIC_API_KEY = input.apiKey;
+  if (input.apiKey) childEnv.ANTHROPIC_API_KEY = input.apiKey;
   if (input.baseUrl && !isOAuthToken) childEnv.ANTHROPIC_BASE_URL = input.baseUrl;
 
   const hooks: Partial<Record<string, HookCallbackMatcher[]>> = {
