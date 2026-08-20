@@ -85,7 +85,7 @@ export function SettingsView({ initialTab = "channels" }: { initialTab?: Setting
         reserved the same strip a second time and pushed the whole page 80px
         down — against the sidebar's first row at 36px.
       */}
-      <div className="flex h-full min-h-0 w-full">
+      <div className="flex h-full min-h-0 w-full pt-2">
         <div className="w-[180px] shrink-0 border-r border-border/50 px-2">
           <h2 className="text-xs font-medium text-muted-foreground px-3 mb-2 uppercase tracking-wider">
             {getSettingsViewLabel("settings.view.title")}
