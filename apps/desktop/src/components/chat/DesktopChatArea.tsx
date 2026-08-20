@@ -1560,7 +1560,7 @@ export function DesktopChatArea() {
 
   return (
     <div className="flex h-full min-h-0 min-w-0 w-full flex-1 flex-col overflow-x-hidden">
-      <div data-tauri-drag-region style={{ padding: PAGE_PAD, paddingBottom: "8px" }}>
+      <div data-tauri-drag-region style={{ padding: PAGE_PAD, paddingTop: "24px", paddingBottom: "8px" }}>
         <DesktopChatHeader conversation={currentConversation} />
       </div>
 
