@@ -76,17 +76,9 @@ export function SettingsView({ initialTab = "channels" }: { initialTab?: Setting
   };
 
   return (
-    <div className="h-full min-h-0">
-      {/*
-        No top padding on either column. The 32px that used to sit here was for
-        clearing the macOS overlay title bar, back when the right pane reserved
-        nothing above its content. The shell now owns that band (a 32px
-        `data-tauri-drag-region`) plus 16px of its own padding, so a `pt-8` here
-        reserved the same strip a second time and pushed the whole page 80px
-        down — against the sidebar's first row at 36px.
-      */}
+    <div className="flex h-full min-h-0 flex-col">
       <div data-tauri-drag-region className="shrink-0" style={{ height: "24px" }} />
-      <div className="flex h-full min-h-0 w-full">
+      <div className="flex flex-1 min-h-0 w-full">
         <div className="w-[180px] shrink-0 border-r border-border/50 px-2">
           <h2 className="text-xs font-medium text-muted-foreground px-3 mb-2 uppercase tracking-wider">
             {getSettingsViewLabel("settings.view.title")}
