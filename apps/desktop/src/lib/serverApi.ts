@@ -1,5 +1,4 @@
 import { useBackendStatusStore } from "../stores/backendStatusStore";
-import type { ApiUser, LoginInput, RegisterInput } from "../types/auth";
 import type {
   ApiAgentCheckResult,
   ApiChannel,
@@ -28,12 +27,6 @@ export interface ChatPrepareResult {
 }
 
 export interface ServerApi {
-  auth: {
-    login: (data: LoginInput) => Promise<{ user: ApiUser }>;
-    register: (data: RegisterInput) => Promise<{ user: ApiUser }>;
-    logout: () => Promise<{ success: boolean }>;
-    me: () => Promise<{ user: ApiUser | null }>;
-  };
   conversations: {
     list: () => Promise<{ conversations: ApiConversation[] }>;
     create: (data: CreateConversationInput) => Promise<{ conversation: ApiConversation }>;
@@ -289,24 +282,6 @@ export function createServerApi(options?: { baseUrl?: string; fetch?: FetchLike 
   const fetchImpl = options?.fetch || fetch;
 
   return {
-    auth: {
-      login: (data) =>
-        fetchJson(fetchImpl, baseUrl, "/auth/login", {
-          method: "POST",
-          body: JSON.stringify(data),
-        }),
-      register: (data) =>
-        fetchJson(fetchImpl, baseUrl, "/auth/register", {
-          method: "POST",
-          body: JSON.stringify(data),
-        }),
-      logout: () =>
-        fetchJson(fetchImpl, baseUrl, "/auth/logout", {
-          method: "POST",
-        }),
-      me: () => fetchJson(fetchImpl, baseUrl, "/auth/me"),
-    },
-
     conversations: {
       list: () => fetchJson(fetchImpl, baseUrl, "/conversations"),
       create: (data) =>

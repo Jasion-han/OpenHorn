@@ -1,19 +1,12 @@
 import { create } from "zustand";
-import { createServerApi } from "../lib/serverApi";
-import type { ApiUser, LoginInput, RegisterInput, User } from "../types/auth";
-
-const api = createServerApi();
-
-function mapUser(user: ApiUser): User {
-  return {
-    id: user.id,
-    email: user.email,
-    username: user.username,
-  };
-}
+import { authClient } from "../lib/authClient";
+import type { LoginInput, RegisterInput, User } from "../types/auth";
 
 function toErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "请求失败";
+  if (error && typeof error === "object" && "message" in error) {
+    return (error as { message: string }).message;
+  }
+  return error instanceof Error ? error.message : "Request failed";
 }
 
 interface AuthState {
@@ -45,36 +38,37 @@ export const useAuthStore = create<AuthState>((set) => ({
   async bootstrap() {
     set({ loading: true, error: null });
     try {
-      const { user } = await api.auth.me();
+      const { data: session } = await authClient.getSession();
       set({
-        user: user ? mapUser(user) : null,
+        user: session?.user
+          ? { id: session.user.id, email: session.user.email, username: session.user.name }
+          : null,
         ready: true,
         loading: false,
       });
     } catch (error) {
-      set({
-        user: null,
-        ready: true,
-        loading: false,
-        error: toErrorMessage(error),
-      });
+      set({ user: null, ready: true, loading: false, error: toErrorMessage(error) });
     }
   },
 
   async login(input) {
     set({ loading: true, error: null });
     try {
-      const { user } = await api.auth.login(input);
+      const { data, error } = await authClient.signIn.email({
+        email: input.email,
+        password: input.password,
+        rememberMe: input.rememberMe ?? true,
+      });
+      if (error) throw error;
       set({
-        user: mapUser(user),
+        user: data?.user
+          ? { id: data.user.id, email: data.user.email, username: data.user.name }
+          : null,
         ready: true,
         loading: false,
       });
     } catch (error) {
-      set({
-        loading: false,
-        error: toErrorMessage(error),
-      });
+      set({ loading: false, error: toErrorMessage(error) });
       throw error;
     }
   },
@@ -82,17 +76,21 @@ export const useAuthStore = create<AuthState>((set) => ({
   async register(input) {
     set({ loading: true, error: null });
     try {
-      const { user } = await api.auth.register(input);
+      const { data, error } = await authClient.signUp.email({
+        name: input.username,
+        email: input.email,
+        password: input.password,
+      });
+      if (error) throw error;
       set({
-        user: mapUser(user),
+        user: data?.user
+          ? { id: data.user.id, email: data.user.email, username: data.user.name }
+          : null,
         ready: true,
         loading: false,
       });
     } catch (error) {
-      set({
-        loading: false,
-        error: toErrorMessage(error),
-      });
+      set({ loading: false, error: toErrorMessage(error) });
       throw error;
     }
   },
@@ -101,18 +99,13 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ loading: true, error: null });
     try {
       if (!options?.skipRequest) {
-        await api.auth.logout();
+        await authClient.signOut();
       }
     } finally {
-      set({
-        user: null,
-        ready: true,
-        loading: false,
-      });
+      set({ user: null, ready: true, loading: false });
     }
   },
 
   clearError: () => set({ error: null }),
-
   reset: () => set({ ...INITIAL_STATE }),
 }));
