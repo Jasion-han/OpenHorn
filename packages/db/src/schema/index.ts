@@ -4,7 +4,7 @@ export const users = sqliteTable("users", {
   id: text("id").primaryKey(),
   email: text("email").notNull().unique(),
   username: text("username").notNull(),
-  passwordHash: text("password_hash").notNull(),
+  passwordHash: text("password_hash"),
   tokenVersion: integer("token_version").notNull().default(0),
   emailVerified: integer("email_verified", { mode: "boolean" }).default(false),
   image: text("image"),

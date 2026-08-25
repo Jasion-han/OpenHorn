@@ -18,7 +18,7 @@ const SCHEMA_DDL: string[] = [
     id TEXT PRIMARY KEY,
     email TEXT NOT NULL,
     username TEXT NOT NULL,
-    password_hash TEXT NOT NULL,
+    password_hash TEXT,
     token_version INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
@@ -1036,6 +1036,33 @@ async function ensureAgentTaskAutoStartColumn(): Promise<void> {
   }
 }
 
+async function ensurePasswordHashNullable(): Promise<void> {
+  const result = await client.execute(`PRAGMA table_info('users');`);
+  const rows = getRows(result);
+  const col = rows.find((r) => (r as Record<string, unknown>).name === "password_hash");
+  if (col && (col as Record<string, unknown>).notnull === 1) {
+    await client.execute(`PRAGMA foreign_keys = OFF;`);
+    await client.execute(`DROP TABLE IF EXISTS users__ph_mig;`);
+    await client.execute(`CREATE TABLE users__ph_mig AS SELECT * FROM users;`);
+    await client.execute(`DROP TABLE users;`);
+    await client.execute(`CREATE TABLE users (
+      id TEXT PRIMARY KEY,
+      email TEXT NOT NULL,
+      username TEXT NOT NULL,
+      password_hash TEXT,
+      token_version INTEGER NOT NULL DEFAULT 0,
+      email_verified INTEGER DEFAULT 0,
+      image TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );`);
+    await client.execute(`INSERT INTO users SELECT * FROM users__ph_mig;`);
+    await client.execute(`DROP TABLE users__ph_mig;`);
+    await client.execute(`CREATE UNIQUE INDEX IF NOT EXISTS users_email_unique ON users(email);`);
+    await client.execute(`PRAGMA foreign_keys = ON;`);
+  }
+}
+
 async function ensureUserEmailVerifiedColumn(): Promise<void> {
   const result = await client.execute(`PRAGMA table_info('users');`);
   const rows = getRows(result);
@@ -1126,6 +1153,7 @@ export async function bootstrapDatabase(): Promise<void> {
   await ensureAgentTaskAutoStartColumn();
   await ensureAttachmentsSessionIdColumn();
 
+  await ensurePasswordHashNullable();
   await ensureUserEmailVerifiedColumn();
   await ensureUserImageColumn();
   await ensureAccountIssuerColumn();
