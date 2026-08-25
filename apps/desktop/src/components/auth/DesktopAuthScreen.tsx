@@ -88,10 +88,15 @@ export function DesktopAuthScreen() {
       if (err) throw err;
       setForgotSent(true);
     } catch (err) {
-      const msg =
-        err && typeof err === "object" && "message" in err
-          ? (err as { message: string }).message
-          : "Failed to send reset email";
+      let msg = "Failed to send reset email";
+      if (err && typeof err === "object" && "message" in err) {
+        const raw = (err as { message: string }).message;
+        if (raw.toLowerCase().includes("invalid email")) {
+          msg = "Please enter a valid email address";
+        } else {
+          msg = raw;
+        }
+      }
       setForgotError(msg);
     } finally {
       setForgotLoading(false);
