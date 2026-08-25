@@ -25,6 +25,49 @@ const SCHEMA_DDL: string[] = [
   );`,
   `CREATE UNIQUE INDEX IF NOT EXISTS users_email_unique ON users(email);`,
 
+  `CREATE TABLE IF NOT EXISTS session (
+    id TEXT PRIMARY KEY,
+    expires_at INTEGER NOT NULL,
+    token TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    ip_address TEXT,
+    user_agent TEXT,
+    user_id TEXT NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS session_token_unique ON session(token);`,
+  `CREATE INDEX IF NOT EXISTS session_userId_idx ON session(user_id);`,
+
+  `CREATE TABLE IF NOT EXISTS account (
+    id TEXT PRIMARY KEY,
+    account_id TEXT NOT NULL,
+    provider_id TEXT NOT NULL,
+    issuer TEXT,
+    user_id TEXT NOT NULL,
+    access_token TEXT,
+    refresh_token TEXT,
+    id_token TEXT,
+    access_token_expires_at INTEGER,
+    refresh_token_expires_at INTEGER,
+    scope TEXT,
+    password TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );`,
+  `CREATE INDEX IF NOT EXISTS account_userId_idx ON account(user_id);`,
+
+  `CREATE TABLE IF NOT EXISTS verification (
+    id TEXT PRIMARY KEY,
+    identifier TEXT NOT NULL,
+    value TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );`,
+  `CREATE INDEX IF NOT EXISTS verification_identifier_idx ON verification(identifier);`,
+
   `CREATE TABLE IF NOT EXISTS channels (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
@@ -993,6 +1036,58 @@ async function ensureAgentTaskAutoStartColumn(): Promise<void> {
   }
 }
 
+async function ensureUserEmailVerifiedColumn(): Promise<void> {
+  const result = await client.execute(`PRAGMA table_info('users');`);
+  const rows = getRows(result);
+  if (!hasColumnNamed(rows, "email_verified")) {
+    await client.execute(`ALTER TABLE users ADD COLUMN email_verified INTEGER DEFAULT 0;`);
+    await client.execute(`UPDATE users SET email_verified = 1;`);
+  }
+}
+
+async function ensureUserImageColumn(): Promise<void> {
+  const result = await client.execute(`PRAGMA table_info('users');`);
+  const rows = getRows(result);
+  if (!hasColumnNamed(rows, "image")) {
+    await client.execute(`ALTER TABLE users ADD COLUMN image TEXT;`);
+  }
+}
+
+async function ensureAccountIssuerColumn(): Promise<void> {
+  const result = await client.execute(`PRAGMA table_info('account');`);
+  const rows = getRows(result);
+  if (!hasColumnNamed(rows, "issuer")) {
+    await client.execute(`ALTER TABLE account ADD COLUMN issuer TEXT;`);
+  }
+}
+
+async function migratePasswordsToAccountTable(): Promise<void> {
+  const usersWithPassword = await client.execute(`
+    SELECT u.id, u.password_hash
+    FROM users u
+    WHERE u.password_hash IS NOT NULL
+      AND u.password_hash != ''
+      AND NOT EXISTS (
+        SELECT 1 FROM account a
+        WHERE a.user_id = u.id AND a.provider_id = 'credential'
+      );
+  `);
+
+  const rows = getRows(usersWithPassword);
+  const now = Math.floor(Date.now() / 1000);
+  for (const row of rows) {
+    const userId = row.id as string;
+    const passwordHash = row.password_hash as string;
+    const accountId = crypto.randomUUID();
+    await client.execute({
+      sql: `INSERT INTO account (id, account_id, provider_id, issuer, user_id, password, created_at, updated_at) VALUES (?, ?, 'credential', 'local:credential', ?, ?, ?, ?);`,
+      args: [accountId, userId, userId, passwordHash, now, now],
+    });
+  }
+
+  await client.execute(`UPDATE account SET issuer = 'local:credential' WHERE provider_id = 'credential' AND (issuer IS NULL OR issuer = '');`);
+}
+
 export async function bootstrapDatabase(): Promise<void> {
   await client.execute("PRAGMA foreign_keys=ON;");
 
@@ -1030,6 +1125,11 @@ export async function bootstrapDatabase(): Promise<void> {
   await ensureAgentTaskRequiresPlanApprovalColumn();
   await ensureAgentTaskAutoStartColumn();
   await ensureAttachmentsSessionIdColumn();
+
+  await ensureUserEmailVerifiedColumn();
+  await ensureUserImageColumn();
+  await ensureAccountIssuerColumn();
+  await migratePasswordsToAccountTable();
 
   // Runs LAST and rebuilds 7 core tables with DROP TABLE + RENAME. SQLite drops
   // a table's indexes with the table, and the SCHEMA_DDL pass above already
