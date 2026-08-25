@@ -1,8 +1,13 @@
 import type { Context, MiddlewareHandler } from "hono";
-import { getCookie } from "hono/cookie";
-import { getUserFromToken } from "../services/authService";
+import { auth } from "../auth";
 
-export type RequestUser = Awaited<ReturnType<typeof getUserFromToken>>;
+export interface PublicUser {
+  id: string;
+  email: string;
+  username: string;
+}
+
+export type RequestUser = PublicUser | null;
 export type AuthenticatedUser = NonNullable<RequestUser>;
 export type UserEnv = {
   Variables: {
@@ -11,10 +16,15 @@ export type UserEnv = {
 };
 
 export async function getRequestUser(c: Context): Promise<RequestUser> {
-  const token = getCookie(c, "token");
-  if (!token) return null;
-
-  return getUserFromToken(token);
+  const session = await auth.api.getSession({
+    headers: c.req.raw.headers,
+  });
+  if (!session) return null;
+  return {
+    id: session.user.id,
+    email: session.user.email,
+    username: session.user.name,
+  };
 }
 
 export const requireUser: MiddlewareHandler<UserEnv> = async (c, next) => {
@@ -22,7 +32,6 @@ export const requireUser: MiddlewareHandler<UserEnv> = async (c, next) => {
   if (!user) {
     return c.json({ error: "Unauthorized" }, 401);
   }
-
   c.set("user", user);
   return next();
 };

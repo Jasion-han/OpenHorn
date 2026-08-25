@@ -2,29 +2,31 @@ import { expect, test } from "bun:test";
 import { users } from "db";
 import { eq } from "drizzle-orm";
 import { db } from "../db";
-import { getUserFromToken, login, register, revokeUserSessions } from "./authService";
+import { getUserById, revokeUserSessions } from "./authService";
 
-test("auth: token stops verifying after sessions are revoked", async () => {
-  const email = `${crypto.randomUUID()}@revocation.test`;
-  const { token, user } = await register({ email, username: "revoke", password: "secret123" });
+test("auth: revokeUserSessions bumps tokenVersion", async () => {
+  const id = crypto.randomUUID();
+  const now = new Date();
+  await db.insert(users).values({
+    id,
+    email: `${id}@revocation.test`,
+    username: "revoke",
+    passwordHash: "not-used",
+    tokenVersion: 0,
+    createdAt: now,
+    updatedAt: now,
+  });
 
   try {
-    // A freshly-issued token resolves to its owner.
-    const before = await getUserFromToken(token);
-    expect(before).toMatchObject({ id: user.id, email });
+    const before = await getUserById(id);
+    expect(before).toMatchObject({ id, email: `${id}@revocation.test` });
 
-    // Bumping tokenVersion invalidates every outstanding token immediately.
-    const revoked = await revokeUserSessions(user.id);
+    const revoked = await revokeUserSessions(id);
     expect(revoked).toBe(true);
 
-    const after = await getUserFromToken(token);
-    expect(after).toEqual(null);
-
-    // Logging in again mints a token carrying the new version, which verifies.
-    const fresh = await login({ email, password: "secret123" });
-    const reauth = await getUserFromToken(fresh.token);
-    expect(reauth).toMatchObject({ id: user.id, email });
+    const row = await db.select().from(users).where(eq(users.id, id)).limit(1);
+    expect(row[0].tokenVersion).toBe(1);
   } finally {
-    await db.delete(users).where(eq(users.id, user.id));
+    await db.delete(users).where(eq(users.id, id));
   }
 });

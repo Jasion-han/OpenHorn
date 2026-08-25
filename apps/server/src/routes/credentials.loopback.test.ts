@@ -3,22 +3,29 @@ import { afterAll, expect, mock, test } from "bun:test";
 // in-test `mock.module(...)` runs, then re-register them in afterAll so this
 // file's mocks don't leak into later test files (mock.restore() does not
 // unregister mock.module()).
-import * as realAuthServiceNs from "../services/authService";
+import * as realAuthNs from "../auth";
 import * as realCredentialDetectionServiceNs from "../services/credentialDetectionService";
 
-const realAuthService = { ...realAuthServiceNs };
+const realAuth = { ...realAuthNs };
 const realCredentialDetectionService = { ...realCredentialDetectionServiceNs };
 
 afterAll(() => {
-  mock.module("../services/authService", () => realAuthService);
+  mock.module("../auth", () => realAuth);
   mock.module("../services/credentialDetectionService", () => realCredentialDetectionService);
 });
 
-// requireUser resolves the request user via getUserFromToken — mock it so the
-// route authenticates instead of returning 401, letting us exercise the
+// requireUser resolves the request user via auth.api.getSession — mock it so
+// the route authenticates instead of returning 401, letting us exercise the
 // loopback guard.
-mock.module("../services/authService", () => ({
-  getUserFromToken: async () => ({ id: "user-1" }),
+mock.module("../auth", () => ({
+  auth: {
+    api: {
+      getSession: async () => ({
+        user: { id: "user-1", email: "test@test.com", name: "test" },
+        session: { id: "sess-1" },
+      }),
+    },
+  },
 }));
 mock.module("../services/credentialDetectionService", () => ({
   detectCredentialSources: async () => [],
