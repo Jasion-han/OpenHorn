@@ -5,6 +5,8 @@ import { DesktopAuthScreen } from "./components/auth/DesktopAuthScreen";
 import { DesktopChatArea } from "./components/chat/DesktopChatArea";
 import { SettingsView } from "./components/settings/SettingsView";
 import { ThemeListener } from "./components/theme/ThemeListener";
+import { getDesktopBackendBase } from "./lib/backendBase";
+import { PENDING_OAUTH_NONCE_KEY } from "./lib/constants";
 import { UNAUTHORIZED_EVENT } from "./lib/serverApi";
 import { getTauriSidecarPlatform, hasOverlayTitleBar } from "./lib/tauriBridge";
 import { useAuthStore } from "./stores/authStore";
@@ -61,8 +63,27 @@ export function App() {
     };
 
     window.addEventListener(UNAUTHORIZED_EVENT, handleUnauthorized);
+
+    (window as unknown as Record<string, unknown>).__checkPendingOAuth = async () => {
+      const nonce = localStorage.getItem(PENDING_OAUTH_NONCE_KEY);
+      if (!nonce) return;
+      try {
+        const base = getDesktopBackendBase();
+        const res = await fetch(`${base}/auth/desktop-oauth-exchange?nonce=${nonce}`, {
+          credentials: "include",
+        });
+        if (res.ok) {
+          localStorage.removeItem(PENDING_OAUTH_NONCE_KEY);
+          window.location.reload();
+        }
+      } catch {
+        // ignore
+      }
+    };
+
     return () => {
       window.removeEventListener(UNAUTHORIZED_EVENT, handleUnauthorized);
+      delete (window as unknown as Record<string, unknown>).__checkPendingOAuth;
     };
   }, [bootstrapAuth, logout, resetChat, setActiveView]);
 

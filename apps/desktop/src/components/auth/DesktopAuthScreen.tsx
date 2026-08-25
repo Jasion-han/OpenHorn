@@ -1,7 +1,13 @@
 import { useState } from "react";
 import { Button, cn, Input, Label } from "ui";
 import { authClient } from "../../lib/authClient";
+import { getDesktopBackendBase } from "../../lib/backendBase";
 import { useAuthStore } from "../../stores/authStore";
+
+import { PENDING_OAUTH_NONCE_KEY } from "../../lib/constants";
+
+const REMEMBERED_EMAIL_KEY = "openhorn:remembered_email";
+const REMEMBERED_PASSWORD_KEY = "openhorn:remembered_password";
 
 type AuthView = "login" | "register" | "forgotPassword";
 
@@ -30,14 +36,18 @@ function GoogleIcon() {
 
 export function DesktopAuthScreen() {
   const [view, setView] = useState<AuthView>("login");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [email, setEmail] = useState(() => localStorage.getItem(REMEMBERED_EMAIL_KEY) ?? "");
+  const [password, setPassword] = useState(
+    () => localStorage.getItem(REMEMBERED_PASSWORD_KEY) ?? "",
+  );
   const [username, setUsername] = useState("");
   const [forgotEmail, setForgotEmail] = useState("");
   const [forgotSent, setForgotSent] = useState(false);
   const [forgotError, setForgotError] = useState<string | null>(null);
   const [forgotLoading, setForgotLoading] = useState(false);
-  const [rememberMe, setRememberMe] = useState(true);
+  const [rememberMe, setRememberMe] = useState(
+    () => localStorage.getItem(REMEMBERED_EMAIL_KEY) !== null,
+  );
   const [googleLoading, setGoogleLoading] = useState(false);
 
   const login = useAuthStore((state) => state.login);
@@ -55,6 +65,13 @@ export function DesktopAuthScreen() {
     clearError();
     if (view === "login") {
       await login({ email: email.trim(), password, rememberMe });
+      if (rememberMe) {
+        localStorage.setItem(REMEMBERED_EMAIL_KEY, email.trim());
+        localStorage.setItem(REMEMBERED_PASSWORD_KEY, password);
+      } else {
+        localStorage.removeItem(REMEMBERED_EMAIL_KEY);
+        localStorage.removeItem(REMEMBERED_PASSWORD_KEY);
+      }
       return;
     }
     await register({ email: email.trim(), username: username.trim(), password });
@@ -83,16 +100,24 @@ export function DesktopAuthScreen() {
 
   const handleGoogleLogin = async () => {
     setGoogleLoading(true);
+    const nonce = crypto.randomUUID();
+    const base = getDesktopBackendBase();
+
+    localStorage.setItem(PENDING_OAUTH_NONCE_KEY, nonce);
+
     try {
-      await authClient.signIn.social({ provider: "google", callbackURL: "/" });
+      const { open } = await import("@tauri-apps/plugin-shell");
+      await open(`${base}/auth/desktop-google-start?nonce=${nonce}`);
     } catch {
-      setGoogleLoading(false);
+      window.open(`${base}/auth/desktop-google-start?nonce=${nonce}`, "_blank");
     }
   };
 
   if (view === "forgotPassword") {
     return (
-      <div className="flex h-dvh items-center justify-center bg-gradient-to-br from-background via-background to-muted/20 px-4">
+      <div className="flex h-dvh flex-col bg-gradient-to-br from-background via-background to-muted/20 px-4">
+        <div data-tauri-drag-region className="shrink-0" style={{ height: "24px" }} />
+        <div className="flex flex-1 items-center justify-center">
         <div className="w-full max-w-sm">
           <div className="mb-6 text-center">
             <h1 className="text-2xl font-bold">Reset Password</h1>
@@ -166,12 +191,15 @@ export function DesktopAuthScreen() {
             )}
           </div>
         </div>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="flex h-dvh items-center justify-center bg-gradient-to-br from-background via-background to-muted/20 px-4">
+    <div className="flex h-dvh flex-col bg-gradient-to-br from-background via-background to-muted/20 px-4">
+      <div data-tauri-drag-region className="shrink-0" style={{ height: "24px" }} />
+      <div className="flex flex-1 items-center justify-center">
       <div className="w-full max-w-sm">
         <div className="mb-6 text-center">
           <h1 className="text-2xl font-bold">Welcome to OpenHorn</h1>
@@ -294,6 +322,7 @@ export function DesktopAuthScreen() {
 
           {error && <p className="mt-3 text-center text-sm text-destructive">{error}</p>}
         </div>
+      </div>
       </div>
     </div>
   );
