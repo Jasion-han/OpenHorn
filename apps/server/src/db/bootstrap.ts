@@ -1063,6 +1063,20 @@ async function ensurePasswordHashNullable(): Promise<void> {
   }
 }
 
+async function ensureDefaultLocalUser(): Promise<void> {
+  const result = await client.execute(`SELECT COUNT(*) as cnt FROM users;`);
+  const count = (result.rows[0] as Record<string, unknown>)?.cnt as number;
+  if (count === 0) {
+    const id = crypto.randomUUID();
+    const now = Math.floor(Date.now() / 1000);
+    await client.execute({
+      sql: `INSERT INTO users (id, email, username, token_version, email_verified, created_at, updated_at)
+            VALUES (?, ?, ?, 0, 1, ?, ?)`,
+      args: [id, "local@openhorn.local", "User", now, now],
+    });
+  }
+}
+
 async function ensureUserEmailVerifiedColumn(): Promise<void> {
   const result = await client.execute(`PRAGMA table_info('users');`);
   const rows = getRows(result);
@@ -1158,6 +1172,7 @@ export async function bootstrapDatabase(): Promise<void> {
   await ensureUserImageColumn();
   await ensureAccountIssuerColumn();
   await migratePasswordsToAccountTable();
+  await ensureDefaultLocalUser();
 
   // Runs LAST and rebuilds 7 core tables with DROP TABLE + RENAME. SQLite drops
   // a table's indexes with the table, and the SCHEMA_DDL pass above already

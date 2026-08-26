@@ -1,7 +1,6 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
-import { auth } from "./auth";
 import { bootstrapDatabase } from "./db/bootstrap";
 import attachmentRoutes from "./routes/attachments";
 import authRoutes from "./routes/auth";
@@ -49,8 +48,6 @@ app.use(
 );
 
 app.get("/", (c) => c.json({ message: "OpenHorn API", version: "1.0.0" }));
-
-app.all("/api/auth/*", (c) => auth.handler(c.req.raw));
 
 app.route("/auth", authRoutes);
 app.route("/channels", channelRoutes);
