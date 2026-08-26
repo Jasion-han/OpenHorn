@@ -1,13 +1,6 @@
 import { create } from "zustand";
-import { authClient } from "../lib/authClient";
-import type { LoginInput, RegisterInput, User } from "../types/auth";
-
-function toErrorMessage(error: unknown) {
-  if (error && typeof error === "object" && "message" in error) {
-    return (error as { message: string }).message;
-  }
-  return error instanceof Error ? error.message : "Request failed";
-}
+import { getDesktopBackendBase } from "../lib/backendBase";
+import type { User } from "../types/auth";
 
 interface AuthState {
   user: User | null;
@@ -16,8 +9,6 @@ interface AuthState {
   error: string | null;
   setUser: (user: User | null) => void;
   bootstrap: () => Promise<void>;
-  login: (input: LoginInput) => Promise<void>;
-  register: (input: RegisterInput) => Promise<void>;
   logout: (options?: { skipRequest?: boolean }) => Promise<void>;
   clearError: () => void;
   reset: () => void;
@@ -38,72 +29,17 @@ export const useAuthStore = create<AuthState>((set) => ({
   async bootstrap() {
     set({ loading: true, error: null });
     try {
-      const { data: session } = await authClient.getSession();
-      set({
-        user: session?.user
-          ? { id: session.user.id, email: session.user.email, username: session.user.name }
-          : null,
-        ready: true,
-        loading: false,
-      });
-    } catch (error) {
-      set({ user: null, ready: true, loading: false, error: toErrorMessage(error) });
-    }
-  },
-
-  async login(input) {
-    set({ loading: true, error: null });
-    try {
-      const { data, error } = await authClient.signIn.email({
-        email: input.email,
-        password: input.password,
-        rememberMe: input.rememberMe ?? true,
-      });
-      if (error) throw error;
-      set({
-        user: data?.user
-          ? { id: data.user.id, email: data.user.email, username: data.user.name }
-          : null,
-        ready: true,
-        loading: false,
-      });
-    } catch (error) {
-      set({ loading: false, error: toErrorMessage(error) });
-      throw error;
-    }
-  },
-
-  async register(input) {
-    set({ loading: true, error: null });
-    try {
-      const { data, error } = await authClient.signUp.email({
-        name: input.username,
-        email: input.email,
-        password: input.password,
-      });
-      if (error) throw error;
-      set({
-        user: data?.user
-          ? { id: data.user.id, email: data.user.email, username: data.user.name }
-          : null,
-        ready: true,
-        loading: false,
-      });
-    } catch (error) {
-      set({ loading: false, error: toErrorMessage(error) });
-      throw error;
-    }
-  },
-
-  async logout(options) {
-    set({ loading: true, error: null });
-    try {
-      if (!options?.skipRequest) {
-        await authClient.signOut();
-      }
-    } finally {
+      const base = getDesktopBackendBase();
+      const res = await fetch(`${base}/auth/me`);
+      const data = (await res.json()) as { user: User | null };
+      set({ user: data.user, ready: true, loading: false });
+    } catch {
       set({ user: null, ready: true, loading: false });
     }
+  },
+
+  async logout() {
+    set({ user: null, ready: true, loading: false });
   },
 
   clearError: () => set({ error: null }),
