@@ -1,7 +1,6 @@
 import {
   ChevronDown,
   ChevronRight,
-  LogOut,
   MoreHorizontal,
   PanelLeftClose,
   Pencil,
@@ -202,7 +201,6 @@ export function DesktopLeftSidebar() {
   const setSidebarCollapsed = useDesktopShellStore((state) => state.setSidebarCollapsed);
   const openSettings = useDesktopShellStore((state) => state.openSettings);
   const user = useAuthStore((state) => state.user);
-  const logout = useAuthStore((state) => state.logout);
   const backendStatus = useBackendStatusStore((state) => state.status);
   const backendLastError = useBackendStatusStore((state) => state.lastError);
   const backendRetry = useBackendStatusStore((state) => state.retry);
@@ -285,15 +283,6 @@ export function DesktopLeftSidebar() {
         error instanceof Error ? error.message : getSidebarLabel("sidebar.notify.saveFailedBody"),
       );
       void useChatStore.getState().loadConversations();
-    }
-  };
-
-  const handleLogout = async () => {
-    try {
-      await logout();
-    } finally {
-      reset();
-      setActiveView("chat");
     }
   };
 
@@ -537,14 +526,6 @@ export function DesktopLeftSidebar() {
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" side="top" className="w-44">
             <DropdownMenuLabel>{user?.username || "User"}</DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              className="text-destructive focus:text-destructive"
-              onClick={() => void handleLogout()}
-            >
-              <LogOut size={16} />
-              {getSidebarLabel("sidebar.logout")}
-            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
 
