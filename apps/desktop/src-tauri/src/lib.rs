@@ -1250,11 +1250,6 @@ pub fn run() {
         // closing, so we do not leave orphaned bun processes if the
         // user quits from the window chrome.
         .on_window_event(|window, event| {
-            if let tauri::WindowEvent::Focused(true) = event {
-                if let Some(wv) = window.webviews().first() {
-                    let _ = wv.eval("window.__checkPendingOAuth?.()");
-                }
-            }
             if let tauri::WindowEvent::CloseRequested { .. } = event {
                 let handle = window.app_handle();
                 if let Some(state) = handle.try_state::<SidecarState>() {
