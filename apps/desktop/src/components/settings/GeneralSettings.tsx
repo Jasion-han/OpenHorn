@@ -1,4 +1,4 @@
-import { AlignLeft, Pencil } from "lucide-react";
+import { Pencil, ScrollText } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Badge, Button, cn, Input, Label, SettingsCard, SettingsSection, Textarea } from "ui";
 import { formatGeneralSettingsLabel, getGeneralSettingsLabel } from "../../lib/i18n/agent";
@@ -67,7 +67,9 @@ export function GeneralSettings() {
               <p className="text-base leading-tight font-bold">
                 {username || getGeneralSettingsLabel("settings.general.account.usernameFallback")}
               </p>
-              <p className="text-sm text-muted-foreground">{email}</p>
+              {email && !email.endsWith("@openhorn.local") && (
+                <p className="text-sm text-muted-foreground">{email}</p>
+              )}
             </div>
           </div>
 
@@ -76,13 +78,15 @@ export function GeneralSettings() {
               <Label>{getGeneralSettingsLabel("settings.general.account.usernameLabel")}</Label>
               <Input value={username} onChange={(event) => setUsername(event.target.value)} />
             </div>
-            <div className="flex flex-col gap-1.5">
-              <Label>{getGeneralSettingsLabel("settings.general.account.emailLabel")}</Label>
-              <Input value={email} disabled />
-              <p className="text-xs text-muted-foreground">
-                {getGeneralSettingsLabel("settings.general.account.emailReadonly")}
-              </p>
-            </div>
+            {email && !email.endsWith("@openhorn.local") && (
+              <div className="flex flex-col gap-1.5">
+                <Label>{getGeneralSettingsLabel("settings.general.account.emailLabel")}</Label>
+                <Input value={email} disabled />
+                <p className="text-xs text-muted-foreground">
+                  {getGeneralSettingsLabel("settings.general.account.emailReadonly")}
+                </p>
+              </div>
+            )}
             <div>
               <Button type="button">
                 {getGeneralSettingsLabel("settings.general.account.save")}
@@ -100,7 +104,7 @@ export function GeneralSettings() {
           <div className="mb-3 flex items-start justify-between">
             <div className="flex items-center gap-2">
               <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-muted">
-                <AlignLeft size={18} className="text-muted-foreground" />
+                <ScrollText size={18} className="text-muted-foreground" />
               </div>
               <div>
                 <div className="flex items-center gap-2">
