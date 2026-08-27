@@ -261,15 +261,15 @@ export function McpSettings() {
   const mergeImportRows = useCallback(
     (found: DiscoveredMcpServer[], existingNames: Set<string>) => {
       setImportRows((prev) => {
-        const seen = new Set(prev.map((r) => `${r.client} ${r.name}`));
+        const seen = new Set(prev.map((r) => `${r.client} ${r.name}`));
         const additions = found
-          .filter((s) => !seen.has(`${s.client} ${s.name}`))
-          .map((s) => ({ ...s, exists: existingNames.has(s.name) }));
+          .filter((s) => !seen.has(`${s.client} ${s.name}`) && !existingNames.has(s.name))
+          .map((s) => ({ ...s, exists: false }));
         const next = [...prev, ...additions];
         setSelectedRows((sel) => {
           const updated = new Set(sel);
-          next.forEach((row, idx) => {
-            if (idx >= prev.length && !row.exists) updated.add(idx);
+          next.forEach((_, idx) => {
+            if (idx >= prev.length) updated.add(idx);
           });
           return updated;
         });
@@ -567,7 +567,7 @@ export function McpSettings() {
             <DialogTitle>导入已有 MCP 配置</DialogTitle>
             <DialogDescription>
               {discoveredSources.length > 0
-                ? `已扫描到 ${discoveredSources.join("、")} 的本地配置；同一工具合并为一条，标签标出它在哪些平台配置过。勾选要导入的 server，或手动选择配置文件。`
+                ? "已扫描本地 AI 工具的 MCP 配置；同一工具合并为一条，仅列出尚未导入的。勾选要导入的 server，或手动选择配置文件。"
                 : "勾选要导入的 server，或手动选择一个配置文件导入。"}
             </DialogDescription>
           </DialogHeader>
@@ -621,11 +621,6 @@ export function McpSettings() {
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
                           <span className="truncate text-sm font-medium">{row.name}</span>
-                          {row.exists && (
-                            <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                              已存在
-                            </span>
-                          )}
                         </div>
                         <div className="mt-0.5 flex flex-wrap items-center gap-1">
                           {row.clients.map((c) => (
