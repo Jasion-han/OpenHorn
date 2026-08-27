@@ -1,3 +1,4 @@
+import { userInfo } from "node:os";
 import type { ResultSet, Row } from "@libsql/client";
 import { client } from "./index";
 
@@ -1069,10 +1070,11 @@ async function ensureDefaultLocalUser(): Promise<void> {
   if (count === 0) {
     const id = crypto.randomUUID();
     const now = Math.floor(Date.now() / 1000);
+    const osUsername = userInfo().username || "User";
     await client.execute({
       sql: `INSERT INTO users (id, email, username, token_version, email_verified, created_at, updated_at)
             VALUES (?, ?, ?, 0, 1, ?, ?)`,
-      args: [id, "local@openhorn.local", "User", now, now],
+      args: [id, "local@openhorn.local", osUsername, now, now],
     });
   }
 }

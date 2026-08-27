@@ -515,7 +515,7 @@ export function DesktopLeftSidebar() {
                 <div className="truncate text-[13px] font-medium leading-4">
                   {user?.username || "User"}
                 </div>
-                {user?.email && (
+                {user?.email && !user.email.endsWith("@openhorn.local") && (
                   <div className="truncate text-[11px] leading-4 text-muted-foreground">
                     {user.email}
                   </div>
