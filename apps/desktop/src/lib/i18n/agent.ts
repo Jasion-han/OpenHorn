@@ -777,9 +777,9 @@ export const generalSettingsLabels = {
   // Section: custom instructions (system prompt)
   "settings.general.instructions.title": "自定义指令",
   "settings.general.instructions.description":
-    "对所有对话与 Agent 会话生效，用于设置你的个人偏好与回答风格。",
+    "你写在这里的内容会自动附加到每次对话中，AI 会在回答时参考这些偏好。",
   "settings.general.instructions.charCount": "{count} 字符",
-  "settings.general.instructions.hint": "自定义 AI 的回答方式、语言与行为偏好。",
+  "settings.general.instructions.hint": "例如回答语言、风格偏好、专业领域等，AI 会据此调整回答方式。",
   "settings.general.instructions.edit": "编辑",
   "settings.general.instructions.placeholder":
     "例如：你是一个专业的代码助手，请用中文回答所有问题...",
