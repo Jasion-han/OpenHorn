@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/desktop/frontend/index.md", "reason": "核对是否符合桌面端规范（i18n、测试匹配器、组件树独立性、流式实时链路）"}
+{"file": ".trellis/tasks/07-06-desktop-message-list-virtualization-for-long-conversations/research/current-architecture.md", "reason": "逐项核对 PRD 验收：钉顶/切换跳底/流式重钉/变高重测/流式行常挂载/post-stream 稳定等原行为未回归"}

@@ -1,0 +1,7 @@
+{"file": ".trellis/tasks/08-17-acp-plan-diff-tool-agentinfo-ui/prd.md", "reason": "PRD: 目标、决策、四层改动要求、验收标准"}
+{"file": ".trellis/tasks/08-16-sidecar-acp-runtime-acp-agent/research/acp-protocol-and-ts-lib.md", "reason": "ACP v1 session/update 事件全集——tool_call/plan/usage_update 字段定义的规范依据"}
+{"file": ".trellis/tasks/08-16-sidecar-acp-runtime-acp-agent/research/acp-client-implementations.md", "reason": "Zed/Obsidian 等 client 的 tool call/plan/diff 渲染参考"}
+{"file": ".trellis/spec/sidecar/backend/index.md", "reason": "sidecar 代码规范"}
+{"file": ".trellis/spec/desktop/frontend/index.md", "reason": "desktop 组件和状态管理规范"}
+{"file": "skills/openhorn/rules/desktop-rules.md", "reason": "组件树、streaming、i18n 规则"}
+{"file": "skills/openhorn/rules/coding-standards.md", "reason": "测试规范、Biome、bun test 限制"}

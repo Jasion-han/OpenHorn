@@ -1,0 +1,2 @@
+{"file": "apps/desktop/src/components/chat/DesktopChatArea.tsx", "reason": "skill 标签渲染位置（MessageBubbleImpl 用户分支 872-899 行）"}
+{"file": "skills/openhorn/rules/desktop-rules.md", "reason": "桌面端组件树与样式规范"}

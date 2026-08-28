@@ -1,0 +1,4 @@
+{"file": ".trellis/tasks/08-17-acp-plan-diff-tool-agentinfo-ui/prd.md", "reason": "对照验收标准逐条核查"}
+{"file": ".trellis/tasks/08-16-sidecar-acp-runtime-acp-agent/research/acp-protocol-and-ts-lib.md", "reason": "事件映射是否覆盖了 tool_call/plan/usage_update 的全部字段"}
+{"file": "skills/openhorn/rules/desktop-rules.md", "reason": "i18n、组件树规范"}
+{"file": "skills/openhorn/rules/coding-standards.md", "reason": "测试 matcher 限制、Biome"}

@@ -1,0 +1,5 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/tasks/05-03-local-ai-auth-integration/prd.md", "reason": "PRD acceptance criteria"}
+{"file": "skills/openhorn/rules/project-rules.md", "reason": "Project rules - DB sync, imports, i18n"}
+{"file": "skills/openhorn/rules/desktop-rules.md", "reason": "Desktop rules - component tree, streaming"}
+{"file": "skills/openhorn/rules/coding-standards.md", "reason": "Coding standards - biome, bun test, git"}

@@ -1,0 +1,5 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/sidecar/backend/index.md", "reason": "sidecar runtime/协议改动约定（改后需重编译）"}
+{"file": ".trellis/spec/desktop/frontend/index.md", "reason": "桌面端附件读取/传参约定"}
+{"file": ".trellis/spec/shared/backend/index.md", "reason": "共享 AttachmentPart 类型放 packages/shared"}
+{"file": ".trellis/spec/server/backend/index.md", "reason": "server 端附件解析对照（adapters/messageService）"}

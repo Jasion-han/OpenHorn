@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/desktop/frontend/component-guidelines.md", "reason": "改 DesktopMarkdownMessage 组件与拆分子组件，需遵循组件规范"}
+{"file": ".trellis/spec/desktop/frontend/quality-guidelines.md", "reason": "桌面端质量与测试矩阵限制"}
+{"file": ".trellis/spec/desktop/frontend/hook-guidelines.md", "reason": "延迟高亮涉及 useEffect/useState 等 hook 用法"}

@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/desktop/frontend/component-guidelines.md", "reason": "修改 ThemeListener 组件需遵循桌面端组件规范"}
+{"file": ".trellis/spec/desktop/frontend/quality-guidelines.md", "reason": "桌面端质量规范（事件监听清理等）"}

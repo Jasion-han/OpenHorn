@@ -1,0 +1,10 @@
+{"file": ".trellis/tasks/08-16-sidecar-acp-runtime-acp-agent/prd.md", "reason": "任务 PRD：目标、已拍板决策（渠道类型 acp / 标杆 claude-agent-acp+codex-acp / capability 推荐组合）、验收标准"}
+{"file": ".trellis/tasks/08-16-sidecar-acp-runtime-acp-agent/research/acp-protocol-and-ts-lib.md", "reason": "ACP v1 协议生命周期、session/update 事件全集、capability 矩阵、@agentclientprotocol/sdk 1.x fluent API 用法——写 acp client 的规范依据"}
+{"file": ".trellis/tasks/08-16-sidecar-acp-runtime-acp-agent/research/acp-agents-landscape.md", "reason": "claude-agent-acp / codex-acp / gemini 的启动命令、认证 env、token 上报形状——渠道配置与 per-agent usage 解析依据"}
+{"file": ".trellis/tasks/08-16-sidecar-acp-runtime-acp-agent/research/acp-client-implementations.md", "reason": "client 最小实现面、进程组杀/孤儿回收/静默失败检测先例、fs 校验接法、8 类实证坑（可作测试用例清单）"}
+{"file": ".trellis/spec/sidecar/backend/index.md", "reason": "sidecar 后端规范：新 runtime acp.ts 的落点"}
+{"file": ".trellis/spec/server/backend/index.md", "reason": "server 渠道体系规范：新增 acp 渠道 protocol 类型"}
+{"file": ".trellis/spec/shared/backend/index.md", "reason": "shared DTO 类型规范：渠道/协议类型扩展"}
+{"file": ".trellis/spec/desktop/frontend/index.md", "reason": "desktop 规范：ChannelEditorModal 增加 acp 渠道配置 UI"}
+{"file": "skills/openhorn/rules/sidecar-security.md", "reason": "sidecar 8 层安全模型：ACP 的 fs 反向调用必须接 workspace 校验、shell-risk 挂 permission"}
+{"file": "skills/openhorn/rules/project-rules.md", "reason": "包管理、DB 双定义同步、agent runtime 选择规则"}

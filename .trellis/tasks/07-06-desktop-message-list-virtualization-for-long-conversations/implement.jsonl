@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/desktop/frontend/index.md", "reason": "桌面端前端规范：组件树、流式、i18n（中文文案须走 agent.ts）、测试匹配器限制等必须遵守的约定"}
+{"file": ".trellis/tasks/07-06-desktop-message-list-virtualization-for-long-conversations/research/current-architecture.md", "reason": "现有渲染/滚动/流式架构的精确 file:line 地图——虚拟化必须保留的行为清单（钉顶、切换跳底、流式重钉、变高来源、会破坏点）"}
+{"file": ".trellis/tasks/07-06-desktop-message-list-virtualization-for-long-conversations/research/react-virtual-streaming-chat.md", "reason": "@tanstack/react-virtual v3 动态测量+scrollToIndex 代码草图、React19 注意事项(useFlushSync/getItemKey)、版本下限"}

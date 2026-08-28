@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/desktop/frontend/hook-guidelines.md", "reason": "改动在 useSidecarAgentRun hook 及配套纯函数模块"}
+{"file": ".trellis/spec/desktop/frontend/quality-guidelines.md", "reason": "桌面端质量规范与测试矩阵限制"}

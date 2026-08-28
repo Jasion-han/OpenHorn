@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/desktop/frontend/index.md", "reason": "Desktop frontend entry point for scoped UI work."}
+{"file": ".trellis/spec/desktop/frontend/component-guidelines.md", "reason": "Desktop component styling and interaction conventions."}
+{"file": ".trellis/spec/desktop/frontend/quality-guidelines.md", "reason": "Desktop frontend quality expectations."}
+{"file": ".trellis/spec/desktop/frontend/type-safety.md", "reason": "Desktop TypeScript expectations."}

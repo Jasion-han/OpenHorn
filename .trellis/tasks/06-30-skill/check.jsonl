@@ -1,0 +1,2 @@
+{"file": ".trellis/tasks/06-30-skill/research/sidecar-workspace.md", "reason": "验收物化落点与注入点是否正确：cwd=workspaceRoot、.claude/skills 在 cwd 内、extra 注入、gitignore、双 runtime 一致；server 路径 B 应被排除"}
+{"file": ".trellis/tasks/06-30-skill/research/skill-injection.md", "reason": "验收 SKILL.md frontmatter 规则（name/description 长度）、渐进式语义、以及 DB 两处同步/用户隔离是否照 MCP 模式落实"}

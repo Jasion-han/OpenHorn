@@ -1,0 +1,2 @@
+{"file": ".trellis/tasks/06-30-skill/research/sidecar-workspace.md", "reason": "sidecar/server workspace 模型与全部落地点 file:line：cwd 来源、claude.ts/direct.ts 文件工具与边界、buildAgentSystemPrompt 的 extra 注入位、ensureGitignore 样板、协议字段位置——物化与注入实现的权威指针"}
+{"file": ".trellis/tasks/06-30-skill/research/skill-injection.md", "reason": "Agent Skill 标准结构（SKILL.md frontmatter name≤64/description≤1024、正文<500行）、三级渐进式加载机制、照搬 MCP 的 DB/路由/传参管线对照清单与 file:line"}

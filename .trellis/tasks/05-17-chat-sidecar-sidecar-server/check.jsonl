@@ -1,0 +1,5 @@
+{"file": ".trellis/tasks/05-17-chat-sidecar-sidecar-server/prd.md", "reason": "Verify implementation matches acceptance criteria"}
+{"file": ".trellis/spec/sidecar/backend/index.md", "reason": "Check sidecar security model compliance"}
+{"file": ".trellis/spec/server/backend/index.md", "reason": "Check server route/service patterns"}
+{"file": ".trellis/spec/desktop/frontend/index.md", "reason": "Check desktop component patterns"}
+{"file": ".trellis/spec/guides/index.md", "reason": "Coding standards compliance"}

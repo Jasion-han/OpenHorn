@@ -1,0 +1,5 @@
+{"file": ".trellis/tasks/08-16-sidecar-acp-runtime-acp-agent/prd.md", "reason": "对照验收标准逐条核查"}
+{"file": ".trellis/tasks/08-16-sidecar-acp-runtime-acp-agent/research/acp-client-implementations.md", "reason": "8 类实证坑清单：取消语义、进程组杀、permission 先于 tool_call、静默空响应——check 时逐项验证是否覆盖"}
+{"file": ".trellis/spec/sidecar/backend/index.md", "reason": "sidecar 代码规范符合性"}
+{"file": "skills/openhorn/rules/sidecar-security.md", "reason": "安全模型不被 ACP runtime 破坏：fs 校验、loopback、握手 token"}
+{"file": "skills/openhorn/rules/coding-standards.md", "reason": "bun test 规范、Biome、测试 matcher 限制"}

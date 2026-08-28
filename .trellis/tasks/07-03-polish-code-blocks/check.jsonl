@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/desktop/frontend/index.md", "reason": "Desktop frontend entry point for scoped UI verification."}
+{"file": ".trellis/spec/desktop/frontend/component-guidelines.md", "reason": "Verify the component remains consistent with desktop conventions."}
+{"file": ".trellis/spec/desktop/frontend/quality-guidelines.md", "reason": "Verify the CSS change stays narrow and maintainable."}
+{"file": ".trellis/spec/desktop/frontend/type-safety.md", "reason": "Verify TypeScript remains clean."}

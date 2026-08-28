@@ -1,0 +1,6 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/server/backend/index.md", "reason": "校验 server 后端约定符合度"}
+{"file": ".trellis/spec/sidecar/backend/index.md", "reason": "校验 sidecar 改动与重编译要求"}
+{"file": ".trellis/spec/shared/backend/index.md", "reason": "校验 DTO/SearchCitation 扩展一致性"}
+{"file": ".trellis/tasks/06-29-tavily-firecrawl/research/keyless-search-options.md", "reason": "校验 provider 选择/降级链/共享key安全（key 不下发客户端）"}
+{"file": ".trellis/tasks/06-29-tavily-firecrawl/research/curated-sources.md", "reason": "校验信任重排与时效优化落实"}

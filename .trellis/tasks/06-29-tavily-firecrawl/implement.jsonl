@@ -1,0 +1,7 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/server/backend/index.md", "reason": "searchService.ts 所在层：server 后端约定（DTO/服务/错误处理）"}
+{"file": ".trellis/spec/sidecar/backend/index.md", "reason": "direct.ts 所在层：sidecar agent runtime 约定，改后需重编译"}
+{"file": ".trellis/spec/shared/backend/index.md", "reason": "SearchCitation/DTO 单一来源，provider 无关结构扩展"}
+{"file": ".trellis/tasks/06-29-tavily-firecrawl/research/tavily-news-api.md", "reason": "Tavily 时效参数：topic:news+time_range:day，days 已废弃"}
+{"file": ".trellis/tasks/06-29-tavily-firecrawl/research/keyless-search-options.md", "reason": "DDG keyless 落地方式 + provider 抽象接缝 + 共享key回退"}
+{"file": ".trellis/tasks/06-29-tavily-firecrawl/research/curated-sources.md", "reason": "精选信源清单 + 信任重排策略"}
