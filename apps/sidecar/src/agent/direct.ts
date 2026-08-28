@@ -48,7 +48,7 @@ import {
 import { sanitizeChildEnv } from "./childEnv";
 import { HISTORY_MAX_TOKENS, truncateHistory } from "./context";
 import { type AgentEvent, buildUsageEvent, toCount } from "./events";
-import { buildIntentContext, classifyToolIntent } from "./intent-context";
+import { buildIntentContext } from "./intent-context";
 import { capMcpTools, connectMcpTools } from "./mcp-tools";
 import { buildSkillsPromptSection, type MaterializedSkill } from "./skills";
 import { buildAgentSystemPrompt } from "./system-prompt";
@@ -854,20 +854,6 @@ export async function runDirectAgent(input: RunDirectAgentInput): Promise<void> 
     checkpoint,
     readAllowRoots: (input.skills ?? []).map((skill) => skill.skillDir),
   });
-
-  // Intent-based tool routing: remove unnecessary tools for this prompt to
-  // reduce prompt token consumption. Only prune when at least one intent
-  // signal fires — when all are false the user likely just wants to read /
-  // chat, so keep the full tool set as a safety net.
-  const intent = classifyToolIntent(input.prompt);
-  if (intent.needsEdit || intent.needsShell || intent.needsWeb) {
-    if (!intent.needsEdit) {
-      tools = tools.filter((t) => t.name !== "write_file" && t.name !== "edit_file");
-    }
-    if (!intent.needsShell) {
-      tools = tools.filter((t) => t.name !== "bash");
-    }
-  }
 
   // Bridge enabled MCP servers into the tool set (best-effort). The Claude SDK
   // path gets MCP natively; here we connect and expose them as agent tools so

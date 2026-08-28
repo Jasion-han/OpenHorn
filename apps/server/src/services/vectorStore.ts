@@ -84,6 +84,23 @@ export async function searchChunks(
   }
 }
 
+/**
+ * Quick existence check — returns true when the vector table contains at least
+ * one chunk for the given user. Used by the RAG retrieval path to skip the
+ * (paid) embedding API call when the user has never indexed any documents.
+ */
+export async function hasChunksForUser(userId: string): Promise<boolean> {
+  const db = await getDb();
+  try {
+    const table = await db.openTable(TABLE_NAME);
+    const count = await table.countRows(`userId = '${sanitizeForWhere(userId)}'`);
+    return count > 0;
+  } catch {
+    // Table does not exist yet — no documents have ever been indexed.
+    return false;
+  }
+}
+
 export async function deleteChunksByAttachment(attachmentId: string): Promise<void> {
   const db = await getDb();
   try {

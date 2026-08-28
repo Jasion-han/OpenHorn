@@ -3,6 +3,7 @@ import { and, desc, eq, isNotNull, ne } from "drizzle-orm";
 import { createAdapter } from "../agent-adapters";
 import { db } from "../db";
 import { getChannels, getResolvedChannelForUser } from "./channelService";
+import { getSettingValues } from "./settingsService";
 
 /** Minimum number of messages before a conversation is eligible for summarization. */
 const SUMMARY_MESSAGE_THRESHOLD = 10;
@@ -10,11 +11,19 @@ const SUMMARY_MESSAGE_THRESHOLD = 10;
 /** Cooldown between consecutive summarization attempts for the same conversation. */
 const SUMMARY_COOLDOWN_MS = 5 * 60 * 1000;
 
-const SUMMARY_PROMPT =
-  "请为以下对话生成一段简洁的中文摘要（100-200字），提取关键事实和结论。只输出摘要内容，不要加标题或前缀。\n\n对话内容：\n";
+const COMBINED_PROMPT = `请为以下对话：
+1. 生成一段简洁的中文摘要（100-200字）
+2. 提取关键事实（JSON数组，每个元素是字符串，最多10条，每条不超过50字）
 
-const KEY_FACTS_PROMPT =
-  "请从以下对话中提取关键事实、决策和用户偏好，以JSON数组格式输出。每个元素是一个字符串，描述一个独立的事实。最多10条，每条不超过50字。只输出JSON数组。\n\n对话内容：\n";
+输出格式（严格遵循）：
+SUMMARY:
+（摘要内容）
+
+KEY_FACTS:
+（JSON数组）
+
+对话内容：
+`;
 
 /**
  * Conditionally generates a summary for a conversation when it has enough
@@ -22,6 +31,10 @@ const KEY_FACTS_PROMPT =
  * should never await this or let its errors propagate.
  */
 export async function maybeSummarize(userId: string, conversationId: string): Promise<void> {
+  // Opt-in: only run when the user has explicitly enabled auto-summarization.
+  const userSettings = await getSettingValues(userId, ["agent.autoSummarize"]);
+  if (userSettings["agent.autoSummarize"] !== "true") return;
+
   const conv = await db
     .select()
     .from(conversations)
@@ -84,27 +97,41 @@ async function generateSummary(userId: string, conversationId: string): Promise<
   const model = resolved.modelId;
 
   try {
-    const [summaryResp, factsResp] = await Promise.all([
-      adapter.chat({
-        model,
-        messages: [{ role: "user", content: SUMMARY_PROMPT + transcript }],
-        maxTokens: 300,
-      }),
-      adapter.chat({
-        model,
-        messages: [{ role: "user", content: KEY_FACTS_PROMPT + transcript }],
-        maxTokens: 500,
-      }),
-    ]);
+    const resp = await adapter.chat({
+      model,
+      messages: [{ role: "user", content: COMBINED_PROMPT + transcript }],
+      maxTokens: 800,
+    });
 
-    await db
-      .update(conversations)
-      .set({
-        summary: summaryResp.content.trim(),
-        keyFacts: factsResp.content.trim(),
-        lastSummarizedAt: new Date(),
-      })
-      .where(eq(conversations.id, conversationId));
+    const raw = resp.content.trim();
+
+    // Parse the combined response by looking for SUMMARY: and KEY_FACTS: markers.
+    const summaryMarker = "SUMMARY:";
+    const factsMarker = "KEY_FACTS:";
+    const summaryIdx = raw.indexOf(summaryMarker);
+    const factsIdx = raw.indexOf(factsMarker);
+
+    let summary = "";
+    let keyFacts = "";
+
+    if (summaryIdx !== -1 && factsIdx !== -1 && factsIdx > summaryIdx) {
+      summary = raw.substring(summaryIdx + summaryMarker.length, factsIdx).trim();
+      keyFacts = raw.substring(factsIdx + factsMarker.length).trim();
+    } else {
+      // Fallback: treat the entire response as the summary when markers are absent.
+      summary = raw;
+    }
+
+    if (summary) {
+      await db
+        .update(conversations)
+        .set({
+          summary,
+          keyFacts: keyFacts || null,
+          lastSummarizedAt: new Date(),
+        })
+        .where(eq(conversations.id, conversationId));
+    }
   } catch {
     // Silent failure -- same pattern as autoTitleService
   }

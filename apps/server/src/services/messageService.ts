@@ -20,7 +20,7 @@ import {
   removeAttachmentFiles,
 } from "./attachmentService";
 import { getResolvedChannelForConversation } from "./channelService";
-import { isChannelAvailable, recordChannelFailure, recordChannelSuccess } from "./circuitBreaker";
+import { recordChannelFailure, recordChannelSuccess } from "./circuitBreaker";
 import { buildLiveContext, type LiveContextResult, toStoredLiveMetadata } from "./liveCapabilities";
 import { classifyLiveRouteWithModel } from "./liveRouteClassifier";
 import { classifyProviderError } from "./providerErrorSummary";
@@ -948,41 +948,36 @@ export async function sendMessage(userId: string, input: SendMessageInput) {
 
   if (resolvedChannel) {
     const channelId = resolvedChannel.channel.id;
-    if (!isChannelAvailable(channelId)) {
-      responseContent =
-        "该渠道暂时不可用（连续多次请求失败，已触发熔断保护）。请稍后重试或切换其他渠道。";
-    } else {
-      const adapter = createAdapter(
-        resolvedChannel.channel.protocol,
-        resolvedChannel.apiKey,
-        resolvedChannel.channel.baseUrl || undefined,
-      );
-      responseModel = resolvedChannel.modelId;
+    const adapter = createAdapter(
+      resolvedChannel.channel.protocol,
+      resolvedChannel.apiKey,
+      resolvedChannel.channel.baseUrl || undefined,
+    );
+    responseModel = resolvedChannel.modelId;
 
-      // Mirror the streaming path (streamMessage): if the provider throws mid-turn,
-      // persist an "Error:" assistant reply below instead of throwing and leaving a
-      // dangling user message with no assistant row for this turn.
-      try {
-        const stream = await adapter.chatStream({
-          model: resolvedChannel.modelId,
-          messages: chatMessages,
-          maxTokens: 4096,
-        });
+    // Mirror the streaming path (streamMessage): if the provider throws mid-turn,
+    // persist an "Error:" assistant reply below instead of throwing and leaving a
+    // dangling user message with no assistant row for this turn.
+    try {
+      const stream = await adapter.chatStream({
+        model: resolvedChannel.modelId,
+        messages: chatMessages,
+        maxTokens: 4096,
+      });
 
-        for await (const chunk of stream) {
-          if (typeof chunk !== "string" || chunk.length === 0) {
-            continue;
-          }
-          responseContent += chunk;
+      for await (const chunk of stream) {
+        if (typeof chunk !== "string" || chunk.length === 0) {
+          continue;
         }
-        recordChannelSuccess(channelId);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "Stream error";
-        responseContent = `Error: ${message}`;
-        const classified = classifyProviderError(message);
-        if (classified.retryable) {
-          recordChannelFailure(channelId);
-        }
+        responseContent += chunk;
+      }
+      recordChannelSuccess(channelId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Stream error";
+      responseContent = `Error: ${message}`;
+      const classified = classifyProviderError(message);
+      if (classified.retryable) {
+        recordChannelFailure(channelId);
       }
     }
   } else {
@@ -1209,33 +1204,6 @@ export async function streamMessage(
     }
 
     const streamChannelId = resolvedChannel.channel.id;
-    if (!isChannelAvailable(streamChannelId)) {
-      const circuitMessage =
-        "该渠道暂时不可用（连续多次请求失败，已触发熔断保护）。请稍后重试或切换其他渠道。";
-
-      await db.insert(messages).values({
-        id: assistantMessageId,
-        conversationId: input.conversationId,
-        role: "assistant",
-        content: circuitMessage,
-        model: resolvedChannel.modelId,
-        mode: "chat",
-        attachments: null,
-        agentRun: null,
-        liveMetadata: serializeLiveMetadata(liveContext),
-        citations: serializeCitations(liveContext.citations),
-        createdAt: assistantCreatedAt,
-      });
-      await ftsUpsert(assistantMessageId, input.conversationId, circuitMessage);
-
-      await db
-        .update(conversations)
-        .set({ updatedAt: new Date(), lastMode: "chat", runStatus: null })
-        .where(eq(conversations.id, input.conversationId));
-
-      send({ type: "done", messageId: assistantMessageId });
-      return;
-    }
 
     await db.insert(messages).values({
       id: assistantMessageId,

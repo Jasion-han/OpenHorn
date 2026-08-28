@@ -13,7 +13,7 @@ import { runCodexAgent } from "./agent/codex";
 import { runDirectAgent } from "./agent/direct";
 import { drainMcpPool, testMcpServer } from "./agent/mcp-tools";
 import { resolveSkills } from "./agent/skills";
-import { createTraceWriter } from "./agent/trace";
+
 import { detectAllCredentials, detectCredentialForProtocol } from "./auth";
 import { createCheckpointSession, rollbackCheckpoint } from "./checkpoints";
 
@@ -463,9 +463,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
           state.agentRuns.set(runId, { abortController });
           state.ownedRunIds.add(runId);
           ws.send(JSON.stringify(buildOkResponse(request.requestId, { runId })));
-          const writeTrace = createTraceWriter(cwd, runId);
           const onEvent = (event: import("./agent/events").AgentEvent) => {
-            writeTrace(event);
             ws.send(JSON.stringify(buildEvent("agent.event", { runId, event })));
           };
           const guard = (label: string, promise: Promise<void>) => {

@@ -211,7 +211,6 @@ type PoolEntry = {
   client: Client;
   tools: AgentTool<TSchema>[];
   configHash: string;
-  refCount: number;
   idleTimer: ReturnType<typeof setTimeout> | null;
 };
 
@@ -224,7 +223,7 @@ function configFingerprint(config: Record<string, unknown>): string {
 function scheduleEviction(serverName: string, entry: PoolEntry) {
   if (entry.idleTimer) clearTimeout(entry.idleTimer);
   entry.idleTimer = setTimeout(async () => {
-    if (entry.refCount <= 0 && pool.get(serverName) === entry) {
+    if (pool.get(serverName) === entry) {
       pool.delete(serverName);
       await entry.client.close().catch(() => {});
     }
@@ -239,7 +238,6 @@ async function acquireServer(
   const existing = pool.get(serverName);
 
   if (existing && existing.configHash === hash) {
-    existing.refCount++;
     if (existing.idleTimer) {
       clearTimeout(existing.idleTimer);
       existing.idleTimer = null;
@@ -260,18 +258,10 @@ async function acquireServer(
     client: connected.client,
     tools: connected.tools,
     configHash: hash,
-    refCount: 1,
     idleTimer: null,
   };
   pool.set(serverName, entry);
   return { tools: entry.tools, entry };
-}
-
-function releaseServer(serverName: string, entry: PoolEntry) {
-  entry.refCount = Math.max(0, entry.refCount - 1);
-  if (entry.refCount === 0 && pool.get(serverName) === entry) {
-    scheduleEviction(serverName, entry);
-  }
 }
 
 /**
@@ -308,7 +298,9 @@ export async function connectMcpTools(
     toolsByServer,
     cleanup: async () => {
       for (const { serverName, entry } of acquired) {
-        releaseServer(serverName, entry);
+        if (pool.get(serverName) === entry) {
+          scheduleEviction(serverName, entry);
+        }
       }
     },
   };

@@ -10,6 +10,7 @@ import {
   type DocumentChunk,
   deleteChunksByAttachment,
   deleteChunksByConversation,
+  hasChunksForUser,
   searchChunks,
 } from "./vectorStore";
 
@@ -67,6 +68,10 @@ export async function retrieveContext(
   baseUrl?: string,
   limit = 5,
 ): Promise<string> {
+  // Skip the (paid) embedding API call when the user has no indexed documents.
+  const hasDocuments = await hasChunksForUser(userId);
+  if (!hasDocuments) return "";
+
   const [queryVector] = await generateEmbeddings([query], apiKey, baseUrl);
   if (!queryVector) return "";
 
