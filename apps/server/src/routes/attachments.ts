@@ -85,7 +85,7 @@ attachments.post("/upload", async (c) => {
     }
 
     try {
-      const stored = await storeAttachment({ conversationId, sessionId, file });
+      const stored = await storeAttachment({ conversationId, sessionId, file, userId: user.id });
       results.push({
         id: stored.id,
         fileName: stored.fileName,

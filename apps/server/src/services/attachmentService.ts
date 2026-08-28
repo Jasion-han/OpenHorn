@@ -1,10 +1,10 @@
 import { existsSync } from "node:fs";
 import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { agentSessions, attachments, conversations } from "db";
-import { eq, inArray } from "drizzle-orm";
+import { agentSessions, attachments, channels, conversations } from "db";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "../db";
-import { generateId } from "../utils";
+import { decrypt, generateId } from "../utils";
 import { formatAttachmentContext, parseAttachmentContent } from "./attachmentParser";
 
 export const MAX_ATTACHMENT_SIZE = 20 * 1024 * 1024;
@@ -88,10 +88,51 @@ function resolveDataDir() {
   return localDataDir;
 }
 
+/**
+ * Resolve an OpenAI-compatible embedding API key for the given user.
+ * Returns null when the user has no enabled OpenAI-compatible channel.
+ */
+async function getEmbeddingApiKey(
+  userId: string,
+): Promise<{ apiKey: string; baseUrl?: string } | null> {
+  const rows = await db
+    .select()
+    .from(channels)
+    .where(and(eq(channels.userId, userId), eq(channels.enabled, true)));
+
+  // Prefer a channel whose protocol is explicitly "openai" (or null/empty,
+  // which defaults to OpenAI-compatible).
+  const openaiRow = rows.find((ch) => {
+    const p = (ch.protocol || "").toLowerCase();
+    return p === "openai" || p === "";
+  });
+
+  const row = openaiRow || rows[0];
+  if (!row?.apiKey) return null;
+
+  const apiKey = decrypt(row.apiKey);
+  // Skip CLI-OAuth channels — they don't support the embeddings endpoint.
+  if (apiKey.startsWith("__cli_oauth__")) return null;
+
+  let baseUrl: string | undefined;
+  if (row.baseUrl) {
+    // Ensure the base URL ends with /v1 for OpenAI-compatible calls.
+    let url = row.baseUrl.replace(/\/+$/, "");
+    if (!url.match(/\/v\d+$/)) {
+      url = `${url}/v1`;
+    }
+    baseUrl = url;
+  }
+
+  return { apiKey, baseUrl };
+}
+
 export async function storeAttachment(params: {
   conversationId?: string;
   sessionId?: string;
   file: File;
+  /** Optional — when provided, enables background RAG indexing of text-based attachments. */
+  userId?: string;
 }) {
   const resolvedType = resolveMimeType(params.file);
 
@@ -124,6 +165,45 @@ export async function storeAttachment(params: {
     fileSize: params.file.size,
     createdAt: new Date(),
   });
+
+  // Fire-and-forget: asynchronously index text-based attachments into the
+  // vector store for RAG retrieval. Images are skipped (no text to embed).
+  if (params.userId && params.conversationId) {
+    const capturedUserId = params.userId;
+    const capturedConversationId = params.conversationId;
+    const capturedFileName = params.file.name;
+    const capturedFilePath = filePath;
+    const capturedFileType = resolvedType;
+
+    void (async () => {
+      try {
+        const creds = await getEmbeddingApiKey(capturedUserId);
+        if (!creds) return;
+
+        const text = await parseAttachmentContent({
+          filePath: capturedFilePath,
+          fileType: capturedFileType,
+          fileName: capturedFileName,
+        });
+        // Skip images and empty content
+        if (!text || text.startsWith("[Image:")) return;
+
+        const { indexAttachment } = await import("./ragService");
+        await indexAttachment(
+          id,
+          capturedUserId,
+          capturedConversationId,
+          capturedFileName,
+          text,
+          creds.apiKey,
+          creds.baseUrl,
+        );
+      } catch (error) {
+        // Best-effort: RAG indexing failure must never block attachment upload.
+        console.error("[rag] indexing failed for attachment", id, error);
+      }
+    })();
+  }
 
   return {
     id,

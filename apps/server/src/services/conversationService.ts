@@ -15,6 +15,8 @@ import { and, desc, eq, inArray, ne, notExists, or, sql } from "drizzle-orm";
 import { db } from "../db";
 import { generateId } from "../utils";
 import { removeAttachmentFiles } from "./attachmentService";
+import { ftsDeleteConversation } from "./messageService";
+import { deleteChunksByConversation } from "./ragService";
 
 export interface CreateConversationInput {
   title: string;
@@ -312,7 +314,9 @@ export async function deleteConversation(userId: string, conversationId: string)
       .where(and(eq(conversations.id, conversationId), eq(conversations.userId, userId)));
   });
 
+  await ftsDeleteConversation(conversationId);
   await removeAttachmentFiles(attachmentFilePaths);
+  await deleteChunksByConversation(conversationId).catch(() => {});
 
   return { success: true };
 }
