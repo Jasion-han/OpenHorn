@@ -2,7 +2,7 @@ import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { AgentEvent } from "./events";
 
-export interface TraceEntry {
+interface TraceEntry {
   ts: number;
   runId: string;
   type: string;

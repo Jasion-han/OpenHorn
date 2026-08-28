@@ -1,6 +1,6 @@
 export const HISTORY_MAX_TOKENS = 16_000;
 
-export function estimateTokens(text: string): number {
+function estimateTokens(text: string): number {
   return Math.ceil(text.length / 3.5);
 }
 

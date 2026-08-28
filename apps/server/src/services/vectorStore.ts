@@ -7,6 +7,10 @@ import path from "node:path";
 import * as lancedb from "@lancedb/lancedb";
 import { EMBEDDING_DIMENSIONS } from "./embeddingService";
 
+function sanitizeForWhere(value: string): string {
+  return value.replace(/'/g, "''");
+}
+
 let dbInstance: lancedb.Connection | null = null;
 
 async function getDb(): Promise<lancedb.Connection> {
@@ -70,7 +74,7 @@ export async function searchChunks(
     const table = await db.openTable(TABLE_NAME);
     const results = await table
       .search(queryVector)
-      .where(`userId = '${userId}'`)
+      .where(`userId = '${sanitizeForWhere(userId)}'`)
       .limit(limit)
       .toArray();
     return results as unknown as DocumentChunk[];
@@ -84,7 +88,7 @@ export async function deleteChunksByAttachment(attachmentId: string): Promise<vo
   const db = await getDb();
   try {
     const table = await db.openTable(TABLE_NAME);
-    await table.delete(`attachmentId = '${attachmentId}'`);
+    await table.delete(`attachmentId = '${sanitizeForWhere(attachmentId)}'`);
   } catch {
     // Table might not exist yet
   }
@@ -94,7 +98,7 @@ export async function deleteChunksByConversation(conversationId: string): Promis
   const db = await getDb();
   try {
     const table = await db.openTable(TABLE_NAME);
-    await table.delete(`conversationId = '${conversationId}'`);
+    await table.delete(`conversationId = '${sanitizeForWhere(conversationId)}'`);
   } catch {
     // Table might not exist yet
   }

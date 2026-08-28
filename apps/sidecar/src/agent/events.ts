@@ -24,10 +24,6 @@ export type AgentEvent =
       promptTokens: number;
       completionTokens: number;
       totalTokens: number;
-      /** Cumulative prompt tokens across all turns in this run. */
-      cumulativePromptTokens?: number;
-      /** Cumulative completion tokens across all turns in this run. */
-      cumulativeCompletionTokens?: number;
       /** ACP usage_update: context window total size. */
       contextSize?: number;
       /** ACP usage_update: cumulative session cost. */
