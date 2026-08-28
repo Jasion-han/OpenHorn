@@ -126,6 +126,10 @@ export function McpSettings() {
       notifyError("配置错误", "请填写 MCP Server 名称。");
       return;
     }
+    if (mcpServers.some((s) => s.name === mcpName.trim())) {
+      notifyError("名称重复", `已存在名为「${mcpName.trim()}」的 MCP Server。`);
+      return;
+    }
 
     let parsedConfig: Record<string, unknown>;
     try {
@@ -280,7 +284,6 @@ export function McpSettings() {
   );
 
   const openImport = async () => {
-    setImportOpen(true);
     setImportRows([]);
     setSelectedRows(new Set());
     setDiscovering(true);
@@ -293,12 +296,13 @@ export function McpSettings() {
     } finally {
       setDiscovering(false);
     }
+    setImportOpen(true);
   };
 
   const handlePickFile = async () => {
     try {
       const found = await pickMcpConfigFile();
-      if (found === null) return; // user cancelled
+      if (found === null) return;
       if (found.length === 0) {
         notifyError("未发现配置", "所选文件中没有可解析的 MCP server。");
         return;
@@ -501,7 +505,11 @@ export function McpSettings() {
           <div className="grid gap-4">
             <div className="grid gap-1.5">
               <Label>名称</Label>
-              <Input value={mcpName} onChange={(event) => setMcpName(event.target.value)} />
+              <Input
+                value={mcpName}
+                onChange={(event) => setMcpName(event.target.value)}
+                placeholder="例如：my-mcp-server"
+              />
             </div>
 
             <div className="grid gap-1.5">
@@ -511,6 +519,7 @@ export function McpSettings() {
                 className="font-mono text-sm"
                 value={mcpConfig}
                 onChange={(event) => setMcpConfig(event.target.value)}
+                placeholder='{"command": "npx", "args": ["-y", "@example/mcp-server"]}'
               />
             </div>
           </div>
@@ -567,8 +576,8 @@ export function McpSettings() {
             <DialogTitle>导入已有 MCP 配置</DialogTitle>
             <DialogDescription>
               {discoveredSources.length > 0
-                ? "已扫描本地 AI 工具的 MCP 配置；同一工具合并为一条，仅列出尚未导入的。勾选要导入的 server，或手动选择配置文件。"
-                : "勾选要导入的 server，或手动选择一个配置文件导入。"}
+                ? "已扫描本地 AI 工具的 MCP 配置；同一工具合并为一条，仅列出尚未导入的。勾选要导入的 server，或选择配置文件。"
+                : "勾选要导入的 server，或选择一个配置文件导入。"}
             </DialogDescription>
           </DialogHeader>
 

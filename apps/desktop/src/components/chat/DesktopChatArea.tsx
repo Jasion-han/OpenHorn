@@ -1461,9 +1461,7 @@ export function DesktopChatArea() {
       // ignore reload failures after stop
     }
     const msgs = useChatStore.getState().messages;
-    const orphans = msgs.filter(
-      (m) => m.role === "assistant" && !m.content?.trim(),
-    );
+    const orphans = msgs.filter((m) => m.role === "assistant" && !m.content?.trim());
     for (const orphan of orphans) {
       try {
         await deleteMessage(orphan.id);
@@ -1560,7 +1558,10 @@ export function DesktopChatArea() {
 
   return (
     <div className="flex h-full min-h-0 min-w-0 w-full flex-1 flex-col overflow-x-hidden">
-      <div data-tauri-drag-region style={{ padding: PAGE_PAD, paddingTop: "24px", paddingBottom: "8px" }}>
+      <div
+        data-tauri-drag-region
+        style={{ padding: PAGE_PAD, paddingTop: "24px", paddingBottom: "8px" }}
+      >
         <DesktopChatHeader conversation={currentConversation} />
       </div>
 

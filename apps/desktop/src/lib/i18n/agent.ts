@@ -779,7 +779,8 @@ export const generalSettingsLabels = {
   "settings.general.instructions.description":
     "你写在这里的内容会自动附加到每次对话中，AI 会在回答时参考这些偏好。",
   "settings.general.instructions.charCount": "{count} 字符",
-  "settings.general.instructions.hint": "例如回答语言、风格偏好、专业领域等，AI 会据此调整回答方式。",
+  "settings.general.instructions.hint":
+    "例如回答语言、风格偏好、专业领域等，AI 会据此调整回答方式。",
   "settings.general.instructions.edit": "编辑",
   "settings.general.instructions.placeholder":
     "例如：你是一个专业的代码助手，请用中文回答所有问题...",

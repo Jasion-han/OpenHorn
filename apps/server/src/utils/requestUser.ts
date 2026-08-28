@@ -17,7 +17,11 @@ export type UserEnv = {
 };
 
 export async function getRequestUser(_c: Context): Promise<RequestUser> {
-  const row = await db.select().from(users).limit(1).then((r) => r[0]);
+  const row = await db
+    .select()
+    .from(users)
+    .limit(1)
+    .then((r) => r[0]);
   if (!row) return null;
   return { id: row.id, email: row.email, username: row.username };
 }
