@@ -43,23 +43,9 @@ export function DesktopShellLayout({
         </div>
       )}
 
-      <div className="flex min-w-0 flex-1 flex-col">
-        {/*
-          Collapsing hands the whole width to the content and moves the toggle to
-          the top-left — the same spot the sidebar's own collapse button occupies,
-          so the control appears to stay put. A narrow left rail was tried first
-          and read as a cramped gutter next to the content's own padding.
-
-          The control belongs to the shell rather than to each view: the collapse
-          half lives inside the sidebar and is reachable everywhere, so an expand
-          button owned by individual views left whichever view lacked one
-          (settings) with no way back.
-        */}
+      <div className="relative flex min-w-0 flex-1 flex-col">
         {sidebarCollapsed && (
-          <div
-            data-tauri-drag-region
-            className="titlebar-traffic-light-inset shrink-0 px-2 pb-1 pt-2"
-          >
+          <div className="absolute left-2 top-2 z-10 titlebar-traffic-light-inset">
             <Button
               variant="ghost"
               size="icon-sm"
@@ -73,15 +59,6 @@ export function DesktopShellLayout({
           </div>
         )}
 
-        {/*
-          The traffic lights sit over the sidebar, so the sidebar was the only
-          thing reserving a draggable strip. With it expanded the entire right
-          half of the window had no drag region at all — the window could only
-          be moved by that one top-left corner. This is the right pane's half of
-          the same band. No traffic-light inset here (they are over the sidebar),
-          and it lines the content up with the collapsed state, which already
-          reserved the same 32px above its content.
-        */}
         <div
           data-tauri-drag-region
           className={cn("min-h-0 flex-1 overflow-hidden", isCompact ? "p-4" : "p-2")}
