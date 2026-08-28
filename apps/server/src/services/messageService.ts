@@ -1,7 +1,7 @@
 import { attachments, conversations, messages } from "db";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { type ChatContentPart, type ChatMessage, createAdapter } from "../agent-adapters";
-import { db } from "../db";
+import { client, db } from "../db";
 import { generateId } from "../utils";
 import { createSseStream } from "../utils/sse";
 import { buildAgentPlan } from "./agentPlanBuilder";
@@ -19,8 +19,10 @@ import {
   removeAttachmentFiles,
 } from "./attachmentService";
 import { getResolvedChannelForConversation } from "./channelService";
+import { isChannelAvailable, recordChannelFailure, recordChannelSuccess } from "./circuitBreaker";
 import { buildLiveContext, type LiveContextResult, toStoredLiveMetadata } from "./liveCapabilities";
 import { classifyLiveRouteWithModel } from "./liveRouteClassifier";
+import { classifyProviderError } from "./providerErrorSummary";
 import { mergeSystemPromptParts, RESPONSE_STYLE_GUARDRAILS } from "./responseStyle";
 import {
   type SearchCitation,
@@ -28,6 +30,7 @@ import {
   TAVILY_ENABLED_SETTING,
 } from "./searchService";
 import { getSettingValues } from "./settingsService";
+import { getRecentSummaries, maybeSummarize } from "./summaryService";
 
 const GLOBAL_SYSTEM_PROMPT_KEY = "chat.systemPrompt";
 // Hard safety backstop for chat-mode model context. `getMessages` intentionally
@@ -36,6 +39,60 @@ const GLOBAL_SYSTEM_PROMPT_KEY = "chat.systemPrompt";
 // so it is not a clean message-count bound. This cap only trims pathologically
 // long conversations; normal conversations stay well under it and are unchanged.
 const CHAT_MAX_CONTEXT_MESSAGES = 200;
+const CHAT_MAX_CONTEXT_TOKENS = 32_000;
+
+function estimateChatTokens(text: string): number {
+  return Math.ceil(text.length / 3.5);
+}
+
+// ---------------------------------------------------------------------------
+// FTS5 sync helpers — best-effort; the virtual table may not exist in test
+// environments that skip bootstrapDatabase().
+// ---------------------------------------------------------------------------
+
+async function ftsUpsert(
+  messageId: string,
+  conversationId: string,
+  content: string,
+): Promise<void> {
+  if (!content) return;
+  try {
+    const truncated = content.substring(0, 5000);
+    await client.execute({
+      sql: `DELETE FROM messages_fts WHERE message_id = ?`,
+      args: [messageId],
+    });
+    await client.execute({
+      sql: `INSERT INTO messages_fts(message_id, conversation_id, content) VALUES (?, ?, ?)`,
+      args: [messageId, conversationId, truncated],
+    });
+  } catch {
+    // FTS table may not exist yet (tests, pre-migration DBs)
+  }
+}
+
+async function ftsDeleteMessage(messageId: string): Promise<void> {
+  try {
+    await client.execute({
+      sql: `DELETE FROM messages_fts WHERE message_id = ?`,
+      args: [messageId],
+    });
+  } catch {
+    // best-effort
+  }
+}
+
+export async function ftsDeleteConversation(conversationId: string): Promise<void> {
+  try {
+    await client.execute({
+      sql: `DELETE FROM messages_fts WHERE conversation_id = ?`,
+      args: [conversationId],
+    });
+  } catch {
+    // best-effort
+  }
+}
+
 const AGENT_DEFAULT_COMPLEXITY_SETTING = "agent.defaultComplexity";
 const AGENT_DEFAULT_UX_MODE_SETTING = "agent.defaultUxMode";
 const AGENT_DEFAULT_REQUIRES_PLAN_APPROVAL_SETTING = "agent.defaultRequiresPlanApproval";
@@ -294,6 +351,11 @@ export async function syncTaskBackedMessages(userId: string, taskId: string): Pr
         staleTargets.map((message) => message.id),
       ),
     );
+
+  // Sync FTS for each updated message
+  await Promise.all(
+    staleTargets.map((target) => ftsUpsert(target.id, conversationId, nextContent)),
+  );
 }
 
 async function planTaskForTurn(userId: string, task: AgentTaskRecord) {
@@ -479,6 +541,8 @@ async function applyTaskBackedAgentTurnToMessage(params: {
     })
     .where(eq(messages.id, params.assistantMessageId));
 
+  await ftsUpsert(params.assistantMessageId, params.conversationId, content);
+
   await db
     .update(conversations)
     .set({
@@ -633,19 +697,54 @@ async function buildChatMessages(
   userId: string,
   conversationMessages: Array<{ role: string; content: string; attachments?: string | null }>,
   systemPrompt?: string | null,
+  conversationId?: string | null,
 ): Promise<ChatMessage[]> {
   const chatMessages: ChatMessage[] = [];
 
-  if (systemPrompt) {
-    appendChatMessage(chatMessages, "system", systemPrompt);
+  let effectiveSystemPrompt = systemPrompt || "";
+
+  // For new conversations (< 3 messages), inject historical summaries as memory
+  if (conversationId && conversationMessages.length < 3) {
+    try {
+      const summaries = await getRecentSummaries(userId, conversationId);
+      if (summaries.length > 0) {
+        const memoryBlock = summaries
+          .map((s) => `### ${s.title || "未命名会话"}\n${s.summary}`)
+          .join("\n\n");
+        const memoryPrompt = `\n\n## 历史对话记忆\n以下是用户近期对话的摘要，可供参考（不必主动提及，仅在相关时引用）：\n\n${memoryBlock}`;
+        effectiveSystemPrompt = effectiveSystemPrompt
+          ? effectiveSystemPrompt + memoryPrompt
+          : memoryPrompt.trim();
+      }
+    } catch {
+      // Best-effort: do not block the conversation
+    }
   }
 
-  // Backstop against unbounded growth on very long conversations: keep only the
-  // most recent messages before re-reading attachments and building the payload.
-  const boundedMessages =
+  if (effectiveSystemPrompt) {
+    appendChatMessage(chatMessages, "system", effectiveSystemPrompt);
+  }
+
+  // Two-stage truncation: first a message-count cap, then a token-budget cap.
+  // The message-count cap is a coarse backstop; the token cap is the real limit.
+  let boundedMessages =
     conversationMessages.length > CHAT_MAX_CONTEXT_MESSAGES
       ? conversationMessages.slice(-CHAT_MAX_CONTEXT_MESSAGES)
       : conversationMessages;
+
+  let tokenBudget = CHAT_MAX_CONTEXT_TOKENS;
+  if (systemPrompt) tokenBudget -= estimateChatTokens(systemPrompt);
+  let totalTokens = 0;
+  let startIdx = boundedMessages.length;
+  for (let i = boundedMessages.length - 1; i >= 0; i--) {
+    const tokens = estimateChatTokens(boundedMessages[i]!.content) + 10;
+    if (totalTokens + tokens > tokenBudget) break;
+    totalTokens += tokens;
+    startIdx = i;
+  }
+  if (startIdx > 0) {
+    boundedMessages = boundedMessages.slice(startIdx);
+  }
 
   for (const message of boundedMessages) {
     if (message.role === "user" && message.attachments) {
@@ -780,6 +879,7 @@ export async function sendMessage(userId: string, input: SendMessageInput) {
     agentRun: null,
     createdAt: now,
   });
+  await ftsUpsert(userMessageId, input.conversationId, input.content);
 
   if (input.attachments?.length) {
     await linkAttachmentsToMessage(input.attachments, userMessageId, userId);
@@ -815,38 +915,50 @@ export async function sendMessage(userId: string, input: SendMessageInput) {
     userId,
     conversationMessages,
     buildEffectiveSystemPrompt(conversation.systemPrompt, liveContext),
+    input.conversationId,
   );
 
   let responseContent = "";
   let responseModel: string | null = null;
 
   if (resolvedChannel) {
-    const adapter = createAdapter(
-      resolvedChannel.channel.protocol,
-      resolvedChannel.apiKey,
-      resolvedChannel.channel.baseUrl || undefined,
-    );
-    responseModel = resolvedChannel.modelId;
+    const channelId = resolvedChannel.channel.id;
+    if (!isChannelAvailable(channelId)) {
+      responseContent =
+        "该渠道暂时不可用（连续多次请求失败，已触发熔断保护）。请稍后重试或切换其他渠道。";
+    } else {
+      const adapter = createAdapter(
+        resolvedChannel.channel.protocol,
+        resolvedChannel.apiKey,
+        resolvedChannel.channel.baseUrl || undefined,
+      );
+      responseModel = resolvedChannel.modelId;
 
-    // Mirror the streaming path (streamMessage): if the provider throws mid-turn,
-    // persist an "Error:" assistant reply below instead of throwing and leaving a
-    // dangling user message with no assistant row for this turn.
-    try {
-      const stream = await adapter.chatStream({
-        model: resolvedChannel.modelId,
-        messages: chatMessages,
-        maxTokens: 4096,
-      });
+      // Mirror the streaming path (streamMessage): if the provider throws mid-turn,
+      // persist an "Error:" assistant reply below instead of throwing and leaving a
+      // dangling user message with no assistant row for this turn.
+      try {
+        const stream = await adapter.chatStream({
+          model: resolvedChannel.modelId,
+          messages: chatMessages,
+          maxTokens: 4096,
+        });
 
-      for await (const chunk of stream) {
-        if (typeof chunk !== "string" || chunk.length === 0) {
-          continue;
+        for await (const chunk of stream) {
+          if (typeof chunk !== "string" || chunk.length === 0) {
+            continue;
+          }
+          responseContent += chunk;
         }
-        responseContent += chunk;
+        recordChannelSuccess(channelId);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Stream error";
+        responseContent = `Error: ${message}`;
+        const classified = classifyProviderError(message);
+        if (classified.retryable) {
+          recordChannelFailure(channelId);
+        }
       }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Stream error";
-      responseContent = `Error: ${message}`;
     }
   } else {
     responseContent = conversation.channelId
@@ -868,6 +980,10 @@ export async function sendMessage(userId: string, input: SendMessageInput) {
     citations: serializeCitations(liveContext.citations),
     createdAt: new Date(),
   });
+  await ftsUpsert(assistantMessageId, input.conversationId, responseContent);
+
+  // Fire-and-forget: generate summary if the conversation is long enough
+  void maybeSummarize(userId, input.conversationId).catch(() => {});
 
   return {
     userMessage: {
@@ -913,6 +1029,7 @@ export async function deleteMessage(userId: string, messageId: string) {
     await tx.delete(messages).where(eq(messages.id, messageId));
   });
 
+  await ftsDeleteMessage(messageId);
   await removeAttachmentFiles(attachmentFileRows.map((row) => row.filePath).filter(Boolean));
 
   return { success: true };
@@ -938,6 +1055,7 @@ export async function streamMessage(
       agentRun: null,
       createdAt: now,
     });
+    await ftsUpsert(userMessageId, input.conversationId, input.content);
 
     if (input.attachments?.length) {
       await linkAttachmentsToMessage(input.attachments, userMessageId, userId);
@@ -979,6 +1097,9 @@ export async function streamMessage(
         attachmentIds: input.attachments || [],
         agentOverrides: input.agentOverrides,
       });
+
+      // Fire-and-forget: generate summary if the conversation is long enough
+      void maybeSummarize(userId, input.conversationId).catch(() => {});
 
       send({
         type: "done",
@@ -1026,6 +1147,7 @@ export async function streamMessage(
       userId,
       conversationMessages,
       effectiveSystemPrompt,
+      input.conversationId,
     );
 
     if (!resolvedChannel) {
@@ -1046,6 +1168,7 @@ export async function streamMessage(
         citations: serializeCitations(liveContext.citations),
         createdAt: assistantCreatedAt,
       });
+      await ftsUpsert(assistantMessageId, input.conversationId, message);
 
       await db
         .update(conversations)
@@ -1054,6 +1177,35 @@ export async function streamMessage(
           lastMode: "chat",
           runStatus: null,
         })
+        .where(eq(conversations.id, input.conversationId));
+
+      send({ type: "done", messageId: assistantMessageId });
+      return;
+    }
+
+    const streamChannelId = resolvedChannel.channel.id;
+    if (!isChannelAvailable(streamChannelId)) {
+      const circuitMessage =
+        "该渠道暂时不可用（连续多次请求失败，已触发熔断保护）。请稍后重试或切换其他渠道。";
+
+      await db.insert(messages).values({
+        id: assistantMessageId,
+        conversationId: input.conversationId,
+        role: "assistant",
+        content: circuitMessage,
+        model: resolvedChannel.modelId,
+        mode: "chat",
+        attachments: null,
+        agentRun: null,
+        liveMetadata: serializeLiveMetadata(liveContext),
+        citations: serializeCitations(liveContext.citations),
+        createdAt: assistantCreatedAt,
+      });
+      await ftsUpsert(assistantMessageId, input.conversationId, circuitMessage);
+
+      await db
+        .update(conversations)
+        .set({ updatedAt: new Date(), lastMode: "chat", runStatus: null })
         .where(eq(conversations.id, input.conversationId));
 
       send({ type: "done", messageId: assistantMessageId });
@@ -1096,6 +1248,7 @@ export async function streamMessage(
         responseContent += chunk;
         send({ type: "delta", content: chunk });
       }
+      recordChannelSuccess(streamChannelId);
     } catch (error) {
       // A client disconnect aborts ctx.signal, which surfaces here as an abort
       // error. That is a normal cancellation, not a failure — keep whatever
@@ -1104,6 +1257,10 @@ export async function streamMessage(
       if (!ctx.signal.aborted) {
         const message = error instanceof Error ? error.message : "Stream error";
         responseContent = `Error: ${message}`;
+        const classified = classifyProviderError(message);
+        if (classified.retryable) {
+          recordChannelFailure(streamChannelId);
+        }
       }
     }
 
@@ -1117,6 +1274,7 @@ export async function streamMessage(
         updatedAt: new Date(),
       })
       .where(eq(messages.id, assistantMessageId));
+    await ftsUpsert(assistantMessageId, input.conversationId, responseContent);
 
     await db
       .update(conversations)
@@ -1126,6 +1284,9 @@ export async function streamMessage(
         runStatus: null,
       })
       .where(eq(conversations.id, input.conversationId));
+
+    // Fire-and-forget: generate summary if the conversation is long enough
+    void maybeSummarize(userId, input.conversationId).catch(() => {});
 
     send({
       type: "done",
@@ -1170,6 +1331,7 @@ export async function editUserMessage(
       .update(messages)
       .set({ content: newContent.trim() })
       .where(eq(messages.id, userMessageId));
+    await ftsUpsert(userMessageId, userMsg.conversationId, newContent.trim());
 
     // Build context up to (not including) the assistant message, with updated user content
     const contextMsgs = allMsgs
@@ -1251,7 +1413,12 @@ export async function editUserMessage(
       send(citationsPayload);
     }
 
-    const chatMessages = await buildChatMessages(userId, contextMsgs, effectiveSystemPrompt);
+    const chatMessages = await buildChatMessages(
+      userId,
+      contextMsgs,
+      effectiveSystemPrompt,
+      userMsg.conversationId,
+    );
 
     if (!resolvedChannel) {
       send({ type: "error", message: "未配置可用的默认渠道/默认模型。" });
@@ -1304,6 +1471,7 @@ export async function editUserMessage(
         updatedAt: new Date(),
       })
       .where(eq(messages.id, assistantMessageId));
+    await ftsUpsert(assistantMessageId, userMsg.conversationId, responseContent);
 
     send({ type: "done", messageId: assistantMessageId, model: resolvedChannel.modelId });
   });
@@ -1424,7 +1592,12 @@ export async function regenerateMessage(
     if (citationsPayload) {
       send(citationsPayload);
     }
-    const chatMessages = await buildChatMessages(userId, contextMsgs, effectiveSystemPrompt);
+    const chatMessages = await buildChatMessages(
+      userId,
+      contextMsgs,
+      effectiveSystemPrompt,
+      assistantMsg.conversationId,
+    );
 
     if (!resolvedChannel) {
       send({ type: "error", message: "未配置可用的默认渠道/默认模型。" });
@@ -1461,6 +1634,7 @@ export async function regenerateMessage(
         updatedAt: new Date(),
       })
       .where(eq(messages.id, assistantMessageId));
+    await ftsUpsert(assistantMessageId, assistantMsg.conversationId, responseContent);
 
     send({ type: "done", messageId: assistantMessageId, model: resolvedChannel.modelId });
   });
@@ -1550,6 +1724,7 @@ export async function syncSidecarMessages(
         .update(messages)
         .set({ content: input.userContent })
         .where(eq(messages.id, input.userMessageId));
+      await ftsUpsert(input.userMessageId, input.conversationId, input.userContent);
       await db
         .update(messages)
         .set({
@@ -1564,6 +1739,7 @@ export async function syncSidecarMessages(
           updatedAt: new Date(),
         })
         .where(eq(messages.id, input.assistantMessageId));
+      await ftsUpsert(input.assistantMessageId, input.conversationId, input.assistantContent);
       if (Array.isArray(input.attachmentsMeta)) {
         // Replace, not append: the edit's meta is authoritative for this message.
         await db.delete(attachments).where(eq(attachments.messageId, input.userMessageId));
@@ -1594,6 +1770,7 @@ export async function syncSidecarMessages(
     agentRun: null,
     createdAt: now,
   });
+  await ftsUpsert(userMessageId, input.conversationId, input.userContent);
 
   if (Array.isArray(input.attachmentsMeta) && input.attachmentsMeta.length > 0) {
     await insertSidecarAttachmentMeta(
@@ -1618,6 +1795,10 @@ export async function syncSidecarMessages(
     citations: null,
     createdAt: new Date(now.getTime() + 1),
   });
+  await ftsUpsert(assistantMessageId, input.conversationId, input.assistantContent);
+
+  // Fire-and-forget: generate summary if the conversation is long enough
+  void maybeSummarize(userId, input.conversationId).catch(() => {});
 
   return { userMessageId, assistantMessageId };
 }
@@ -1656,6 +1837,7 @@ export async function prepareChatForSidecar(
     agentRun: null,
     createdAt: now,
   });
+  await ftsUpsert(userMessageId, input.conversationId, input.content);
 
   if (input.attachments?.length) {
     await linkAttachmentsToMessage(input.attachments, userMessageId, userId);
@@ -1695,7 +1877,12 @@ export async function prepareChatForSidecar(
   const baseSystemPrompt = conversation.systemPrompt || settings[GLOBAL_SYSTEM_PROMPT_KEY] || null;
 
   const conversationMessages = await getMessages(input.conversationId);
-  const chatMessages = await buildChatMessages(userId, conversationMessages, baseSystemPrompt);
+  const chatMessages = await buildChatMessages(
+    userId,
+    conversationMessages,
+    baseSystemPrompt,
+    input.conversationId,
+  );
 
   return {
     apiKey: resolvedChannel.apiKey,
@@ -1738,9 +1925,76 @@ export async function completeChatFromSidecar(
     .where(
       and(eq(messages.id, input.assistantMessageId), eq(messages.conversationId, conversation.id)),
     );
+  await ftsUpsert(input.assistantMessageId, input.conversationId, input.content);
 
   await db
     .update(conversations)
     .set({ updatedAt: new Date(), lastMode: "chat", runStatus: null })
     .where(eq(conversations.id, conversation.id));
+
+  // Fire-and-forget: generate summary if the conversation is long enough
+  void maybeSummarize(userId, input.conversationId).catch(() => {});
+}
+
+// ---------------------------------------------------------------------------
+// Full-text search over message content (FTS5)
+// ---------------------------------------------------------------------------
+
+function mapSearchRow(row: Record<string, unknown>) {
+  return {
+    messageId: String(row.message_id ?? ""),
+    conversationId: String(row.conversation_id ?? ""),
+    conversationTitle: String(row.conversation_title ?? ""),
+    role: String(row.role ?? ""),
+    snippet: String(row.snippet ?? ""),
+    createdAt: Number(row.created_at ?? 0),
+  };
+}
+
+export async function searchMessages(
+  userId: string,
+  query: string,
+  limit = 50,
+): Promise<
+  Array<{
+    messageId: string;
+    conversationId: string;
+    conversationTitle: string;
+    role: string;
+    snippet: string;
+    createdAt: number;
+  }>
+> {
+  const trimmed = query.trim();
+  if (!trimmed) return [];
+
+  // trigram FTS requires >= 3 chars
+  if (trimmed.length >= 3) {
+    const escaped = trimmed.replace(/"/g, '""');
+    const result = await client.execute({
+      sql: `SELECT f.message_id, f.conversation_id, substr(f.content, 1, 200) as snippet,
+                   c.title AS conversation_title, m.role, m.created_at
+            FROM messages_fts f
+            JOIN conversations c ON c.id = f.conversation_id AND c.user_id = ?
+            JOIN messages m ON m.id = f.message_id
+            WHERE messages_fts MATCH ?
+            ORDER BY rank
+            LIMIT ?`,
+      args: [userId, `"${escaped}"`, limit],
+    });
+    return (result.rows as Record<string, unknown>[]).map(mapSearchRow);
+  }
+
+  // < 3 chars: LIKE fallback
+  const result = await client.execute({
+    sql: `SELECT m.id as message_id, m.conversation_id, substr(m.content, 1, 200) as snippet,
+                 c.title AS conversation_title, m.role, m.created_at
+          FROM messages m
+          JOIN conversations c ON c.id = m.conversation_id AND c.user_id = ?
+          WHERE m.content LIKE ?
+          ORDER BY m.created_at DESC
+          LIMIT ?`,
+    args: [userId, `%${trimmed}%`, limit],
+  });
+  return (result.rows as Record<string, unknown>[]).map(mapSearchRow);
 }
