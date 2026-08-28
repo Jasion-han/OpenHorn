@@ -710,6 +710,8 @@ export const sidebarLabels = {
   "sidebar.action.delete": "删除",
   // Empty state
   "sidebar.emptyState": "暂无会话",
+  // Search results
+  "sidebar.searchNoResults": "无匹配的消息",
   // Delete-confirm dialog
   "sidebar.deleteDialog.title": "删除对话？",
   "sidebar.deleteDialog.description": "确定删除该会话？此操作不可恢复。",

@@ -290,3 +290,12 @@ export interface SendMessageInput {
   attachments?: string[];
   mode?: ChatMode;
 }
+
+export interface MessageSearchResult {
+  messageId: string;
+  conversationId: string;
+  conversationTitle: string;
+  role: string;
+  snippet: string;
+  createdAt: number;
+}

@@ -133,6 +133,7 @@ function createStubServerApi() {
         assistantMessageId: "a1",
       }),
       chatComplete: async () => ({ success: true }),
+      search: async () => ({ results: [] }),
     },
     channels: {
       list: async () => ({

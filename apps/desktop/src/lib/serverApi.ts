@@ -7,6 +7,7 @@ import type {
   ApiMessage,
   ApiSettingsMap,
   CreateConversationInput,
+  MessageSearchResult,
   SendMessageInput,
   UpdateConversationInput,
 } from "../types/chat";
@@ -36,6 +37,7 @@ export interface ServerApi {
   };
   messages: {
     list: (conversationId: string) => Promise<{ messages: ApiMessage[] }>;
+    search: (query: string) => Promise<{ results: MessageSearchResult[] }>;
     stream: (data: SendMessageInput, options?: { signal?: AbortSignal }) => Promise<Response>;
     delete: (id: string) => Promise<{ success: boolean }>;
     regenerate: (
@@ -308,6 +310,8 @@ export function createServerApi(options?: { baseUrl?: string; fetch?: FetchLike 
     messages: {
       list: (conversationId) =>
         fetchJson(fetchImpl, baseUrl, `/messages/${encodeURIComponent(conversationId)}`),
+      search: (query) =>
+        fetchJson(fetchImpl, baseUrl, `/messages/search?q=${encodeURIComponent(query)}`),
       stream: async (data, options) => {
         return requestWithBackendStatus(fetchImpl, `${baseUrl}/messages/stream`, {
           method: "POST",

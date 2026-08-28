@@ -10,6 +10,7 @@ import type {
   Conversation,
   Message,
   MessageAttachmentMeta,
+  MessageSearchResult,
   SendMessageInput,
 } from "../types/chat";
 
@@ -229,6 +230,7 @@ export interface ChatState {
 
   loadChannels: () => Promise<void>;
   loadConversations: () => Promise<void>;
+  searchMessages: (query: string) => Promise<MessageSearchResult[]>;
   selectConversation: (conversationId: string) => Promise<void>;
   createConversation: (
     title: string,
@@ -398,6 +400,10 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
         set({ isLoading: false, error: toErrorMessage(error) });
         throw error;
       }
+    },
+
+    async searchMessages(query) {
+      return adapter.searchMessages(query);
     },
 
     async selectConversation(conversationId) {

@@ -90,6 +90,7 @@ function createStubAdapter() {
       editedContent = content;
       return new Response("ok", { status: 200 });
     },
+    searchMessages: async () => [],
     abortActiveStream: () => {},
     getSettings: async () => ({}),
   };
@@ -591,6 +592,7 @@ function createManyConvAdapter(count: number): ChatAdapter {
     deleteMessage: async () => {},
     regenerateMessage: async () => new Response("ok", { status: 200 }),
     editUserMessage: async () => new Response("ok", { status: 200 }),
+    searchMessages: async () => [],
     abortActiveStream: () => {},
     getSettings: async () => ({}),
   };

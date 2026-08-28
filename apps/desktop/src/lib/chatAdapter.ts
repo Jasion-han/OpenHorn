@@ -11,6 +11,7 @@ import type {
   CreateConversationInput,
   Message,
   MessageAttachmentMeta,
+  MessageSearchResult,
   SendMessageInput,
   UpdateConversationInput,
 } from "../types/chat";
@@ -34,6 +35,7 @@ export interface ChatAdapter {
     data?: { userMessageId?: string; userContent?: string },
   ) => Promise<Response>;
   editUserMessage: (messageId: string, content: string) => Promise<Response>;
+  searchMessages: (query: string) => Promise<MessageSearchResult[]>;
   abortActiveStream: () => void;
   getSettings: (keys: string[]) => Promise<Record<string, string>>;
 }
@@ -279,6 +281,11 @@ export function createChatAdapter(api: ServerApi = createServerApi()): ChatAdapt
       }
 
       return response;
+    },
+
+    async searchMessages(query) {
+      const { results } = await api.messages.search(query);
+      return results;
     },
 
     abortActiveStream() {

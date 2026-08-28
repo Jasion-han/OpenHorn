@@ -39,7 +39,7 @@ import { useAuthStore } from "../../stores/authStore";
 import { useBackendStatusStore } from "../../stores/backendStatusStore";
 import { useChatStore } from "../../stores/chatStore";
 import { useDesktopShellStore } from "../../stores/desktopShellStore";
-import type { Conversation } from "../../types/chat";
+import type { Conversation, MessageSearchResult } from "../../types/chat";
 
 // The shortcut hint next to the new-conversation button. The handler accepts both
 // modifiers, so the label follows the platform instead of always showing ⌘.
@@ -212,8 +212,11 @@ export function DesktopLeftSidebar() {
   const selectConversation = useChatStore((state) => state.selectConversation);
   const updateConversation = useChatStore((state) => state.updateConversation);
   const deleteConversation = useChatStore((state) => state.deleteConversation);
+  const searchMessages = useChatStore((state) => state.searchMessages);
   const reset = useChatStore((state) => state.reset);
   const backendBase = getDesktopBackendBase();
+
+  const [searchResults, setSearchResults] = useState<MessageSearchResult[] | null>(null);
 
   // ⌘N / Ctrl+N — the shortcut advertised next to the new-conversation button.
   useEffect(() => {
@@ -227,6 +230,26 @@ export function DesktopLeftSidebar() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   });
+
+  // Debounced full-text search via backend FTS5 API. When the query is empty,
+  // searchResults is set to null so the sidebar falls back to the normal
+  // conversation list with client-side title filtering.
+  useEffect(() => {
+    const q = query.trim();
+    if (!q) {
+      setSearchResults(null);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      try {
+        const results = await searchMessages(q);
+        setSearchResults(results);
+      } catch {
+        setSearchResults(null);
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [query, searchMessages]);
 
   const filteredConversations = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
@@ -397,104 +420,144 @@ export function DesktopLeftSidebar() {
 
           <ScrollArea className="flex-1 min-h-0">
             <div className="flex flex-col gap-1 py-1">
-              {pinned.length > 0 && (
-                <div>
-                  <div className="flex items-center justify-between px-3 pb-1 pt-2">
-                    <span className="text-[11px] font-medium text-muted-foreground/80">
-                      {getSidebarLabel("sidebar.pinnedHeading")}
-                    </span>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      className="h-5 w-5"
-                      onClick={() => setPinnedOpen((value) => !value)}
-                    >
-                      {pinnedOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                    </Button>
-                  </div>
-
-                  {pinnedOpen &&
-                    pinned.map((conversation) =>
-                      renamingId === conversation.id ? (
-                        <div key={conversation.id} className="px-2 py-1">
-                          <Input
-                            autoFocus
-                            value={renameValue}
-                            onChange={(event) => setRenameValue(event.target.value)}
-                            onBlur={() => void handleSubmitRename(conversation)}
-                            onKeyDown={(event) => {
-                              if (event.key === "Enter") void handleSubmitRename(conversation);
-                              if (event.key === "Escape") setRenamingId(null);
-                            }}
-                          />
-                        </div>
-                      ) : (
-                        <ConversationRow
-                          key={`pinned-${conversation.id}`}
-                          conversation={conversation}
-                          isActive={currentConversation?.id === conversation.id}
-                          onSelect={() => {
-                            setActiveView("chat");
-                            void selectConversation(conversation.id);
-                          }}
-                          onRename={() => {
-                            setRenamingId(conversation.id);
-                            setRenameValue(displayConversationTitle(conversation.title));
-                          }}
-                          onTogglePin={() => void handleTogglePin(conversation)}
-                          onDelete={() => setPendingDelete(conversation)}
-                          pinLabel={getSidebarLabel("sidebar.action.unpin")}
-                        />
-                      ),
-                    )}
-                </div>
-              )}
-
-              {groups.map((group) => (
-                <div key={group.label}>
-                  <p className="px-3 pb-1 pt-2 text-[11px] font-medium text-muted-foreground/80">
-                    {getSidebarLabel(group.label)}
-                  </p>
-                  {group.items.map((conversation) =>
-                    renamingId === conversation.id ? (
-                      <div key={conversation.id} className="px-2 py-1">
-                        <Input
-                          autoFocus
-                          value={renameValue}
-                          onChange={(event) => setRenameValue(event.target.value)}
-                          onBlur={() => void handleSubmitRename(conversation)}
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter") void handleSubmitRename(conversation);
-                            if (event.key === "Escape") setRenamingId(null);
-                          }}
-                        />
-                      </div>
-                    ) : (
-                      <ConversationRow
-                        key={conversation.id}
-                        conversation={conversation}
-                        isActive={currentConversation?.id === conversation.id}
-                        onSelect={() => {
+              {searchResults !== null ? (
+                searchResults.length > 0 ? (
+                  searchResults.map((result) => (
+                    // biome-ignore lint/a11y/useSemanticElements: cannot use <button> due to multi-line content layout
+                    <div
+                      key={result.messageId}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => {
+                        setActiveView("chat");
+                        void selectConversation(result.conversationId);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
                           setActiveView("chat");
-                          void selectConversation(conversation.id);
-                        }}
-                        onRename={() => {
-                          setRenamingId(conversation.id);
-                          setRenameValue(displayConversationTitle(conversation.title));
-                        }}
-                        onTogglePin={() => void handleTogglePin(conversation)}
-                        onDelete={() => setPendingDelete(conversation)}
-                        pinLabel={getSidebarLabel("sidebar.action.pin")}
-                      />
-                    ),
-                  )}
-                </div>
-              ))}
+                          void selectConversation(result.conversationId);
+                        }
+                      }}
+                      className="flex cursor-pointer flex-col gap-0.5 rounded-[10px] border border-transparent px-3 py-[7px] text-left text-sm transition-colors duration-100 titlebar-no-drag text-foreground/70 hover:bg-foreground/[0.04] hover:text-foreground"
+                    >
+                      <span className="truncate font-medium text-foreground">
+                        {displayConversationTitle(result.conversationTitle)}
+                      </span>
+                      <span className="line-clamp-2 text-xs text-muted-foreground">
+                        {result.snippet.length > 100
+                          ? `${result.snippet.slice(0, 100)}...`
+                          : result.snippet}
+                      </span>
+                    </div>
+                  ))
+                ) : (
+                  <p className="py-8 text-center text-xs text-muted-foreground">
+                    {getSidebarLabel("sidebar.searchNoResults")}
+                  </p>
+                )
+              ) : (
+                <>
+                  {pinned.length > 0 && (
+                    <div>
+                      <div className="flex items-center justify-between px-3 pb-1 pt-2">
+                        <span className="text-[11px] font-medium text-muted-foreground/80">
+                          {getSidebarLabel("sidebar.pinnedHeading")}
+                        </span>
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          className="h-5 w-5"
+                          onClick={() => setPinnedOpen((value) => !value)}
+                        >
+                          {pinnedOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                        </Button>
+                      </div>
 
-              {filteredConversations.length === 0 && (
-                <p className="py-8 text-center text-xs text-muted-foreground">
-                  {getSidebarLabel("sidebar.emptyState")}
-                </p>
+                      {pinnedOpen &&
+                        pinned.map((conversation) =>
+                          renamingId === conversation.id ? (
+                            <div key={conversation.id} className="px-2 py-1">
+                              <Input
+                                autoFocus
+                                value={renameValue}
+                                onChange={(event) => setRenameValue(event.target.value)}
+                                onBlur={() => void handleSubmitRename(conversation)}
+                                onKeyDown={(event) => {
+                                  if (event.key === "Enter") void handleSubmitRename(conversation);
+                                  if (event.key === "Escape") setRenamingId(null);
+                                }}
+                              />
+                            </div>
+                          ) : (
+                            <ConversationRow
+                              key={`pinned-${conversation.id}`}
+                              conversation={conversation}
+                              isActive={currentConversation?.id === conversation.id}
+                              onSelect={() => {
+                                setActiveView("chat");
+                                void selectConversation(conversation.id);
+                              }}
+                              onRename={() => {
+                                setRenamingId(conversation.id);
+                                setRenameValue(displayConversationTitle(conversation.title));
+                              }}
+                              onTogglePin={() => void handleTogglePin(conversation)}
+                              onDelete={() => setPendingDelete(conversation)}
+                              pinLabel={getSidebarLabel("sidebar.action.unpin")}
+                            />
+                          ),
+                        )}
+                    </div>
+                  )}
+
+                  {groups.map((group) => (
+                    <div key={group.label}>
+                      <p className="px-3 pb-1 pt-2 text-[11px] font-medium text-muted-foreground/80">
+                        {getSidebarLabel(group.label)}
+                      </p>
+                      {group.items.map((conversation) =>
+                        renamingId === conversation.id ? (
+                          <div key={conversation.id} className="px-2 py-1">
+                            <Input
+                              autoFocus
+                              value={renameValue}
+                              onChange={(event) => setRenameValue(event.target.value)}
+                              onBlur={() => void handleSubmitRename(conversation)}
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter") void handleSubmitRename(conversation);
+                                if (event.key === "Escape") setRenamingId(null);
+                              }}
+                            />
+                          </div>
+                        ) : (
+                          <ConversationRow
+                            key={conversation.id}
+                            conversation={conversation}
+                            isActive={currentConversation?.id === conversation.id}
+                            onSelect={() => {
+                              setActiveView("chat");
+                              void selectConversation(conversation.id);
+                            }}
+                            onRename={() => {
+                              setRenamingId(conversation.id);
+                              setRenameValue(displayConversationTitle(conversation.title));
+                            }}
+                            onTogglePin={() => void handleTogglePin(conversation)}
+                            onDelete={() => setPendingDelete(conversation)}
+                            pinLabel={getSidebarLabel("sidebar.action.pin")}
+                          />
+                        ),
+                      )}
+                    </div>
+                  ))}
+
+                  {filteredConversations.length === 0 && (
+                    <p className="py-8 text-center text-xs text-muted-foreground">
+                      {getSidebarLabel("sidebar.emptyState")}
+                    </p>
+                  )}
+                </>
               )}
             </div>
           </ScrollArea>
