@@ -92,7 +92,7 @@ function resolveDataDir() {
  * Resolve an OpenAI-compatible embedding API key for the given user.
  * Returns null when the user has no enabled OpenAI-compatible channel.
  */
-async function getEmbeddingApiKey(
+export async function getEmbeddingApiKey(
   userId: string,
 ): Promise<{ apiKey: string; baseUrl?: string } | null> {
   const rows = await db

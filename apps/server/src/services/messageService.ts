@@ -14,6 +14,7 @@ import type {
 } from "./agentTaskService";
 import {
   buildAttachmentPayloadFromIds,
+  getEmbeddingApiKey,
   LOCAL_ATTACHMENT_PATH_PREFIX,
   linkAttachmentsToMessage,
   removeAttachmentFiles,
@@ -23,6 +24,7 @@ import { isChannelAvailable, recordChannelFailure, recordChannelSuccess } from "
 import { buildLiveContext, type LiveContextResult, toStoredLiveMetadata } from "./liveCapabilities";
 import { classifyLiveRouteWithModel } from "./liveRouteClassifier";
 import { classifyProviderError } from "./providerErrorSummary";
+import { retrieveContext } from "./ragService";
 import { mergeSystemPromptParts, RESPONSE_STYLE_GUARDRAILS } from "./responseStyle";
 import {
   type SearchCitation,
@@ -718,6 +720,29 @@ async function buildChatMessages(
       }
     } catch {
       // Best-effort: do not block the conversation
+    }
+  }
+
+  // RAG context injection — retrieve relevant document chunks for the user's
+  // latest query and append them to the system prompt so the model can reference
+  // uploaded documents during the conversation.
+  const lastUserMsg = conversationMessages.filter((m) => m.role === "user").pop();
+  if (lastUserMsg) {
+    try {
+      const embeddingCreds = await getEmbeddingApiKey(userId);
+      if (embeddingCreds) {
+        const ragContext = await retrieveContext(
+          lastUserMsg.content,
+          userId,
+          embeddingCreds.apiKey,
+          embeddingCreds.baseUrl,
+        );
+        if (ragContext) {
+          effectiveSystemPrompt = `${effectiveSystemPrompt || ""}\n\n## 相关文档上下文\n\n${ragContext}`;
+        }
+      }
+    } catch {
+      // RAG retrieval failure must not block normal conversation
     }
   }
 
