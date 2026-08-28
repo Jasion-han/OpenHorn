@@ -6,6 +6,7 @@ import {
   getMessagesForUserWithAttachments,
   prepareChatForSidecar,
   regenerateMessage,
+  searchMessages,
   sendMessage,
   streamMessage,
   syncSidecarMessages,
@@ -39,6 +40,17 @@ function parseUsagePayload(
 const messages = new Hono<UserEnv>();
 
 messages.use("*", requireUser);
+
+messages.get("/search", async (c) => {
+  const user = c.get("user");
+  const query = c.req.query("q") ?? "";
+  try {
+    const results = await searchMessages(user.id, query);
+    return c.json({ results });
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : "Search failed" }, 500);
+  }
+});
 
 messages.get("/:conversationId", async (c) => {
   const user = c.get("user");

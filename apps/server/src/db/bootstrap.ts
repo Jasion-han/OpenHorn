@@ -111,6 +111,9 @@ const SCHEMA_DDL: string[] = [
 	    force_web_search INTEGER DEFAULT 1,
 	    run_status TEXT,
 	    workspace_id TEXT,
+	    summary TEXT,
+	    key_facts TEXT,
+	    last_summarized_at INTEGER,
 	    created_at INTEGER NOT NULL,
 	    updated_at INTEGER NOT NULL,
 	    FOREIGN KEY (user_id) REFERENCES users(id),
@@ -805,6 +808,9 @@ async function ensureDeleteSemanticsForeignKeys(): Promise<boolean> {
       force_web_search INTEGER DEFAULT 1,
       run_status TEXT,
       workspace_id TEXT,
+      summary TEXT,
+      key_facts TEXT,
+      last_summarized_at INTEGER,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL,
       FOREIGN KEY (user_id) REFERENCES users(id),
@@ -825,6 +831,9 @@ async function ensureDeleteSemanticsForeignKeys(): Promise<boolean> {
         COALESCE(force_web_search, 1),
         run_status,
         workspace_id,
+        summary,
+        key_facts,
+        last_summarized_at,
         created_at,
         updated_at
       FROM conversations;`);
@@ -1128,7 +1137,45 @@ async function migratePasswordsToAccountTable(): Promise<void> {
     });
   }
 
-  await client.execute(`UPDATE account SET issuer = 'local:credential' WHERE provider_id = 'credential' AND (issuer IS NULL OR issuer = '');`);
+  await client.execute(
+    `UPDATE account SET issuer = 'local:credential' WHERE provider_id = 'credential' AND (issuer IS NULL OR issuer = '');`,
+  );
+}
+
+async function ensureConversationSummaryColumns(): Promise<void> {
+  const result = await client.execute(`PRAGMA table_info('conversations');`);
+  const rows = getRows(result);
+  if (!hasColumnNamed(rows, "summary")) {
+    await client.execute(`ALTER TABLE conversations ADD COLUMN summary TEXT;`);
+  }
+  if (!hasColumnNamed(rows, "key_facts")) {
+    await client.execute(`ALTER TABLE conversations ADD COLUMN key_facts TEXT;`);
+  }
+  if (!hasColumnNamed(rows, "last_summarized_at")) {
+    await client.execute(`ALTER TABLE conversations ADD COLUMN last_summarized_at INTEGER;`);
+  }
+}
+
+async function ensureMessagesFtsTable(): Promise<void> {
+  const check = await client.execute(
+    `SELECT name FROM sqlite_master WHERE type='table' AND name='messages_fts';`,
+  );
+  if (getRows(check).length > 0) return;
+
+  await client.execute(
+    `CREATE VIRTUAL TABLE messages_fts USING fts5(
+      message_id UNINDEXED,
+      conversation_id UNINDEXED,
+      content,
+      tokenize='trigram'
+    );`,
+  );
+
+  // Backfill existing messages (truncate long content to 5000 chars for index efficiency)
+  await client.execute(
+    `INSERT INTO messages_fts(message_id, conversation_id, content)
+     SELECT id, conversation_id, substr(content, 1, 5000) FROM messages;`,
+  );
 }
 
 export async function bootstrapDatabase(): Promise<void> {
@@ -1176,6 +1223,8 @@ export async function bootstrapDatabase(): Promise<void> {
   await migratePasswordsToAccountTable();
   await ensureDefaultLocalUser();
 
+  await ensureConversationSummaryColumns();
+
   // Runs LAST and rebuilds 7 core tables with DROP TABLE + RENAME. SQLite drops
   // a table's indexes with the table, and the SCHEMA_DDL pass above already
   // ran — so without replaying the index DDL here, a database that just took
@@ -1188,4 +1237,9 @@ export async function bootstrapDatabase(): Promise<void> {
       }
     }
   }
+
+  // FTS5 virtual table for full-text search over message content. Must run
+  // after ensureDeleteSemanticsForeignKeys (which may rebuild the messages
+  // table) so the backfill reads the final rows.
+  await ensureMessagesFtsTable();
 }
