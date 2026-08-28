@@ -112,6 +112,38 @@ function shouldRetryStatus(status: number) {
   return status === 429 || status === 502 || status === 503 || status === 504;
 }
 
+const MAX_RETRY_ATTEMPTS = 3;
+const RETRY_BASE_DELAY_MS = 500;
+const RETRY_MAX_DELAY_MS = 8_000;
+
+async function fetchWithRetry(
+  url: string,
+  init: RequestInit,
+  signal?: AbortSignal,
+): Promise<Response> {
+  let response: Response | null = null;
+  for (let attempt = 0; attempt <= MAX_RETRY_ATTEMPTS; attempt++) {
+    response = await fetch(url, { ...init, signal });
+    if (response.ok) return response;
+    if (!shouldRetryStatus(response.status) || attempt === MAX_RETRY_ATTEMPTS) return response;
+
+    let delayMs: number;
+    if (response.status === 429) {
+      const retryAfter = response.headers.get("retry-after");
+      const parsed = retryAfter ? Number(retryAfter) : NaN;
+      delayMs =
+        Number.isFinite(parsed) && parsed > 0
+          ? Math.min(parsed * 1000, RETRY_MAX_DELAY_MS)
+          : RETRY_BASE_DELAY_MS * 2 ** attempt;
+    } else {
+      delayMs = RETRY_BASE_DELAY_MS * 2 ** attempt;
+    }
+    const jitter = Math.random() * delayMs * 0.25;
+    await sleep(Math.min(delayMs + jitter, RETRY_MAX_DELAY_MS));
+  }
+  return response!;
+}
+
 function createTimeoutError(message: string) {
   const error = new Error(message);
   error.name = "TimeoutError";
@@ -537,22 +569,20 @@ export class OpenAIAdapter implements ProviderAdapter {
       options.signal,
       options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
     );
-    let response: Response | null = null;
+    let response: Response;
     try {
-      for (let attempt = 0; attempt < 2; attempt++) {
-        response = await fetch(url, {
+      response = await fetchWithRetry(
+        url,
+        {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${this.apiKey}`,
           },
           body,
-          signal: timeout.signal,
-        });
-        if (response.ok) break;
-        if (!shouldRetryStatus(response.status) || attempt === 1) break;
-        await sleep(500 * (attempt + 1));
-      }
+        },
+        timeout.signal,
+      );
     } catch (error) {
       timeout.cleanup();
       rethrowAbortReason(timeout.signal, error);
@@ -563,9 +593,9 @@ export class OpenAIAdapter implements ProviderAdapter {
       throw timeout.signal.reason;
     }
 
-    if (!response || !response.ok) {
-      const detail = response ? await readErrorDetail(response) : "Request failed";
-      throw new Error(formatProviderApiError(response?.status, detail));
+    if (!response.ok) {
+      const detail = await readErrorDetail(response);
+      throw new Error(formatProviderApiError(response.status, detail));
     }
 
     const data = (await response.json()) as unknown;
@@ -631,10 +661,11 @@ export class OpenAIAdapter implements ProviderAdapter {
       idleTimeoutMs: options.streamIdleTimeoutMs,
       totalTimeoutMs: options.streamTotalTimeoutMs,
     });
-    let response: Response | null = null;
+    let response: Response;
     try {
-      for (let attempt = 0; attempt < 2; attempt++) {
-        response = await fetch(url, {
+      response = await fetchWithRetry(
+        url,
+        {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -642,12 +673,9 @@ export class OpenAIAdapter implements ProviderAdapter {
             Authorization: `Bearer ${this.apiKey}`,
           },
           body,
-          signal: timeout.signal,
-        });
-        if (response.ok) break;
-        if (!shouldRetryStatus(response.status) || attempt === 1) break;
-        await sleep(500 * (attempt + 1));
-      }
+        },
+        timeout.signal,
+      );
     } catch (error) {
       timeout.cleanup();
       rethrowAbortReason(timeout.signal, error);
@@ -658,10 +686,10 @@ export class OpenAIAdapter implements ProviderAdapter {
       throw timeout.signal.reason;
     }
 
-    if (!response || !response.ok) {
+    if (!response.ok) {
       timeout.cleanup();
-      const detail = response ? await readErrorDetail(response) : "Request failed";
-      throw new Error(formatProviderApiError(response?.status, detail));
+      const detail = await readErrorDetail(response);
+      throw new Error(formatProviderApiError(response.status, detail));
     }
 
     const reader = response.body?.getReader();
@@ -867,22 +895,20 @@ export class OpenAIAdapter implements ProviderAdapter {
       options.signal,
       options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
     );
-    let response: Response | null = null;
+    let response: Response;
     try {
-      for (let attempt = 0; attempt < 2; attempt++) {
-        response = await fetch(url, {
+      response = await fetchWithRetry(
+        url,
+        {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${this.apiKey}`,
           },
           body,
-          signal: timeout.signal,
-        });
-        if (response.ok) break;
-        if (!shouldRetryStatus(response.status) || attempt === 1) break;
-        await sleep(500 * (attempt + 1));
-      }
+        },
+        timeout.signal,
+      );
     } catch (error) {
       timeout.cleanup();
       rethrowAbortReason(timeout.signal, error);
@@ -893,9 +919,9 @@ export class OpenAIAdapter implements ProviderAdapter {
       throw timeout.signal.reason;
     }
 
-    if (!response || !response.ok) {
-      const detail = response ? await readErrorDetail(response) : "Request failed";
-      throw new Error(formatProviderApiError(response?.status, detail));
+    if (!response.ok) {
+      const detail = await readErrorDetail(response);
+      throw new Error(formatProviderApiError(response.status, detail));
     }
 
     const data = (await response.json()) as unknown;
@@ -968,10 +994,11 @@ export class OpenAIAdapter implements ProviderAdapter {
       totalTimeoutMs: options.requestTimeoutMs ?? DEFAULT_STREAM_TOTAL_TIMEOUT_MS,
       firstTokenTimeoutMs: resolveToolCallingStreamFirstTokenTimeoutMs(options.requestTimeoutMs),
     });
-    let response: Response | null = null;
+    let response: Response;
     try {
-      for (let attempt = 0; attempt < 2; attempt++) {
-        response = await fetch(url, {
+      response = await fetchWithRetry(
+        url,
+        {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -979,12 +1006,9 @@ export class OpenAIAdapter implements ProviderAdapter {
             Authorization: `Bearer ${this.apiKey}`,
           },
           body,
-          signal: timeout.signal,
-        });
-        if (response.ok) break;
-        if (!shouldRetryStatus(response.status) || attempt === 1) break;
-        await sleep(500 * (attempt + 1));
-      }
+        },
+        timeout.signal,
+      );
     } catch (error) {
       timeout.cleanup();
       rethrowAbortReason(timeout.signal, error);
@@ -995,10 +1019,10 @@ export class OpenAIAdapter implements ProviderAdapter {
       throw timeout.signal.reason;
     }
 
-    if (!response || !response.ok) {
+    if (!response.ok) {
       timeout.cleanup();
-      const detail = response ? await readErrorDetail(response) : "Request failed";
-      throw new Error(formatProviderApiError(response?.status, detail));
+      const detail = await readErrorDetail(response);
+      throw new Error(formatProviderApiError(response.status, detail));
     }
 
     const reader = response.body?.getReader();
@@ -1250,10 +1274,11 @@ export class AnthropicAdapter implements ProviderAdapter {
       options.signal,
       options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
     );
-    let response: Response | null = null;
+    let response: Response;
     try {
-      for (let attempt = 0; attempt < 2; attempt++) {
-        response = await fetch(url, {
+      response = await fetchWithRetry(
+        url,
+        {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -1261,12 +1286,9 @@ export class AnthropicAdapter implements ProviderAdapter {
             "anthropic-version": "2023-06-01",
           },
           body,
-          signal: timeout.signal,
-        });
-        if (response.ok) break;
-        if (!shouldRetryStatus(response.status) || attempt === 1) break;
-        await sleep(500 * (attempt + 1));
-      }
+        },
+        timeout.signal,
+      );
     } catch (error) {
       timeout.cleanup();
       rethrowAbortReason(timeout.signal, error);
@@ -1277,9 +1299,9 @@ export class AnthropicAdapter implements ProviderAdapter {
       throw timeout.signal.reason;
     }
 
-    if (!response || !response.ok) {
-      const detail = response ? await readErrorDetail(response) : "Request failed";
-      throw new Error(formatProviderApiError(response?.status, detail));
+    if (!response.ok) {
+      const detail = await readErrorDetail(response);
+      throw new Error(formatProviderApiError(response.status, detail));
     }
 
     const data = (await response.json()) as unknown;
@@ -1354,10 +1376,11 @@ export class AnthropicAdapter implements ProviderAdapter {
       idleTimeoutMs: options.streamIdleTimeoutMs,
       totalTimeoutMs: options.streamTotalTimeoutMs,
     });
-    let response: Response | null = null;
+    let response: Response;
     try {
-      for (let attempt = 0; attempt < 2; attempt++) {
-        response = await fetch(url, {
+      response = await fetchWithRetry(
+        url,
+        {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -1365,12 +1388,9 @@ export class AnthropicAdapter implements ProviderAdapter {
             "anthropic-version": "2023-06-01",
           },
           body,
-          signal: timeout.signal,
-        });
-        if (response.ok) break;
-        if (!shouldRetryStatus(response.status) || attempt === 1) break;
-        await sleep(500 * (attempt + 1));
-      }
+        },
+        timeout.signal,
+      );
     } catch (error) {
       timeout.cleanup();
       rethrowAbortReason(timeout.signal, error);
@@ -1381,10 +1401,10 @@ export class AnthropicAdapter implements ProviderAdapter {
       throw timeout.signal.reason;
     }
 
-    if (!response || !response.ok) {
+    if (!response.ok) {
       timeout.cleanup();
-      const detail = response ? await readErrorDetail(response) : "Request failed";
-      throw new Error(formatProviderApiError(response?.status, detail));
+      const detail = await readErrorDetail(response);
+      throw new Error(formatProviderApiError(response.status, detail));
     }
 
     const reader = response.body?.getReader();
@@ -1548,10 +1568,11 @@ export class AnthropicAdapter implements ProviderAdapter {
       options.signal,
       options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
     );
-    let response: Response | null = null;
+    let response: Response;
     try {
-      for (let attempt = 0; attempt < 2; attempt++) {
-        response = await fetch(url, {
+      response = await fetchWithRetry(
+        url,
+        {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -1559,12 +1580,9 @@ export class AnthropicAdapter implements ProviderAdapter {
             "anthropic-version": "2023-06-01",
           },
           body,
-          signal: timeout.signal,
-        });
-        if (response.ok) break;
-        if (!shouldRetryStatus(response.status) || attempt === 1) break;
-        await sleep(500 * (attempt + 1));
-      }
+        },
+        timeout.signal,
+      );
     } catch (error) {
       timeout.cleanup();
       rethrowAbortReason(timeout.signal, error);
@@ -1575,8 +1593,8 @@ export class AnthropicAdapter implements ProviderAdapter {
       throw timeout.signal.reason;
     }
 
-    if (!response || !response.ok) {
-      const detail = response ? await readErrorDetail(response) : "Request failed";
+    if (!response.ok) {
+      const detail = await readErrorDetail(response);
       if (
         options.toolChoice &&
         options.toolChoice !== "auto" &&
@@ -1587,7 +1605,7 @@ export class AnthropicAdapter implements ProviderAdapter {
           toolChoice: "auto",
         });
       }
-      throw new Error(formatProviderApiError(response?.status, detail));
+      throw new Error(formatProviderApiError(response.status, detail));
     }
 
     const data = (await response.json()) as unknown;
@@ -1788,28 +1806,26 @@ export class GoogleAdapter implements ToolCallingAdapter {
       options.signal,
       options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
     );
-    let response: Response | null = null;
+    let response: Response;
     try {
-      for (let attempt = 0; attempt < 2; attempt++) {
-        response = await fetch(url, {
+      response = await fetchWithRetry(
+        url,
+        {
           method: "POST",
           headers: this.authHeaders(),
           body,
-          signal: timeout.signal,
-        });
-        if (response.ok) break;
-        if (!shouldRetryStatus(response.status) || attempt === 1) break;
-        await sleep(500 * (attempt + 1));
-      }
+        },
+        timeout.signal,
+      );
     } catch (error) {
       timeout.cleanup();
       rethrowAbortReason(timeout.signal, error);
     }
     timeout.cleanup();
 
-    if (!response || !response.ok) {
-      const detail = response ? await readErrorDetail(response) : "Request failed";
-      throw new Error(formatProviderApiError(response?.status, detail));
+    if (!response.ok) {
+      const detail = await readErrorDetail(response);
+      throw new Error(formatProviderApiError(response.status, detail));
     }
 
     const data = (await response.json()) as unknown;
@@ -1876,28 +1892,26 @@ export class GoogleAdapter implements ToolCallingAdapter {
       idleTimeoutMs: options.streamIdleTimeoutMs,
       totalTimeoutMs: options.streamTotalTimeoutMs,
     });
-    let response: Response | null = null;
+    let response: Response;
     try {
-      for (let attempt = 0; attempt < 2; attempt++) {
-        response = await fetch(url, {
+      response = await fetchWithRetry(
+        url,
+        {
           method: "POST",
           headers: this.authHeaders(),
           body,
-          signal: timeout.signal,
-        });
-        if (response.ok) break;
-        if (!shouldRetryStatus(response.status) || attempt === 1) break;
-        await sleep(500 * (attempt + 1));
-      }
+        },
+        timeout.signal,
+      );
     } catch (error) {
       timeout.cleanup();
       rethrowAbortReason(timeout.signal, error);
     }
 
-    if (!response || !response.ok) {
+    if (!response.ok) {
       timeout.cleanup();
-      const detail = response ? await readErrorDetail(response) : "Request failed";
-      throw new Error(formatProviderApiError(response?.status, detail));
+      const detail = await readErrorDetail(response);
+      throw new Error(formatProviderApiError(response.status, detail));
     }
 
     const reader = response.body?.getReader();
@@ -2025,28 +2039,26 @@ export class GoogleAdapter implements ToolCallingAdapter {
       options.signal,
       options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
     );
-    let response: Response | null = null;
+    let response: Response;
     try {
-      for (let attempt = 0; attempt < 2; attempt++) {
-        response = await fetch(url, {
+      response = await fetchWithRetry(
+        url,
+        {
           method: "POST",
           headers: this.authHeaders(),
           body,
-          signal: timeout.signal,
-        });
-        if (response.ok) break;
-        if (!shouldRetryStatus(response.status) || attempt === 1) break;
-        await sleep(500 * (attempt + 1));
-      }
+        },
+        timeout.signal,
+      );
     } catch (error) {
       timeout.cleanup();
       rethrowAbortReason(timeout.signal, error);
     }
     timeout.cleanup();
 
-    if (!response || !response.ok) {
-      const detail = response ? await readErrorDetail(response) : "Request failed";
-      throw new Error(formatProviderApiError(response?.status, detail));
+    if (!response.ok) {
+      const detail = await readErrorDetail(response);
+      throw new Error(formatProviderApiError(response.status, detail));
     }
 
     const data = (await response.json()) as unknown;
