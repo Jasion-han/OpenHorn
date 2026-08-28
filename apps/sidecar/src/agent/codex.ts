@@ -5,6 +5,7 @@ import { createInterface } from "node:readline";
 import type { AttachmentPart } from "shared/types";
 import { appendAttachmentContext } from "./attachments";
 import { sanitizeChildEnv } from "./childEnv";
+import { HISTORY_MAX_TOKENS, truncateHistory } from "./context";
 import { type AgentEvent, buildUsageEvent, toCount } from "./events";
 import { buildAgentSystemPrompt } from "./system-prompt";
 
@@ -147,11 +148,10 @@ export function mapCodexEvent(msg: JsonRpcMessage): AgentEvent | null {
 
 export async function runCodexAgent(input: RunCodexAgentInput): Promise<void> {
   const { model, cwd, abortController, onEvent } = input;
-  // Prepend conversation history so the turn carries context (same pattern as
-  // direct.ts — codex app-server takes a single input turn, not a message list).
   let seededPrompt = input.prompt;
   if (input.conversationHistory && input.conversationHistory.length > 0) {
-    const historyBlock = input.conversationHistory
+    const trimmed = truncateHistory(input.conversationHistory, HISTORY_MAX_TOKENS);
+    const historyBlock = trimmed
       .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
       .join("\n\n");
     seededPrompt = `${historyBlock}\n\n---\n\nUser: ${input.prompt}`;

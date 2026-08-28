@@ -18,7 +18,8 @@ import {
   partitionImagesByFormat,
 } from "./attachments";
 import { sanitizeChildEnv } from "./childEnv";
-import { type AgentEvent, convertSdkEvent } from "./events";
+import { HISTORY_MAX_TOKENS, truncateHistory } from "./context";
+import { type AgentEvent, convertSdkEvent, toCount } from "./events";
 import { buildIntentContext } from "./intent-context";
 import { buildSkillsPromptSection, type MaterializedSkill } from "./skills";
 import { buildAgentSystemPrompt } from "./system-prompt";
@@ -56,6 +57,8 @@ export type RunClaudeAgentInput = {
    * as a Level-1 metadata block (read on demand via the SDK's `Read` tool).
    */
   skills?: MaterializedSkill[];
+  /** Per-run token budget. When cumulative tokens exceed this limit the run is aborted. */
+  tokenBudgetPerRun?: number;
   requestApproval: (input: {
     toolUseId: string;
     toolName: string;
@@ -357,13 +360,10 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
     queryOptions.resume = input.sdkSessionId;
   }
 
-  // Claude Agent SDK only accepts a single prompt string. When we have
-  // conversation history we prepend it as structured context so the
-  // agent understands the prior turns without polluting the user's
-  // visible message in the UI.
   let effectivePrompt = input.prompt;
   if (input.conversationHistory && input.conversationHistory.length > 0) {
-    const historyBlock = input.conversationHistory
+    const trimmed = truncateHistory(input.conversationHistory, HISTORY_MAX_TOKENS);
+    const historyBlock = trimmed
       .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
       .join("\n\n");
     effectivePrompt = `${historyBlock}\n\n---\n\nUser: ${input.prompt}`;
@@ -432,6 +432,27 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
           for (const e of events) input.onEvent(e);
         } else {
           input.onEvent(events);
+        }
+      }
+      // Token budget guard: the SDK reports cumulative usage on the terminal
+      // `result` message. Since the SDK manages the agent loop internally,
+      // turn-level interception is not possible — we check the final total
+      // and surface an error so the caller knows the budget was exceeded.
+      if (input.tokenBudgetPerRun && message.type === "result") {
+        const usage = message.usage;
+        if (usage && typeof usage === "object") {
+          const raw = usage as Record<string, unknown>;
+          const total =
+            toCount(raw.input_tokens) +
+            toCount(raw.cache_creation_input_tokens) +
+            toCount(raw.cache_read_input_tokens) +
+            toCount(raw.output_tokens);
+          if (total > input.tokenBudgetPerRun) {
+            input.onEvent({
+              type: "error",
+              content: `Token 预算已用尽（已消耗 ${total.toLocaleString()} tokens，上限 ${input.tokenBudgetPerRun.toLocaleString()} tokens）`,
+            });
+          }
         }
       }
     }

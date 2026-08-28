@@ -11,8 +11,9 @@ import { runCodexChat } from "./agent/chatCodex";
 import { runClaudeAgent } from "./agent/claude";
 import { runCodexAgent } from "./agent/codex";
 import { runDirectAgent } from "./agent/direct";
-import { testMcpServer } from "./agent/mcp-tools";
+import { drainMcpPool, testMcpServer } from "./agent/mcp-tools";
 import { resolveSkills } from "./agent/skills";
+import { createTraceWriter } from "./agent/trace";
 import { detectAllCredentials, detectCredentialForProtocol } from "./auth";
 import { createCheckpointSession, rollbackCheckpoint } from "./checkpoints";
 
@@ -417,6 +418,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
           attachments,
           skills,
           acpAgent,
+          tokenBudgetPerRun: rawTokenBudget,
         } = params as {
           prompt: string;
           apiKey: string;
@@ -433,7 +435,10 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
           attachments?: import("shared/types").AttachmentPart[];
           skills?: import("./agent/skills").SkillMeta[];
           acpAgent?: { command: string; args?: string[]; env?: Record<string, string> };
+          tokenBudgetPerRun?: number;
         };
+        const tokenBudgetPerRun =
+          typeof rawTokenBudget === "number" && rawTokenBudget > 0 ? rawTokenBudget : undefined;
 
         let resolvedApiKey = apiKey;
         let forceCodexCli = false;
@@ -458,7 +463,9 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
           state.agentRuns.set(runId, { abortController });
           state.ownedRunIds.add(runId);
           ws.send(JSON.stringify(buildOkResponse(request.requestId, { runId })));
+          const writeTrace = createTraceWriter(cwd, runId);
           const onEvent = (event: import("./agent/events").AgentEvent) => {
+            writeTrace(event);
             ws.send(JSON.stringify(buildEvent("agent.event", { runId, event })));
           };
           const guard = (label: string, promise: Promise<void>) => {
@@ -582,6 +589,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
               conversationHistory,
               attachments,
               skills: materializedSkills,
+              tokenBudgetPerRun,
               requestApproval: async (approvalInput) => {
                 const { toolUseId } = approvalInput;
                 return new Promise<boolean>((resolve) => {
@@ -608,6 +616,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
 
         {
           const { runId, onEvent, guard } = initRun("direct");
+          const checkpoint = await createCheckpointSession(cwd, runId);
           guard(
             "Direct agent",
             runDirectAgent({
@@ -618,6 +627,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
               prompt,
               cwd,
               abortController,
+              checkpoint,
               conversationHistory,
               permissionMode,
               systemPrompt,
@@ -626,6 +636,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
               mcpServers,
               attachments,
               skills: materializedSkills,
+              tokenBudgetPerRun,
               requestApproval: async (approvalInput) => {
                 // Must be unique across concurrent runs on this connection:
                 // state.pendingApprovals is shared, so a time-only id would let
@@ -647,6 +658,9 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
                 });
               },
               onEvent,
+              onCheckpointReady: () => {
+                ws.send(JSON.stringify(buildEvent("checkpoint.ready", { runId })));
+              },
             }),
           );
         }
@@ -725,6 +739,8 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
     );
   }
 }
+
+process.on("exit", () => drainMcpPool());
 
 console.log(
   JSON.stringify({

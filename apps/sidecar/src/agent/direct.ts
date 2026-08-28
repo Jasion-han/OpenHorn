@@ -28,6 +28,11 @@ import {
 import type { AttachmentPart } from "shared/types";
 import { modelSupportsVision } from "shared/vision";
 import {
+  createCheckpointSession,
+  ensureCheckpointBackup,
+  finalizeCheckpoint,
+} from "../checkpoints";
+import {
   resolvePathInsideWorkspace,
   resolveWritePathInsideWorkspace,
   toWorkspaceRelative,
@@ -41,8 +46,9 @@ import {
   partitionImagesByFormat,
 } from "./attachments";
 import { sanitizeChildEnv } from "./childEnv";
+import { HISTORY_MAX_TOKENS, truncateHistory } from "./context";
 import { type AgentEvent, buildUsageEvent, toCount } from "./events";
-import { buildIntentContext } from "./intent-context";
+import { buildIntentContext, classifyToolIntent } from "./intent-context";
 import { capMcpTools, connectMcpTools } from "./mcp-tools";
 import { buildSkillsPromptSection, type MaterializedSkill } from "./skills";
 import { buildAgentSystemPrompt } from "./system-prompt";
@@ -69,14 +75,18 @@ export type RunDirectAgentInput = {
   /** Enabled MCP servers keyed by name (`{ type, command/url, args, env }`). */
   mcpServers?: Record<string, Record<string, unknown>>;
   attachments?: AttachmentPart[];
+  checkpoint?: import("../checkpoints").CheckpointSession;
   /** Enabled skills materialized to the workspace; read on demand via `read_file`. */
   skills?: MaterializedSkill[];
+  /** Per-run token budget. When cumulative tokens exceed this limit the agent is aborted. */
+  tokenBudgetPerRun?: number;
   requestApproval?: (input: {
     toolName: string;
     toolInput: Record<string, unknown>;
     reason: string;
   }) => Promise<boolean>;
   onEvent: (event: AgentEvent) => void;
+  onCheckpointReady?: () => void;
 };
 
 // ---------------------------------------------------------------------------
@@ -206,6 +216,7 @@ interface ExecuteToolOptions {
    * Write/edit stay strictly workspace-bounded. Mirrors claude.ts.
    */
   readAllowRoots?: string[];
+  checkpoint?: import("../checkpoints").CheckpointSession;
   requestApproval?: (input: {
     toolName: string;
     toolInput: Record<string, unknown>;
@@ -334,6 +345,9 @@ export async function executeTool(
     if (!filePath) return "Error: path is required";
     const content = typeof input.content === "string" ? input.content : "";
     try {
+      if (options?.checkpoint) {
+        await ensureCheckpointBackup(options.checkpoint, filePath).catch(() => {});
+      }
       const resolved = await resolveWritePathInWorkspace(cwd, filePath);
       await mkdir(path.dirname(resolved), { recursive: true });
       await writeFileNoFollow(resolved, content);
@@ -350,6 +364,9 @@ export async function executeTool(
     const newStr = typeof input.new_string === "string" ? input.new_string : "";
     if (!oldStr) return "Error: old_string must not be empty";
     try {
+      if (options?.checkpoint) {
+        await ensureCheckpointBackup(options.checkpoint, filePath).catch(() => {});
+      }
       const resolved = await resolveWritePathInWorkspace(cwd, filePath);
       const content = await readFile(resolved, "utf-8");
       if (!content.includes(oldStr)) return "Error: old_string not found in file";
@@ -828,15 +845,30 @@ export async function runDirectAgent(input: RunDirectAgentInput): Promise<void> 
     : { injectable: [], unsupported: [] };
   const useVisionImages = injectable.length > 0;
   const model = buildModel(input, useVisionImages);
+  const checkpoint = input.checkpoint ?? (await createCheckpointSession(input.cwd));
   let tools = buildTools(input.cwd, {
     permissionMode: input.permissionMode,
     tavilyApiKey: input.tavilyApiKey,
     requestApproval: input.requestApproval,
     webSearchEnabled: input.webSearchEnabled,
-    // Let READ tools reach each enabled skill's folder — the prompt built below
-    // points the model at these absolute paths.
+    checkpoint,
     readAllowRoots: (input.skills ?? []).map((skill) => skill.skillDir),
   });
+
+  // Intent-based tool routing: remove unnecessary tools for this prompt to
+  // reduce prompt token consumption. Only prune when at least one intent
+  // signal fires — when all are false the user likely just wants to read /
+  // chat, so keep the full tool set as a safety net.
+  const intent = classifyToolIntent(input.prompt);
+  if (intent.needsEdit || intent.needsShell || intent.needsWeb) {
+    if (!intent.needsEdit) {
+      tools = tools.filter((t) => t.name !== "write_file" && t.name !== "edit_file");
+    }
+    if (!intent.needsShell) {
+      tools = tools.filter((t) => t.name !== "bash");
+    }
+  }
+
   // Bridge enabled MCP servers into the tool set (best-effort). The Claude SDK
   // path gets MCP natively; here we connect and expose them as agent tools so
   // OpenAI-protocol models get the same capability. capMcpTools keeps the
@@ -851,12 +883,10 @@ export async function runDirectAgent(input: RunDirectAgentInput): Promise<void> 
   }
   const apiKey = input.apiKey;
 
-  // Build the effective prompt, prepending conversation history if present
-  // (same pattern as claude.ts since pi-agent-core doesn't accept pre-seeded
-  // message history directly).
   let effectivePrompt = input.prompt;
   if (input.conversationHistory && input.conversationHistory.length > 0) {
-    const historyBlock = input.conversationHistory
+    const trimmed = truncateHistory(input.conversationHistory, HISTORY_MAX_TOKENS);
+    const historyBlock = trimmed
       .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
       .join("\n\n");
     effectivePrompt = `${historyBlock}\n\n---\n\nUser: ${input.prompt}`;
@@ -922,6 +952,20 @@ export async function runDirectAgent(input: RunDirectAgentInput): Promise<void> 
           promptTokens +=
             toCount(used?.input) + toCount(used?.cacheRead) + toCount(used?.cacheWrite);
           completionTokens += toCount(used?.output);
+        }
+        // Token budget guard: abort the run when cumulative token spend
+        // exceeds the per-run budget. Checked before MAX_TURNS so the user
+        // sees a budget error rather than a generic turn-limit message.
+        if (input.tokenBudgetPerRun) {
+          const totalSpent = promptTokens + completionTokens;
+          if (totalSpent > input.tokenBudgetPerRun) {
+            input.onEvent({
+              type: "error",
+              content: `Token 预算已用尽（已消耗 ${totalSpent.toLocaleString()} tokens，上限 ${input.tokenBudgetPerRun.toLocaleString()} tokens）`,
+            });
+            agent.abort();
+            return;
+          }
         }
         if (turnCount >= MAX_TURNS) {
           input.onEvent({
@@ -1010,8 +1054,14 @@ export async function runDirectAgent(input: RunDirectAgentInput): Promise<void> 
   } finally {
     input.abortController.signal.removeEventListener("abort", onAbort);
     await mcpCleanup?.();
-    // In the `finally` so a cancelled or failed run still reports what it spent
-    // — those turns cost the same as the ones that finished.
+    if (checkpoint.files.size > 0) {
+      try {
+        await finalizeCheckpoint(checkpoint);
+        input.onCheckpointReady?.();
+      } catch {
+        // best-effort
+      }
+    }
     const usage = buildUsageEvent(promptTokens, completionTokens);
     if (usage) input.onEvent(usage);
     input.onEvent({ type: "done" });

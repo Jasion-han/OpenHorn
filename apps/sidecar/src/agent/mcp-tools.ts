@@ -199,37 +199,107 @@ export async function testMcpServer(
   }
 }
 
+// ---------------------------------------------------------------------------
+// Connection pool — keeps MCP connections alive between agent runs so stdio
+// servers don't respawn on every turn.  Keyed by serverName; config changes
+// (detected via JSON fingerprint) evict the stale entry and reconnect.
+// ---------------------------------------------------------------------------
+
+const POOL_IDLE_TTL_MS = 5 * 60 * 1000;
+
+type PoolEntry = {
+  client: Client;
+  tools: AgentTool<TSchema>[];
+  configHash: string;
+  refCount: number;
+  idleTimer: ReturnType<typeof setTimeout> | null;
+};
+
+const pool = new Map<string, PoolEntry>();
+
+function configFingerprint(config: Record<string, unknown>): string {
+  return JSON.stringify(config, Object.keys(config).sort());
+}
+
+function scheduleEviction(serverName: string, entry: PoolEntry) {
+  if (entry.idleTimer) clearTimeout(entry.idleTimer);
+  entry.idleTimer = setTimeout(async () => {
+    if (entry.refCount <= 0 && pool.get(serverName) === entry) {
+      pool.delete(serverName);
+      await entry.client.close().catch(() => {});
+    }
+  }, POOL_IDLE_TTL_MS);
+}
+
+async function acquireServer(
+  serverName: string,
+  config: Record<string, unknown>,
+): Promise<{ tools: AgentTool<TSchema>[]; entry: PoolEntry } | null> {
+  const hash = configFingerprint(config);
+  const existing = pool.get(serverName);
+
+  if (existing && existing.configHash === hash) {
+    existing.refCount++;
+    if (existing.idleTimer) {
+      clearTimeout(existing.idleTimer);
+      existing.idleTimer = null;
+    }
+    return { tools: existing.tools, entry: existing };
+  }
+
+  if (existing) {
+    pool.delete(serverName);
+    if (existing.idleTimer) clearTimeout(existing.idleTimer);
+    await existing.client.close().catch(() => {});
+  }
+
+  const connected = await connectServer(serverName, config);
+  if (!connected) return null;
+
+  const entry: PoolEntry = {
+    client: connected.client,
+    tools: connected.tools,
+    configHash: hash,
+    refCount: 1,
+    idleTimer: null,
+  };
+  pool.set(serverName, entry);
+  return { tools: entry.tools, entry };
+}
+
+function releaseServer(serverName: string, entry: PoolEntry) {
+  entry.refCount = Math.max(0, entry.refCount - 1);
+  if (entry.refCount === 0 && pool.get(serverName) === entry) {
+    scheduleEviction(serverName, entry);
+  }
+}
+
 /**
- * Connects to every provided MCP server (best-effort — a server that fails to
- * connect or list tools is skipped, never fatal) and returns their tools as
- * AgentTools plus a cleanup function that closes all connections.
- *
- * Servers connect in parallel so one slow/dead server (15s timeout) bounds the
- * total wall time instead of adding to it. Tool order stays deterministic: the
- * results are stitched together in the callers' key order, not completion order.
+ * Connects to every provided MCP server, reusing pooled connections when the
+ * config hasn't changed.  Servers that need a fresh connection connect in
+ * parallel; pooled hits return instantly.  Tool order stays deterministic.
  */
 export async function connectMcpTools(
   mcpServers: Record<string, Record<string, unknown>>,
 ): Promise<ConnectedMcp> {
   const entries = Object.entries(mcpServers);
   const settled = await Promise.allSettled(
-    entries.map(([serverName, config]) => connectServer(serverName, config)),
+    entries.map(([serverName, config]) => acquireServer(serverName, config)),
   );
 
-  const clients: Client[] = [];
+  const acquired: Array<{ serverName: string; entry: PoolEntry }> = [];
   const toolsByServer: McpServerTools[] = [];
   settled.forEach((result, index) => {
     const serverName = entries[index]?.[0] ?? "";
     if (result.status === "rejected") {
-      const reason = result.reason;
       console.error(
         `[mcp] skipping server "${serverName}":`,
-        reason instanceof Error ? reason.message : reason,
+        result.reason instanceof Error ? result.reason.message : result.reason,
       );
       return;
     }
     if (!result.value) return;
-    clients.push(result.value.client);
+    acquired.push({ serverName, entry: result.value.entry });
     toolsByServer.push({ serverName, tools: result.value.tools });
   });
 
@@ -237,9 +307,19 @@ export async function connectMcpTools(
     tools: toolsByServer.flatMap((s) => s.tools),
     toolsByServer,
     cleanup: async () => {
-      await Promise.all(clients.map((c) => c.close().catch(() => {})));
+      for (const { serverName, entry } of acquired) {
+        releaseServer(serverName, entry);
+      }
     },
   };
+}
+
+export function drainMcpPool() {
+  for (const [, entry] of pool) {
+    if (entry.idleTimer) clearTimeout(entry.idleTimer);
+    entry.client.close().catch(() => {});
+  }
+  pool.clear();
 }
 
 /**

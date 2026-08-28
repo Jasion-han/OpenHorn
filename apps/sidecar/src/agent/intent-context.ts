@@ -5,6 +5,32 @@
 
 export type IntentRoute = "local_time" | "weather" | "none";
 
+// ---------------------------------------------------------------------------
+// Tool intent classification — filters unnecessary tools from the agent's
+// tool set based on the user prompt, reducing prompt token consumption.
+// ---------------------------------------------------------------------------
+
+export type ToolIntent = {
+  needsEdit: boolean;
+  needsShell: boolean;
+  needsWeb: boolean;
+};
+
+const EDIT_SIGNALS =
+  /修改|改一下|fix|修复|创建|新建|create|write|重构|refactor|add|添加|实现|implement|删除|remove|update|更新|替换|replace|重写|rewrite/i;
+const SHELL_SIGNALS =
+  /运行|执行|run|build|compile|test|测试|npm|pnpm|pip|docker|deploy|安装|install|启动|start|stop|kill|restart/i;
+const WEB_SIGNALS =
+  /搜索|search|查一下|look up|latest|最新|文档|documentation|网上|online|url|http/i;
+
+export function classifyToolIntent(prompt: string): ToolIntent {
+  return {
+    needsEdit: EDIT_SIGNALS.test(prompt),
+    needsShell: SHELL_SIGNALS.test(prompt),
+    needsWeb: WEB_SIGNALS.test(prompt),
+  };
+}
+
 export interface IntentContextResult {
   route: IntentRoute;
   context: string | null;

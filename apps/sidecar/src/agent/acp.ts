@@ -8,6 +8,7 @@ import { classifyBashCommandRisk } from "../shell-risk";
 import { toWorkspaceRelative } from "../workspace";
 import { appendAttachmentContext } from "./attachments";
 import { sanitizeChildEnv } from "./childEnv";
+import { HISTORY_MAX_TOKENS, truncateHistory } from "./context";
 import {
   type AgentEvent,
   type AgentToolDiff,
@@ -806,11 +807,10 @@ export async function runAcpAgent(input: RunAcpAgentInput): Promise<void> {
   }
 
   // Replay conversation history into the prompt so the agent has context from
-  // prior turns in this OpenHorn conversation. Always inject when history is
-  // present — a preconnected or reused ACP session has no OpenHorn context.
   let promptText = input.prompt;
   if (input.conversationHistory && input.conversationHistory.length > 0) {
-    const historyBlock = input.conversationHistory
+    const trimmed = truncateHistory(input.conversationHistory, HISTORY_MAX_TOKENS);
+    const historyBlock = trimmed
       .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
       .join("\n\n");
     promptText = `${historyBlock}\n\n---\n\nUser: ${input.prompt}`;
