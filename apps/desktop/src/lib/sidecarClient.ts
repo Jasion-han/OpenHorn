@@ -95,6 +95,8 @@ export interface SidecarRunAgentInput {
   skills?: Array<{ name: string; description: string; path: string }>;
   /** Local ACP agent launch config; required when protocol is "acp". */
   acpAgent?: { command: string; args?: string[]; env?: Record<string, string> };
+  /** Maximum token budget for a single agent run. */
+  tokenBudgetPerRun?: number;
   onEvent: (event: AgentTaskStreamEvent) => void | Promise<void>;
   onApproval: (request: SidecarApprovalRequest) => void | Promise<void>;
   onError: (message: string) => void;
@@ -446,6 +448,7 @@ export class SidecarClient {
       attachments,
       skills,
       acpAgent,
+      tokenBudgetPerRun,
       onEvent,
       onApproval,
       onError,
@@ -469,6 +472,7 @@ export class SidecarClient {
       ...(attachments && attachments.length > 0 ? { attachments } : {}),
       ...(skills && skills.length > 0 ? { skills } : {}),
       ...(acpAgent ? { acpAgent } : {}),
+      ...(tokenBudgetPerRun ? { tokenBudgetPerRun } : {}),
     })) as { runId: string };
     const runId = result.runId;
     this.runHandlers.set(runId, {

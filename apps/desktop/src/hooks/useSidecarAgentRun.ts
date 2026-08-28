@@ -487,6 +487,7 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
         skills: skillMetas,
         conversationHistory: input.conversationHistory,
         attachments: input.attachments,
+        tokenBudgetPerRun: 200000,
         onSdkSessionId: (sessionId) => {
           setSdkSessionId(sessionId);
         },
