@@ -3,6 +3,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { db } from "../db";
 import { decrypt, encrypt, generateId } from "../utils";
 import { probeAnthropicModel } from "./anthropicProbe";
+import { isChannelAvailable } from "./circuitBreaker";
 import { summarizeProviderError } from "./providerErrorSummary";
 
 type ChannelRow = typeof channels.$inferSelect;
@@ -1233,6 +1234,44 @@ export function resolveModelIdFromChannelItem(
   return resolveStrictDefaultModelId(channel);
 }
 
+/**
+ * If the primary channel's circuit breaker is open, try to find an
+ * alternative enabled channel whose breaker is closed (or half_open).
+ * Falls back to the primary when no alternative exists — this lets the
+ * half_open probe mechanism work rather than returning null.
+ */
+async function applyCircuitBreakerFallback(
+  userId: string,
+  primary: ResolvedChannel,
+): Promise<ResolvedChannel> {
+  if (isChannelAvailable(primary.channel.id)) {
+    return primary;
+  }
+
+  console.warn(
+    `[circuit-breaker] Channel ${primary.channel.id} (${primary.channel.name}) is unavailable, attempting fallback`,
+  );
+
+  const allChannels = await getChannels(userId);
+  for (const ch of allChannels) {
+    if (ch.id === primary.channel.id) continue;
+    if (!ch.enabled || !ch.hasApiKey) continue;
+    if (!isChannelAvailable(ch.id)) continue;
+
+    const fallback = await getResolvedChannelForUser(userId, ch.id);
+    if (fallback) {
+      console.warn(
+        `[circuit-breaker] Falling back to channel ${ch.id} (${ch.name}), model=${fallback.modelId}`,
+      );
+      return fallback;
+    }
+  }
+
+  // All channels unavailable; return primary so half_open probe can work
+  console.warn("[circuit-breaker] No fallback channel available; returning primary");
+  return primary;
+}
+
 export async function getResolvedChannelForConversation(
   userId: string,
   conversation: { channelId?: string | null; modelId?: string | null },
@@ -1273,14 +1312,16 @@ export async function getResolvedChannelForConversation(
       if (resolved2) apiKey2 = resolved2;
     }
 
-    return {
+    return applyCircuitBreakerFallback(userId, {
       channel: channelWithRuntimeBaseUrl,
       apiKey: apiKey2,
       modelId,
-    };
+    });
   }
 
-  return getResolvedChannelForUser(userId, null);
+  const resolved = await getResolvedChannelForUser(userId, null);
+  if (!resolved) return null;
+  return applyCircuitBreakerFallback(userId, resolved);
 }
 
 export async function getResolvedChannelById(userId: string, channelId: string) {
