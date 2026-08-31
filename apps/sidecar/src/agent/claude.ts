@@ -210,16 +210,39 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
   // would let it open its own sidecar connection) or any unrelated provider
   // key. The Anthropic credentials this run legitimately needs are re-injected
   // explicitly below, after stripping.
-  const childEnv: Record<string, string | undefined> = sanitizeChildEnv({ ...process.env });
   const isOAuthToken =
     input.apiKey?.startsWith("sk-ant-oat") || input.apiKey?.startsWith("__cli_oauth__");
-  if (input.apiKey && !isOAuthToken) childEnv.ANTHROPIC_API_KEY = input.apiKey;
-  if (input.baseUrl && !isOAuthToken) childEnv.ANTHROPIC_BASE_URL = input.baseUrl;
-  // OAuth runs rely on the CLI's own credential discovery (macOS keychain).
-  // sanitizeChildEnv strips all CLAUDE* vars, but the CLI needs them to locate
-  // its config/credentials. Restore the safe, non-secret ones.
+
+  // OAuth: CLI discovers credentials via CLAUDE_* env vars + macOS keychain.
+  // sanitizeChildEnv strips ALL CLAUDE_* vars, breaking discovery. Use a lighter
+  // strip list that keeps CLAUDE_* intact.
+  let childEnv: Record<string, string | undefined>;
   if (isOAuthToken) {
+    childEnv = { ...process.env };
+    for (const key of Object.keys(childEnv)) {
+      if (
+        key.startsWith("OPENHORN") ||
+        key.startsWith("CODEX_COMPANION") ||
+        key.startsWith("TRELLIS_") ||
+        key === "ANTHROPIC_API_KEY" ||
+        key === "ANTHROPIC_BASE_URL" ||
+        key === "OPENAI_API_KEY" ||
+        key === "DEEPSEEK_API_KEY" ||
+        key === "GOOGLE_API_KEY" ||
+        key === "GEMINI_API_KEY" ||
+        key === "TAVILY_API_KEY" ||
+        key === "JWT_SECRET" ||
+        key === "ENCRYPTION_KEY" ||
+        key === "DATABASE_URL"
+      ) {
+        delete childEnv[key];
+      }
+    }
     childEnv.CLAUDE_CODE_ENTRYPOINT = "cli";
+  } else {
+    childEnv = sanitizeChildEnv({ ...process.env });
+    if (input.apiKey) childEnv.ANTHROPIC_API_KEY = input.apiKey;
+    if (input.baseUrl) childEnv.ANTHROPIC_BASE_URL = input.baseUrl;
   }
   // Always prevent nesting detection in the spawned CLI.
   delete childEnv.CLAUDECODE;
