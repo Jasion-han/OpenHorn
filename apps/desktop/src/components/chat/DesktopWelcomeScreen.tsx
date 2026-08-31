@@ -248,6 +248,10 @@ export function DesktopWelcomeScreen() {
 
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey) {
+      const composing =
+        event.nativeEvent.isComposing ||
+        ("keyCode" in event.nativeEvent && event.nativeEvent.keyCode === 229);
+      if (composing) return;
       event.preventDefault();
       void start(draft);
     }
