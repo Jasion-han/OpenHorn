@@ -46,6 +46,13 @@
 **Prevent:** 排查此类问题不要靠猜——用 SDK 直接搭个台架，把 OpenHorn 的 queryOptions 逐项加进去二分。当时 hooks / canUseTool / includePartialMessages / env / 模型名逐个试过都是 2,233，唯一变量是 CLI 版本
 **Note:** Claude Code 自己在两种情况下会**静默关掉**延迟加载：模型不支持 `tool_reference` block，或 `ANTHROPIC_BASE_URL` 指向非 `api.anthropic.com` 的中转（可用 `ENABLE_TOOL_SEARCH=true` 强开，前提是中转能透传 `tool_reference`）。不认识的工具名会被忽略而不是报错，所以加 `ToolSearch` 对旧 binary 是安全降级
 
+## OAuth Agent 运行 exit code 1
+
+**Symptom:** Agent 模式发消息，CLI 启动后立即或短暂 Thinking 后报 "Claude Code process exited with code 1"
+**Cause:** `sanitizeChildEnv()` 的 `key.startsWith("CLAUDE")` 规则把 CLI 发现 OAuth 凭证所需的 `CLAUDE_*` 配置变量全部剥离了。CLI 找不到 keychain 凭证 → exit 1。仅恢复 `CLAUDE_CODE_ENTRYPOINT=cli` 不够，凭证发现链路依赖多个 `CLAUDE_*` 变量
+**Fix:** OAuth 场景（`isOAuthToken=true`）下不走 `sanitizeChildEnv`，改用轻量级清理：只剥离 secrets（`OPENHORN*`、各厂商 API key、`JWT_SECRET` 等）和嵌套检测变量（`CLAUDECODE`、`AI_AGENT`、`CLAUDE_CODE_CHILD_SESSION`），保留全部 `CLAUDE_*`。API key 场景保持 `sanitizeChildEnv` 不变
+**Prevent:** 改 `childEnv` 构建逻辑时，从 Claude Code 终端启动 dev 复现真实场景（sidecar 会继承 `CLAUDE_*` 变量）。用台架二分法（`bun -e` + SDK query）对比 dev 模式 vs 编译后差异。注意 OAuth token (`sk-ant-oat-*`) 不是标准 API key，不能塞进 `ANTHROPIC_API_KEY`（API 返回 401）
+
 ## macOS 窗口拖不动
 
 **Symptom:** 窗口只有某一小块能拖动，其余地方按住没反应
