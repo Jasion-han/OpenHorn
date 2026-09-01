@@ -696,6 +696,10 @@ export const sidebarLabels = {
   "sidebar.collapse": "收起侧栏",
   "sidebar.expand": "展开侧栏",
   "sidebar.settings": "设置",
+  // Quick-access entries (between new-conversation button and the list)
+  "sidebar.scheduledTasks": "定时任务",
+  "sidebar.knowledgeBase": "资料库",
+  "sidebar.comingSoon": "即将上线",
   // Section header
   "sidebar.pinnedHeading": "置顶",
   "sidebar.conversationsHeading": "会话",

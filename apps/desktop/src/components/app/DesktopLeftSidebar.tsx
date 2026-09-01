@@ -1,6 +1,8 @@
 import {
+  BookOpen,
   ChevronDown,
   ChevronRight,
+  Clock,
   MoreHorizontal,
   PanelLeftClose,
   Pencil,
@@ -402,6 +404,35 @@ export function DesktopLeftSidebar() {
               {NEW_CONVERSATION_SHORTCUT_LABEL}
             </kbd>
           </Button>
+
+          <div className="flex flex-col gap-0.5">
+            <button
+              type="button"
+              className="flex items-center gap-2 rounded-[10px] px-3 py-[7px] text-left text-sm text-foreground/70 transition-colors duration-100 titlebar-no-drag hover:bg-foreground/[0.04] hover:text-foreground"
+              onClick={() =>
+                notifySuccess(
+                  getSidebarLabel("sidebar.scheduledTasks"),
+                  getSidebarLabel("sidebar.comingSoon"),
+                )
+              }
+            >
+              <Clock size={15} className="shrink-0 text-muted-foreground" />
+              {getSidebarLabel("sidebar.scheduledTasks")}
+            </button>
+            <button
+              type="button"
+              className="flex items-center gap-2 rounded-[10px] px-3 py-[7px] text-left text-sm text-foreground/70 transition-colors duration-100 titlebar-no-drag hover:bg-foreground/[0.04] hover:text-foreground"
+              onClick={() =>
+                notifySuccess(
+                  getSidebarLabel("sidebar.knowledgeBase"),
+                  getSidebarLabel("sidebar.comingSoon"),
+                )
+              }
+            >
+              <BookOpen size={15} className="shrink-0 text-muted-foreground" />
+              {getSidebarLabel("sidebar.knowledgeBase")}
+            </button>
+          </div>
 
           {searchOpen && (
             <Input
