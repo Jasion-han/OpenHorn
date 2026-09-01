@@ -5,6 +5,7 @@ import {
   createScheduledTask,
   createTaskRun,
   deleteScheduledTask,
+  deleteTaskRun,
   getScheduledTask,
   listScheduledTasks,
   listTaskRuns,
@@ -109,6 +110,13 @@ router.get("/runs", async (c) => {
   const user = c.get("user");
   const runs = await listTaskRuns(user.id);
   return c.json({ runs });
+});
+
+router.delete("/runs/:runId", async (c) => {
+  const user = c.get("user");
+  const runId = c.req.param("runId");
+  await deleteTaskRun(user.id, runId);
+  return c.json({ success: true });
 });
 
 export default router;

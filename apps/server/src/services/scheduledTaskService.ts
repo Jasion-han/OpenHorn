@@ -220,6 +220,12 @@ export async function completeTaskRun(
     .where(eq(scheduledTaskRuns.id, runId));
 }
 
+export async function deleteTaskRun(userId: string, runId: string) {
+  await db
+    .delete(scheduledTaskRuns)
+    .where(and(eq(scheduledTaskRuns.id, runId), eq(scheduledTaskRuns.userId, userId)));
+}
+
 export async function advanceNextRunAt(taskId: string) {
   const rows = await db.select().from(scheduledTasks).where(eq(scheduledTasks.id, taskId));
   const task = rows[0];

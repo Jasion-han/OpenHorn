@@ -1,4 +1,5 @@
 import {
+  AlarmClock,
   BookOpen,
   ChevronDown,
   ChevronRight,
@@ -204,6 +205,7 @@ export function DesktopLeftSidebar() {
   const setActiveView = useDesktopShellStore((state) => state.setActiveView);
   const setSidebarCollapsed = useDesktopShellStore((state) => state.setSidebarCollapsed);
   const openSettings = useDesktopShellStore((state) => state.openSettings);
+  const openScheduledTasks = useDesktopShellStore((state) => state.openScheduledTasks);
   const user = useAuthStore((state) => state.user);
   const backendStatus = useBackendStatusStore((state) => state.status);
   const backendLastError = useBackendStatusStore((state) => state.lastError);
@@ -436,9 +438,9 @@ export function DesktopLeftSidebar() {
                   ? "bg-foreground/[0.08] text-foreground"
                   : "text-foreground/70 hover:bg-foreground/[0.04] hover:text-foreground",
               )}
-              onClick={() => setActiveView("scheduled-tasks")}
+              onClick={() => openScheduledTasks("tasks")}
             >
-              <Clock size={15} className="shrink-0 text-muted-foreground" />
+              <AlarmClock size={15} className="shrink-0 text-muted-foreground" />
               {getSidebarLabel("sidebar.scheduledTasks")}
             </button>
             <button
@@ -594,11 +596,11 @@ export function DesktopLeftSidebar() {
                             key={run.id}
                             role="button"
                             tabIndex={0}
-                            onClick={() => setActiveView("scheduled-tasks")}
+                            onClick={() => openScheduledTasks("runs")}
                             onKeyDown={(event) => {
                               if (event.key === "Enter" || event.key === " ") {
                                 event.preventDefault();
-                                setActiveView("scheduled-tasks");
+                                openScheduledTasks("runs");
                               }
                             }}
                             className="flex cursor-pointer items-center gap-2 rounded-[10px] px-3 py-[7px] text-left text-sm text-foreground/70 transition-colors duration-100 titlebar-no-drag hover:bg-foreground/[0.04] hover:text-foreground"

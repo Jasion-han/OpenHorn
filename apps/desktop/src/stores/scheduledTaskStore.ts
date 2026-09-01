@@ -28,6 +28,7 @@ interface ScheduledTaskState {
     }>,
   ) => Promise<ScheduledTask | null>;
   deleteTask: (id: string) => Promise<void>;
+  deleteRun: (runId: string) => Promise<void>;
   toggleTask: (id: string) => Promise<void>;
   runTaskNow: (id: string) => Promise<boolean>;
 }
@@ -106,6 +107,16 @@ export const useScheduledTaskStore = create<ScheduledTaskState>((set) => ({
       const base = getDesktopBackendBase();
       await fetch(`${base}/scheduled-tasks/${id}`, { method: "DELETE" });
       set((state) => ({ tasks: state.tasks.filter((t) => t.id !== id) }));
+    } catch {
+      // silent
+    }
+  },
+
+  async deleteRun(runId) {
+    try {
+      const base = getDesktopBackendBase();
+      await fetch(`${base}/scheduled-tasks/runs/${runId}`, { method: "DELETE" });
+      set((state) => ({ runs: state.runs.filter((r) => r.id !== runId) }));
     } catch {
       // silent
     }

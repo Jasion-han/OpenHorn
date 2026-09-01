@@ -171,7 +171,8 @@ function formatNextRun(date: Date | undefined | null): string {
 }
 
 export function ScheduledTasksView() {
-  const [tab, setTab] = useState<Tab>("tasks");
+  const scheduledTasksTab = useDesktopShellStore((s) => s.scheduledTasksTab);
+  const [tab, setTab] = useState<Tab>(scheduledTasksTab);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [templateData, setTemplateData] = useState<{
     title: string;
@@ -182,8 +183,17 @@ export function ScheduledTasksView() {
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [runningTaskIds, setRunningTaskIds] = useState<Set<string>>(new Set());
 
-  const { tasks, runs, loading, loadTasks, loadRuns, deleteTask, toggleTask, runTaskNow } =
-    useScheduledTaskStore();
+  const {
+    tasks,
+    runs,
+    loading,
+    loadTasks,
+    loadRuns,
+    deleteTask,
+    deleteRun,
+    toggleTask,
+    runTaskNow,
+  } = useScheduledTaskStore();
   const setActiveView = useDesktopShellStore((s) => s.setActiveView);
   const setPrefillComposer = useDesktopShellStore((s) => s.setPrefillComposer);
   const startNewConversation = useChatStore((s) => s.startNewConversation);
@@ -192,6 +202,10 @@ export function ScheduledTasksView() {
     void loadTasks();
     void loadRuns();
   }, [loadTasks, loadRuns]);
+
+  useEffect(() => {
+    setTab(scheduledTasksTab);
+  }, [scheduledTasksTab]);
 
   const handleTemplateClick = (tpl: (typeof TEMPLATES)[0]) => {
     setTemplateData({
@@ -446,7 +460,7 @@ export function ScheduledTasksView() {
                 runs.map((run) => (
                   <div
                     key={run.id}
-                    className="flex items-center justify-between rounded-xl border border-border/60 bg-background px-4 py-3"
+                    className="group flex items-center justify-between rounded-xl border border-border/60 bg-background px-4 py-3"
                   >
                     <div className="flex flex-col gap-0.5 min-w-0 flex-1">
                       <span className="text-sm font-medium truncate">
@@ -484,6 +498,14 @@ export function ScheduledTasksView() {
                       <span className="text-xs text-muted-foreground whitespace-nowrap">
                         {formatNextRun(run.startedAt)}
                       </span>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        className="h-6 w-6 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive"
+                        onClick={() => void deleteRun(run.id)}
+                      >
+                        <Trash2 size={13} />
+                      </Button>
                     </div>
                   </div>
                 ))

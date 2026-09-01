@@ -30,6 +30,7 @@ export interface DesktopShellState {
    */
   pendingPrompt: { text: string; files: File[] } | null;
   prefillComposer: string | null;
+  scheduledTasksTab: "tasks" | "runs";
 
   setActiveView: (view: DesktopActiveView) => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
@@ -38,6 +39,7 @@ export interface DesktopShellState {
   toggleFullAccess: () => void;
   setPendingPrompt: (prompt: { text: string; files: File[] } | null) => void;
   setPrefillComposer: (text: string | null) => void;
+  openScheduledTasks: (tab?: "tasks" | "runs") => void;
   reset: () => void;
 }
 
@@ -48,6 +50,7 @@ const INITIAL_STATE = {
   fullAccessEnabled: false,
   pendingPrompt: null as { text: string; files: File[] } | null,
   prefillComposer: null as string | null,
+  scheduledTasksTab: "tasks" as "tasks" | "runs",
 };
 
 export function createDesktopShellStore() {
@@ -66,6 +69,8 @@ export function createDesktopShellStore() {
         toggleFullAccess: () => set((state) => ({ fullAccessEnabled: !state.fullAccessEnabled })),
         setPendingPrompt: (pendingPrompt) => set({ pendingPrompt }),
         setPrefillComposer: (prefillComposer) => set({ prefillComposer }),
+        openScheduledTasks: (tab = "tasks") =>
+          set({ activeView: "scheduled-tasks", scheduledTasksTab: tab }),
         reset: () => set({ ...INITIAL_STATE }),
       }),
       {
