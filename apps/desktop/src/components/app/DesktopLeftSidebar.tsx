@@ -593,14 +593,14 @@ export function DesktopLeftSidebar() {
                             }))
                           }
                         >
-                          {(taskGroupsOpen[taskId] ?? true) ? (
+                          {(taskGroupsOpen[taskId] ?? false) ? (
                             <ChevronDown size={12} />
                           ) : (
                             <ChevronRight size={12} />
                           )}
                         </Button>
                       </div>
-                      {(taskGroupsOpen[taskId] ?? true) &&
+                      {(taskGroupsOpen[taskId] ?? false) &&
                         runs.map((run) => (
                           <div
                             key={run.id}
