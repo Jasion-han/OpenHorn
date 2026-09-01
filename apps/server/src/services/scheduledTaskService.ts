@@ -156,17 +156,28 @@ export async function toggleScheduledTask(userId: string, taskId: string) {
 }
 
 export async function listTaskRuns(userId: string, taskId?: string, limit = 50) {
+  const baseQuery = db
+    .select({
+      id: scheduledTaskRuns.id,
+      taskId: scheduledTaskRuns.taskId,
+      userId: scheduledTaskRuns.userId,
+      status: scheduledTaskRuns.status,
+      result: scheduledTaskRuns.result,
+      error: scheduledTaskRuns.error,
+      startedAt: scheduledTaskRuns.startedAt,
+      completedAt: scheduledTaskRuns.completedAt,
+      taskTitle: scheduledTasks.title,
+    })
+    .from(scheduledTaskRuns)
+    .leftJoin(scheduledTasks, eq(scheduledTaskRuns.taskId, scheduledTasks.id));
+
   if (taskId) {
-    return db
-      .select()
-      .from(scheduledTaskRuns)
+    return baseQuery
       .where(and(eq(scheduledTaskRuns.taskId, taskId), eq(scheduledTaskRuns.userId, userId)))
       .orderBy(desc(scheduledTaskRuns.startedAt))
       .limit(limit);
   }
-  return db
-    .select()
-    .from(scheduledTaskRuns)
+  return baseQuery
     .where(eq(scheduledTaskRuns.userId, userId))
     .orderBy(desc(scheduledTaskRuns.startedAt))
     .limit(limit);

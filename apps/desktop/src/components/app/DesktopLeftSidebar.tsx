@@ -3,6 +3,7 @@ import {
   ChevronDown,
   ChevronRight,
   Clock,
+  FileText,
   MoreHorizontal,
   PanelLeftClose,
   Pencil,
@@ -41,6 +42,7 @@ import { useAuthStore } from "../../stores/authStore";
 import { useBackendStatusStore } from "../../stores/backendStatusStore";
 import { useChatStore } from "../../stores/chatStore";
 import { useDesktopShellStore } from "../../stores/desktopShellStore";
+import { useScheduledTaskStore } from "../../stores/scheduledTaskStore";
 import type { Conversation, MessageSearchResult } from "../../types/chat";
 
 // The shortcut hint next to the new-conversation button. The handler accepts both
@@ -217,8 +219,14 @@ export function DesktopLeftSidebar() {
   const searchMessages = useChatStore((state) => state.searchMessages);
   const reset = useChatStore((state) => state.reset);
   const backendBase = getDesktopBackendBase();
+  const recentRuns = useScheduledTaskStore((state) => state.runs);
+  const loadRuns = useScheduledTaskStore((state) => state.loadRuns);
 
   const [searchResults, setSearchResults] = useState<MessageSearchResult[] | null>(null);
+
+  useEffect(() => {
+    void loadRuns();
+  }, [loadRuns]);
 
   // ⌘N / Ctrl+N — the shortcut advertised next to the new-conversation button.
   useEffect(() => {
@@ -590,6 +598,37 @@ export function DesktopLeftSidebar() {
                   )}
                 </>
               )}
+
+              {recentRuns.length > 0 &&
+                recentRuns.slice(0, 5).map((run) => (
+                  <div
+                    key={run.id}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setActiveView("scheduled-tasks")}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        setActiveView("scheduled-tasks");
+                      }
+                    }}
+                    className="flex cursor-pointer items-center gap-2 rounded-[10px] px-3 py-[7px] text-left text-sm text-foreground/70 transition-colors duration-100 titlebar-no-drag hover:bg-foreground/[0.04] hover:text-foreground"
+                  >
+                    <Clock size={14} className="shrink-0 text-muted-foreground" />
+                    <span className="min-w-0 flex-1 truncate">
+                      {run.taskTitle ?? run.taskId.slice(0, 8)}
+                    </span>
+                    <span
+                      className={cn(
+                        "h-2 w-2 shrink-0 rounded-full",
+                        run.status === "completed" && "bg-emerald-500",
+                        run.status === "failed" && "bg-red-500",
+                        run.status === "running" && "bg-blue-500 animate-pulse",
+                        run.status === "pending" && "bg-gray-400",
+                      )}
+                    />
+                  </div>
+                ))}
             </div>
           </ScrollArea>
         </div>
