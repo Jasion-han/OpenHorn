@@ -20,6 +20,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
+  ScrollArea,
   Switch,
 } from "ui";
 import { getScheduledTaskLabel } from "../../lib/i18n/agent";
@@ -137,7 +138,10 @@ export function ScheduledTasksView() {
   };
 
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-6">
+    <div className="flex h-full min-h-0 flex-col">
+      <div data-tauri-drag-region className="shrink-0" style={{ height: "24px" }} />
+      <ScrollArea className="flex-1 min-h-0">
+        <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-6 pb-8">
       <div className="flex items-start justify-between">
         <div>
           <h1 className="text-2xl font-bold">{getScheduledTaskLabel("scheduledTask.title")}</h1>
@@ -365,6 +369,8 @@ export function ScheduledTasksView() {
         initialFrequency={templateData?.frequency}
         initialTime={templateData?.time}
       />
+        </div>
+      </ScrollArea>
     </div>
   );
 }

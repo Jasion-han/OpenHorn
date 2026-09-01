@@ -14,7 +14,8 @@ export function DesktopShellLayout({
   children: React.ReactNode;
   activeView: "chat" | "settings" | "scheduled-tasks";
 }) {
-  const isCompact = activeView !== "chat";
+  const needsOuterPadding = activeView === "settings";
+  const nativeScroll = activeView === "settings";
   const sidebarCollapsed = useDesktopShellStore((state) => state.sidebarCollapsed);
   const setSidebarCollapsed = useDesktopShellStore((state) => state.setSidebarCollapsed);
   const loadChannels = useChatStore((state) => state.loadChannels);
@@ -61,12 +62,12 @@ export function DesktopShellLayout({
 
         <div
           data-tauri-drag-region
-          className={cn("min-h-0 flex-1 overflow-hidden", isCompact ? "p-4" : "p-2")}
+          className={cn("min-h-0 flex-1 overflow-hidden", needsOuterPadding ? "p-4" : "p-2")}
         >
           <div
             className={cn(
               "h-full min-h-0 min-w-0 w-full overflow-x-hidden",
-              isCompact ? "overflow-y-auto" : "overflow-y-hidden",
+              nativeScroll ? "overflow-y-auto" : "overflow-y-hidden",
             )}
           >
             {children}
