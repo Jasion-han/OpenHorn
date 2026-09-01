@@ -917,7 +917,7 @@ export const scheduledTaskLabels = {
   "scheduledTask.action.runNow": "立即执行",
   "scheduledTask.action.edit": "编辑",
   "scheduledTask.action.delete": "删除",
-  "scheduledTask.notify.runStartedTitle": "已触发",
+  "scheduledTask.notify.runStartedTitle": "定时任务",
   "scheduledTask.notify.runStartedBody": "定时任务已开始执行",
   "scheduledTask.notify.runFailedTitle": "执行失败",
   "scheduledTask.notify.runFailedBody": "无法触发定时任务",

@@ -180,6 +180,7 @@ export function ScheduledTasksView() {
     time: string;
   } | null>(null);
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
+  const [runningTaskIds, setRunningTaskIds] = useState<Set<string>>(new Set());
 
   const { tasks, runs, loading, loadTasks, loadRuns, deleteTask, toggleTask, runTaskNow } =
     useScheduledTaskStore();
@@ -219,10 +220,27 @@ export function ScheduledTasksView() {
     setDialogOpen(true);
   };
 
-  const handleRunNow = (task: (typeof tasks)[0]) => {
-    startNewConversation();
-    setPrefillComposer(task.prompt);
-    setActiveView("chat");
+  const handleRunNow = async (task: (typeof tasks)[0]) => {
+    setRunningTaskIds((prev) => new Set(prev).add(task.id));
+    notifySuccess(
+      getScheduledTaskLabel("scheduledTask.notify.runStartedTitle"),
+      getScheduledTaskLabel("scheduledTask.notify.runStartedBody"),
+    );
+    const ok = await runTaskNow(task.id);
+    setRunningTaskIds((prev) => {
+      const next = new Set(prev);
+      next.delete(task.id);
+      return next;
+    });
+    if (ok) {
+      void loadRuns();
+      void loadTasks();
+    } else {
+      notifyError(
+        getScheduledTaskLabel("scheduledTask.notify.runFailedTitle"),
+        getScheduledTaskLabel("scheduledTask.notify.runFailedBody"),
+      );
+    }
   };
 
   const handleDelete = async (id: string) => {
@@ -327,11 +345,18 @@ export function ScheduledTasksView() {
                             <Clock size={12} />
                             {formatFrequency(task.frequency)} {task.time}
                           </span>
-                          {task.nextRunAt && (
-                            <span>
-                              {getScheduledTaskLabel("scheduledTask.nextRun")}:{" "}
-                              {formatNextRun(task.nextRunAt)}
+                          {runningTaskIds.has(task.id) ? (
+                            <span className="flex items-center gap-1 text-primary">
+                              <span className="h-3 w-3 animate-spin rounded-full border border-primary border-t-transparent" />
+                              {getScheduledTaskLabel("scheduledTask.runStatus.running")}
                             </span>
+                          ) : (
+                            task.nextRunAt && (
+                              <span>
+                                {getScheduledTaskLabel("scheduledTask.nextRun")}:{" "}
+                                {formatNextRun(task.nextRunAt)}
+                              </span>
+                            )
                           )}
                         </div>
                       </div>
@@ -351,7 +376,7 @@ export function ScheduledTasksView() {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end" className="w-36">
-                            <DropdownMenuItem onClick={() => handleRunNow(task)}>
+                            <DropdownMenuItem onClick={() => void handleRunNow(task)}>
                               <Play size={14} />
                               {getScheduledTaskLabel("scheduledTask.action.runNow")}
                             </DropdownMenuItem>
