@@ -227,6 +227,7 @@ export function ScheduledTasksView() {
         getScheduledTaskLabel("scheduledTask.notify.runStartedBody"),
       );
       void loadRuns();
+      void loadTasks();
     } else {
       notifyError(
         getScheduledTaskLabel("scheduledTask.notify.runFailedTitle"),
