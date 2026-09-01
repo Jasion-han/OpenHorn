@@ -599,20 +599,20 @@ export function DesktopLeftSidebar() {
                             tabIndex={0}
                             onClick={() => {
                               if (run.conversationId) {
-                                setActiveView("chat");
                                 void selectConversation(run.conversationId);
+                                setActiveView("chat");
                               } else {
-                                openRunDetail(run.id);
+                                openScheduledTasks("runs");
                               }
                             }}
                             onKeyDown={(event) => {
                               if (event.key === "Enter" || event.key === " ") {
                                 event.preventDefault();
                                 if (run.conversationId) {
-                                  setActiveView("chat");
                                   void selectConversation(run.conversationId);
+                                  setActiveView("chat");
                                 } else {
-                                  openRunDetail(run.id);
+                                  openScheduledTasks("runs");
                                 }
                               }
                             }}

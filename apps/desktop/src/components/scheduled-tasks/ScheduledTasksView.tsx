@@ -172,8 +172,6 @@ function formatNextRun(date: Date | undefined | null): string {
 
 export function ScheduledTasksView() {
   const scheduledTasksTab = useDesktopShellStore((s) => s.scheduledTasksTab);
-  const selectedRunId = useDesktopShellStore((s) => s.selectedRunId);
-  const openScheduledTasks = useDesktopShellStore((s) => s.openScheduledTasks);
   const [tab, setTab] = useState<Tab>(scheduledTasksTab);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [templateData, setTemplateData] = useState<{
@@ -269,15 +267,6 @@ export function ScheduledTasksView() {
       getScheduledTaskLabel("scheduledTask.notify.deletedBody"),
     );
   };
-
-  useEffect(() => {
-    if (!selectedRunId) return;
-    const run = runs.find((r) => r.id === selectedRunId);
-    if (run?.conversationId) {
-      void selectConversation(run.conversationId);
-      setActiveView("chat");
-    }
-  }, [selectedRunId, runs, selectConversation, setActiveView]);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
