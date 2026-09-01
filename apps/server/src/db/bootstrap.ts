@@ -285,6 +285,37 @@ const SCHEMA_DDL: string[] = [
     FOREIGN KEY (user_id) REFERENCES users(id)
   );`,
 
+  `CREATE TABLE IF NOT EXISTS scheduled_tasks (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    prompt TEXT NOT NULL,
+    frequency TEXT NOT NULL,
+    time TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    notify_on_complete INTEGER NOT NULL DEFAULT 1,
+    channel_id TEXT,
+    model_id TEXT,
+    last_run_at INTEGER,
+    next_run_at INTEGER,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );`,
+
+  `CREATE TABLE IF NOT EXISTS scheduled_task_runs (
+    id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    result TEXT,
+    error TEXT,
+    started_at INTEGER NOT NULL,
+    completed_at INTEGER,
+    FOREIGN KEY (task_id) REFERENCES scheduled_tasks(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );`,
+
   `CREATE TABLE IF NOT EXISTS agent_events (
     id TEXT PRIMARY KEY,
     session_id TEXT NOT NULL,
@@ -325,6 +356,10 @@ const SCHEMA_DDL: string[] = [
   `CREATE INDEX IF NOT EXISTS agent_artifacts_run_idx ON agent_artifacts(run_id);`,
   `CREATE INDEX IF NOT EXISTS agent_events_session_idx ON agent_events(session_id);`,
   `CREATE INDEX IF NOT EXISTS mcp_servers_user_idx ON mcp_servers(user_id);`,
+  `CREATE INDEX IF NOT EXISTS scheduled_tasks_user_idx ON scheduled_tasks(user_id);`,
+  `CREATE INDEX IF NOT EXISTS scheduled_tasks_next_run_idx ON scheduled_tasks(next_run_at);`,
+  `CREATE INDEX IF NOT EXISTS scheduled_task_runs_task_idx ON scheduled_task_runs(task_id);`,
+  `CREATE INDEX IF NOT EXISTS scheduled_task_runs_user_idx ON scheduled_task_runs(user_id);`,
   // Existing DBs may hold duplicate (user_id, key) settings rows from the old
   // delete-then-insert code before the upsert fix. Remove dupes (keeping the
   // latest = highest rowid) BEFORE creating the unique index below, otherwise

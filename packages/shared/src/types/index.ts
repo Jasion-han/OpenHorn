@@ -123,6 +123,47 @@ export interface CredentialSource {
   error?: string;
 }
 
+export type ScheduledTaskFrequency =
+  | "daily"
+  | "weekly_mon"
+  | "weekly_tue"
+  | "weekly_wed"
+  | "weekly_thu"
+  | "weekly_fri"
+  | "weekly_sat"
+  | "weekly_sun";
+
+export type ScheduledTaskRunStatus = "pending" | "running" | "completed" | "failed";
+
+export interface ScheduledTask {
+  id: string;
+  userId: string;
+  title: string;
+  prompt: string;
+  frequency: ScheduledTaskFrequency;
+  time: string;
+  enabled: boolean;
+  notifyOnComplete: boolean;
+  channelId?: string;
+  modelId?: string;
+  lastRunAt?: Date;
+  nextRunAt?: Date;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface ScheduledTaskRun {
+  id: string;
+  taskId: string;
+  userId: string;
+  status: ScheduledTaskRunStatus;
+  result?: string;
+  error?: string;
+  startedAt: Date;
+  completedAt?: Date;
+  taskTitle?: string;
+}
+
 export interface ProviderPreset {
   protocol: ChannelProtocol;
   baseUrl: string;

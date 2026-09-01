@@ -386,6 +386,54 @@ export const agentEvents = sqliteTable(
   (table) => [index("agent_events_session_idx").on(table.sessionId)],
 );
 
+export const scheduledTasks = sqliteTable(
+  "scheduled_tasks",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    prompt: text("prompt").notNull(),
+    frequency: text("frequency").notNull(),
+    time: text("time").notNull(),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+    notifyOnComplete: integer("notify_on_complete", { mode: "boolean" }).notNull().default(true),
+    channelId: text("channel_id"),
+    modelId: text("model_id"),
+    lastRunAt: integer("last_run_at", { mode: "timestamp" }),
+    nextRunAt: integer("next_run_at", { mode: "timestamp" }),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [
+    index("scheduled_tasks_user_idx").on(table.userId),
+    index("scheduled_tasks_next_run_idx").on(table.nextRunAt),
+  ],
+);
+
+export const scheduledTaskRuns = sqliteTable(
+  "scheduled_task_runs",
+  {
+    id: text("id").primaryKey(),
+    taskId: text("task_id")
+      .notNull()
+      .references(() => scheduledTasks.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    status: text("status").notNull().default("pending"),
+    result: text("result"),
+    error: text("error"),
+    startedAt: integer("started_at", { mode: "timestamp" }).notNull(),
+    completedAt: integer("completed_at", { mode: "timestamp" }),
+  },
+  (table) => [
+    index("scheduled_task_runs_task_idx").on(table.taskId),
+    index("scheduled_task_runs_user_idx").on(table.userId),
+  ],
+);
+
 export const settings = sqliteTable(
   "settings",
   {
