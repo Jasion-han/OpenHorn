@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { getResolvedChannelForUser } from "../services/channelService";
 import { createConversation } from "../services/conversationService";
 import {
   advanceNextRunAt,
@@ -83,10 +84,19 @@ router.post("/:id/run", async (c) => {
   const task = await getScheduledTask(user.id, id);
   if (!task) return c.json({ error: "not found" }, 404);
 
+  let channelId = task.channelId;
+  let modelId = task.modelId;
+  if (!channelId) {
+    const resolved = await getResolvedChannelForUser(user.id);
+    if (resolved) {
+      channelId = resolved.channel.id;
+      modelId = resolved.modelId;
+    }
+  }
   const conversation = await createConversation(user.id, {
     title: task.title,
-    channelId: task.channelId,
-    modelId: task.modelId,
+    channelId,
+    modelId,
   });
   const runId = await createTaskRun(task.id, user.id, conversation.id);
   await advanceNextRunAt(task.id);
