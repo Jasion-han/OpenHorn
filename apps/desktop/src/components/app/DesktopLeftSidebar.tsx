@@ -264,13 +264,22 @@ export function DesktopLeftSidebar() {
     return () => clearTimeout(timer);
   }, [query, searchMessages]);
 
+  const scheduledConversationIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const run of recentRuns) {
+      if (run.conversationId) ids.add(run.conversationId);
+    }
+    return ids;
+  }, [recentRuns]);
+
   const filteredConversations = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
-    if (!normalizedQuery) return conversations;
-    return conversations.filter((conversation) =>
+    const base = conversations.filter((c) => !scheduledConversationIds.has(c.id));
+    if (!normalizedQuery) return base;
+    return base.filter((conversation) =>
       conversation.title.toLowerCase().includes(normalizedQuery),
     );
-  }, [conversations, query]);
+  }, [conversations, query, scheduledConversationIds]);
 
   // Opens the welcome screen rather than creating a row up front — the
   // conversation is created by the first message that is actually sent.
