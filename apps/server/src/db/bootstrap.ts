@@ -1192,6 +1192,14 @@ async function ensureConversationSummaryColumns(): Promise<void> {
   }
 }
 
+async function ensureScheduledTaskRunConversationIdColumn(): Promise<void> {
+  const result = await client.execute(`PRAGMA table_info('scheduled_task_runs');`);
+  const rows = getRows(result);
+  if (rows.length > 0 && !hasColumnNamed(rows, "conversation_id")) {
+    await client.execute(`ALTER TABLE scheduled_task_runs ADD COLUMN conversation_id TEXT;`);
+  }
+}
+
 async function ensureMessagesFtsTable(): Promise<void> {
   const check = await client.execute(
     `SELECT name FROM sqlite_master WHERE type='table' AND name='messages_fts';`,
@@ -1260,6 +1268,7 @@ export async function bootstrapDatabase(): Promise<void> {
   await ensureDefaultLocalUser();
 
   await ensureConversationSummaryColumns();
+  await ensureScheduledTaskRunConversationIdColumn();
 
   // Runs LAST and rebuilds 7 core tables with DROP TABLE + RENAME. SQLite drops
   // a table's indexes with the table, and the SCHEMA_DDL pass above already
