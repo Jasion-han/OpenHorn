@@ -219,21 +219,10 @@ export function ScheduledTasksView() {
     setDialogOpen(true);
   };
 
-  const handleRunNow = async (id: string) => {
-    const ok = await runTaskNow(id);
-    if (ok) {
-      notifySuccess(
-        getScheduledTaskLabel("scheduledTask.notify.runStartedTitle"),
-        getScheduledTaskLabel("scheduledTask.notify.runStartedBody"),
-      );
-      void loadRuns();
-      void loadTasks();
-    } else {
-      notifyError(
-        getScheduledTaskLabel("scheduledTask.notify.runFailedTitle"),
-        getScheduledTaskLabel("scheduledTask.notify.runFailedBody"),
-      );
-    }
+  const handleRunNow = (task: (typeof tasks)[0]) => {
+    startNewConversation();
+    setPrefillComposer(task.prompt);
+    setActiveView("chat");
   };
 
   const handleDelete = async (id: string) => {
@@ -362,7 +351,7 @@ export function ScheduledTasksView() {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end" className="w-36">
-                            <DropdownMenuItem onClick={() => void handleRunNow(task.id)}>
+                            <DropdownMenuItem onClick={() => handleRunNow(task)}>
                               <Play size={14} />
                               {getScheduledTaskLabel("scheduledTask.action.runNow")}
                             </DropdownMenuItem>
