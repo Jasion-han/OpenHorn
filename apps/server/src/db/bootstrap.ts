@@ -308,6 +308,7 @@ const SCHEMA_DDL: string[] = [
     task_id TEXT NOT NULL,
     user_id TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'pending',
+    conversation_id TEXT,
     result TEXT,
     error TEXT,
     started_at INTEGER NOT NULL,

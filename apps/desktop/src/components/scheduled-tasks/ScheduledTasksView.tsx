@@ -236,21 +236,24 @@ export function ScheduledTasksView() {
     setDialogOpen(true);
   };
 
+  const selectConversation = useChatStore((s) => s.selectConversation);
+  const setPendingPrompt = useDesktopShellStore((s) => s.setPendingPrompt);
+
   const handleRunNow = async (task: (typeof tasks)[0]) => {
     setRunningTaskIds((prev) => new Set(prev).add(task.id));
-    notifySuccess(
-      getScheduledTaskLabel("scheduledTask.notify.runStartedTitle"),
-      getScheduledTaskLabel("scheduledTask.notify.runStartedBody"),
-    );
-    const ok = await runTaskNow(task.id);
+    const conversationId = await runTaskNow(task.id);
     setRunningTaskIds((prev) => {
       const next = new Set(prev);
       next.delete(task.id);
       return next;
     });
-    if (ok) {
+    if (conversationId) {
       void loadRuns();
       void loadTasks();
+      void useChatStore.getState().loadConversations();
+      await selectConversation(conversationId);
+      setPendingPrompt({ text: task.prompt, files: [] });
+      setActiveView("chat");
     } else {
       notifyError(
         getScheduledTaskLabel("scheduledTask.notify.runFailedTitle"),
@@ -267,56 +270,14 @@ export function ScheduledTasksView() {
     );
   };
 
-  const selectedRun = selectedRunId ? runs.find((r) => r.id === selectedRunId) : null;
-  const selectedTask = selectedRun ? tasks.find((t) => t.id === selectedRun.taskId) : null;
-
-  if (selectedRun) {
-    return (
-      <div className="flex h-full min-h-0 flex-col">
-        <div data-tauri-drag-region className="shrink-0" style={{ height: "24px" }} />
-        <ScrollArea className="flex-1 min-h-0">
-          <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-6 pb-8">
-            <button
-              type="button"
-              className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors w-fit"
-              onClick={() => openScheduledTasks("runs")}
-            >
-              <ChevronDown size={14} className="rotate-90" />
-              {getScheduledTaskLabel("scheduledTask.tab.runs")}
-            </button>
-
-            <div className="flex flex-col gap-4">
-              <div className="flex justify-end">
-                <div className="max-w-[80%] rounded-2xl rounded-tr-md bg-primary px-4 py-3 text-primary-foreground">
-                  <p className="text-sm whitespace-pre-wrap">
-                    {selectedTask?.prompt ?? selectedRun.taskId}
-                  </p>
-                </div>
-              </div>
-
-              {selectedRun.result && (
-                <div className="flex justify-start">
-                  <div className="max-w-[80%] rounded-2xl rounded-tl-md bg-muted px-4 py-3">
-                    <p className="text-sm whitespace-pre-wrap">{selectedRun.result}</p>
-                  </div>
-                </div>
-              )}
-
-              {selectedRun.error && (
-                <div className="flex justify-start">
-                  <div className="max-w-[80%] rounded-2xl rounded-tl-md bg-red-50 dark:bg-red-900/20 px-4 py-3">
-                    <p className="text-sm text-destructive whitespace-pre-wrap">
-                      {selectedRun.error}
-                    </p>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </ScrollArea>
-      </div>
-    );
-  }
+  useEffect(() => {
+    if (!selectedRunId) return;
+    const run = runs.find((r) => r.id === selectedRunId);
+    if (run?.conversationId) {
+      void selectConversation(run.conversationId);
+      setActiveView("chat");
+    }
+  }, [selectedRunId, runs, selectConversation, setActiveView]);
 
   return (
     <div className="flex h-full min-h-0 flex-col">

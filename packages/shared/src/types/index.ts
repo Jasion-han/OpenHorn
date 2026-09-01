@@ -157,6 +157,7 @@ export interface ScheduledTaskRun {
   taskId: string;
   userId: string;
   status: ScheduledTaskRunStatus;
+  conversationId?: string;
   result?: string;
   error?: string;
   startedAt: Date;

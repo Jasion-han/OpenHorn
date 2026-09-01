@@ -423,6 +423,7 @@ export const scheduledTaskRuns = sqliteTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     status: text("status").notNull().default("pending"),
+    conversationId: text("conversation_id"),
     result: text("result"),
     error: text("error"),
     startedAt: integer("started_at", { mode: "timestamp" }).notNull(),

@@ -30,7 +30,7 @@ interface ScheduledTaskState {
   deleteTask: (id: string) => Promise<void>;
   deleteRun: (runId: string) => Promise<void>;
   toggleTask: (id: string) => Promise<void>;
-  runTaskNow: (id: string) => Promise<boolean>;
+  runTaskNow: (id: string) => Promise<string | null>;
 }
 
 export const useScheduledTaskStore = create<ScheduledTaskState>((set) => ({
@@ -126,9 +126,11 @@ export const useScheduledTaskStore = create<ScheduledTaskState>((set) => ({
     try {
       const base = getDesktopBackendBase();
       const res = await fetch(`${base}/scheduled-tasks/${id}/run`, { method: "POST" });
-      return res.ok;
+      if (!res.ok) return null;
+      const json = (await res.json()) as { conversationId?: string };
+      return json.conversationId ?? null;
     } catch {
-      return false;
+      return null;
     }
   },
 

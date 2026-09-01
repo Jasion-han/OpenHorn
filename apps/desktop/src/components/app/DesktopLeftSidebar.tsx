@@ -597,11 +597,23 @@ export function DesktopLeftSidebar() {
                             key={run.id}
                             role="button"
                             tabIndex={0}
-                            onClick={() => openRunDetail(run.id)}
+                            onClick={() => {
+                              if (run.conversationId) {
+                                setActiveView("chat");
+                                void selectConversation(run.conversationId);
+                              } else {
+                                openRunDetail(run.id);
+                              }
+                            }}
                             onKeyDown={(event) => {
                               if (event.key === "Enter" || event.key === " ") {
                                 event.preventDefault();
-                                openRunDetail(run.id);
+                                if (run.conversationId) {
+                                  setActiveView("chat");
+                                  void selectConversation(run.conversationId);
+                                } else {
+                                  openRunDetail(run.id);
+                                }
                               }
                             }}
                             className="flex cursor-pointer items-center gap-2 rounded-[10px] px-3 py-[7px] text-left text-sm text-foreground/70 transition-colors duration-100 titlebar-no-drag hover:bg-foreground/[0.04] hover:text-foreground"

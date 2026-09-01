@@ -162,6 +162,7 @@ export async function listTaskRuns(userId: string, taskId?: string, limit = 50) 
       taskId: scheduledTaskRuns.taskId,
       userId: scheduledTaskRuns.userId,
       status: scheduledTaskRuns.status,
+      conversationId: scheduledTaskRuns.conversationId,
       result: scheduledTaskRuns.result,
       error: scheduledTaskRuns.error,
       startedAt: scheduledTaskRuns.startedAt,
@@ -191,7 +192,7 @@ export async function getDueTasks() {
     .where(and(eq(scheduledTasks.enabled, true), lte(scheduledTasks.nextRunAt, now)));
 }
 
-export async function createTaskRun(taskId: string, userId: string) {
+export async function createTaskRun(taskId: string, userId: string, conversationId?: string) {
   const id = generateId();
   const now = new Date();
   await db.insert(scheduledTaskRuns).values({
@@ -199,6 +200,7 @@ export async function createTaskRun(taskId: string, userId: string) {
     taskId,
     userId,
     status: "running",
+    conversationId: conversationId ?? null,
     startedAt: now,
   });
   return id;
