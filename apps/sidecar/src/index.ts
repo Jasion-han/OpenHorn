@@ -4,6 +4,11 @@
 // level so the SDK's child process never sees them.
 delete process.env.CLAUDECODE;
 delete process.env.AI_AGENT;
+for (const key of Object.keys(process.env)) {
+  if (key.startsWith("CLAUDE_CODE_") && key !== "CLAUDE_CODE_ENTRYPOINT") {
+    delete process.env[key];
+  }
+}
 
 import { preconnectAcpAgent, runAcpAgent } from "./agent/acp";
 import { runChatStream } from "./agent/chat";
