@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { Toaster, TooltipProvider } from "ui";
 import { DesktopShellLayout } from "./components/app/DesktopShellLayout";
 import { DesktopChatArea } from "./components/chat/DesktopChatArea";
+import { ScheduledTasksView } from "./components/scheduled-tasks/ScheduledTasksView";
 import { SettingsView } from "./components/settings/SettingsView";
 import { ThemeListener } from "./components/theme/ThemeListener";
 import { getTauriSidecarPlatform, hasOverlayTitleBar } from "./lib/tauriBridge";
@@ -80,7 +81,13 @@ export function App() {
       <ThemeListener />
       <Toaster />
       <DesktopShellLayout activeView={activeView}>
-        {activeView === "settings" ? <SettingsView /> : <DesktopChatArea />}
+        {activeView === "settings" ? (
+          <SettingsView />
+        ) : activeView === "scheduled-tasks" ? (
+          <ScheduledTasksView />
+        ) : (
+          <DesktopChatArea />
+        )}
       </DesktopShellLayout>
     </TooltipProvider>
   );

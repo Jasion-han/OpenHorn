@@ -139,6 +139,8 @@ export function DesktopWelcomeScreen() {
   const composerMode = useChatStore((state) => state.composerMode);
   const setComposerMode = useChatStore((state) => state.setComposerMode);
   const setPendingPrompt = useDesktopShellStore((state) => state.setPendingPrompt);
+  const prefillComposer = useDesktopShellStore((state) => state.prefillComposer);
+  const setPrefillComposer = useDesktopShellStore((state) => state.setPrefillComposer);
   const fullAccessEnabled = useDesktopShellStore((state) => state.fullAccessEnabled);
   const toggleFullAccess = useDesktopShellStore((state) => state.toggleFullAccess);
 
@@ -174,6 +176,14 @@ export function DesktopWelcomeScreen() {
   // opens the model picker. Fires at most once per mount.
   const acpStartupPreconnectedRef = useRef(false);
   // biome-ignore lint/correctness/useExhaustiveDependencies: handleAcpChannelSelect is unstable by identity
+  useEffect(() => {
+    if (prefillComposer) {
+      setDraft(prefillComposer);
+      setPrefillComposer(null);
+      queueMicrotask(() => textareaRef.current?.focus());
+    }
+  }, [prefillComposer, setPrefillComposer]);
+
   useEffect(() => {
     if (acpStartupPreconnectedRef.current) return;
     const acpChannel = channels.find((c) => c.protocol === "acp" && c.enabled);

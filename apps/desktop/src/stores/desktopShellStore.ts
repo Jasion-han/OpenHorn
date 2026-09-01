@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-export type DesktopActiveView = "chat" | "settings";
+export type DesktopActiveView = "chat" | "settings" | "scheduled-tasks";
 export type DesktopSettingsTab =
   | "general"
   | "channels"
@@ -29,6 +29,7 @@ export interface DesktopShellState {
    * hence the send) before the welcome screen's `await` even resumes.
    */
   pendingPrompt: { text: string; files: File[] } | null;
+  prefillComposer: string | null;
 
   setActiveView: (view: DesktopActiveView) => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
@@ -36,6 +37,7 @@ export interface DesktopShellState {
   openSettings: (tab?: DesktopSettingsTab) => void;
   toggleFullAccess: () => void;
   setPendingPrompt: (prompt: { text: string; files: File[] } | null) => void;
+  setPrefillComposer: (text: string | null) => void;
   reset: () => void;
 }
 
@@ -45,6 +47,7 @@ const INITIAL_STATE = {
   settingsTab: "channels" as DesktopSettingsTab,
   fullAccessEnabled: false,
   pendingPrompt: null as { text: string; files: File[] } | null,
+  prefillComposer: null as string | null,
 };
 
 export function createDesktopShellStore() {
@@ -62,6 +65,7 @@ export function createDesktopShellStore() {
           }),
         toggleFullAccess: () => set((state) => ({ fullAccessEnabled: !state.fullAccessEnabled })),
         setPendingPrompt: (pendingPrompt) => set({ pendingPrompt }),
+        setPrefillComposer: (prefillComposer) => set({ prefillComposer }),
         reset: () => set({ ...INITIAL_STATE }),
       }),
       {

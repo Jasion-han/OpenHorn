@@ -871,3 +871,54 @@ type SettingsViewLabelKey = keyof typeof settingsViewLabels;
 export function getSettingsViewLabel(key: SettingsViewLabelKey): string {
   return settingsViewLabels[key];
 }
+
+export const scheduledTaskLabels = {
+  "scheduledTask.title": "定时任务",
+  "scheduledTask.subtitle": "请保持电脑开机，关机或休眠时，定时任务将无法自动执行。",
+  "scheduledTask.tab.tasks": "定时任务",
+  "scheduledTask.tab.runs": "执行记录",
+  "scheduledTask.newTask": "新任务",
+  "scheduledTask.createViaChat": "通过对话创建",
+  "scheduledTask.createManually": "手动创建",
+  "scheduledTask.emptyState": "还没有创建定时任务",
+  "scheduledTask.templateHeading": "从模板开始",
+  "scheduledTask.createTitle": "创建定时任务",
+  "scheduledTask.createSubtitle": "设置任务名称、Prompt 指令和执行时间，保存后将自动调度。",
+  "scheduledTask.fieldName": "任务名",
+  "scheduledTask.fieldNamePlaceholder": "请输入任务名",
+  "scheduledTask.fieldPrompt": "Prompt 指令",
+  "scheduledTask.fieldPromptPlaceholder":
+    '请输入执行指令，例如："每天早上帮我总结昨晚收到的企业邮件"',
+  "scheduledTask.fieldTime": "执行时间",
+  "scheduledTask.fieldNotify": "完成时推送系统通知",
+  "scheduledTask.cancel": "取消",
+  "scheduledTask.save": "保存任务",
+  "scheduledTask.saving": "保存中...",
+  "scheduledTask.freq.daily": "每天",
+  "scheduledTask.freq.weekly_mon": "每周一",
+  "scheduledTask.freq.weekly_tue": "每周二",
+  "scheduledTask.freq.weekly_wed": "每周三",
+  "scheduledTask.freq.weekly_thu": "每周四",
+  "scheduledTask.freq.weekly_fri": "每周五",
+  "scheduledTask.freq.weekly_sat": "每周六",
+  "scheduledTask.freq.weekly_sun": "每周日",
+  "scheduledTask.notify.createdTitle": "已创建",
+  "scheduledTask.notify.createdBody": "定时任务已创建",
+  "scheduledTask.notify.createFailedTitle": "创建失败",
+  "scheduledTask.notify.createFailedBody": "无法创建定时任务",
+  "scheduledTask.notify.deletedTitle": "已删除",
+  "scheduledTask.notify.deletedBody": "定时任务已删除",
+  "scheduledTask.nextRun": "下次执行",
+  "scheduledTask.runsEmpty": "暂无执行记录",
+  "scheduledTask.runStatus.completed": "成功",
+  "scheduledTask.runStatus.failed": "失败",
+  "scheduledTask.runStatus.running": "执行中",
+  "scheduledTask.runStatus.pending": "等待中",
+  "scheduledTask.action.delete": "删除",
+} as const;
+
+type ScheduledTaskLabelKey = keyof typeof scheduledTaskLabels;
+
+export function getScheduledTaskLabel(key: ScheduledTaskLabelKey): string {
+  return scheduledTaskLabels[key];
+}

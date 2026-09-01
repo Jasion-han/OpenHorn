@@ -12,9 +12,9 @@ export function DesktopShellLayout({
   activeView,
 }: {
   children: React.ReactNode;
-  activeView: "chat" | "settings";
+  activeView: "chat" | "settings" | "scheduled-tasks";
 }) {
-  const isCompact = activeView === "settings";
+  const isCompact = activeView !== "chat";
   const sidebarCollapsed = useDesktopShellStore((state) => state.sidebarCollapsed);
   const setSidebarCollapsed = useDesktopShellStore((state) => state.setSidebarCollapsed);
   const loadChannels = useChatStore((state) => state.loadChannels);
