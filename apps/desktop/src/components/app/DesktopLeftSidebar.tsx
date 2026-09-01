@@ -206,6 +206,7 @@ export function DesktopLeftSidebar() {
   const setSidebarCollapsed = useDesktopShellStore((state) => state.setSidebarCollapsed);
   const openSettings = useDesktopShellStore((state) => state.openSettings);
   const openScheduledTasks = useDesktopShellStore((state) => state.openScheduledTasks);
+  const openRunDetail = useDesktopShellStore((state) => state.openRunDetail);
   const user = useAuthStore((state) => state.user);
   const backendStatus = useBackendStatusStore((state) => state.status);
   const backendLastError = useBackendStatusStore((state) => state.lastError);
@@ -596,11 +597,11 @@ export function DesktopLeftSidebar() {
                             key={run.id}
                             role="button"
                             tabIndex={0}
-                            onClick={() => openScheduledTasks("runs")}
+                            onClick={() => openRunDetail(run.id)}
                             onKeyDown={(event) => {
                               if (event.key === "Enter" || event.key === " ") {
                                 event.preventDefault();
-                                openScheduledTasks("runs");
+                                openRunDetail(run.id);
                               }
                             }}
                             className="flex cursor-pointer items-center gap-2 rounded-[10px] px-3 py-[7px] text-left text-sm text-foreground/70 transition-colors duration-100 titlebar-no-drag hover:bg-foreground/[0.04] hover:text-foreground"

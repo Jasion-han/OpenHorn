@@ -31,6 +31,7 @@ export interface DesktopShellState {
   pendingPrompt: { text: string; files: File[] } | null;
   prefillComposer: string | null;
   scheduledTasksTab: "tasks" | "runs";
+  selectedRunId: string | null;
 
   setActiveView: (view: DesktopActiveView) => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
@@ -40,6 +41,7 @@ export interface DesktopShellState {
   setPendingPrompt: (prompt: { text: string; files: File[] } | null) => void;
   setPrefillComposer: (text: string | null) => void;
   openScheduledTasks: (tab?: "tasks" | "runs") => void;
+  openRunDetail: (runId: string) => void;
   reset: () => void;
 }
 
@@ -51,6 +53,7 @@ const INITIAL_STATE = {
   pendingPrompt: null as { text: string; files: File[] } | null,
   prefillComposer: null as string | null,
   scheduledTasksTab: "tasks" as "tasks" | "runs",
+  selectedRunId: null as string | null,
 };
 
 export function createDesktopShellStore() {
@@ -70,7 +73,8 @@ export function createDesktopShellStore() {
         setPendingPrompt: (pendingPrompt) => set({ pendingPrompt }),
         setPrefillComposer: (prefillComposer) => set({ prefillComposer }),
         openScheduledTasks: (tab = "tasks") =>
-          set({ activeView: "scheduled-tasks", scheduledTasksTab: tab }),
+          set({ activeView: "scheduled-tasks", scheduledTasksTab: tab, selectedRunId: null }),
+        openRunDetail: (runId) => set({ activeView: "scheduled-tasks", selectedRunId: runId }),
         reset: () => set({ ...INITIAL_STATE }),
       }),
       {
