@@ -3,6 +3,7 @@ import { getResolvedChannelForUser } from "../services/channelService";
 import { createConversation } from "../services/conversationService";
 import {
   advanceNextRunAt,
+  completeTaskRun,
   createScheduledTask,
   createTaskRun,
   deleteScheduledTask,
@@ -99,6 +100,7 @@ router.post("/:id/run", async (c) => {
     modelId,
   });
   const runId = await createTaskRun(task.id, user.id, conversation.id);
+  await completeTaskRun(runId, { status: "completed" });
   await advanceNextRunAt(task.id);
   return c.json({ success: true, runId, conversationId: conversation.id });
 });
