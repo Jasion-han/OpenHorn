@@ -3,7 +3,6 @@ import {
   ChevronDown,
   ChevronRight,
   Clock,
-  FileText,
   MoreHorizontal,
   PanelLeftClose,
   Pencil,
@@ -196,6 +195,7 @@ export function DesktopLeftSidebar() {
   // sidebar is just "new conversation + the list".
   const [searchOpen, setSearchOpen] = useState(false);
   const [pinnedOpen, setPinnedOpen] = useState(true);
+  const [taskGroupsOpen, setTaskGroupsOpen] = useState<Record<string, boolean>>({});
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [pendingDelete, setPendingDelete] = useState<Conversation | null>(null);
@@ -347,6 +347,20 @@ export function DesktopLeftSidebar() {
   const pinned = filteredConversations.filter((conversation) => conversation.isPinned);
   const rest = filteredConversations.filter((conversation) => !conversation.isPinned);
   const groups = groupByCreatedAt(rest, today);
+
+  const taskGroups = useMemo(() => {
+    const map = new Map<string, { taskTitle: string; runs: typeof recentRuns }>();
+    for (const run of recentRuns) {
+      const key = run.taskId;
+      const existing = map.get(key);
+      if (existing) {
+        existing.runs.push(run);
+      } else {
+        map.set(key, { taskTitle: run.taskTitle ?? run.taskId.slice(0, 8), runs: [run] });
+      }
+    }
+    return Array.from(map.entries());
+  }, [recentRuns]);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -550,6 +564,70 @@ export function DesktopLeftSidebar() {
                     </div>
                   )}
 
+                  {taskGroups.map(([taskId, { taskTitle, runs }]) => (
+                    <div key={`task-${taskId}`}>
+                      <div className="flex items-center justify-between px-3 pb-1 pt-2">
+                        <span className="text-[11px] font-medium text-muted-foreground/80">
+                          {taskTitle}
+                        </span>
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          className="h-5 w-5"
+                          onClick={() =>
+                            setTaskGroupsOpen((prev) => ({
+                              ...prev,
+                              [taskId]: !(prev[taskId] ?? true),
+                            }))
+                          }
+                        >
+                          {(taskGroupsOpen[taskId] ?? true) ? (
+                            <ChevronDown size={12} />
+                          ) : (
+                            <ChevronRight size={12} />
+                          )}
+                        </Button>
+                      </div>
+                      {(taskGroupsOpen[taskId] ?? true) &&
+                        runs.map((run) => (
+                          <div
+                            key={run.id}
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => setActiveView("scheduled-tasks")}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter" || event.key === " ") {
+                                event.preventDefault();
+                                setActiveView("scheduled-tasks");
+                              }
+                            }}
+                            className="flex cursor-pointer items-center gap-2 rounded-[10px] px-3 py-[7px] text-left text-sm text-foreground/70 transition-colors duration-100 titlebar-no-drag hover:bg-foreground/[0.04] hover:text-foreground"
+                          >
+                            <Clock size={14} className="shrink-0 text-muted-foreground" />
+                            <span className="min-w-0 flex-1 truncate text-xs">
+                              {run.startedAt
+                                ? new Date(run.startedAt).toLocaleString("zh-CN", {
+                                    month: "2-digit",
+                                    day: "2-digit",
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                  })
+                                : run.id.slice(0, 8)}
+                            </span>
+                            <span
+                              className={cn(
+                                "h-2 w-2 shrink-0 rounded-full",
+                                run.status === "completed" && "bg-emerald-500",
+                                run.status === "failed" && "bg-red-500",
+                                run.status === "running" && "bg-blue-500 animate-pulse",
+                                run.status === "pending" && "bg-gray-400",
+                              )}
+                            />
+                          </div>
+                        ))}
+                    </div>
+                  ))}
+
                   {groups.map((group) => (
                     <div key={group.label}>
                       <p className="px-3 pb-1 pt-2 text-[11px] font-medium text-muted-foreground/80">
@@ -598,37 +676,6 @@ export function DesktopLeftSidebar() {
                   )}
                 </>
               )}
-
-              {recentRuns.length > 0 &&
-                recentRuns.slice(0, 5).map((run) => (
-                  <div
-                    key={run.id}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => setActiveView("scheduled-tasks")}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" || event.key === " ") {
-                        event.preventDefault();
-                        setActiveView("scheduled-tasks");
-                      }
-                    }}
-                    className="flex cursor-pointer items-center gap-2 rounded-[10px] px-3 py-[7px] text-left text-sm text-foreground/70 transition-colors duration-100 titlebar-no-drag hover:bg-foreground/[0.04] hover:text-foreground"
-                  >
-                    <Clock size={14} className="shrink-0 text-muted-foreground" />
-                    <span className="min-w-0 flex-1 truncate">
-                      {run.taskTitle ?? run.taskId.slice(0, 8)}
-                    </span>
-                    <span
-                      className={cn(
-                        "h-2 w-2 shrink-0 rounded-full",
-                        run.status === "completed" && "bg-emerald-500",
-                        run.status === "failed" && "bg-red-500",
-                        run.status === "running" && "bg-blue-500 animate-pulse",
-                        run.status === "pending" && "bg-gray-400",
-                      )}
-                    />
-                  </div>
-                ))}
             </div>
           </ScrollArea>
         </div>
