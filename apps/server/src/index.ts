@@ -9,9 +9,13 @@ import conversationRoutes from "./routes/conversations";
 import credentialRoutes from "./routes/credentials";
 import mcpRoutes from "./routes/mcp";
 import messageRoutes from "./routes/messages";
+import scheduledTaskRoutes from "./routes/scheduledTasks";
 import settingsRoutes from "./routes/settings";
 
+import { startScheduler } from "./services/scheduledTaskScheduler";
+
 await bootstrapDatabase();
+startScheduler();
 
 const app = new Hono();
 
@@ -56,6 +60,7 @@ app.route("/messages", messageRoutes);
 app.route("/attachments", attachmentRoutes);
 app.route("/mcp", mcpRoutes);
 app.route("/credentials", credentialRoutes);
+app.route("/scheduled-tasks", scheduledTaskRoutes);
 app.route("/settings", settingsRoutes);
 
 const port = parseInt(process.env.PORT || "3002", 10);
