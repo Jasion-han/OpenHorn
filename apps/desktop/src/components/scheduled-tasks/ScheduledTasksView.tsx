@@ -14,7 +14,9 @@ import {
   MessageSquare,
   Moon,
   MoreHorizontal,
+  Pencil,
   PenLine,
+  Play,
   Plus,
   Trash2,
   Zap,
@@ -32,7 +34,7 @@ import {
   Switch,
 } from "ui";
 import { getScheduledTaskLabel } from "../../lib/i18n/agent";
-import { notifySuccess } from "../../lib/notify";
+import { notifyError, notifySuccess } from "../../lib/notify";
 import { useChatStore } from "../../stores/chatStore";
 import { useDesktopShellStore } from "../../stores/desktopShellStore";
 import { useScheduledTaskStore } from "../../stores/scheduledTaskStore";
@@ -177,8 +179,9 @@ export function ScheduledTasksView() {
     frequency: ScheduledTaskFrequency;
     time: string;
   } | null>(null);
+  const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
 
-  const { tasks, runs, loading, loadTasks, loadRuns, deleteTask, toggleTask } =
+  const { tasks, runs, loading, loadTasks, loadRuns, deleteTask, toggleTask, runTaskNow } =
     useScheduledTaskStore();
   const setActiveView = useDesktopShellStore((s) => s.setActiveView);
   const setPrefillComposer = useDesktopShellStore((s) => s.setPrefillComposer);
@@ -201,7 +204,35 @@ export function ScheduledTasksView() {
 
   const handleNewTask = () => {
     setTemplateData(null);
+    setEditingTaskId(null);
     setDialogOpen(true);
+  };
+
+  const handleEdit = (task: (typeof tasks)[0]) => {
+    setEditingTaskId(task.id);
+    setTemplateData({
+      title: task.title,
+      prompt: task.prompt,
+      frequency: task.frequency,
+      time: task.time,
+    });
+    setDialogOpen(true);
+  };
+
+  const handleRunNow = async (id: string) => {
+    const ok = await runTaskNow(id);
+    if (ok) {
+      notifySuccess(
+        getScheduledTaskLabel("scheduledTask.notify.runStartedTitle"),
+        getScheduledTaskLabel("scheduledTask.notify.runStartedBody"),
+      );
+      void loadRuns();
+    } else {
+      notifyError(
+        getScheduledTaskLabel("scheduledTask.notify.runFailedTitle"),
+        getScheduledTaskLabel("scheduledTask.notify.runFailedBody"),
+      );
+    }
   };
 
   const handleDelete = async (id: string) => {
@@ -329,7 +360,15 @@ export function ScheduledTasksView() {
                               <MoreHorizontal size={14} />
                             </Button>
                           </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" className="w-32">
+                          <DropdownMenuContent align="end" className="w-36">
+                            <DropdownMenuItem onClick={() => void handleRunNow(task.id)}>
+                              <Play size={14} />
+                              {getScheduledTaskLabel("scheduledTask.action.runNow")}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => handleEdit(task)}>
+                              <Pencil size={14} />
+                              {getScheduledTaskLabel("scheduledTask.action.edit")}
+                            </DropdownMenuItem>
                             <DropdownMenuItem
                               className="text-destructive focus:text-destructive"
                               onClick={() => void handleDelete(task.id)}
@@ -441,8 +480,12 @@ export function ScheduledTasksView() {
             open={dialogOpen}
             onOpenChange={(open) => {
               setDialogOpen(open);
-              if (!open) setTemplateData(null);
+              if (!open) {
+                setTemplateData(null);
+                setEditingTaskId(null);
+              }
             }}
+            editTaskId={editingTaskId ?? undefined}
             initialTitle={templateData?.title}
             initialPrompt={templateData?.prompt}
             initialFrequency={templateData?.frequency}

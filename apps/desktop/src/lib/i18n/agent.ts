@@ -914,7 +914,20 @@ export const scheduledTaskLabels = {
   "scheduledTask.runStatus.failed": "失败",
   "scheduledTask.runStatus.running": "执行中",
   "scheduledTask.runStatus.pending": "等待中",
+  "scheduledTask.action.runNow": "立即执行",
+  "scheduledTask.action.edit": "编辑",
   "scheduledTask.action.delete": "删除",
+  "scheduledTask.notify.runStartedTitle": "已触发",
+  "scheduledTask.notify.runStartedBody": "定时任务已开始执行",
+  "scheduledTask.notify.runFailedTitle": "执行失败",
+  "scheduledTask.notify.runFailedBody": "无法触发定时任务",
+  "scheduledTask.notify.updatedTitle": "已更新",
+  "scheduledTask.notify.updatedBody": "定时任务已更新",
+  "scheduledTask.notify.updateFailedTitle": "更新失败",
+  "scheduledTask.notify.updateFailedBody": "无法更新定时任务",
+  "scheduledTask.editTitle": "编辑定时任务",
+  "scheduledTask.editSubtitle": "修改任务名称、Prompt 指令或执行时间。",
+  "scheduledTask.saveEdit": "保存修改",
 } as const;
 
 type ScheduledTaskLabelKey = keyof typeof scheduledTaskLabels;

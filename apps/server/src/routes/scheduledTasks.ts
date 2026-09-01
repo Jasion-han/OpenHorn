@@ -1,7 +1,11 @@
 import { Hono } from "hono";
 import {
+  advanceNextRunAt,
+  completeTaskRun,
   createScheduledTask,
+  createTaskRun,
   deleteScheduledTask,
+  getScheduledTask,
   listScheduledTasks,
   listTaskRuns,
   toggleScheduledTask,
@@ -70,6 +74,28 @@ router.patch("/:id/toggle", async (c) => {
   const task = await toggleScheduledTask(user.id, id);
   if (!task) return c.json({ error: "not found" }, 404);
   return c.json({ task });
+});
+
+router.post("/:id/run", async (c) => {
+  const user = c.get("user");
+  const id = c.req.param("id");
+  const task = await getScheduledTask(user.id, id);
+  if (!task) return c.json({ error: "not found" }, 404);
+
+  const runId = await createTaskRun(task.id, user.id);
+  try {
+    await advanceNextRunAt(task.id);
+    await completeTaskRun(runId, {
+      status: "completed",
+      result: `[手动触发] ${task.title}\n\nPrompt: ${task.prompt}\n\n(Agent 执行功能将在后续版本接入)`,
+    });
+  } catch (err) {
+    await completeTaskRun(runId, {
+      status: "failed",
+      error: err instanceof Error ? err.message : "Unknown error",
+    });
+  }
+  return c.json({ success: true, runId });
 });
 
 router.get("/:id/runs", async (c) => {

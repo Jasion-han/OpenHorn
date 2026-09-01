@@ -17,8 +17,19 @@ interface ScheduledTaskState {
     time: string;
     notifyOnComplete?: boolean;
   }) => Promise<ScheduledTask | null>;
+  updateTask: (
+    id: string,
+    data: Partial<{
+      title: string;
+      prompt: string;
+      frequency: ScheduledTaskFrequency;
+      time: string;
+      notifyOnComplete: boolean;
+    }>,
+  ) => Promise<ScheduledTask | null>;
   deleteTask: (id: string) => Promise<void>;
   toggleTask: (id: string) => Promise<void>;
+  runTaskNow: (id: string) => Promise<boolean>;
 }
 
 export const useScheduledTaskStore = create<ScheduledTaskState>((set) => ({
@@ -70,6 +81,26 @@ export const useScheduledTaskStore = create<ScheduledTaskState>((set) => ({
     }
   },
 
+  async updateTask(id, data) {
+    try {
+      const base = getDesktopBackendBase();
+      const res = await fetch(`${base}/scheduled-tasks/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) return null;
+      const json = (await res.json()) as { task: ScheduledTask };
+      const updated = hydrateDates(json.task);
+      set((state) => ({
+        tasks: state.tasks.map((t) => (t.id === id ? updated : t)),
+      }));
+      return updated;
+    } catch {
+      return null;
+    }
+  },
+
   async deleteTask(id) {
     try {
       const base = getDesktopBackendBase();
@@ -77,6 +108,16 @@ export const useScheduledTaskStore = create<ScheduledTaskState>((set) => ({
       set((state) => ({ tasks: state.tasks.filter((t) => t.id !== id) }));
     } catch {
       // silent
+    }
+  },
+
+  async runTaskNow(id) {
+    try {
+      const base = getDesktopBackendBase();
+      const res = await fetch(`${base}/scheduled-tasks/${id}/run`, { method: "POST" });
+      return res.ok;
+    } catch {
+      return false;
     }
   },
 

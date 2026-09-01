@@ -36,6 +36,7 @@ const FREQUENCIES: { value: ScheduledTaskFrequency; label: string }[] = [
 interface CreateTaskDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  editTaskId?: string;
   initialTitle?: string;
   initialPrompt?: string;
   initialFrequency?: ScheduledTaskFrequency;
@@ -45,6 +46,7 @@ interface CreateTaskDialogProps {
 export function CreateTaskDialog({
   open,
   onOpenChange,
+  editTaskId,
   initialTitle = "",
   initialPrompt = "",
   initialFrequency = "daily",
@@ -57,6 +59,9 @@ export function CreateTaskDialog({
   const [notify, setNotify] = useState(true);
   const [saving, setSaving] = useState(false);
   const createTask = useScheduledTaskStore((s) => s.createTask);
+  const updateTask = useScheduledTaskStore((s) => s.updateTask);
+
+  const isEdit = Boolean(editTaskId);
 
   useEffect(() => {
     if (open) {
@@ -71,6 +76,31 @@ export function CreateTaskDialog({
   const handleSave = async () => {
     if (!title.trim() || !prompt.trim()) return;
     setSaving(true);
+
+    if (isEdit && editTaskId) {
+      const updated = await updateTask(editTaskId, {
+        title: title.trim(),
+        prompt: prompt.trim(),
+        frequency,
+        time,
+        notifyOnComplete: notify,
+      });
+      setSaving(false);
+      if (updated) {
+        notifySuccess(
+          getScheduledTaskLabel("scheduledTask.notify.updatedTitle"),
+          getScheduledTaskLabel("scheduledTask.notify.updatedBody"),
+        );
+        onOpenChange(false);
+      } else {
+        notifyError(
+          getScheduledTaskLabel("scheduledTask.notify.updateFailedTitle"),
+          getScheduledTaskLabel("scheduledTask.notify.updateFailedBody"),
+        );
+      }
+      return;
+    }
+
     const task = await createTask({
       title: title.trim(),
       prompt: prompt.trim(),
@@ -85,11 +115,6 @@ export function CreateTaskDialog({
         getScheduledTaskLabel("scheduledTask.notify.createdBody"),
       );
       onOpenChange(false);
-      setTitle("");
-      setPrompt("");
-      setFrequency("daily");
-      setTime("09:00");
-      setNotify(true);
     } else {
       notifyError(
         getScheduledTaskLabel("scheduledTask.notify.createFailedTitle"),
@@ -102,9 +127,15 @@ export function CreateTaskDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>{getScheduledTaskLabel("scheduledTask.createTitle")}</DialogTitle>
+          <DialogTitle>
+            {isEdit
+              ? getScheduledTaskLabel("scheduledTask.editTitle")
+              : getScheduledTaskLabel("scheduledTask.createTitle")}
+          </DialogTitle>
           <DialogDescription>
-            {getScheduledTaskLabel("scheduledTask.createSubtitle")}
+            {isEdit
+              ? getScheduledTaskLabel("scheduledTask.editSubtitle")
+              : getScheduledTaskLabel("scheduledTask.createSubtitle")}
           </DialogDescription>
         </DialogHeader>
 
@@ -181,7 +212,9 @@ export function CreateTaskDialog({
           >
             {saving
               ? getScheduledTaskLabel("scheduledTask.saving")
-              : getScheduledTaskLabel("scheduledTask.save")}
+              : isEdit
+                ? getScheduledTaskLabel("scheduledTask.saveEdit")
+                : getScheduledTaskLabel("scheduledTask.save")}
           </Button>
         </DialogFooter>
       </DialogContent>
