@@ -71,19 +71,6 @@ const PLACEHOLDER_KEYS = [
 
 const WELCOME_PLACEHOLDERS = PLACEHOLDER_KEYS.map((key) => getChatLabel(key));
 
-const SUBTITLE_KEYS = [
-  "chat.welcome.subtitle1",
-  "chat.welcome.subtitle2",
-  "chat.welcome.subtitle3",
-  "chat.welcome.subtitle4",
-  "chat.welcome.subtitle5",
-  "chat.welcome.subtitle6",
-] as const;
-
-function pickSubtitle(): string {
-  const key = SUBTITLE_KEYS[Math.floor(Math.random() * SUBTITLE_KEYS.length)];
-  return getChatLabel(key);
-}
 
 interface WelcomeSuggestionsResult {
   items: string[];
@@ -123,7 +110,6 @@ const STALE_RECHECK_DELAYS_MS = [8000, 20000];
  * attachments, agent mode), so duplicating that here would drift.
  */
 export function DesktopWelcomeScreen() {
-  const [subtitle] = useState(pickSubtitle);
   const [draft, setDraft] = useState("");
   const [attachments, setAttachments] = useState<File[]>([]);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
@@ -344,7 +330,7 @@ export function DesktopWelcomeScreen() {
                 : getChatLabel(welcomeTitleKeyFor(hour))}
             </h1>
             <p className="mt-2 text-sm text-muted-foreground">
-              {subtitle}
+              {getChatLabel("chat.welcome.subtitle")}
             </p>
           </div>
 

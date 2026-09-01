@@ -78,7 +78,16 @@ export function usePlaceholderTypewriter(
     const step = erasing
       ? revealed > 0
         ? { delay: tickMsFor(erasingChar, ERASE_MS), run: () => setRevealed((n) => n - 1) }
-        : { delay: REST_MS, run: () => setErasing(false) }
+        : {
+            delay: REST_MS,
+            run: () => {
+              setPlaceholder((prev) => ({
+                text: pickPlaceholder(pool, prev.text),
+                draw: prev.draw + 1,
+              }));
+              setErasing(false);
+            },
+          }
       : revealed < total
         ? { delay: tickMsFor(typing, TYPE_MS), run: () => setRevealed((n) => n + 1) }
         : { delay: HOLD_MS, run: () => setErasing(true) };
