@@ -192,18 +192,60 @@ export async function getDueTasks() {
     .where(and(eq(scheduledTasks.enabled, true), lte(scheduledTasks.nextRunAt, now)));
 }
 
-export async function createTaskRun(taskId: string, userId: string, conversationId?: string) {
+export async function createTaskRun(
+  taskId: string,
+  userId: string,
+  conversationId?: string,
+  status: "pending" | "running" = "running",
+) {
   const id = generateId();
   const now = new Date();
   await db.insert(scheduledTaskRuns).values({
     id,
     taskId,
     userId,
-    status: "running",
+    status,
     conversationId: conversationId ?? null,
     startedAt: now,
   });
   return id;
+}
+
+/**
+ * Hands a scheduler-created `pending` run to the client that will execute it.
+ * Conditional on the current status so two clients (or a retry) cannot both
+ * take the same run: only the first caller sees `true`.
+ */
+export async function claimTaskRun(userId: string, runId: string): Promise<boolean> {
+  const result = await db
+    .update(scheduledTaskRuns)
+    .set({ status: "running" })
+    .where(
+      and(
+        eq(scheduledTaskRuns.id, runId),
+        eq(scheduledTaskRuns.userId, userId),
+        eq(scheduledTaskRuns.status, "pending"),
+      ),
+    );
+  return result.rowsAffected > 0;
+}
+
+export async function finishTaskRun(
+  userId: string,
+  runId: string,
+  result: { status: "completed" | "failed"; result?: string; error?: string },
+): Promise<boolean> {
+  const now = new Date();
+  const updated = await db
+    .update(scheduledTaskRuns)
+    .set({
+      status: result.status,
+      result: result.result ?? null,
+      error: result.error ?? null,
+      completedAt: now,
+    })
+    .where(and(eq(scheduledTaskRuns.id, runId), eq(scheduledTaskRuns.userId, userId)));
+  return updated.rowsAffected > 0;
 }
 
 export async function completeTaskRun(

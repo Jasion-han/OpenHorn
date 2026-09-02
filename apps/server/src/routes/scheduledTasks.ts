@@ -1,13 +1,16 @@
 import { Hono } from "hono";
 import { getResolvedChannelForUser } from "../services/channelService";
 import { createConversation } from "../services/conversationService";
+import { rescheduleScheduler } from "../services/scheduledTaskScheduler";
 import {
   advanceNextRunAt,
+  claimTaskRun,
   completeTaskRun,
   createScheduledTask,
   createTaskRun,
   deleteScheduledTask,
   deleteTaskRun,
+  finishTaskRun,
   getScheduledTask,
   listScheduledTasks,
   listTaskRuns,
@@ -51,6 +54,7 @@ router.post("/", async (c) => {
     channelId: body.channelId,
     modelId: body.modelId,
   });
+  rescheduleScheduler();
   return c.json({ task }, 201);
 });
 
@@ -61,6 +65,7 @@ router.put("/:id", async (c) => {
 
   const task = await updateScheduledTask(user.id, id, body);
   if (!task) return c.json({ error: "not found" }, 404);
+  rescheduleScheduler();
   return c.json({ task });
 });
 
@@ -68,6 +73,7 @@ router.delete("/:id", async (c) => {
   const user = c.get("user");
   const id = c.req.param("id");
   await deleteScheduledTask(user.id, id);
+  rescheduleScheduler();
   return c.json({ success: true });
 });
 
@@ -76,6 +82,7 @@ router.patch("/:id/toggle", async (c) => {
   const id = c.req.param("id");
   const task = await toggleScheduledTask(user.id, id);
   if (!task) return c.json({ error: "not found" }, 404);
+  rescheduleScheduler();
   return c.json({ task });
 });
 
@@ -98,10 +105,12 @@ router.post("/:id/run", async (c) => {
     title: task.title,
     channelId,
     modelId,
+    forceNew: true,
   });
   const runId = await createTaskRun(task.id, user.id, conversation.id);
   await completeTaskRun(runId, { status: "completed" });
   await advanceNextRunAt(task.id);
+  rescheduleScheduler();
   return c.json({ success: true, runId, conversationId: conversation.id });
 });
 
@@ -116,6 +125,32 @@ router.get("/runs", async (c) => {
   const user = c.get("user");
   const runs = await listTaskRuns(user.id);
   return c.json({ runs });
+});
+
+// Desktop-side execution of a scheduler-created run: claim it (pending →
+// running, first caller wins), then report the outcome once the agent turn
+// has been persisted through the regular sync-sidecar path.
+router.patch("/runs/:runId/claim", async (c) => {
+  const user = c.get("user");
+  const runId = c.req.param("runId");
+  const claimed = await claimTaskRun(user.id, runId);
+  return c.json({ claimed });
+});
+
+router.patch("/runs/:runId/complete", async (c) => {
+  const user = c.get("user");
+  const runId = c.req.param("runId");
+  const body = await c.req.json<{ status?: string; result?: string; error?: string }>();
+  if (body.status !== "completed" && body.status !== "failed") {
+    return c.json({ error: "status must be completed or failed" }, 400);
+  }
+  const updated = await finishTaskRun(user.id, runId, {
+    status: body.status,
+    result: typeof body.result === "string" ? body.result : undefined,
+    error: typeof body.error === "string" ? body.error : undefined,
+  });
+  if (!updated) return c.json({ error: "not found" }, 404);
+  return c.json({ success: true });
 });
 
 router.delete("/runs/:runId", async (c) => {
