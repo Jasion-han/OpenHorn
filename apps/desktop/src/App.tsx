@@ -5,6 +5,7 @@ import { DesktopChatArea } from "./components/chat/DesktopChatArea";
 import { ScheduledTasksView } from "./components/scheduled-tasks/ScheduledTasksView";
 import { SettingsView } from "./components/settings/SettingsView";
 import { ThemeListener } from "./components/theme/ThemeListener";
+import { startBackgroundTaskRunner } from "./lib/backgroundTaskRunner";
 import { getTauriSidecarPlatform, hasOverlayTitleBar } from "./lib/tauriBridge";
 import { useAuthStore } from "./stores/authStore";
 import { useDesktopShellStore } from "./stores/desktopShellStore";
@@ -60,6 +61,7 @@ export function App() {
         );
       if (platform !== null) {
         void useSidecarStore.getState().start();
+        startBackgroundTaskRunner();
       }
     })();
 
