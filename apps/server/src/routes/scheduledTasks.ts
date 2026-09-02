@@ -106,6 +106,7 @@ router.post("/:id/run", async (c) => {
     channelId,
     modelId,
     forceNew: true,
+    scheduledTaskId: task.id,
   });
   const runId = await createTaskRun(task.id, user.id, conversation.id);
   await completeTaskRun(runId, { status: "completed" });

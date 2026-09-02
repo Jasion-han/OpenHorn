@@ -38,6 +38,7 @@ async function executeDueTasks() {
           channelId,
           modelId,
           forceNew: true,
+          scheduledTaskId: task.id,
         });
 
         // The server is only the clock: it records that the task is due and

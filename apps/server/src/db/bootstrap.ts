@@ -111,6 +111,7 @@ const SCHEMA_DDL: string[] = [
 	    force_web_search INTEGER DEFAULT 1,
 	    run_status TEXT,
 	    workspace_id TEXT,
+	    scheduled_task_id TEXT,
 	    summary TEXT,
 	    key_facts TEXT,
 	    last_summarized_at INTEGER,
@@ -1200,6 +1201,45 @@ async function ensureScheduledTaskRunConversationIdColumn(): Promise<void> {
   }
 }
 
+async function ensureConversationScheduledTaskIdColumn(): Promise<void> {
+  const result = await client.execute(`PRAGMA table_info('conversations');`);
+  const rows = getRows(result);
+  if (rows.length > 0 && !hasColumnNamed(rows, "scheduled_task_id")) {
+    await client.execute(`ALTER TABLE conversations ADD COLUMN scheduled_task_id TEXT;`);
+    // Backfill conversations that already belong to a scheduled run but predate
+    // this column, so they drop out of the user's chat list retroactively.
+    await client.execute(
+      `UPDATE conversations SET scheduled_task_id = (
+         SELECT r.task_id FROM scheduled_task_runs r
+         WHERE r.conversation_id = conversations.id
+         ORDER BY r.started_at LIMIT 1
+       )
+       WHERE scheduled_task_id IS NULL
+         AND id IN (SELECT conversation_id FROM scheduled_task_runs WHERE conversation_id IS NOT NULL);`,
+    );
+    // Older scheduled runs (pre-run-link runtime) left conversations with no run
+    // row at all — the only marker is the legacy "[定时任务自动触发]" prompt prefix.
+    // Flag those whose title still matches one of the user's scheduled tasks. Both
+    // conditions together make a false positive (a real chat) effectively impossible.
+    await client.execute(
+      `UPDATE conversations SET scheduled_task_id = (
+         SELECT t.id FROM scheduled_tasks t
+         WHERE t.title = conversations.title AND t.user_id = conversations.user_id
+         LIMIT 1
+       )
+       WHERE scheduled_task_id IS NULL
+         AND EXISTS (
+           SELECT 1 FROM scheduled_tasks t
+           WHERE t.title = conversations.title AND t.user_id = conversations.user_id
+         )
+         AND id IN (
+           SELECT m.conversation_id FROM messages m
+           WHERE m.role = 'user' AND m.content LIKE '[定时任务自动触发]%'
+         );`,
+    );
+  }
+}
+
 async function ensureMessagesFtsTable(): Promise<void> {
   const check = await client.execute(
     `SELECT name FROM sqlite_master WHERE type='table' AND name='messages_fts';`,
@@ -1269,6 +1309,7 @@ export async function bootstrapDatabase(): Promise<void> {
 
   await ensureConversationSummaryColumns();
   await ensureScheduledTaskRunConversationIdColumn();
+  await ensureConversationScheduledTaskIdColumn();
 
   // Runs LAST and rebuilds 7 core tables with DROP TABLE + RENAME. SQLite drops
   // a table's indexes with the table, and the SCHEMA_DDL pass above already

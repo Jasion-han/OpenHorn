@@ -117,6 +117,9 @@ export const conversations = sqliteTable(
     forceWebSearch: integer("force_web_search", { mode: "boolean" }).default(true),
     runStatus: text("run_status"),
     workspaceId: text("workspace_id"),
+    // Set when the conversation belongs to a scheduled task run. Non-null rows are
+    // hidden from the user's chat list (they show under the task group instead).
+    scheduledTaskId: text("scheduled_task_id"),
     summary: text("summary"),
     keyFacts: text("key_facts"),
     lastSummarizedAt: integer("last_summarized_at", { mode: "timestamp" }),

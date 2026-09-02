@@ -11,7 +11,7 @@ import {
   conversations,
   messages,
 } from "db";
-import { and, desc, eq, inArray, ne, notExists, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, ne, notExists, or, sql } from "drizzle-orm";
 import { db } from "../db";
 import { generateId } from "../utils";
 import { removeAttachmentFiles } from "./attachmentService";
@@ -39,6 +39,11 @@ export interface CreateConversationInput {
    * before writing anything must not have its (blank) conversation reused.
    */
   forceNew?: boolean;
+  /**
+   * Marks the conversation as belonging to a scheduled task run. Non-null rows
+   * are hidden from the user's chat list and shown under the task group instead.
+   */
+  scheduledTaskId?: string;
 }
 
 export interface UpdateConversationInput {
@@ -106,6 +111,8 @@ async function findReusableBlankConversation(
       and(
         eq(conversations.userId, userId),
         eq(conversations.title, title),
+        // A scheduled-task conversation is never adopted as a fresh chat.
+        isNull(conversations.scheduledTaskId),
         excludeConversationId ? ne(conversations.id, excludeConversationId) : undefined,
         notExists(
           db
@@ -165,6 +172,7 @@ export async function createConversation(userId: string, input: CreateConversati
     isPinned: false,
     forceWebSearch,
     runStatus: null,
+    scheduledTaskId: input.scheduledTaskId ?? null,
     createdAt: now,
     updatedAt: now,
   });
@@ -182,6 +190,7 @@ export async function createConversation(userId: string, input: CreateConversati
     isPinned: false,
     forceWebSearch,
     runStatus: null,
+    scheduledTaskId: input.scheduledTaskId ?? null,
     createdAt: now,
     updatedAt: now,
   };
