@@ -1,14 +1,6 @@
-import { messages } from "db";
-import { db } from "../db";
-import { generateId } from "../utils";
 import { getResolvedChannelForUser } from "./channelService";
 import { createConversation } from "./conversationService";
-import {
-  advanceNextRunAt,
-  completeTaskRun,
-  createTaskRun,
-  getDueTasks,
-} from "./scheduledTaskService";
+import { advanceNextRunAt, createTaskRun, getDueTasks } from "./scheduledTaskService";
 
 let intervalHandle: ReturnType<typeof setInterval> | null = null;
 
@@ -33,25 +25,12 @@ async function executeDueTasks() {
           modelId,
         });
 
-        await db.insert(messages).values({
-          id: generateId(),
-          conversationId: conversation.id,
-          role: "user",
-          content: `[定时任务自动触发] ${task.prompt}`,
-          mode: "agent",
-          createdAt: new Date(),
-        });
-
-        const runId = await createTaskRun(task.id, task.userId, conversation.id);
-        await completeTaskRun(runId, { status: "completed" });
+        await createTaskRun(task.id, task.userId, conversation.id);
         await advanceNextRunAt(task.id);
       } catch (err) {
         const runId = await createTaskRun(task.id, task.userId);
-        await completeTaskRun(runId, {
-          status: "failed",
-          error: err instanceof Error ? err.message : "Unknown error",
-        });
         await advanceNextRunAt(task.id);
+        console.error("[scheduler] task failed:", task.id, err);
       }
     }
   } catch {

@@ -13,7 +13,7 @@ import {
   Settings,
   Trash2,
 } from "lucide-react";
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import {
   Badge,
   Button,
@@ -224,15 +224,49 @@ export function DesktopLeftSidebar() {
   const reset = useChatStore((state) => state.reset);
   const backendBase = getDesktopBackendBase();
   const recentRuns = useScheduledTaskStore((state) => state.runs);
+  const scheduledTasks = useScheduledTaskStore((state) => state.tasks);
   const loadRuns = useScheduledTaskStore((state) => state.loadRuns);
+  const loadScheduledTasks = useScheduledTaskStore((state) => state.loadTasks);
+  const setPendingPrompt = useDesktopShellStore((state) => state.setPendingPrompt);
 
   const [searchResults, setSearchResults] = useState<MessageSearchResult[] | null>(null);
 
   useEffect(() => {
     void loadRuns();
-    const timer = setInterval(() => void loadRuns(), 30_000);
+    void loadScheduledTasks();
+    const timer = setInterval(() => {
+      void loadRuns();
+      void loadScheduledTasks();
+    }, 30_000);
     return () => clearInterval(timer);
-  }, [loadRuns]);
+  }, [loadRuns, loadScheduledTasks]);
+
+  const processedRunsRef = useRef(new Set<string>());
+  useEffect(() => {
+    for (const run of recentRuns) {
+      if (run.status === "running" && run.conversationId && !processedRunsRef.current.has(run.id)) {
+        processedRunsRef.current.add(run.id);
+        const task = scheduledTasks.find((t) => t.id === run.taskId);
+        if (task) {
+          void loadConversations().then(() => {
+            void selectConversation(run.conversationId!);
+            setPendingPrompt({
+              text: `[定时任务自动触发] ${task.prompt}`,
+              files: [],
+            });
+            setActiveView("chat");
+          });
+        }
+      }
+    }
+  }, [
+    recentRuns,
+    scheduledTasks,
+    loadConversations,
+    selectConversation,
+    setPendingPrompt,
+    setActiveView,
+  ]);
 
   // ⌘N / Ctrl+N — the shortcut advertised next to the new-conversation button.
   useEffect(() => {
