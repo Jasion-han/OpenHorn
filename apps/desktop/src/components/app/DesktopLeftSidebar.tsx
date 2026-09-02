@@ -241,10 +241,14 @@ export function DesktopLeftSidebar() {
     return () => clearInterval(timer);
   }, [loadRuns, loadScheduledTasks]);
 
-  const processedRunsRef = useRef(new Set<string>());
+  const processedRunsRef = useRef<Set<string> | null>(null);
   useEffect(() => {
+    if (processedRunsRef.current === null) {
+      processedRunsRef.current = new Set(recentRuns.map((r) => r.id));
+      return;
+    }
     for (const run of recentRuns) {
-      if (run.status === "running" && run.conversationId && !processedRunsRef.current.has(run.id)) {
+      if (run.conversationId && !processedRunsRef.current.has(run.id)) {
         processedRunsRef.current.add(run.id);
         const task = scheduledTasks.find((t) => t.id === run.taskId);
         if (task) {
@@ -254,19 +258,11 @@ export function DesktopLeftSidebar() {
               text: `[定时任务自动触发] ${task.prompt}`,
               files: [],
             });
-            setActiveView("chat");
           });
         }
       }
     }
-  }, [
-    recentRuns,
-    scheduledTasks,
-    loadConversations,
-    selectConversation,
-    setPendingPrompt,
-    setActiveView,
-  ]);
+  }, [recentRuns, scheduledTasks, loadConversations, selectConversation, setPendingPrompt]);
 
   // ⌘N / Ctrl+N — the shortcut advertised next to the new-conversation button.
   useEffect(() => {

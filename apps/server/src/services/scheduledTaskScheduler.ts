@@ -1,6 +1,11 @@
 import { getResolvedChannelForUser } from "./channelService";
 import { createConversation } from "./conversationService";
-import { advanceNextRunAt, createTaskRun, getDueTasks } from "./scheduledTaskService";
+import {
+  advanceNextRunAt,
+  completeTaskRun,
+  createTaskRun,
+  getDueTasks,
+} from "./scheduledTaskService";
 
 let intervalHandle: ReturnType<typeof setInterval> | null = null;
 
@@ -25,7 +30,8 @@ async function executeDueTasks() {
           modelId,
         });
 
-        await createTaskRun(task.id, task.userId, conversation.id);
+        const runId = await createTaskRun(task.id, task.userId, conversation.id);
+        await completeTaskRun(runId, { status: "completed" });
         await advanceNextRunAt(task.id);
       } catch (err) {
         const runId = await createTaskRun(task.id, task.userId);
