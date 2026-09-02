@@ -581,28 +581,25 @@ export function DesktopLeftSidebar() {
 
                   {taskGroups.map(([taskId, { taskTitle, runs }]) => (
                     <div key={`task-${taskId}`}>
-                      <div className="flex items-center justify-between px-3 pb-1 pt-2">
+                      <button
+                        type="button"
+                        className="flex w-full cursor-pointer items-center gap-1 px-3 pb-1 pt-2 text-left"
+                        onClick={() =>
+                          setTaskGroupsOpen((prev) => ({
+                            ...prev,
+                            [taskId]: !(prev[taskId] ?? false),
+                          }))
+                        }
+                      >
+                        {(taskGroupsOpen[taskId] ?? false) ? (
+                          <ChevronDown size={11} className="shrink-0 text-muted-foreground/60" />
+                        ) : (
+                          <ChevronRight size={11} className="shrink-0 text-muted-foreground/60" />
+                        )}
                         <span className="text-[11px] font-medium text-muted-foreground/80">
                           {taskTitle}
                         </span>
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          className="h-5 w-5"
-                          onClick={() =>
-                            setTaskGroupsOpen((prev) => ({
-                              ...prev,
-                              [taskId]: !(prev[taskId] ?? true),
-                            }))
-                          }
-                        >
-                          {(taskGroupsOpen[taskId] ?? false) ? (
-                            <ChevronDown size={12} />
-                          ) : (
-                            <ChevronRight size={12} />
-                          )}
-                        </Button>
-                      </div>
+                      </button>
                       {(taskGroupsOpen[taskId] ?? false) &&
                         runs.map((run) => (
                           <div
