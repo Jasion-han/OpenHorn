@@ -217,6 +217,7 @@ export function DesktopLeftSidebar() {
   const currentConversation = useChatStore((state) => state.currentConversation);
   const startNewConversation = useChatStore((state) => state.startNewConversation);
   const selectConversation = useChatStore((state) => state.selectConversation);
+  const loadConversations = useChatStore((state) => state.loadConversations);
   const updateConversation = useChatStore((state) => state.updateConversation);
   const deleteConversation = useChatStore((state) => state.deleteConversation);
   const searchMessages = useChatStore((state) => state.searchMessages);
