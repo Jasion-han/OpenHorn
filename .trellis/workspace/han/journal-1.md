@@ -169,3 +169,41 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 5: 定时任务隐式准时触发 + 每次独立会话 + 执行中蓝点
+
+**Date**: 2026-09-02
+**Task**: 定时任务隐式准时触发 + 每次独立会话 + 执行中蓝点
+**Package**: agent
+**Branch**: `main`
+
+### Summary
+
+定时任务从'服务端假标完成'改为真正隐式准时执行：服务端到点建 pending run 并精准重武装定时器；桌面端后台执行器认领 pending run，复用聊天同款 sidecar 管线（credentials/MCP/skills/workspace/systemPrompt/Tavily/历史）执行并经 sync-sidecar 落库，全程静默不跳转，打开会话可见流式过程；抽 sidecarRunSupport 共享模块给聊天与定时任务复用；每次执行建独立会话（forceNew，不复用空会话）；执行中(pending/running)统一蓝色小点。desktop 199 + server 174 测试全绿，已推送 origin/main。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `790c0f5` | (see git log) |
+| `9b382a5` | (see git log) |
+| `b5123b1` | (see git log) |
+| `f0a1b7e` | (see git log) |
+| `c1dac7d` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
