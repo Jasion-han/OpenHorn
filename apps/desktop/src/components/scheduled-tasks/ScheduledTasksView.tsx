@@ -201,6 +201,11 @@ export function ScheduledTasksView() {
   useEffect(() => {
     void loadTasks();
     void loadRuns();
+    const timer = setInterval(() => {
+      void loadTasks();
+      void loadRuns();
+    }, 30_000);
+    return () => clearInterval(timer);
   }, [loadTasks, loadRuns]);
 
   useEffect(() => {

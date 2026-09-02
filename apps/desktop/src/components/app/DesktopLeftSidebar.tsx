@@ -229,6 +229,8 @@ export function DesktopLeftSidebar() {
 
   useEffect(() => {
     void loadRuns();
+    const timer = setInterval(() => void loadRuns(), 30_000);
+    return () => clearInterval(timer);
   }, [loadRuns]);
 
   // ⌘N / Ctrl+N — the shortcut advertised next to the new-conversation button.
@@ -608,8 +610,10 @@ export function DesktopLeftSidebar() {
                             tabIndex={0}
                             onClick={() => {
                               if (run.conversationId) {
-                                void selectConversation(run.conversationId);
-                                setActiveView("chat");
+                                void loadConversations().then(() => {
+                                  void selectConversation(run.conversationId!);
+                                  setActiveView("chat");
+                                });
                               } else {
                                 openScheduledTasks("runs");
                               }
@@ -618,8 +622,10 @@ export function DesktopLeftSidebar() {
                               if (event.key === "Enter" || event.key === " ") {
                                 event.preventDefault();
                                 if (run.conversationId) {
-                                  void selectConversation(run.conversationId);
-                                  setActiveView("chat");
+                                  void loadConversations().then(() => {
+                                    void selectConversation(run.conversationId!);
+                                    setActiveView("chat");
+                                  });
                                 } else {
                                   openScheduledTasks("runs");
                                 }
