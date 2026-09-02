@@ -252,11 +252,20 @@ export function DesktopLeftSidebar() {
         processedRunsRef.current.add(run.id);
         const task = scheduledTasks.find((t) => t.id === run.taskId);
         if (task) {
+          const prevConversation = useChatStore.getState().currentConversation;
           void loadConversations().then(() => {
-            void selectConversation(run.conversationId!);
-            setPendingPrompt({
-              text: `[定时任务自动触发] ${task.prompt}`,
-              files: [],
+            void selectConversation(run.conversationId!).then(() => {
+              setPendingPrompt({
+                text: `[定时任务自动触发] ${task.prompt}`,
+                files: [],
+              });
+              setTimeout(() => {
+                if (prevConversation) {
+                  void selectConversation(prevConversation.id);
+                } else {
+                  useChatStore.getState().startNewConversation();
+                }
+              }, 500);
             });
           });
         }

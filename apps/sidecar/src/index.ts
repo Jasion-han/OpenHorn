@@ -5,6 +5,10 @@
 delete process.env.CLAUDECODE;
 delete process.env.AI_AGENT;
 delete process.env.CLAUDE_CODE_CHILD_SESSION;
+delete process.env.CLAUDE_CODE_MESSAGING_SOCKET;
+delete process.env.CLAUDE_CODE_MESSAGING_TOKEN;
+delete process.env.CLAUDE_CODE_BRIDGE_SESSION_ID;
+delete process.env.CLAUDE_CODE_SESSION_ID;
 
 import { preconnectAcpAgent, runAcpAgent } from "./agent/acp";
 import { runChatStream } from "./agent/chat";
