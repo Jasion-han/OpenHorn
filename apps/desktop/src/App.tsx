@@ -81,11 +81,13 @@ export function App() {
       <ThemeListener />
       <Toaster />
       <DesktopShellLayout activeView={activeView}>
-        <div style={{ display: activeView === "chat" ? undefined : "none" }} className="h-full">
+        {activeView === "settings" ? (
+          <SettingsView />
+        ) : activeView === "scheduled-tasks" ? (
+          <ScheduledTasksView />
+        ) : (
           <DesktopChatArea />
-        </div>
-        {activeView === "settings" && <SettingsView />}
-        {activeView === "scheduled-tasks" && <ScheduledTasksView />}
+        )}
       </DesktopShellLayout>
     </TooltipProvider>
   );
