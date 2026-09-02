@@ -33,6 +33,12 @@ export interface CreateConversationInput {
    * that content is never taken over and wiped.
    */
   excludeConversationId?: string;
+  /**
+   * Always mint a new row, never adopt a blank one. Scheduled-task runs set this:
+   * every run must land in its own conversation, and a previous run that ended
+   * before writing anything must not have its (blank) conversation reused.
+   */
+  forceNew?: boolean;
 }
 
 export interface UpdateConversationInput {
@@ -126,11 +132,9 @@ export async function createConversation(userId: string, input: CreateConversati
   // currently showing, but that guard cannot see blank conversations left behind by
   // an earlier session — after a reload every entry point would mint another one.
   // Enforcing it here covers every caller instead of every call site.
-  const reusable = await findReusableBlankConversation(
-    userId,
-    input.title,
-    input.excludeConversationId,
-  );
+  const reusable = input.forceNew
+    ? null
+    : await findReusableBlankConversation(userId, input.title, input.excludeConversationId);
   if (reusable) {
     // Adopt this call's settings: the caller may have picked a different model or
     // mode than the blank conversation was created with.
