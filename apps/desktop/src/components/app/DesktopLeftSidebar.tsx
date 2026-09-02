@@ -267,22 +267,18 @@ export function DesktopLeftSidebar() {
     return () => clearTimeout(timer);
   }, [query, searchMessages]);
 
-  const scheduledConversationIds = useMemo(() => {
-    const ids = new Set<string>();
-    for (const run of recentRuns) {
-      if (run.conversationId) ids.add(run.conversationId);
-    }
-    return ids;
-  }, [recentRuns]);
-
   const filteredConversations = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
-    const base = conversations.filter((c) => !scheduledConversationIds.has(c.id));
+    // A scheduled-task conversation is marked at the data layer (scheduledTaskId)
+    // and shown only under its task group — never in the user's chat list. This
+    // is robust against the runs window: filtering by the runs list dropped older
+    // scheduled conversations back into the chat list once their run scrolled off.
+    const base = conversations.filter((c) => !c.scheduledTaskId);
     if (!normalizedQuery) return base;
     return base.filter((conversation) =>
       conversation.title.toLowerCase().includes(normalizedQuery),
     );
-  }, [conversations, query, scheduledConversationIds]);
+  }, [conversations, query]);
 
   // Opens the welcome screen rather than creating a row up front — the
   // conversation is created by the first message that is actually sent.

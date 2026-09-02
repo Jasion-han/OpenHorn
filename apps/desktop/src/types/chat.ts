@@ -54,6 +54,7 @@ export interface ApiConversation {
   isPinned: boolean;
   forceWebSearch?: boolean | null;
   runStatus: string | null;
+  scheduledTaskId?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -210,6 +211,7 @@ export interface Conversation {
   isPinned: boolean;
   forceWebSearch?: boolean;
   runStatus?: string | null;
+  scheduledTaskId?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
