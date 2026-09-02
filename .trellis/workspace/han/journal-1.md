@@ -207,3 +207,38 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 6: 定时任务会话隐藏出用户聊天列表
+
+**Date**: 2026-09-02
+**Task**: 定时任务会话隐藏出用户聊天列表
+**Package**: agent
+**Branch**: `main`
+
+### Summary
+
+修复定时任务会话漏进用户聊天列表：原先靠 runs 窗口交叉过滤不可靠，改为数据层给 conversations 加 scheduled_task_id 列标记；createConversation/scheduler/route 写入，findReusableBlankConversation 排除；侧栏改按该标记过滤，顶部任务组仍按 runs 渲染可点击查看；bootstrap 迁移回填历史泄漏（run 关联 + 旧执行器无 run 关联者按前缀+标题双条件回填）。已回填本机 8 条会话，浏览器实测聊天列表无泄漏，typecheck + desktop 199 + server 174 全绿，已推 origin/main。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `02a083b` | (see git log) |
+| `345ac62` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
