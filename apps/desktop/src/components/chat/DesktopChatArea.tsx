@@ -27,6 +27,7 @@ import {
 } from "../../lib/messageGroups";
 import { notifyWarning } from "../../lib/notify";
 import { createServerApi, readErrorMessage } from "../../lib/serverApi";
+import { resolveRunSettings } from "../../lib/sidecarRunSupport";
 import {
   findKnownSlashToken,
   findSlashTokenAtCursor,
@@ -67,46 +68,6 @@ async function fetchDesktopSearchStatus(): Promise<DesktopSearchStatus> {
 }
 
 const chatAreaApi = createServerApi();
-const GLOBAL_SYSTEM_PROMPT_KEY = "chat.systemPrompt";
-
-async function fetchGlobalSystemPrompt(): Promise<string | undefined> {
-  try {
-    const { settings } = await chatAreaApi.settings.get([GLOBAL_SYSTEM_PROMPT_KEY]);
-    const value = settings[GLOBAL_SYSTEM_PROMPT_KEY];
-    return value || undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-/**
- * Shared run-settings resolution used by the send / retry / edit paths so the
- * three sites cannot drift. Returns the global system prompt plus the Tavily
- * key (only forwarded when web search is forced and Tavily is enabled; a
- * disabled Tavily lets the sidecar fall back to keyless DuckDuckGo).
- */
-async function resolveRunSettings(forceWebSearch: boolean): Promise<{
-  systemPrompt: string | undefined;
-  tavilyApiKey: string | undefined;
-}> {
-  const systemPrompt = await fetchGlobalSystemPrompt();
-  let tavilyApiKey: string | undefined;
-  if (forceWebSearch) {
-    try {
-      const { settings } = await chatAreaApi.settings.get([
-        "liveSearch.tavilyApiKey",
-        "liveSearch.tavilyEnabled",
-      ]);
-      if (settings["liveSearch.tavilyEnabled"] !== "false") {
-        tavilyApiKey = settings["liveSearch.tavilyApiKey"] || undefined;
-      }
-    } catch {
-      // ignore
-    }
-  }
-  return { systemPrompt, tavilyApiKey };
-}
-
 /** Collapse newlines / repeated whitespace into a single line for the slash panel. */
 function collapseLine(text: string): string {
   return text.replace(/\s+/g, " ").trim();
@@ -927,8 +888,10 @@ export function DesktopChatArea() {
             conversationHistory.push({ role: m.role, content: text });
           }
         }
-        const { systemPrompt: globalSystemPrompt, tavilyApiKey } =
-          await resolveRunSettings(forceWebSearch);
+        const { systemPrompt: globalSystemPrompt, tavilyApiKey } = await resolveRunSettings(
+          chatAreaApi,
+          forceWebSearch,
+        );
         await sidecarRun.startRun({
           conversationId,
           channelId: currentConversation.channelId,
@@ -1195,7 +1158,7 @@ export function DesktopChatArea() {
           }
         }
         const { systemPrompt: retrySystemPrompt, tavilyApiKey: retryTavilyApiKey } =
-          await resolveRunSettings(forceWebSearch);
+          await resolveRunSettings(chatAreaApi, forceWebSearch);
         // Re-parse the original message so a retried `/server` (or `/skill`)
         // invocation behaves exactly like the original send: the model gets the
         // instruction wrapper, the run targets that single MCP server, and the
@@ -1366,7 +1329,7 @@ export function DesktopChatArea() {
           }
         }
         const { systemPrompt: editSystemPrompt, tavilyApiKey: editTavilyApiKey } =
-          await resolveRunSettings(forceWebSearch);
+          await resolveRunSettings(chatAreaApi, forceWebSearch);
         await sidecarRun.startRun({
           conversationId: currentConversation.id,
           // Same guarantee as the retry path, via `useSidecarForEdit`.

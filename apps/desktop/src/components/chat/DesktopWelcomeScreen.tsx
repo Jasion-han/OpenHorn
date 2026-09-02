@@ -71,7 +71,6 @@ const PLACEHOLDER_KEYS = [
 
 const WELCOME_PLACEHOLDERS = PLACEHOLDER_KEYS.map((key) => getChatLabel(key));
 
-
 interface WelcomeSuggestionsResult {
   items: string[];
   /** The server scheduled a regeneration; a newer set will exist shortly. */

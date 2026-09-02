@@ -1,39 +1,22 @@
 import { useRef, useState } from "react";
 import type { AttachmentPart } from "shared/types";
-import { normalizeMcpServerConfig } from "../lib/mcpServerConfig";
 import { createServerApi } from "../lib/serverApi";
 import type { SidecarApprovalRequest, SidecarClient } from "../lib/sidecarClient";
-import { discoverSkills, skillsDisabledList } from "../lib/tauriBridge";
+import {
+  type AcpAvailableModel,
+  applySidecarEventToChat,
+  type RunUsage,
+  resolveEnabledMcpServers,
+  resolveEnabledSkills,
+  type SkillMeta,
+} from "../lib/sidecarRunSupport";
 import { useChatStore } from "../stores/chatStore";
 import { useSidecarStore } from "../stores/sidecarStore";
 import { claimRunOwnership, createRunPersistGuard, isRunOwner } from "./sidecarRunOwnership";
 
 const api = createServerApi();
 
-/** Skill metadata sent with a run — read in place from `path` (Claude-style). */
-interface SkillMeta {
-  name: string;
-  description: string;
-  path: string;
-}
-
-/**
- * Resolve the user's enabled skills to send with a run. Skills are discovered
- * as real folders across the known locations (cc-switch, Claude Code, Codex,
- * Gemini) minus the user-disabled set, and read IN PLACE — the run carries each
- * skill's name/description + absolute folder path; nothing is copied.
- */
-async function resolveEnabledSkills(): Promise<SkillMeta[]> {
-  const [discovered, disabled] = await Promise.all([discoverSkills(), skillsDisabledList()]);
-  const disabledSet = new Set(disabled.map((n) => n.trim().toLowerCase()));
-  return (discovered ?? [])
-    .filter((s) => !disabledSet.has(s.name.trim().toLowerCase()))
-    .map((s) => ({
-      name: s.name,
-      description: (s.description ?? "").replace(/\s+/g, " ").trim(),
-      path: s.path,
-    }));
-}
+export type { AcpAvailableModel };
 
 /**
  * Identity of the sidecar agent run that is currently bound to a
@@ -75,13 +58,6 @@ export interface SidecarAgentRunInput {
   // Metadata of the local attachments (name/type/size only — the files stay on
   // this machine), persisted with the user message so its chips survive reloads.
   attachmentsMeta?: Array<{ fileName: string; fileType?: string; fileSize?: number }>;
-}
-
-/** A model option dynamically provided by an ACP agent session. */
-export interface AcpAvailableModel {
-  id: string;
-  name: string;
-  description?: string;
 }
 
 export interface SidecarAgentRunApi {
@@ -240,8 +216,7 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
     // `result` message, so they land here shortly before `done` — captured in
     // the run closure rather than in the store because their only consumer is
     // the persistence call below.
-    let runUsage: { promptTokens: number; completionTokens: number; totalTokens: number } | null =
-      null;
+    let runUsage: RunUsage | null = null;
 
     const persistOnce = async (assistantContent: string, agentRun: unknown, model: string) => {
       if (cancelledRef.current) return;
@@ -420,26 +395,9 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
       credentials.protocol === "acp"
     ) {
       try {
-        const { servers } = await api.mcp.listServers();
-        const map: Record<string, Record<string, unknown>> = {};
-        for (const server of (servers || []) as Array<{
-          name: string;
-          type: string;
-          config: Record<string, unknown> | null;
-          isEnabled: boolean;
-        }>) {
-          if (!server.isEnabled) continue;
-          map[server.name] = normalizeMcpServerConfig(server.type, server.config);
-        }
-        if (Object.keys(map).length > 0) mcpServers = map;
-        // Slash-targeted run: keep only the invoked server. If the name no
-        // longer matches an enabled server (e.g. it was disabled meanwhile),
-        // fall back to the full roster rather than silently dropping MCP.
-        const target = input.targetMcpServer?.trim().toLowerCase();
-        if (mcpServers && target) {
-          const hit = Object.entries(mcpServers).find(([name]) => name.toLowerCase() === target);
-          if (hit) mcpServers = { [hit[0]]: hit[1] };
-        }
+        // Slash-targeted run: keep only the invoked server (falls back to the
+        // full roster when the name no longer matches an enabled server).
+        mcpServers = await resolveEnabledMcpServers(api, input.targetMcpServer);
       } catch {
         // MCP is additive; ignore load failures and run without it.
       }
@@ -503,92 +461,21 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
             // is dropped wholesale so the two runs' text can't interleave and
             // this run can't flip the new run's isBusy/activeRun state.
             if (!ownsMessage()) return;
-            if (
-              event.type === "execution_event" &&
-              event.eventType === "final_text" &&
-              event.content
-            ) {
-              useChatStore.getState().applyStreamEvent(input.assistantMessageId, {
-                type: "delta",
-                content: event.content,
-              });
+            // Text / tool steps / usage / failure state are projected onto the
+            // assistant message by the shared bridge (same code path as a
+            // scheduled run); only the side data comes back here.
+            const outcome = applySidecarEventToChat(input.assistantMessageId, event);
+            if (outcome.kind === "acp_models") {
+              // ACP dynamic model list — update the hook state so the model
+              // picker can show agent-provided models instead of the channel list.
+              setAcpAvailableModels(outcome.models);
               return;
             }
-            if (event.type === "execution_event" && event.eventType === "text" && event.content) {
-              useChatStore.getState().applyStreamEvent(input.assistantMessageId, {
-                type: "delta",
-                content: event.content,
-              });
+            if (outcome.kind === "usage") {
+              runUsage = outcome.usage;
               return;
             }
-            // ACP dynamic model list — update the hook state so the model picker
-            // can show agent-provided models instead of the static channel list.
-            if (event.type === "execution_event" && event.eventType === "available_models") {
-              const meta = event.metadata as {
-                models?: Array<{ id: string; name: string; description?: string }>;
-              };
-              if (Array.isArray(meta?.models)) {
-                setAcpAvailableModels(meta.models);
-              }
-              return;
-            }
-            // Held for persistence rather than rendered: the bubble shows the
-            // token count only after the row is saved, from the stored value.
-            if (event.type === "execution_event" && event.eventType === "usage") {
-              const meta = event.metadata as Record<string, unknown> | undefined;
-              if (meta) {
-                runUsage = {
-                  promptTokens: Number(meta.promptTokens) || 0,
-                  completionTokens: Number(meta.completionTokens) || 0,
-                  totalTokens: Number(meta.totalTokens) || 0,
-                };
-                // ACP usage_update carries context window size and cost — surface
-                // them as a context_usage agent event so the run panel can show a
-                // live occupancy bar.
-                if (meta.contextSize || meta.cost) {
-                  useChatStore.getState().applyStreamEvent(input.assistantMessageId, {
-                    type: "agent_event",
-                    event: {
-                      type: "context_usage",
-                      toolInput: {
-                        used: Number(meta.promptTokens) || 0,
-                        size: Number(meta.contextSize) || 0,
-                        cost: meta.cost,
-                      },
-                    },
-                  });
-                }
-              }
-              return;
-            }
-            if (
-              event.type === "execution_event" &&
-              event.eventType !== "final_text" &&
-              event.eventType !== "text"
-            ) {
-              // For ACP-specific event types (tool_call_detail, plan, agent_info),
-              // the data lives in metadata rather than toolInput — pass it through
-              // as toolInput so applyAgentEventToRun can read it uniformly.
-              const useMetadata =
-                event.eventType === "tool_call_detail" ||
-                event.eventType === "plan" ||
-                event.eventType === "agent_info";
-              useChatStore.getState().applyStreamEvent(input.assistantMessageId, {
-                type: "agent_event",
-                event: {
-                  type: event.eventType ?? "",
-                  content: event.content,
-                  toolName: event.toolName,
-                  toolInput: useMetadata ? event.metadata : event.toolInput,
-                },
-              });
-              return;
-            }
-            if (event.type === "done") {
-              useChatStore.getState().applyStreamEvent(input.assistantMessageId, {
-                type: "done",
-                messageId: input.assistantMessageId,
-              });
+            if (outcome.kind === "done") {
               const assistantMsg = useChatStore
                 .getState()
                 .findMessageAnywhere(input.assistantMessageId);
@@ -608,12 +495,6 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
               }
               syncRun(null);
               setIsBusy(false);
-            }
-            if (event.type === "error") {
-              useChatStore.getState().applyStreamEvent(input.assistantMessageId, {
-                type: "error",
-                message: event.content || "本地运行出错",
-              });
             }
           };
         })(),
@@ -805,18 +686,7 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
       // Fetch enabled MCP servers — same as startRun.
       let mcpServers: Record<string, Record<string, unknown>> | undefined;
       try {
-        const { servers } = await api.mcp.listServers();
-        const map: Record<string, Record<string, unknown>> = {};
-        for (const server of (servers || []) as Array<{
-          name: string;
-          type: string;
-          config: Record<string, unknown> | null;
-          isEnabled: boolean;
-        }>) {
-          if (!server.isEnabled) continue;
-          map[server.name] = normalizeMcpServerConfig(server.type, server.config);
-        }
-        if (Object.keys(map).length > 0) mcpServers = map;
+        mcpServers = await resolveEnabledMcpServers(api);
       } catch {
         // MCP is additive; ignore load failures.
       }
