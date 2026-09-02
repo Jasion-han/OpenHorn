@@ -647,8 +647,10 @@ export function DesktopLeftSidebar() {
                                 "h-2 w-2 shrink-0 rounded-full",
                                 run.status === "completed" && "bg-emerald-500",
                                 run.status === "failed" && "bg-red-500",
-                                run.status === "running" && "bg-blue-500 animate-pulse",
-                                run.status === "pending" && "bg-gray-400",
+                                // pending（到点刚建、桌面端尚未认领的一瞬）也算执行中，
+                                // 统一蓝色脉冲，一到点就是蓝点，不闪一下灰。
+                                (run.status === "running" || run.status === "pending") &&
+                                  "bg-blue-500 animate-pulse",
                               )}
                             />
                           </div>

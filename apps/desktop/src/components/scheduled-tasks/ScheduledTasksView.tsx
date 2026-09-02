@@ -491,10 +491,9 @@ export function ScheduledTasksView() {
                             "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400",
                           run.status === "failed" &&
                             "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
-                          run.status === "running" &&
+                          // pending 与 running 都算执行中，统一蓝色。
+                          (run.status === "running" || run.status === "pending") &&
                             "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
-                          run.status === "pending" &&
-                            "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400",
                         )}
                       >
                         {getScheduledTaskLabel(
