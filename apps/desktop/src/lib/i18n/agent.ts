@@ -929,6 +929,18 @@ export const scheduledTaskLabels = {
   "scheduledTask.editTitle": "编辑定时任务",
   "scheduledTask.editSubtitle": "修改任务名称、Prompt 指令或执行时间。",
   "scheduledTask.saveEdit": "保存修改",
+  "scheduledTask.run.missed": "客户端当时不在线，已错过执行时间",
+  "scheduledTask.run.sidecarNotReady": "本地运行环境未就绪，未能执行",
+  "scheduledTask.run.conversationMissing": "任务会话不存在，未能执行",
+  "scheduledTask.run.noChannel": "任务会话没有可用的渠道或模型，未能执行",
+  "scheduledTask.run.unsupportedProtocol": "本地运行暂不支持该渠道协议",
+  "scheduledTask.run.credentialsFailed": "获取渠道凭据失败",
+  "scheduledTask.run.startFailed": "启动本地运行失败",
+  "scheduledTask.run.noOutput": "已完成（无文本输出）",
+  "scheduledTask.run.timeout": "执行超过 30 分钟，已自动取消",
+  "scheduledTask.run.interrupted": "执行被中断（客户端已重启）",
+  "scheduledTask.notify.runCompletedTitle": "定时任务已完成",
+  "scheduledTask.notify.runFailedBgTitle": "定时任务执行失败",
 } as const;
 
 type ScheduledTaskLabelKey = keyof typeof scheduledTaskLabels;

@@ -262,6 +262,14 @@ export interface ChatState {
     },
   ) => Promise<{ userMessageId: string; assistantMessageId: string; response: Response }>;
   addMessage: (message: Message) => void;
+  /**
+   * Appends messages to a conversation that may not be the one on screen — the
+   * seed of a background (scheduled) turn. On the current conversation this is
+   * addMessage; otherwise the messages land in the per-conversation cache so
+   * the run streams into them there and opening the conversation mid-run shows
+   * it live, exactly like navigating away from a streaming conversation.
+   */
+  seedConversationMessages: (conversationId: string, messages: Message[]) => void;
   deleteMessage: (messageId: string) => Promise<void>;
   regenerateMessage: (
     messageId: string,
@@ -717,6 +725,14 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
       set((state) => ({
         messages: [...state.messages, message],
       }));
+    },
+
+    seedConversationMessages(conversationId, messages) {
+      if (get().currentConversation?.id === conversationId) {
+        set((state) => ({ messages: [...state.messages, ...messages] }));
+        return;
+      }
+      cacheSet(conversationId, [...(messageCache.get(conversationId) ?? []), ...messages]);
     },
 
     async deleteMessage(messageId) {
