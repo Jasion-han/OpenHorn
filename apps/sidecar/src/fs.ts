@@ -16,6 +16,10 @@ export type FsEntry = {
   mtimeMs?: number;
 };
 
+// Legacy: hides any leftover `.openhorn/` dir from workspace listings.
+// Nothing writes `.openhorn/` into the workspace anymore (snapshots moved to
+// `~/.openhorn/`, skills materialization removed). Can be removed once all
+// users have migrated.
 function shouldHideName(name: string) {
   return name === ".openhorn";
 }

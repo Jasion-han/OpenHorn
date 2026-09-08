@@ -4,18 +4,18 @@ import path from "node:path";
 /**
  * Agent Skills resolution + progressive-disclosure prompt.
  *
- * Skill content is materialized to disk ONCE by the desktop side (Rust
- * `skills_materialize_*` commands), into `<cwd>/.openhorn/skills/<name>/SKILL.md`
- * (+ bundled files) — the OpenHorn-owned `.openhorn/` directory (already
- * git-ignored, same as checkpoints). The agent.run message then carries only
- * lightweight metadata (name + description) plus the materialized `skillsRoot`,
- * so a run never ships skill bodies (which can be tens of MB) over the
- * WebSocket. This sidecar module just verifies the on-disk layout and turns it
- * into prompt metadata.
+ * Skills are read IN PLACE from their real folders on disk. The desktop side
+ * discovers skill directories via Tauri IPC (scanning `~/.cc-switch`,
+ * `~/.claude`, `~/.agents`, `~/.codex`, `~/.gemini` etc.) and passes absolute
+ * paths to the sidecar — no files are copied into the workspace. The agent.run
+ * message carries lightweight metadata (name + description + absolute path), so
+ * a run never ships skill bodies (which can be tens of MB) over the WebSocket.
+ * This sidecar module just verifies the on-disk layout and turns it into prompt
+ * metadata.
  *
  * The model is told about each skill's name/description and the SKILL.md path via
  * the system prompt (Level 1). It then reads the full SKILL.md and any bundled
- * resources on demand with its normal Read/Bash tools (Levels 2–3) — true
+ * resources on demand with its normal Read/Bash tools (Levels 2-3) — true
  * progressive disclosure, identical for the Claude SDK and direct runtimes.
  */
 
@@ -34,9 +34,7 @@ export type MaterializedSkill = {
 };
 
 // Folder-safe skill name: lowercase, [a-z0-9-] only, matching Anthropic's
-// frontmatter `name` rules. Falls back to "skill" if nothing survives. Must
-// stay in sync with the desktop materializer's sanitization so the directory
-// chosen on write matches the one resolved here on read.
+// frontmatter `name` rules. Falls back to "skill" if nothing survives.
 export function sanitizeSkillName(name: string): string {
   const cleaned = name
     .trim()
@@ -54,10 +52,10 @@ export function normalizeDescription(description: string): string {
 }
 
 /**
- * Resolve the already-materialized skills under `skillsRoot` into prompt
- * metadata. The desktop side wrote the content to disk; we only verify that
- * each skill's SKILL.md exists and surface its path. A skill whose SKILL.md is
- * missing is skipped (never throws) so one bad entry can't break the run.
+ * Resolve skills into prompt metadata. Each `SkillMeta` carries the absolute
+ * path to the skill's real folder; we verify that SKILL.md exists and surface
+ * its path. A skill whose SKILL.md is missing is skipped (never throws) so one
+ * bad entry can't break the run.
  */
 export async function resolveSkills(metas: SkillMeta[] | undefined): Promise<MaterializedSkill[]> {
   if (!metas || metas.length === 0) return [];

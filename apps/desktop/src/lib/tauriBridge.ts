@@ -120,51 +120,6 @@ export async function pickSkillFolder(): Promise<ImportedSkill | null> {
   return (await invoke("skill_pick_folder")) as ImportedSkill | null;
 }
 
-/** One file to write during skill materialization (rel path + content). */
-export interface SkillMaterializeEntry {
-  relPath: string;
-  content: string;
-  isBinary: boolean;
-}
-
-/**
- * Begin materializing enabled skills: creates a staging dir under the
- * workspace's `.openhorn/` and ensures `.openhorn/` is git-ignored. Returns the
- * staging dir path to stream batches into.
- */
-export async function skillsMaterializeBegin(workspaceRoot: string): Promise<string> {
-  const { invoke } = await import("@tauri-apps/api/core");
-  return (await invoke("skills_materialize_begin", { workspaceRoot })) as string;
-}
-
-/** Write one batch of files into the staging dir from `skillsMaterializeBegin`. */
-export async function skillsMaterializeBatch(
-  tmpRoot: string,
-  entries: SkillMaterializeEntry[],
-): Promise<void> {
-  const { invoke } = await import("@tauri-apps/api/core");
-  await invoke("skills_materialize_batch", { tmpRoot, entries });
-}
-
-/**
- * Atomically swap the staging dir into place as `<root>/.openhorn/skills`.
- * Returns the final skills root passed to the sidecar run.
- */
-export async function skillsMaterializeFinalize(
-  workspaceRoot: string,
-  tmpRoot: string,
-): Promise<string> {
-  const { invoke } = await import("@tauri-apps/api/core");
-  return (await invoke("skills_materialize_finalize", { workspaceRoot, tmpRoot })) as string;
-}
-
-/** Whether a previously-materialized skills dir still exists (cache validation). */
-export async function skillsMaterializedExists(skillsRoot: string): Promise<boolean> {
-  if (!isTauriRuntime()) return false;
-  const { invoke } = await import("@tauri-apps/api/core");
-  return (await invoke("skills_materialized_exists", { skillsRoot })) as boolean;
-}
-
 /** Names of skills the user has explicitly disabled (everything else is on). */
 export async function skillsDisabledList(): Promise<string[]> {
   if (!isTauriRuntime()) return [];
