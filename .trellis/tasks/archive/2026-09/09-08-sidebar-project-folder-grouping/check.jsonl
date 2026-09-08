@@ -1,0 +1,4 @@
+{"file": "skills/openhorn/rules/project-rules.md", "reason": "DB 双定义同步、agent runtime、包管理规则"}
+{"file": "skills/openhorn/rules/desktop-rules.md", "reason": "侧栏组件树、i18n 字典规则、sidecar 接线"}
+{"file": "skills/openhorn/rules/coding-standards.md", "reason": "格式、测试、git 约定"}
+{"file": "skills/openhorn/rules/sidecar-security.md", "reason": "workspace root deny-list 语义"}

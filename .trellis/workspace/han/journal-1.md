@@ -319,3 +319,38 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 9: 回滚快照迁出项目目录 + 死代码清理
+
+**Date**: 2026-09-08
+**Task**: 回滚快照迁出项目目录 + 死代码清理
+**Package**: agent
+**Branch**: `main`
+
+### Summary
+
+快照存储从 <workspace>/.openhorn/snapshots/ 迁到 ~/.openhorn/snapshots/<workspaceSlug>/；旧快照自动迁移、空快照自动清理、每工作区保留20个；删除 Rust 侧 skills 物化死代码（7 个函数/结构体 + TS 4 个导出）；OpenHorn 在用户项目目录的运行时脚印降为零。真机验证：Vorla 的 .openhorn/ 整目录消失，8 个旧快照迁至家目录，Downloads 工作区 pruned 到 20 个。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `52a17ab` | (see git log) |
+| `43b15e9` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

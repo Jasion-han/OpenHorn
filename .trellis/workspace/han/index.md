@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 8
+- **Total Sessions**: 9
 - **Last Active**: 2026-09-08
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~321 | Active |
+| `journal-1.md` | ~356 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 9 | 2026-09-08 | 回滚快照迁出项目目录 + 死代码清理 | `52a17ab`, `43b15e9` | `main` |
 | 8 | 2026-09-08 | 输入框上下键调出历史消息 | `b415da0` | `main` |
 | 7 | 2026-09-08 | 侧栏按项目文件夹分组管理会话 | `5322a24`, `41ee532`, `2b5166f`, `5cc46d2`, `158ffc9`, `f306104`, `cf93c66`, `5b664ce`, `f5a4e9b`, `6b634e7` | `main` |
 | 6 | 2026-09-02 | 定时任务会话隐藏出用户聊天列表 | `02a083b`, `345ac62` | `main` |
