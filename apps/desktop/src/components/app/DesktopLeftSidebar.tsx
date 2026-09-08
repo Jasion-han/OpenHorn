@@ -6,6 +6,7 @@ import {
   Clock,
   Folder,
   FolderInput,
+  FolderOpen,
   FolderPlus,
   MoreHorizontal,
   PanelLeftClose,
@@ -790,11 +791,7 @@ export function DesktopLeftSidebar() {
                           }))
                         }
                       >
-                        {(taskGroupsOpen[taskId] ?? false) ? (
-                          <ChevronDown size={11} className="shrink-0 text-muted-foreground/60" />
-                        ) : (
-                          <ChevronRight size={11} className="shrink-0 text-muted-foreground/60" />
-                        )}
+                        <AlarmClock size={11} className="shrink-0 text-muted-foreground/60" />
                         <span className="text-[11px] font-medium text-muted-foreground/80">
                           {taskTitle}
                         </span>
@@ -922,21 +919,25 @@ export function DesktopLeftSidebar() {
                                 onClick={() => toggleProjectExpanded(project.id)}
                                 aria-expanded={open}
                               >
-                                {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                                {project.isStarred ? (
+                                  <Star
+                                    size={13}
+                                    className="shrink-0 fill-amber-400 text-amber-400"
+                                  />
+                                ) : open ? (
+                                  <FolderOpen
+                                    size={13}
+                                    className="shrink-0 text-muted-foreground"
+                                  />
+                                ) : (
+                                  <Folder size={13} className="shrink-0 text-muted-foreground" />
+                                )}
                               </button>
                               <button
                                 type="button"
                                 className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
                                 onClick={() => handleSelectProject(project)}
                               >
-                                {project.isStarred ? (
-                                  <Star
-                                    size={13}
-                                    className="shrink-0 fill-amber-400 text-amber-400"
-                                  />
-                                ) : (
-                                  <Folder size={13} className="shrink-0 text-muted-foreground" />
-                                )}
                                 <span className="min-w-0 flex-1 truncate font-medium">
                                   {project.name}
                                 </span>
