@@ -1,3 +1,0 @@
-{"path":".trellis/tasks/09-01-scheduled-tasks-feature/prd.md","reason":"Check implementation against PRD requirements and acceptance criteria"}
-{"path":"skills/openhorn/rules/project-rules.md","reason":"Verify DB sync, import conventions, package management rules"}
-{"path":"skills/openhorn/rules/coding-standards.md","reason":"Verify formatting, TypeScript patterns, i18n compliance"}

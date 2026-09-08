@@ -1,5 +1,0 @@
-{"path":".trellis/tasks/09-01-scheduled-tasks-feature/prd.md","reason":"PRD with full requirements, acceptance criteria, and technical approach"}
-{"path":"skills/openhorn/rules/project-rules.md","reason":"Package management, DB sync rules (both schema definitions must be updated together)"}
-{"path":"skills/openhorn/rules/coding-standards.md","reason":"Formatting, TypeScript, testing, git conventions"}
-{"path":"skills/openhorn/rules/desktop-rules.md","reason":"Component tree, streaming, sidecar wiring patterns"}
-{"path":"skills/openhorn/references/architecture.md","reason":"Full architecture reference for understanding provider adapter pattern and agent flow"}
