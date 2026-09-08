@@ -5,6 +5,7 @@ import { DesktopChatArea } from "./components/chat/DesktopChatArea";
 import { ScheduledTasksView } from "./components/scheduled-tasks/ScheduledTasksView";
 import { SettingsView } from "./components/settings/SettingsView";
 import { ThemeListener } from "./components/theme/ThemeListener";
+import { useRefreshOnFocus } from "./hooks/useRefreshOnFocus";
 import { startBackgroundTaskRunner } from "./lib/backgroundTaskRunner";
 import { getTauriSidecarPlatform, hasOverlayTitleBar } from "./lib/tauriBridge";
 import { useAuthStore } from "./stores/authStore";
@@ -46,6 +47,8 @@ export function App() {
   useEffect(() => {
     void bootstrapAuth();
   }, [bootstrapAuth]);
+
+  useRefreshOnFocus();
 
   useEffect(() => {
     let cancelled = false;
