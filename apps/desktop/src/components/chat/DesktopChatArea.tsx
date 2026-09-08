@@ -16,6 +16,14 @@ import { useSidecarAgentRun } from "../../hooks/useSidecarAgentRun";
 import { filesToAttachmentParts } from "../../lib/attachmentParts";
 import { uploadAttachments } from "../../lib/attachments";
 import { getDesktopBackendBase } from "../../lib/backendBase";
+import {
+  buildComposerHistory,
+  caretOnFirstLine,
+  caretOnLastLine,
+  type HistoryNavState,
+  navigateHistory,
+  resetHistoryNav,
+} from "../../lib/composerHistory";
 import { COMPOSER_PLACEHOLDERS } from "../../lib/composerPlaceholder";
 import { deriveComposerRunState } from "../../lib/composerRunState";
 import { isDefaultConversationTitle } from "../../lib/conversationTitle";
@@ -119,6 +127,8 @@ export function DesktopChatArea() {
   const [isUploading, setIsUploading] = useState(false);
   const viewportRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  // ↑/↓ recall of sent messages (shell-style). Reset on edit / send / switch.
+  const historyNavRef = useRef<HistoryNavState>(resetHistoryNav());
   const pendingPreviewUrlsRef = useRef<Map<string, string[]>>(new Map());
   const pendingScrollTargetRef = useRef<
     { type: "bottom" } | { type: "message"; id: string } | null
@@ -203,6 +213,14 @@ export function DesktopChatArea() {
   // this the whole round-grouping array would be rebuilt each token even though
   // the grouping only depends on the message list.
   const groupedMessages = useMemo(() => groupMessagesByRound(messages), [messages]);
+  const currentConversationId = currentConversation?.id ?? null;
+  const composerHistory = useMemo(
+    () =>
+      currentConversationId
+        ? buildComposerHistory(messages.filter((m) => m.conversationId === currentConversationId))
+        : [],
+    [messages, currentConversationId],
+  );
 
   // Group indexes that MUST always stay mounted regardless of the scroll window:
   //  - the group carrying the currently streaming assistant (keeps the
@@ -271,6 +289,7 @@ export function DesktopChatArea() {
   // biome-ignore lint/correctness/useExhaustiveDependencies: dep is a trigger, not read in body
   useEffect(() => {
     pendingScrollTargetRef.current = { type: "bottom" };
+    historyNavRef.current = resetHistoryNav();
     queueMicrotask(() => inputRef.current?.focus());
   }, [currentConversation?.id]);
 
@@ -621,6 +640,8 @@ export function DesktopChatArea() {
 
   const handleInputChange = (value: string) => {
     setInput(value);
+    // Any edit leaves history mode; the current text becomes the new draft.
+    historyNavRef.current = resetHistoryNav();
     // The textarea's selection is already updated when change fires, so the
     // cursor position tells us which `/token` (if any) is being typed.
     const cursor = inputRef.current?.selectionStart ?? value.length;
@@ -712,6 +733,40 @@ export function DesktopChatArea() {
       }
     }
 
+    // Shell-style history: ↑ on the first line / ↓ on the last line walk the
+    // sent messages of this conversation. Middle lines keep native caret moves.
+    if (
+      (event.key === "ArrowUp" || event.key === "ArrowDown") &&
+      !composing &&
+      !slashOpen &&
+      !event.shiftKey &&
+      !event.altKey &&
+      !event.metaKey &&
+      !event.ctrlKey &&
+      currentConversation
+    ) {
+      const el = event.currentTarget;
+      const direction = event.key === "ArrowUp" ? "up" : "down";
+      const onEdgeLine =
+        direction === "up"
+          ? caretOnFirstLine(el.value, el.selectionStart)
+          : caretOnLastLine(el.value, el.selectionEnd);
+      if (onEdgeLine) {
+        const result = navigateHistory(historyNavRef.current, composerHistory, direction, input);
+        historyNavRef.current = result.state;
+        if (result.text !== null) {
+          event.preventDefault();
+          const text = result.text;
+          setInput(text);
+          setSlashOpen(false);
+          queueMicrotask(() => {
+            inputRef.current?.setSelectionRange(text.length, text.length);
+          });
+          return;
+        }
+      }
+    }
+
     if (event.key === "Enter" && !event.shiftKey) {
       if (composing) {
         return;
@@ -795,6 +850,7 @@ export function DesktopChatArea() {
       if (cmd) {
         cmd.run();
         setInput("");
+        historyNavRef.current = resetHistoryNav();
         setSlashOpen(false);
         return;
       }
@@ -861,6 +917,7 @@ export function DesktopChatArea() {
       });
       pendingScrollTargetRef.current = { type: "message", id: userMessageId };
       setInput("");
+      historyNavRef.current = resetHistoryNav();
       setSlashOpen(false);
       setLoading(true);
       setStreaming(true, conversationId);
