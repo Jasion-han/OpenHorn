@@ -120,6 +120,11 @@ export const conversations = sqliteTable(
     // Set when the conversation belongs to a scheduled task run. Non-null rows are
     // hidden from the user's chat list (they show under the task group instead).
     scheduledTaskId: text("scheduled_task_id"),
+    // Sidebar project (a local folder) the conversation is filed under. Null =
+    // plain chat list. No FK: the column is added by ALTER on existing databases
+    // and SQLite cannot attach constraints that way; projectService nulls it on
+    // project delete instead.
+    projectId: text("project_id"),
     summary: text("summary"),
     keyFacts: text("key_facts"),
     lastSummarizedAt: integer("last_summarized_at", { mode: "timestamp" }),
@@ -129,6 +134,32 @@ export const conversations = sqliteTable(
   (table) => [
     index("conversations_user_idx").on(table.userId),
     index("conversations_channel_idx").on(table.channelId),
+    index("conversations_project_idx").on(table.projectId),
+  ],
+);
+
+/**
+ * A "project" is a local folder the user added to the sidebar. Conversations
+ * filed under it run their agent turns with the folder as the sidecar workspace
+ * root (cwd), and the sidebar groups them under the project.
+ */
+export const projects = sqliteTable(
+  "projects",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    /** Absolute, canonical folder path picked through the desktop folder dialog. */
+    rootPath: text("root_path").notNull(),
+    isStarred: integer("is_starred", { mode: "boolean" }).notNull().default(false),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [
+    index("projects_user_idx").on(table.userId),
+    uniqueIndex("projects_user_root_path_idx").on(table.userId, table.rootPath),
   ],
 );
 

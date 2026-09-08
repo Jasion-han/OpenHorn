@@ -112,6 +112,7 @@ const SCHEMA_DDL: string[] = [
 	    run_status TEXT,
 	    workspace_id TEXT,
 	    scheduled_task_id TEXT,
+	    project_id TEXT,
 	    summary TEXT,
 	    key_facts TEXT,
 	    last_summarized_at INTEGER,
@@ -318,6 +319,20 @@ const SCHEMA_DDL: string[] = [
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   );`,
 
+  // Sidebar projects: a local folder the user added. Conversations reference it
+  // through conversations.project_id (no FK — see projectService for delete
+  // semantics).
+  `CREATE TABLE IF NOT EXISTS projects (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    root_path TEXT NOT NULL,
+    is_starred INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );`,
+
   `CREATE TABLE IF NOT EXISTS agent_events (
     id TEXT PRIMARY KEY,
     session_id TEXT NOT NULL,
@@ -339,6 +354,8 @@ const SCHEMA_DDL: string[] = [
   `CREATE INDEX IF NOT EXISTS attachments_session_idx ON attachments(session_id);`,
   `CREATE INDEX IF NOT EXISTS conversations_user_idx ON conversations(user_id);`,
   `CREATE INDEX IF NOT EXISTS conversations_channel_idx ON conversations(channel_id);`,
+  `CREATE INDEX IF NOT EXISTS projects_user_idx ON projects(user_id);`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS projects_user_root_path_idx ON projects(user_id, root_path);`,
   `CREATE INDEX IF NOT EXISTS channels_user_idx ON channels(user_id);`,
   `CREATE INDEX IF NOT EXISTS channel_models_channel_idx ON channel_models(channel_id);`,
   `CREATE INDEX IF NOT EXISTS agent_sessions_user_idx ON agent_sessions(user_id);`,
@@ -1240,6 +1257,19 @@ async function ensureConversationScheduledTaskIdColumn(): Promise<void> {
   }
 }
 
+async function ensureConversationProjectIdColumn(): Promise<void> {
+  const result = await client.execute(`PRAGMA table_info('conversations');`);
+  const rows = getRows(result);
+  if (rows.length > 0 && !hasColumnNamed(rows, "project_id")) {
+    await client.execute(`ALTER TABLE conversations ADD COLUMN project_id TEXT;`);
+  }
+  // Not in SCHEMA_DDL: that pass runs before the ALTER above, and CREATE INDEX
+  // on a column that does not exist yet fails the whole bootstrap.
+  await client.execute(
+    `CREATE INDEX IF NOT EXISTS conversations_project_idx ON conversations(project_id);`,
+  );
+}
+
 async function ensureMessagesFtsTable(): Promise<void> {
   const check = await client.execute(
     `SELECT name FROM sqlite_master WHERE type='table' AND name='messages_fts';`,
@@ -1323,6 +1353,11 @@ export async function bootstrapDatabase(): Promise<void> {
       }
     }
   }
+
+  // After the FK rebuild: that migration re-creates `conversations` from an
+  // explicit column list that predates this column, so adding it earlier would
+  // only have it dropped again on a database taking both migrations at once.
+  await ensureConversationProjectIdColumn();
 
   // FTS5 virtual table for full-text search over message content. Must run
   // after ensureDeleteSemanticsForeignKeys (which may rebuild the messages

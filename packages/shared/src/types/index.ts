@@ -27,6 +27,22 @@ export interface Conversation {
   systemPrompt?: string;
   contextLength: number;
   isPinned: boolean;
+  /** Sidebar project the conversation is filed under; null/undefined = plain chat list. */
+  projectId?: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/**
+ * A local folder the user added to the sidebar. Conversations filed under a
+ * project run their agent turns with `rootPath` as the sidecar workspace root.
+ */
+export interface Project {
+  id: string;
+  userId: string;
+  name: string;
+  rootPath: string;
+  isStarred: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
