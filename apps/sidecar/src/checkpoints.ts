@@ -1,4 +1,17 @@
-import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+/**
+ * Checkpoint snapshots — file-level backup/rollback for agent runs.
+ *
+ * Runtime state lives under the user's home directory, keyed by a
+ * deterministic workspace slug (like Claude Code's ~/.claude/file-history):
+ *
+ *   ~/.openhorn/snapshots/<workspaceSlug>/<runId>/
+ *
+ * Nothing is written into the user's project directory. The base path
+ * (~/.openhorn) can be overridden via the OPENHORN_HOME env var (tests use
+ * this to avoid touching the real home).
+ */
+import { cp, mkdir, readdir, readFile, rename, rm, rmdir, stat, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { generateId } from "./id";
 import { ensureParentDirExists, resolvePathInsideWorkspace } from "./workspace";
@@ -22,6 +35,8 @@ export type CheckpointSession = {
   files: Map<string, CheckpointFileEntry>;
 };
 
+const MAX_SNAPSHOTS_PER_WORKSPACE = 20;
+
 function normalizeRelPath(input: string) {
   const p = input.replace(/\\/g, "/").replace(/^\.\/+/, "");
   if (!p || p === "." || p.startsWith("/") || /^[a-zA-Z]:\//.test(p)) {
@@ -33,13 +48,56 @@ function normalizeRelPath(input: string) {
   return p;
 }
 
+// ---------------------------------------------------------------------------
+// Path helpers
+// ---------------------------------------------------------------------------
+
+/** Resolve the OpenHorn home base (default ~/.openhorn). */
+export function resolveSnapshotsHome(): string {
+  const base = process.env.OPENHORN_HOME?.trim() || path.join(os.homedir(), ".openhorn");
+  return path.join(base, "snapshots");
+}
+
+/**
+ * Deterministic, filesystem-safe slug from an absolute workspace path.
+ * Every `/` and `\` is replaced with `-`; a Windows drive colon is dropped.
+ *
+ *   /Users/han/Project/Vorla  ->  -Users-han-Project-Vorla
+ *   C:\work\x                 ->  C-work-x
+ */
+export function workspaceSlug(workspaceRoot: string): string {
+  // Drop Windows drive colon (C:\... -> C\...)
+  let p = workspaceRoot.replace(/^([a-zA-Z]):/, "$1");
+  // Replace all separators with -
+  p = p.replace(/[\\/]/g, "-");
+  return p;
+}
+
+/**
+ * Full snapshot directory for a given workspace + runId.
+ * Validates runId to prevent directory traversal.
+ */
+export function snapshotDirFor(workspaceRoot: string, runId: string): string {
+  if (runId.includes("/") || runId.includes("\\") || runId.includes("..")) {
+    throw new Error(`Invalid runId: ${runId}`);
+  }
+  return path.join(resolveSnapshotsHome(), workspaceSlug(workspaceRoot), runId);
+}
+
+// ---------------------------------------------------------------------------
+// Session lifecycle
+// ---------------------------------------------------------------------------
+
 export async function createCheckpointSession(
   workspaceRoot: string,
   runId: string = generateId(),
 ): Promise<CheckpointSession> {
-  const checkpointDir = path.join(workspaceRoot, ".openhorn", "snapshots", runId);
+  // Best-effort legacy migration + pruning before creating the new session.
+  await migrateLegacySnapshots(workspaceRoot);
+  await pruneSnapshots(workspaceRoot, MAX_SNAPSHOTS_PER_WORKSPACE);
+
+  const checkpointDir = snapshotDirFor(workspaceRoot, runId);
   await mkdir(path.join(checkpointDir, "files"), { recursive: true });
-  await ensureGitignore(workspaceRoot);
 
   return {
     runId,
@@ -93,7 +151,7 @@ export async function finalizeCheckpoint(session: CheckpointSession): Promise<Ch
 }
 
 export async function rollbackCheckpoint(workspaceRoot: string, runId: string) {
-  const checkpointDir = path.join(workspaceRoot, ".openhorn", "snapshots", runId);
+  const checkpointDir = snapshotDirFor(workspaceRoot, runId);
   const manifestPath = path.join(checkpointDir, "manifest.json");
   const raw = await readFile(manifestPath, "utf8");
   const manifest = JSON.parse(raw) as CheckpointManifest;
@@ -114,25 +172,127 @@ export async function rollbackCheckpoint(workspaceRoot: string, runId: string) {
   return { ok: true };
 }
 
-async function ensureGitignore(workspaceRoot: string) {
+// ---------------------------------------------------------------------------
+// Empty snapshot cleanup
+// ---------------------------------------------------------------------------
+
+/**
+ * Remove a checkpoint session directory if no files were backed up.
+ * Called after a run settles so chat-only turns don't leave empty dirs.
+ */
+export async function discardCheckpointIfEmpty(session: CheckpointSession): Promise<void> {
   try {
-    await stat(path.join(workspaceRoot, ".git"));
+    if (session.files.size === 0) {
+      await rm(session.checkpointDir, { recursive: true, force: true });
+    }
   } catch {
-    return;
+    // best-effort
   }
+}
 
-  const gitignorePath = path.join(workspaceRoot, ".gitignore");
-  let current = "";
+// ---------------------------------------------------------------------------
+// Legacy migration
+// ---------------------------------------------------------------------------
+
+/**
+ * Move snapshot dirs from the old in-project location
+ * (<workspaceRoot>/.openhorn/snapshots/<runId>) to the new home-based
+ * location. All errors are swallowed — migration must never block a run.
+ */
+export async function migrateLegacySnapshots(workspaceRoot: string): Promise<void> {
+  const legacyBase = path.join(workspaceRoot, ".openhorn", "snapshots");
   try {
-    current = await readFile(gitignorePath, "utf8");
+    await stat(legacyBase);
   } catch {
-    current = "";
+    return; // no legacy dir — nothing to do
   }
 
-  if (current.split(/\r?\n/).some((line) => line.trim() === ".openhorn/")) {
-    return;
-  }
+  try {
+    const slug = workspaceSlug(workspaceRoot);
+    const newBase = path.join(resolveSnapshotsHome(), slug);
+    await mkdir(newBase, { recursive: true });
 
-  const next = `${current.trimEnd()}${current.trim().length ? "\n" : ""}.openhorn/\n`;
-  await writeFile(gitignorePath, next, "utf8");
+    const entries = await readdir(legacyBase);
+    for (const name of entries) {
+      const src = path.join(legacyBase, name);
+      const dst = path.join(newBase, name);
+      try {
+        await stat(dst);
+        // target already exists — skip
+        continue;
+      } catch {
+        // target does not exist — proceed
+      }
+      try {
+        await rename(src, dst);
+      } catch {
+        // rename may fail across devices — fall back to copy + rm
+        try {
+          await cp(src, dst, { recursive: true });
+          await rm(src, { recursive: true, force: true });
+        } catch {
+          // give up on this entry
+        }
+      }
+    }
+
+    // Clean up the legacy dirs if empty (rmdir fails on non-empty — that's fine)
+    try {
+      await rmdir(legacyBase);
+    } catch {
+      // not empty or already gone
+    }
+    try {
+      await rmdir(path.join(workspaceRoot, ".openhorn"));
+    } catch {
+      // not empty (e.g. skills still there) or already gone
+    }
+  } catch {
+    // swallow everything — migration is best-effort
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Pruning
+// ---------------------------------------------------------------------------
+
+/**
+ * Keep only the newest `keep` snapshot dirs per workspace (by mtime).
+ * Best-effort — errors are swallowed.
+ */
+export async function pruneSnapshots(workspaceRoot: string, keep: number): Promise<void> {
+  try {
+    const slug = workspaceSlug(workspaceRoot);
+    const base = path.join(resolveSnapshotsHome(), slug);
+    let entries: string[];
+    try {
+      entries = await readdir(base);
+    } catch {
+      return; // dir doesn't exist yet
+    }
+
+    const items: { name: string; mtime: number }[] = [];
+    for (const name of entries) {
+      try {
+        const s = await stat(path.join(base, name));
+        items.push({ name, mtime: s.mtimeMs });
+      } catch {
+        // skip entries we can't stat
+      }
+    }
+
+    // Sort newest first
+    items.sort((a, b) => b.mtime - a.mtime);
+
+    // Remove everything beyond `keep`
+    for (const item of items.slice(keep)) {
+      try {
+        await rm(path.join(base, item.name), { recursive: true, force: true });
+      } catch {
+        // best-effort
+      }
+    }
+  } catch {
+    // swallow
+  }
 }

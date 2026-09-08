@@ -10,6 +10,6 @@ Sidecar 的安全姿态是**分层防御**的。改动任何一层之前先理�
 6. **进程隔离靠 SDK 自己，本仓不写 sandbox wrapper**：`apps/sidecar/src` 里**没有**任何 `sandbox-exec` / `bwrap` / `allowUnsandboxedCommands` 调用——隔离完全依赖 Claude Code 二进制的内建行为。而 `claude.ts` 传的是 `permissionMode: "bypassPermissions"` + `allowDangerouslySkipPermissions: true`，即**本仓不在这一层设防**，命令是否放行完全由第 5 层的 `shell-risk.ts` 白名单 + `canUseTool` 回调决定。评估攻击面时不要把这层当成一道防线。
    （本条 2026-07-28 修正：原文写着「macOS 用 sandbox-exec，Linux 用 bwrap，`allowUnsandboxedCommands: false`」——代码里搜不到这三个关键词，属于描述了一个不存在的管控。）
 7. **凭据隔离**：绝不写 `process.env.ANTHROPIC_API_KEY`。apiKey 通过 SDK `options.env` per-call 传递。
-8. **Checkpoint 归属校验**：`checkpoint.rollback` 必须命中 `ownedRunIds`。Rollback **只覆盖 SDK Write/Edit**，不覆盖 bash。
+8. **Checkpoint 归属校验**：`checkpoint.rollback` 必须命中 `ownedRunIds`。Rollback **只覆盖 SDK Write/Edit**，不覆盖 bash。快照存储在 `~/.openhorn/snapshots/<workspaceSlug>/<runId>/`（可通过 `OPENHORN_HOME` 覆盖基础路径），不再写入用户项目目录，也不修改用户的 `.gitignore`。
 
 改 sidecar 代码后，`bun test` 全过不代表安全性没退化——仍需在 `tauri dev` 环境照攻击面清单实测。

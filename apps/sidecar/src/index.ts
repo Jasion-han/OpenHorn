@@ -20,7 +20,12 @@ import { drainMcpPool, testMcpServer } from "./agent/mcp-tools";
 import { resolveSkills } from "./agent/skills";
 
 import { detectAllCredentials, detectCredentialForProtocol } from "./auth";
-import { createCheckpointSession, rollbackCheckpoint } from "./checkpoints";
+import type { CheckpointSession } from "./checkpoints";
+import {
+  createCheckpointSession,
+  discardCheckpointIfEmpty,
+  rollbackCheckpoint,
+} from "./checkpoints";
 
 function isChatGptOAuthToken(key: string): boolean {
   if (!key.startsWith("eyJ")) return false;
@@ -471,7 +476,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
           const onEvent = (event: import("./agent/events").AgentEvent) => {
             ws.send(JSON.stringify(buildEvent("agent.event", { runId, event })));
           };
-          const guard = (label: string, promise: Promise<void>) => {
+          const guard = (label: string, promise: Promise<void>, checkpoint?: CheckpointSession) => {
             void promise
               .catch((err) => {
                 if (abortController.signal.aborted) {
@@ -483,6 +488,9 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
               })
               .finally(() => {
                 state.agentRuns.delete(runId);
+                if (checkpoint) {
+                  void discardCheckpointIfEmpty(checkpoint);
+                }
               });
           };
           return { runId, onEvent, guard };
@@ -564,6 +572,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
                 ws.send(JSON.stringify(buildEvent("checkpoint.ready", { runId })));
               },
             }),
+            checkpoint,
           );
           return;
         }
@@ -613,6 +622,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
                 ws.send(JSON.stringify(buildEvent("agent.session", { runId, sdkSessionId: sid })));
               },
             }),
+            checkpoint,
           );
           return;
         }
@@ -665,6 +675,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
                 ws.send(JSON.stringify(buildEvent("checkpoint.ready", { runId })));
               },
             }),
+            checkpoint,
           );
         }
 

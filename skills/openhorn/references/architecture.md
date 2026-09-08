@@ -85,7 +85,7 @@ macOS 走 `TitleBarStyle::Overlay`，没有原生标题栏 —— 拖拽区必�
 
 ## Sidecar (apps/sidecar)
 
-独立 Bun WebSocket 服务，类 JSON-RPC 协议（`protocol.ts`）。提供 fs 操作（`fs.ts`）、检查点（`checkpoints.ts`）、shell 风险评估（`shell-risk.ts`）、三条 agent runtime（`agent/`）。分层安全防御详见 `rules/sidecar-security.md`。
+独立 Bun WebSocket 服务，类 JSON-RPC 协议（`protocol.ts`）。提供 fs 操作（`fs.ts`）、检查点（`checkpoints.ts`）、shell 风险评估（`shell-risk.ts`）、三条 agent runtime（`agent/`）。检查点快照存储在 `~/.openhorn/snapshots/<workspaceSlug>/<runId>/`（按项目路径分桶，不写入用户项目目录）。分层安全防御详见 `rules/sidecar-security.md`。
 
 改 `apps/sidecar/src/` 后必须重新编译，否则 Tauri 用的还是旧二进制 —— 见 `references/gotchas.md#sidecar-编译`。
 
