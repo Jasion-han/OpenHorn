@@ -19,6 +19,7 @@ import { useEffect, useRef, useState } from "react";
 import { fileKey } from "shared/format";
 import { Button, cn, Textarea, Tooltip, TooltipContent, TooltipTrigger } from "ui";
 import { usePlaceholderTypewriter } from "../../hooks/usePlaceholderTypewriter";
+import { getChatLabel } from "../../lib/i18n/agent";
 import type { ChatMode } from "../../types/chat";
 import { DesktopAttachmentPreviewItem } from "./DesktopAttachmentPreviewItem";
 import { DesktopComposerModeChip } from "./DesktopComposerModeChip";
@@ -72,6 +73,7 @@ export function DesktopComposer({
   forceWebSearch,
   onToggleWebSearch,
   streaming,
+  busyElsewhere = false,
   canSubmit,
   onStop,
   inputRef,
@@ -108,6 +110,8 @@ export function DesktopComposer({
   forceWebSearch: boolean;
   onToggleWebSearch: () => void;
   streaming: boolean;
+  /** Another conversation's turn is running: sending here would cancel it. */
+  busyElsewhere?: boolean;
   canSubmit: boolean;
   onStop: () => void | Promise<void>;
   inputRef?: RefObject<HTMLTextAreaElement | null>;
@@ -210,6 +214,8 @@ export function DesktopComposer({
   };
 
   const modeDisabled = disabled || streaming;
+  const busyElsewhereLabel = getChatLabel("chat.composer.busyElsewhere");
+  const showBusyElsewhere = busyElsewhere && !streaming;
 
   useEffect(() => {
     if (!slashOpen) return;
@@ -384,6 +390,10 @@ export function DesktopComposer({
           </div>
         </div>
 
+        {showBusyElsewhere && (
+          <p className="px-2 pt-1 text-xs text-muted-foreground">{busyElsewhereLabel}</p>
+        )}
+
         <div className="flex h-[40px] items-center justify-between gap-4 px-2 py-[5px]">
           <div className="flex min-w-0 flex-1 items-center gap-1.5">
             <Tooltip>
@@ -505,6 +515,18 @@ export function DesktopComposer({
                 title="Stop"
               >
                 <Square className="size-[22px]" />
+              </Button>
+            ) : showBusyElsewhere ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                className="size-[30px] rounded-full text-foreground/30 cursor-not-allowed"
+                disabled
+                aria-label={busyElsewhereLabel}
+                title={busyElsewhereLabel}
+              >
+                <CornerDownLeft className="size-[22px]" />
               </Button>
             ) : (
               <Button

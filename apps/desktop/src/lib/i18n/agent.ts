@@ -628,6 +628,9 @@ export const chatLabels = {
   "chat.runtime.executing": "本地 Agent 正在执行...",
   // Composer mode toggle disabled fallback (DesktopComposer)
   "chat.composer.modeUnavailable": "当前不可用",
+  // Composer send disabled because another conversation's agent turn is running
+  // (the sidecar runs one turn at a time; sending here would cancel it).
+  "chat.composer.busyElsewhere": "另一个会话正在运行，请等它完成或先停止它",
   // Agent run panel: one batched fetch call that targeted several pages. The
   // count is the headline — "did it read all of my links" is what a reader of
   // this panel is checking — with the URLs listed underneath it.

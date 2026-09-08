@@ -17,6 +17,7 @@ import { filesToAttachmentParts } from "../../lib/attachmentParts";
 import { uploadAttachments } from "../../lib/attachments";
 import { getDesktopBackendBase } from "../../lib/backendBase";
 import { COMPOSER_PLACEHOLDERS } from "../../lib/composerPlaceholder";
+import { deriveComposerRunState } from "../../lib/composerRunState";
 import { isDefaultConversationTitle } from "../../lib/conversationTitle";
 import { getEffectiveModelForConversation } from "../../lib/effectiveModel";
 import { getChatLabel, getSlashLabel } from "../../lib/i18n/agent";
@@ -94,6 +95,7 @@ export function DesktopChatArea() {
   const messages = useChatStore((state) => state.messages);
   const isLoading = useChatStore((state) => state.isLoading);
   const isStreaming = useChatStore((state) => state.isStreaming);
+  const streamingConversationId = useChatStore((state) => state.streamingConversationId);
   const composerMode = useChatStore((state) => state.composerMode);
   const setComposerMode = useChatStore((state) => state.setComposerMode);
   const addMessage = useChatStore((state) => state.addMessage);
@@ -182,6 +184,14 @@ export function DesktopChatArea() {
   const hasInput = Boolean(input.trim());
   const hasFiles = pendingAttachments.length > 0;
   const forceWebSearch = currentConversation?.forceWebSearch ?? true;
+  // The sidecar runs one turn at a time: Stop must only target the turn that
+  // belongs to this conversation, and sending from another conversation would
+  // kill the running one — hence `!isStreaming` (global) stays in `canSend`.
+  const { streamingHere, busyElsewhere } = deriveComposerRunState({
+    isStreaming,
+    streamingConversationId,
+    currentConversationId: currentConversation?.id ?? null,
+  });
   const canSend =
     effectiveModel.ok &&
     Boolean(currentConversation) &&
@@ -1072,7 +1082,12 @@ export function DesktopChatArea() {
     // No usable model — leave the draft in the composer rather than dropping it,
     // and stop waiting so it never fires later on its own.
     if (!effectiveModel.ok) autoSendRef.current = false;
-  }, [canSend, input, pendingAttachments, effectiveModel.ok]);
+    // Another conversation's turn is still running: auto-sending now would
+    // cancel it (startRun aborts any in-flight run). Keep the draft in the
+    // input, drop the auto-send so it never fires later on its own once the
+    // other turn ends, and let the composer's busy hint explain why.
+    if (busyElsewhere) autoSendRef.current = false;
+  }, [canSend, input, pendingAttachments, effectiveModel.ok, busyElsewhere]);
 
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [deleteInFlight, setDeleteInFlight] = useState(false);
@@ -1409,6 +1424,8 @@ export function DesktopChatArea() {
   };
 
   const handleStop = async () => {
+    // Never cancel another conversation's run from here.
+    if (!streamingHere) return;
     if (sidecarRun.isBusy) {
       await sidecarRun.cancel();
     }
@@ -1668,7 +1685,8 @@ export function DesktopChatArea() {
           onToggleFullAccess={toggleFullAccess}
           forceWebSearch={forceWebSearch}
           onToggleWebSearch={() => void handleToggleWebSearch()}
-          streaming={isStreaming}
+          streaming={streamingHere}
+          busyElsewhere={busyElsewhere}
           canSubmit={canSend}
           onStop={() => void handleStop()}
           inputRef={inputRef}
