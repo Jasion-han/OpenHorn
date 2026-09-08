@@ -1,6 +1,7 @@
 import {
   ChevronDown,
   CornerDownLeft,
+  FolderOpen,
   Globe,
   MessageSquare,
   Paperclip,
@@ -24,6 +25,7 @@ import { welcomeTitleKeyFor } from "../../lib/welcomeHero";
 import { useAuthStore } from "../../stores/authStore";
 import { useChatStore } from "../../stores/chatStore";
 import { useDesktopShellStore } from "../../stores/desktopShellStore";
+import { resolveProjectRootForConversation, useProjectStore } from "../../stores/projectStore";
 import { useSidecarStore } from "../../stores/sidecarStore";
 import { DesktopAttachmentPreviewItem } from "./DesktopAttachmentPreviewItem";
 import { ACCEPT_FILES } from "./DesktopComposer";
@@ -134,6 +136,12 @@ export function DesktopWelcomeScreen() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const user = useAuthStore((state) => state.user);
+  const activeProjectId = useProjectStore((state) => state.activeProjectId);
+  const projects = useProjectStore((state) => state.projects);
+  const setActiveProject = useProjectStore((state) => state.setActiveProject);
+  const activeProject = activeProjectId
+    ? (projects.find((project) => project.id === activeProjectId) ?? null)
+    : null;
   const channels = useChatStore((state) => state.channels);
   const createConversation = useChatStore((state) => state.createConversation);
   const composerMode = useChatStore((state) => state.composerMode);
@@ -158,7 +166,13 @@ export function DesktopWelcomeScreen() {
       };
       if (!config.command) return null;
 
-      await useSidecarStore.getState().ensureWorkspace();
+      // The welcome screen has no conversation yet; the scope for the one about
+      // to be created is the active sidebar project (if any).
+      await useSidecarStore.getState().ensureWorkspace(
+        resolveProjectRootForConversation({
+          projectId: useProjectStore.getState().activeProjectId,
+        }),
+      );
       const result = await sidecar.client.preconnectAcp({
         acpAgent: { command: config.command, args: config.args, env: config.env },
       });
@@ -242,6 +256,9 @@ export function DesktopWelcomeScreen() {
         modelId: selection?.modelId ?? null,
         defaultMode: composerMode,
         forceWebSearch,
+        // Scope chosen in the sidebar: the conversation is filed under the
+        // active project and its agent turns run in that folder.
+        projectId: activeProject?.id ?? null,
       });
       setDraft("");
       setAttachments([]);
@@ -275,6 +292,12 @@ export function DesktopWelcomeScreen() {
       return [...prev, ...next.filter((file) => !seen.has(fileKey(file)))];
     });
   };
+
+  // Picking a project in the sidebar lands here with the scope chip shown; hand
+  // the caret to the box the same way ⌘N does, so the user can type right away.
+  useEffect(() => {
+    if (activeProjectId) queueMicrotask(() => textareaRef.current?.focus());
+  }, [activeProjectId]);
 
   // A suggestion is a starting point, not a command: it fills the box and hands
   // the caret back so it can be edited before sending.
@@ -331,6 +354,27 @@ export function DesktopWelcomeScreen() {
             <p className="mt-2 text-sm text-muted-foreground">
               {getChatLabel("chat.welcome.subtitle")}
             </p>
+            {activeProject && (
+              <div
+                className="mt-4 flex items-center gap-1.5 rounded-full border border-border/70 bg-foreground/[0.03] py-1 pl-3 pr-1 text-xs text-foreground/80"
+                title={activeProject.rootPath}
+              >
+                <FolderOpen className="size-3.5 text-muted-foreground" />
+                <span className="text-muted-foreground">
+                  {getChatLabel("chat.welcome.projectScope")}
+                </span>
+                <span className="max-w-[260px] truncate font-medium">{activeProject.name}</span>
+                <button
+                  type="button"
+                  onClick={() => setActiveProject(null)}
+                  className="ml-0.5 flex size-5 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-foreground/[0.08] hover:text-foreground"
+                  aria-label={getChatLabel("chat.welcome.leaveProject")}
+                  title={getChatLabel("chat.welcome.leaveProject")}
+                >
+                  <X className="size-3" />
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Visual language deliberately mirrors DesktopComposer so the box does

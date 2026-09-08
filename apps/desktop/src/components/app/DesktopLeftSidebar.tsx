@@ -4,6 +4,9 @@ import {
   ChevronDown,
   ChevronRight,
   Clock,
+  Folder,
+  FolderInput,
+  FolderPlus,
   MoreHorizontal,
   PanelLeftClose,
   Pencil,
@@ -11,9 +14,11 @@ import {
   Plus,
   Search,
   Settings,
+  Star,
   Trash2,
 } from "lucide-react";
 import { memo, useEffect, useMemo, useState } from "react";
+import type { Project } from "shared/types";
 import {
   Badge,
   Button,
@@ -29,6 +34,9 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
   Input,
   ScrollArea,
@@ -42,6 +50,7 @@ import { useAuthStore } from "../../stores/authStore";
 import { useBackendStatusStore } from "../../stores/backendStatusStore";
 import { useChatStore } from "../../stores/chatStore";
 import { useDesktopShellStore } from "../../stores/desktopShellStore";
+import { useProjectStore } from "../../stores/projectStore";
 import { useScheduledTaskStore } from "../../stores/scheduledTaskStore";
 import type { Conversation, MessageSearchResult } from "../../types/chat";
 
@@ -88,6 +97,37 @@ export function groupByCreatedAt(
   return groups;
 }
 
+/** How many of a project's conversations show before "load more" takes over. */
+export const PROJECT_PAGE_SIZE = 10;
+/** How many more rows each "load more" click reveals. */
+export const PROJECT_PAGE_STEP = 20;
+
+/**
+ * Splits conversations into the plain list and per-project buckets. A
+ * conversation whose project is not in `projects` (removed elsewhere, or the
+ * project list failed to load) falls back to the plain list rather than
+ * disappearing. Project buckets are ordered by last activity, newest first —
+ * a project is a working folder, so "what did I do here last" matters more
+ * than creation date.
+ */
+export function partitionByProject(
+  items: Conversation[],
+  projects: Project[],
+): { plain: Conversation[]; byProject: Map<string, Conversation[]> } {
+  const byProject = new Map<string, Conversation[]>();
+  for (const project of projects) byProject.set(project.id, []);
+  const plain: Conversation[] = [];
+  for (const item of items) {
+    const bucket = item.projectId ? byProject.get(item.projectId) : undefined;
+    if (bucket) bucket.push(item);
+    else plain.push(item);
+  }
+  const byUpdatedDesc = (a: Conversation, b: Conversation) =>
+    b.updatedAt.getTime() - a.updatedAt.getTime();
+  for (const bucket of byProject.values()) bucket.sort(byUpdatedDesc);
+  return { plain, byProject };
+}
+
 // Memoized: switching conversations changes `currentConversation`, which re-renders
 // the sidebar. Without this, every row (each mounting a Radix DropdownMenu) would
 // re-render — the dominant cost of a conversation switch. The comparator ignores the
@@ -97,20 +137,32 @@ const ConversationRow = memo(
   function ConversationRow({
     conversation,
     isActive,
+    isRunning,
+    projects,
+    indent,
     onSelect,
     onRename,
     onTogglePin,
+    onMoveToProject,
     onDelete,
     pinLabel,
   }: {
     conversation: Conversation;
     isActive: boolean;
+    /** A turn is streaming in this conversation — shown as a pulsing dot. */
+    isRunning: boolean;
+    /** Targets for the "move to project" submenu (the row's own project is excluded). */
+    projects: Project[];
+    /** Nested under a project header. */
+    indent?: boolean;
     onSelect: () => void;
     onRename: () => void;
     onTogglePin: () => void;
+    onMoveToProject: (projectId: string | null) => void;
     onDelete: () => void;
     pinLabel: string;
   }) {
+    const moveTargets = projects.filter((project) => project.id !== conversation.projectId);
     return (
       // biome-ignore lint/a11y/useSemanticElements: cannot use <button> due to nested interactive menu controls
       <div
@@ -124,12 +176,16 @@ const ConversationRow = memo(
           }
         }}
         className={cn(
-          "group flex cursor-pointer items-center justify-between rounded-[10px] border border-transparent px-3 py-[7px] text-left text-sm transition-colors duration-100 titlebar-no-drag",
+          "group flex cursor-pointer items-center justify-between rounded-[10px] border border-transparent py-[7px] pr-3 text-left text-sm transition-colors duration-100 titlebar-no-drag",
+          indent ? "pl-7" : "pl-3",
           isActive
             ? "bg-foreground/[0.08] text-foreground shadow-[0_1px_2px_0_rgba(0,0,0,0.05)]"
             : "text-foreground/70 hover:bg-foreground/[0.04] hover:text-foreground",
         )}
       >
+        {isRunning && (
+          <span className="mr-2 h-2 w-2 shrink-0 animate-pulse rounded-full bg-blue-500" />
+        )}
         <span className="min-w-0 flex-1 truncate">
           {displayConversationTitle(conversation.title)}
         </span>
@@ -162,6 +218,44 @@ const ConversationRow = memo(
               <Pin size={14} />
               {pinLabel}
             </DropdownMenuItem>
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger onClick={(event) => event.stopPropagation()}>
+                <FolderInput size={14} />
+                {getSidebarLabel("sidebar.action.moveToProject")}
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent className="max-h-72 w-48 overflow-y-auto">
+                {moveTargets.length === 0 && !conversation.projectId ? (
+                  <DropdownMenuItem disabled>
+                    {getSidebarLabel("sidebar.action.noProjects")}
+                  </DropdownMenuItem>
+                ) : null}
+                {moveTargets.map((project) => (
+                  <DropdownMenuItem
+                    key={project.id}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onMoveToProject(project.id);
+                    }}
+                  >
+                    <Folder size={14} />
+                    <span className="truncate">{project.name}</span>
+                  </DropdownMenuItem>
+                ))}
+                {conversation.projectId ? (
+                  <>
+                    {moveTargets.length > 0 && <DropdownMenuSeparator />}
+                    <DropdownMenuItem
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onMoveToProject(null);
+                      }}
+                    >
+                      {getSidebarLabel("sidebar.action.moveOutOfProject")}
+                    </DropdownMenuItem>
+                  </>
+                ) : null}
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
             <DropdownMenuSeparator />
             <DropdownMenuItem
               className="text-destructive focus:text-destructive"
@@ -180,10 +274,14 @@ const ConversationRow = memo(
   },
   (prev, next) =>
     prev.isActive === next.isActive &&
+    prev.isRunning === next.isRunning &&
+    prev.indent === next.indent &&
+    prev.projects === next.projects &&
     prev.pinLabel === next.pinLabel &&
     prev.conversation.id === next.conversation.id &&
     prev.conversation.title === next.conversation.title &&
-    prev.conversation.isPinned === next.conversation.isPinned,
+    prev.conversation.isPinned === next.conversation.isPinned &&
+    (prev.conversation.projectId ?? null) === (next.conversation.projectId ?? null),
 );
 
 export function DesktopLeftSidebar() {
@@ -200,6 +298,12 @@ export function DesktopLeftSidebar() {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [pendingDelete, setPendingDelete] = useState<Conversation | null>(null);
+  const [projectRenamingId, setProjectRenamingId] = useState<string | null>(null);
+  const [projectRenameValue, setProjectRenameValue] = useState("");
+  const [pendingRemoveProject, setPendingRemoveProject] = useState<Project | null>(null);
+  // Rows revealed per project beyond the first page ("load more" is client-side:
+  // the conversation list is already fully loaded).
+  const [projectVisibleCounts, setProjectVisibleCounts] = useState<Record<string, number>>({});
 
   const activeView = useDesktopShellStore((state) => state.activeView);
   const setActiveView = useDesktopShellStore((state) => state.setActiveView);
@@ -221,7 +325,19 @@ export function DesktopLeftSidebar() {
   const updateConversation = useChatStore((state) => state.updateConversation);
   const deleteConversation = useChatStore((state) => state.deleteConversation);
   const searchMessages = useChatStore((state) => state.searchMessages);
+  const isStreaming = useChatStore((state) => state.isStreaming);
   const reset = useChatStore((state) => state.reset);
+  const projects = useProjectStore((state) => state.projects);
+  const activeProjectId = useProjectStore((state) => state.activeProjectId);
+  const projectsExpanded = useProjectStore((state) => state.expanded);
+  const loadProjects = useProjectStore((state) => state.loadProjects);
+  const addProjectFromPicker = useProjectStore((state) => state.addProjectFromPicker);
+  const renameProject = useProjectStore((state) => state.renameProject);
+  const toggleProjectStar = useProjectStore((state) => state.toggleStar);
+  const removeProject = useProjectStore((state) => state.removeProject);
+  const setActiveProject = useProjectStore((state) => state.setActiveProject);
+  const setProjectExpanded = useProjectStore((state) => state.setExpanded);
+  const toggleProjectExpanded = useProjectStore((state) => state.toggleExpanded);
   const backendBase = getDesktopBackendBase();
   const recentRuns = useScheduledTaskStore((state) => state.runs);
   const loadRuns = useScheduledTaskStore((state) => state.loadRuns);
@@ -233,6 +349,10 @@ export function DesktopLeftSidebar() {
     const timer = setInterval(() => void loadRuns(), 30_000);
     return () => clearInterval(timer);
   }, [loadRuns]);
+
+  useEffect(() => {
+    void loadProjects();
+  }, [loadProjects]);
 
   // ⌘N / Ctrl+N — the shortcut advertised next to the new-conversation button.
   useEffect(() => {
@@ -330,6 +450,77 @@ export function DesktopLeftSidebar() {
     }
   };
 
+  const handleMoveToProject = async (conversation: Conversation, projectId: string | null) => {
+    if ((conversation.projectId ?? null) === projectId) return;
+    try {
+      await updateConversation(conversation.id, { projectId });
+      if (projectId) setProjectExpanded(projectId, true);
+    } catch {
+      // store 已记录 error 并回滚
+    }
+  };
+
+  // Selecting a project makes it the scope for the next conversation and opens
+  // the welcome screen, mirroring "new conversation" but inside that folder.
+  const handleSelectProject = (project: Project) => {
+    setActiveProject(project.id);
+    setProjectExpanded(project.id, true);
+    startNewConversation();
+    setActiveView("chat");
+  };
+
+  const handleAddProject = async () => {
+    try {
+      const project = await addProjectFromPicker();
+      if (!project) return;
+      notifySuccess(getSidebarLabel("sidebar.project.notify.addedTitle"), project.name);
+    } catch (error) {
+      notifyError(
+        getSidebarLabel("sidebar.project.notify.addFailedTitle"),
+        error instanceof Error
+          ? error.message
+          : getSidebarLabel("sidebar.project.notify.addFailedBody"),
+      );
+    }
+  };
+
+  const handleToggleProjectStar = async (project: Project) => {
+    try {
+      await toggleProjectStar(project.id);
+    } catch (error) {
+      notifyError(
+        getSidebarLabel("sidebar.project.notify.updateFailedTitle"),
+        error instanceof Error ? error.message : "",
+      );
+    }
+  };
+
+  const handleSubmitProjectRename = async (project: Project) => {
+    const nextName = projectRenameValue.trim();
+    setProjectRenamingId(null);
+    if (!nextName || nextName === project.name) return;
+    try {
+      await renameProject(project.id, nextName);
+    } catch (error) {
+      notifyError(
+        getSidebarLabel("sidebar.project.notify.updateFailedTitle"),
+        error instanceof Error ? error.message : "",
+      );
+    }
+  };
+
+  const handleRemoveProject = async (project: Project) => {
+    try {
+      await removeProject(project.id);
+      notifySuccess(getSidebarLabel("sidebar.project.notify.removedTitle"), project.name);
+    } catch (error) {
+      notifyError(
+        getSidebarLabel("sidebar.project.notify.removeFailedTitle"),
+        error instanceof Error ? error.message : "",
+      );
+    }
+  };
+
   const handleRetry = async () => {
     if (retrying) return;
     setRetrying(true);
@@ -355,9 +546,54 @@ export function DesktopLeftSidebar() {
     }
   };
 
-  const pinned = filteredConversations.filter((conversation) => conversation.isPinned);
-  const rest = filteredConversations.filter((conversation) => !conversation.isPinned);
+  const { plain, byProject } = useMemo(
+    () => partitionByProject(filteredConversations, projects),
+    [filteredConversations, projects],
+  );
+  const pinned = plain.filter((conversation) => conversation.isPinned);
+  const rest = plain.filter((conversation) => !conversation.isPinned);
   const groups = groupByCreatedAt(rest, today);
+
+  // One place decides how a conversation row renders (inline rename vs. row), so
+  // the plain, pinned and project lists cannot drift apart in menu items.
+  const renderConversation = (conversation: Conversation, indent?: boolean) =>
+    renamingId === conversation.id ? (
+      <div key={conversation.id} className={cn("py-1", indent ? "pl-6 pr-2" : "px-2")}>
+        <Input
+          autoFocus
+          value={renameValue}
+          onChange={(event) => setRenameValue(event.target.value)}
+          onBlur={() => void handleSubmitRename(conversation)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") void handleSubmitRename(conversation);
+            if (event.key === "Escape") setRenamingId(null);
+          }}
+        />
+      </div>
+    ) : (
+      <ConversationRow
+        key={conversation.id}
+        conversation={conversation}
+        isActive={currentConversation?.id === conversation.id}
+        isRunning={isStreaming && currentConversation?.id === conversation.id}
+        projects={projects}
+        indent={indent}
+        onSelect={() => {
+          setActiveView("chat");
+          void selectConversation(conversation.id);
+        }}
+        onRename={() => {
+          setRenamingId(conversation.id);
+          setRenameValue(displayConversationTitle(conversation.title));
+        }}
+        onTogglePin={() => void handleTogglePin(conversation)}
+        onMoveToProject={(projectId) => void handleMoveToProject(conversation, projectId)}
+        onDelete={() => setPendingDelete(conversation)}
+        pinLabel={getSidebarLabel(
+          conversation.isPinned ? "sidebar.action.unpin" : "sidebar.action.pin",
+        )}
+      />
+    );
 
   const taskGroups = useMemo(() => {
     const map = new Map<string, { taskTitle: string; runs: typeof recentRuns }>();
@@ -538,40 +774,7 @@ export function DesktopLeftSidebar() {
                         </Button>
                       </div>
 
-                      {pinnedOpen &&
-                        pinned.map((conversation) =>
-                          renamingId === conversation.id ? (
-                            <div key={conversation.id} className="px-2 py-1">
-                              <Input
-                                autoFocus
-                                value={renameValue}
-                                onChange={(event) => setRenameValue(event.target.value)}
-                                onBlur={() => void handleSubmitRename(conversation)}
-                                onKeyDown={(event) => {
-                                  if (event.key === "Enter") void handleSubmitRename(conversation);
-                                  if (event.key === "Escape") setRenamingId(null);
-                                }}
-                              />
-                            </div>
-                          ) : (
-                            <ConversationRow
-                              key={`pinned-${conversation.id}`}
-                              conversation={conversation}
-                              isActive={currentConversation?.id === conversation.id}
-                              onSelect={() => {
-                                setActiveView("chat");
-                                void selectConversation(conversation.id);
-                              }}
-                              onRename={() => {
-                                setRenamingId(conversation.id);
-                                setRenameValue(displayConversationTitle(conversation.title));
-                              }}
-                              onTogglePin={() => void handleTogglePin(conversation)}
-                              onDelete={() => setPendingDelete(conversation)}
-                              pinLabel={getSidebarLabel("sidebar.action.unpin")}
-                            />
-                          ),
-                        )}
+                      {pinnedOpen && pinned.map((conversation) => renderConversation(conversation))}
                     </div>
                   )}
 
@@ -654,48 +857,181 @@ export function DesktopLeftSidebar() {
                     </div>
                   ))}
 
+                  {/* Projects: local folders, each grouping the conversations filed
+                      under it; selecting one scopes the next conversation to it.
+                      Placed above the (unbounded) plain list so it stays reachable. */}
+                  <div>
+                    <div className="flex items-center justify-between px-3 pb-1 pt-3">
+                      <span className="text-[11px] font-medium text-muted-foreground/80">
+                        {getSidebarLabel("sidebar.projectsHeading")}
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        className="h-5 w-5"
+                        aria-label={getSidebarLabel("sidebar.project.add")}
+                        title={getSidebarLabel("sidebar.project.add")}
+                        onClick={() => void handleAddProject()}
+                      >
+                        <FolderPlus size={13} />
+                      </Button>
+                    </div>
+
+                    {projects.length === 0 && (
+                      <p className="px-3 py-2 text-xs text-muted-foreground/70">
+                        {getSidebarLabel("sidebar.project.empty")}
+                      </p>
+                    )}
+
+                    {projects.map((project) => {
+                      const items = byProject.get(project.id) ?? [];
+                      const open = projectsExpanded[project.id] ?? false;
+                      const visibleCount = projectVisibleCounts[project.id] ?? PROJECT_PAGE_SIZE;
+                      const visible = items.slice(0, visibleCount);
+                      const remaining = items.length - visible.length;
+                      const isScope = activeProjectId === project.id && !currentConversation;
+                      return (
+                        <div key={`project-${project.id}`}>
+                          {projectRenamingId === project.id ? (
+                            <div className="px-2 py-1">
+                              <Input
+                                autoFocus
+                                value={projectRenameValue}
+                                onChange={(event) => setProjectRenameValue(event.target.value)}
+                                onBlur={() => void handleSubmitProjectRename(project)}
+                                onKeyDown={(event) => {
+                                  if (event.key === "Enter")
+                                    void handleSubmitProjectRename(project);
+                                  if (event.key === "Escape") setProjectRenamingId(null);
+                                }}
+                              />
+                            </div>
+                          ) : (
+                            <div
+                              className={cn(
+                                "group flex items-center gap-1 rounded-[10px] border border-transparent py-[6px] pl-1.5 pr-1 text-sm transition-colors duration-100 titlebar-no-drag",
+                                isScope
+                                  ? "bg-foreground/[0.08] text-foreground"
+                                  : "text-foreground/80 hover:bg-foreground/[0.04] hover:text-foreground",
+                              )}
+                              title={project.rootPath}
+                            >
+                              <button
+                                type="button"
+                                className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground/60 hover:text-foreground"
+                                onClick={() => toggleProjectExpanded(project.id)}
+                                aria-expanded={open}
+                              >
+                                {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                              </button>
+                              <button
+                                type="button"
+                                className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+                                onClick={() => handleSelectProject(project)}
+                              >
+                                {project.isStarred ? (
+                                  <Star
+                                    size={13}
+                                    className="shrink-0 fill-amber-400 text-amber-400"
+                                  />
+                                ) : (
+                                  <Folder size={13} className="shrink-0 text-muted-foreground" />
+                                )}
+                                <span className="min-w-0 flex-1 truncate font-medium">
+                                  {project.name}
+                                </span>
+                              </button>
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon-sm"
+                                    className="h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100 data-[state=open]:opacity-100"
+                                  >
+                                    <MoreHorizontal size={13} />
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end" className="w-44">
+                                  <DropdownMenuItem onClick={() => handleSelectProject(project)}>
+                                    <Plus size={14} />
+                                    {getSidebarLabel("sidebar.project.newConversation")}
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    onClick={() => void handleToggleProjectStar(project)}
+                                  >
+                                    <Star size={14} />
+                                    {getSidebarLabel(
+                                      project.isStarred
+                                        ? "sidebar.project.unstar"
+                                        : "sidebar.project.star",
+                                    )}
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    onClick={() => {
+                                      setProjectRenamingId(project.id);
+                                      setProjectRenameValue(project.name);
+                                    }}
+                                  >
+                                    <Pencil size={14} />
+                                    {getSidebarLabel("sidebar.project.rename")}
+                                  </DropdownMenuItem>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem
+                                    className="text-destructive focus:text-destructive"
+                                    onClick={() =>
+                                      window.setTimeout(() => setPendingRemoveProject(project), 0)
+                                    }
+                                  >
+                                    <Trash2 size={14} />
+                                    {getSidebarLabel("sidebar.project.remove")}
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </div>
+                          )}
+
+                          {open && items.length === 0 && (
+                            <p className="py-1.5 pl-7 pr-3 text-xs text-muted-foreground/60">
+                              {getSidebarLabel("sidebar.project.noConversations")}
+                            </p>
+                          )}
+                          {open &&
+                            visible.map((conversation) => renderConversation(conversation, true))}
+                          {open && remaining > 0 && (
+                            <button
+                              type="button"
+                              className="w-full py-1.5 pl-7 pr-3 text-left text-xs text-muted-foreground/70 transition-colors hover:text-foreground"
+                              onClick={() =>
+                                setProjectVisibleCounts((prev) => ({
+                                  ...prev,
+                                  [project.id]: visibleCount + PROJECT_PAGE_STEP,
+                                }))
+                              }
+                            >
+                              {formatSidebarLabel("sidebar.project.loadMore", { count: remaining })}
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {plain.length > 0 && projects.length > 0 && (
+                    <p className="px-3 pb-0 pt-3 text-[11px] font-medium text-muted-foreground/80">
+                      {getSidebarLabel("sidebar.conversationsHeading")}
+                    </p>
+                  )}
+
                   {groups.map((group) => (
                     <div key={group.label}>
                       <p className="px-3 pb-1 pt-2 text-[11px] font-medium text-muted-foreground/80">
                         {getSidebarLabel(group.label)}
                       </p>
-                      {group.items.map((conversation) =>
-                        renamingId === conversation.id ? (
-                          <div key={conversation.id} className="px-2 py-1">
-                            <Input
-                              autoFocus
-                              value={renameValue}
-                              onChange={(event) => setRenameValue(event.target.value)}
-                              onBlur={() => void handleSubmitRename(conversation)}
-                              onKeyDown={(event) => {
-                                if (event.key === "Enter") void handleSubmitRename(conversation);
-                                if (event.key === "Escape") setRenamingId(null);
-                              }}
-                            />
-                          </div>
-                        ) : (
-                          <ConversationRow
-                            key={conversation.id}
-                            conversation={conversation}
-                            isActive={currentConversation?.id === conversation.id}
-                            onSelect={() => {
-                              setActiveView("chat");
-                              void selectConversation(conversation.id);
-                            }}
-                            onRename={() => {
-                              setRenamingId(conversation.id);
-                              setRenameValue(displayConversationTitle(conversation.title));
-                            }}
-                            onTogglePin={() => void handleTogglePin(conversation)}
-                            onDelete={() => setPendingDelete(conversation)}
-                            pinLabel={getSidebarLabel("sidebar.action.pin")}
-                          />
-                        ),
-                      )}
+                      {group.items.map((conversation) => renderConversation(conversation))}
                     </div>
                   ))}
 
-                  {filteredConversations.length === 0 && (
+                  {plain.length === 0 && (
                     <p className="py-8 text-center text-xs text-muted-foreground">
                       {getSidebarLabel("sidebar.emptyState")}
                     </p>
@@ -780,6 +1116,38 @@ export function DesktopLeftSidebar() {
               }}
             >
               {getSidebarLabel("sidebar.deleteDialog.confirm")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(pendingRemoveProject)}
+        onOpenChange={(open) => !open && setPendingRemoveProject(null)}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{getSidebarLabel("sidebar.project.removeDialog.title")}</DialogTitle>
+            <DialogDescription>
+              {getSidebarLabel("sidebar.project.removeDialog.description")}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setPendingRemoveProject(null)}>
+              {getSidebarLabel("sidebar.project.removeDialog.cancel")}
+            </Button>
+            <Button
+              ref={(el) => {
+                queueMicrotask(() => el?.focus());
+              }}
+              variant="destructive"
+              onClick={() => {
+                const target = pendingRemoveProject;
+                setPendingRemoveProject(null);
+                if (target) void handleRemoveProject(target);
+              }}
+            >
+              {getSidebarLabel("sidebar.project.removeDialog.confirm")}
             </Button>
           </DialogFooter>
         </DialogContent>

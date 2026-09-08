@@ -657,6 +657,12 @@ export const chatLabels = {
   "chat.agent.contextCost": "Cost: {amount} {currency}",
   // ACP diff
   "chat.agent.diff.newFile": "New file",
+  // Welcome screen: the project scope chip (new conversations land in this folder)
+  "chat.welcome.projectScope": "项目",
+  "chat.welcome.projectScopeHint": "新会话将在此文件夹中运行",
+  "chat.welcome.leaveProject": "退出项目",
+  // Sidecar run refused: the conversation's project folder cannot be used as cwd
+  "chat.run.projectRootUnavailable": "项目文件夹不可用，无法在该目录中运行：{root}",
 } as const;
 
 type ChatLabelKey = keyof typeof chatLabels;
@@ -739,6 +745,32 @@ export const sidebarLabels = {
   "sidebar.notify.backendDownMixedContent":
     "仍然无法访问后端（可能被浏览器 Mixed Content 拦截：HTTPS 页面访问 HTTP 后端）。",
   "sidebar.notify.backendDownGeneric": "仍然无法连接到后端服务（{base}）。",
+  // Projects section (local folders grouping their conversations)
+  "sidebar.projectsHeading": "项目",
+  "sidebar.project.add": "添加文件夹",
+  "sidebar.project.empty": "添加一个文件夹，把会话按项目归类",
+  "sidebar.project.newConversation": "在此项目新建会话",
+  "sidebar.project.star": "收藏",
+  "sidebar.project.unstar": "取消收藏",
+  "sidebar.project.rename": "重命名",
+  "sidebar.project.remove": "移除项目",
+  "sidebar.project.noConversations": "暂无会话",
+  "sidebar.project.loadMore": "加载更多（{count} 条）",
+  "sidebar.project.removeDialog.title": "移除项目",
+  "sidebar.project.removeDialog.description":
+    "将同时删除该项目下的全部会话及其消息，此操作无法撤销。磁盘上的文件夹不受影响。",
+  "sidebar.project.removeDialog.cancel": "取消",
+  "sidebar.project.removeDialog.confirm": "删除项目和会话",
+  "sidebar.project.notify.addedTitle": "已添加项目",
+  "sidebar.project.notify.addFailedTitle": "添加项目失败",
+  "sidebar.project.notify.addFailedBody": "无法添加该文件夹，请重试。",
+  "sidebar.project.notify.removedTitle": "已移除项目",
+  "sidebar.project.notify.removeFailedTitle": "移除项目失败",
+  "sidebar.project.notify.updateFailedTitle": "更新项目失败",
+  // Conversation row: move between projects
+  "sidebar.action.moveToProject": "移到项目",
+  "sidebar.action.moveOutOfProject": "移出项目",
+  "sidebar.action.noProjects": "还没有项目",
 } as const;
 
 export type SidebarLabelKey = keyof typeof sidebarLabels;

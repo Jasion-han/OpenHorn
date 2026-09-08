@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import type { Project } from "shared/types";
 import type { Conversation } from "../../types/chat";
-import { groupByCreatedAt } from "./DesktopLeftSidebar";
+import { groupByCreatedAt, partitionByProject } from "./DesktopLeftSidebar";
 
 const conversation = (id: string, createdAt: Date): Conversation =>
   ({ id, title: id, createdAt, isPinned: false }) as Conversation;
@@ -52,5 +53,56 @@ describe("groupByCreatedAt", () => {
     ];
     const ids = groupByCreatedAt(items, now)[0].items.map((item) => item.id);
     expect(ids).toEqual(["evening", "noon", "morning"]);
+  });
+});
+
+describe("partitionByProject", () => {
+  const project = (id: string) =>
+    ({ id, name: id, rootPath: `/tmp/${id}`, isStarred: false }) as Project;
+  const withProject = (id: string, projectId: string | null, updatedAt: Date): Conversation =>
+    ({
+      id,
+      title: id,
+      projectId,
+      isPinned: false,
+      createdAt: updatedAt,
+      updatedAt,
+    }) as Conversation;
+
+  test("files conversations under their project and keeps the rest plain", () => {
+    const projects = [project("p1"), project("p2")];
+    const items = [
+      withProject("a", "p1", at(2026, 9, 1)),
+      withProject("b", null, at(2026, 9, 2)),
+      withProject("c", "p2", at(2026, 9, 3)),
+    ];
+    const { plain, byProject } = partitionByProject(items, projects);
+    expect(plain.map((item) => item.id)).toEqual(["b"]);
+    expect(byProject.get("p1")?.map((item) => item.id)).toEqual(["a"]);
+    expect(byProject.get("p2")?.map((item) => item.id)).toEqual(["c"]);
+  });
+
+  test("a conversation whose project is unknown falls back to the plain list", () => {
+    // Removed elsewhere, or the project list failed to load: the row must stay
+    // reachable rather than vanish from both sections.
+    const items = [withProject("orphan", "gone", at(2026, 9, 1))];
+    const { plain, byProject } = partitionByProject(items, [project("p1")]);
+    expect(plain.map((item) => item.id)).toEqual(["orphan"]);
+    expect(byProject.get("p1")).toEqual([]);
+  });
+
+  test("project buckets are ordered by last activity, newest first", () => {
+    const items = [
+      withProject("old", "p1", at(2026, 9, 1)),
+      withProject("new", "p1", at(2026, 9, 3)),
+      withProject("mid", "p1", at(2026, 9, 2)),
+    ];
+    const { byProject } = partitionByProject(items, [project("p1")]);
+    expect(byProject.get("p1")?.map((item) => item.id)).toEqual(["new", "mid", "old"]);
+  });
+
+  test("every known project gets a bucket, even an empty one", () => {
+    const { byProject } = partitionByProject([], [project("p1"), project("p2")]);
+    expect(Array.from(byProject.keys())).toEqual(["p1", "p2"]);
   });
 });
