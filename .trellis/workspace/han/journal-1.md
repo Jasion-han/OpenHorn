@@ -242,3 +242,46 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 7: 侧栏按项目文件夹分组管理会话
+
+**Date**: 2026-09-08
+**Task**: 侧栏按项目文件夹分组管理会话
+**Package**: agent
+**Branch**: `main`
+
+### Summary
+
+新增 projects 表与 conversations.project_id；服务端项目 CRUD、空会话复用按项目隔离、删除项目原子级联删会话；桌面端 projectStore、侧栏项目段（星标/折叠/移动/加载更多）、欢迎页作用域 chip、项目会话以项目目录作 sidecar cwd；窗口重获焦点刷新列表；运行灯与停止键按实际流式会话显示。顺带修复 ACP 预连接 session id 泄漏导致 Anthropic 回合 exit code 1。真机验证：项目会话 pwd=/Users/han/Project/OpenHorn，普通会话=默认工作区。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `5322a24` | (see git log) |
+| `41ee532` | (see git log) |
+| `2b5166f` | (see git log) |
+| `5cc46d2` | (see git log) |
+| `158ffc9` | (see git log) |
+| `f306104` | (see git log) |
+| `cf93c66` | (see git log) |
+| `5b664ce` | (see git log) |
+| `f5a4e9b` | (see git log) |
+| `6b634e7` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
