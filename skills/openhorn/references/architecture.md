@@ -73,7 +73,7 @@ sidecar 侧有**三个** runtime 入口，共用 `agent/system-prompt.ts` 这一
 
 单个 SQLite 文件 `data/openhorn.db`。当前的表：
 
-`users`、`channels` + `channel_models`、`conversations`、`messages`、`workspaces`、`skills` + `skill_files`、`mcp_servers`、`attachments`、`settings`、`agent_sessions` + `agent_events`、`agent_tasks` + `agent_runs` + `agent_plan_steps` + `agent_task_events` + `agent_approval_requests` + `agent_artifacts`
+`users`、`channels` + `channel_models`、`conversations`、`projects`、`messages`、`workspaces`、`skills` + `skill_files`、`mcp_servers`、`attachments`、`settings`、`agent_sessions` + `agent_events`、`agent_tasks` + `agent_runs` + `agent_plan_steps` + `agent_task_events` + `agent_approval_requests` + `agent_artifacts`
 
 每张表**两处定义**，必须同步 —— 见 `rules/project-rules.md` § 数据库同步。
 

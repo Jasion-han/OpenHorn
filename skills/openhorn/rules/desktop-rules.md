@@ -8,6 +8,13 @@
 
 外壳只有两个文件：`app/DesktopShellLayout.tsx`（左右分栏 + 顶部拖拽带）和 `app/DesktopLeftSidebar.tsx`。
 
+## 侧栏「项目」
+
+- 项目 = 本地文件夹（`projects` 表，`conversations.project_id` 归属）。状态在 `stores/projectStore.ts`：`activeProjectId` 是**下一个新会话的作用域**，跟随所选会话的 `projectId`（store 订阅 chatStore），点项目名 = 设作用域 + 打开欢迎页
+- 挂在项目下的会话，agent 回合前 `useSidecarAgentRun` 用 `resolveProjectRootForConversation` 取项目目录，调 `sidecarStore.ensureWorkspace(root)` 推给 sidecar 作 cwd；**不传 root 时只读 localStorage 的默认工作区，绝不沿用 store 里上一轮的项目目录**。项目目录不可用（被删/移动）时拒跑并报 `chat.run.projectRootUnavailable`
+- 空会话复用按项目作用域隔离（server `findReusableBlankConversation` 与 chatStore 双侧守卫）
+- 侧栏顺序：置顶 → 定时任务组 → 项目 → 会话（今天/昨天/更早）。项目段放在无上限的会话列表之上，否则会被推到几千像素之外
+
 ## 中文文案
 
 **唯一允许出现中文用户文案的地方是 `src/lib/i18n/`**（`agent.ts` 等字典）。组件里禁止内联中文字符串；字典查不到时返回 `null`，调用方显式降级为不渲染，**禁止 fallback 字符串**。工具名、状态机字面量（`Bash` / `Search` / `Approved`）一律保留英文。
