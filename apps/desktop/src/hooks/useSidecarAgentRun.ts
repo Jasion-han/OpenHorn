@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import type { AttachmentPart } from "shared/types";
+import { formatChatLabel } from "../lib/i18n/agent";
 import { createServerApi } from "../lib/serverApi";
 import type { SidecarApprovalRequest, SidecarClient } from "../lib/sidecarClient";
 import {
@@ -11,6 +12,7 @@ import {
   type SkillMeta,
 } from "../lib/sidecarRunSupport";
 import { useChatStore } from "../stores/chatStore";
+import { resolveProjectRootForConversation } from "../stores/projectStore";
 import { useSidecarStore } from "../stores/sidecarStore";
 import { claimRunOwnership, createRunPersistGuard, isRunOwner } from "./sidecarRunOwnership";
 
@@ -421,11 +423,30 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
 
     // Re-sync the workspace to the sidecar before EVERY run (for the agent's cwd
     // and MCP). The sidecar may have restarted and lost it, diverging from the
-    // desktop's value. Best-effort — the run continues regardless.
+    // desktop's value. A conversation filed under a sidebar project runs in that
+    // project's folder; for a plain conversation this is best-effort and the run
+    // continues regardless. For a project it is not: a vanished folder must
+    // refuse the run rather than let the agent work in some other directory.
+    const projectRoot = resolveProjectRootForConversation(
+      useChatStore.getState().conversations.find((c) => c.id === input.conversationId),
+    );
+    let workspaceRoot: string | null = null;
     try {
-      await useSidecarStore.getState().ensureWorkspace();
+      workspaceRoot = await useSidecarStore.getState().ensureWorkspace(projectRoot);
     } catch {
       // ignore; the sidecar keeps whatever workspace it already has
+    }
+    if (projectRoot && !workspaceRoot) {
+      if (!ownsMessage()) return;
+      setIsBusy(false);
+      const message = formatChatLabel("chat.run.projectRootUnavailable", { root: projectRoot });
+      setLastError(message);
+      useChatStore.getState().applyStreamEvent(input.assistantMessageId, {
+        type: "error",
+        message,
+      });
+      persistFailure(message, input.modelId || credentials.modelId);
+      return;
     }
 
     // Enabled Agent Skills — read IN PLACE from their real folders (Claude-style):
@@ -712,9 +733,14 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
         // MCP is additive; ignore load failures.
       }
 
-      // Ensure the workspace is set so the sidecar has a cwd.
+      // Ensure the workspace is set so the sidecar has a cwd (the project's
+      // folder for a conversation filed under a sidebar project).
       try {
-        await useSidecarStore.getState().ensureWorkspace();
+        await useSidecarStore
+          .getState()
+          .ensureWorkspace(
+            resolveProjectRootForConversation(useChatStore.getState().currentConversation),
+          );
       } catch {
         // ignore
       }

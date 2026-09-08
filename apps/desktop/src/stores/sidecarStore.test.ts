@@ -228,6 +228,36 @@ describe("sidecarStore", () => {
     expect(store.getState().lastError).toBe("sidecar not ready");
   });
 
+  test("ensureWorkspace pushes the per-conversation override for that run only", async () => {
+    const { store, fakeClient } = createStore();
+    await store.getState().start();
+    fakeClient.setWorkspaceCalls.length = 0;
+
+    const root = await store.getState().ensureWorkspace("/tmp/project-a");
+    expect(root).toBe("/tmp/project-a");
+    expect(fakeClient.setWorkspaceCalls).toEqual(["/tmp/project-a"]);
+    expect(store.getState().workspaceRoot).toBe("/tmp/project-a");
+
+    // The next plain run must NOT inherit the project override from the store:
+    // with nothing saved it falls back to the sidecar default (empty string).
+    const plain = await store.getState().ensureWorkspace();
+    expect(fakeClient.setWorkspaceCalls).toEqual(["/tmp/project-a", ""]);
+    expect(plain).toBe("");
+  });
+
+  test("ensureWorkspace returns null and records the error when the override is rejected", async () => {
+    const { store, fakeClient } = createStore();
+    await store.getState().start();
+    fakeClient.setWorkspaceImpl = async (root) => {
+      if (root === "/gone") throw new Error("ENOENT: no such file or directory");
+      return { workspaceRoot: root };
+    };
+
+    const root = await store.getState().ensureWorkspace("/gone");
+    expect(root).toBe(null);
+    expect(store.getState().lastError).toBe("ENOENT: no such file or directory");
+  });
+
   test("markUnsupported sets status to unsupported and records the reason", () => {
     const { store } = createStore();
     store.getState().markUnsupported("running outside Tauri");

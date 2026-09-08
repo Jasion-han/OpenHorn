@@ -56,8 +56,12 @@ export interface SidecarState {
    * one or to the sidecar-resolved default. Without this, a failed/raced
    * default-workspace setup leaves workspaceRoot null, which silently drops
    * Agent Skills.
+   *
+   * `rootOverride` is the per-conversation folder (a sidebar project). It is
+   * pushed to the sidecar for this run only and is NOT persisted as the user's
+   * default workspace — the next plain conversation falls back to the saved one.
    */
-  ensureWorkspace: () => Promise<string | null>;
+  ensureWorkspace: (rootOverride?: string | null) => Promise<string | null>;
   markUnsupported: (reason: string) => void;
   reset: () => void;
 }
@@ -294,11 +298,14 @@ export function createDesktopSidecarStore(options: CreateSidecarStoreOptions) {
       }
     },
 
-    async ensureWorkspace() {
+    async ensureWorkspace(rootOverride) {
       const { client, status } = get();
-      // Pick the target: current store value, else the saved one, else let the
-      // sidecar resolve its default (empty string).
-      let target = get().workspaceRoot;
+      const override = rootOverride?.trim() || null;
+      // Pick the target: the per-conversation override, else the saved default,
+      // else let the sidecar resolve its default (empty string). The store's
+      // current value is deliberately not consulted: it may hold a previous
+      // run's project override, which must not leak into a plain conversation.
+      let target = override;
       if (!target) {
         try {
           target = localStorage.getItem(WORKSPACE_STORAGE_KEY);
@@ -314,13 +321,23 @@ export function createDesktopSidecarStore(options: CreateSidecarStoreOptions) {
         try {
           const result = await client.setWorkspace(target);
           set({ workspaceRoot: result.workspaceRoot, lastError: null });
-          try {
-            localStorage.setItem(WORKSPACE_STORAGE_KEY, result.workspaceRoot);
-          } catch {}
+          if (!override) {
+            try {
+              localStorage.setItem(WORKSPACE_STORAGE_KEY, result.workspaceRoot);
+            } catch {}
+          }
           return result.workspaceRoot;
-        } catch {}
+        } catch (error) {
+          // A project folder that no longer exists (moved/deleted) must not be
+          // silent: the caller refuses the run instead of proceeding in the
+          // previous cwd.
+          if (override) {
+            set({ lastError: toErrorMessage(error) });
+            return null;
+          }
+        }
       }
-      return get().workspaceRoot;
+      return override ? null : get().workspaceRoot;
     },
 
     markUnsupported(reason) {
