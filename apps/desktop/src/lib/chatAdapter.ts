@@ -77,6 +77,7 @@ function mapConversation(conversation: ApiConversation): Conversation {
       conversation.forceWebSearch == null ? true : Boolean(conversation.forceWebSearch),
     runStatus: conversation.runStatus ?? null,
     scheduledTaskId: conversation.scheduledTaskId ?? null,
+    projectId: conversation.projectId ?? null,
     createdAt: new Date(conversation.createdAt),
     updatedAt: new Date(conversation.updatedAt),
   };

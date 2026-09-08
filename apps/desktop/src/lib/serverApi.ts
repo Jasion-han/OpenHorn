@@ -5,6 +5,7 @@ import type {
   ApiChannelModel,
   ApiConversation,
   ApiMessage,
+  ApiProject,
   ApiSettingsMap,
   CreateConversationInput,
   MessageSearchResult,
@@ -34,6 +35,15 @@ export interface ServerApi {
     update: (id: string, data: UpdateConversationInput) => Promise<{ success: boolean }>;
     delete: (id: string) => Promise<{ success: boolean }>;
     autoTitle: (id: string, prompt: string) => Promise<{ success: boolean; title?: string }>;
+  };
+  projects: {
+    list: () => Promise<{ projects: ApiProject[] }>;
+    create: (data: { name: string; rootPath: string }) => Promise<{ project: ApiProject }>;
+    update: (
+      id: string,
+      data: { name?: string; isStarred?: boolean },
+    ) => Promise<{ project: ApiProject }>;
+    delete: (id: string) => Promise<{ success: boolean }>;
   };
   messages: {
     list: (conversationId: string) => Promise<{ messages: ApiMessage[] }>;
@@ -304,6 +314,24 @@ export function createServerApi(options?: { baseUrl?: string; fetch?: FetchLike 
         fetchJson(fetchImpl, baseUrl, `/conversations/${encodeURIComponent(id)}/auto-title`, {
           method: "POST",
           body: JSON.stringify({ prompt }),
+        }),
+    },
+
+    projects: {
+      list: () => fetchJson(fetchImpl, baseUrl, "/projects"),
+      create: (data) =>
+        fetchJson(fetchImpl, baseUrl, "/projects", {
+          method: "POST",
+          body: JSON.stringify(data),
+        }),
+      update: (id, data) =>
+        fetchJson(fetchImpl, baseUrl, `/projects/${encodeURIComponent(id)}`, {
+          method: "PUT",
+          body: JSON.stringify(data),
+        }),
+      delete: (id) =>
+        fetchJson(fetchImpl, baseUrl, `/projects/${encodeURIComponent(id)}`, {
+          method: "DELETE",
         }),
     },
 

@@ -239,6 +239,8 @@ export interface ChatState {
       modelId?: string | null;
       defaultMode?: ChatMode;
       forceWebSearch?: boolean;
+      /** Sidebar project to file the conversation under (null = plain list). */
+      projectId?: string | null;
     },
   ) => Promise<Conversation>;
   /**
@@ -494,7 +496,10 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
       // reuse whenever it holds any of them; otherwise "新会话" would silently
       // wipe what the user is looking at instead of opening a new one.
       const curHasContent = cur ? state.messages.some((m) => m.conversationId === cur.id) : false;
-      if (cur && !curHasContent) {
+      // A blank conversation is only reused within the same project scope: its
+      // agent turns run in that project's folder, so it must not be re-homed.
+      const sameScope = cur ? (cur.projectId ?? null) === (options?.projectId ?? null) : false;
+      if (cur && !curHasContent && sameScope) {
         // 当前已是空会话，复用它而不是再建一个空会话
         return cur;
       }
@@ -505,6 +510,7 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
         modelId: options?.modelId,
         defaultMode: options?.defaultMode,
         forceWebSearch: options?.forceWebSearch,
+        projectId: options?.projectId ?? null,
         excludeConversationId: curHasContent ? cur?.id : undefined,
       });
 
@@ -579,6 +585,7 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
           contextLength: updates.contextLength,
           isPinned: updates.isPinned,
           forceWebSearch: updates.forceWebSearch,
+          projectId: updates.projectId,
         });
       } catch (error) {
         if (previous) {

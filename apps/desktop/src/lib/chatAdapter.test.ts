@@ -58,6 +58,16 @@ function createStubServerApi() {
         title: `标题: ${prompt}`,
       }),
     },
+    projects: {
+      list: async () => ({ projects: [] }),
+      create: async () => {
+        throw new Error("not used");
+      },
+      update: async () => {
+        throw new Error("not used");
+      },
+      delete: async () => ({ success: true }),
+    },
     messages: {
       list: async () => ({
         messages: [

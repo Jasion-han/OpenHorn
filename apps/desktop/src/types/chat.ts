@@ -55,6 +55,17 @@ export interface ApiConversation {
   forceWebSearch?: boolean | null;
   runStatus: string | null;
   scheduledTaskId?: string | null;
+  projectId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ApiProject {
+  id: string;
+  userId: string;
+  name: string;
+  rootPath: string;
+  isStarred: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -212,6 +223,8 @@ export interface Conversation {
   forceWebSearch?: boolean;
   runStatus?: string | null;
   scheduledTaskId?: string | null;
+  /** Sidebar project (local folder) the conversation is filed under; null = plain list. */
+  projectId?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -274,6 +287,8 @@ export interface CreateConversationInput {
    * content the server cannot see (optimistic drafts, an unpersisted failed run).
    */
   excludeConversationId?: string;
+  /** File the new conversation under a sidebar project. */
+  projectId?: string | null;
 }
 
 export interface UpdateConversationInput {
@@ -284,6 +299,8 @@ export interface UpdateConversationInput {
   contextLength?: number;
   isPinned?: boolean;
   forceWebSearch?: boolean;
+  /** Move to a project (id) or back to the plain list (null). */
+  projectId?: string | null;
 }
 
 export interface SendMessageInput {
