@@ -325,7 +325,7 @@ export function DesktopLeftSidebar() {
   const updateConversation = useChatStore((state) => state.updateConversation);
   const deleteConversation = useChatStore((state) => state.deleteConversation);
   const searchMessages = useChatStore((state) => state.searchMessages);
-  const isStreaming = useChatStore((state) => state.isStreaming);
+  const streamingConversationId = useChatStore((state) => state.streamingConversationId);
   const reset = useChatStore((state) => state.reset);
   const projects = useProjectStore((state) => state.projects);
   const activeProjectId = useProjectStore((state) => state.activeProjectId);
@@ -575,7 +575,7 @@ export function DesktopLeftSidebar() {
         key={conversation.id}
         conversation={conversation}
         isActive={currentConversation?.id === conversation.id}
-        isRunning={isStreaming && currentConversation?.id === conversation.id}
+        isRunning={streamingConversationId === conversation.id}
         projects={projects}
         indent={indent}
         onSelect={() => {

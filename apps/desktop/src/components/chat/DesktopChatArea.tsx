@@ -853,7 +853,7 @@ export function DesktopChatArea() {
       setInput("");
       setSlashOpen(false);
       setLoading(true);
-      setStreaming(true);
+      setStreaming(true, conversationId);
       setStreamingAssistantId(assistantMessageId);
       setError(null);
       queueMicrotask(() => inputRef.current?.focus());
@@ -1114,7 +1114,7 @@ export function DesktopChatArea() {
       pendingScrollTargetRef.current = { type: "message", id: userMessage.id };
     }
     setLoading(true);
-    setStreaming(true);
+    setStreaming(true, currentConversation.id);
     setStreamingAssistantId(messageId);
     setError(null);
     useChatStore.getState().updateMessage(messageId, {
@@ -1266,7 +1266,7 @@ export function DesktopChatArea() {
     handleCancelEdit();
     pendingScrollTargetRef.current = { type: "message", id: userMessage.id };
     setLoading(true);
-    setStreaming(true);
+    setStreaming(true, currentConversation.id);
     setStreamingAssistantId(assistantMessageId);
     setError(null);
     useChatStore.getState().updateMessage(userMessage.id, { content: editDisplayContent });

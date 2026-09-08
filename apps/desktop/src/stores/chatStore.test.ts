@@ -471,6 +471,29 @@ describe("desktop chat store", () => {
     expect(store.getState().isStreaming).toBe(false);
   });
 
+  test("setStreaming records which conversation is streaming and clears it on stop", async () => {
+    const { adapter } = createStubAdapter();
+    const store = createDesktopChatStore(adapter);
+
+    await store.getState().loadConversations();
+    await store.getState().selectConversation("conv-1");
+
+    store.getState().setStreaming(true, "conv-a");
+    expect(store.getState().isStreaming).toBe(true);
+    expect(store.getState().streamingConversationId).toBe("conv-a");
+
+    store.getState().setStreaming(false);
+    expect(store.getState().isStreaming).toBe(false);
+    expect(store.getState().streamingConversationId).toBe(null);
+
+    // Fallback: no explicit id → current conversation.
+    store.getState().setStreaming(true);
+    expect(store.getState().streamingConversationId).toBe("conv-1");
+
+    store.getState().abortStreaming();
+    expect(store.getState().streamingConversationId).toBe(null);
+  });
+
   test("deletes message through adapter and removes it locally", async () => {
     const { adapter, getDeletedMessageId } = createStubAdapter();
     const store = createDesktopChatStore(adapter);

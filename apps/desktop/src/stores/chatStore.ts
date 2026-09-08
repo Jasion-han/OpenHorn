@@ -226,6 +226,7 @@ export interface ChatState {
   selectedChannelId: string | null;
   isLoading: boolean;
   isStreaming: boolean;
+  streamingConversationId: string | null;
   error: string | null;
 
   loadChannels: () => Promise<void>;
@@ -301,7 +302,7 @@ export interface ChatState {
   setComposerMode: (mode: ChatMode) => void;
   setSelectedChannelId: (channelId: string | null) => void;
   setLoading: (loading: boolean) => void;
-  setStreaming: (streaming: boolean) => void;
+  setStreaming: (streaming: boolean, conversationId?: string | null) => void;
   setError: (error: string | null) => void;
   reset: () => void;
 }
@@ -315,6 +316,7 @@ const INITIAL_STATE = {
   selectedChannelId: null as string | null,
   isLoading: false,
   isStreaming: false,
+  streamingConversationId: null as string | null,
   error: null as string | null,
 };
 
@@ -699,6 +701,7 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
       set({
         messages: nextMessages,
         isStreaming: true,
+        streamingConversationId: state.currentConversation.id,
         error: null,
       });
 
@@ -715,12 +718,14 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
         if (input.existingMessageIds) {
           set({
             isStreaming: false,
+            streamingConversationId: null,
             error: toErrorMessage(error),
           });
         } else {
           set({
             messages: state.messages,
             isStreaming: false,
+            streamingConversationId: null,
             error: toErrorMessage(error),
           });
         }
@@ -759,7 +764,7 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
 
     abortStreaming() {
       adapter.abortActiveStream();
-      set({ isStreaming: false });
+      set({ isStreaming: false, streamingConversationId: null });
     },
 
     applyStreamEvent(messageId, event) {
@@ -834,7 +839,7 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
     },
 
     completeStreamingMessage(_messageId) {
-      set({ isStreaming: false });
+      set({ isStreaming: false, streamingConversationId: null });
     },
 
     failStreamingMessage(messageId, error) {
@@ -842,6 +847,7 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
       if (found) {
         set((state) => ({
           isStreaming: false,
+          streamingConversationId: null,
           error,
           messages: state.messages.map((message) =>
             message.id === messageId
@@ -861,7 +867,7 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
           ),
         }));
       } else {
-        set({ isStreaming: false, error });
+        set({ isStreaming: false, streamingConversationId: null, error });
         updateCachedMessage(messageId, (msg) => ({
           ...msg,
           content: msg.content || error,
@@ -977,8 +983,13 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
       set({ isLoading: loading });
     },
 
-    setStreaming(streaming) {
-      set({ isStreaming: streaming });
+    setStreaming(streaming, conversationId) {
+      set({
+        isStreaming: streaming,
+        streamingConversationId: streaming
+          ? (conversationId ?? get().currentConversation?.id ?? null)
+          : null,
+      });
     },
 
     setError(error) {
