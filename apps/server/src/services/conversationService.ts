@@ -44,6 +44,13 @@ export interface CreateConversationInput {
    * are hidden from the user's chat list and shown under the task group instead.
    */
   scheduledTaskId?: string;
+  /**
+   * Sidebar project (local folder) to file the conversation under. Null/undefined
+   * = plain chat list. Blank-conversation reuse only adopts a row filed under the
+   * same project: a project's conversations run with that folder as cwd, so an
+   * empty row from another scope must not be silently re-homed.
+   */
+  projectId?: string | null;
 }
 
 export interface UpdateConversationInput {
@@ -57,6 +64,8 @@ export interface UpdateConversationInput {
   isPinned?: boolean;
   forceWebSearch?: boolean;
   runStatus?: string | null;
+  /** Move to a project (id) or back to the plain chat list (null). */
+  projectId?: string | null;
 }
 
 export function normalizeConversationModelInput(input: {
@@ -102,6 +111,7 @@ export async function getConversationById(userId: string, conversationId: string
 async function findReusableBlankConversation(
   userId: string,
   title: string,
+  projectId: string | null,
   excludeConversationId?: string,
 ) {
   const rows = await db
@@ -113,6 +123,8 @@ async function findReusableBlankConversation(
         eq(conversations.title, title),
         // A scheduled-task conversation is never adopted as a fresh chat.
         isNull(conversations.scheduledTaskId),
+        // Same project scope only (see CreateConversationInput.projectId).
+        projectId ? eq(conversations.projectId, projectId) : isNull(conversations.projectId),
         excludeConversationId ? ne(conversations.id, excludeConversationId) : undefined,
         notExists(
           db
@@ -139,9 +151,15 @@ export async function createConversation(userId: string, input: CreateConversati
   // currently showing, but that guard cannot see blank conversations left behind by
   // an earlier session — after a reload every entry point would mint another one.
   // Enforcing it here covers every caller instead of every call site.
+  const projectId = input.projectId ?? null;
   const reusable = input.forceNew
     ? null
-    : await findReusableBlankConversation(userId, input.title, input.excludeConversationId);
+    : await findReusableBlankConversation(
+        userId,
+        input.title,
+        projectId,
+        input.excludeConversationId,
+      );
   if (reusable) {
     // Adopt this call's settings: the caller may have picked a different model or
     // mode than the blank conversation was created with.
@@ -173,6 +191,7 @@ export async function createConversation(userId: string, input: CreateConversati
     forceWebSearch,
     runStatus: null,
     scheduledTaskId: input.scheduledTaskId ?? null,
+    projectId,
     createdAt: now,
     updatedAt: now,
   });
@@ -191,6 +210,7 @@ export async function createConversation(userId: string, input: CreateConversati
     forceWebSearch,
     runStatus: null,
     scheduledTaskId: input.scheduledTaskId ?? null,
+    projectId,
     createdAt: now,
     updatedAt: now,
   };
@@ -228,6 +248,7 @@ export async function updateConversation(
   if (input.isPinned !== undefined) updates.isPinned = input.isPinned;
   if (input.forceWebSearch !== undefined) updates.forceWebSearch = input.forceWebSearch;
   if (input.runStatus !== undefined) updates.runStatus = input.runStatus;
+  if (input.projectId !== undefined) updates.projectId = input.projectId;
 
   await db
     .update(conversations)
@@ -237,10 +258,42 @@ export async function updateConversation(
   return { success: true };
 }
 
-export async function deleteConversation(userId: string, conversationId: string) {
+/** Drizzle transaction handle for the libsql driver, as passed to `db.transaction((tx) => ...)`. */
+export type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/**
+ * Everything `applyConversationDeletion` needs, gathered before any row is
+ * touched. Attachment file paths are collected here because once the rows are
+ * gone there is no way to find the files again.
+ */
+export interface ConversationDeletionPlan {
+  conversationId: string;
+  userId: string;
+  messageIds: string[];
+  sessionIds: string[];
+  taskIds: string[];
+  attachmentFilePaths: string[];
+}
+
+/*
+ * Conversation deletion is split into three phases — plan / apply / finish —
+ * so a multi-conversation delete (removing a sidebar project) can run every
+ * `apply` inside ONE transaction and only then run the `finish` steps.
+ * `deleteConversation` below is the single-conversation composition of the
+ * three and behaves exactly as before the split.
+ */
+
+/**
+ * Phase 1: resolve the conversation and collect the ids of every dependent
+ * row. Returns null when the conversation does not exist for this user.
+ */
+export async function planConversationDeletion(
+  userId: string,
+  conversationId: string,
+): Promise<ConversationDeletionPlan | null> {
   const conversation = await getConversationById(userId, conversationId);
   if (!conversation) {
-    return { success: true };
+    return null;
   }
 
   const [messageRows, sessionRows, taskRows] = await Promise.all([
@@ -282,54 +335,82 @@ export async function deleteConversation(userId: string, conversationId: string)
     ...new Set(attachmentFileRows.map((row) => row.filePath).filter(Boolean)),
   ];
 
-  await db.transaction(async (tx) => {
-    if (messageIds.length > 0) {
-      await tx.delete(attachments).where(inArray(attachments.messageId, messageIds));
-    }
+  return { conversationId, userId, messageIds, sessionIds, taskIds, attachmentFilePaths };
+}
 
-    if (sessionIds.length > 0) {
-      await tx.delete(attachments).where(inArray(attachments.sessionId, sessionIds));
-      await tx.delete(agentEvents).where(inArray(agentEvents.sessionId, sessionIds));
-      await tx
-        .delete(agentSessions)
-        .where(and(eq(agentSessions.userId, userId), inArray(agentSessions.id, sessionIds)));
-    }
+/**
+ * Phase 2: delete every row belonging to the conversation inside the caller's
+ * transaction. Contains no side effects outside the database.
+ */
+export async function applyConversationDeletion(
+  tx: DbTransaction,
+  plan: ConversationDeletionPlan,
+): Promise<void> {
+  const { conversationId, userId, messageIds, sessionIds, taskIds } = plan;
 
-    if (taskIds.length > 0) {
-      const runRows = await tx
-        .select({ id: agentRuns.id })
-        .from(agentRuns)
-        .where(inArray(agentRuns.taskId, taskIds));
-      const runIds = runRows.map((row) => row.id);
+  if (messageIds.length > 0) {
+    await tx.delete(attachments).where(inArray(attachments.messageId, messageIds));
+  }
 
-      if (runIds.length > 0) {
-        await tx.delete(agentPlanSteps).where(inArray(agentPlanSteps.runId, runIds));
-        await tx.delete(agentTaskEvents).where(inArray(agentTaskEvents.runId, runIds));
-        await tx.delete(agentApprovalRequests).where(inArray(agentApprovalRequests.runId, runIds));
-        await tx.delete(agentArtifacts).where(inArray(agentArtifacts.runId, runIds));
-        await tx.delete(agentRuns).where(inArray(agentRuns.id, runIds));
-      }
-
-      await tx.delete(agentPlanSteps).where(inArray(agentPlanSteps.taskId, taskIds));
-      await tx.delete(agentTaskEvents).where(inArray(agentTaskEvents.taskId, taskIds));
-      await tx.delete(agentApprovalRequests).where(inArray(agentApprovalRequests.taskId, taskIds));
-      await tx.delete(agentArtifacts).where(inArray(agentArtifacts.taskId, taskIds));
-      await tx
-        .delete(agentTasks)
-        .where(and(eq(agentTasks.userId, userId), inArray(agentTasks.id, taskIds)));
-    }
-
-    await tx.delete(attachments).where(eq(attachments.conversationId, conversationId));
-    await tx.delete(messages).where(eq(messages.conversationId, conversationId));
-
+  if (sessionIds.length > 0) {
+    await tx.delete(attachments).where(inArray(attachments.sessionId, sessionIds));
+    await tx.delete(agentEvents).where(inArray(agentEvents.sessionId, sessionIds));
     await tx
-      .delete(conversations)
-      .where(and(eq(conversations.id, conversationId), eq(conversations.userId, userId)));
-  });
+      .delete(agentSessions)
+      .where(and(eq(agentSessions.userId, userId), inArray(agentSessions.id, sessionIds)));
+  }
 
-  await ftsDeleteConversation(conversationId);
-  await removeAttachmentFiles(attachmentFilePaths);
-  await deleteChunksByConversation(conversationId).catch(() => {});
+  if (taskIds.length > 0) {
+    const runRows = await tx
+      .select({ id: agentRuns.id })
+      .from(agentRuns)
+      .where(inArray(agentRuns.taskId, taskIds));
+    const runIds = runRows.map((row) => row.id);
+
+    if (runIds.length > 0) {
+      await tx.delete(agentPlanSteps).where(inArray(agentPlanSteps.runId, runIds));
+      await tx.delete(agentTaskEvents).where(inArray(agentTaskEvents.runId, runIds));
+      await tx.delete(agentApprovalRequests).where(inArray(agentApprovalRequests.runId, runIds));
+      await tx.delete(agentArtifacts).where(inArray(agentArtifacts.runId, runIds));
+      await tx.delete(agentRuns).where(inArray(agentRuns.id, runIds));
+    }
+
+    await tx.delete(agentPlanSteps).where(inArray(agentPlanSteps.taskId, taskIds));
+    await tx.delete(agentTaskEvents).where(inArray(agentTaskEvents.taskId, taskIds));
+    await tx.delete(agentApprovalRequests).where(inArray(agentApprovalRequests.taskId, taskIds));
+    await tx.delete(agentArtifacts).where(inArray(agentArtifacts.taskId, taskIds));
+    await tx
+      .delete(agentTasks)
+      .where(and(eq(agentTasks.userId, userId), inArray(agentTasks.id, taskIds)));
+  }
+
+  await tx.delete(attachments).where(eq(attachments.conversationId, conversationId));
+  await tx.delete(messages).where(eq(messages.conversationId, conversationId));
+
+  await tx
+    .delete(conversations)
+    .where(and(eq(conversations.id, conversationId), eq(conversations.userId, userId)));
+}
+
+/**
+ * Phase 3: post-commit cleanup that deliberately stays OUTSIDE the transaction —
+ * the FTS delete goes through the raw libsql client (not the drizzle tx), a
+ * file unlink cannot be rolled back, and rag chunk cleanup is best-effort.
+ */
+export async function finishConversationDeletion(plan: ConversationDeletionPlan): Promise<void> {
+  await ftsDeleteConversation(plan.conversationId);
+  await removeAttachmentFiles(plan.attachmentFilePaths);
+  await deleteChunksByConversation(plan.conversationId).catch(() => {});
+}
+
+export async function deleteConversation(userId: string, conversationId: string) {
+  const plan = await planConversationDeletion(userId, conversationId);
+  if (!plan) {
+    return { success: true };
+  }
+
+  await db.transaction((tx) => applyConversationDeletion(tx, plan));
+  await finishConversationDeletion(plan);
 
   return { success: true };
 }
