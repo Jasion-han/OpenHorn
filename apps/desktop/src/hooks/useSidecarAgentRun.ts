@@ -126,7 +126,23 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
   const [lastFinishedRunId, setLastFinishedRunId] = useState<string | null>(null);
   const [isRollingBack, setIsRollingBack] = useState(false);
   const [rollbackError, setRollbackError] = useState<string | null>(null);
-  const [sdkSessionId, setSdkSessionId] = useState<string | null>(null);
+  // The resumable runtime session, tagged with where it came from. A session id
+  // is only handed back as `resume` to a run on the same protocol — and, for
+  // non-ACP runtimes, the same conversation. The hook lives in the always-mounted
+  // chat area, so without the tag the startup ACP preconnect's session id was
+  // passed to every later Anthropic run as `resume`, and the Claude CLI exited
+  // with code 1 because no such session existed.
+  const [sdkSession, setSdkSession] = useState<{
+    id: string;
+    protocol: string;
+    conversationId: string | null;
+  } | null>(null);
+  const sdkSessionId = sdkSession?.id ?? null;
+  const resumableSessionId = (protocol: string, conversationId: string): string | undefined => {
+    if (!sdkSession || sdkSession.protocol !== protocol) return undefined;
+    if (protocol !== "acp" && sdkSession.conversationId !== conversationId) return undefined;
+    return sdkSession.id;
+  };
   const [acpAvailableModels, setAcpAvailableModels] = useState<AcpAvailableModel[]>([]);
   const [acpPreconnecting, setAcpPreconnecting] = useState(false);
   const runRef = useRef<ActiveSidecarRun | null>(null);
@@ -436,7 +452,8 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
         baseUrl: credentials.baseUrl ?? undefined,
         protocol: credentials.protocol,
         acpAgent,
-        sdkSessionId: input.sdkSessionId ?? sdkSessionId ?? undefined,
+        sdkSessionId:
+          input.sdkSessionId ?? resumableSessionId(credentials.protocol, input.conversationId),
         permissionMode: input.permissionMode,
         systemPrompt: input.systemPrompt,
         webSearchEnabled: input.webSearchEnabled,
@@ -447,7 +464,11 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
         attachments: input.attachments,
         tokenBudgetPerRun: undefined,
         onSdkSessionId: (sessionId) => {
-          setSdkSessionId(sessionId);
+          setSdkSession({
+            id: sessionId,
+            protocol: credentials.protocol,
+            conversationId: input.conversationId,
+          });
         },
         onCheckpointReady: (ckptRunId) => {
           // Keyed by runId, so a superseded run's late signal can't taint the
@@ -701,7 +722,11 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
       const result = await client.preconnectAcp({ acpAgent, mcpServers });
 
       if (result.sessionId) {
-        setSdkSessionId(result.sessionId);
+        setSdkSession({
+          id: result.sessionId,
+          protocol: "acp",
+          conversationId: useChatStore.getState().currentConversation?.id ?? null,
+        });
       }
       if (result.models && result.models.length > 0) {
         setAcpAvailableModels(result.models);
