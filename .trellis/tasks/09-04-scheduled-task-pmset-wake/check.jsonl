@@ -1,2 +1,0 @@
-{"file": ".trellis/tasks/09-04-scheduled-task-pmset-wake/prd.md", "reason": "对照 AC 验收:owner 标记、清理还原、电池如实提示、B 不回归"}
-{"file": ".trellis/tasks/09-04-scheduled-task-pmset-wake/research/pmset-wake-scheduling.md", "reason": "核对 pmset 用法安全(不用 repeat/cancelall)、授权取消处理"}
