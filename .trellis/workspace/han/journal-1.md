@@ -285,3 +285,37 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 8: 输入框上下键调出历史消息
+
+**Date**: 2026-09-08
+**Task**: 输入框上下键调出历史消息
+**Package**: agent
+**Branch**: `main`
+
+### Summary
+
+会话输入框 ↑/↓ 按 shell 历史方式翻阅本会话已发送的用户消息：只在光标首/末行触发，翻过最新回到草稿，重复去重，编辑/发送/切会话重置；纯逻辑 lib/composerHistory.ts + 13 单测，浏览器实测 ↑↑↑↓↓ 序列正确。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b415da0` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
