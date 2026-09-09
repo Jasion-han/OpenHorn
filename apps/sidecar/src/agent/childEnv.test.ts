@@ -52,10 +52,13 @@ describe("sanitizeChildEnv", () => {
 // route its env through sanitizeChildEnv. Unit-testing the helper alone does
 // not prove it is actually *called* — that gap is how direct.ts and claude.ts
 // leaked OPENHORN_HANDSHAKE_TOKEN while childEnv.test.ts stayed green.
+//
+// NOTE: claude.ts is not listed here because it no longer spawns child
+// processes directly — all tool execution is delegated to executeTool() from
+// direct.ts, which applies sanitizeChildEnv internally for bash/grep/glob.
 describe("child env hygiene is wired into every model-facing spawn path", () => {
   const MODEL_FACING_RUNTIMES = [
     "src/agent/direct.ts",
-    "src/agent/claude.ts",
     "src/agent/codex.ts",
     "src/agent/chatCodex.ts",
     "src/agent/mcp-tools.ts",
