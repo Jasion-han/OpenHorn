@@ -17,8 +17,8 @@ describe("resolveAgentLiveIndicator", () => {
     expect(resolveAgentLiveIndicator({ ...base, hasText: true })).toBe("trailing");
   });
 
-  test("switches to the trailing indicator once a step is recorded", () => {
-    expect(resolveAgentLiveIndicator({ ...base, stepCount: 1 })).toBe("trailing");
+  test("hides the indicator once steps are recorded (timeline takes over)", () => {
+    expect(resolveAgentLiveIndicator({ ...base, stepCount: 1 })).toBe("none");
   });
 
   test("never returns both — leading and trailing are mutually exclusive", () => {

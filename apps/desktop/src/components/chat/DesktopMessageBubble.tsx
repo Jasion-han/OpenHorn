@@ -32,7 +32,8 @@ export function resolveAgentLiveIndicator(input: {
   stepCount: number;
 }): "leading" | "trailing" | "none" {
   if (!input.isAgentAssistant || !input.isStreaming) return "none";
-  return input.hasText || input.stepCount > 0 ? "trailing" : "leading";
+  if (input.stepCount > 0) return "none";
+  return input.hasText ? "trailing" : "leading";
 }
 
 function MessageBubbleImpl({
@@ -84,7 +85,11 @@ function MessageBubbleImpl({
     ) : (
       // The panel's own "no steps yet" placeholder would sit next to the trailing
       // "Working" line — suppress it whenever that line is the active indicator.
-      <AgentRunPanel run={message.agentRun} hideIdleIndicator={liveIndicator === "trailing"} />
+      <AgentRunPanel
+        run={message.agentRun}
+        hideIdleIndicator={liveIndicator === "trailing"}
+        isStreaming={isMessageStreaming}
+      />
     )
   ) : null;
 

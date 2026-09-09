@@ -1608,7 +1608,7 @@ export function DesktopChatArea() {
 
       <div
         ref={viewportRef}
-        className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto scrollbar-thin"
+        className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-scroll scrollbar-thin"
         style={{ paddingLeft: PAGE_PAD, paddingRight: PAGE_PAD }}
       >
         <div className="flex min-w-0 w-full flex-col">
