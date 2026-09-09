@@ -263,6 +263,28 @@ function createStubServerApi() {
       deleteServer: async () => ({ success: true }),
       testServer: async () => ({ success: true }),
     },
+    dataTransfer: {
+      estimateExport: async () => ({
+        conversations: 0,
+        messages: 0,
+        attachments: 0,
+        estimatedBytes: 0,
+      }),
+      exportBackup: async () => ({ filePath: "", manifest: {} }),
+      exportDTI: async () => [],
+      detectFormat: async () => ({ format: "unknown" }),
+      importData: async () => ({
+        format: "openhorn" as const,
+        conversations: { imported: 0, skipped: 0 },
+        messages: { imported: 0 },
+        attachments: { imported: 0, missing: 0 },
+        channels: { imported: 0, skipped: 0, needsKey: 0 },
+        projects: { imported: 0, needsRebind: 0 },
+        mcpServers: { imported: 0, needsConfirm: 0 },
+        scheduledTasks: { imported: 0 },
+        errors: [],
+      }),
+    },
   };
 
   return {
