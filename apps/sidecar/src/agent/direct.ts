@@ -924,10 +924,33 @@ export async function runDirectAgent(input: RunDirectAgentInput): Promise<void> 
     toolExecution: "sequential",
   });
 
+  // Per-turn text buffer: collects text_delta content so we can distinguish
+  // intermediate reasoning (flushed as `reasoning` when a tool call follows)
+  // from the final response (flushed as `final_text` when the agent ends).
+  let turnTextBuffer = "";
+  let turnHadToolCall = false;
+
+  /** Flush the accumulated text buffer as the given event type. */
+  const flushTextBuffer = (asType: "reasoning" | "final_text") => {
+    if (turnTextBuffer) {
+      input.onEvent({ type: asType, content: turnTextBuffer });
+      turnTextBuffer = "";
+    }
+  };
+
   // Map pi-agent-core events to our AgentEvent format
   agent.subscribe((event: PiAgentEvent) => {
     switch (event.type) {
       case "turn_end": {
+        // If the turn had no tool calls, the buffered text is the final response.
+        if (!turnHadToolCall) {
+          flushTextBuffer("final_text");
+        } else {
+          // Any remaining text after the last tool result in this turn.
+          flushTextBuffer("reasoning");
+        }
+        turnHadToolCall = false;
+
         turnCount++;
         // pi's `input` has the cache buckets taken OUT of it (see its
         // openai-completions provider: `input = prompt_tokens - cacheRead -
@@ -963,14 +986,19 @@ export async function runDirectAgent(input: RunDirectAgentInput): Promise<void> 
         break;
       }
       case "message_update": {
-        // Extract text deltas from the assistant message event stream
+        // Buffer text deltas instead of immediately emitting. The buffer is
+        // flushed as `reasoning` when a tool call follows (intermediate turn)
+        // or as `final_text` when the turn ends without tool calls (final turn).
         const ame = event.assistantMessageEvent;
         if (ame.type === "text_delta") {
-          input.onEvent({ type: "final_text", content: ame.delta });
+          turnTextBuffer += ame.delta;
         }
         break;
       }
       case "tool_execution_start":
+        // Text before a tool call is intermediate reasoning.
+        flushTextBuffer("reasoning");
+        turnHadToolCall = true;
         input.onEvent({
           type: "tool_start",
           toolName: event.toolName,
@@ -993,6 +1021,9 @@ export async function runDirectAgent(input: RunDirectAgentInput): Promise<void> 
         break;
       }
       case "agent_end": {
+        // Flush any remaining text as final response.
+        flushTextBuffer("final_text");
+
         // Check if agent ended with an error
         const msgs = event.messages;
         if (msgs.length > 0) {

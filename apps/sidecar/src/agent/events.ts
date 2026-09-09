@@ -14,6 +14,8 @@ export interface AgentToolDiff {
 export type AgentEvent =
   | { type: "text"; content: string }
   | { type: "final_text"; content: string }
+  | { type: "reasoning"; content: string }
+  | { type: "clear_streaming_text" }
   | { type: "thinking"; content: string }
   | { type: "tool_start"; toolName?: string; toolInput?: unknown }
   | { type: "tool_result"; content?: string }
@@ -76,7 +78,12 @@ export function convertSdkEvent(message: SdkMessage): AgentEvent | AgentEvent[] 
       content?: Array<{ type?: string; text?: string; name?: string; input?: unknown }>;
     };
     const events: AgentEvent[] = [];
+    const hasToolUse = (msg.content || []).some((b) => b.type === "tool_use");
     for (const block of msg.content || []) {
+      if (block.type === "text" && block.text && hasToolUse) {
+        events.push({ type: "clear_streaming_text" });
+        events.push({ type: "reasoning", content: block.text });
+      }
       if (block.type === "tool_use") {
         events.push({
           type: "tool_start",
@@ -96,7 +103,7 @@ export function convertSdkEvent(message: SdkMessage): AgentEvent | AgentEvent[] 
   }
 
   if (message.type === "text" && typeof message.text === "string") {
-    return null;
+    return { type: "reasoning", content: message.text };
   }
 
   if (message.type === "tool_start") {
