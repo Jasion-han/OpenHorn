@@ -1,6 +1,5 @@
 import path from "node:path";
 import type { CanUseTool, HookCallbackMatcher } from "@anthropic-ai/claude-agent-sdk";
-import embeddedCliPath from "@anthropic-ai/claude-agent-sdk/embed";
 import type { AttachmentPart } from "shared/types";
 import { modelSupportsVision } from "shared/vision";
 import { type CheckpointSession, ensureCheckpointBackup, finalizeCheckpoint } from "../checkpoints";
@@ -166,21 +165,8 @@ export function buildNetworkAllowedDomains(baseUrl: string | undefined): string[
   return Array.from(new Set([userHost ?? DEFAULT_ANTHROPIC_HOST, DEFAULT_ANTHROPIC_HOST]));
 }
 
-/**
- * The Claude Code CLI the SDK spawns. Prefer the one the SDK ships over
- * whatever happens to be on PATH: it is the build the SDK was tested against,
- * and its version is what decides how much of the prompt the tool schemas eat.
- * A 2.1.x CLI defers only built-in tools; the SDK's own 2.2.0 defers MCP
- * schemas too, which is the difference between 9,827 and 2,233 prompt tokens
- * for a one-line question with six MCP servers enabled.
- *
- * `@anthropic-ai/claude-agent-sdk/embed` is the SDK's answer for compiled Bun
- * binaries: the bundler embeds cli.js into $bunfs and the import extracts it to
- * a temp dir, since a child process can't read the parent's $bunfs. PATH stays
- * as the fallback so a missing embed degrades instead of killing the run.
- */
+/** Locate the `claude` CLI on PATH for the SDK to spawn. */
 async function findClaudeBinary(): Promise<string> {
-  if (embeddedCliPath) return embeddedCliPath;
   const { execSync } = await import("node:child_process");
   try {
     return execSync("which claude", { timeout: 5000 }).toString().trim();
@@ -439,6 +425,7 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
   });
 
   let capturedSessionId: string | null = null;
+  let streamedTextBuf = "";
   try {
     for await (const message of query as AsyncIterable<SdkMessage>) {
       if (
@@ -451,10 +438,17 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
       }
       const events = convertSdkEvent(message);
       if (events) {
-        if (Array.isArray(events)) {
-          for (const e of events) input.onEvent(e);
-        } else {
-          input.onEvent(events);
+        const flat = Array.isArray(events) ? events : [events];
+        for (const e of flat) {
+          if (e.type === "final_text") {
+            streamedTextBuf += e.content;
+          }
+          if (e.type === "tool_start" && streamedTextBuf) {
+            input.onEvent({ type: "clear_streaming_text" });
+            input.onEvent({ type: "reasoning", content: streamedTextBuf });
+            streamedTextBuf = "";
+          }
+          input.onEvent(e);
         }
       }
       // Token budget guard: the SDK reports cumulative usage on the terminal
