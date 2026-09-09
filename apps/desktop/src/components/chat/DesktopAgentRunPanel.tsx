@@ -720,10 +720,10 @@ function TimelineSegments({
   const segments = segmentSteps(run.steps);
   const isInProgress = run.status === "partial" || run.status === "running";
 
-  // Determine whether to show "waiting for model" indicator:
-  // The run is in progress and the last step is a completed tool_result
   const lastStep = run.steps[run.steps.length - 1];
-  const showWaiting = isInProgress && lastStep?.type === "tool_result";
+  const lastSeg = segments[segments.length - 1];
+  const hasActiveProcessGroup = lastSeg?.kind === "process" && isInProgress;
+  const showWaiting = isInProgress && lastStep?.type === "tool_result" && !hasActiveProcessGroup;
 
   return (
     <div className="mt-2 flex flex-col gap-1">

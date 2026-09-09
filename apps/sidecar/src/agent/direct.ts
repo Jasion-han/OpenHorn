@@ -924,31 +924,14 @@ export async function runDirectAgent(input: RunDirectAgentInput): Promise<void> 
     toolExecution: "sequential",
   });
 
-  // Per-turn text buffer: collects text_delta content so we can distinguish
-  // intermediate reasoning (flushed as `reasoning` when a tool call follows)
-  // from the final response (flushed as `final_text` when the agent ends).
   let turnTextBuffer = "";
   let turnHadToolCall = false;
-
-  /** Flush the accumulated text buffer as the given event type. */
-  const flushTextBuffer = (asType: "reasoning" | "final_text") => {
-    if (turnTextBuffer) {
-      input.onEvent({ type: asType, content: turnTextBuffer });
-      turnTextBuffer = "";
-    }
-  };
 
   // Map pi-agent-core events to our AgentEvent format
   agent.subscribe((event: PiAgentEvent) => {
     switch (event.type) {
       case "turn_end": {
-        // If the turn had no tool calls, the buffered text is the final response.
-        if (!turnHadToolCall) {
-          flushTextBuffer("final_text");
-        } else {
-          // Any remaining text after the last tool result in this turn.
-          flushTextBuffer("reasoning");
-        }
+        turnTextBuffer = "";
         turnHadToolCall = false;
 
         turnCount++;
@@ -992,12 +975,16 @@ export async function runDirectAgent(input: RunDirectAgentInput): Promise<void> 
         const ame = event.assistantMessageEvent;
         if (ame.type === "text_delta") {
           turnTextBuffer += ame.delta;
+          input.onEvent({ type: "final_text", content: ame.delta });
         }
         break;
       }
       case "tool_execution_start":
-        // Text before a tool call is intermediate reasoning.
-        flushTextBuffer("reasoning");
+        if (turnTextBuffer) {
+          input.onEvent({ type: "clear_streaming_text" });
+          input.onEvent({ type: "reasoning", content: turnTextBuffer });
+          turnTextBuffer = "";
+        }
         turnHadToolCall = true;
         input.onEvent({
           type: "tool_start",
@@ -1021,8 +1008,7 @@ export async function runDirectAgent(input: RunDirectAgentInput): Promise<void> 
         break;
       }
       case "agent_end": {
-        // Flush any remaining text as final response.
-        flushTextBuffer("final_text");
+        turnTextBuffer = "";
 
         // Check if agent ended with an error
         const msgs = event.messages;
