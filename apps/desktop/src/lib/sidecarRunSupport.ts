@@ -143,6 +143,17 @@ export function applySidecarEventToChat(
     store.applyStreamEvent(assistantMessageId, { type: "delta", content: event.content });
     return { kind: "handled" };
   }
+  if (event.type === "execution_event" && event.eventType === "clear_streaming_text") {
+    store.applyStreamEvent(assistantMessageId, { type: "clear_streaming_text" });
+    return { kind: "handled" };
+  }
+  if (event.type === "execution_event" && event.eventType === "reasoning" && event.content) {
+    store.applyStreamEvent(assistantMessageId, {
+      type: "agent_event",
+      event: { type: "reasoning", content: event.content },
+    });
+    return { kind: "handled" };
+  }
   if (event.type === "execution_event" && event.eventType === "text" && event.content) {
     store.applyStreamEvent(assistantMessageId, { type: "delta", content: event.content });
     return { kind: "handled" };

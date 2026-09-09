@@ -658,6 +658,8 @@ export const chatLabels = {
   // ACP context usage
   "chat.agent.contextUsage": "{used} / {size} ({percent}%)",
   "chat.agent.contextCost": "Cost: {amount} {currency}",
+  // Intermediate reasoning
+  "chat.agent.reasoning": "Reasoning",
   // ACP diff
   "chat.agent.diff.newFile": "New file",
   // Welcome screen: the project scope chip (new conversations land in this folder)

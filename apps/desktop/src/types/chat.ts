@@ -71,7 +71,7 @@ export interface ApiProject {
 }
 
 export interface ApiAgentRunStep {
-  type: "tool_start" | "tool_result" | "error" | "text" | "tool_detail" | "plan";
+  type: "tool_start" | "tool_result" | "error" | "text" | "tool_detail" | "plan" | "reasoning";
   toolName?: string;
   content?: string;
   toolInput?: unknown;
@@ -268,6 +268,7 @@ export type ChatStreamEvent =
   | { type: "live_status"; status: ApiLiveStatus; route: ApiLiveRoute; label?: string }
   | { type: "citations"; citations: ApiCitation[] }
   | { type: "delta"; content: string }
+  | { type: "clear_streaming_text" }
   | { type: "done"; messageId?: string; model?: string; agentRun?: ApiAgentRun }
   | {
       type: "agent_event";

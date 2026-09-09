@@ -143,6 +143,8 @@ interface SidecarAgentEvent {
   type:
     | "text"
     | "final_text"
+    | "reasoning"
+    | "clear_streaming_text"
     | "thinking"
     | "tool_start"
     | "tool_result"
@@ -221,6 +223,21 @@ export function projectSidecarAgentEvent(runId: string, raw: unknown): AgentTask
         runId,
         eventType: "final_text",
         content: typeof event.content === "string" ? event.content : "",
+      };
+    case "reasoning":
+      return {
+        type: "execution_event",
+        taskId: runId,
+        runId,
+        eventType: "reasoning",
+        content: typeof event.content === "string" ? event.content : "",
+      };
+    case "clear_streaming_text":
+      return {
+        type: "execution_event",
+        taskId: runId,
+        runId,
+        eventType: "clear_streaming_text",
       };
     case "usage":
       return {

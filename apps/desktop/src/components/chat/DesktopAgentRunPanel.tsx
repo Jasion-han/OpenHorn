@@ -309,7 +309,7 @@ export function AgentRunPanel({
   const toolCount = run.steps.filter(
     (step) => step.type === "tool_start" || step.type === "tool_detail",
   ).length;
-  const hasThinking = run.steps.some((step) => step.type === "text");
+  const hasThinking = run.steps.some((step) => step.type === "text" || step.type === "reasoning");
   const isInProgress = run.status === "partial" || run.status === "running";
   const shouldRender =
     Boolean(run.error) ||
@@ -449,6 +449,22 @@ export function AgentRunPanel({
               return (
                 // biome-ignore lint/suspicious/noArrayIndexKey: run steps are append-only
                 <PlanStep key={`plan-${stepIndex}`} entries={step.planEntries} />
+              );
+            }
+
+            if (step.type === "reasoning") {
+              const raw = (step.content ?? "").trim();
+              if (!raw) return null;
+              return (
+                <InlineClampStep
+                  // biome-ignore lint/suspicious/noArrayIndexKey: run steps are append-only
+                  key={`reasoning-${stepIndex}`}
+                  label={getChatLabel("chat.agent.reasoning")}
+                  detail={raw}
+                  isResult={false}
+                  tone="default"
+                  maxLines={3}
+                />
               );
             }
 

@@ -174,6 +174,23 @@ function applyAgentEventToRun(
     };
   }
 
+  if (event.type === "reasoning") {
+    const content = event.content ?? "";
+    const lastStep = base.steps[base.steps.length - 1];
+    if (lastStep && lastStep.type === "reasoning") {
+      const updatedSteps = [...base.steps];
+      updatedSteps[updatedSteps.length - 1] = {
+        ...lastStep,
+        content: (lastStep.content ?? "") + content,
+      };
+      return { ...base, steps: updatedSteps };
+    }
+    return {
+      ...base,
+      steps: [...base.steps, { type: "reasoning", content }],
+    };
+  }
+
   if (event.type === "text" || event.type === "thinking") {
     const content = event.content ?? "";
     const lastStep = base.steps[base.steps.length - 1];
@@ -770,6 +787,11 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
     applyStreamEvent(messageId, event) {
       if (event.type === "delta") {
         get().appendMessageDelta(messageId, event.content || "");
+        return;
+      }
+
+      if (event.type === "clear_streaming_text") {
+        get().updateMessage(messageId, { content: "" });
         return;
       }
 
