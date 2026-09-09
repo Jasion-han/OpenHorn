@@ -51,7 +51,7 @@ import { type AgentEvent, buildUsageEvent, toCount } from "./events";
 import { buildIntentContext } from "./intent-context";
 import { capMcpTools, connectMcpTools } from "./mcp-tools";
 import { buildSkillsPromptSection, type MaterializedSkill } from "./skills";
-import { buildAgentSystemPrompt } from "./system-prompt";
+import { buildAgentSystemPrompt, buildReActBehaviorSection } from "./system-prompt";
 
 export type RunDirectAgentInput = {
   apiKey: string;
@@ -901,6 +901,10 @@ export async function runDirectAgent(input: RunDirectAgentInput): Promise<void> 
       webFetchAvailable: input.webSearchEnabled !== false,
       extra: buildSkillsPromptSection(input.skills ?? [], "read_file"),
     }),
+    buildReActBehaviorSection(),
+    // Direct-runtime-specific: GPT models tend to fire all available tools in
+    // one massive batch. This extra nudge keeps them iterative.
+    "After each tool call round, analyze the results before deciding the next action. Do not request all tools at once — execute in small batches so you can inspect intermediate results and adjust your approach.",
     input.systemPrompt,
     intentResult.context,
   ]
@@ -921,7 +925,7 @@ export async function runDirectAgent(input: RunDirectAgentInput): Promise<void> 
     },
     streamFn: streamSimple,
     getApiKey: () => apiKey,
-    toolExecution: "sequential",
+    toolExecution: "parallel",
   });
 
   let turnTextBuffer = "";

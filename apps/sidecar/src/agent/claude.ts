@@ -21,7 +21,7 @@ import { HISTORY_MAX_TOKENS, truncateHistory } from "./context";
 import { type AgentEvent, convertSdkEvent, toCount } from "./events";
 import { buildIntentContext } from "./intent-context";
 import { buildSkillsPromptSection, type MaterializedSkill } from "./skills";
-import { buildAgentSystemPrompt } from "./system-prompt";
+import { buildAgentSystemPrompt, buildReActBehaviorSection } from "./system-prompt";
 
 type SdkMessage = {
   type: string;
@@ -285,6 +285,7 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
       webFetchAvailable: input.webSearchEnabled !== false,
       extra: buildSkillsPromptSection(input.skills ?? [], "Read"),
     }),
+    buildReActBehaviorSection(),
     input.systemPrompt,
     intentResult.context,
   ]

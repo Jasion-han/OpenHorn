@@ -60,7 +60,7 @@ export function buildAgentSystemPrompt(opts?: {
     "- Do what the user asked and what it clearly entails — no more. Don't expand scope, add unrequested features, refactor unrelated code, or take tangential actions. If you notice related work worth doing, mention it instead of silently doing it.",
     "- When a detail is only mildly ambiguous, make the most reasonable assumption, proceed, and state the assumption — only stop to ask when intent is genuinely unclear or the action is destructive/irreversible.",
     "- Keep going until the request is fully resolved before handing back; don't punt a half-finished result.",
-    "- Run independent tool calls together rather than one at a time. Prefer your dedicated file/search tools over raw shell when one fits.",
+    "- When multiple independent lookups are needed, batch a small group together (3–5) rather than issuing them one at a time. Prefer your dedicated file/search tools over raw shell when one fits.",
     '- Do not write any preface, narration, or progress note before or between tool calls (e.g. "I\'ll first check…"). Gather what you need with your tools first, then write the complete answer once, as a single coherent message at the end — the UI merges all your text into one reply, so anything you say before the tools finish gets glued to the front of your final answer. Never put tool-by-tool reasoning into the answer.',
     "",
     "# Writing code",
@@ -105,4 +105,18 @@ export function buildAgentSystemPrompt(opts?: {
   }
 
   return lines.join("\n");
+}
+
+/**
+ * Shared ReAct (Reason → Act → Observe) behaviour section. Both the Claude SDK
+ * and the Direct (OpenAI/Google) runtimes append this to guide the model toward
+ * a step-by-step agent loop instead of fire-and-forget tool batches.
+ */
+export function buildReActBehaviorSection(): string {
+  return [
+    "# Agent execution discipline",
+    "- Work step by step: after each round of tool calls, analyze the results and explain your reasoning before deciding what to do next.",
+    "- Keep tool call batches small — 3 to 5 calls per round. Do not request dozens of tools in a single turn; split the work into digestible rounds so you can course-correct between them.",
+    "- Between rounds, briefly state what you learned and what you plan to do next. This makes your process transparent and helps catch mistakes early.",
+  ].join("\n");
 }
