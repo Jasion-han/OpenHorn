@@ -1,7 +1,11 @@
-import { Bot, KeyRound, Palette, Plug, Radio, Settings, Sparkles } from "lucide-react";
+import { Bot, HardDrive, KeyRound, Palette, Plug, Radio, Settings, Sparkles } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { cn, ScrollArea } from "ui";
-import { getCredentialLabel, getSettingsViewLabel } from "../../lib/i18n/agent";
+import {
+  getCredentialLabel,
+  getDataTransferLabel,
+  getSettingsViewLabel,
+} from "../../lib/i18n/agent";
 import {
   type DesktopSettingsTab as SettingsTab,
   useDesktopShellStore,
@@ -9,6 +13,7 @@ import {
 import { AgentSettings } from "./AgentSettings";
 import { AppearanceSettings } from "./AppearanceSettings";
 import { ChannelSettings } from "./ChannelSettings";
+import { DataTransferSettings } from "./DataTransferSettings";
 import { DesktopCredentialSourcesPanel } from "./DesktopCredentialSourcesPanel";
 import { GeneralSettings } from "./GeneralSettings";
 import { McpSettings } from "./McpSettings";
@@ -34,6 +39,11 @@ const TABS: Array<{ id: SettingsTab; label: string; icon: ReactNode }> = [
   { id: "mcp", label: "MCP", icon: <Plug size={16} /> },
   { id: "skill", label: "Skill", icon: <Sparkles size={16} /> },
   {
+    id: "data",
+    label: getDataTransferLabel("settings.view.tab.data"),
+    icon: <HardDrive size={16} />,
+  },
+  {
     id: "appearance",
     label: getSettingsViewLabel("settings.view.tab.appearance"),
     icon: <Palette size={16} />,
@@ -54,6 +64,8 @@ function TabContent({ id }: { id: SettingsTab }) {
       return <McpSettings />;
     case "skill":
       return <SkillSettings />;
+    case "data":
+      return <DataTransferSettings />;
     case "appearance":
       return <AppearanceSettings />;
   }

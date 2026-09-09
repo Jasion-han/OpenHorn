@@ -983,3 +983,95 @@ type ScheduledTaskLabelKey = keyof typeof scheduledTaskLabels;
 export function getScheduledTaskLabel(key: ScheduledTaskLabelKey): string {
   return scheduledTaskLabels[key];
 }
+
+/**
+ * Labels for the Data Transfer settings panel (DataTransferSettings): export
+ * backup, export DTI, import data from OpenHorn / ChatGPT / Claude. File
+ * format identifiers ("OpenHorn", "ChatGPT", "Claude", "DTI", "ZIP", "JSON")
+ * stay English per rule 3 above; everything else is user-facing Chinese copy.
+ * Templates use `{name}` placeholders resolved via `formatDataTransferLabel`.
+ */
+export const dataTransferLabels = {
+  // Section
+  "settings.data.title": "数据管理",
+  "settings.data.description": "导出备份、导入数据，或迁移到其他平台。",
+  // Tab label in settings sidebar
+  "settings.view.tab.data": "数据",
+  // Export area
+  "settings.data.export.heading": "导出",
+  "settings.data.export.backupTitle": "导出备份",
+  "settings.data.export.backupDescription":
+    "导出 OpenHorn 全量数据（对话、消息、附件、渠道配置等），用于迁移到新设备。不含 API Key。",
+  "settings.data.export.backupButton": "导出备份",
+  "settings.data.export.dtiTitle": "导出通用格式 (DTI)",
+  "settings.data.export.dtiDescription":
+    "将对话导出为 DTI 标准 JSON，可导入到 Google Gemini 等支持该格式的工具。",
+  "settings.data.export.dtiButton": "导出通用格式",
+  // Export states
+  "settings.data.export.estimating": "正在估算...",
+  "settings.data.export.exporting": "正在导出...",
+  "settings.data.export.estimateInfo":
+    "{conversations} 个对话、{messages} 条消息、{attachments} 个附件，预计 {size}",
+  "settings.data.export.confirmTitle": "确认导出",
+  "settings.data.export.confirmBackup": "将导出以上数据为 OpenHorn 备份文件。",
+  "settings.data.export.confirmDti": "将导出对话为 DTI 标准 JSON 文件。",
+  "settings.data.export.selectDir": "选择保存位置",
+  "settings.data.export.cancel": "取消",
+  "settings.data.export.confirm": "开始导出",
+  // Export result
+  "settings.data.export.successTitle": "导出完成",
+  "settings.data.export.successBody": "文件已保存到 {path}",
+  "settings.data.export.failedTitle": "导出失败",
+  // Import area
+  "settings.data.import.heading": "导入",
+  "settings.data.import.title": "导入数据",
+  "settings.data.import.description":
+    "从 OpenHorn 备份、ChatGPT 导出或 Claude 导出文件中导入数据。支持 ZIP 和 JSON 格式。",
+  "settings.data.import.button": "选择文件并导入",
+  // Import states
+  "settings.data.import.detecting": "正在识别文件格式...",
+  "settings.data.import.importing": "正在导入...",
+  "settings.data.import.formatDetected": "检测到 {format} 文件",
+  "settings.data.import.confirmTitle": "确认导入",
+  "settings.data.import.confirmBody": "将从此文件导入数据，已有的相同数据会被跳过。",
+  "settings.data.import.cancel": "取消",
+  "settings.data.import.confirm": "开始导入",
+  // Import result
+  "settings.data.import.successTitle": "导入完成",
+  "settings.data.import.failedTitle": "导入失败",
+  "settings.data.import.resultConversations": "对话：导入 {imported} 个，跳过 {skipped} 个",
+  "settings.data.import.resultMessages": "消息：导入 {imported} 条",
+  "settings.data.import.resultAttachments": "附件：导入 {imported} 个，缺失 {missing} 个",
+  "settings.data.import.resultChannels":
+    "渠道：导入 {imported} 个，跳过 {skipped} 个，{needsKey} 个需配置 API Key",
+  "settings.data.import.resultProjects": "项目：导入 {imported} 个，{needsRebind} 个待重新绑定",
+  "settings.data.import.resultMcp": "MCP：导入 {imported} 个，{needsConfirm} 个需确认",
+  "settings.data.import.resultScheduledTasks": "定时任务：导入 {imported} 个",
+  "settings.data.import.resultErrors": "错误：{count} 个",
+  // Format labels
+  "settings.data.format.openhorn": "OpenHorn 备份",
+  "settings.data.format.chatgpt": "ChatGPT 导出",
+  "settings.data.format.claude": "Claude 导出",
+  "settings.data.format.unknown": "未知格式",
+  // Toasts
+  "settings.data.notify.noTauri": "文件选择仅在桌面端可用",
+  "settings.data.notify.cancelled": "已取消",
+  "settings.data.notify.cancelledBody": "操作已取消",
+} as const;
+
+type DataTransferLabelKey = keyof typeof dataTransferLabels;
+
+export function getDataTransferLabel(key: DataTransferLabelKey): string {
+  return dataTransferLabels[key];
+}
+
+export function formatDataTransferLabel(
+  key: DataTransferLabelKey,
+  vars: Record<string, string | number>,
+): string {
+  let text: string = dataTransferLabels[key];
+  for (const [name, value] of Object.entries(vars)) {
+    text = text.replaceAll(`{${name}}`, String(value));
+  }
+  return text;
+}

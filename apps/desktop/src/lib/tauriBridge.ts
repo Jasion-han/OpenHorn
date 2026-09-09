@@ -135,6 +135,28 @@ export async function skillsSetEnabled(name: string, enabled: boolean): Promise<
 }
 
 /**
+ * Opens a native file picker filtered for data import files (ZIP / JSON).
+ * Returns the absolute path of the chosen file, or null when the user cancels.
+ * Outside Tauri returns null.
+ */
+export async function pickImportFile(): Promise<string | null> {
+  if (!isTauriRuntime()) return null;
+  const { invoke } = await import("@tauri-apps/api/core");
+  return (await invoke("pick_import_file")) as string | null;
+}
+
+/**
+ * Opens a native folder picker for choosing an export output directory.
+ * Reuses the existing `pick_workspace_dir` Tauri command.
+ * Returns the absolute path or null when the user cancels.
+ */
+export async function pickExportDir(): Promise<string | null> {
+  if (!isTauriRuntime()) return null;
+  const { invoke } = await import("@tauri-apps/api/core");
+  return (await invoke("pick_workspace_dir")) as string | null;
+}
+
+/**
  * Returns a `SidecarPlatform` backed by the real Tauri IPC when we are
  * running inside the desktop shell. Returns `null` in every other
  * environment so the caller can `markUnsupported`.

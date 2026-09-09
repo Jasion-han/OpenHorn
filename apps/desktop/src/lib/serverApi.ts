@@ -8,6 +8,9 @@ import type {
   ApiProject,
   ApiSettingsMap,
   CreateConversationInput,
+  ExportBackupResult,
+  ExportEstimate,
+  ImportResult,
   MessageSearchResult,
   SendMessageInput,
   UpdateConversationInput,
@@ -166,6 +169,13 @@ export interface ServerApi {
     ) => Promise<{ success: boolean }>;
     deleteServer: (id: string) => Promise<{ success: boolean }>;
     testServer: (id: string) => Promise<{ success: boolean; error?: string }>;
+  };
+  dataTransfer: {
+    estimateExport: () => Promise<ExportEstimate>;
+    exportBackup: (outputDir?: string) => Promise<ExportBackupResult>;
+    exportDTI: () => Promise<object[]>;
+    detectFormat: (filePath: string) => Promise<{ format: string }>;
+    importData: (filePath: string, format?: string) => Promise<ImportResult>;
   };
 }
 
@@ -487,6 +497,29 @@ export function createServerApi(options?: { baseUrl?: string; fetch?: FetchLike 
       testServer: (id) =>
         fetchJson(fetchImpl, baseUrl, `/mcp/servers/${encodeURIComponent(id)}/test`, {
           method: "POST",
+        }),
+    },
+
+    dataTransfer: {
+      estimateExport: () => fetchJson(fetchImpl, baseUrl, "/data-transfer/export/estimate"),
+      exportBackup: (outputDir) =>
+        fetchJson(fetchImpl, baseUrl, "/data-transfer/export/backup", {
+          method: "POST",
+          body: JSON.stringify({ outputDir }),
+        }),
+      exportDTI: () =>
+        fetchJson(fetchImpl, baseUrl, "/data-transfer/export/dti", {
+          method: "POST",
+        }),
+      detectFormat: (filePath) =>
+        fetchJson(fetchImpl, baseUrl, "/data-transfer/import/detect", {
+          method: "POST",
+          body: JSON.stringify({ filePath }),
+        }),
+      importData: (filePath, format) =>
+        fetchJson(fetchImpl, baseUrl, "/data-transfer/import", {
+          method: "POST",
+          body: JSON.stringify({ filePath, format }),
         }),
     },
   };

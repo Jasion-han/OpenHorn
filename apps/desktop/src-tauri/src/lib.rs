@@ -334,6 +334,22 @@ async fn pick_workspace_dir(app: tauri::AppHandle) -> Result<Option<String>, Str
     Ok(picked)
 }
 
+/// Opens a file picker filtered for data import files (ZIP / JSON).
+/// Returns the absolute path of the chosen file, or None when the user cancels.
+#[tauri::command]
+async fn pick_import_file(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+
+    let picked = app
+        .dialog()
+        .file()
+        .add_filter("Data files", &["zip", "json"])
+        .blocking_pick_file()
+        .map(|p| p.to_string());
+
+    Ok(picked)
+}
+
 /// One MCP server discovered in (or parsed out of) an existing client
 /// config on the user's machine, normalised into OpenHorn's shape.
 #[derive(Clone, Debug, Serialize)]
@@ -1121,6 +1137,7 @@ pub fn run() {
             stop_sidecar,
             get_sidecar_endpoint,
             pick_workspace_dir,
+            pick_import_file,
             mcp_discover_configs,
             mcp_pick_config_file,
             skills_discover,

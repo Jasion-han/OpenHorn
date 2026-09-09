@@ -9,7 +9,8 @@ export type DesktopSettingsTab =
   | "agent"
   | "mcp"
   | "skill"
-  | "appearance";
+  | "appearance"
+  | "data";
 
 export interface DesktopShellState {
   activeView: DesktopActiveView;

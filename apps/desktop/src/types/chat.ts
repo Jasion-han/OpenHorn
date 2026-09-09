@@ -318,3 +318,27 @@ export interface MessageSearchResult {
   snippet: string;
   createdAt: number;
 }
+
+export interface ExportEstimate {
+  conversations: number;
+  messages: number;
+  attachments: number;
+  estimatedBytes: number;
+}
+
+export interface ExportBackupResult {
+  filePath: string;
+  manifest: Record<string, unknown>;
+}
+
+export interface ImportResult {
+  format: "openhorn" | "chatgpt" | "claude";
+  conversations: { imported: number; skipped: number };
+  messages: { imported: number };
+  attachments: { imported: number; missing: number };
+  channels: { imported: number; skipped: number; needsKey: number };
+  projects: { imported: number; needsRebind: number };
+  mcpServers: { imported: number; needsConfirm: number };
+  scheduledTasks: { imported: number };
+  errors: string[];
+}
