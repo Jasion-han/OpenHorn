@@ -1,11 +1,22 @@
-import { CornerDownRight } from "lucide-react";
-import { useState } from "react";
+import { ChevronRight, CornerDownRight, Sparkles } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
 import { cn } from "ui";
 import { extractToolUrls, summarizeToolInput } from "../../lib/agentToolSummary";
 import { formatChatLabel, getChatLabel } from "../../lib/i18n/agent";
 import type { ApiAgentRun, ApiAgentRunStep } from "../../types/chat";
 import { DesktopAgentTaskMetaLine } from "./DesktopAgentTaskMetaLine";
 import { InlineClampStep } from "./DesktopInlineClampStep";
+import { DesktopMarkdownMessage, stripLeadingThematicBreak } from "./DesktopMarkdownMessage";
+import { DesktopStreamingMarkdownMessage } from "./DesktopStreamingMarkdownMessage";
+
+// --- Elapsed time formatting ---
+function formatElapsedTime(ms: number): string {
+  const totalSeconds = Math.floor(ms / 1000);
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}m ${seconds}s`;
+}
 
 // --- ACP kind label ---
 function kindLabel(kind: string | undefined): string {
@@ -296,6 +307,7 @@ function ToolDetailStep({ step }: { step: ApiAgentRunStep }) {
 export function AgentRunPanel({
   run,
   hideIdleIndicator = false,
+  isStreaming = false,
 }: {
   run?: ApiAgentRun;
   /**
@@ -304,12 +316,17 @@ export function AgentRunPanel({
    * concurrent activities.
    */
   hideIdleIndicator?: boolean;
+  /** Whether the message is currently being streamed — used to decide between
+   *  the streaming and static Markdown renderer for the last text step. */
+  isStreaming?: boolean;
 }) {
   if (!run) return null;
   const toolCount = run.steps.filter(
     (step) => step.type === "tool_start" || step.type === "tool_detail",
   ).length;
-  const hasThinking = run.steps.some((step) => step.type === "text" || step.type === "reasoning");
+  const hasThinking = run.steps.some(
+    (step) => step.type === "text" || step.type === "reasoning" || step.type === "thinking",
+  );
   const isInProgress = run.status === "partial" || run.status === "running";
   const shouldRender =
     Boolean(run.error) ||
@@ -357,25 +374,6 @@ export function AgentRunPanel({
     return normalized.charAt(0).toUpperCase() + normalized.slice(1);
   };
 
-  const summarizeToolResult = (content: string | null | undefined) => {
-    const lines = (content ?? "")
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .filter((line) => !/^stdout:?$/i.test(line))
-      .filter((line) => !/^stderr:?$/i.test(line))
-      .filter((line) => !/^exit_?code\s*:/i.test(line));
-
-    if (lines.length === 0) return null;
-    const summary = lines.join(" · ").replace(/\s+/g, " ").trim();
-    // No hard line/character truncation here: visual collapsing is handled by
-    // InlineClampStep (3 lines collapsed, full content when expanded). Keep all
-    // lines so the expanded view shows the complete tool result, and only apply
-    // a loose safety ceiling to avoid pathologically long strings — never
-    // insert an inline ellipsis.
-    return summary.length > 8000 ? summary.slice(0, 8000) : summary;
-  };
-
   const statusLabel = (() => {
     switch (run.status) {
       case "completed":
@@ -403,7 +401,7 @@ export function AgentRunPanel({
   })();
 
   const displayTitle =
-    toolCount > 0 ? `Execution · ${toolCount} ${toolCount === 1 ? "tool" : "tools"}` : "Execution";
+    toolCount > 0 ? `Agent · ${toolCount} ${toolCount === 1 ? "tool" : "tools"}` : "Agent";
 
   // Agent info line for the header (ACP only).
   const agentLabel = run.agentInfo
@@ -419,46 +417,183 @@ export function AgentRunPanel({
           100% { background-position: -30% 50%; text-shadow: 0 0 0 rgba(15,23,42,0); }
         }
       `}</style>
-      <details open={run.status === "running" || run.status === "partial" || undefined}>
-        <summary className="list-none cursor-pointer">
-          <div className="flex items-center justify-between gap-3 border-b border-border/35 pb-1.5">
-            <div className="flex min-w-0 items-center gap-2">
-              <span className="truncate text-sm leading-6 text-muted-foreground">
-                {displayTitle}{" "}
-                <span className={cn("text-muted-foreground/70", statusClassName)}>
-                  &middot; {statusLabel}
-                </span>
-                {agentLabel && (
-                  <span className="ml-1.5 text-xs text-muted-foreground/40">{agentLabel}</span>
-                )}
-              </span>
-            </div>
-          </div>
-        </summary>
+      {agentLabel && <div className="mb-1 text-xs text-muted-foreground/40">{agentLabel}</div>}
+      <TimelineSegments run={run} isStreaming={isStreaming} presentToolLabel={presentToolLabel} />
+      {/* Context usage bar (ACP only) */}
+      {run.contextUsage && <ContextUsageBar contextUsage={run.contextUsage} />}
+    </div>
+  );
+}
 
-        <div className="mt-2 flex flex-col gap-2.5">
-          {run.error && <DesktopAgentTaskMetaLine text={run.error} tone="danger" />}
-          {run.steps.map((step, stepIndex) => {
-            // --- ACP tool_detail step ---
+// ---------------------------------------------------------------------------
+// Timeline segments: group non-text steps into collapsible process groups,
+// interleaved with always-visible text steps.
+// ---------------------------------------------------------------------------
+
+type Segment =
+  | { kind: "process"; steps: ApiAgentRunStep[]; startIndex: number }
+  | { kind: "text"; step: ApiAgentRunStep; stepIndex: number }
+  | { kind: "reasoning"; step: ApiAgentRunStep; stepIndex: number }
+  | { kind: "thinking"; step: ApiAgentRunStep; stepIndex: number };
+
+function segmentSteps(steps: ApiAgentRunStep[]): Segment[] {
+  const segments: Segment[] = [];
+  let currentGroup: ApiAgentRunStep[] | null = null;
+  let groupStart = 0;
+
+  const flushGroup = () => {
+    if (currentGroup) {
+      segments.push({ kind: "process", steps: currentGroup, startIndex: groupStart });
+      currentGroup = null;
+    }
+  };
+
+  for (let i = 0; i < steps.length; i++) {
+    const step = steps[i];
+    if (step.type === "text") {
+      flushGroup();
+      segments.push({ kind: "text", step, stepIndex: i });
+    } else if (step.type === "reasoning") {
+      flushGroup();
+      segments.push({ kind: "reasoning", step, stepIndex: i });
+    } else if (step.type === "thinking") {
+      flushGroup();
+      segments.push({ kind: "thinking", step, stepIndex: i });
+    } else {
+      if (!currentGroup) {
+        currentGroup = [];
+        groupStart = i;
+      }
+      currentGroup.push(step);
+    }
+  }
+  flushGroup();
+  return segments;
+}
+
+function ProcessGroupSection({
+  steps,
+  groupIndex,
+  isLast,
+  isRunning,
+  endTimestamp,
+  presentToolLabel,
+}: {
+  steps: ApiAgentRunStep[];
+  groupIndex: number;
+  isLast: boolean;
+  isRunning: boolean;
+  endTimestamp?: number;
+  presentToolLabel: (name: string | null | undefined) => string;
+}) {
+  const isActive = isLast && isRunning;
+  const [expanded, setExpanded] = useState(false);
+  const toggle = useCallback(() => setExpanded((v) => !v), []);
+
+  // --- Elapsed time ---
+  const firstTs = steps[0]?.timestamp;
+  const completedElapsed = firstTs && endTimestamp ? endTimestamp - firstTs : 0;
+  const [liveElapsed, setLiveElapsed] = useState(() =>
+    isActive && firstTs ? Date.now() - firstTs : completedElapsed,
+  );
+
+  useEffect(() => {
+    if (!isActive) {
+      if (completedElapsed > 0) setLiveElapsed(completedElapsed);
+      return;
+    }
+    if (!firstTs) return;
+    const tick = () => setLiveElapsed(Date.now() - firstTs);
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [isActive, firstTs, completedElapsed]);
+
+  const toolStepCount = steps.filter(
+    (s) => s.type === "tool_start" || s.type === "tool_detail",
+  ).length;
+
+  const hasTimestamps = firstTs != null;
+  const elapsedStr = hasTimestamps ? formatElapsedTime(liveElapsed) : "";
+
+  const summaryLabel = isActive
+    ? hasTimestamps
+      ? formatChatLabel("chat.agent.processGroupRunning", {
+          count: toolStepCount,
+          time: elapsedStr,
+        })
+      : formatChatLabel("chat.agent.processGroupNoTime", { count: toolStepCount })
+    : hasTimestamps
+      ? formatChatLabel("chat.agent.processGroup", { count: toolStepCount, time: elapsedStr })
+      : formatChatLabel("chat.agent.processGroupNoTime", { count: toolStepCount });
+
+  const summarizeToolResult = (content: string | null | undefined) => {
+    const lines = (content ?? "")
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .filter((line) => !/^stdout:?$/i.test(line))
+      .filter((line) => !/^stderr:?$/i.test(line))
+      .filter((line) => !/^exit_?code\s*:/i.test(line));
+    if (lines.length === 0) return null;
+    const summary = lines.join(" · ").replace(/\s+/g, " ").trim();
+    return summary.length > 8000 ? summary.slice(0, 8000) : summary;
+  };
+
+  // Active groups default to collapsed with a preview of the current step;
+  // user can click to expand all steps.
+  const showExpanded = expanded;
+
+  // --- Current step preview for active (running) group ---
+  const lastStep = steps[steps.length - 1];
+  const previewLabel =
+    lastStep && (lastStep.type === "tool_start" || lastStep.type === "tool_result")
+      ? presentToolLabel(lastStep.toolName)
+      : null;
+  const previewDetail =
+    lastStep?.type === "tool_start" ? summarizeToolInput(lastStep.toolInput) : null;
+  const showPreview = isActive && !expanded && previewLabel;
+
+  return (
+    <div className="my-1">
+      <button
+        type="button"
+        onClick={toggle}
+        className="flex w-full items-center gap-1.5 rounded px-1 py-0.5 text-xs text-muted-foreground/60 hover:bg-accent/40 hover:text-muted-foreground transition-colors"
+      >
+        <Sparkles size={12} className="shrink-0 opacity-50" />
+        <ChevronRight
+          size={12}
+          className={cn("shrink-0 transition-transform", showExpanded && "rotate-90")}
+        />
+        <span>{summaryLabel}</span>
+      </button>
+      {/* Current step preview for active group (collapsed state) */}
+      {showPreview && (
+        <div className="mt-0.5 flex items-center gap-1.5 pl-7 text-xs text-muted-foreground/40">
+          <span className="truncate">
+            {previewLabel}
+            {previewDetail && (
+              <span className="text-muted-foreground/30">{` · ${previewDetail}`}</span>
+            )}
+          </span>
+        </div>
+      )}
+      {showExpanded && (
+        <div className="mt-1 flex flex-col gap-1.5 border-l-2 border-border/25 pl-3">
+          {steps.map((step, i) => {
             if (step.type === "tool_detail") {
-              return <ToolDetailStep key={`detail-${step.toolCallId || stepIndex}`} step={step} />;
+              return <ToolDetailStep key={`detail-${step.toolCallId || i}`} step={step} />;
             }
-
-            // --- ACP plan step ---
             if (step.type === "plan" && step.planEntries) {
-              return (
-                // biome-ignore lint/suspicious/noArrayIndexKey: run steps are append-only
-                <PlanStep key={`plan-${stepIndex}`} entries={step.planEntries} />
-              );
+              return <PlanStep key={`plan-${groupIndex}-${i}`} entries={step.planEntries} />;
             }
-
             if (step.type === "reasoning") {
               const raw = (step.content ?? "").trim();
               if (!raw) return null;
               return (
                 <InlineClampStep
-                  // biome-ignore lint/suspicious/noArrayIndexKey: run steps are append-only
-                  key={`reasoning-${stepIndex}`}
+                  key={`reasoning-${groupIndex}-${i}`}
                   label={getChatLabel("chat.agent.reasoning")}
                   detail={raw}
                   isResult={false}
@@ -467,31 +602,6 @@ export function AgentRunPanel({
                 />
               );
             }
-
-            if (step.type === "text") {
-              const isLastText = !run.steps
-                .slice(stepIndex + 1)
-                .some((s) => s.type === "tool_start" || s.type === "tool_detail");
-              if (isLastText && run.status === "completed") return null;
-              const raw = (step.content ?? "").trim();
-              if (!raw) return null;
-              return (
-                // biome-ignore lint/suspicious/noArrayIndexKey: run steps are append-only, so a step's index is its identity
-                <div key={`text-${stepIndex}`}>
-                  <span className="relative flex items-start gap-2 py-0.5 text-sm leading-6 text-muted-foreground/50">
-                    <span
-                      aria-hidden="true"
-                      className="mt-[8px] h-1.5 w-1.5 shrink-0 rounded-full bg-current"
-                      style={{ opacity: 0.2 }}
-                    />
-                    <span className="min-w-0 italic">{raw}</span>
-                  </span>
-                </div>
-              );
-            }
-
-            const stepKey = `${step.type}-${step.toolName || ""}-${stepIndex}`;
-            const isActive = false;
             const label = step.type === "error" ? "Error" : presentToolLabel(step.toolName);
             const detail =
               step.type === "tool_start"
@@ -499,20 +609,12 @@ export function AgentRunPanel({
                 : step.type === "tool_result"
                   ? summarizeToolResult(step.content)
                   : step.content?.trim() || summarizeToolInput(step.toolInput);
-
             if (step.type === "tool_result" && !detail) return null;
-
-            // A batched fetch (`urls: [...]`) is ONE call against several pages, so
-            // it renders as one node with the pages nested under it. Listing the
-            // URLs as sibling rows read as three separate calls; running them
-            // together into one wrapped paragraph read as URL soup. The count goes
-            // in the header because "did it open all of my links" is the question
-            // this panel exists to answer.
             if (step.type === "tool_start") {
               const urls = extractToolUrls(step.toolInput);
               if (urls.length > 1) {
                 return (
-                  <div key={stepKey}>
+                  <div key={`tool-${groupIndex}-${i}`}>
                     <InlineClampStep
                       label={label || "Tool"}
                       detail={formatChatLabel("chat.agent.fetchTargets", { count: urls.length })}
@@ -523,15 +625,10 @@ export function AgentRunPanel({
                     <div className="flex flex-col gap-0.5 pb-1 pl-4 text-sm leading-6">
                       {urls.map((url) => (
                         <div key={url} className="flex items-start gap-1.5">
-                          {/* Corner glyph marking the row as belonging to the call
-                            above. `mt-[7px]` sits it on the text's baseline row
-                            rather than the line box's top. */}
                           <CornerDownRight
                             aria-hidden="true"
                             className="mt-[7px] size-3 shrink-0 text-foreground opacity-25"
                           />
-                          {/* `break-all`: a long URL must stay readable in full
-                            rather than be cut — it is what the reader verifies. */}
                           <span className="min-w-0 break-all text-foreground opacity-32">
                             {url}
                           </span>
@@ -542,11 +639,10 @@ export function AgentRunPanel({
                 );
               }
             }
-
             if (step.type === "tool_start" || step.type === "tool_result") {
               return (
                 <InlineClampStep
-                  key={stepKey}
+                  key={`tool-${groupIndex}-${i}`}
                   label={label || "Tool"}
                   detail={detail}
                   isResult={step.type === "tool_result"}
@@ -555,25 +651,140 @@ export function AgentRunPanel({
                 />
               );
             }
-
-            const text = step.type === "error" ? label : label || detail;
-
-            if (!text && !detail) return null;
-
-            return (
-              <DesktopAgentTaskMetaLine
-                key={stepKey}
-                text={text ?? detail ?? "Tool"}
-                subtext={detail}
-                active={isActive}
-                tone={step.type === "error" ? "danger" : "default"}
-              />
-            );
+            if (step.type === "error") {
+              return (
+                <DesktopAgentTaskMetaLine
+                  key={`err-${groupIndex}-${i}`}
+                  text={label ?? "Error"}
+                  subtext={detail}
+                  tone="danger"
+                />
+              );
+            }
+            return null;
           })}
         </div>
-      </details>
-      {/* Context usage bar — always visible even when steps are collapsed (ACP only) */}
-      {run.contextUsage && <ContextUsageBar contextUsage={run.contextUsage} />}
+      )}
+    </div>
+  );
+}
+
+function ThinkingSection({ step }: { step: ApiAgentRunStep }) {
+  const [expanded, setExpanded] = useState(false);
+  const raw = (step.content ?? "").trim();
+  if (!raw) return null;
+
+  const lines = raw.split("\n");
+  const needsCollapse = lines.length > 3;
+  const preview = needsCollapse && !expanded ? lines.slice(0, 3).join("\n") : raw;
+
+  return (
+    <div className="my-1">
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="flex items-center gap-1.5 rounded px-1 py-0.5 text-xs text-muted-foreground/50 hover:bg-accent/40 hover:text-muted-foreground transition-colors"
+      >
+        <ChevronRight
+          size={12}
+          className={cn("shrink-0 transition-transform", expanded && "rotate-90")}
+        />
+        <span>{getChatLabel("chat.agent.thinking")}</span>
+      </button>
+      <div className="mt-0.5 pl-5 text-xs leading-5 text-muted-foreground/50 font-mono whitespace-pre-wrap">
+        {preview}
+        {needsCollapse && !expanded && <span className="text-muted-foreground/30">{" ..."}</span>}
+      </div>
+    </div>
+  );
+}
+
+function WaitingIndicator() {
+  return (
+    <div className="flex items-center gap-2 py-1 pl-1 text-xs text-muted-foreground/40">
+      <span className="tracking-widest">{"..."}</span>
+      <span>{getChatLabel("chat.agent.waitingForModel")}</span>
+    </div>
+  );
+}
+
+function TimelineSegments({
+  run,
+  isStreaming,
+  presentToolLabel,
+}: {
+  run: ApiAgentRun;
+  isStreaming: boolean;
+  presentToolLabel: (name: string | null | undefined) => string;
+}) {
+  const segments = segmentSteps(run.steps);
+  const isInProgress = run.status === "partial" || run.status === "running";
+
+  // Determine whether to show "waiting for model" indicator:
+  // The run is in progress and the last step is a completed tool_result
+  const lastStep = run.steps[run.steps.length - 1];
+  const showWaiting = isInProgress && lastStep?.type === "tool_result";
+
+  return (
+    <div className="mt-2 flex flex-col gap-1">
+      {run.error && <DesktopAgentTaskMetaLine text={run.error} tone="danger" />}
+      {segments.map((seg, segIndex) => {
+        if (seg.kind === "process") {
+          const isLastSegment = segIndex === segments.length - 1;
+          const nextSeg = segments[segIndex + 1];
+          const endTs = nextSeg
+            ? "step" in nextSeg
+              ? nextSeg.step.timestamp
+              : nextSeg.steps[0]?.timestamp
+            : undefined;
+          return (
+            <ProcessGroupSection
+              key={`pg-${seg.startIndex}`}
+              steps={seg.steps}
+              groupIndex={seg.startIndex}
+              isLast={isLastSegment}
+              isRunning={isInProgress}
+              endTimestamp={endTs}
+              presentToolLabel={presentToolLabel}
+            />
+          );
+        }
+        if (seg.kind === "reasoning") {
+          const raw = (seg.step.content ?? "").trim();
+          if (!raw) return null;
+          return (
+            <div
+              key={`reasoning-${seg.stepIndex}`}
+              className="py-0.5 text-sm leading-6"
+              style={{ overflowWrap: "anywhere", wordBreak: "break-word", maxWidth: "100%" }}
+            >
+              <DesktopMarkdownMessage content={raw} />
+            </div>
+          );
+        }
+        if (seg.kind === "thinking") {
+          return <ThinkingSection key={`thinking-${seg.stepIndex}`} step={seg.step} />;
+        }
+        const raw = (seg.step.content ?? "").trim();
+        if (!raw) return null;
+        const isLastText = !segments.slice(segIndex + 1).some((s) => s.kind === "text");
+        const useStreaming = isStreaming && isLastText;
+        const displayText = stripLeadingThematicBreak(raw);
+        return (
+          <div
+            key={`text-${seg.stepIndex}`}
+            className="text-sm leading-6"
+            style={{ overflowWrap: "anywhere", wordBreak: "break-word", maxWidth: "100%" }}
+          >
+            {useStreaming ? (
+              <DesktopStreamingMarkdownMessage content={displayText} pulseKey={0} />
+            ) : (
+              <DesktopMarkdownMessage content={displayText} />
+            )}
+          </div>
+        );
+      })}
+      {showWaiting && <WaitingIndicator />}
     </div>
   );
 }

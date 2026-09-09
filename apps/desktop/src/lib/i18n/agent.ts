@@ -660,6 +660,11 @@ export const chatLabels = {
   "chat.agent.contextCost": "Cost: {amount} {currency}",
   // Intermediate reasoning
   "chat.agent.reasoning": "Reasoning",
+  "chat.agent.processGroup": "{count} 个步骤 · {time}",
+  "chat.agent.processGroupRunning": "处理中 · {time} · {count} 个步骤",
+  "chat.agent.processGroupNoTime": "{count} 个步骤",
+  "chat.agent.waitingForModel": "等待模型响应",
+  "chat.agent.thinking": "思考",
   // ACP diff
   "chat.agent.diff.newFile": "New file",
   // Welcome screen: the project scope chip (new conversations land in this folder)
