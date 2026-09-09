@@ -154,6 +154,13 @@ export function applySidecarEventToChat(
     });
     return { kind: "handled" };
   }
+  if (event.type === "execution_event" && event.eventType === "thinking" && event.content) {
+    store.applyStreamEvent(assistantMessageId, {
+      type: "agent_event",
+      event: { type: "thinking", content: event.content },
+    });
+    return { kind: "handled" };
+  }
   if (event.type === "execution_event" && event.eventType === "text" && event.content) {
     store.applyStreamEvent(assistantMessageId, { type: "delta", content: event.content });
     return { kind: "handled" };

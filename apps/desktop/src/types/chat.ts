@@ -71,7 +71,15 @@ export interface ApiProject {
 }
 
 export interface ApiAgentRunStep {
-  type: "tool_start" | "tool_result" | "error" | "text" | "tool_detail" | "plan" | "reasoning";
+  type:
+    | "tool_start"
+    | "tool_result"
+    | "error"
+    | "text"
+    | "tool_detail"
+    | "plan"
+    | "reasoning"
+    | "thinking";
   toolName?: string;
   content?: string;
   toolInput?: unknown;
@@ -83,6 +91,8 @@ export interface ApiAgentRunStep {
   diff?: { path: string; oldText: string | null; newText: string };
   /** ACP plan entries (for type "plan") */
   planEntries?: Array<{ content: string; priority: string; status: string }>;
+  /** Frontend-only: timestamp when the step was created, for elapsed time display */
+  timestamp?: number;
 }
 
 export interface ApiAgentRun {

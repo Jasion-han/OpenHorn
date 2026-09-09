@@ -77,6 +77,8 @@ function applyAgentEventToRun(
 ): ApiAgentRun {
   const base = run || createPartialAgentRun();
 
+  const now = Date.now();
+
   if (event.type === "tool_start" || event.type === "tool_result") {
     return {
       ...base,
@@ -88,6 +90,7 @@ function applyAgentEventToRun(
           toolName: event.toolName,
           content: event.content,
           toolInput: event.toolInput,
+          timestamp: now,
         },
       ],
     };
@@ -118,6 +121,7 @@ function applyAgentEventToRun(
         meta.rawInput && typeof meta.rawInput === "object"
           ? (meta.rawInput as Record<string, unknown>)
           : undefined,
+      timestamp: now,
     };
     if (existingIdx >= 0) {
       // Merge update into existing step (status/locations/diff may change).
@@ -142,7 +146,7 @@ function applyAgentEventToRun(
     return {
       ...base,
       planEntries: entries,
-      steps: [...base.steps, { type: "plan", planEntries: entries }],
+      steps: [...base.steps, { type: "plan", planEntries: entries, timestamp: now }],
     };
   }
 
@@ -187,11 +191,28 @@ function applyAgentEventToRun(
     }
     return {
       ...base,
-      steps: [...base.steps, { type: "reasoning", content }],
+      steps: [...base.steps, { type: "reasoning", content, timestamp: now }],
     };
   }
 
-  if (event.type === "text" || event.type === "thinking") {
+  if (event.type === "thinking") {
+    const content = event.content ?? "";
+    const lastStep = base.steps[base.steps.length - 1];
+    if (lastStep && lastStep.type === "thinking") {
+      const updatedSteps = [...base.steps];
+      updatedSteps[updatedSteps.length - 1] = {
+        ...lastStep,
+        content: (lastStep.content ?? "") + content,
+      };
+      return { ...base, steps: updatedSteps };
+    }
+    return {
+      ...base,
+      steps: [...base.steps, { type: "thinking", content, timestamp: now }],
+    };
+  }
+
+  if (event.type === "text") {
     const content = event.content ?? "";
     const lastStep = base.steps[base.steps.length - 1];
     if (lastStep && lastStep.type === "text") {
@@ -204,7 +225,7 @@ function applyAgentEventToRun(
     }
     return {
       ...base,
-      steps: [...base.steps, { type: "text", content }],
+      steps: [...base.steps, { type: "text", content, timestamp: now }],
     };
   }
 
@@ -215,7 +236,7 @@ function applyAgentEventToRun(
       status: "failed",
       summary: "Error",
       error: message,
-      steps: [...base.steps, { type: "error", content: message }],
+      steps: [...base.steps, { type: "error", content: message, timestamp: now }],
     };
   }
 
@@ -227,11 +248,10 @@ function completeAgentRun(run: ApiAgentRun | undefined): ApiAgentRun | undefined
   if (run.status === "failed" || run.error) {
     return run;
   }
-  const trimmedSteps = run.steps ? [...run.steps] : [];
-  while (trimmedSteps.length > 0 && trimmedSteps[trimmedSteps.length - 1].type === "text") {
-    trimmedSteps.pop();
-  }
-  return { ...run, status: "completed", steps: trimmedSteps };
+  // Text steps are now the primary home for the final response (timeline
+  // rendering). Do NOT strip them — they must survive into the completed run
+  // so the AgentRunPanel can render the full chronological timeline.
+  return { ...run, status: "completed" };
 }
 
 export interface ChatState {
@@ -786,12 +806,64 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
 
     applyStreamEvent(messageId, event) {
       if (event.type === "delta") {
-        get().appendMessageDelta(messageId, event.content || "");
+        const content = event.content || "";
+        if (!content) return;
+        // Agent mode: route text into agentRun.steps as a "text" step so it
+        // appears inline in the chronological timeline rather than in a
+        // separate content area below the process panel.
+        const msg = get().findMessageAnywhere(messageId);
+        if (msg?.agentRun) {
+          const agentEvent = { type: "text", content };
+          const found = get().messages.some((m) => m.id === messageId);
+          if (found) {
+            set((state) => ({
+              messages: state.messages.map((message) =>
+                message.id === messageId
+                  ? {
+                      ...message,
+                      agentRun: applyAgentEventToRun(message.agentRun, agentEvent),
+                    }
+                  : message,
+              ),
+            }));
+          } else {
+            updateCachedMessage(messageId, (m) => ({
+              ...m,
+              agentRun: applyAgentEventToRun(m.agentRun, agentEvent),
+            }));
+          }
+        } else {
+          get().appendMessageDelta(messageId, content);
+        }
         return;
       }
 
       if (event.type === "clear_streaming_text") {
-        get().updateMessage(messageId, { content: "" });
+        // Agent mode: clear the last text step's content so the next text
+        // segment starts fresh (e.g. after a tool call the model may restart
+        // its textual response).
+        const msg = get().findMessageAnywhere(messageId);
+        if (msg?.agentRun) {
+          const updater = (m: Message): Message => {
+            if (!m.agentRun) return m;
+            const steps = m.agentRun.steps.filter((s, i, arr) => {
+              if (s.type !== "text") return true;
+              const isLast = !arr.slice(i + 1).some((x) => x.type === "text");
+              return !isLast;
+            });
+            return { ...m, agentRun: { ...m.agentRun, steps } };
+          };
+          const found = get().messages.some((m) => m.id === messageId);
+          if (found) {
+            set((state) => ({
+              messages: state.messages.map((m) => (m.id === messageId ? updater(m) : m)),
+            }));
+          } else {
+            updateCachedMessage(messageId, updater);
+          }
+        } else {
+          get().updateMessage(messageId, { content: "" });
+        }
         return;
       }
 
