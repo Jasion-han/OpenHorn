@@ -1,5 +1,5 @@
 import path from "node:path";
-import Anthropic from "@anthropic-ai/sdk";
+import type { CanUseTool, HookCallbackMatcher } from "@anthropic-ai/claude-agent-sdk";
 import type { AttachmentPart } from "shared/types";
 import { modelSupportsVision } from "shared/vision";
 import { type CheckpointSession, ensureCheckpointBackup, finalizeCheckpoint } from "../checkpoints";
@@ -16,21 +16,19 @@ import {
   imageUnsupportedFormatText,
   partitionImagesByFormat,
 } from "./attachments";
+import { sanitizeChildEnv } from "./childEnv";
 import { HISTORY_MAX_TOKENS, truncateHistory } from "./context";
-import { executeTool } from "./direct";
-import { type AgentEvent, buildUsageEvent, toCount } from "./events";
+import { type AgentEvent, convertSdkEvent, toCount } from "./events";
 import { buildIntentContext } from "./intent-context";
 import { buildSkillsPromptSection, type MaterializedSkill } from "./skills";
 import { buildAgentSystemPrompt, buildReActBehaviorSection } from "./system-prompt";
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
 
 type SdkMessage = {
   type: string;
   [key: string]: unknown;
 };
+
+type CanUseToolOptions = Parameters<CanUseTool>[2];
 
 export type RunClaudeAgentInput = {
   apiKey: string;
@@ -49,17 +47,13 @@ export type RunClaudeAgentInput = {
    * shape (`{ type, command, args, env }` for stdio; `{ type, url, headers }`
    * for http/sse). The SDK launches stdio servers itself and exposes their
    * tools to the model — they're additive to the built-in `tools` allowlist.
-   *
-   * NOTE: MCP tools are NOT yet wired into the self-managed loop. They still
-   * require the Claude Agent SDK path. This is noted as out-of-scope in the
-   * PRD and will be migrated separately.
    */
   mcpServers?: Record<string, Record<string, unknown>>;
   conversationHistory?: Array<{ role: "user" | "assistant"; content: string }>;
   attachments?: AttachmentPart[];
   /**
    * Enabled skills already materialized to the workspace. Surfaced to the model
-   * as a Level-1 metadata block (read on demand via the `Read` tool).
+   * as a Level-1 metadata block (read on demand via the SDK's `Read` tool).
    */
   skills?: MaterializedSkill[];
   /** Per-run token budget. When cumulative tokens exceed this limit the run is aborted. */
@@ -75,10 +69,6 @@ export type RunClaudeAgentInput = {
   onCheckpointReady: (runId: string) => void;
   onSdkSessionId: (sessionId: string) => void;
 };
-
-// ---------------------------------------------------------------------------
-// Existing helper functions (exported for tests — UNCHANGED)
-// ---------------------------------------------------------------------------
 
 function extractTargetFilePath(toolName: string, toolInput: unknown): string | null {
   if (!toolInput || typeof toolInput !== "object") return null;
@@ -175,10 +165,6 @@ export function buildNetworkAllowedDomains(baseUrl: string | undefined): string[
   return Array.from(new Set([userHost ?? DEFAULT_ANTHROPIC_HOST, DEFAULT_ANTHROPIC_HOST]));
 }
 
-// ---------------------------------------------------------------------------
-// Kept for rollback — not used in the self-managed loop
-// ---------------------------------------------------------------------------
-
 /** Locate the `claude` CLI on PATH for the SDK to spawn. */
 async function findClaudeBinary(): Promise<string> {
   const { execSync } = await import("node:child_process");
@@ -189,244 +175,102 @@ async function findClaudeBinary(): Promise<string> {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Self-managed agent loop — constants
-// ---------------------------------------------------------------------------
-
-/** Maximum number of agent turns before forced stop (prevents infinite loops). */
-const MAX_TURNS = 30;
-
-/** Default max output tokens per API call. */
-const DEFAULT_MAX_TOKENS = 16384;
-
-// ---------------------------------------------------------------------------
-// Tool definitions for the Anthropic Messages API
-// ---------------------------------------------------------------------------
-
-/**
- * Tool definitions use PascalCase names matching Claude Code conventions:
- * Read, Write, Edit, Bash, Grep, Glob, WebSearch, WebFetch. The model is
- * familiar with these names and their parameter shapes.
- */
-function buildAnthropicTools(opts?: {
-  webSearchEnabled?: boolean;
-}): Array<Record<string, unknown>> {
-  const tools: Array<Record<string, unknown>> = [
-    {
-      name: "Read",
-      description:
-        "Read the contents of a file at the given path. Use this to examine file contents, check configurations, or understand code structure.",
-      input_schema: {
-        type: "object",
-        properties: {
-          file_path: {
-            type: "string",
-            description: "The absolute path to the file to read",
-          },
-        },
-        required: ["file_path"],
-      },
-    },
-    {
-      name: "Write",
-      description:
-        "Create or overwrite a file with the given content. Use this for new files or complete rewrites. For partial edits, prefer the Edit tool.",
-      input_schema: {
-        type: "object",
-        properties: {
-          file_path: {
-            type: "string",
-            description: "The absolute path to the file to write",
-          },
-          content: {
-            type: "string",
-            description: "The content to write to the file",
-          },
-        },
-        required: ["file_path", "content"],
-      },
-    },
-    {
-      name: "Edit",
-      description:
-        "Edit a file by replacing the first occurrence of an exact string match. Use this for precise modifications to existing files. If the string appears multiple times, only the first match is replaced.",
-      input_schema: {
-        type: "object",
-        properties: {
-          file_path: {
-            type: "string",
-            description: "The absolute path to the file to modify",
-          },
-          old_string: {
-            type: "string",
-            description: "The exact string to find and replace",
-          },
-          new_string: {
-            type: "string",
-            description: "The replacement string",
-          },
-        },
-        required: ["file_path", "old_string", "new_string"],
-      },
-    },
-    {
-      name: "Bash",
-      description:
-        "Run a shell command and return its output. Use this for file operations, git commands, package management, building, testing, and any other shell tasks.",
-      input_schema: {
-        type: "object",
-        properties: {
-          command: {
-            type: "string",
-            description: "The shell command to execute",
-          },
-        },
-        required: ["command"],
-      },
-    },
-    {
-      name: "Grep",
-      description:
-        "Search for a text pattern in files. Returns matching lines with file paths and line numbers.",
-      input_schema: {
-        type: "object",
-        properties: {
-          pattern: {
-            type: "string",
-            description: "Search pattern (literal string or regex)",
-          },
-          path: {
-            type: "string",
-            description: "Directory or file to search in. Defaults to '.'",
-          },
-          include: {
-            type: "string",
-            description: "File glob pattern to filter, e.g. '*.ts'",
-          },
-        },
-        required: ["pattern"],
-      },
-    },
-    {
-      name: "Glob",
-      description: "Find files matching a glob pattern. Returns a list of matching file paths.",
-      input_schema: {
-        type: "object",
-        properties: {
-          pattern: {
-            type: "string",
-            description: "Glob pattern, e.g. '**/*.ts', 'src/**/*.json'",
-          },
-        },
-        required: ["pattern"],
-      },
-    },
-  ];
-
-  if (opts?.webSearchEnabled !== false) {
-    tools.push(
-      {
-        name: "WebSearch",
-        description:
-          "Search the web for information. Use this when you need current or real-time data.",
-        input_schema: {
-          type: "object",
-          properties: {
-            query: {
-              type: "string",
-              description: "The search query",
-            },
-          },
-          required: ["query"],
-        },
-      },
-      {
-        name: "WebFetch",
-        description:
-          "Fetch a web page and return its content as Markdown. Use this to read documentation, articles, or any web content.",
-        input_schema: {
-          type: "object",
-          properties: {
-            url: {
-              type: "string",
-              description: "The URL to fetch",
-            },
-          },
-          required: ["url"],
-        },
-      },
-    );
-  }
-
-  return tools;
+let cachedSdk: typeof import("@anthropic-ai/claude-agent-sdk") | null = null;
+async function getSdk() {
+  if (!cachedSdk) cachedSdk = await import("@anthropic-ai/claude-agent-sdk");
+  return cachedSdk;
 }
+// Eagerly warm the SDK import so the first agent run doesn't pay the cost.
+void getSdk();
 
-// ---------------------------------------------------------------------------
-// Tool name/parameter mapping from Claude conventions to executeTool format
-// ---------------------------------------------------------------------------
-
-/**
- * Maps PascalCase tool names and parameter conventions used by the Anthropic
- * Messages API (Read/Write/Edit with `file_path`) to the snake_case names and
- * parameter shapes expected by `executeTool` from `direct.ts` (read_file with
- * `path`, etc.).
- */
-function mapToolForExecution(
-  toolName: string,
-  toolInput: Record<string, unknown>,
-): { executorName: string; executorInput: Record<string, unknown> } {
-  switch (toolName) {
-    case "Read":
-      return { executorName: "read_file", executorInput: { path: toolInput.file_path } };
-    case "Write":
-      return {
-        executorName: "write_file",
-        executorInput: { path: toolInput.file_path, content: toolInput.content },
-      };
-    case "Edit":
-      return {
-        executorName: "edit_file",
-        executorInput: {
-          path: toolInput.file_path,
-          old_string: toolInput.old_string,
-          new_string: toolInput.new_string,
-        },
-      };
-    case "Bash":
-      return { executorName: "bash", executorInput: { command: toolInput.command } };
-    case "Grep":
-      return { executorName: "grep", executorInput: toolInput };
-    case "Glob":
-      return { executorName: "glob", executorInput: toolInput };
-    case "WebSearch":
-      return { executorName: "web_search", executorInput: { query: toolInput.query } };
-    case "WebFetch":
-      return { executorName: "web_fetch", executorInput: { url: toolInput.url } };
-    default:
-      return { executorName: toolName, executorInput: toolInput };
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Main entry point — self-managed Messages API loop
-// ---------------------------------------------------------------------------
-
-/**
- * Runs a Claude agent using the Anthropic Messages API directly, with a
- * self-managed agent loop. This replaces the old Claude Agent SDK `query()`
- * approach, giving us access to intermediate reasoning text between tool
- * call rounds for true ReAct display.
- *
- * Tool execution reuses `executeTool` from `direct.ts` — the same battle-tested
- * code that powers the generic tool-calling runtime. Workspace boundary checks,
- * checkpoint backups, and Bash approval are handled identically to the old SDK
- * path.
- */
 export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> {
-  const anthropic = new Anthropic({
-    apiKey: input.apiKey,
-    ...(input.baseUrl ? { baseURL: input.baseUrl } : {}),
-  });
+  const sdk = await getSdk();
+
+  // Per-run env. Critically, we do NOT mutate process.env here — sidecar
+  // is a long-lived process and concurrent runs would race on a shared
+  // ANTHROPIC_API_KEY. Instead we hand the credentials to the SDK via
+  // its `options.env` field, which the SDK uses for the spawned child
+  // process exclusively. The current sidecar process's env stays clean.
+  // Use the shared strip list rather than a local one: the SDK child gets a
+  // full Bash tool, so it must not inherit OPENHORN_HANDSHAKE_TOKEN (which
+  // would let it open its own sidecar connection) or any unrelated provider
+  // key. The Anthropic credentials this run legitimately needs are re-injected
+  // explicitly below, after stripping.
+  const isOAuthToken =
+    input.apiKey?.startsWith("sk-ant-oat") || input.apiKey?.startsWith("__cli_oauth__");
+
+  // OAuth: CLI discovers credentials via CLAUDE_* env vars + macOS keychain.
+  // sanitizeChildEnv strips ALL CLAUDE_* vars, breaking discovery. Use a lighter
+  // strip list that keeps CLAUDE_* intact.
+  let childEnv: Record<string, string | undefined>;
+  if (isOAuthToken) {
+    childEnv = { ...process.env };
+    for (const key of Object.keys(childEnv)) {
+      if (
+        key.startsWith("OPENHORN") ||
+        key.startsWith("CODEX_COMPANION") ||
+        key.startsWith("TRELLIS_") ||
+        key === "ANTHROPIC_API_KEY" ||
+        key === "ANTHROPIC_BASE_URL" ||
+        key === "OPENAI_API_KEY" ||
+        key === "DEEPSEEK_API_KEY" ||
+        key === "GOOGLE_API_KEY" ||
+        key === "GEMINI_API_KEY" ||
+        key === "TAVILY_API_KEY" ||
+        key === "JWT_SECRET" ||
+        key === "ENCRYPTION_KEY" ||
+        key === "DATABASE_URL"
+      ) {
+        delete childEnv[key];
+      }
+    }
+    childEnv.CLAUDE_CODE_ENTRYPOINT = "cli";
+  } else {
+    childEnv = sanitizeChildEnv({ ...process.env });
+    if (input.apiKey) childEnv.ANTHROPIC_API_KEY = input.apiKey;
+    if (input.baseUrl) childEnv.ANTHROPIC_BASE_URL = input.baseUrl;
+  }
+  // Always prevent nesting detection in the spawned CLI.
+  delete childEnv.CLAUDECODE;
+  delete childEnv.AI_AGENT;
+  delete childEnv.CLAUDE_CODE_CHILD_SESSION;
+
+  const hooks: Partial<Record<string, HookCallbackMatcher[]>> = {
+    PreToolUse: [
+      {
+        hooks: [
+          async (hookInput) => {
+            if (!hookInput || typeof hookInput !== "object") return { continue: true };
+            const data = hookInput as Record<string, unknown>;
+            const toolName = typeof data.tool_name === "string" ? data.tool_name : "";
+            const filePath = extractTargetFilePath(toolName, data.tool_input);
+            if (filePath) {
+              try {
+                // The SDK hands us an ABSOLUTE path; ensureCheckpointBackup
+                // takes a workspace-relative one and rejects anything starting
+                // with "/". Converting here is what makes the backup actually
+                // happen — without it every call threw and was swallowed below,
+                // leaving the manifest empty and rollback silently inert.
+                await ensureCheckpointBackup(
+                  input.checkpoint,
+                  toWorkspaceRelative(input.checkpoint.workspaceRoot, filePath),
+                );
+              } catch (error) {
+                // Best-effort: do not block tool execution on checkpoint
+                // failures — but log, so a systematic failure is visible
+                // instead of silently disabling rollback.
+                console.error(
+                  `[claude-agent] checkpoint backup failed for ${filePath}:`,
+                  error instanceof Error ? error.message : error,
+                );
+              }
+            }
+            return { continue: true };
+          },
+        ],
+      },
+    ],
+  };
 
   // Merge user system prompt with intent context (time / weather)
   const intentResult = await buildIntentContext(input.prompt, {
@@ -436,6 +280,8 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
     buildAgentSystemPrompt({
       cwd: input.cwd,
       permissionMode: input.permissionMode ?? "full-access",
+      // Mirrors the `sdkTools` condition below, which is what actually decides
+      // whether WebFetch exists for this run.
       webFetchAvailable: input.webSearchEnabled !== false,
       extra: buildSkillsPromptSection(input.skills ?? [], "Read"),
     }),
@@ -446,13 +292,84 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
     .filter(Boolean)
     .join("\n\n");
 
-  // Build tool definitions
-  const anthropicTools = buildAnthropicTools({ webSearchEnabled: input.webSearchEnabled });
+  // Build tools list, conditionally including web tools.
+  //
+  // `ToolSearch` is Claude Code's deferred tool loading: with it present, tool
+  // schemas (built-in AND every MCP server's) stay out of the prompt prefix and
+  // are pulled in on demand. `tools` is an allowlist, so leaving it out is what
+  // forced every MCP schema into every request — measured at 20,118 prompt
+  // tokens for a one-line question with 6 MCP servers enabled, versus 2,243
+  // with it. Because schemas are re-sent on every agent-loop iteration, the
+  // saving compounds on tool-using turns (40,428 -> 7,853 for a single fetch).
+  // Claude Code turns itself off when the model can't do tool_reference blocks
+  // or when ANTHROPIC_BASE_URL is a non-first-party host, and binaries too old
+  // to know the name ignore it, so it degrades to today's behavior on its own.
+  const sdkTools: string[] = ["Read", "Grep", "Glob", "Write", "Edit", "Bash", "ToolSearch"];
+  if (input.webSearchEnabled !== false) {
+    sdkTools.push("WebFetch", "WebSearch");
+  }
 
-  // Skill read-allow roots for workspace boundary checks
-  const skillRoots = (input.skills ?? []).map((s) => s.skillDir);
+  const queryOptions: Record<string, unknown> = {
+    abortController: input.abortController,
+    cwd: input.cwd,
+    env: childEnv,
+    model: input.model,
+    pathToClaudeCodeExecutable: await findClaudeBinary(),
+    tools: sdkTools,
+    permissionMode: "bypassPermissions",
+    allowDangerouslySkipPermissions: true,
+    promptSuggestions: false,
+    includePartialMessages: true,
+    ...(finalSystemPrompt ? { systemPrompt: finalSystemPrompt } : {}),
+    ...(input.mcpServers && Object.keys(input.mcpServers).length > 0
+      ? { mcpServers: input.mcpServers }
+      : {}),
+    canUseTool: async (
+      toolName: string,
+      toolInput: Record<string, unknown>,
+      options: CanUseToolOptions,
+    ) => {
+      if (toolName === "Bash") {
+        const cmd = typeof toolInput.command === "string" ? toolInput.command : "";
+        const risk = classifyBashCommandRisk(cmd);
+        if (risk.level === "allow") {
+          return { behavior: "allow" } as const;
+        }
+        const allow = await input.requestApproval({
+          toolUseId: options.toolUseID,
+          toolName,
+          toolInput,
+          decisionReason: risk.reason || options.decisionReason,
+          blockedPath: options.blockedPath,
+        });
+        return allow
+          ? ({ behavior: "allow" } as const)
+          : ({ behavior: "deny", message: "User denied command" } as const);
+      }
 
-  // Build effective prompt with history + attachments
+      const fsDeny = await checkSdkFsToolPath(
+        toolName,
+        toolInput,
+        input.cwd,
+        (input.skills ?? []).map((s) => s.skillDir),
+      );
+      if (fsDeny !== null) {
+        return { behavior: "deny", message: fsDeny } as const;
+      }
+
+      if (options?.blockedPath) {
+        return { behavior: "deny", message: `Blocked path: ${options.blockedPath}` } as const;
+      }
+
+      return { behavior: "allow" } as const;
+    },
+    hooks,
+  };
+
+  if (input.sdkSessionId) {
+    queryOptions.resume = input.sdkSessionId;
+  }
+
   let effectivePrompt = input.prompt;
   if (input.conversationHistory && input.conversationHistory.length > 0) {
     const trimmed = truncateHistory(input.conversationHistory, HISTORY_MAX_TOKENS);
@@ -466,7 +383,8 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
   if (fileContext) effectivePrompt += fileContext;
 
   // Image attachments: send real content blocks to vision-capable models,
-  // otherwise degrade to a textual placeholder so the run never errors.
+  // otherwise degrade to a textual placeholder so the run never errors. Images
+  // whose format the provider rejects (bmp/svg/heic …) also degrade to text.
   const images = getImageAttachments(input.attachments);
   const supportsVision = modelSupportsVision(input.model);
   const { injectable, unsupported } = supportsVision
@@ -480,217 +398,88 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
     effectivePrompt += imageUnsupportedFormatText(unsupported);
   }
 
-  // Build the initial user message. For vision-capable models with images,
-  // use a multi-block content array; otherwise a plain string.
-  let initialUserContent: string | Array<Record<string, unknown>> = effectivePrompt;
+  // Build the prompt input: a plain string normally, or an async-iterable
+  // single user message carrying image content blocks for vision runs.
+  let promptInput: Parameters<typeof sdk.query>[0]["prompt"] = effectivePrompt;
   if (useVisionImages) {
-    const blocks: Array<Record<string, unknown>> = [{ type: "text", text: effectivePrompt }];
+    const content: Array<Record<string, unknown>> = [{ type: "text", text: effectivePrompt }];
     for (const img of injectable) {
-      blocks.push({
+      content.push({
         type: "image",
         source: { type: "base64", media_type: img.mediaType, data: img.dataBase64 },
       });
     }
-    initialUserContent = blocks;
+    const userMessage = {
+      type: "user",
+      message: { role: "user", content },
+      parent_tool_use_id: null,
+      session_id: input.sdkSessionId ?? "",
+    };
+    promptInput = (async function* () {
+      yield userMessage;
+    })() as Parameters<typeof sdk.query>[0]["prompt"];
   }
 
-  // Messages array for the API loop — grows as the agent interacts
-  const messages: Array<{ role: "user" | "assistant"; content: unknown }> = [
-    { role: "user", content: initialUserContent },
-  ];
+  const query = sdk.query({
+    prompt: promptInput,
+    options: queryOptions as Parameters<typeof sdk.query>[0]["options"],
+  });
 
-  let turnCount = 0;
-  let totalPromptTokens = 0;
-  let totalCompletionTokens = 0;
-
+  let capturedSessionId: string | null = null;
+  let streamedTextBuf = "";
   try {
-    while (turnCount < MAX_TURNS) {
-      // Create a streaming request to the Anthropic Messages API
-      const stream = anthropic.messages.stream(
-        {
-          model: input.model,
-          max_tokens: DEFAULT_MAX_TOKENS,
-          system: finalSystemPrompt,
-          messages: messages as Anthropic.MessageParam[],
-          tools: anthropicTools as unknown as Anthropic.Tool[],
-        },
-        { signal: input.abortController.signal },
-      );
-
-      // Stream text deltas to the UI in real-time
-      let textBuf = "";
-      stream.on("text", (text: string) => {
-        textBuf += text;
-        input.onEvent({ type: "final_text", content: text });
-      });
-
-      // Wait for the complete response
-      let response: Anthropic.Message;
-      try {
-        response = await stream.finalMessage();
-      } catch (err) {
-        // Abort: re-throw so the guard in index.ts handles it (emits done)
-        if (input.abortController.signal.aborted) throw err;
-        // API error: emit error event and stop the loop gracefully
-        input.onEvent({
-          type: "error",
-          content: err instanceof Error ? err.message : String(err),
-        });
-        break;
+    for await (const message of query as AsyncIterable<SdkMessage>) {
+      if (
+        !capturedSessionId &&
+        message.type === "system" &&
+        typeof message.session_id === "string"
+      ) {
+        capturedSessionId = message.session_id;
+        input.onSdkSessionId(capturedSessionId);
       }
-
-      // Accumulate token usage across turns.
-      // Anthropic reports cache reads/writes separately from input_tokens,
-      // so we sum all buckets for the full input figure (same as the old path).
-      const usage = response.usage as unknown as Record<string, unknown>;
-      totalPromptTokens +=
-        toCount(usage.input_tokens) +
-        toCount(usage.cache_creation_input_tokens) +
-        toCount(usage.cache_read_input_tokens);
-      totalCompletionTokens += toCount(usage.output_tokens);
-
-      // Token budget guard: abort the run when cumulative token spend
-      // exceeds the per-run budget.
-      if (input.tokenBudgetPerRun) {
-        const totalSpent = totalPromptTokens + totalCompletionTokens;
-        if (totalSpent > input.tokenBudgetPerRun) {
-          input.onEvent({
-            type: "error",
-            content: `Token 预算已用尽（已消耗 ${totalSpent.toLocaleString()} tokens，上限 ${input.tokenBudgetPerRun.toLocaleString()} tokens）`,
-          });
-          break;
+      const events = convertSdkEvent(message);
+      if (events) {
+        const flat = Array.isArray(events) ? events : [events];
+        for (const e of flat) {
+          if (e.type === "final_text") {
+            streamedTextBuf += e.content;
+          }
+          if (e.type === "tool_start" && streamedTextBuf) {
+            input.onEvent({ type: "clear_streaming_text" });
+            input.onEvent({ type: "reasoning", content: streamedTextBuf });
+            streamedTextBuf = "";
+          }
+          input.onEvent(e);
         }
       }
-
-      // Any stop reason other than tool_use means the conversation is done
-      if (response.stop_reason !== "tool_use") {
-        break;
-      }
-
-      // ---------------------------------------------------------------
-      // stop_reason === "tool_use": execute tools and continue the loop
-      // ---------------------------------------------------------------
-
-      // The text streamed so far was intermediate reasoning (the model was
-      // thinking before deciding to call tools). Convert it from final_text
-      // (which the UI renders as the chat reply) to reasoning (which the UI
-      // renders in the collapsible agent reasoning section).
-      if (textBuf) {
-        input.onEvent({ type: "clear_streaming_text" });
-        input.onEvent({ type: "reasoning", content: textBuf });
-        textBuf = "";
-      }
-
-      // Extract tool_use blocks from the response
-      const toolUseBlocks = response.content.filter(
-        (b): b is Anthropic.ContentBlock & { type: "tool_use"; id: string; name: string } =>
-          b.type === "tool_use",
-      );
-
-      // Defensive: if stop_reason is tool_use but no blocks exist, bail
-      if (toolUseBlocks.length === 0) {
-        break;
-      }
-
-      const toolResults: Array<{
-        type: "tool_result";
-        tool_use_id: string;
-        content: string;
-        is_error?: boolean;
-      }> = [];
-
-      for (const block of toolUseBlocks) {
-        const toolInput = (block.input || {}) as Record<string, unknown>;
-
-        // Emit tool_start so the UI shows the tool being invoked
-        input.onEvent({ type: "tool_start", toolName: block.name, toolInput });
-
-        // --- Workspace boundary check for fs tools (Read/Write/Edit) ---
-        const fsDeny = await checkSdkFsToolPath(block.name, toolInput, input.cwd, skillRoots);
-        if (fsDeny !== null) {
-          input.onEvent({ type: "tool_result", content: fsDeny });
-          toolResults.push({
-            type: "tool_result",
-            tool_use_id: block.id,
-            content: fsDeny,
-            is_error: true,
-          });
-          continue;
-        }
-
-        // --- Bash approval for risky commands ---
-        if (block.name === "Bash") {
-          const cmd = typeof toolInput.command === "string" ? toolInput.command : "";
-          const risk = classifyBashCommandRisk(cmd);
-          if (risk.level !== "allow") {
-            const allowed = await input.requestApproval({
-              toolUseId: block.id,
-              toolName: "Bash",
-              toolInput,
-              decisionReason: risk.reason,
+      // Token budget guard: the SDK reports cumulative usage on the terminal
+      // `result` message. Since the SDK manages the agent loop internally,
+      // turn-level interception is not possible — we check the final total
+      // and surface an error so the caller knows the budget was exceeded.
+      if (input.tokenBudgetPerRun && message.type === "result") {
+        const usage = message.usage;
+        if (usage && typeof usage === "object") {
+          const raw = usage as Record<string, unknown>;
+          const total =
+            toCount(raw.input_tokens) +
+            toCount(raw.cache_creation_input_tokens) +
+            toCount(raw.cache_read_input_tokens) +
+            toCount(raw.output_tokens);
+          if (total > input.tokenBudgetPerRun) {
+            input.onEvent({
+              type: "error",
+              content: `Token 预算已用尽（已消耗 ${total.toLocaleString()} tokens，上限 ${input.tokenBudgetPerRun.toLocaleString()} tokens）`,
             });
-            if (!allowed) {
-              const denyMsg = "User denied command";
-              input.onEvent({ type: "tool_result", content: denyMsg });
-              toolResults.push({
-                type: "tool_result",
-                tool_use_id: block.id,
-                content: denyMsg,
-                is_error: true,
-              });
-              continue;
-            }
           }
         }
-
-        // --- Checkpoint backup for file-modifying tools (before execution) ---
-        // Mirrors the old PreToolUse hook: convert the absolute path to a
-        // workspace-relative one so ensureCheckpointBackup can normalise it.
-        const filePath = extractTargetFilePath(block.name, toolInput);
-        if (filePath) {
-          try {
-            const relPath = toWorkspaceRelative(input.checkpoint.workspaceRoot, filePath);
-            await ensureCheckpointBackup(input.checkpoint, relPath);
-          } catch (error) {
-            console.error(
-              `[claude-agent] checkpoint backup failed for ${filePath}:`,
-              error instanceof Error ? error.message : error,
-            );
-          }
-        }
-
-        // --- Map tool name/params and execute ---
-        const mapped = mapToolForExecution(block.name, toolInput);
-        const result = await executeTool(mapped.executorName, mapped.executorInput, input.cwd, {
-          permissionMode: "full-access",
-          checkpoint: input.checkpoint,
-          readAllowRoots: skillRoots,
-        });
-
-        input.onEvent({
-          type: "tool_result",
-          content: result.length > 8000 ? `${result.slice(0, 8000)}...` : result,
-        });
-        toolResults.push({ type: "tool_result", tool_use_id: block.id, content: result });
-      }
-
-      // Append the assistant's response and the tool results to the message
-      // history so the model can see what happened on the next iteration.
-      messages.push({ role: "assistant", content: response.content });
-      messages.push({ role: "user", content: toolResults });
-
-      turnCount++;
-      if (turnCount >= MAX_TURNS) {
-        input.onEvent({
-          type: "error",
-          content: `Agent stopped: reached maximum of ${MAX_TURNS} turns`,
-        });
       }
     }
   } finally {
     // Always finalize the checkpoint when this run actually backed up files,
-    // even on abort or a mid-stream throw. Otherwise manifest.json is never
-    // written and rollbackCheckpoint() fails with ENOENT.
+    // even on abort (SDK throws AbortError) or a mid-stream throw. Otherwise
+    // manifest.json is never written and rollbackCheckpoint() fails with
+    // ENOENT exactly when the user cancels a run that already edited files.
+    // Best-effort: a finalize failure must not mask the original abort/error.
     if (input.checkpoint.files.size > 0) {
       try {
         await finalizeCheckpoint(input.checkpoint);
@@ -701,9 +490,5 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
     }
   }
 
-  // Emit final usage + done events. If the function threw (e.g. abort),
-  // these are never reached — the guard in index.ts handles that case.
-  const usageEvent = buildUsageEvent(totalPromptTokens, totalCompletionTokens);
-  if (usageEvent) input.onEvent(usageEvent);
   input.onEvent({ type: "done" });
 }
