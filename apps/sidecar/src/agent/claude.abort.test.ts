@@ -7,18 +7,27 @@ import path from "node:path";
 // already backed up files, the checkpoint must still be finalized so a later
 // rollbackCheckpoint() can read manifest.json instead of failing with ENOENT.
 //
-// The SDK is mocked (via mock.module, before ./claude is imported) with a query
-// that yields one message and then throws — simulating an AbortError partway
-// through the stream.
+// The Anthropic SDK is mocked (via mock.module, before ./claude is imported)
+// with a fake client whose `messages.stream()` returns a stream that rejects
+// on `finalMessage()` — simulating an AbortError partway through the stream.
 describe("runClaudeAgent checkpoint finalize on abort", () => {
   test("aborted run still leaves a readable manifest that rollback can restore", async () => {
     const abortErr = Object.assign(new Error("Aborted"), { name: "AbortError" });
-    mock.module("@anthropic-ai/claude-agent-sdk", () => ({
-      query: () =>
-        (async function* () {
-          yield { type: "system", session_id: "sess-1" };
-          throw abortErr;
-        })(),
+    mock.module("@anthropic-ai/sdk", () => ({
+      default: class MockAnthropic {
+        messages = {
+          stream: () => {
+            const obj = {
+              on(_event: string, _callback: unknown) {
+                return obj;
+              },
+              finalMessage: () => Promise.reject(abortErr),
+              controller: new AbortController(),
+            };
+            return obj;
+          },
+        };
+      },
     }));
 
     const { runClaudeAgent } = await import("./claude");
