@@ -374,35 +374,6 @@ export function AgentRunPanel({
     return normalized.charAt(0).toUpperCase() + normalized.slice(1);
   };
 
-  const statusLabel = (() => {
-    switch (run.status) {
-      case "completed":
-        return "Done";
-      case "failed":
-        return "Failed";
-      case "cancelled":
-        return "Cancelled";
-      default:
-        return "Running";
-    }
-  })();
-
-  const statusClassName = (() => {
-    switch (run.status) {
-      case "completed":
-        return "text-emerald-700";
-      case "failed":
-        return "text-orange-700";
-      case "cancelled":
-        return "text-slate-700";
-      default:
-        return "text-blue-700";
-    }
-  })();
-
-  const displayTitle =
-    toolCount > 0 ? `Agent · ${toolCount} ${toolCount === 1 ? "tool" : "tools"}` : "Agent";
-
   // Agent info line for the header (ACP only).
   const agentLabel = run.agentInfo
     ? `${run.agentInfo.name}${run.agentInfo.version ? ` v${run.agentInfo.version}` : ""}`
