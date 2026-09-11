@@ -116,6 +116,8 @@ const SCHEMA_DDL: string[] = [
 	    summary TEXT,
 	    key_facts TEXT,
 	    last_summarized_at INTEGER,
+	    imported_from TEXT,
+	    imported_at INTEGER,
 	    created_at INTEGER NOT NULL,
 	    updated_at INTEGER NOT NULL,
 	    FOREIGN KEY (user_id) REFERENCES users(id),
@@ -258,6 +260,8 @@ const SCHEMA_DDL: string[] = [
     type TEXT NOT NULL,
     config TEXT NOT NULL,
     is_enabled INTEGER DEFAULT 1,
+    imported_from TEXT,
+    imported_at INTEGER,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     FOREIGN KEY (user_id) REFERENCES users(id)
@@ -333,6 +337,19 @@ const SCHEMA_DDL: string[] = [
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   );`,
 
+  `CREATE TABLE IF NOT EXISTS import_records (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    source TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    parts TEXT NOT NULL,
+    errors TEXT NOT NULL,
+    total_imported INTEGER NOT NULL DEFAULT 0,
+    total_needs_action INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );`,
+
   `CREATE TABLE IF NOT EXISTS agent_events (
     id TEXT PRIMARY KEY,
     session_id TEXT NOT NULL,
@@ -379,6 +396,7 @@ const SCHEMA_DDL: string[] = [
   `CREATE INDEX IF NOT EXISTS scheduled_tasks_next_run_idx ON scheduled_tasks(next_run_at);`,
   `CREATE INDEX IF NOT EXISTS scheduled_task_runs_task_idx ON scheduled_task_runs(task_id);`,
   `CREATE INDEX IF NOT EXISTS scheduled_task_runs_user_idx ON scheduled_task_runs(user_id);`,
+  `CREATE INDEX IF NOT EXISTS import_records_user_created_idx ON import_records(user_id, created_at);`,
   // Existing DBs may hold duplicate (user_id, key) settings rows from the old
   // delete-then-insert code before the upsert fix. Remove dupes (keeping the
   // latest = highest rowid) BEFORE creating the unique index below, otherwise
@@ -1270,6 +1288,30 @@ async function ensureConversationProjectIdColumn(): Promise<void> {
   );
 }
 
+async function ensureConversationImportColumns(): Promise<void> {
+  const result = await client.execute(`PRAGMA table_info('conversations');`);
+  const rows = getRows(result);
+  if (rows.length === 0) return;
+  if (!hasColumnNamed(rows, "imported_from")) {
+    await client.execute(`ALTER TABLE conversations ADD COLUMN imported_from TEXT;`);
+  }
+  if (!hasColumnNamed(rows, "imported_at")) {
+    await client.execute(`ALTER TABLE conversations ADD COLUMN imported_at INTEGER;`);
+  }
+}
+
+async function ensureMcpServerImportColumns(): Promise<void> {
+  const result = await client.execute(`PRAGMA table_info('mcp_servers');`);
+  const rows = getRows(result);
+  if (rows.length === 0) return;
+  if (!hasColumnNamed(rows, "imported_from")) {
+    await client.execute(`ALTER TABLE mcp_servers ADD COLUMN imported_from TEXT;`);
+  }
+  if (!hasColumnNamed(rows, "imported_at")) {
+    await client.execute(`ALTER TABLE mcp_servers ADD COLUMN imported_at INTEGER;`);
+  }
+}
+
 async function ensureMessagesFtsTable(): Promise<void> {
   const check = await client.execute(
     `SELECT name FROM sqlite_master WHERE type='table' AND name='messages_fts';`,
@@ -1358,6 +1400,10 @@ export async function bootstrapDatabase(): Promise<void> {
   // explicit column list that predates this column, so adding it earlier would
   // only have it dropped again on a database taking both migrations at once.
   await ensureConversationProjectIdColumn();
+  // Same reason as project_id: the FK rebuild copies an explicit column list
+  // that predates these columns, so they must be (re-)added after it.
+  await ensureConversationImportColumns();
+  await ensureMcpServerImportColumns();
 
   // FTS5 virtual table for full-text search over message content. Must run
   // after ensureDeleteSemanticsForeignKeys (which may rebuild the messages

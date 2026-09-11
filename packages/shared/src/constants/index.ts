@@ -28,3 +28,13 @@ export const PROVIDERS = {
 export const DEFAULT_CONTEXT_LENGTH = 4096;
 
 export const MAX_CONTEXT_LENGTH = 100000;
+
+// --- Import center ---
+/** Maximum number of per-item entries kept on an ImportPart; beyond that only the counters grow. */
+export const IMPORT_PART_ITEMS_LIMIT = 200;
+/** Upper bound on conversations a single `POST /import/local/run` processes; callers page with explicit `sessionIds`. */
+export const LOCAL_IMPORT_RUN_MAX_CONVERSATIONS = 500;
+/** Settings key holding the JSON PromptTemplate[] shown in the slash panel's prompt group. */
+export const PROMPT_TEMPLATES_SETTING_KEY = "prompts.templates";
+/** Settings key of the global system prompt that imported instructions are appended to. */
+export const GLOBAL_SYSTEM_PROMPT_SETTING_KEY = "chat.systemPrompt";

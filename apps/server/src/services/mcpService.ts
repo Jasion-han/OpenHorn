@@ -12,6 +12,9 @@ export interface MCPServerItem {
   type: string;
   config: Record<string, unknown>;
   isEnabled: boolean;
+  /** Import source id when the entry came from an import; null when created by hand. */
+  importedFrom: string | null;
+  importedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -20,6 +23,8 @@ export interface CreateMCPServerInput {
   name: string;
   type: string;
   config: Record<string, unknown>;
+  /** Set by the desktop MCP importer; stamps `imported_from` / `imported_at`. */
+  importedFrom?: string | null;
 }
 
 export interface UpdateMCPServerInput {
@@ -48,6 +53,8 @@ function toItem(row: McpServerRow): MCPServerItem {
     type: row.type,
     config: parseConfig(row.config),
     isEnabled: Boolean(row.isEnabled),
+    importedFrom: row.importedFrom ?? null,
+    importedAt: row.importedAt ?? null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -76,6 +83,11 @@ export async function createMCPServer(
 ): Promise<MCPServerItem> {
   const id = generateId();
   const now = new Date();
+  const importedFrom =
+    typeof input.importedFrom === "string" && input.importedFrom.trim()
+      ? input.importedFrom.trim()
+      : null;
+  const importedAt = importedFrom ? now : null;
 
   await db.insert(mcpServers).values({
     id,
@@ -84,6 +96,8 @@ export async function createMCPServer(
     type: input.type,
     config: JSON.stringify(input.config),
     isEnabled: true,
+    importedFrom,
+    importedAt,
     createdAt: now,
     updatedAt: now,
   });
@@ -95,6 +109,8 @@ export async function createMCPServer(
     type: input.type,
     config: input.config,
     isEnabled: true,
+    importedFrom,
+    importedAt,
     createdAt: now,
     updatedAt: now,
   };

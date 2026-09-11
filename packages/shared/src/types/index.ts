@@ -29,6 +29,9 @@ export interface Conversation {
   isPinned: boolean;
   /** Sidebar project the conversation is filed under; null/undefined = plain chat list. */
   projectId?: string | null;
+  /** ImportSource id when the conversation was imported; null/undefined otherwise. */
+  importedFrom?: string | null;
+  importedAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -94,6 +97,9 @@ export interface MCPServer {
   type: string;
   config: Record<string, unknown>;
   isEnabled: boolean;
+  /** ImportSource id when the server entry was imported; null/undefined otherwise. */
+  importedFrom?: string | null;
+  importedAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -185,4 +191,160 @@ export interface ProviderPreset {
   protocol: ChannelProtocol;
   baseUrl: string;
   name: string;
+}
+
+// ---------------------------------------------------------------------------
+// Import center (settings → 导入)
+// ---------------------------------------------------------------------------
+
+/** Where an import came from. `file` = backup zip / ChatGPT / Claude.ai export picked by the user. */
+export type ImportSource =
+  | "claude-code"
+  | "codex"
+  | "gemini"
+  | "cc-switch"
+  | "opencode"
+  | "cursor"
+  | "vscode"
+  | "claude-desktop"
+  | "continue"
+  | "file";
+
+export type ImportKind = "local" | "backup" | "chatgpt" | "claude-export";
+
+/**
+ * Top-level import units. Messages are never a part of their own — a
+ * conversation item carries its message count in `detail` / the part `note`,
+ * so `totalImported` counts conversations, not the messages inside them.
+ */
+export type ImportPartType =
+  | "conversations"
+  | "mcp"
+  | "skills"
+  | "instructions"
+  | "prompts"
+  | "credentials"
+  | "channels"
+  | "projects"
+  | "scheduledTasks"
+  | "settings"
+  | "attachments";
+
+export type ImportPartItemStatus = "imported" | "skipped" | "needsAction";
+
+export type ImportPartLinkKind =
+  | "conversation"
+  | "mcp"
+  | "skill"
+  | "channel"
+  | "project"
+  | "settings-tab"
+  | "prompt";
+
+export interface ImportPartItem {
+  label: string;
+  detail?: string;
+  status: ImportPartItemStatus;
+  link?: { kind: ImportPartLinkKind; id?: string };
+}
+
+export interface ImportPart {
+  type: ImportPartType;
+  imported: number;
+  skipped: number;
+  needsAction: number;
+  note?: string;
+  /** At most IMPORT_PART_ITEMS_LIMIT (shared/constants) entries. */
+  items: ImportPartItem[];
+}
+
+export interface ImportRecord {
+  id: string;
+  userId: string;
+  source: ImportSource;
+  kind: ImportKind;
+  parts: ImportPart[];
+  errors: string[];
+  totalImported: number;
+  totalNeedsAction: number;
+  createdAt: Date;
+}
+
+export interface CreateImportRecordInput {
+  source: ImportSource;
+  kind: ImportKind;
+  parts: ImportPart[];
+  errors?: string[];
+}
+
+export interface ImportRecordListResult {
+  records: ImportRecord[];
+  /** Pass back as `cursor` to fetch the next (older) page; absent when exhausted. */
+  nextCursor?: string;
+}
+
+/** Sources the server can scan on its own (their conversations/instructions/prompts live in the home dir). */
+export type LocalImportServerSource = "claude-code" | "codex" | "gemini";
+
+export interface LocalImportScanSource {
+  source: ImportSource;
+  /** The client's config directory exists on this machine. */
+  available: boolean;
+  parts: {
+    conversations?: { count: number; handledBy: "server" };
+    instructions?: { count: number; handledBy: "server"; path?: string };
+    prompts?: { count: number; handledBy: "server" };
+    /** MCP configs are discovered by the desktop (Rust) side; the server only flags the part. */
+    mcp?: { handledBy: "desktop" };
+    skills?: { handledBy: "desktop" };
+  };
+}
+
+export interface LocalImportScanResult {
+  homeDir: string;
+  sources: LocalImportScanSource[];
+}
+
+/** One importable session, as listed by `GET /import/local/conversations`. */
+export interface LocalImportConversationSummary {
+  id: string;
+  title: string;
+  cwd: string | null;
+  createdAt: number;
+  updatedAt: number;
+  sizeBytes: number;
+  /** Already present in OpenHorn (same id). */
+  alreadyImported: boolean;
+}
+
+export interface LocalImportConversationListResult {
+  source: LocalImportServerSource;
+  conversations: LocalImportConversationSummary[];
+}
+
+export interface LocalImportRunRequest {
+  source: LocalImportServerSource;
+  parts: {
+    conversations?: { sessionIds: string[] | "all" };
+    instructions?: true;
+    prompts?: true;
+  };
+}
+
+export interface LocalImportRunResult {
+  recordId: string;
+  parts: ImportPart[];
+  errors: string[];
+}
+
+/** A slash-panel prompt template imported from `~/.codex/prompts` or `~/.claude/commands` (settings key `prompts.templates`). */
+export interface PromptTemplate {
+  id: string;
+  name: string;
+  namespace?: string;
+  description?: string;
+  argumentHint?: string;
+  body: string;
+  source: ImportSource;
+  importedAt: number;
 }

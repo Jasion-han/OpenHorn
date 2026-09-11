@@ -7,11 +7,12 @@ import authRoutes from "./routes/auth";
 import channelRoutes from "./routes/channels";
 import conversationRoutes from "./routes/conversations";
 import credentialRoutes from "./routes/credentials";
+import dataTransferRoutes from "./routes/dataTransfer";
+import importRoutes from "./routes/importRecords";
 import mcpRoutes from "./routes/mcp";
 import messageRoutes from "./routes/messages";
 import projectRoutes from "./routes/projects";
 import scheduledTaskRoutes from "./routes/scheduledTasks";
-import dataTransferRoutes from "./routes/dataTransfer";
 import settingsRoutes from "./routes/settings";
 
 import { startScheduler } from "./services/scheduledTaskScheduler";
@@ -66,6 +67,7 @@ app.route("/credentials", credentialRoutes);
 app.route("/scheduled-tasks", scheduledTaskRoutes);
 app.route("/settings", settingsRoutes);
 app.route("/data-transfer", dataTransferRoutes);
+app.route("/import", importRoutes);
 
 const port = parseInt(process.env.PORT || "3002", 10);
 

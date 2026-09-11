@@ -1,0 +1,1 @@
+{"parentUuid": null, "isSidechain": false, "cwd": "/Users/test/Project/beta", "sessionId": "33333333-3333-4333-8333-333333333333", "entrypoint": "cli", "type": "user", "uuid": "y1", "timestamp": "2026-09-03T10:00:00.000Z", "isMeta": true, "message": {"role": "user", "content": "<local-command-stdout>ok</local-command-stdout>"}}

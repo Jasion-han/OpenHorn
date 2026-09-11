@@ -128,6 +128,10 @@ export const conversations = sqliteTable(
     summary: text("summary"),
     keyFacts: text("key_facts"),
     lastSummarizedAt: integer("last_summarized_at", { mode: "timestamp" }),
+    // Import provenance: source id (`claude-code`, `codex`, `file`, ...) and
+    // when it was imported. Null for conversations created inside OpenHorn.
+    importedFrom: text("imported_from"),
+    importedAt: integer("imported_at", { mode: "timestamp" }),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
     updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
   },
@@ -376,6 +380,9 @@ export const mcpServers = sqliteTable(
     type: text("type").notNull(),
     config: text("config").notNull(),
     isEnabled: integer("is_enabled", { mode: "boolean" }).default(true),
+    /** Import provenance (source id); null when the user created it by hand. */
+    importedFrom: text("imported_from"),
+    importedAt: integer("imported_at", { mode: "timestamp" }),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
     updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
   },
@@ -481,4 +488,32 @@ export const settings = sqliteTable(
     updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
   },
   (table) => [uniqueIndex("settings_user_key_unique").on(table.userId, table.key)],
+);
+
+/**
+ * One row per import run (local AI-client scan, backup zip, ChatGPT/Claude
+ * export, or a desktop-side MCP/skill/credential import reported through
+ * `POST /import/records`). `parts` / `errors` are JSON (see `ImportPart` in
+ * packages/shared). Deleting a record never undoes the imported data.
+ */
+export const importRecords = sqliteTable(
+  "import_records",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** ImportSource: claude-code | codex | gemini | cc-switch | opencode | cursor | claude-desktop | continue | file */
+    source: text("source").notNull(),
+    /** ImportKind: local | backup | chatgpt | claude-export */
+    kind: text("kind").notNull(),
+    /** JSON ImportPart[] */
+    parts: text("parts").notNull(),
+    /** JSON string[] */
+    errors: text("errors").notNull(),
+    totalImported: integer("total_imported").notNull().default(0),
+    totalNeedsAction: integer("total_needs_action").notNull().default(0),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [index("import_records_user_created_idx").on(table.userId, table.createdAt)],
 );

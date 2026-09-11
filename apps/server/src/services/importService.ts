@@ -1,13 +1,19 @@
 /**
  * Data import service — restores from .openhorn-backup.zip or imports
- * conversations from ChatGPT / Claude export files.
+ * conversations from ChatGPT / Claude.ai export files.
  *
- * Merge strategy: UUID-based dedup; on conflict, keep the newer updatedAt.
- * Channels matched by (name + provider + baseUrl); never overwrites existing keys.
+ * Merge strategy (backup): rows are matched by id / natural key and existing
+ * rows are always kept — an incoming row with the same key is skipped, never
+ * merged or replaced. Conversations dedupe on id (their messages/attachments
+ * only come along with a newly inserted conversation); channels on
+ * (name, provider) and are inserted without an apiKey; projects on rootPath;
+ * MCP servers on name; settings on key. Scheduled tasks are inserted disabled.
+ *
+ * Every import writes an `import_records` row (source `file`) and stamps the
+ * conversations / MCP servers it created with `imported_from` / `imported_at`.
  */
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
-import yauzl from "yauzl";
 import {
   attachments,
   channelModels,
@@ -20,8 +26,13 @@ import {
   settings,
 } from "db";
 import { and, eq } from "drizzle-orm";
+import type { ImportKind, ImportPart } from "shared/types";
+import yauzl from "yauzl";
 import { db } from "../db";
 import type { ExportManifest } from "./exportService";
+import { addPartItem, createImportRecord, createPart, IMPORT_DETAIL } from "./importRecordsService";
+
+const FILE_IMPORT_SOURCE = "file";
 
 export interface ImportResult {
   format: "openhorn" | "chatgpt" | "claude";
@@ -30,9 +41,11 @@ export interface ImportResult {
   attachments: { imported: number; missing: number };
   channels: { imported: number; skipped: number; needsKey: number };
   projects: { imported: number; needsRebind: number };
-  mcpServers: { imported: number; needsConfirm: number };
+  mcpServers: { imported: number; skipped: number; needsConfirm: number };
   scheduledTasks: { imported: number };
   errors: string[];
+  /** Id of the `import_records` row written for this run (absent when nothing could be parsed). */
+  recordId?: string;
 }
 
 function emptyResult(format: ImportResult["format"]): ImportResult {
@@ -43,10 +56,102 @@ function emptyResult(format: ImportResult["format"]): ImportResult {
     attachments: { imported: 0, missing: 0 },
     channels: { imported: 0, skipped: 0, needsKey: 0 },
     projects: { imported: 0, needsRebind: 0 },
-    mcpServers: { imported: 0, needsConfirm: 0 },
+    mcpServers: { imported: 0, skipped: 0, needsConfirm: 0 },
     scheduledTasks: { imported: 0 },
     errors: [],
   };
+}
+
+// ---------------------------------------------------------------------------
+// Import history — per-item detail collected while importing, then written as
+// one `import_records` row. Kept on a small collector so the counters in
+// ImportResult (the shape the existing UI dialog reads) stay untouched.
+// ---------------------------------------------------------------------------
+
+const IMPORT_KIND_BY_FORMAT: Record<ImportResult["format"], ImportKind> = {
+  openhorn: "backup",
+  chatgpt: "chatgpt",
+  claude: "claude-export",
+};
+
+class PartCollector {
+  private readonly parts = new Map<ImportPart["type"], ImportPart>();
+
+  part(type: ImportPart["type"]): ImportPart {
+    let part = this.parts.get(type);
+    if (!part) {
+      part = createPart(type);
+      this.parts.set(type, part);
+    }
+    return part;
+  }
+
+  add(type: ImportPart["type"], item: Parameters<typeof addPartItem>[1]): void {
+    addPartItem(this.part(type), item);
+  }
+
+  /** Count-only bump for parts that have no meaningful per-item label (attachments). */
+  count(type: ImportPart["type"], field: "imported" | "skipped" | "needsAction", n = 1): void {
+    this.part(type)[field] += n;
+  }
+
+  /** Messages are not a part: their total rides on the conversations part as a note. */
+  noteMessages(count: number): void {
+    if (count > 0) this.part("conversations").note = IMPORT_DETAIL.messagesNote(count);
+  }
+
+  list(): ImportPart[] {
+    return Array.from(this.parts.values());
+  }
+}
+
+async function finishImport(
+  userId: string,
+  result: ImportResult,
+  collector: PartCollector,
+): Promise<ImportResult> {
+  const parts = collector.list();
+  if (parts.length === 0 && result.errors.length === 0) return result;
+  try {
+    const record = await createImportRecord(userId, {
+      source: FILE_IMPORT_SOURCE,
+      kind: IMPORT_KIND_BY_FORMAT[result.format],
+      parts,
+      errors: result.errors,
+    });
+    result.recordId = record.id;
+  } catch (error) {
+    result.errors.push(
+      `import record not written: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// Backup rows come out of JSON with ISO-string timestamps; Drizzle's
+// `integer({ mode: "timestamp" })` columns need Date instances (it calls
+// `.getTime()`), so every row is revived before insert.
+// ---------------------------------------------------------------------------
+
+const TIMESTAMP_FIELDS = [
+  "createdAt",
+  "updatedAt",
+  "lastSummarizedAt",
+  "lastRunAt",
+  "nextRunAt",
+  "importedAt",
+] as const;
+
+function reviveDates<T extends Record<string, unknown>>(row: T): T {
+  const out: Record<string, unknown> = { ...row };
+  for (const field of TIMESTAMP_FIELDS) {
+    const value = out[field];
+    if (value === undefined || value === null || value instanceof Date) continue;
+    const parsed = typeof value === "number" ? new Date(value) : new Date(String(value));
+    out[field] = Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+  return out as T;
 }
 
 // ---------------------------------------------------------------------------
@@ -136,6 +241,8 @@ export async function detectFormat(filePath: string): Promise<DetectedFormat> {
 
 export async function importOpenHornBackup(userId: string, zipPath: string): Promise<ImportResult> {
   const result = emptyResult("openhorn");
+  const collector = new PartCollector();
+  const importedAt = new Date();
   const entries = await extractZipEntries(zipPath);
 
   const manifest = parseJsonEntry<ExportManifest>(entries, "manifest.json");
@@ -156,18 +263,38 @@ export async function importOpenHornBackup(userId: string, zipPath: string): Pro
     ).map((r) => r.id),
   );
 
+  // biome-ignore lint/suspicious/noExplicitAny: external JSON schema
+  const msgRows = parseJsonEntry<any[]>(entries, "messages.json") ?? [];
+  const messageCountByConv = new Map<string, number>();
+  for (const msg of msgRows) {
+    const convId = String(msg.conversationId);
+    messageCountByConv.set(convId, (messageCountByConv.get(convId) ?? 0) + 1);
+  }
+
   for (const conv of convRows) {
     if (existingConvIds.has(conv.id)) {
       result.conversations.skipped++;
+      collector.add("conversations", {
+        label: String(conv.title ?? conv.id),
+        detail: IMPORT_DETAIL.alreadyExists,
+        status: "skipped",
+        link: { kind: "conversation", id: String(conv.id) },
+      });
       continue;
     }
-    await db.insert(conversations).values({ ...conv, userId });
+    await db
+      .insert(conversations)
+      .values({ ...reviveDates(conv), userId, importedFrom: FILE_IMPORT_SOURCE, importedAt });
     result.conversations.imported++;
+    collector.add("conversations", {
+      label: String(conv.title ?? conv.id),
+      detail: IMPORT_DETAIL.messageCount(messageCountByConv.get(String(conv.id)) ?? 0),
+      status: "imported",
+      link: { kind: "conversation", id: String(conv.id) },
+    });
   }
 
   // --- Messages ---
-  // biome-ignore lint/suspicious/noExplicitAny: external JSON schema
-  const msgRows = parseJsonEntry<any[]>(entries, "messages.json") ?? [];
   const importedConvIds = new Set(
     convRows
       .filter((c: { id: string }) => !existingConvIds.has(c.id))
@@ -175,9 +302,10 @@ export async function importOpenHornBackup(userId: string, zipPath: string): Pro
   );
   for (const msg of msgRows) {
     if (!importedConvIds.has(msg.conversationId)) continue;
-    await db.insert(messages).values(msg);
+    await db.insert(messages).values(reviveDates(msg));
     result.messages.imported++;
   }
+  collector.noteMessages(result.messages.imported);
 
   // --- Attachments ---
   // biome-ignore lint/suspicious/noExplicitAny: external JSON schema
@@ -194,10 +322,18 @@ export async function importOpenHornBackup(userId: string, zipPath: string): Pro
       const localName = `imported-${att.id}${ext}`;
       const localPath = path.join(uploadsDir, localName);
       await writeFile(localPath, fileData);
-      await db.insert(attachments).values({ ...att, userId, filePath: `uploaded:${localName}` });
+      await db
+        .insert(attachments)
+        .values({ ...reviveDates(att), userId, filePath: `uploaded:${localName}` });
       result.attachments.imported++;
+      collector.count("attachments", "imported");
     } else {
       result.attachments.missing++;
+      collector.add("attachments", {
+        label: String(att.fileName ?? att.id),
+        detail: IMPORT_DETAIL.attachmentMissing,
+        status: "skipped",
+      });
     }
   }
 
@@ -218,11 +354,23 @@ export async function importOpenHornBackup(userId: string, zipPath: string): Pro
       .limit(1);
     if (existing.length > 0) {
       result.channels.skipped++;
+      collector.add("channels", {
+        label: String(ch.name),
+        detail: IMPORT_DETAIL.alreadyExists,
+        status: "skipped",
+        link: { kind: "channel", id: existing[0].id },
+      });
       continue;
     }
-    await db.insert(channels).values({ ...ch, userId, apiKey: "" });
+    await db.insert(channels).values({ ...reviveDates(ch), userId, apiKey: "" });
     result.channels.imported++;
     result.channels.needsKey++;
+    collector.add("channels", {
+      label: String(ch.name),
+      detail: IMPORT_DETAIL.channelKeyMissing,
+      status: "needsAction",
+      link: { kind: "channel", id: String(ch.id) },
+    });
   }
 
   // --- Channel Models ---
@@ -230,7 +378,7 @@ export async function importOpenHornBackup(userId: string, zipPath: string): Pro
   const modelRows = parseJsonEntry<any[]>(entries, "channel-models.json") ?? [];
   for (const m of modelRows) {
     try {
-      await db.insert(channelModels).values(m);
+      await db.insert(channelModels).values(reviveDates(m));
     } catch {
       // skip if channel doesn't exist or duplicate
     }
@@ -247,6 +395,12 @@ export async function importOpenHornBackup(userId: string, zipPath: string): Pro
       .limit(1);
     if (existing.length > 0) {
       result.projects.imported++;
+      collector.add("projects", {
+        label: String(p.name ?? p.rootPath),
+        detail: IMPORT_DETAIL.alreadyExists,
+        status: "skipped",
+        link: { kind: "project", id: existing[0].id },
+      });
       continue;
     }
     let pathExists = false;
@@ -256,26 +410,62 @@ export async function importOpenHornBackup(userId: string, zipPath: string): Pro
     } catch {
       // path doesn't exist on this machine
     }
-    await db.insert(projects).values({ ...p, userId });
+    await db.insert(projects).values({ ...reviveDates(p), userId });
     result.projects.imported++;
     if (!pathExists) result.projects.needsRebind++;
+    collector.add("projects", {
+      label: String(p.name ?? p.rootPath),
+      detail: pathExists
+        ? String(p.rootPath)
+        : IMPORT_DETAIL.projectFolderMissing(String(p.rootPath)),
+      status: pathExists ? "imported" : "needsAction",
+      link: { kind: "project", id: String(p.id) },
+    });
   }
 
   // --- MCP Servers ---
   // biome-ignore lint/suspicious/noExplicitAny: external JSON schema
   const mcpRows = parseJsonEntry<any[]>(entries, "mcp-servers.json") ?? [];
   for (const m of mcpRows) {
-    await db.insert(mcpServers).values({ ...m, userId });
+    const existing = await db
+      .select({ id: mcpServers.id })
+      .from(mcpServers)
+      .where(and(eq(mcpServers.userId, userId), eq(mcpServers.name, String(m.name))))
+      .limit(1);
+    if (existing.length > 0) {
+      result.mcpServers.skipped++;
+      collector.add("mcp", {
+        label: String(m.name),
+        detail: IMPORT_DETAIL.mcpSameName,
+        status: "skipped",
+        link: { kind: "mcp", id: existing[0].id },
+      });
+      continue;
+    }
+    await db
+      .insert(mcpServers)
+      .values({ ...reviveDates(m), userId, importedFrom: FILE_IMPORT_SOURCE, importedAt });
     result.mcpServers.imported++;
     result.mcpServers.needsConfirm++;
+    collector.add("mcp", {
+      label: String(m.name),
+      detail: IMPORT_DETAIL.mcpVerifyBeforeEnable,
+      status: "needsAction",
+      link: { kind: "mcp", id: String(m.id) },
+    });
   }
 
   // --- Scheduled Tasks ---
   // biome-ignore lint/suspicious/noExplicitAny: external JSON schema
   const taskRows = parseJsonEntry<any[]>(entries, "scheduled-tasks.json") ?? [];
   for (const t of taskRows) {
-    await db.insert(scheduledTasks).values({ ...t, userId, enabled: false });
+    await db.insert(scheduledTasks).values({ ...reviveDates(t), userId, enabled: false });
     result.scheduledTasks.imported++;
+    collector.add("scheduledTasks", {
+      label: String(t.title ?? t.id),
+      detail: IMPORT_DETAIL.scheduledTaskDisabled,
+      status: "imported",
+    });
   }
 
   // --- Settings ---
@@ -287,11 +477,15 @@ export async function importOpenHornBackup(userId: string, zipPath: string): Pro
       .from(settings)
       .where(and(eq(settings.userId, userId), eq(settings.key, s.key)))
       .limit(1);
-    if (existing.length > 0) continue;
-    await db.insert(settings).values({ ...s, userId });
+    if (existing.length > 0) {
+      collector.add("settings", { label: String(s.key), status: "skipped" });
+      continue;
+    }
+    await db.insert(settings).values({ ...reviveDates(s), userId });
+    collector.add("settings", { label: String(s.key), status: "imported" });
   }
 
-  return result;
+  return finishImport(userId, result, collector);
 }
 
 // ---------------------------------------------------------------------------
@@ -359,6 +553,8 @@ function linearizeChatGPT(
 
 export async function importChatGPT(userId: string, filePath: string): Promise<ImportResult> {
   const result = emptyResult("chatgpt");
+  const collector = new PartCollector();
+  const importedAt = new Date();
 
   let convs: ChatGPTConversation[];
   const ext = path.extname(filePath).toLowerCase();
@@ -381,18 +577,27 @@ export async function importChatGPT(userId: string, filePath: string): Promise<I
     const convId = crypto.randomUUID();
     const convCreatedAt = new Date((conv.create_time ?? Date.now() / 1000) * 1000);
 
+    const title = conv.title || "ChatGPT 导入";
     await db.insert(conversations).values({
       id: convId,
       userId,
-      title: conv.title || "ChatGPT 导入",
+      title,
       contextLength: 4096,
       defaultMode: "chat",
       lastMode: "chat",
       isPinned: false,
+      importedFrom: FILE_IMPORT_SOURCE,
+      importedAt,
       createdAt: convCreatedAt,
       updatedAt: new Date((conv.update_time ?? conv.create_time ?? Date.now() / 1000) * 1000),
     });
     result.conversations.imported++;
+    collector.add("conversations", {
+      label: title,
+      detail: IMPORT_DETAIL.messageCount(linearMessages.length),
+      status: "imported",
+      link: { kind: "conversation", id: convId },
+    });
 
     for (const msg of linearMessages) {
       await db.insert(messages).values({
@@ -406,8 +611,9 @@ export async function importChatGPT(userId: string, filePath: string): Promise<I
       result.messages.imported++;
     }
   }
+  collector.noteMessages(result.messages.imported);
 
-  return result;
+  return finishImport(userId, result, collector);
 }
 
 // ---------------------------------------------------------------------------
@@ -431,6 +637,8 @@ interface ClaudeConversation {
 
 export async function importClaude(userId: string, filePath: string): Promise<ImportResult> {
   const result = emptyResult("claude");
+  const collector = new PartCollector();
+  const importedAt = new Date();
 
   let convs: ClaudeConversation[];
   const ext = path.extname(filePath).toLowerCase();
@@ -453,18 +661,22 @@ export async function importClaude(userId: string, filePath: string): Promise<Im
     const convId = crypto.randomUUID();
     const now = new Date();
 
+    const title = conv.name || "Claude 导入";
     await db.insert(conversations).values({
       id: convId,
       userId,
-      title: conv.name || "Claude 导入",
+      title,
       contextLength: 4096,
       defaultMode: "chat",
       lastMode: "chat",
       isPinned: false,
+      importedFrom: FILE_IMPORT_SOURCE,
+      importedAt,
       createdAt: conv.created_at ? new Date(conv.created_at) : now,
       updatedAt: conv.updated_at ? new Date(conv.updated_at) : now,
     });
     result.conversations.imported++;
+    let importedMessages = 0;
 
     for (const msg of chatMessages) {
       const role =
@@ -489,8 +701,16 @@ export async function importClaude(userId: string, filePath: string): Promise<Im
         createdAt: msg.created_at ? new Date(msg.created_at) : now,
       });
       result.messages.imported++;
+      importedMessages++;
     }
+    collector.add("conversations", {
+      label: title,
+      detail: IMPORT_DETAIL.messageCount(importedMessages),
+      status: "imported",
+      link: { kind: "conversation", id: convId },
+    });
   }
+  collector.noteMessages(result.messages.imported);
 
-  return result;
+  return finishImport(userId, result, collector);
 }

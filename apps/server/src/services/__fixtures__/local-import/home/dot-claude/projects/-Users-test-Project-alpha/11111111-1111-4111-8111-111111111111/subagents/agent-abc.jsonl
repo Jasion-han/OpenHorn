@@ -1,0 +1,1 @@
+{"parentUuid": null, "isSidechain": true, "cwd": "/Users/test/Project/alpha", "sessionId": "11111111-1111-4111-8111-111111111111", "entrypoint": "cli", "type": "user", "uuid": "sa1", "timestamp": "2026-09-01T10:00:04.100Z", "message": {"role": "user", "content": "Subagent prompt"}}
