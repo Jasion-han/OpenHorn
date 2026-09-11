@@ -10,6 +10,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import type { ImportPartItem, ImportSource } from "shared/types";
 import {
   Button,
   Checkbox,
@@ -27,8 +28,8 @@ import {
   Switch,
   Textarea,
 } from "ui";
-import { getMcpLabel } from "../../lib/i18n/agent";
-import { notifyError, notifySuccess } from "../../lib/notify";
+import { formatImportLabel, getImportLabel, getMcpLabel } from "../../lib/i18n/agent";
+import { notifyError, notifySuccess, notifyWarning } from "../../lib/notify";
 import { createServerApi } from "../../lib/serverApi";
 import {
   type DiscoveredMcpServer,
@@ -37,9 +38,55 @@ import {
   pickMcpConfigFile,
 } from "../../lib/tauriBridge";
 import { BACKEND_UP_EVENT } from "../../stores/backendStatusStore";
+import { importSourceFromClientLabel, useImportStore } from "../../stores/importStore";
 import { useSidecarStore } from "../../stores/sidecarStore";
 
 const api = createServerApi();
+
+/**
+ * Writes the MCP import into the import history. The record's source is the
+ * client most rows came from (ties → first in row order); other clients are
+ * still visible per item via the "来源" detail. A failed write only warns —
+ * the servers themselves were already created.
+ */
+async function recordMcpImport(rows: ImportRow[], items: ImportPartItem[]) {
+  if (items.length === 0) return;
+  const tally = new Map<ImportSource, number>();
+  for (const row of rows) {
+    const source = importSourceFromClientLabel(row.client) ?? "file";
+    tally.set(source, (tally.get(source) ?? 0) + 1);
+  }
+  let primary: ImportSource = "file";
+  let best = -1;
+  for (const [source, count] of tally) {
+    if (count > best) {
+      best = count;
+      primary = source;
+    }
+  }
+  const imported = items.filter((item) => item.status === "imported").length;
+  try {
+    await api.importRecords.create({
+      source: primary,
+      kind: "local",
+      parts: [
+        {
+          type: "mcp",
+          imported,
+          skipped: 0,
+          needsAction: items.length - imported,
+          items,
+        },
+      ],
+    });
+    void useImportStore.getState().loadRecords();
+  } catch {
+    notifyWarning(
+      getImportLabel("import.notify.recordFailedTitle"),
+      getImportLabel("import.notify.recordFailedBody"),
+    );
+  }
+}
 
 type MCPServer = {
   id: string;
@@ -343,14 +390,39 @@ export function McpSettings() {
     setImporting(true);
     let ok = 0;
     const failed: string[] = [];
+    const items: ImportPartItem[] = [];
     for (const row of rows) {
+      const importedFrom = importSourceFromClientLabel(row.client) ?? "file";
+      const detail = formatImportLabel("import.detail.clients", {
+        clients: row.clients.join(" · "),
+      });
       try {
-        await api.mcp.createServer({ name: row.name, type: row.type, config: row.config });
+        const { server } = await api.mcp.createServer({
+          name: row.name,
+          type: row.type,
+          config: row.config,
+          importedFrom,
+        });
         ok += 1;
-      } catch {
+        items.push({
+          label: row.name,
+          detail,
+          status: "imported",
+          link: { kind: "mcp", id: server.id },
+        });
+      } catch (error) {
         failed.push(row.name);
+        items.push({
+          label: row.name,
+          detail: formatImportLabel("import.detail.mcpFailed", {
+            message: error instanceof Error ? error.message : String(error),
+          }),
+          status: "needsAction",
+          link: { kind: "mcp" },
+        });
       }
     }
+    await recordMcpImport(rows, items);
     setImporting(false);
     await loadServers();
     setImportOpen(false);

@@ -1,4 +1,4 @@
-import { CornerDownLeft, Plug, Sparkles, Square, Terminal } from "lucide-react";
+import { CornerDownLeft, FileText, Plug, Sparkles, Square, Terminal } from "lucide-react";
 import type {
   ClipboardEvent,
   DragEvent,
@@ -15,7 +15,7 @@ import { DesktopAttachmentPreviewItem } from "./DesktopAttachmentPreviewItem";
 import { DesktopComposerToolbar } from "./DesktopComposerToolbar";
 
 export type SlashPanelItem = {
-  type: "skill" | "mcp" | "command";
+  type: "skill" | "mcp" | "command" | "prompt";
   id: string;
   name: string;
   subtitle: string;
@@ -26,6 +26,7 @@ export const SLASH_ICONS = {
   skill: Sparkles,
   mcp: Plug,
   command: Terminal,
+  prompt: FileText,
 } as const;
 
 export type SlashHighlightRange = {

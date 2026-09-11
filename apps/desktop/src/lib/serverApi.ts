@@ -1,9 +1,21 @@
+import { PROMPT_TEMPLATES_SETTING_KEY } from "shared/constants";
+import type {
+  CreateImportRecordInput,
+  LocalImportConversationListResult,
+  LocalImportRunRequest,
+  LocalImportRunResult,
+  LocalImportScanResult,
+  LocalImportServerSource,
+  PromptTemplate,
+} from "shared/types";
 import { useBackendStatusStore } from "../stores/backendStatusStore";
 import type {
   ApiAgentCheckResult,
   ApiChannel,
   ApiChannelModel,
   ApiConversation,
+  ApiImportRecord,
+  ApiImportRecordListResult,
   ApiMessage,
   ApiProject,
   ApiSettingsMap,
@@ -157,7 +169,9 @@ export interface ServerApi {
       name: string;
       type: string;
       config: Record<string, unknown>;
-    }) => Promise<{ server: unknown }>;
+      /** ImportSource id when the entry comes from the import center / MCP import dialog. */
+      importedFrom?: string;
+    }) => Promise<{ server: { id: string; name: string } }>;
     updateServer: (
       id: string,
       data: {
@@ -176,6 +190,23 @@ export interface ServerApi {
     exportDTI: () => Promise<object[]>;
     detectFormat: (filePath: string) => Promise<{ format: string }>;
     importData: (filePath: string, format?: string) => Promise<ImportResult>;
+  };
+  importRecords: {
+    list: (params?: { limit?: number; cursor?: string }) => Promise<ApiImportRecordListResult>;
+    get: (id: string) => Promise<{ record: ApiImportRecord }>;
+    create: (data: CreateImportRecordInput) => Promise<{ record: ApiImportRecord }>;
+    remove: (id: string) => Promise<{ success: boolean }>;
+  };
+  localImport: {
+    scan: () => Promise<LocalImportScanResult>;
+    listConversations: (
+      source: LocalImportServerSource,
+    ) => Promise<LocalImportConversationListResult>;
+    run: (data: LocalImportRunRequest) => Promise<LocalImportRunResult>;
+  };
+  prompts: {
+    /** Prompt templates stored under the `prompts.templates` settings key. */
+    templates: () => Promise<PromptTemplate[]>;
   };
 }
 
@@ -522,5 +553,84 @@ export function createServerApi(options?: { baseUrl?: string; fetch?: FetchLike 
           body: JSON.stringify({ filePath, format }),
         }),
     },
+
+    importRecords: {
+      list: (params) => {
+        const query = new URLSearchParams();
+        if (params?.limit) query.set("limit", String(params.limit));
+        if (params?.cursor) query.set("cursor", params.cursor);
+        const suffix = query.toString();
+        return fetchJson(fetchImpl, baseUrl, `/import/records${suffix ? `?${suffix}` : ""}`);
+      },
+      get: (id) => fetchJson(fetchImpl, baseUrl, `/import/records/${encodeURIComponent(id)}`),
+      create: (data) =>
+        fetchJson(fetchImpl, baseUrl, "/import/records", {
+          method: "POST",
+          body: JSON.stringify(data),
+        }),
+      remove: (id) =>
+        fetchJson(fetchImpl, baseUrl, `/import/records/${encodeURIComponent(id)}`, {
+          method: "DELETE",
+        }),
+    },
+
+    localImport: {
+      scan: () => fetchJson(fetchImpl, baseUrl, "/import/local/scan", { method: "POST" }),
+      listConversations: (source) =>
+        fetchJson(
+          fetchImpl,
+          baseUrl,
+          `/import/local/conversations?source=${encodeURIComponent(source)}`,
+        ),
+      run: (data) =>
+        fetchJson(fetchImpl, baseUrl, "/import/local/run", {
+          method: "POST",
+          body: JSON.stringify(data),
+        }),
+    },
+
+    prompts: {
+      templates: async () => {
+        const { settings } = await fetchJson<{ settings: ApiSettingsMap }>(
+          fetchImpl,
+          baseUrl,
+          `/settings?keys=${encodeURIComponent(PROMPT_TEMPLATES_SETTING_KEY)}`,
+        );
+        return parsePromptTemplates(settings?.[PROMPT_TEMPLATES_SETTING_KEY]);
+      },
+    },
   };
+}
+
+/**
+ * Parses the raw `prompts.templates` settings value. Malformed entries are
+ * dropped rather than failing the whole list so one bad import cannot hide
+ * every other template from the slash panel.
+ */
+export function parsePromptTemplates(raw: string | null | undefined): PromptTemplate[] {
+  if (!raw) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  const out: PromptTemplate[] = [];
+  for (const entry of parsed) {
+    if (!isRecord(entry)) continue;
+    if (typeof entry.id !== "string" || typeof entry.name !== "string") continue;
+    if (typeof entry.body !== "string" || typeof entry.source !== "string") continue;
+    out.push({
+      id: entry.id,
+      name: entry.name,
+      namespace: typeof entry.namespace === "string" ? entry.namespace : undefined,
+      description: typeof entry.description === "string" ? entry.description : undefined,
+      argumentHint: typeof entry.argumentHint === "string" ? entry.argumentHint : undefined,
+      body: entry.body,
+      source: entry.source as PromptTemplate["source"],
+      importedAt: typeof entry.importedAt === "number" ? entry.importedAt : 0,
+    });
+  }
+  return out;
 }

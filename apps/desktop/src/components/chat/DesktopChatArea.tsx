@@ -47,6 +47,7 @@ import { readSseStream } from "../../lib/sse";
 import { discoverSkills, skillsDisabledList } from "../../lib/tauriBridge";
 import { useChatStore } from "../../stores/chatStore";
 import { useDesktopShellStore } from "../../stores/desktopShellStore";
+import { useImportStore } from "../../stores/importStore";
 import { useSidecarStore } from "../../stores/sidecarStore";
 import type { ChatStreamEvent, Message, MessageAttachmentMeta } from "../../types/chat";
 import { DesktopChatHeader } from "./DesktopChatHeader";
@@ -152,6 +153,11 @@ export function DesktopChatArea() {
     Array<{ id: string; name: string; description: string }>
   >([]);
   const [slashMcps, setSlashMcps] = useState<Array<{ id: string; name: string; type: string }>>([]);
+  // Prompt templates imported from Codex/Claude Code (`prompts.templates`).
+  // Panel-only: selecting one pastes its body, so they are deliberately NOT
+  // part of `knownSlashCommands` (no chip, no highlight, no send-time rewrite).
+  const promptTemplates = useImportStore((state) => state.promptTemplates);
+  const loadPromptTemplates = useImportStore((state) => state.loadPromptTemplates);
   // Known skill/MCP command names with their type — drives the bubble chip and
   // send-time slash resolution. Built-in commands are added separately where
   // needed (highlight/send); they never persist into a stored message.
@@ -439,6 +445,13 @@ export function DesktopChatArea() {
     };
   }, [currentConversation?.id, slashOpen]);
 
+  // Prompt templates change only via the import center (which refreshes the
+  // store itself), so one read per conversation is enough.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: conversation id is a trigger, not read in body
+  useEffect(() => {
+    void loadPromptTemplates();
+  }, [currentConversation?.id, loadPromptTemplates]);
+
   // Cleanup-only: the id is what decides *when* to revoke, which is the whole
   // point — object URLs for a conversation you have left would otherwise leak
   // for as long as the window stays open.
@@ -609,6 +622,18 @@ export function DesktopChatArea() {
       if (q && !m.name.toLowerCase().includes(q)) continue;
       items.push({ type: "mcp", id: m.id, name: m.name, subtitle: m.type, group: mcpGroup });
     }
+    const promptGroup = getSlashLabel("slash.group.prompt");
+    for (const p of promptTemplates) {
+      const display = p.namespace ? `${p.namespace}:${p.name}` : p.name;
+      if (q && !display.toLowerCase().includes(q)) continue;
+      items.push({
+        type: "prompt",
+        id: p.id,
+        name: display,
+        subtitle: collapseLine(p.description ?? p.argumentHint ?? ""),
+        group: promptGroup,
+      });
+    }
     const cmdGroup = getSlashLabel("slash.group.command");
     for (const c of builtinCommands) {
       if (q && !c.name.toLowerCase().includes(q)) continue;
@@ -622,7 +647,7 @@ export function DesktopChatArea() {
       });
     }
     return items;
-  }, [slashOpen, slashQuery, slashSkills, slashMcps, builtinCommands]);
+  }, [slashOpen, slashQuery, slashSkills, slashMcps, promptTemplates, builtinCommands]);
 
   // The `/<name>` token span to paint blue, anywhere in the input, but only when
   // it matches a *recognized* command (enabled skill / enabled MCP server /
@@ -688,6 +713,22 @@ export function DesktopChatArea() {
       const remainder = input.slice(0, range.start) + input.slice(range.end).replace(/^[ \t]/, "");
       setInput(remainder.trim() ? remainder : "");
       item.run?.();
+      return;
+    }
+    if (item.type === "prompt") {
+      // Paste the template body over the typed `/token`; `$ARGUMENTS` and
+      // `$1…$9` stay as-is for the user to fill in.
+      const body = promptTemplates.find((p) => p.id === item.id)?.body ?? "";
+      const next = input.slice(0, range.start) + body + input.slice(range.end);
+      const caret = range.start + body.length;
+      setInput(next);
+      queueMicrotask(() => {
+        const el = inputRef.current;
+        if (el) {
+          el.focus();
+          el.setSelectionRange(caret, caret);
+        }
+      });
       return;
     }
     // Replace the typed `/token` in place — never wipe the rest of the input.

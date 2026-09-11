@@ -4,7 +4,9 @@
 // as commands. Send-time resolution, the bubble chip, and the input highlight
 // all go through these helpers so the three views can never disagree.
 
-export type SlashCommandType = "skill" | "mcp" | "command";
+// `prompt` is panel-only: selecting one pastes its body, so it never becomes a
+// `/name` token in the input and is never registered as a known command.
+export type SlashCommandType = "skill" | "mcp" | "command" | "prompt";
 
 export type KnownSlashToken = {
   /** Index of the `/` in the text. */

@@ -1,14 +1,16 @@
 import { RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { Button, cn } from "ui";
+import { createCliOAuthChannel } from "../../lib/cliOAuthChannel";
 import {
   type CredentialSource,
   listCredentialSources,
   testCredentialSource,
 } from "../../lib/credentialApi";
-import { getCredentialLabel } from "../../lib/i18n/agent";
-import { createServerApi } from "../../lib/serverApi";
+import { formatImportLabel, getCredentialLabel } from "../../lib/i18n/agent";
+import { createServerApi, type ServerApi } from "../../lib/serverApi";
 import type { DetectedCredential } from "../../lib/sidecarClient";
+import { importSourceFromClientLabel, useImportStore } from "../../stores/importStore";
 import { useSidecarStore } from "../../stores/sidecarStore";
 
 const STATUS_ICONS: Record<string, string> = {
@@ -50,6 +52,41 @@ function getStatusColor(status: string): string {
       return "text-orange-600 dark:text-orange-400";
     default:
       return "text-neutral-500 dark:text-neutral-400";
+  }
+}
+
+/**
+ * Writes the "credentials → channel" import into the import history. Failure
+ * is swallowed: the channel already exists, and a missing history row must not
+ * read as a failed creation.
+ */
+async function recordCredentialImport(api: ServerApi, source: CredentialSource, channelId: string) {
+  try {
+    await api.importRecords.create({
+      source: importSourceFromClientLabel(source.sourceName) ?? "file",
+      kind: "local",
+      parts: [
+        {
+          type: "credentials",
+          imported: 1,
+          skipped: 0,
+          needsAction: 0,
+          items: [
+            {
+              label: source.sourceName,
+              detail: formatImportLabel("import.detail.channelCreated", {
+                provider: source.provider,
+              }),
+              status: "imported",
+              link: { kind: "channel", id: channelId },
+            },
+          ],
+        },
+      ],
+    });
+    void useImportStore.getState().loadRecords();
+  } catch {
+    // history only — see above
   }
 }
 
@@ -313,21 +350,12 @@ export function DesktopCredentialSourcesPanel() {
                         setTesting(`create-${source.id}`);
                         try {
                           const api = createServerApi();
-                          const protocol = source.provider === "anthropic" ? "anthropic" : "openai";
-                          await api.channels.create({
-                            name: source.sourceName,
-                            provider: source.provider,
-                            protocol,
-                            apiKey: `__cli_oauth__:${source.id}`,
-                            baseUrl:
-                              source.provider === "anthropic"
-                                ? "https://api.anthropic.com"
-                                : "https://api.openai.com/v1",
-                          });
+                          const { channel } = await createCliOAuthChannel(api, source);
                           setTestResults((prev) => ({
                             ...prev,
                             [`create-${source.id}`]: { success: true },
                           }));
+                          void recordCredentialImport(api, source, channel.id);
                         } catch (err) {
                           setTestResults((prev) => ({
                             ...prev,

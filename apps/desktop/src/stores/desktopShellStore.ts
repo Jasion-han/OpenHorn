@@ -4,6 +4,7 @@ import { persist } from "zustand/middleware";
 export type DesktopActiveView = "chat" | "settings" | "scheduled-tasks";
 export type DesktopSettingsTab =
   | "general"
+  | "import"
   | "channels"
   | "credentials"
   | "agent"

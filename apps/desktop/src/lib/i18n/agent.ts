@@ -512,6 +512,7 @@ export const slashLabels = {
   "slash.group.skill": "技能",
   "slash.group.mcp": "MCP 工具",
   "slash.group.command": "命令",
+  "slash.group.prompt": "提示词",
   "slash.command.newConversation": "新会话",
   "slash.command.newConversation.desc": "开始一个新的会话",
   "slash.command.openSettings": "打开设置",
@@ -915,6 +916,7 @@ export function getAppearanceSettingsLabel(key: AppearanceSettingsLabelKey): str
 export const settingsViewLabels = {
   "settings.view.title": "设置",
   "settings.view.tab.general": "通用",
+  "settings.view.tab.import": "导入",
   "settings.view.tab.channels": "渠道",
   "settings.view.tab.appearance": "外观",
 } as const;
@@ -1091,6 +1093,168 @@ export function formatDataTransferLabel(
     text = text.replaceAll(`{${name}}`, String(value));
   }
   return text;
+}
+
+/**
+ * Labels for the settings → 导入 tab (ImportSettings): detected local AI-client
+ * sources, the per-source import dialog, the "needs action" digest and the
+ * import history. Product names (Claude Code, Codex, MCP, …) stay English per
+ * rule 3; source ids / part types are the shared `ImportSource` /
+ * `ImportPartType` enums. Templates use `{name}` placeholders resolved via
+ * `formatImportLabel`.
+ */
+export const importLabels = {
+  // Source display names (keyed by shared ImportSource id)
+  "import.source.claude-code": "Claude Code",
+  "import.source.codex": "Codex CLI",
+  "import.source.gemini": "Gemini CLI",
+  "import.source.cc-switch": "CC Switch",
+  "import.source.opencode": "OpenCode",
+  "import.source.cursor": "Cursor",
+  "import.source.vscode": "VS Code",
+  "import.source.claude-desktop": "Claude Desktop",
+  "import.source.continue": "Continue",
+  "import.source.file": "其他客户端 / 文件",
+  // Part display names (keyed by shared ImportPartType)
+  "import.part.conversations": "会话",
+  "import.part.mcp": "MCP",
+  "import.part.skills": "技能",
+  "import.part.instructions": "全局指令",
+  "import.part.prompts": "提示词模板",
+  "import.part.credentials": "凭据",
+  "import.part.channels": "渠道",
+  "import.part.projects": "项目",
+  "import.part.scheduledTasks": "定时任务",
+  "import.part.settings": "设置",
+  "import.part.attachments": "附件",
+  // Item status
+  "import.status.imported": "已导入",
+  "import.status.skipped": "已跳过",
+  "import.status.needsAction": "需处理",
+  // Section: detected sources
+  "import.detected.title": "检测到可导入的配置",
+  "import.detected.description":
+    "扫描本机 AI 客户端的会话、MCP、技能、全局指令与凭据，按来源勾选后批量导入。",
+  "import.detected.rescan": "重新扫描",
+  "import.detected.scanning": "正在扫描本机配置…",
+  "import.detected.scanFailed": "扫描失败：{message}",
+  "import.detected.import": "导入",
+  "import.detected.partCount": "{part} {count}",
+  "import.detected.summaryEmpty": "暂无可导入内容",
+  "import.detected.desktopOnly": "本机来源扫描仅在桌面端可用。",
+  // Empty state
+  "import.empty.title": "未检测到本机 AI 客户端配置",
+  "import.empty.description":
+    "没有在用户目录下找到 Claude Code、Codex CLI、Gemini CLI 等客户端的数据。你可以手动选择一个 MCP 配置文件，或从 OpenHorn 备份文件导入。",
+  "import.empty.pickConfig": "选择配置文件…",
+  "import.empty.fromBackup": "从备份文件导入",
+  "import.empty.pickConfigNone": "所选文件中没有可解析的 MCP server。",
+  "import.empty.pickConfigFailed": "无法读取所选文件。",
+  // Import dialog
+  "import.dialog.title": "从 {source} 导入",
+  "import.dialog.description": "勾选要导入的部分。已导入或已存在的条目默认不勾选。",
+  "import.dialog.partRow": "{part}（{count}）",
+  "import.dialog.conversationsHint": "共 {total} 个会话，已选 {selected} 个",
+  "import.dialog.conversationsLoading": "正在读取会话列表…",
+  "import.dialog.conversationsSearch": "搜索会话标题或路径",
+  "import.dialog.conversationsExpand": "选择会话",
+  "import.dialog.entriesExpand": "选择条目",
+  "import.dialog.conversationsCollapse": "收起",
+  "import.dialog.selectAll": "全选",
+  "import.dialog.selectNone": "取消全选",
+  "import.dialog.selectNew": "只选未导入",
+  "import.dialog.alreadyImported": "已导入",
+  "import.dialog.alreadyExists": "已存在",
+  "import.dialog.alreadyEnabled": "已启用",
+  "import.dialog.noCwd": "未知目录",
+  "import.dialog.instructionsPath": "来源：{path}",
+  "import.dialog.credentialsHint": "登录态凭据将创建为占位渠道；环境变量密钥只列出不导入。",
+  "import.dialog.cancel": "取消",
+  "import.dialog.close": "关闭",
+  "import.dialog.confirm": "导入 {count} 项",
+  "import.dialog.nothingSelected": "请至少勾选一项",
+  "import.dialog.progress": "正在导入… {done} / {total}",
+  "import.dialog.progressDesktop": "正在导入 MCP / 技能 / 凭据…",
+  "import.dialog.resultTitle": "导入完成",
+  "import.dialog.resultSummary":
+    "已导入 {imported} 项 · 跳过 {skipped} 项 · {needsAction} 项需处理",
+  "import.dialog.resultErrors": "{count} 条错误",
+  "import.dialog.viewRecord": "查看记录",
+  "import.dialog.failedTitle": "导入失败",
+  // Needs-action digest
+  "import.needsAction.title": "需要处理",
+  "import.needsAction.description": "最近导入中未完成的条目，点击右侧动作前往处理。",
+  // History
+  "import.history.title": "导入历史",
+  "import.history.description": "每次导入的记录，展开可查看各部分与具体条目。",
+  "import.history.empty": "还没有导入记录。",
+  "import.history.cardTitle": "导入 · {source}",
+  "import.history.cardSummary": "已导入 {imported} 项 · {needsAction} 项需处理",
+  "import.history.cardSummaryClean": "已导入 {imported} 项",
+  "import.history.kind.local": "本机",
+  "import.history.kind.backup": "备份文件",
+  "import.history.kind.chatgpt": "ChatGPT 导出",
+  "import.history.kind.claude-export": "Claude.ai 导出",
+  "import.history.partSummary": "已导入 {imported} · 跳过 {skipped}",
+  "import.history.partNeedsAction": "{count} 项需处理",
+  "import.history.itemsTruncated": "仅显示前 {shown} 条，其余 {rest} 条未列出",
+  "import.history.noItems": "无条目明细",
+  "import.history.errors": "错误",
+  "import.history.loadMore": "查看更多",
+  "import.history.loading": "加载中…",
+  "import.history.delete": "删除记录",
+  "import.history.deleteFailed": "无法删除该记录。",
+  "import.history.loadFailed": "无法加载导入历史。",
+  // Item actions (by link.kind)
+  "import.action.conversation": "在会话中打开",
+  "import.action.mcp": "在 MCP 中打开",
+  "import.action.skill": "在技能中打开",
+  "import.action.channel": "在渠道中打开",
+  "import.action.project": "查看项目",
+  "import.action.settings-tab": "打开设置",
+  // Details written into desktop-side import records / items
+  "import.detail.clients": "来源：{clients}",
+  "import.detail.mcpExists": "同名 MCP 已存在",
+  "import.detail.mcpFailed": "创建失败：{message}",
+  "import.detail.skillEnabled": "已启用，运行时就地读取",
+  "import.detail.skillAlreadyEnabled": "此前已启用",
+  "import.detail.skillFailed": "启用失败：{message}",
+  "import.detail.channelCreated": "已创建占位渠道（{provider}）",
+  "import.detail.channelExists": "渠道已存在",
+  "import.detail.channelFailed": "创建渠道失败：{message}",
+  "import.detail.credentialEnvOnly": "环境变量密钥仅列出，不导入",
+  // Toasts
+  "import.notify.recordFailedTitle": "记录写入失败",
+  "import.notify.recordFailedBody": "导入已完成，但导入历史未能记录。",
+} as const;
+
+type ImportLabelKey = keyof typeof importLabels;
+
+export function getImportLabel(key: ImportLabelKey): string {
+  return importLabels[key];
+}
+
+export function formatImportLabel(
+  key: ImportLabelKey,
+  vars: Record<string, string | number>,
+): string {
+  let text: string = importLabels[key];
+  for (const [name, value] of Object.entries(vars)) {
+    text = text.replaceAll(`{${name}}`, String(value));
+  }
+  return text;
+}
+
+/** Display name of an import source; unknown ids fall back to the raw id. */
+export function getImportSourceLabel(source: string): string {
+  const key = `import.source.${source}` as ImportLabelKey;
+  return key in importLabels ? importLabels[key] : source;
+}
+
+/** Display name of an import part type; unknown types fall back to the raw id. */
+export function getImportPartLabel(part: string): string {
+  const key = `import.part.${part}` as ImportLabelKey;
+  return key in importLabels ? importLabels[key] : part;
 }
 
 /**

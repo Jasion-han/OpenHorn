@@ -1,4 +1,14 @@
+import type { ImportRecord } from "shared/types";
+
 export type ChatMode = "chat" | "agent";
+
+/** `ImportRecord` as it arrives over JSON — `createdAt` is an ISO string, not a Date. */
+export type ApiImportRecord = Omit<ImportRecord, "createdAt"> & { createdAt: string };
+
+export interface ApiImportRecordListResult {
+  records: ApiImportRecord[];
+  nextCursor?: string;
+}
 
 export type ApiProviderErrorKind =
   | "quota_exhausted"

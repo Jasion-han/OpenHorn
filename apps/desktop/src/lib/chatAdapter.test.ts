@@ -258,7 +258,7 @@ function createStubServerApi() {
     },
     mcp: {
       listServers: async () => ({ servers: [] }),
-      createServer: async () => ({ server: {} }),
+      createServer: async () => ({ server: { id: "m1", name: "m1" } }),
       updateServer: async () => ({ success: true }),
       deleteServer: async () => ({ success: true }),
       testServer: async () => ({ success: true }),
@@ -284,6 +284,24 @@ function createStubServerApi() {
         scheduledTasks: { imported: 0 },
         errors: [],
       }),
+    },
+    importRecords: {
+      list: async () => ({ records: [] }),
+      get: async () => {
+        throw new Error("not implemented");
+      },
+      create: async () => {
+        throw new Error("not implemented");
+      },
+      remove: async () => ({ success: true }),
+    },
+    localImport: {
+      scan: async () => ({ homeDir: "", sources: [] }),
+      listConversations: async (source) => ({ source, conversations: [] }),
+      run: async () => ({ recordId: "", parts: [], errors: [] }),
+    },
+    prompts: {
+      templates: async () => [],
     },
   };
 

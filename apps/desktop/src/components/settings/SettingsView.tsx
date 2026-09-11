@@ -1,5 +1,15 @@
-import { Bot, HardDrive, KeyRound, Palette, Plug, Radio, Settings, Sparkles } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import {
+  Bot,
+  Download,
+  HardDrive,
+  KeyRound,
+  Palette,
+  Plug,
+  Radio,
+  Settings,
+  Sparkles,
+} from "lucide-react";
+import { type ReactNode, useEffect, useState } from "react";
 import { cn, ScrollArea } from "ui";
 import {
   getCredentialLabel,
@@ -16,6 +26,7 @@ import { ChannelSettings } from "./ChannelSettings";
 import { DataTransferSettings } from "./DataTransferSettings";
 import { DesktopCredentialSourcesPanel } from "./DesktopCredentialSourcesPanel";
 import { GeneralSettings } from "./GeneralSettings";
+import { ImportSettings } from "./ImportSettings";
 import { McpSettings } from "./McpSettings";
 import { SkillSettings } from "./SkillSettings";
 
@@ -24,6 +35,11 @@ const TABS: Array<{ id: SettingsTab; label: string; icon: ReactNode }> = [
     id: "general",
     label: getSettingsViewLabel("settings.view.tab.general"),
     icon: <Settings size={16} />,
+  },
+  {
+    id: "import",
+    label: getSettingsViewLabel("settings.view.tab.import"),
+    icon: <Download size={16} />,
   },
   {
     id: "channels",
@@ -54,6 +70,8 @@ function TabContent({ id }: { id: SettingsTab }) {
   switch (id) {
     case "general":
       return <GeneralSettings />;
+    case "import":
+      return <ImportSettings />;
     case "channels":
       return <ChannelSettings />;
     case "credentials":
@@ -77,14 +95,19 @@ export function SettingsView({ initialTab = "channels" }: { initialTab?: Setting
   const resolvedTab = TABS.some((tab) => tab.id === activeTab) ? activeTab : initialTab;
   const [visited, setVisited] = useState<Set<SettingsTab>>(new Set([resolvedTab]));
 
-  const handleTabClick = (tabId: SettingsTab) => {
-    setActiveTab(tabId);
+  // Tabs can also be switched from outside the nav (e.g. the import history's
+  // "open in MCP" action writes the store directly); keep those alive too.
+  useEffect(() => {
     setVisited((prev) => {
-      if (prev.has(tabId)) return prev;
+      if (prev.has(resolvedTab)) return prev;
       const next = new Set(prev);
-      next.add(tabId);
+      next.add(resolvedTab);
       return next;
     });
+  }, [resolvedTab]);
+
+  const handleTabClick = (tabId: SettingsTab) => {
+    setActiveTab(tabId);
   };
 
   return (
@@ -117,7 +140,7 @@ export function SettingsView({ initialTab = "channels" }: { initialTab?: Setting
 
         <div className="flex-1 min-h-0 relative">
           {TABS.map((tab) => {
-            if (!visited.has(tab.id)) return null;
+            if (!visited.has(tab.id) && tab.id !== resolvedTab) return null;
             return (
               <div
                 key={tab.id}
