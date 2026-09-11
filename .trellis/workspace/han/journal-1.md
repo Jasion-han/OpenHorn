@@ -354,3 +354,41 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 10: 回复内文件引用/链接右侧预览面板、外部编辑器打开、tool_start 提前、流式首字符修复、composer 响应式
+
+**Date**: 2026-09-11
+**Task**: 回复内文件引用/链接右侧预览面板、外部编辑器打开、tool_start 提前、流式首字符修复、composer 响应式
+**Package**: agent
+**Branch**: `main`
+
+### Summary
+
+新增右侧预览面板：文件引用走 sidecar fs.read 代码预览+行高亮，http 链接走 Tauri 子 webview 内嵌浏览器（capability 改 webviews:[main]，弹窗期间预截图垫底无闪跳），可拖宽/多标签/收起展开；在编辑器中打开按用户选择记住并跳行；sidecar 三 runtime 在 tool_use 出现即发 tool_start 并按 toolCallId 合并；修复 StrictMode 流式首字符丢失；composer 工具条容器查询收缩。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0090e22` | (see git log) |
+| `438d62d` | (see git log) |
+| `107ef40` | (see git log) |
+| `8919989` | (see git log) |
+| `70336b3` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
