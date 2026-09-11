@@ -71,13 +71,33 @@ function applyStreamDelta(message: Message, delta: string, updates?: Partial<Mes
   };
 }
 
-function applyAgentEventToRun(
+export function applyAgentEventToRun(
   run: ApiAgentRun | undefined,
   event: Extract<ChatStreamEvent, { type: "agent_event" }>["event"],
 ): ApiAgentRun {
   const base = run || createPartialAgentRun();
 
   const now = Date.now();
+
+  if (event.type === "tool_start" && event.toolCallId) {
+    // The runtime emits tool_start twice per call: once the moment the model
+    // opens the tool call (name only) and again when execution begins (with
+    // input). Fill the existing row in place and keep its timestamp so the
+    // elapsed timer counts from the first sighting.
+    const existingIdx = base.steps.findIndex(
+      (s) => s.type === "tool_start" && s.toolCallId === event.toolCallId,
+    );
+    if (existingIdx >= 0) {
+      const updatedSteps = [...base.steps];
+      const existing = updatedSteps[existingIdx] as ApiAgentRunStep;
+      updatedSteps[existingIdx] = {
+        ...existing,
+        toolName: event.toolName || existing.toolName,
+        toolInput: event.toolInput ?? existing.toolInput,
+      };
+      return { ...base, summary: "Working", steps: updatedSteps };
+    }
+  }
 
   if (event.type === "tool_start" || event.type === "tool_result") {
     return {
@@ -90,6 +110,7 @@ function applyAgentEventToRun(
           toolName: event.toolName,
           content: event.content,
           toolInput: event.toolInput,
+          toolCallId: event.toolCallId,
           timestamp: now,
         },
       ],

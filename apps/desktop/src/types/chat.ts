@@ -282,7 +282,13 @@ export type ChatStreamEvent =
   | { type: "done"; messageId?: string; model?: string; agentRun?: ApiAgentRun }
   | {
       type: "agent_event";
-      event: { type: string; content?: string; toolName?: string; toolInput?: unknown };
+      event: {
+        type: string;
+        content?: string;
+        toolName?: string;
+        toolInput?: unknown;
+        toolCallId?: string;
+      };
     }
   | { type: "error"; message: string };
 

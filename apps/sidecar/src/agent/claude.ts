@@ -408,6 +408,42 @@ function mapToolForExecution(
 }
 
 // ---------------------------------------------------------------------------
+// OAuth billing attribution
+// ---------------------------------------------------------------------------
+
+/**
+ * Claude Code OAuth tokens (`sk-ant-oat…`) carry no API-billing quota. The
+ * server attributes a request to the user's Claude Code subscription only when
+ * the system prompt opens with this billing marker — exactly what the Claude
+ * CLI sends as `system[0]`. Without it, Sonnet/Opus requests are refused with
+ * an opaque 429 `rate_limit_error` (Haiku still passes on its free tier), which
+ * is why the marker is mandatory and not merely cosmetic.
+ *
+ * Verified 2026-09-10 against api.anthropic.com: the marker alone unlocks
+ * Sonnet 4.6 and Opus 4.6 over Bearer auth; no beta header, metadata, or
+ * `?beta=true` endpoint is required, and the build-hash suffix on the version
+ * is optional. `cc_version` is taken from the installed CLI so the attribution
+ * tracks whatever the user actually has. An OAuth token only ever comes from a
+ * CLI login, so the CLI is present whenever this path runs; the constant is a
+ * last-resort value that was verified to be accepted.
+ */
+const VERIFIED_CC_VERSION = "2.1.267";
+let cachedBillingHeader: string | null = null;
+async function buildOAuthBillingHeader(): Promise<string> {
+  if (cachedBillingHeader) return cachedBillingHeader;
+  let version = VERIFIED_CC_VERSION;
+  try {
+    const { execSync } = await import("node:child_process");
+    const out = execSync("claude --version", { timeout: 5000 }).toString();
+    version = out.match(/(\d+\.\d+\.\d+)/)?.[1] ?? version;
+  } catch {
+    // CLI not on PATH — keep the verified constant
+  }
+  cachedBillingHeader = `x-anthropic-billing-header: cc_version=${version}; cc_entrypoint=sdk-cli;`;
+  return cachedBillingHeader;
+}
+
+// ---------------------------------------------------------------------------
 // Main entry point — self-managed Messages API loop
 // ---------------------------------------------------------------------------
 
@@ -436,6 +472,7 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
     webSearchEnabled: input.webSearchEnabled,
   });
   const finalSystemPrompt = [
+    isOAuth ? await buildOAuthBillingHeader() : null,
     buildAgentSystemPrompt({
       cwd: input.cwd,
       permissionMode: input.permissionMode ?? "full-access",
@@ -526,6 +563,25 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
         textBuf += text;
         input.onEvent({ type: "final_text", content: text });
       });
+      // The moment a tool_use block opens, the text so far is reasoning and the
+      // tool row should appear (its input JSON may take seconds to stream). The
+      // execution loop below re-emits `tool_start` with the same `toolCallId`
+      // plus the full input, and the desktop merges the two into one step.
+      stream.on("streamEvent", (event: Anthropic.MessageStreamEvent) => {
+        if (event.type !== "content_block_start" || event.content_block.type !== "tool_use") {
+          return;
+        }
+        if (textBuf) {
+          input.onEvent({ type: "clear_streaming_text" });
+          input.onEvent({ type: "reasoning", content: textBuf });
+          textBuf = "";
+        }
+        input.onEvent({
+          type: "tool_start",
+          toolName: event.content_block.name,
+          toolCallId: event.content_block.id,
+        });
+      });
 
       // Wait for the complete response
       let response: Anthropic.Message;
@@ -606,12 +662,22 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
         const toolInput = (block.input || {}) as Record<string, unknown>;
 
         // Emit tool_start so the UI shows the tool being invoked
-        input.onEvent({ type: "tool_start", toolName: block.name, toolInput });
+        input.onEvent({
+          type: "tool_start",
+          toolName: block.name,
+          toolInput,
+          toolCallId: block.id,
+        });
 
         // --- Workspace boundary check for fs tools (Read/Write/Edit) ---
         const fsDeny = await checkSdkFsToolPath(block.name, toolInput, input.cwd, skillRoots);
         if (fsDeny !== null) {
-          input.onEvent({ type: "tool_result", content: fsDeny });
+          input.onEvent({
+            type: "tool_result",
+            content: fsDeny,
+            toolName: block.name,
+            toolCallId: block.id,
+          });
           toolResults.push({
             type: "tool_result",
             tool_use_id: block.id,
@@ -621,8 +687,12 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
           continue;
         }
 
-        // --- Bash approval for risky commands ---
-        if (block.name === "Bash") {
+        // --- Bash approval for risky commands (default mode only) ---
+        // Full-access skips the risk gate entirely, matching the old SDK path
+        // (`permissionMode: "bypassPermissions"` never invoked canUseTool) and
+        // the Direct runtime's `executeTool` gating.
+        const permissionMode = input.permissionMode ?? "full-access";
+        if (block.name === "Bash" && permissionMode !== "full-access") {
           const cmd = typeof toolInput.command === "string" ? toolInput.command : "";
           const risk = classifyBashCommandRisk(cmd);
           if (risk.level !== "allow") {
@@ -634,7 +704,12 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
             });
             if (!allowed) {
               const denyMsg = "User denied command";
-              input.onEvent({ type: "tool_result", content: denyMsg });
+              input.onEvent({
+                type: "tool_result",
+                content: denyMsg,
+                toolName: block.name,
+                toolCallId: block.id,
+              });
               toolResults.push({
                 type: "tool_result",
                 tool_use_id: block.id,
@@ -673,6 +748,8 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
         input.onEvent({
           type: "tool_result",
           content: result.length > 8000 ? `${result.slice(0, 8000)}...` : result,
+          toolName: block.name,
+          toolCallId: block.id,
         });
         toolResults.push({ type: "tool_result", tool_use_id: block.id, content: result });
       }

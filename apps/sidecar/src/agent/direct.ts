@@ -980,6 +980,20 @@ export async function runDirectAgent(input: RunDirectAgentInput): Promise<void> 
         if (ame.type === "text_delta") {
           turnTextBuffer += ame.delta;
           input.onEvent({ type: "final_text", content: ame.delta });
+        } else if (ame.type === "toolcall_start") {
+          // The model has started emitting a tool call. Its arguments JSON may
+          // take seconds to stream, so flush the text into reasoning and show
+          // the tool row (name only) now; `tool_execution_start` fills in the
+          // input on the same row via `toolCallId` once the args are complete.
+          const tc = ame.partial.content[ame.contentIndex];
+          if (tc && tc.type === "toolCall") {
+            if (turnTextBuffer) {
+              input.onEvent({ type: "clear_streaming_text" });
+              input.onEvent({ type: "reasoning", content: turnTextBuffer });
+              turnTextBuffer = "";
+            }
+            input.onEvent({ type: "tool_start", toolName: tc.name, toolCallId: tc.id });
+          }
         }
         break;
       }
@@ -994,6 +1008,7 @@ export async function runDirectAgent(input: RunDirectAgentInput): Promise<void> 
           type: "tool_start",
           toolName: event.toolName,
           toolInput: event.args,
+          toolCallId: event.toolCallId,
         });
         break;
       case "tool_execution_end": {
@@ -1008,6 +1023,8 @@ export async function runDirectAgent(input: RunDirectAgentInput): Promise<void> 
         input.onEvent({
           type: "tool_result",
           content: text.length > 8000 ? `${text.slice(0, 8000)}...` : text,
+          toolName: event.toolName,
+          toolCallId: event.toolCallId,
         });
         break;
       }

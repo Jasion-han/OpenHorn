@@ -213,6 +213,12 @@ export function applySidecarEventToChat(
       event.eventType === "tool_call_detail" ||
       event.eventType === "plan" ||
       event.eventType === "agent_info";
+    // tool_start / tool_result carry the call id in metadata so the store can
+    // merge the early "name only" tool_start with the later one that has input.
+    const toolCallId =
+      event.eventType === "tool_start" || event.eventType === "tool_result"
+        ? (event.metadata as { toolCallId?: string } | undefined)?.toolCallId
+        : undefined;
     store.applyStreamEvent(assistantMessageId, {
       type: "agent_event",
       event: {
@@ -220,6 +226,7 @@ export function applySidecarEventToChat(
         content: event.content,
         toolName: event.toolName,
         toolInput: useMetadata ? event.metadata : event.toolInput,
+        toolCallId,
       },
     });
     return { kind: "handled" };
