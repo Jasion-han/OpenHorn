@@ -21,10 +21,16 @@ export function DesktopStreamingMarkdownMessage({
     });
 
     smootherRef.current = smoother;
+    // `targetContentRef` mirrors what has been pushed into the *current* smoother
+    // instance, so it must be reset whenever the instance is (re)created. Otherwise
+    // a StrictMode/remount leaves the new smoother empty while the ref still claims
+    // the content was already pushed, and the first delta is silently dropped.
+    targetContentRef.current = "";
 
     return () => {
       smoother.cancel();
       smootherRef.current = null;
+      targetContentRef.current = "";
     };
   }, []);
 

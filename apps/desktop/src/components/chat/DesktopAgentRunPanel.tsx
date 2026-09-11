@@ -516,13 +516,21 @@ function ProcessGroupSection({
   const showExpanded = expanded;
 
   // --- Current step preview for active (running) group ---
-  const lastStep = steps[steps.length - 1];
-  const previewLabel =
-    lastStep && (lastStep.type === "tool_start" || lastStep.type === "tool_result")
-      ? presentToolLabel(lastStep.toolName)
-      : null;
+  // Show the most recent tool *call* (which carries name + input) rather than
+  // the raw last step: a trailing `tool_result` has neither, and would render
+  // as a bare "Tool" while the model is still thinking after that result.
+  let currentTool: ApiAgentRunStep | undefined;
+  for (let i = steps.length - 1; i >= 0; i--) {
+    const s = steps[i];
+    if (s.type === "tool_start" || s.type === "tool_detail") {
+      currentTool = s;
+      break;
+    }
+  }
+  // ACP `tool_detail` steps store their human title in `toolName` too.
+  const previewLabel = currentTool ? presentToolLabel(currentTool.toolName) : null;
   const previewDetail =
-    lastStep?.type === "tool_start" ? summarizeToolInput(lastStep.toolInput) : null;
+    currentTool?.type === "tool_start" ? summarizeToolInput(currentTool.toolInput) : null;
   const showPreview = isActive && !expanded && previewLabel;
 
   return (
