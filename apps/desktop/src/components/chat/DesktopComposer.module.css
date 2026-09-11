@@ -1,0 +1,28 @@
+/* Bottom toolbar of the composer. The chat column shrinks when the preview
+   panel opens, so the toolbar adapts to its own width with a container query
+   instead of the viewport: chip labels drop first, then the model name gets
+   narrower. Nothing here may ever wrap — the toolbar is a fixed 40px row. */
+
+.toolbar {
+  container-type: inline-size;
+}
+
+.modelLabel {
+  max-width: 220px;
+}
+
+@container (max-width: 560px) {
+  .chipLabel {
+    display: none;
+  }
+
+  .modelLabel {
+    max-width: 120px;
+  }
+}
+
+@container (max-width: 420px) {
+  .modelLabel {
+    max-width: 80px;
+  }
+}

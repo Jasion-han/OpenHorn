@@ -1,14 +1,4 @@
-import {
-  ChevronDown,
-  CornerDownLeft,
-  FolderOpen,
-  Globe,
-  MessageSquare,
-  Paperclip,
-  ShieldOff,
-  Sparkles,
-  X,
-} from "lucide-react";
+import { CornerDownLeft, FolderOpen, MessageSquare, Sparkles, X } from "lucide-react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useEffect, useRef, useState } from "react";
 import { fileKey } from "shared/format";
@@ -29,9 +19,8 @@ import { resolveProjectRootForConversation, useProjectStore } from "../../stores
 import { useSidecarStore } from "../../stores/sidecarStore";
 import { DesktopAttachmentPreviewItem } from "./DesktopAttachmentPreviewItem";
 import { ACCEPT_FILES } from "./DesktopComposer";
-import { DesktopComposerModeChip } from "./DesktopComposerModeChip";
+import { DesktopComposerToolbar } from "./DesktopComposerToolbar";
 import { DesktopModelPickerModal } from "./DesktopModelPickerModal";
-import { DesktopProviderLogo } from "./DesktopProviderLogo";
 
 const welcomeApi = createServerApi();
 
@@ -446,82 +435,19 @@ export function DesktopWelcomeScreen() {
               </button>
             </div>
 
-            <div className="flex h-[40px] items-center justify-between gap-4 px-2 py-[5px]">
-              <div className="flex min-w-0 flex-1 items-center gap-1.5">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="size-[30px] rounded-full text-foreground/60 hover:text-foreground"
-                  aria-label="Attach"
-                  title="Add Attachments"
-                >
-                  <Paperclip className="size-5" />
-                </Button>
-
-                <DesktopComposerModeChip mode={composerMode} onModeChange={setComposerMode} />
-
-                <button
-                  type="button"
-                  onClick={() => setModelPickerOpen(true)}
-                  className={cn(
-                    "flex min-w-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors",
-                    selection
-                      ? "text-muted-foreground hover:bg-accent hover:text-foreground"
-                      : "text-orange-600 hover:bg-orange-500/10 hover:text-orange-700",
-                  )}
-                  aria-label="Model"
-                  title="Model"
-                >
-                  {selectedProvider ? (
-                    <DesktopProviderLogo provider={selectedProvider} className="size-4" />
-                  ) : null}
-                  <span className="max-w-[220px] truncate">
-                    {selection?.modelId ?? getChatLabel("chat.welcome.noModel")}
-                  </span>
-                  <ChevronDown className="size-3" />
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setForceWebSearch((on) => !on)}
-                  className={cn(
-                    "flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors",
-                    forceWebSearch
-                      ? "bg-emerald-400/20 text-emerald-500 hover:bg-emerald-400/30"
-                      : "text-muted-foreground hover:bg-accent hover:text-foreground",
-                  )}
-                  aria-label="Allow web search"
-                  title={forceWebSearch ? "Web Search: On" : "Web Search: Off"}
-                >
-                  <Globe className="size-3.5" />
-                  <span>Web Search</span>
-                </button>
-
-                {composerMode === "agent" && (
-                  <button
-                    type="button"
-                    onClick={toggleFullAccess}
-                    className={cn(
-                      "inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs transition-colors",
-                      fullAccessEnabled
-                        ? "bg-rose-400/20 text-rose-600 hover:bg-rose-400/30"
-                        : "text-muted-foreground hover:bg-accent hover:text-foreground",
-                    )}
-                    aria-label="Full Access"
-                    title={
-                      fullAccessEnabled
-                        ? "Full Access: All operations auto-approved"
-                        : "Full Access: Off (dangerous commands need approval)"
-                    }
-                  >
-                    <ShieldOff size={14} />
-                    <span>Full Access</span>
-                  </button>
-                )}
-              </div>
-
+            <DesktopComposerToolbar
+              onAttach={() => fileInputRef.current?.click()}
+              mode={composerMode}
+              onModeChange={setComposerMode}
+              modelProvider={selectedProvider}
+              modelLabel={selection?.modelId ?? getChatLabel("chat.welcome.noModel")}
+              modelTone={selection ? "normal" : "warning"}
+              onOpenModelPicker={() => setModelPickerOpen(true)}
+              forceWebSearch={forceWebSearch}
+              onToggleWebSearch={() => setForceWebSearch((on) => !on)}
+              fullAccessEnabled={fullAccessEnabled}
+              onToggleFullAccess={toggleFullAccess}
+            >
               <Button
                 type="button"
                 variant="ghost"
@@ -539,7 +465,7 @@ export function DesktopWelcomeScreen() {
               >
                 <CornerDownLeft className="size-[22px]" />
               </Button>
-            </div>
+            </DesktopComposerToolbar>
           </div>
 
           {/* `items-start`: without it these stretch to the full column width, so

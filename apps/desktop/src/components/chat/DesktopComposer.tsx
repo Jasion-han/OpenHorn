@@ -1,14 +1,4 @@
-import {
-  ChevronDown,
-  CornerDownLeft,
-  Globe,
-  Paperclip,
-  Plug,
-  ShieldOff,
-  Sparkles,
-  Square,
-  Terminal,
-} from "lucide-react";
+import { CornerDownLeft, Plug, Sparkles, Square, Terminal } from "lucide-react";
 import type {
   ClipboardEvent,
   DragEvent,
@@ -17,13 +7,12 @@ import type {
 } from "react";
 import { useEffect, useRef, useState } from "react";
 import { fileKey } from "shared/format";
-import { Button, cn, Textarea, Tooltip, TooltipContent, TooltipTrigger } from "ui";
+import { Button, cn, Textarea } from "ui";
 import { usePlaceholderTypewriter } from "../../hooks/usePlaceholderTypewriter";
 import { getChatLabel } from "../../lib/i18n/agent";
 import type { ChatMode } from "../../types/chat";
 import { DesktopAttachmentPreviewItem } from "./DesktopAttachmentPreviewItem";
-import { DesktopComposerModeChip } from "./DesktopComposerModeChip";
-import { DesktopProviderLogo } from "./DesktopProviderLogo";
+import { DesktopComposerToolbar } from "./DesktopComposerToolbar";
 
 export type SlashPanelItem = {
   type: "skill" | "mcp" | "command";
@@ -394,161 +383,71 @@ export function DesktopComposer({
           <p className="px-2 pt-1 text-xs text-muted-foreground">{busyElsewhereLabel}</p>
         )}
 
-        <div className="flex h-[40px] items-center justify-between gap-4 px-2 py-[5px]">
-          <div className="flex min-w-0 flex-1 items-center gap-1.5">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={disabled}
-                  className="size-[30px] rounded-full text-foreground/60 hover:text-foreground"
-                  aria-label="Attach"
-                >
-                  <Paperclip className="size-5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="top">
-                <p>Add Attachments</p>
-              </TooltipContent>
-            </Tooltip>
-
-            <DesktopComposerModeChip
-              mode={mode}
-              onModeChange={onModeChange}
-              disabled={modeDisabled}
-              agentAvailable={agentModeAvailable}
-              agentDisabledReason={agentModeDisabledReason}
-            />
-
-            <button
+        <DesktopComposerToolbar
+          onAttach={() => fileInputRef.current?.click()}
+          attachDisabled={disabled}
+          mode={mode}
+          onModeChange={onModeChange}
+          modeDisabled={modeDisabled}
+          agentAvailable={agentModeAvailable}
+          agentDisabledReason={agentModeDisabledReason}
+          modelProvider={modelProvider}
+          modelLabel={modelLabel || "Select model"}
+          modelTone={modelTone}
+          onOpenModelPicker={onOpenModelPicker}
+          modelDisabled={disabled}
+          forceWebSearch={forceWebSearch}
+          onToggleWebSearch={onToggleWebSearch}
+          chipsDisabled={disabled || streaming}
+          fullAccessEnabled={fullAccessEnabled}
+          onToggleFullAccess={onToggleFullAccess}
+        >
+          {streaming ? (
+            <Button
               type="button"
-              onClick={onOpenModelPicker}
-              disabled={!onOpenModelPicker || disabled}
-              className={cn(
-                "flex min-w-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors",
-                modelTone === "warning"
-                  ? "text-orange-600 hover:text-orange-700 hover:bg-orange-500/10"
-                  : "text-muted-foreground hover:text-foreground hover:bg-accent",
-                (!onOpenModelPicker || disabled) && "opacity-60 pointer-events-none",
-              )}
-              aria-label="Model"
-              title="Model"
+              variant="ghost"
+              size="icon-sm"
+              className="size-[30px] rounded-full text-destructive hover:bg-destructive/10"
+              onClick={() => {
+                void onStop();
+              }}
+              aria-label="Stop"
+              title="Stop"
             >
-              {modelProvider ? (
-                <DesktopProviderLogo provider={modelProvider} className="size-4" />
-              ) : null}
-              <span className="max-w-[220px] truncate">{modelLabel || "Select model"}</span>
-              <ChevronDown className="size-3" />
-            </button>
-
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={onToggleWebSearch}
-                  disabled={disabled || streaming}
-                  className={cn(
-                    "flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors",
-                    forceWebSearch
-                      ? "bg-emerald-400/20 text-emerald-500 hover:bg-emerald-400/30"
-                      : "text-muted-foreground hover:bg-accent hover:text-foreground",
-                    (disabled || streaming) && "pointer-events-none opacity-60",
-                  )}
-                  aria-label="Allow web search"
-                  title="Allow web search"
-                >
-                  <Globe className="size-3.5" />
-                  <span>Web Search</span>
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="top">
-                <p>{forceWebSearch ? "Web Search: On" : "Web Search: Off"}</p>
-              </TooltipContent>
-            </Tooltip>
-
-            {mode === "agent" && onToggleFullAccess && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    onClick={onToggleFullAccess}
-                    disabled={disabled || streaming}
-                    className={cn(
-                      "inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs transition-colors",
-                      fullAccessEnabled
-                        ? "bg-rose-400/20 text-rose-600 hover:bg-rose-400/30"
-                        : "text-muted-foreground hover:text-foreground hover:bg-accent",
-                      (disabled || streaming) && "pointer-events-none opacity-60",
-                    )}
-                    aria-label="Full Access"
-                    title="Full Access"
-                  >
-                    <ShieldOff size={14} />
-                    <span>Full Access</span>
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="top">
-                  <p>
-                    {fullAccessEnabled
-                      ? "Full Access: All operations auto-approved"
-                      : "Full Access: Off (dangerous commands need approval)"}
-                  </p>
-                </TooltipContent>
-              </Tooltip>
-            )}
-          </div>
-
-          <div className="flex items-center gap-1.5">
-            {streaming ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                className="size-[30px] rounded-full text-destructive hover:bg-destructive/10"
-                onClick={() => {
-                  void onStop();
-                }}
-                aria-label="Stop"
-                title="Stop"
-              >
-                <Square className="size-[22px]" />
-              </Button>
-            ) : showBusyElsewhere ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                className="size-[30px] rounded-full text-foreground/30 cursor-not-allowed"
-                disabled
-                aria-label={busyElsewhereLabel}
-                title={busyElsewhereLabel}
-              >
-                <CornerDownLeft className="size-[22px]" />
-              </Button>
-            ) : (
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                className={cn(
-                  "size-[30px] rounded-full",
-                  canSubmit
-                    ? "text-primary hover:bg-primary/10"
-                    : "text-foreground/30 cursor-not-allowed",
-                )}
-                onClick={() => void onSubmit()}
-                disabled={!canSubmit}
-                aria-label="Send"
-                title="Send"
-              >
-                <CornerDownLeft className="size-[22px]" />
-              </Button>
-            )}
-          </div>
-        </div>
+              <Square className="size-[22px]" />
+            </Button>
+          ) : showBusyElsewhere ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              className="size-[30px] rounded-full text-foreground/30 cursor-not-allowed"
+              disabled
+              aria-label={busyElsewhereLabel}
+              title={busyElsewhereLabel}
+            >
+              <CornerDownLeft className="size-[22px]" />
+            </Button>
+          ) : (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              className={cn(
+                "size-[30px] rounded-full",
+                canSubmit
+                  ? "text-primary hover:bg-primary/10"
+                  : "text-foreground/30 cursor-not-allowed",
+              )}
+              onClick={() => void onSubmit()}
+              disabled={!canSubmit}
+              aria-label="Send"
+              title="Send"
+            >
+              <CornerDownLeft className="size-[22px]" />
+            </Button>
+          )}
+        </DesktopComposerToolbar>
       </div>
     </div>
   );

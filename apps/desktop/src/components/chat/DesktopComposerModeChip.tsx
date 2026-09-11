@@ -55,7 +55,7 @@ export function DesktopComposerModeChip({
   }, [open]);
 
   return (
-    <div ref={rootRef} className="relative inline-flex flex-col items-center">
+    <div ref={rootRef} className="relative inline-flex shrink-0 flex-col items-center">
       {open && !disabled && (
         <div className="pointer-events-none absolute bottom-full left-0 right-0 z-20 mb-1 flex justify-center">
           <button
@@ -94,7 +94,7 @@ export function DesktopComposerModeChip({
           setOpen((prev) => !prev);
         }}
         className={cn(
-          "flex min-w-[68px] items-center justify-center gap-1.5 rounded-[10px] px-2.5 py-1 text-xs transition-colors",
+          "flex min-w-[68px] shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-[10px] px-2.5 py-1 text-xs transition-colors",
           open
             ? "bg-accent/80 text-foreground"
             : "text-muted-foreground hover:bg-accent hover:text-foreground",
@@ -103,7 +103,7 @@ export function DesktopComposerModeChip({
         aria-label="Mode"
         title="Mode"
       >
-        <span className="truncate">{mode === "chat" ? "Chat" : "Agent"}</span>
+        <span className="truncate whitespace-nowrap">{mode === "chat" ? "Chat" : "Agent"}</span>
         <ChevronDown className={cn("size-3 transition-transform", open && "rotate-180")} />
       </button>
     </div>
