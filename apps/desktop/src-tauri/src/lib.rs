@@ -652,6 +652,16 @@ fn mcp_discover_configs(app: tauri::AppHandle) -> Vec<DiscoveredServer> {
             all.extend(parse_json_mcp("Claude Desktop", &content));
         }
     }
+    // VS Code user-level MCP config (top-level `servers`, handled by
+    // `extract_servers`). `config_dir()` is ~/Library/Application Support on
+    // macOS, ~/.config on Linux and %APPDATA% on Windows, matching where VS
+    // Code keeps its `User/` profile on each platform.
+    if let Some(dir) = &config {
+        let path = dir.join("Code").join("User").join("mcp.json");
+        if let Ok(content) = fs::read_to_string(&path) {
+            all.extend(parse_json_mcp("VS Code", &content));
+        }
+    }
 
     // Dedup by tool signature so each tool appears once, accumulating the list
     // of platforms it was found in. First occurrence (CC Switch, then Claude
@@ -887,6 +897,14 @@ fn skills_discover(app: tauri::AppHandle) -> Vec<DiscoveredSkill> {
         scan_skills_dir(&dir.join(".codex").join("skills"), "Codex CLI", &mut all);
         // Gemini CLI user-level.
         scan_skills_dir(&dir.join(".gemini").join("skills"), "Gemini CLI", &mut all);
+        // Continue user-level.
+        scan_skills_dir(&dir.join(".continue").join("skills"), "Continue", &mut all);
+        // OpenCode user-level (XDG config dir).
+        scan_skills_dir(
+            &dir.join(".config").join("opencode").join("skills"),
+            "OpenCode",
+            &mut all,
+        );
     }
 
     // Dedup by normalized skill name, accumulating each platform a skill was
@@ -1229,5 +1247,81 @@ mod tests {
         let a = generate_handshake_token();
         let b = generate_handshake_token();
         assert_ne!(a, b);
+    }
+
+    /// Fresh directory under the OS temp dir; removed on drop.
+    struct TempDir(std::path::PathBuf);
+
+    impl TempDir {
+        fn new(tag: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!(
+                "openhorn-lib-{tag}-{}-{}",
+                std::process::id(),
+                generate_handshake_token()
+            ));
+            fs::create_dir_all(&dir).unwrap();
+            Self(dir)
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn scan_skills_dir_only_returns_dirs_with_skill_md_and_tags_client() {
+        let tmp = TempDir::new("skills");
+        let root = &tmp.0;
+
+        // Two real skills: one with a frontmatter name, one falling back to
+        // the directory name.
+        let alpha = root.join("alpha");
+        fs::create_dir_all(&alpha).unwrap();
+        fs::write(
+            alpha.join("SKILL.md"),
+            "---\nname: Alpha Skill\ndescription: does alpha\n---\nbody\n",
+        )
+        .unwrap();
+        let beta = root.join("beta");
+        fs::create_dir_all(&beta).unwrap();
+        fs::write(beta.join("SKILL.md"), "# beta\n").unwrap();
+
+        // No SKILL.md → not a skill.
+        let plain = root.join("plain");
+        fs::create_dir_all(&plain).unwrap();
+        fs::write(plain.join("README.md"), "nope\n").unwrap();
+
+        // Hidden dir with a SKILL.md → skipped.
+        let hidden = root.join(".hidden");
+        fs::create_dir_all(&hidden).unwrap();
+        fs::write(hidden.join("SKILL.md"), "---\nname: hidden\n---\n").unwrap();
+
+        // A stray file at the top level → skipped.
+        fs::write(root.join("SKILL.md"), "not a dir\n").unwrap();
+
+        let mut out = Vec::new();
+        scan_skills_dir(root, "Continue", &mut out);
+
+        assert_eq!(out.len(), 2, "got {:?}", out.iter().map(|s| &s.name).collect::<Vec<_>>());
+        let mut names: Vec<&str> = out.iter().map(|s| s.name.as_str()).collect();
+        names.sort();
+        assert_eq!(names, vec!["Alpha Skill", "beta"]);
+        for skill in &out {
+            assert_eq!(skill.client, "Continue");
+            assert_eq!(skill.clients, vec!["Continue".to_string()]);
+        }
+        let alpha_skill = out.iter().find(|s| s.name == "Alpha Skill").unwrap();
+        assert_eq!(alpha_skill.description.as_deref(), Some("does alpha"));
+        assert_eq!(alpha_skill.path, alpha.to_string_lossy());
+    }
+
+    #[test]
+    fn scan_skills_dir_missing_dir_is_noop() {
+        let tmp = TempDir::new("skills-missing");
+        let mut out = Vec::new();
+        scan_skills_dir(&tmp.0.join("does-not-exist"), "OpenCode", &mut out);
+        assert!(out.is_empty());
     }
 }
