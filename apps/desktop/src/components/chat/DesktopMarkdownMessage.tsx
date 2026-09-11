@@ -1,4 +1,4 @@
-import { Check, Copy } from "lucide-react";
+import { Check, Copy, FileCode2 } from "lucide-react";
 import { Fragment, memo, startTransition, useEffect, useMemo, useRef, useState } from "react";
 import type { Components } from "react-markdown";
 import ReactMarkdown from "react-markdown";
@@ -7,8 +7,16 @@ import { oneDark, oneLight } from "react-syntax-highlighter/dist/esm/styles/pris
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import { getDomainBadge } from "../../lib/domainBadge";
-import { normalizeExternalUrl } from "../../lib/normalizeExternalUrl";
+import { formatPreviewLabel, getPreviewLabel } from "../../lib/i18n/agent";
+import { notifyError } from "../../lib/notify";
+import { classifyReferenceHref, referenceUrlTransform } from "../../lib/referenceLink";
+import { openWorkspaceFile } from "../../lib/tauriBridge";
 import { THEME_MODE_CHANGE_EVENT } from "../../lib/theme";
+import { useChatStore } from "../../stores/chatStore";
+import { useExternalEditorStore } from "../../stores/externalEditorStore";
+import { usePreviewPanelStore } from "../../stores/previewPanelStore";
+import { resolveProjectRootForConversation } from "../../stores/projectStore";
+import { useSidecarStore } from "../../stores/sidecarStore";
 import styles from "./desktop-markdown.module.css";
 
 // Micromark fails to recognise **…** as bold when a CJK character sits
@@ -140,6 +148,24 @@ function scheduleIdle(run: () => void): () => void {
   // with the synchronous first paint while still capping the wait.
   const id = window.setTimeout(run, IDLE_HIGHLIGHT_TIMEOUT_MS);
   return () => window.clearTimeout(id);
+}
+
+/** Flattens a link's React children into the plain text the model wrote. */
+function reactNodeToText(node: React.ReactNode): string {
+  if (node === null || node === undefined || typeof node === "boolean") return "";
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(reactNodeToText).join("");
+  if (typeof node === "object" && "props" in node) {
+    const props = (node as { props?: { children?: React.ReactNode } }).props;
+    return reactNodeToText(props?.children);
+  }
+  return "";
+}
+
+function openWithShell(url: string) {
+  import("@tauri-apps/plugin-shell")
+    .then((mod) => mod.open(url))
+    .catch(() => window.open(url, "_blank"));
 }
 
 function CopyButton({ code }: { code: string }) {
@@ -301,84 +327,168 @@ function DesktopMarkdownMessageImpl({ content }: { content: string }) {
   type PreProps = React.ComponentPropsWithoutRef<"pre"> & { node?: unknown };
   type LinkProps = React.ComponentPropsWithoutRef<"a"> & { node?: unknown };
 
-  const components: Components = {
-    a({ href, children, ...props }: LinkProps) {
-      const normalizedHref = normalizeExternalUrl(href);
-      let domain = "";
-      try {
-        domain = new URL(normalizedHref).hostname;
-      } catch {}
-      // Derived locally on purpose — see lib/domainBadge.ts. Fetching real
-      // favicons would disclose every linked hostname to a third party.
-      const badge = domain ? getDomainBadge(domain) : null;
-      const handleClick = (e: React.MouseEvent) => {
-        e.preventDefault();
-        // Stop here so App.tsx's global click interceptor does not also fire
-        // and open the same URL a second time.
-        e.stopPropagation();
-        if (normalizedHref && normalizedHref !== "#") {
-          import("@tauri-apps/plugin-shell")
-            .then((mod) => mod.open(normalizedHref))
-            .catch(() => window.open(normalizedHref, "_blank"));
+  // Hoisted out of the render path on purpose. react-markdown uses these
+  // functions as React element *types*; recreating them on every render (each
+  // streaming delta) makes React see a brand-new type, unmount every custom
+  // node and remount it — which replaces the code-block DOM, drops :hover on
+  // the Copy button (visible flicker) and re-runs Prism on every keystroke.
+  const components: Components = useMemo(
+    () => ({
+      a({ href, children, ...props }: LinkProps) {
+        const linkText = reactNodeToText(children);
+        // Classified without the workspace root: only the kind matters for
+        // rendering, and the root is read fresh at click time from the store
+        // so it never has to be a dependency of this memo.
+        const link = classifyReferenceHref(href, linkText, null);
+        const isFile = link.kind === "file";
+        const targetUrl = link.kind === "web" || link.kind === "external" ? link.url : null;
+        let domain = "";
+        if (targetUrl) {
+          try {
+            domain = new URL(targetUrl).hostname;
+          } catch {}
         }
-      };
-      return (
-        <a href={normalizedHref} onClick={handleClick} className={styles.richLink} {...props}>
-          {badge ? (
-            <span
-              aria-hidden="true"
-              className={styles.linkFavicon}
-              style={{
-                backgroundColor: `hsl(${badge.hue} 62% ${badge.lightness}%)`,
-                color: "hsl(0 0% 100%)",
-              }}
-            >
-              {badge.letter}
-            </span>
-          ) : (
-            <span className={styles.linkFaviconFallback}>🌐</span>
-          )}
-          {children}
-        </a>
-      );
-    },
-    code({ className, children, ...props }: CodeProps) {
-      const match = /language-([\w-]+)/.exec(className || "");
-      const lang = match?.[1];
-      const langMeta = getLanguageMeta(lang);
-      const codeString = String(children).replace(/\n$/, "");
-      const isBlock = codeString.includes("\n") || Boolean(match);
-      if (isBlock) {
-        const lineCount = codeString.split("\n").length;
+        // Derived locally on purpose — see lib/domainBadge.ts. Fetching real
+        // favicons would disclose every linked hostname to a third party.
+        const badge = domain ? getDomainBadge(domain) : null;
+        const handleClick = (e: React.MouseEvent) => {
+          e.preventDefault();
+          // Stop here so App.tsx's global click interceptor does not also fire
+          // and open the same URL a second time.
+          e.stopPropagation();
+          // Same root the preview panel's open button uses: the conversation's
+          // project folder, falling back to the sidecar's current workspace
+          // (which may still point at a previously opened project).
+          const currentConversation = useChatStore.getState().currentConversation;
+          const workspaceRoot =
+            resolveProjectRootForConversation(currentConversation) ??
+            useSidecarStore.getState().workspaceRoot;
+          const resolved = classifyReferenceHref(href, linkText, workspaceRoot);
+          const wantsExternal = e.metaKey || e.ctrlKey;
+          switch (resolved.kind) {
+            case "anchor":
+              return;
+            case "external":
+              openWithShell(resolved.url);
+              return;
+            case "web":
+              if (wantsExternal) openWithShell(resolved.url);
+              else usePreviewPanelStore.getState().openUrl(resolved.url);
+              return;
+            case "file":
+              if (wantsExternal) {
+                if (!workspaceRoot) {
+                  notifyError(
+                    getPreviewLabel("preview.file.openFailedTitle"),
+                    getPreviewLabel("preview.file.noWorkspace"),
+                  );
+                  return;
+                }
+                // Text files go to the remembered editor (with the line);
+                // anything else, or no editor chosen yet, to the OS default app.
+                const editors = useExternalEditorStore.getState();
+                editors
+                  .openWithPreference(workspaceRoot, resolved.path, resolved.line)
+                  .then((handled) =>
+                    handled ? undefined : openWorkspaceFile(workspaceRoot, resolved.path),
+                  )
+                  .catch((error: unknown) => {
+                    const message = error instanceof Error ? error.message : String(error);
+                    notifyError(
+                      getPreviewLabel("preview.file.openFailedTitle"),
+                      formatPreviewLabel("preview.file.openExternalFailed", { message }),
+                    );
+                  });
+                return;
+              }
+              usePreviewPanelStore.getState().openFile({
+                path: resolved.path,
+                line: resolved.line,
+                endLine: resolved.endLine,
+                conversationId: useChatStore.getState().currentConversation?.id ?? null,
+              });
+              return;
+          }
+        };
+        // File references get an inert href: a relative `apps/x/route.ts:144`
+        // would resolve against the dev server / tauri origin, and any
+        // middle-click, "copy link" or fallback navigation would then go to a
+        // URL that does not exist. The path is still exposed via `title`.
+        const anchorHref = targetUrl ?? "#";
+        const anchorTitle = link.kind === "file" ? link.path : undefined;
         return (
-          <CodeBlock
-            codeString={codeString}
-            className={className}
-            language={langMeta.syntax}
-            accent={langMeta.accent}
-            label={langMeta.label}
-            lineCount={lineCount}
-            isDark={isDark}
-            syntaxTheme={syntaxTheme}
-            codeProps={props}
-          />
+          <a
+            href={anchorHref}
+            title={anchorTitle}
+            onClick={handleClick}
+            className={styles.richLink}
+            {...props}
+          >
+            {isFile ? (
+              <span aria-hidden="true" className={styles.linkFileIcon}>
+                <FileCode2 size={14} strokeWidth={1.9} />
+              </span>
+            ) : badge ? (
+              <span
+                aria-hidden="true"
+                className={styles.linkFavicon}
+                style={{
+                  backgroundColor: `hsl(${badge.hue} 62% ${badge.lightness}%)`,
+                  color: "hsl(0 0% 100%)",
+                }}
+              >
+                {badge.letter}
+              </span>
+            ) : (
+              <span className={styles.linkFaviconFallback}>🌐</span>
+            )}
+            {children}
+          </a>
         );
-      }
+      },
+      code({ className, children, ...props }: CodeProps) {
+        const match = /language-([\w-]+)/.exec(className || "");
+        const lang = match?.[1];
+        const langMeta = getLanguageMeta(lang);
+        const codeString = String(children).replace(/\n$/, "");
+        const isBlock = codeString.includes("\n") || Boolean(match);
+        if (isBlock) {
+          const lineCount = codeString.split("\n").length;
+          return (
+            <CodeBlock
+              codeString={codeString}
+              className={className}
+              language={langMeta.syntax}
+              accent={langMeta.accent}
+              label={langMeta.label}
+              lineCount={lineCount}
+              isDark={isDark}
+              syntaxTheme={syntaxTheme}
+              codeProps={props}
+            />
+          );
+        }
 
-      return (
-        <code className={className} {...props}>
-          {children}
-        </code>
-      );
-    },
-    pre({ children }: PreProps) {
-      return <>{children}</>;
-    },
-  };
+        return (
+          <code className={className} {...props}>
+            {children}
+          </code>
+        );
+      },
+      pre({ children }: PreProps) {
+        return <>{children}</>;
+      },
+    }),
+    [syntaxTheme, isDark],
+  );
 
   return (
     <div className={styles.root}>
-      <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]} components={components}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm, remarkBreaks]}
+        components={components}
+        urlTransform={referenceUrlTransform}
+      >
         {normalized}
       </ReactMarkdown>
     </div>

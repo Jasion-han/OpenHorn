@@ -269,6 +269,9 @@ export function projectSidecarAgentEvent(runId: string, raw: unknown): AgentTask
         eventType: "tool_start",
         toolName: typeof event.toolName === "string" ? event.toolName : undefined,
         toolInput: event.toolInput,
+        metadata: {
+          toolCallId: typeof event.toolCallId === "string" ? event.toolCallId : undefined,
+        },
       };
     case "tool_result":
       return {
@@ -277,6 +280,10 @@ export function projectSidecarAgentEvent(runId: string, raw: unknown): AgentTask
         runId,
         eventType: "tool_result",
         content: typeof event.content === "string" ? event.content : "",
+        toolName: typeof event.toolName === "string" ? event.toolName : undefined,
+        metadata: {
+          toolCallId: typeof event.toolCallId === "string" ? event.toolCallId : undefined,
+        },
       };
     case "tool_call_detail":
       return {
@@ -440,6 +447,15 @@ export class SidecarClient {
     const result = (await this.request("workspace.setCurrent", { root })) as {
       workspaceRoot: string;
     };
+    return result;
+  }
+
+  /**
+   * Reads a text file by workspace-relative path. The sidecar validates the
+   * path against the current workspace root and rejects anything outside it.
+   */
+  async readFile(path: string): Promise<{ content: string }> {
+    const result = (await this.request("fs.read", { path })) as { content: string };
     return result;
   }
 

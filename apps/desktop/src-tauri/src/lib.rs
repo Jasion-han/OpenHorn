@@ -10,6 +10,9 @@ use tauri::{Manager, State, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_shell::process::CommandChild;
 use tauri_plugin_shell::ShellExt;
 
+mod preview;
+mod workspace_open;
+
 /// Description of a running sidecar child process, surfaced to the
 /// webview once it has announced its port. `token` is a 32-byte random
 /// value injected into the sidecar's env on spawn; the webview uses it
@@ -312,7 +315,12 @@ fn stop_sidecar(state: State<'_, SidecarState>) -> Result<(), String> {
 
 #[tauri::command]
 fn get_sidecar_endpoint(state: State<'_, SidecarState>) -> Option<SidecarEndpoint> {
-    state.inner.lock().unwrap().as_ref().map(|s| s.endpoint.clone())
+    state
+        .inner
+        .lock()
+        .unwrap()
+        .as_ref()
+        .map(|s| s.endpoint.clone())
 }
 
 /// Opens the platform directory picker and returns the chosen absolute
@@ -599,7 +607,9 @@ fn mcp_discover_configs(app: tauri::AppHandle) -> Vec<DiscoveredServer> {
     // CC Switch first — it's the user's global source of truth, and carries
     // descriptions, so it wins the dedup against per-client copies.
     if let Some(dir) = &home {
-        all.extend(read_ccswitch_db(&dir.join(".cc-switch").join("cc-switch.db")));
+        all.extend(read_ccswitch_db(
+            &dir.join(".cc-switch").join("cc-switch.db"),
+        ));
     }
     // Claude Code (CLI) — global config and project-scoped file.
     if let Some(dir) = &home {
@@ -865,7 +875,11 @@ fn skills_discover(app: tauri::AppHandle) -> Vec<DiscoveredSkill> {
 
     if let Some(dir) = &home {
         // cc-switch central store — source of truth, wins dedup.
-        scan_skills_dir(&dir.join(".cc-switch").join("skills"), "CC-Switch", &mut all);
+        scan_skills_dir(
+            &dir.join(".cc-switch").join("skills"),
+            "CC-Switch",
+            &mut all,
+        );
         // Claude Code user-level.
         scan_skills_dir(&dir.join(".claude").join("skills"), "Claude Code", &mut all);
         // Codex CLI — new cross-tool user path, then legacy/cc-switch path.
@@ -881,7 +895,8 @@ fn skills_discover(app: tauri::AppHandle) -> Vec<DiscoveredSkill> {
     // the cc-switch original instead of appearing twice. cc-switch is scanned
     // first, so its entry is pushed first and wins as the representative.
     let mut result: Vec<DiscoveredSkill> = Vec::new();
-    let mut idx_by_name: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut idx_by_name: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
     for skill in all {
         let key = skill.name.trim().to_lowercase();
         if let Some(&i) = idx_by_name.get(&key) {
@@ -1095,7 +1110,10 @@ pub fn run() {
             builder
                 .on_navigation(|url| {
                     let s = url.as_str();
-                    if s.starts_with("http://localhost") || s.starts_with("https://localhost") || s.starts_with("tauri://") {
+                    if s.starts_with("http://localhost")
+                        || s.starts_with("https://localhost")
+                        || s.starts_with("tauri://")
+                    {
                         return true;
                     }
                     #[cfg(target_os = "macos")]
@@ -1108,7 +1126,9 @@ pub fn run() {
                     }
                     #[cfg(target_os = "windows")]
                     {
-                        let _ = std::process::Command::new("cmd").args(["/c", "start", s]).spawn();
+                        let _ = std::process::Command::new("cmd")
+                            .args(["/c", "start", s])
+                            .spawn();
                     }
                     false
                 })
@@ -1144,7 +1164,20 @@ pub fn run() {
             skill_read_dir,
             skill_pick_folder,
             skills_disabled_list,
-            skills_set_enabled
+            skills_set_enabled,
+            preview::preview_webview_open,
+            preview::preview_webview_set_bounds,
+            preview::preview_webview_navigate,
+            preview::preview_webview_history,
+            preview::preview_webview_history_state,
+            preview::preview_webview_snapshot,
+            preview::preview_webview_reload,
+            preview::preview_webview_set_visible,
+            preview::preview_webview_close,
+            workspace_open::open_workspace_file,
+            workspace_open::reveal_workspace_file,
+            workspace_open::external_editors_detect,
+            workspace_open::pick_editor_app
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -1198,4 +1231,3 @@ mod tests {
         assert_ne!(a, b);
     }
 }
-

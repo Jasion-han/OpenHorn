@@ -1,10 +1,12 @@
-import { PanelLeft } from "lucide-react";
+import { PanelLeft, PanelRightOpen } from "lucide-react";
 import { useEffect } from "react";
 import { Button, cn } from "ui";
-import { getSidebarLabel } from "../../lib/i18n/agent";
+import { getPreviewLabel, getSidebarLabel } from "../../lib/i18n/agent";
 import { BACKEND_UP_EVENT } from "../../stores/backendStatusStore";
 import { useChatStore } from "../../stores/chatStore";
 import { useDesktopShellStore } from "../../stores/desktopShellStore";
+import { usePreviewPanelStore } from "../../stores/previewPanelStore";
+import { DesktopPreviewPanel } from "../preview/DesktopPreviewPanel";
 import { DesktopLeftSidebar } from "./DesktopLeftSidebar";
 
 export function DesktopShellLayout({
@@ -20,6 +22,11 @@ export function DesktopShellLayout({
   const setSidebarCollapsed = useDesktopShellStore((state) => state.setSidebarCollapsed);
   const loadChannels = useChatStore((state) => state.loadChannels);
   const loadConversations = useChatStore((state) => state.loadConversations);
+  const previewOpen = usePreviewPanelStore((state) => state.isOpen);
+  const previewCollapsed = usePreviewPanelStore((state) => state.collapsed);
+  const previewTabCount = usePreviewPanelStore((state) => state.tabs.length);
+  const expandPreview = usePreviewPanelStore((state) => state.expandPanel);
+  const togglePreview = usePreviewPanelStore((state) => state.togglePanel);
 
   // Owned by the shell, not by the sidebar: a collapsed sidebar is unmounted, so
   // loading from there meant starting the app with it collapsed left the store
@@ -33,6 +40,26 @@ export function DesktopShellLayout({
     window.addEventListener(BACKEND_UP_EVENT, load);
     return () => window.removeEventListener(BACKEND_UP_EVENT, load);
   }, [loadChannels, loadConversations]);
+
+  // ⌘⇧E / Ctrl+Shift+E — collapse / expand the preview panel. Only meaningful
+  // while it has tabs; ⌘N (new conversation) is the only other shell shortcut.
+  useEffect(() => {
+    if (!previewOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.key.toLowerCase() !== "e" ||
+        !(event.metaKey || event.ctrlKey) ||
+        !event.shiftKey ||
+        event.altKey
+      ) {
+        return;
+      }
+      event.preventDefault();
+      togglePreview();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [previewOpen, togglePreview]);
 
   return (
     <div className="flex h-dvh w-dvw overflow-hidden bg-background">
@@ -60,6 +87,29 @@ export function DesktopShellLayout({
           </div>
         )}
 
+        {previewOpen && previewCollapsed && (
+          <div className="absolute right-2 top-2 z-10">
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="titlebar-no-drag relative"
+              aria-label={getPreviewLabel("preview.panel.expand")}
+              title={`${getPreviewLabel("preview.panel.expand")} (⌘⇧E)`}
+              onClick={expandPreview}
+            >
+              <PanelRightOpen size={17} />
+              {previewTabCount > 0 && (
+                <span
+                  aria-hidden="true"
+                  className="absolute -right-0.5 -top-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-foreground/80 px-1 text-[9px] font-medium leading-none text-background"
+                >
+                  {previewTabCount > 9 ? "9+" : previewTabCount}
+                </span>
+              )}
+            </Button>
+          </div>
+        )}
+
         <div
           data-tauri-drag-region
           className={cn("min-h-0 flex-1 overflow-hidden", needsOuterPadding ? "p-4" : "p-2")}
@@ -74,6 +124,11 @@ export function DesktopShellLayout({
           </div>
         </div>
       </div>
+
+      {/* Third column: file / web preview opened from links in replies. Only
+          mounted while open so the child webviews it owns are torn down with it;
+          collapsing merely hides it so those webviews keep their state. */}
+      {previewOpen && <DesktopPreviewPanel collapsed={previewCollapsed} />}
     </div>
   );
 }

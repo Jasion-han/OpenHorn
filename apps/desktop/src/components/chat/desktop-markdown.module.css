@@ -135,6 +135,21 @@
   user-select: none;
 }
 
+/* Workspace file reference (route.ts:144): a code-file glyph in the same box
+   the domain badge occupies so the two link kinds align on a line. */
+.linkFileIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  vertical-align: middle;
+  border-radius: 3px;
+  flex-shrink: 0;
+  color: currentColor;
+  opacity: 0.85;
+}
+
 .linkFaviconFallback {
   font-size: 14px;
   line-height: 1;

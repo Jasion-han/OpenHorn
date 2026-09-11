@@ -21,7 +21,9 @@ tauri-build = { version = "2.5.6", features = [] }
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
-tauri = { version = "2.10.3", features = ["devtools"] }
+# `unstable` unlocks the multiwebview API (Window::add_child) used by the
+# reply-reference preview panel's embedded browser (src/preview.rs).
+tauri = { version = "2.10.3", features = ["devtools", "unstable"] }
 tauri-plugin-log = "2"
 # For spawning the OpenHorn sidecar binary as a Tauri sidecar process
 # and for the workspace picker dialog.
@@ -37,3 +39,22 @@ toml = "0.8"
 rusqlite = { version = "0.31", features = ["bundled"] }
 # Encoding non-UTF-8 skill resource files as base64 during skill import.
 base64 = "0.22"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# Native WKWebView back/forward + canGoBack/canGoForward for the preview
+# panel's embedded browser (src/preview.rs). Version matches what wry already
+# pulls in (see Cargo.lock) so it is not compiled twice.
+objc2-web-kit = { version = "0.3", default-features = false, features = [
+    "std",
+    "WKWebView",
+    "WKNavigation",
+    # `takeSnapshotWithConfiguration:completionHandler:` — used to freeze the
+    # last frame of a preview webview while a dialog covers it.
+    "WKSnapshotConfiguration",
+    "block2",
+    "objc2-app-kit",
+] }
+# NSImage → NSBitmapImageRep → PNG bytes for the snapshot above.
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSImage", "NSImageRep", "NSBitmapImageRep"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSData", "NSDictionary", "NSError"] }
+block2 = { version = "0.6", default-features = false, features = ["std"] }

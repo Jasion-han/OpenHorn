@@ -156,6 +156,72 @@ export async function pickExportDir(): Promise<string | null> {
   return (await invoke("pick_workspace_dir")) as string | null;
 }
 
+/** One editor bundle found on this machine by `external_editors_detect`. */
+export interface DetectedEditor {
+  id: string;
+  name: string;
+  appPath: string;
+  /** Whether the Rust side knows how to pass a line number to this editor. */
+  supportsLine: boolean;
+}
+
+/** The editor to launch a workspace file with; `id` selects the line-number argv shape. */
+export interface EditorChoice {
+  id?: string;
+  appPath: string;
+}
+
+/**
+ * Lists the known editors installed in /Applications or ~/Applications.
+ * Outside Tauri returns an empty list.
+ */
+export async function externalEditorsDetect(): Promise<DetectedEditor[]> {
+  if (!isTauriRuntime()) return [];
+  const { invoke } = await import("@tauri-apps/api/core");
+  return (await invoke("external_editors_detect")) as DetectedEditor[];
+}
+
+/**
+ * Opens a workspace file with the chosen editor (jumping to `line` when the
+ * editor supports it) or, without `editor`, the OS default application.
+ * `path` may be relative to `workspaceRoot` or absolute; the Rust side
+ * refuses anything that does not resolve to a regular file under the root.
+ * Goes through a dedicated command because the shell plugin's scope does not
+ * allow `file://`, and widening it would let the webview open anything.
+ * Rejects with the Rust error message, or when not running under Tauri.
+ */
+export async function openWorkspaceFile(
+  workspaceRoot: string,
+  path: string,
+  opts?: { line?: number; editor?: EditorChoice | null },
+): Promise<void> {
+  if (!isTauriRuntime()) throw new Error("open_workspace_file is only available in Tauri");
+  const { invoke } = await import("@tauri-apps/api/core");
+  await invoke<void>("open_workspace_file", {
+    workspaceRoot,
+    path,
+    line: opts?.line ?? null,
+    editor: opts?.editor ? { id: opts.editor.id ?? null, appPath: opts.editor.appPath } : null,
+  });
+}
+
+/** Reveals a workspace file in Finder / the file manager. Same path rules as `openWorkspaceFile`. */
+export async function revealWorkspaceFile(workspaceRoot: string, path: string): Promise<void> {
+  if (!isTauriRuntime()) throw new Error("reveal_workspace_file is only available in Tauri");
+  const { invoke } = await import("@tauri-apps/api/core");
+  await invoke<void>("reveal_workspace_file", { workspaceRoot, path });
+}
+
+/**
+ * Native picker for an application bundle (`.app`) to use as the editor.
+ * Returns its absolute path, or null when cancelled / outside Tauri.
+ */
+export async function pickEditorApp(): Promise<string | null> {
+  if (!isTauriRuntime()) return null;
+  const { invoke } = await import("@tauri-apps/api/core");
+  return (await invoke("pick_editor_app")) as string | null;
+}
+
 /**
  * Returns a `SidecarPlatform` backed by the real Tauri IPC when we are
  * running inside the desktop shell. Returns `null` in every other
@@ -179,4 +245,189 @@ export async function getTauriSidecarPlatform(): Promise<SidecarPlatform | null>
       return (await invoke("pick_workspace_dir")) as string | null;
     },
   };
+}
+
+// ---------------------------------------------------------------------------
+// Preview panel: embedded browser backed by a Tauri child webview
+// ---------------------------------------------------------------------------
+
+export interface PreviewWebviewRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface PreviewWebviewPageLoadEvent {
+  label: string;
+  url: string;
+  phase: "started" | "finished";
+}
+
+export interface PreviewWebviewTitleEvent {
+  label: string;
+  title: string;
+}
+
+export interface PreviewWebviewHistoryState {
+  canGoBack: boolean;
+  canGoForward: boolean;
+}
+
+function roundRect(rect: PreviewWebviewRect): PreviewWebviewRect {
+  return {
+    x: Math.round(rect.x),
+    y: Math.round(rect.y),
+    width: Math.max(1, Math.round(rect.width)),
+    height: Math.max(1, Math.round(rect.height)),
+  };
+}
+
+// Commands for one label run strictly in the order they were issued. The IPC
+// transport is a series of independent fetches with no ordering guarantee, and
+// React StrictMode issues open → close → open back to back on mount: if the
+// close overtook the second open it would destroy the webview the component
+// believes it owns. Serialising per label also means a set_visible / set_bounds
+// issued while the open is still in flight lands after it instead of failing.
+const previewCommandQueues = new Map<string, Promise<void>>();
+
+function enqueuePreviewCommand(label: string, run: () => Promise<void>): Promise<void> {
+  const previous = previewCommandQueues.get(label) ?? Promise.resolve();
+  const next = previous.catch(() => {}).then(run);
+  const settled = next
+    .catch(() => {})
+    .then(() => {
+      if (previewCommandQueues.get(label) === settled) previewCommandQueues.delete(label);
+    });
+  previewCommandQueues.set(label, settled);
+  return next;
+}
+
+function enqueuePreviewQuery<T>(label: string, run: () => Promise<T>): Promise<T> {
+  let result: T;
+  return enqueuePreviewCommand(label, async () => {
+    result = await run();
+  }).then(() => result);
+}
+
+function invokePreviewCommand(
+  label: string,
+  command: string,
+  args: Record<string, unknown>,
+): Promise<void> {
+  if (!isTauriRuntime()) return Promise.resolve();
+  // Enqueued synchronously (before the module import resolves) so the queue
+  // order is the call order.
+  return enqueuePreviewCommand(label, async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke<void>(command, { label, ...args });
+  });
+}
+
+/**
+ * Creates (or re-points) the child webview `label` at `url`, positioned over
+ * the given logical rect of the main webview. No-op outside Tauri.
+ */
+export function previewWebviewOpen(params: {
+  label: string;
+  url: string;
+  rect: PreviewWebviewRect;
+}): Promise<void> {
+  return invokePreviewCommand(params.label, "preview_webview_open", {
+    url: params.url,
+    ...roundRect(params.rect),
+  });
+}
+
+export function previewWebviewSetBounds(label: string, rect: PreviewWebviewRect): Promise<void> {
+  return invokePreviewCommand(label, "preview_webview_set_bounds", { ...roundRect(rect) });
+}
+
+export function previewWebviewNavigate(label: string, url: string): Promise<void> {
+  return invokePreviewCommand(label, "preview_webview_navigate", { url });
+}
+
+/** `delta` follows `history.go`: -1 back, 1 forward. */
+export function previewWebviewHistory(label: string, delta: number): Promise<void> {
+  return invokePreviewCommand(label, "preview_webview_history", { delta });
+}
+
+/**
+ * Native back/forward availability of the child webview. Queued behind any
+ * pending navigation/history command for the same label so the answer reflects
+ * the state after those were applied. Outside Tauri both are false.
+ */
+export function previewWebviewHistoryState(label: string): Promise<PreviewWebviewHistoryState> {
+  if (!isTauriRuntime()) return Promise.resolve({ canGoBack: false, canGoForward: false });
+  return enqueuePreviewQuery(label, async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    const state = await invoke<PreviewWebviewHistoryState>("preview_webview_history_state", {
+      label,
+    });
+    return { canGoBack: Boolean(state?.canGoBack), canGoForward: Boolean(state?.canGoForward) };
+  });
+}
+
+/**
+ * PNG data URL of the child webview's current frame, or `null` when it cannot
+ * be taken (outside Tauri, webview gone, hidden, timed out). Never rejects:
+ * callers use it opportunistically to paint a stand-in while the native view
+ * is hidden, and a missing frame just means an empty stand-in.
+ */
+export function previewWebviewSnapshot(label: string): Promise<string | null> {
+  if (!isTauriRuntime()) return Promise.resolve(null);
+  return enqueuePreviewQuery(label, async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    const dataUrl = await invoke<string>("preview_webview_snapshot", { label });
+    return typeof dataUrl === "string" && dataUrl.startsWith("data:image/") ? dataUrl : null;
+  }).catch(() => null);
+}
+
+export function previewWebviewReload(label: string): Promise<void> {
+  return invokePreviewCommand(label, "preview_webview_reload", {});
+}
+
+export function previewWebviewSetVisible(label: string, visible: boolean): Promise<void> {
+  return invokePreviewCommand(label, "preview_webview_set_visible", { visible });
+}
+
+export function previewWebviewClose(label: string): Promise<void> {
+  return invokePreviewCommand(label, "preview_webview_close", {});
+}
+
+type Unlisten = () => void;
+
+/**
+ * Subscribes to a Tauri event, resolving the unlisten function once the
+ * listener is registered. Calling the returned function before registration
+ * completes still unsubscribes (the pending listener is torn down on arrival).
+ */
+function subscribeTauriEvent<T>(name: string, cb: (payload: T) => void): Unlisten {
+  if (!isTauriRuntime()) return () => {};
+  let disposed = false;
+  let unlisten: Unlisten | null = null;
+  void import("@tauri-apps/api/event")
+    .then(({ listen }) => listen<T>(name, (event) => cb(event.payload)))
+    .then((fn) => {
+      if (disposed) fn();
+      else unlisten = fn;
+    })
+    .catch(() => {});
+  return () => {
+    disposed = true;
+    if (unlisten) {
+      unlisten();
+      unlisten = null;
+    }
+  };
+}
+
+export function onPreviewWebviewPageLoad(
+  cb: (event: PreviewWebviewPageLoadEvent) => void,
+): Unlisten {
+  return subscribeTauriEvent<PreviewWebviewPageLoadEvent>("preview-webview:page-load", cb);
+}
+
+export function onPreviewWebviewTitle(cb: (event: PreviewWebviewTitleEvent) => void): Unlisten {
+  return subscribeTauriEvent<PreviewWebviewTitleEvent>("preview-webview:title", cb);
 }

@@ -121,6 +121,24 @@ describe("projectSidecarAgentEvent", () => {
       eventType: "tool_start",
       toolName: "Bash",
       toolInput: { command: "pwd" },
+      metadata: { toolCallId: undefined },
+    });
+  });
+
+  test("projects tool_start toolCallId into metadata", () => {
+    const result = projectSidecarAgentEvent("run-2b", {
+      type: "tool_start",
+      toolName: "Read",
+      toolCallId: "call-1",
+    });
+    expect(result).toEqual({
+      type: "execution_event",
+      taskId: "run-2b",
+      runId: "run-2b",
+      eventType: "tool_start",
+      toolName: "Read",
+      toolInput: undefined,
+      metadata: { toolCallId: "call-1" },
     });
   });
 
@@ -135,6 +153,8 @@ describe("projectSidecarAgentEvent", () => {
       runId: "run-3",
       eventType: "tool_result",
       content: "/home/u",
+      toolName: undefined,
+      metadata: { toolCallId: undefined },
     });
   });
 
@@ -188,6 +208,47 @@ describe("SidecarClient", () => {
     );
     const result = await promise;
     expect(result.workspaceRoot).toBe("/tmp/ws");
+  });
+
+  test("readFile sends fs.read with the path and resolves with the content", async () => {
+    const { client, socket } = await connectClient();
+    const promise = client.readFile("src/a.ts");
+    await Promise.resolve();
+    const request = lastSent(socket);
+    expect(request.method).toBe("fs.read");
+    expect(request.params).toEqual({ path: "src/a.ts" });
+    socket.receive(
+      JSON.stringify({
+        type: "response",
+        requestId: request.requestId,
+        ok: true,
+        result: { content: "export const a = 1;\n" },
+      }),
+    );
+    const result = await promise;
+    expect(result.content).toBe("export const a = 1;\n");
+  });
+
+  test("readFile surfaces the sidecar's error text for paths outside the workspace", async () => {
+    const { client, socket } = await connectClient();
+    const promise = client.readFile("../etc/passwd");
+    await Promise.resolve();
+    const request = lastSent(socket);
+    socket.receive(
+      JSON.stringify({
+        type: "response",
+        requestId: request.requestId,
+        ok: false,
+        error: "Path escapes workspace",
+      }),
+    );
+    let thrown: Error | null = null;
+    try {
+      await promise;
+    } catch (error) {
+      thrown = error as Error;
+    }
+    expect(thrown?.message).toBe("Path escapes workspace");
   });
 
   test("rejects the pending promise when the response comes back with ok:false", async () => {

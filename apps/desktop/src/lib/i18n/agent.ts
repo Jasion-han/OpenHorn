@@ -837,6 +837,16 @@ export const generalSettingsLabels = {
   "settings.general.instructions.saving": "保存中...",
   "settings.general.instructions.save": "保存",
   "settings.general.instructions.emptyState": "暂未设置，点击右上角「编辑」添加。",
+  // Section: external editor (per-machine, stored locally)
+  "settings.general.editor.title": "外部编辑器",
+  "settings.general.editor.description":
+    "预览面板里「在编辑器中打开」使用的应用。每台机器单独记住，不会同步到服务器。",
+  "settings.general.editor.rowLabel": "打开文件的编辑器",
+  "settings.general.editor.rowDescription": "支持的编辑器会直接跳转到引用的行号。",
+  "settings.general.editor.unset": "未设置（点击时选择）",
+  "settings.general.editor.custom": "选择其他应用…",
+  "settings.general.editor.customCurrent": "自定义：{name}",
+  "settings.general.editor.desktopOnly": "仅桌面端可用",
   // Toasts
   "settings.general.notify.savedTitle": "已保存",
   "settings.general.notify.promptSavedBody": "系统提示词已更新",
@@ -1077,6 +1087,67 @@ export function formatDataTransferLabel(
   vars: Record<string, string | number>,
 ): string {
   let text: string = dataTransferLabels[key];
+  for (const [name, value] of Object.entries(vars)) {
+    text = text.replaceAll(`{${name}}`, String(value));
+  }
+  return text;
+}
+
+/**
+ * Labels for the right-hand preview panel (workspace file code view + embedded
+ * browser) opened from links inside assistant replies.
+ */
+const previewLabels = {
+  "preview.panel.title": "预览",
+  "preview.panel.close": "关闭预览面板",
+  "preview.panel.collapse": "收起预览",
+  "preview.panel.expand": "展开预览",
+  "preview.panel.resize": "拖动调整预览面板宽度",
+  "preview.tab.close": "关闭标签页",
+  "preview.tab.untitled": "新标签页",
+  // File view
+  "preview.file.loading": "正在读取文件…",
+  "preview.file.error": "无法读取文件",
+  "preview.file.retry": "重试",
+  "preview.file.reload": "重新加载",
+  "preview.file.openInEditor": "在 {editor} 中打开",
+  "preview.file.openInEditorUnset": "在编辑器中打开",
+  "preview.file.openWithDefault": "用默认应用打开",
+  "preview.file.openMenu": "更多打开方式",
+  "preview.file.menu.noEditors": "未检测到已安装的编辑器",
+  "preview.file.menu.systemDefault": "用系统默认应用打开",
+  "preview.file.menu.chooseApp": "选择其他应用…",
+  "preview.file.menu.reveal": "在 Finder 中显示",
+  "preview.file.openFailedTitle": "无法打开文件",
+  "preview.file.openExternalFailed": "无法在外部打开：{message}",
+  "preview.file.revealFailed": "无法在 Finder 中显示：{message}",
+  "preview.file.copyPath": "点击复制路径",
+  "preview.file.copied": "已复制",
+  "preview.file.noWorkspace": "sidecar 未就绪，无法读取工作区文件",
+  "preview.file.projectRootUnavailable": "项目文件夹不可用，无法读取：{root}",
+  "preview.file.largeFile": "文件较大，已关闭语法高亮",
+  "preview.file.lines": "{count} 行",
+  // Web view
+  "preview.web.back": "后退",
+  "preview.web.forward": "前进",
+  "preview.web.reload": "刷新",
+  "preview.web.address": "输入网址",
+  "preview.web.openExternal": "在浏览器中打开",
+  "preview.web.desktopOnly": "网页预览仅在桌面端可用",
+  "preview.web.loading": "加载中…",
+} as const;
+
+export type PreviewLabelKey = keyof typeof previewLabels;
+
+export function getPreviewLabel(key: PreviewLabelKey): string {
+  return previewLabels[key];
+}
+
+export function formatPreviewLabel(
+  key: PreviewLabelKey,
+  vars: Record<string, string | number>,
+): string {
+  let text: string = previewLabels[key];
   for (const [name, value] of Object.entries(vars)) {
     text = text.replaceAll(`{${name}}`, String(value));
   }

@@ -1,13 +1,37 @@
 import { Pencil, ScrollText } from "lucide-react";
-import { useEffect, useState } from "react";
-import { Badge, Button, cn, Input, Label, SettingsCard, SettingsSection, Textarea } from "ui";
+import { useCallback, useEffect, useState } from "react";
+import {
+  Badge,
+  Button,
+  cn,
+  Input,
+  Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectSeparator,
+  SelectTrigger,
+  SelectValue,
+  SettingsCard,
+  SettingsRow,
+  SettingsSection,
+  Textarea,
+} from "ui";
 import { formatGeneralSettingsLabel, getGeneralSettingsLabel } from "../../lib/i18n/agent";
 import { notifySuccess } from "../../lib/notify";
 import { createServerApi } from "../../lib/serverApi";
+import { isDesktopRuntime, pickEditorApp } from "../../lib/tauriBridge";
 import { useAuthStore } from "../../stores/authStore";
+import { editorNameFromAppPath, useExternalEditorStore } from "../../stores/externalEditorStore";
 
 const api = createServerApi();
 const SYSTEM_PROMPT_KEY = "chat.systemPrompt";
+
+// Radix Select forbids empty-string values, so the non-editor rows use sentinels.
+const EDITOR_UNSET = "__unset";
+const EDITOR_CUSTOM = "__custom";
+const EDITOR_PICK = "__pick";
+const EDITOR_DETECTED_PREFIX = "detected:";
 
 export function GeneralSettings() {
   const user = useAuthStore((state) => state.user);
@@ -17,6 +41,45 @@ export function GeneralSettings() {
   const [savedPrompt, setSavedPrompt] = useState("");
   const [editing, setEditing] = useState(false);
   const [savingPrompt, setSavingPrompt] = useState(false);
+  const editorPreference = useExternalEditorStore((state) => state.preference);
+  const detectedEditors = useExternalEditorStore((state) => state.detected);
+  const setEditorPreference = useExternalEditorStore((state) => state.setPreference);
+  const detectEditors = useExternalEditorStore((state) => state.detect);
+  const desktop = isDesktopRuntime();
+
+  useEffect(() => {
+    if (desktop) void detectEditors();
+  }, [desktop, detectEditors]);
+
+  // A detected preference whose editor is no longer installed reads as unset,
+  // matching what the preview panel's open button does with it.
+  const editorSelectValue = !editorPreference
+    ? EDITOR_UNSET
+    : editorPreference.kind === "custom"
+      ? EDITOR_CUSTOM
+      : detectedEditors.some((editor) => editor.id === editorPreference.id)
+        ? `${EDITOR_DETECTED_PREFIX}${editorPreference.id}`
+        : EDITOR_UNSET;
+
+  const handleEditorChange = useCallback(
+    (value: string) => {
+      if (value === EDITOR_UNSET) {
+        setEditorPreference(null);
+        return;
+      }
+      if (value === EDITOR_PICK) {
+        void pickEditorApp().then((appPath) => {
+          if (!appPath) return;
+          setEditorPreference({ kind: "custom", name: editorNameFromAppPath(appPath), appPath });
+        });
+        return;
+      }
+      if (value.startsWith(EDITOR_DETECTED_PREFIX)) {
+        setEditorPreference({ kind: "detected", id: value.slice(EDITOR_DETECTED_PREFIX.length) });
+      }
+    },
+    [setEditorPreference],
+  );
 
   useEffect(() => {
     api.settings
@@ -162,6 +225,53 @@ export function GeneralSettings() {
               </p>
             )
           )}
+        </SettingsCard>
+      </SettingsSection>
+
+      <SettingsSection
+        title={getGeneralSettingsLabel("settings.general.editor.title")}
+        description={getGeneralSettingsLabel("settings.general.editor.description")}
+      >
+        <SettingsCard>
+          <SettingsRow
+            label={getGeneralSettingsLabel("settings.general.editor.rowLabel")}
+            description={
+              desktop
+                ? getGeneralSettingsLabel("settings.general.editor.rowDescription")
+                : getGeneralSettingsLabel("settings.general.editor.desktopOnly")
+            }
+          >
+            <Select
+              value={editorSelectValue}
+              onValueChange={handleEditorChange}
+              disabled={!desktop}
+            >
+              <SelectTrigger className="w-56">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={EDITOR_UNSET}>
+                  {getGeneralSettingsLabel("settings.general.editor.unset")}
+                </SelectItem>
+                {detectedEditors.map((editor) => (
+                  <SelectItem key={editor.id} value={`${EDITOR_DETECTED_PREFIX}${editor.id}`}>
+                    {editor.name}
+                  </SelectItem>
+                ))}
+                {editorPreference?.kind === "custom" ? (
+                  <SelectItem value={EDITOR_CUSTOM}>
+                    {formatGeneralSettingsLabel("settings.general.editor.customCurrent", {
+                      name: editorPreference.name,
+                    })}
+                  </SelectItem>
+                ) : null}
+                <SelectSeparator />
+                <SelectItem value={EDITOR_PICK}>
+                  {getGeneralSettingsLabel("settings.general.editor.custom")}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </SettingsRow>
         </SettingsCard>
       </SettingsSection>
     </div>
