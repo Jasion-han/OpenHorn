@@ -392,3 +392,39 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 11: 设置页导入中心：本机来源扫描导入 + 导入历史按部分展示
+
+**Date**: 2026-09-11
+**Task**: 设置页导入中心：本机来源扫描导入 + 导入历史按部分展示
+**Package**: agent
+**Branch**: `main`
+
+### Summary
+
+新增 import_records 表与 /import 路由；server 扫描/导入 Claude Code、Codex、Gemini 的历史会话（幂等、过滤注入与自产会话、归项目）、全局指令（标记段）、提示词模板；桌面端新增导入 tab（按来源勾选批量导入、导入历史两级展开可跳转、需要处理区）、斜杠面板提示词分组；MCP/凭据/备份导入统一写记录；Rust 技能扫描补 Continue/OpenCode、MCP 补 VS Code；修复备份恢复日期 bug。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7eb7c4e` | (see git log) |
+| `db961ae` | (see git log) |
+| `620e25d` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

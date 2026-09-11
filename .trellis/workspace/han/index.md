@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 10
+- **Total Sessions**: 11
 - **Last Active**: 2026-09-11
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~394 | Active |
+| `journal-1.md` | ~430 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 11 | 2026-09-11 | 设置页导入中心：本机来源扫描导入 + 导入历史按部分展示 | `7eb7c4e`, `db961ae`, `620e25d` | `main` |
 | 10 | 2026-09-11 | 回复内文件引用/链接右侧预览面板、外部编辑器打开、tool_start 提前、流式首字符修复、composer 响应式 | `0090e22`, `438d62d`, `107ef40`, `8919989`, `70336b3` | `main` |
 | 9 | 2026-09-08 | 回滚快照迁出项目目录 + 死代码清理 | `52a17ab`, `43b15e9` | `main` |
 | 8 | 2026-09-08 | 输入框上下键调出历史消息 | `b415da0` | `main` |
