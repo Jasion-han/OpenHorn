@@ -121,18 +121,13 @@ export interface ScanAggregateInput {
   existingChannelNames: Set<string>;
 }
 
-function sourcesForClients(clients: string[]): ImportSource[] {
-  const out = new Set<ImportSource>();
-  let unmapped = false;
-  for (const client of clients) {
-    const source = importSourceFromClientLabel(client);
-    if (source) out.add(source);
-    else unmapped = true;
-  }
-  // A tool only seen in unmapped clients (picked file) still needs a
-  // home; one that also appears in a known client is already listed there.
-  if (out.size === 0 && unmapped) out.add("file");
-  return [...out];
+/**
+ * The single row a discovered MCP / skill entry belongs to. Rust already
+ * dedupes by canonical path / signature and tags `client` with the owner (the
+ * first client scanned); unmapped labels (picked file) fall back to `file`.
+ */
+function ownerSource(client: string): ImportSource {
+  return importSourceFromClientLabel(client) ?? "file";
 }
 
 /** Whether a summary has anything at all to show (drives `available` for `file`). */
@@ -190,41 +185,39 @@ export function aggregateScan(input: ScanAggregateInput): ImportSourceSummary[] 
     if (scanned.parts.prompts) summary.prompts = { count: scanned.parts.prompts.count };
   }
 
-  // MCP: one row per (source, signature); the same tool found in several
-  // clients shows up under each of them (creating it once is handled at run).
+  // MCP / skills: each entry is listed once, under the client that owns it
+  // (`entry.client`). Tools that CC Switch symlinks into several clients are
+  // NOT fanned out to every client row; `entry.clients` still records where
+  // else they appear and is shown as detail in the dialog / records.
   const seenMcp = new Set<string>();
   for (const server of input.mcp) {
-    for (const source of sourcesForClients(
-      server.clients.length ? server.clients : [server.client],
-    )) {
-      const key = `${source}:${server.signature}`;
-      if (seenMcp.has(key)) continue;
-      seenMcp.add(key);
-      const summary = ensure(source);
-      summary.available = true;
-      const part = summary.mcp ?? { entries: [], newCount: 0 };
-      const exists = input.existingMcpNames.has(server.name);
-      part.entries.push({ ...server, exists });
-      if (!exists) part.newCount += 1;
-      summary.mcp = part;
-    }
+    const source = ownerSource(server.client);
+    const key = `${source}:${server.signature}`;
+    if (seenMcp.has(key)) continue;
+    seenMcp.add(key);
+    const summary = ensure(source);
+    summary.available = true;
+    const part = summary.mcp ?? { entries: [], newCount: 0 };
+    const exists = input.existingMcpNames.has(server.name);
+    part.entries.push({ ...server, exists });
+    if (!exists) part.newCount += 1;
+    summary.mcp = part;
   }
 
   const seenSkill = new Set<string>();
   for (const skill of input.skills) {
     const nameKey = skill.name.trim().toLowerCase();
-    for (const source of sourcesForClients(skill.clients.length ? skill.clients : [skill.client])) {
-      const key = `${source}:${nameKey}`;
-      if (seenSkill.has(key)) continue;
-      seenSkill.add(key);
-      const summary = ensure(source);
-      summary.available = true;
-      const part = summary.skills ?? { entries: [], newCount: 0 };
-      const enabled = !input.disabledSkills.has(nameKey);
-      part.entries.push({ ...skill, enabled });
-      if (!enabled) part.newCount += 1;
-      summary.skills = part;
-    }
+    const source = ownerSource(skill.client);
+    const key = `${source}:${nameKey}`;
+    if (seenSkill.has(key)) continue;
+    seenSkill.add(key);
+    const summary = ensure(source);
+    summary.available = true;
+    const part = summary.skills ?? { entries: [], newCount: 0 };
+    const enabled = !input.disabledSkills.has(nameKey);
+    part.entries.push({ ...skill, enabled });
+    if (!enabled) part.newCount += 1;
+    summary.skills = part;
   }
 
   for (const credential of input.credentials) {

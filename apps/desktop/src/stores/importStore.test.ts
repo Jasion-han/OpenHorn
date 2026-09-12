@@ -124,20 +124,27 @@ describe("aggregateScan", () => {
     expect(claude.conversations).toEqual({ count: 12 });
     expect(claude.instructions).toEqual({ count: 1, path: "/Users/x/.claude/CLAUDE.md" });
     expect(claude.prompts).toEqual({ count: 0 });
-    expect(claude.mcp?.entries.map((e) => e.name)).toEqual(["playwright"]);
-    expect(claude.mcp?.newCount).toBe(1);
+    // playwright is owned by CC-Switch (`client`), so it is not listed here.
+    expect(claude.mcp).toBe(undefined);
     expect(claude.skills?.entries.map((e) => e.name)).toEqual(["pdf"]);
     expect(claude.skills?.newCount).toBe(0);
 
     const codex = rows[1];
     expect(codex.credentials?.entries.map((e) => e.id)).toEqual(["cli-codex"]);
     expect(codex.credentials?.newCount).toBe(1);
-    expect(codex.mcp?.entries).toHaveLength(1);
+    expect(codex.mcp).toBe(undefined);
 
-    // Gemini has no server content but a skill → available through discovery.
+    // Gemini only appears in pdf's `clients`, not as owner → nothing discovered,
+    // and the server scan marks it unavailable.
     const gemini = rows[2];
-    expect(gemini.available).toBe(true);
-    expect(gemini.skills?.entries.map((e) => e.name)).toEqual(["pdf"]);
+    expect(gemini.available).toBe(false);
+    expect(gemini.skills).toBe(undefined);
+
+    const ccSwitch = rows[3];
+    expect(ccSwitch.available).toBe(true);
+    expect(ccSwitch.mcp?.entries.map((e) => e.name)).toEqual(["playwright"]);
+    expect(ccSwitch.mcp?.newCount).toBe(1);
+    expect(ccSwitch.mcp?.entries[0]?.clients).toEqual(["CC-Switch", "Claude Code", "Codex CLI"]);
 
     const cursor = rows[4];
     expect(cursor.mcp?.entries[0]?.exists).toBe(true);
@@ -156,6 +163,72 @@ describe("aggregateScan", () => {
     expect(file.mcp?.entries.map((e) => e.name)).toEqual(["picked-only"]);
     expect(file.credentials?.entries[0]?.importable).toBe(false);
     expect(file.credentials?.newCount).toBe(0);
+  });
+
+  test("a skill symlinked into several clients is listed only under its owner (`client`)", () => {
+    const rows = aggregateScan({
+      server: null,
+      mcp: [],
+      skills: [
+        {
+          name: "pdf",
+          path: "/cc-switch/skills/pdf",
+          client: "CC-Switch",
+          clients: ["CC-Switch", "Claude Code", "Continue"],
+        },
+        skill("csv", ["Claude Code"]),
+      ],
+      disabledSkills: new Set(),
+      credentials: [],
+      existingMcpNames: new Set(),
+      existingChannelNames: new Set(),
+    });
+    expect(rows.map((row) => row.source)).toEqual(["claude-code", "cc-switch"]);
+    const ccSwitch = rows.find((row) => row.source === "cc-switch");
+    expect(ccSwitch?.skills?.entries.map((e) => e.name)).toEqual(["pdf"]);
+    // `clients` is kept for the "also present in …" detail.
+    expect(ccSwitch?.skills?.entries[0]?.clients).toEqual(["CC-Switch", "Claude Code", "Continue"]);
+    const claude = rows.find((row) => row.source === "claude-code");
+    expect(claude?.skills?.entries.map((e) => e.name)).toEqual(["csv"]);
+    expect(rows.some((row) => row.source === "continue")).toBe(false);
+  });
+
+  test("an MCP server symlinked into several clients is listed only under its owner (`client`)", () => {
+    const rows = aggregateScan({
+      server: null,
+      mcp: [
+        mcp("playwright", ["CC-Switch", "Claude Code", "Codex CLI"]),
+        mcp("github", ["Claude Code"]),
+      ],
+      skills: [],
+      disabledSkills: new Set(),
+      credentials: [],
+      existingMcpNames: new Set(),
+      existingChannelNames: new Set(),
+    });
+    expect(rows.map((row) => row.source)).toEqual(["claude-code", "cc-switch"]);
+    const ccSwitch = rows.find((row) => row.source === "cc-switch");
+    expect(ccSwitch?.mcp?.entries.map((e) => e.name)).toEqual(["playwright"]);
+    expect(ccSwitch?.mcp?.newCount).toBe(1);
+    const claude = rows.find((row) => row.source === "claude-code");
+    expect(claude?.mcp?.entries.map((e) => e.name)).toEqual(["github"]);
+    expect(rows.some((row) => row.source === "codex")).toBe(false);
+  });
+
+  test("entries whose owner label is unknown (picked file) land in the `file` row", () => {
+    const rows = aggregateScan({
+      server: null,
+      mcp: [mcp("picked", ["导入的文件", "Claude Code"])],
+      skills: [skill("loose", ["Unknown Client"])],
+      disabledSkills: new Set(),
+      credentials: [],
+      existingMcpNames: new Set(),
+      existingChannelNames: new Set(),
+    });
+    expect(rows.map((row) => row.source)).toEqual(["file"]);
+    expect(rows[0].available).toBe(true);
+    expect(rows[0].mcp?.entries.map((e) => e.name)).toEqual(["picked"]);
+    expect(rows[0].skills?.entries.map((e) => e.name)).toEqual(["loose"]);
   });
 
   test("sources with nothing to import stay unavailable and are omitted when never scanned", () => {
