@@ -1,5 +1,5 @@
 import { ChevronLeft, ChevronRight, Paperclip, X } from "lucide-react";
-import { useState } from "react";
+import { type KeyboardEvent, useState } from "react";
 import { truncateName } from "shared/format";
 import { cn, Dialog, DialogClose, DialogContent, DialogDescription } from "ui";
 import { getAttachmentUrl } from "../../lib/attachmentUrl";
@@ -53,6 +53,20 @@ export function DesktopMessageAttachments({
 
   const canPrev = activeIndex > 0;
   const canNext = activeIndex < imagesForPreview.length - 1;
+
+  // Radix DialogContent takes focus when opened, so key events land here
+  // without a global listener. Does not wrap at either end, matching the
+  // disabled state of the arrow buttons.
+  const handleLightboxKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (imagesForPreview.length <= 1) return;
+    if (event.key === "ArrowLeft" && canPrev) {
+      event.preventDefault();
+      setActiveIndex((idx) => Math.max(0, idx - 1));
+    } else if (event.key === "ArrowRight" && canNext) {
+      event.preventDefault();
+      setActiveIndex((idx) => Math.min(imagesForPreview.length - 1, idx + 1));
+    }
+  };
 
   return (
     <div className={cn("mb-2 flex flex-col gap-2", className)}>
@@ -115,7 +129,10 @@ export function DesktopMessageAttachments({
       )}
 
       <Dialog open={lightboxOpen} onOpenChange={setLightboxOpen}>
-        <DialogContent className="max-w-[min(980px,94vw)] overflow-hidden p-0">
+        <DialogContent
+          className="max-w-[min(980px,94vw)] overflow-hidden p-0"
+          onKeyDown={handleLightboxKeyDown}
+        >
           <DialogDescription className="sr-only">
             {getChatLabel("chat.attachment.lightboxDescription")}
           </DialogDescription>
