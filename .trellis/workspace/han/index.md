@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 12
+- **Total Sessions**: 13
 - **Last Active**: 2026-09-12
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~465 | Active |
+| `journal-1.md` | ~501 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 13 | 2026-09-12 | 本机会话导入：合并助手片段 + 图片附件 + 预览键盘切换 | `1520c90`, `585467d`, `4a49d8d` | `main` |
 | 12 | 2026-09-12 | 导入中心并入数据页 + 技能/MCP 单一归属 | `9cf9aed`, `7c7e545` | `main` |
 | 11 | 2026-09-11 | 设置页导入中心：本机来源扫描导入 + 导入历史按部分展示 | `7eb7c4e`, `db961ae`, `620e25d` | `main` |
 | 10 | 2026-09-11 | 回复内文件引用/链接右侧预览面板、外部编辑器打开、tool_start 提前、流式首字符修复、composer 响应式 | `0090e22`, `438d62d`, `107ef40`, `8919989`, `70336b3` | `main` |

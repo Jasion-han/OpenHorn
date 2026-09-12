@@ -463,3 +463,39 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 13: 本机会话导入：合并助手片段 + 图片附件 + 预览键盘切换
+
+**Date**: 2026-09-12
+**Task**: 本机会话导入：合并助手片段 + 图片附件 + 预览键盘切换
+**Package**: agent
+**Branch**: `main`
+
+### Summary
+
+Claude Code/Codex 导入把一轮回复的多段 assistant 合并为一条；用户 base64 图片落附件并清理 [Image #N] 占位；显式勾选强制重导；桌面端草稿判定收紧修掉重导后残留旧消息；图片预览弹层加 ←/→ 切换。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1520c90` | (see git log) |
+| `585467d` | (see git log) |
+| `4a49d8d` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
