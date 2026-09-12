@@ -916,7 +916,6 @@ export function getAppearanceSettingsLabel(key: AppearanceSettingsLabelKey): str
 export const settingsViewLabels = {
   "settings.view.title": "设置",
   "settings.view.tab.general": "通用",
-  "settings.view.tab.import": "导入",
   "settings.view.tab.channels": "渠道",
   "settings.view.tab.appearance": "外观",
 } as const;
@@ -1043,10 +1042,9 @@ export const dataTransferLabels = {
   "settings.data.export.failedTitle": "导出失败",
   // Import area
   "settings.data.import.heading": "导入",
-  "settings.data.import.title": "导入数据",
-  "settings.data.import.description":
-    "从 OpenHorn 备份、ChatGPT 导出或 Claude 导出文件中导入数据。支持 ZIP 和 JSON 格式。",
-  "settings.data.import.button": "选择文件并导入",
+  "settings.data.import.title": "备份 / 导出文件",
+  "settings.data.import.description": "OpenHorn 备份、ChatGPT / Claude 导出（ZIP、JSON）",
+  "settings.data.import.button": "选择文件",
   // Import states
   "settings.data.import.detecting": "正在识别文件格式...",
   "settings.data.import.importing": "正在导入...",
@@ -1131,10 +1129,9 @@ export const importLabels = {
   "import.status.imported": "已导入",
   "import.status.skipped": "已跳过",
   "import.status.needsAction": "需处理",
-  // Section: detected sources
-  "import.detected.title": "检测到可导入的配置",
+  // Section: import sources (local AI clients + backup / export files)
   "import.detected.description":
-    "扫描本机 AI 客户端的会话、MCP、技能、全局指令与凭据，按来源勾选后批量导入。",
+    "从 OpenHorn 备份或 ChatGPT / Claude 导出文件导入，或扫描本机 AI 客户端的会话、MCP、技能、全局指令与凭据，按来源勾选后批量导入。",
   "import.detected.rescan": "重新扫描",
   "import.detected.scanning": "正在扫描本机配置…",
   "import.detected.scanFailed": "扫描失败：{message}",
@@ -1142,12 +1139,9 @@ export const importLabels = {
   "import.detected.partCount": "{part} {count}",
   "import.detected.summaryEmpty": "暂无可导入内容",
   "import.detected.desktopOnly": "本机来源扫描仅在桌面端可用。",
+  "import.pickMcpConfig": "选择 MCP 配置…",
   // Empty state
   "import.empty.title": "未检测到本机 AI 客户端配置",
-  "import.empty.description":
-    "没有在用户目录下找到 Claude Code、Codex CLI、Gemini CLI 等客户端的数据。你可以手动选择一个 MCP 配置文件，或从 OpenHorn 备份文件导入。",
-  "import.empty.pickConfig": "选择配置文件…",
-  "import.empty.fromBackup": "从备份文件导入",
   "import.empty.pickConfigNone": "所选文件中没有可解析的 MCP server。",
   "import.empty.pickConfigFailed": "无法读取所选文件。",
   // Import dialog

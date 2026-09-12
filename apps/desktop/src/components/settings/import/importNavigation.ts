@@ -5,7 +5,6 @@ import { useProjectStore } from "../../../stores/projectStore";
 
 const SETTINGS_TABS: DesktopSettingsTab[] = [
   "general",
-  "import",
   "channels",
   "credentials",
   "agent",

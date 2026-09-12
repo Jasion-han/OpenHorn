@@ -1,14 +1,4 @@
-import {
-  Bot,
-  Download,
-  HardDrive,
-  KeyRound,
-  Palette,
-  Plug,
-  Radio,
-  Settings,
-  Sparkles,
-} from "lucide-react";
+import { Bot, HardDrive, KeyRound, Palette, Plug, Radio, Settings, Sparkles } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { cn, ScrollArea } from "ui";
 import {
@@ -26,7 +16,6 @@ import { ChannelSettings } from "./ChannelSettings";
 import { DataTransferSettings } from "./DataTransferSettings";
 import { DesktopCredentialSourcesPanel } from "./DesktopCredentialSourcesPanel";
 import { GeneralSettings } from "./GeneralSettings";
-import { ImportSettings } from "./ImportSettings";
 import { McpSettings } from "./McpSettings";
 import { SkillSettings } from "./SkillSettings";
 
@@ -35,11 +24,6 @@ const TABS: Array<{ id: SettingsTab; label: string; icon: ReactNode }> = [
     id: "general",
     label: getSettingsViewLabel("settings.view.tab.general"),
     icon: <Settings size={16} />,
-  },
-  {
-    id: "import",
-    label: getSettingsViewLabel("settings.view.tab.import"),
-    icon: <Download size={16} />,
   },
   {
     id: "channels",
@@ -70,8 +54,6 @@ function TabContent({ id }: { id: SettingsTab }) {
   switch (id) {
     case "general":
       return <GeneralSettings />;
-    case "import":
-      return <ImportSettings />;
     case "channels":
       return <ChannelSettings />;
     case "credentials":

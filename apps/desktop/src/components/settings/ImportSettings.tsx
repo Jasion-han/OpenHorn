@@ -1,9 +1,10 @@
-import { Download, FileUp, HardDrive, Loader2, RefreshCw } from "lucide-react";
+import { Download, FileUp, Loader2, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ImportSource } from "shared/types";
 import { Button, SettingsCard, SettingsSection } from "ui";
 import {
   formatImportLabel,
+  getDataTransferLabel,
   getImportLabel,
   getImportPartLabel,
   getImportSourceLabel,
@@ -11,13 +12,13 @@ import {
 import { notifyError } from "../../lib/notify";
 import { isDesktopRuntime, pickMcpConfigFile } from "../../lib/tauriBridge";
 import { BACKEND_UP_EVENT } from "../../stores/backendStatusStore";
-import { useDesktopShellStore } from "../../stores/desktopShellStore";
 import {
   collectNeedsAction,
   type ImportSourceSummary,
   summaryHasContent,
   useImportStore,
 } from "../../stores/importStore";
+import { BackupFileImportRow } from "./import/BackupFileImportRow";
 import { ImportHistoryCard, ImportItemRow } from "./import/ImportHistoryCard";
 import { ImportSourceDialog } from "./import/ImportSourceDialog";
 import { ImportSourceIcon } from "./import/ImportSourceIcon";
@@ -56,7 +57,6 @@ export function ImportSettings() {
   const loadRecords = useImportStore((state) => state.loadRecords);
   const loadMoreRecords = useImportStore((state) => state.loadMoreRecords);
   const removeRecord = useImportStore((state) => state.removeRecord);
-  const setSettingsTab = useDesktopShellStore((state) => state.setSettingsTab);
 
   const [dialogSource, setDialogSource] = useState<ImportSource | null>(null);
   const [expandedRecords, setExpandedRecords] = useState<Set<string>>(new Set());
@@ -138,13 +138,13 @@ export function ImportSettings() {
   return (
     <div className="flex flex-col gap-8">
       <SettingsSection
-        title={getImportLabel("import.detected.title")}
+        title={getDataTransferLabel("settings.data.import.heading")}
         description={getImportLabel("import.detected.description")}
         action={
           <div className="flex items-center gap-2">
             {desktop ? (
               <Button size="sm" variant="outline" onClick={() => void handlePickConfig()}>
-                <FileUp size={16} /> {getImportLabel("import.empty.pickConfig")}
+                <FileUp size={16} /> {getImportLabel("import.pickMcpConfig")}
               </Button>
             ) : null}
             <Button size="sm" variant="outline" onClick={() => void scan()} disabled={scanning}>
@@ -165,52 +165,37 @@ export function ImportSettings() {
               {getImportLabel("import.detected.desktopOnly")}
             </p>
           ) : null}
-          {scanning && availableSources.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              {getImportLabel("import.detected.scanning")}
-            </p>
-          ) : showEmpty ? (
-            <div className="flex flex-col items-start gap-3">
-              <p className="text-sm font-medium">{getImportLabel("import.empty.title")}</p>
+          <div className="flex flex-col gap-2">
+            {scanning && availableSources.length === 0 ? (
               <p className="text-sm text-muted-foreground">
-                {getImportLabel("import.empty.description")}
+                {getImportLabel("import.detected.scanning")}
               </p>
-              <div className="flex items-center gap-2">
-                {desktop ? (
-                  <Button size="sm" variant="outline" onClick={() => void handlePickConfig()}>
-                    <FileUp size={16} /> {getImportLabel("import.empty.pickConfig")}
-                  </Button>
-                ) : null}
-                <Button size="sm" variant="outline" onClick={() => setSettingsTab("data")}>
-                  <HardDrive size={16} /> {getImportLabel("import.empty.fromBackup")}
+            ) : showEmpty ? (
+              <p className="text-sm text-muted-foreground">
+                {getImportLabel("import.empty.title")}
+              </p>
+            ) : null}
+            {availableSources.map((row) => (
+              <div
+                key={row.source}
+                className="flex items-center justify-between gap-3 rounded-xl border border-border/50 bg-background/60 p-3"
+              >
+                <div className="flex min-w-0 items-center gap-3">
+                  <ImportSourceIcon source={row.source} />
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium">
+                      {getImportSourceLabel(row.source)}
+                    </p>
+                    <p className="truncate text-xs text-muted-foreground">{describeSummary(row)}</p>
+                  </div>
+                </div>
+                <Button size="sm" onClick={() => setDialogSource(row.source)}>
+                  <Download size={16} /> {getImportLabel("import.detected.import")}
                 </Button>
               </div>
-            </div>
-          ) : (
-            <div className="flex flex-col gap-2">
-              {availableSources.map((row) => (
-                <div
-                  key={row.source}
-                  className="flex items-center justify-between gap-3 rounded-xl border border-border/50 bg-background/60 p-3"
-                >
-                  <div className="flex min-w-0 items-center gap-3">
-                    <ImportSourceIcon source={row.source} />
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium">
-                        {getImportSourceLabel(row.source)}
-                      </p>
-                      <p className="truncate text-xs text-muted-foreground">
-                        {describeSummary(row)}
-                      </p>
-                    </div>
-                  </div>
-                  <Button size="sm" onClick={() => setDialogSource(row.source)}>
-                    <Download size={16} /> {getImportLabel("import.detected.import")}
-                  </Button>
-                </div>
-              ))}
-            </div>
-          )}
+            ))}
+            <BackupFileImportRow onImported={() => void loadRecords()} />
+          </div>
         </SettingsCard>
       </SettingsSection>
 
