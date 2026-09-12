@@ -93,6 +93,10 @@ export const IMPORT_DETAIL = {
   messageCount: (count: number) => `${count} 条消息`,
   /** Conversation part note: total messages written across imported conversations. */
   messagesNote: (count: number) => `共 ${count} 条消息`,
+  /** `{count}` = prompt images stored as attachments for one conversation. */
+  imageCount: (count: number) => `含 ${count} 张图片`,
+  /** `{count}` = prompt images dropped (type not allowed or over the size cap). */
+  imagesSkipped: (count: number) => `${count} 张图片未导入（类型不支持或过大）`,
   /** Prefix on a conversation that already existed and was re-imported from a newer source file. */
   updated: "已更新",
   unchanged: "已导入且无变化",

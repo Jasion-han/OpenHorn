@@ -17,7 +17,7 @@ import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
 import { createClient } from "@libsql/client";
-import { conversations, messages, projects } from "db";
+import { attachments, conversations, messages, projects } from "db";
 import { and, eq, inArray, lte } from "drizzle-orm";
 import {
   GLOBAL_SYSTEM_PROMPT_SETTING_KEY,
@@ -38,6 +38,13 @@ import type {
 } from "shared/types";
 import { client, db } from "../db";
 import { generateId } from "../utils";
+import {
+  isAllowedMimeType,
+  linkAttachmentsToMessage,
+  MAX_ATTACHMENT_SIZE,
+  removeAttachmentFiles,
+  storeAttachment,
+} from "./attachmentService";
 import { addPartItem, createImportRecord, createPart, IMPORT_DETAIL } from "./importRecordsService";
 import { getSettingValues, setSettingValue } from "./settingsService";
 
@@ -154,12 +161,60 @@ function truncateTitle(text: string): string {
 // Shared message model
 // ---------------------------------------------------------------------------
 
+/** Inline image a user attached to a prompt (Claude `image` block / Codex `input_image` data URL). */
+interface ParsedImage {
+  mediaType: string;
+  /** Raw base64 payload (no data-URL prefix). */
+  data: string;
+}
+
 interface ParsedMessage {
   role: "user" | "assistant";
   content: string;
   model: string | null;
   usage: { promptTokens: number; completionTokens: number; totalTokens: number } | null;
   createdAt: number;
+  images?: ParsedImage[];
+}
+
+interface ParsedUserContent {
+  text: string;
+  images: ParsedImage[];
+}
+
+function addUsage(a: ParsedMessage["usage"], b: ParsedMessage["usage"]): ParsedMessage["usage"] {
+  if (!a) return b;
+  if (!b) return a;
+  return {
+    promptTokens: a.promptTokens + b.promptTokens,
+    completionTokens: a.completionTokens + b.completionTokens,
+    totalTokens: a.totalTokens + b.totalTokens,
+  };
+}
+
+/**
+ * One reply turn in Claude Code / Codex is written as several API messages
+ * (one per tool round-trip). Without the tool calls in between, those pieces
+ * are one answer: fold every run of assistant messages not separated by a user
+ * prompt into a single message. Content joins with a blank line, usage sums,
+ * model is the last one seen, createdAt is the first piece's.
+ */
+export function mergeConsecutiveAssistant(list: ParsedMessage[]): ParsedMessage[] {
+  const out: ParsedMessage[] = [];
+  for (const m of list) {
+    const last = out[out.length - 1];
+    if (m.role === "assistant" && last?.role === "assistant") {
+      last.content = [last.content, m.content]
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .join("\n\n");
+      last.model = m.model ?? last.model;
+      last.usage = addUsage(last.usage, m.usage);
+      continue;
+    }
+    out.push({ ...m });
+  }
+  return out;
 }
 
 interface ParsedSession {
@@ -243,27 +298,47 @@ function isClaudeInjected(text: string): boolean {
   return CLAUDE_INJECTED_PREFIXES.some((prefix) => trimmed.startsWith(prefix));
 }
 
-/** Text of a user line, or null when it is not a real user prompt (meta / tool_result / compact summary / injected). */
-function claudeUserText(obj: Record<string, unknown>): string | null {
+/** `{type:"image", source:{type:"base64", media_type, data}}`; url / file sources are not importable. */
+function claudeImageBlock(block: Record<string, unknown>): ParsedImage | null {
+  if (block.type !== "image" || !isRecord(block.source)) return null;
+  const source = block.source;
+  const mediaType = asString(source.media_type);
+  const data = asString(source.data);
+  if (source.type !== "base64" || !mediaType?.startsWith("image/") || !data) return null;
+  return { mediaType, data };
+}
+
+/**
+ * Text + inline images of a user line, or null when it is not a real user
+ * prompt (meta / tool_result / compact summary / injected). The `[Image #N]`
+ * placeholders Claude Code puts in the text are kept as-is.
+ */
+function claudeUserContent(obj: Record<string, unknown>): ParsedUserContent | null {
   if (obj.isMeta === true || obj.isCompactSummary === true) return null;
   if (obj.toolUseResult !== undefined && obj.toolUseResult !== null) return null;
   const message = isRecord(obj.message) ? obj.message : null;
   if (!message) return null;
   const content = message.content;
   if (typeof content === "string") {
-    return content.trim() && !isClaudeInjected(content) ? content : null;
+    return content.trim() && !isClaudeInjected(content) ? { text: content, images: [] } : null;
   }
   if (!Array.isArray(content)) return null;
   const texts: string[] = [];
+  const images: ParsedImage[] = [];
   for (const block of content) {
     if (!isRecord(block)) continue;
     if (block.type === "tool_result") return null;
+    const image = claudeImageBlock(block);
+    if (image) {
+      images.push(image);
+      continue;
+    }
     if (block.type !== "text" || typeof block.text !== "string") continue;
     if (isClaudeInjected(block.text)) continue;
     texts.push(block.text);
   }
   const joined = texts.join("\n");
-  return joined.trim() ? joined : null;
+  return joined.trim() ? { text: joined, images } : null;
 }
 
 interface ClaudeAssistantGroup {
@@ -321,7 +396,7 @@ async function readClaudeHead(filePath: string): Promise<ClaudeHead> {
           if (!head.cwd) head.cwd = asString(obj.cwd);
           if (head.firstTimestamp === null) head.firstTimestamp = parseTimestamp(obj.timestamp);
           if (obj.type === "user" && !head.firstUserText) {
-            head.firstUserText = claudeUserText(obj);
+            head.firstUserText = claudeUserContent(obj)?.text ?? null;
           }
         }
       }
@@ -394,14 +469,21 @@ async function parseClaudeSession(file: SessionFile): Promise<ParsedSession | nu
     if (!cwd) cwd = asString(obj.cwd);
 
     if (obj.type === "user") {
-      const text = claudeUserText(obj);
-      if (!text) continue;
+      const user = claudeUserContent(obj);
+      if (!user) continue;
       flush();
       if (!firstUserText) {
-        if (isOpenHornLegacyPrompt(text)) return null;
-        firstUserText = text;
+        if (isOpenHornLegacyPrompt(user.text)) return null;
+        firstUserText = user.text;
       }
-      out.push({ role: "user", content: text, model: null, usage: null, createdAt: ts });
+      out.push({
+        role: "user",
+        content: user.text,
+        model: null,
+        usage: null,
+        createdAt: ts,
+        ...(user.images.length ? { images: user.images } : {}),
+      });
       continue;
     }
 
@@ -441,7 +523,7 @@ async function parseClaudeSession(file: SessionFile): Promise<ParsedSession | nu
     model,
     createdAt,
     updatedAt,
-    messages: out,
+    messages: mergeConsecutiveAssistant(out),
   };
 }
 
@@ -570,17 +652,36 @@ function isCodexSkippedMeta(meta: CodexMeta): boolean {
   return meta.originator === "openhorn" || meta.threadSource === "subagent";
 }
 
-/** User text after dropping injected blocks; null when nothing user-authored remains. */
-function codexUserText(payload: Record<string, unknown>): string | null {
+const CODEX_IMAGE_DATA_URL = /^data:(image\/[\w.+-]+);base64,([A-Za-z0-9+/=\s]+)$/;
+
+/** `{type:"input_image", image_url:"data:image/…;base64,…"}`; http(s) / file urls are not importable. */
+function codexImageBlock(block: Record<string, unknown>): ParsedImage | null {
+  if (block.type !== "input_image") return null;
+  const url = asString(block.image_url);
+  const m = url ? CODEX_IMAGE_DATA_URL.exec(url) : null;
+  if (!m) return null;
+  const data = m[2].replace(/\s+/g, "");
+  return data ? { mediaType: m[1], data } : null;
+}
+
+/** User text (+ inline images) after dropping injected blocks; null when nothing user-authored remains. */
+function codexUserContent(payload: Record<string, unknown>): ParsedUserContent | null {
   if (!Array.isArray(payload.content)) return null;
   const texts: string[] = [];
+  const images: ParsedImage[] = [];
   for (const block of payload.content) {
-    if (!isRecord(block) || block.type !== "input_text" || typeof block.text !== "string") continue;
+    if (!isRecord(block)) continue;
+    const image = codexImageBlock(block);
+    if (image) {
+      images.push(image);
+      continue;
+    }
+    if (block.type !== "input_text" || typeof block.text !== "string") continue;
     if (isCodexInjected(block.text)) continue;
     texts.push(block.text);
   }
   const joined = texts.join("\n");
-  return joined.trim() ? joined : null;
+  return joined.trim() ? { text: joined, images } : null;
 }
 
 function codexAssistantText(payload: Record<string, unknown>): string | null {
@@ -629,7 +730,7 @@ async function readCodexHead(filePath: string): Promise<CodexHead> {
       } else if (obj.type === "response_item" && isRecord(obj.payload)) {
         const p = obj.payload;
         if (p.type === "message" && p.role === "user") {
-          const text = codexUserText(p);
+          const text = codexUserContent(p)?.text;
           if (text) {
             head.firstUserText = text;
             break;
@@ -683,12 +784,19 @@ async function parseCodexSession(
     const ts = parseTimestamp(obj.timestamp) ?? updatedAt ?? createdAt ?? Date.now();
     const role = payload.role;
     if (role === "user") {
-      const text = codexUserText(payload);
-      if (!text) continue;
+      const user = codexUserContent(payload);
+      if (!user) continue;
       if (createdAt === null) createdAt = ts;
       updatedAt = ts;
-      if (!firstUserText) firstUserText = text;
-      out.push({ role: "user", content: text, model: null, usage: null, createdAt: ts });
+      if (!firstUserText) firstUserText = user.text;
+      out.push({
+        role: "user",
+        content: user.text,
+        model: null,
+        usage: null,
+        createdAt: ts,
+        ...(user.images.length ? { images: user.images } : {}),
+      });
     } else if (role === "assistant") {
       const text = codexAssistantText(payload);
       if (!text) continue;
@@ -709,7 +817,7 @@ async function parseCodexSession(
     model,
     createdAt,
     updatedAt,
-    messages: out,
+    messages: mergeConsecutiveAssistant(out),
   };
 }
 
@@ -1138,13 +1246,101 @@ function monotonicTimestamps(list: ParsedMessage[]): Date[] {
 
 type PersistOutcome = "imported" | "updated" | "unchanged";
 
+interface PersistResult {
+  outcome: PersistOutcome;
+  /** Images written as attachments. */
+  imageCount: number;
+  /** Images dropped for an unsupported type or size. */
+  imagesSkipped: number;
+}
+
+const IMAGE_EXTENSIONS: Record<string, string> = {
+  "image/png": "png",
+  "image/jpeg": "jpeg",
+  "image/gif": "gif",
+  "image/webp": "webp",
+};
+
+/**
+ * Writes one prompt image through the regular attachment path (same directory
+ * layout as chat uploads) and links it to the message. `userId` is deliberately
+ * not passed to `storeAttachment`: that would queue RAG indexing, which images
+ * never take part in. Returns false when the image is not storable.
+ */
+async function persistUserImage(
+  userId: string,
+  conversationId: string,
+  messageId: string,
+  image: ParsedImage,
+  ordinal: number,
+): Promise<boolean> {
+  if (!isAllowedMimeType(image.mediaType)) return false;
+  const buffer = Buffer.from(image.data, "base64");
+  if (buffer.byteLength === 0 || buffer.byteLength > MAX_ATTACHMENT_SIZE) return false;
+  const ext = IMAGE_EXTENSIONS[image.mediaType] ?? "bin";
+  const file = new File([buffer], `image-${ordinal}.${ext}`, { type: image.mediaType });
+  // A single unwritable image (disk / permission error) must not abort the
+  // conversation whose messages are already in; it is reported as skipped.
+  try {
+    const stored = await storeAttachment({ conversationId, file });
+    await linkAttachmentsToMessage([stored.id], messageId, userId);
+    return true;
+  } catch (error) {
+    console.error(`[local-import] failed to store image for message ${messageId}:`, error);
+    return false;
+  }
+}
+
+const IMAGE_PLACEHOLDER = /\[Image #\d+\]/g;
+
+/**
+ * Drops the `[Image #N]` markers Claude Code / Codex leave in a prompt once
+ * every image behind them is an attachment. Only lines that carried a marker
+ * are tidied (runs of spaces collapsed, edges trimmed); a line that was nothing
+ * but markers disappears. Returns the input unchanged when it has no marker.
+ */
+export function stripImagePlaceholders(text: string): string {
+  if (!/\[Image #\d+\]/.test(text)) return text;
+  const lines: string[] = [];
+  for (const line of text.split("\n")) {
+    if (!/\[Image #\d+\]/.test(line)) {
+      lines.push(line);
+      continue;
+    }
+    const tidy = line.replace(IMAGE_PLACEHOLDER, "").replace(/ {2,}/g, " ").trim();
+    if (tidy) lines.push(tidy);
+  }
+  return lines.join("\n");
+}
+
+/**
+ * Attachments hang off messages with no guaranteed FK cascade (the runtime
+ * DDL is the authority, not the Drizzle schema), so a re-import must drop the
+ * rows itself — and read their paths first, or the files are orphaned.
+ */
+async function deleteMessageAttachments(messageIds: string[]): Promise<void> {
+  const rows = await db
+    .select({ filePath: attachments.filePath })
+    .from(attachments)
+    .where(inArray(attachments.messageId, messageIds));
+  if (rows.length === 0) return;
+  await db.delete(attachments).where(inArray(attachments.messageId, messageIds));
+  await removeAttachmentFiles(rows.map((row) => row.filePath));
+}
+
 async function persistSession(
   userId: string,
   source: ImportSource,
   session: ParsedSession,
   projectIdByRoot: Map<string, string>,
   now: Date,
-): Promise<PersistOutcome> {
+  /**
+   * Re-import even when the source file is not newer than the stored
+   * conversation. Set for sessions the user picked explicitly: a parser fix
+   * can only reach an already-imported conversation this way.
+   */
+  force = false,
+): Promise<PersistResult> {
   const projectId = session.cwd ? (projectIdByRoot.get(session.cwd) ?? null) : null;
   const existing = await db
     .select({
@@ -1162,12 +1358,14 @@ async function persistSession(
   let outcome: PersistOutcome;
   if (existing.length > 0) {
     // Seconds precision on both sides; anything not strictly newer is unchanged.
-    if (sourceUpdatedAt.getTime() <= existing[0].updatedAt.getTime()) return "unchanged";
+    if (!force && sourceUpdatedAt.getTime() <= existing[0].updatedAt.getTime()) {
+      return { outcome: "unchanged", imageCount: 0, imagesSkipped: 0 };
+    }
     // Only replace what the previous import wrote. Turns the user added inside
     // OpenHorn after importing have createdAt > importedAt and must survive.
     // A same-id conversation that was never imported is not ours to touch.
     const previousImportedAt = existing[0].importedAt;
-    if (!previousImportedAt) return "unchanged";
+    if (!previousImportedAt) return { outcome: "unchanged", imageCount: 0, imagesSkipped: 0 };
     const stale = await db
       .select({ id: messages.id })
       .from(messages)
@@ -1176,6 +1374,7 @@ async function persistSession(
       );
     const staleIds = stale.map((row) => row.id);
     if (staleIds.length > 0) {
+      await deleteMessageAttachments(staleIds);
       await db.delete(messages).where(inArray(messages.id, staleIds));
       await ftsDeleteMessages(staleIds);
     }
@@ -1211,6 +1410,8 @@ async function persistSession(
   }
 
   const stamps = monotonicTimestamps(session.messages);
+  let imageCount = 0;
+  let imagesSkipped = 0;
   for (let i = 0; i < session.messages.length; i++) {
     const m = session.messages[i];
     const id = generateId();
@@ -1225,8 +1426,26 @@ async function persistSession(
       createdAt: stamps[i],
     });
     await ftsInsert(id, session.id, m.content);
+    if (m.role !== "user" || !m.images?.length) continue;
+    let skippedHere = 0;
+    for (let k = 0; k < m.images.length; k++) {
+      const stored = await persistUserImage(userId, session.id, id, m.images[k], k + 1);
+      if (stored) imageCount++;
+      else skippedHere++;
+    }
+    imagesSkipped += skippedHere;
+    // The markers only go once every image is really there to look at; a
+    // prompt that was nothing but images keeps its text so the row is not blank.
+    // The message had to exist first (attachments FK onto it), so this is a
+    // second write; FTS is re-pointed to the same text.
+    if (skippedHere > 0) continue;
+    const cleaned = stripImagePlaceholders(m.content);
+    if (cleaned === m.content || !cleaned.trim()) continue;
+    await db.update(messages).set({ content: cleaned }).where(eq(messages.id, id));
+    await ftsDeleteMessages([id]);
+    await ftsInsert(id, session.id, cleaned);
   }
-  return outcome;
+  return { outcome, imageCount, imagesSkipped };
 }
 
 async function loadProjectIndex(userId: string): Promise<Map<string, string>> {
@@ -1281,6 +1500,9 @@ async function importConversations(
 
   const projectIndex = await loadProjectIndex(userId);
   const now = new Date();
+  // Explicitly picked sessions are rewritten even when their file has not
+  // changed; "all" keeps skipping unchanged ones.
+  const force = selection !== "all";
   let messageCount = 0;
 
   for (const file of wanted) {
@@ -1297,7 +1519,14 @@ async function importConversations(
         });
         continue;
       }
-      const outcome = await persistSession(userId, source, session, projectIndex, now);
+      const { outcome, imageCount, imagesSkipped } = await persistSession(
+        userId,
+        source,
+        session,
+        projectIndex,
+        now,
+        force,
+      );
       if (outcome === "unchanged") {
         addPartItem(convPart, {
           label: session.title,
@@ -1311,6 +1540,8 @@ async function importConversations(
       const detailBits = [
         ...(outcome === "updated" ? [IMPORT_DETAIL.updated] : []),
         IMPORT_DETAIL.messageCount(session.messages.length),
+        ...(imageCount > 0 ? [IMPORT_DETAIL.imageCount(imageCount)] : []),
+        ...(imagesSkipped > 0 ? [IMPORT_DETAIL.imagesSkipped(imagesSkipped)] : []),
         ...(session.cwd ? [session.cwd] : []),
       ];
       addPartItem(convPart, {
