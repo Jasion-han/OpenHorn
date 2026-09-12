@@ -525,13 +525,17 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
         // the server assigns new ids, so an id-only check would keep the stale
         // draft alongside the persisted copy and render the whole exchange
         // twice. Drop any draft whose (role, content) already exists in the DB;
-        // only genuinely in-flight drafts (not yet persisted) survive.
+        // only genuinely in-flight drafts (not yet persisted) survive. A cached
+        // message with a server id that the DB no longer returns was deleted
+        // behind our back (re-import, another client) and is never a draft.
         const dbSignatures = new Set(
           dbMessages.map((m) => `${m.role}\u0000${(m.content || "").trim()}`),
         );
         const drafts = current.filter(
           (m) =>
-            !dbIds.has(m.id) && !dbSignatures.has(`${m.role}\u0000${(m.content || "").trim()}`),
+            m.id.startsWith("draft-") &&
+            !dbIds.has(m.id) &&
+            !dbSignatures.has(`${m.role}\u0000${(m.content || "").trim()}`),
         );
         const merged = drafts.length > 0 ? [...dbMerged, ...drafts] : dbMerged;
 

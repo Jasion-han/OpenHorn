@@ -685,6 +685,55 @@ describe("desktop chat store message cache", () => {
     });
   });
 
+  test("drops cached server-id messages the DB no longer returns, keeps in-flight drafts", async () => {
+    const base = createManyConvAdapter(3);
+    let dbRows: Message[] = [
+      {
+        id: "msg-old",
+        conversationId: "conv-0",
+        role: "assistant",
+        content: "旧回复",
+        mode: "agent",
+        createdAt: new Date("2026-03-20T10:01:00.000Z"),
+      },
+    ];
+    const store = createDesktopChatStore({
+      ...base,
+      loadMessages: async (conversationId) =>
+        conversationId === "conv-0" ? dbRows : base.loadMessages(conversationId),
+    });
+
+    await store.getState().loadConversations();
+    await store.getState().selectConversation("conv-0");
+    // A draft pair (draft-user-* / draft-assistant-*) is not in the DB yet.
+    const result = await store.getState().sendMessage({ content: "继续执行" });
+    // Leave → conv-0 (msg-old + drafts) goes into the cache.
+    await store.getState().selectConversation("conv-1");
+
+    // msg-old was deleted server-side (e.g. the conversation was re-imported).
+    dbRows = [
+      {
+        id: "msg-new",
+        conversationId: "conv-0",
+        role: "assistant",
+        content: "新回复",
+        mode: "agent",
+        createdAt: new Date("2026-03-20T10:02:00.000Z"),
+      },
+    ];
+    await store.getState().selectConversation("conv-0");
+
+    const ids = store.getState().messages.map((m) => m.id);
+    expect(ids.filter((id) => id === "msg-old")).toHaveLength(0);
+    expect(ids.filter((id) => id === "msg-new")).toHaveLength(1);
+    expect(ids.filter((id) => id === result.userMessageId)).toHaveLength(1);
+    expect(ids.filter((id) => id === result.assistantMessageId)).toHaveLength(1);
+    expect(store.getState().messages.find((m) => m.id === result.userMessageId)).toMatchObject({
+      role: "user",
+      content: "继续执行",
+    });
+  });
+
   test("reset clears the message cache", async () => {
     const store = createDesktopChatStore(createManyConvAdapter(3));
 
