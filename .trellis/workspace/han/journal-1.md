@@ -428,3 +428,38 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 12: 导入中心并入数据页 + 技能/MCP 单一归属
+
+**Date**: 2026-09-12
+**Task**: 导入中心并入数据页 + 技能/MCP 单一归属
+**Package**: agent
+**Branch**: `main`
+
+### Summary
+
+去掉独立导入 tab，导入中心并入数据页，备份文件导入作为来源列表最后一行；aggregateScan 改为按 client 归属方单一归属，修掉 cc-switch 符号链接导致的各来源重复计数。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9cf9aed` | (see git log) |
+| `7c7e545` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
