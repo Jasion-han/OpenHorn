@@ -1,5 +1,5 @@
 import { ChevronDown, ChevronRight, Loader2 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { type Dispatch, type SetStateAction, useEffect, useMemo, useState } from "react";
 import type { LocalImportConversationSummary } from "shared/types";
 import {
   Button,
@@ -151,6 +151,62 @@ export function ImportSourceDialog({
   const [mcp, setMcp] = useState<Set<string>>(new Set());
   const [skills, setSkills] = useState<Set<string>>(new Set());
   const [credentials, setCredentials] = useState<Set<string>>(new Set());
+
+  // The part row's checkbox is a master switch over its list. Ticking any entry
+  // turns the switch on (a ticked entry under an off switch counted as nothing
+  // and greyed the confirm button); turning the switch off clears the list, and
+  // turning it back on re-seeds the default (not-yet-imported) selection.
+  const pickInto =
+    (key: PartKey, setList: Dispatch<SetStateAction<Set<string>>>) => (id: string) => {
+      setList((prev) => toggleIn(prev, id));
+      setParts((prev) => (prev.has(key) ? prev : new Set(prev).add(key)));
+    };
+  const selectList = (key: PartKey, setList: Dispatch<SetStateAction<Set<string>>>) => {
+    return (ids: Iterable<string>) => {
+      setList(new Set(ids));
+      setParts((prev) => (prev.has(key) ? prev : new Set(prev).add(key)));
+    };
+  };
+  const defaultListSelection = (key: PartKey): Set<string> => {
+    switch (key) {
+      case "conversations":
+        return new Set(conversationRows?.filter((r) => !r.alreadyImported).map((r) => r.id) ?? []);
+      case "mcp":
+        return new Set(
+          summary?.mcp?.entries.filter((e) => !e.exists).map((e) => e.signature) ?? [],
+        );
+      case "skills":
+        return new Set(summary?.skills?.entries.filter((e) => !e.enabled).map((e) => e.name) ?? []);
+      case "credentials":
+        return new Set(
+          summary?.credentials?.entries.filter((e) => e.importable && !e.exists).map((e) => e.id) ??
+            [],
+        );
+      default:
+        return new Set();
+    }
+  };
+  const listSetter = (key: PartKey): Dispatch<SetStateAction<Set<string>>> | null => {
+    switch (key) {
+      case "conversations":
+        return setSessions;
+      case "mcp":
+        return setMcp;
+      case "skills":
+        return setSkills;
+      case "credentials":
+        return setCredentials;
+      default:
+        return null;
+    }
+  };
+  const togglePart = (key: PartKey) => {
+    const turningOn = !parts.has(key);
+    setParts((prev) => toggleIn(prev, key));
+    const setList = listSetter(key);
+    if (!setList) return;
+    setList(turningOn ? defaultListSelection(key) : new Set());
+  };
   const [query, setQuery] = useState("");
 
   // Reset selection whenever a (new) source is opened. Keyed on `source`, not
@@ -318,7 +374,7 @@ export function ImportSourceDialog({
             variant="ghost"
             size="sm"
             className="shrink-0"
-            onClick={() => setSessions(new Set(all))}
+            onClick={() => selectList("conversations", setSessions)(all)}
           >
             {getImportLabel("import.dialog.selectAll")}
           </Button>
@@ -326,7 +382,7 @@ export function ImportSourceDialog({
             variant="ghost"
             size="sm"
             className="shrink-0"
-            onClick={() => setSessions(new Set(fresh))}
+            onClick={() => selectList("conversations", setSessions)(fresh)}
           >
             {getImportLabel("import.dialog.selectNew")}
           </Button>
@@ -366,7 +422,7 @@ export function ImportSourceDialog({
                         : undefined
                     }
                     checked={sessions.has(row.id)}
-                    onToggle={() => setSessions((prev) => toggleIn(prev, row.id))}
+                    onToggle={() => pickInto("conversations", setSessions)(row.id)}
                   />
                 ))}
               </div>
@@ -393,7 +449,7 @@ export function ImportSourceDialog({
                 })}
                 badge={entry.exists ? getImportLabel("import.dialog.alreadyExists") : undefined}
                 checked={mcp.has(entry.signature)}
-                onToggle={() => setMcp((prev) => toggleIn(prev, entry.signature))}
+                onToggle={() => pickInto("mcp", setMcp)(entry.signature)}
               />
             ))}
           </div>
@@ -412,7 +468,7 @@ export function ImportSourceDialog({
                 meta={entry.description}
                 badge={entry.enabled ? getImportLabel("import.dialog.alreadyEnabled") : undefined}
                 checked={skills.has(entry.name)}
-                onToggle={() => setSkills((prev) => toggleIn(prev, entry.name))}
+                onToggle={() => pickInto("skills", setSkills)(entry.name)}
               />
             ))}
           </div>
@@ -440,7 +496,7 @@ export function ImportSourceDialog({
               }
               checked={credentials.has(entry.id)}
               disabled={!entry.importable}
-              onToggle={() => setCredentials((prev) => toggleIn(prev, entry.id))}
+              onToggle={() => pickInto("credentials", setCredentials)(entry.id)}
             />
           ))}
         </div>
@@ -473,7 +529,7 @@ export function ImportSourceDialog({
                     <Checkbox
                       id={checkboxId}
                       checked={parts.has(key)}
-                      onCheckedChange={() => setParts((prev) => toggleIn(prev, key))}
+                      onCheckedChange={() => togglePart(key)}
                     />
                     <label
                       htmlFor={checkboxId}

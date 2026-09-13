@@ -149,14 +149,22 @@ function PartRow({ part, defaultOpen }: { part: ImportPart; defaultOpen: boolean
   );
 }
 
+/** DOM id of a record card, so the settings page can scroll to a fresh one. */
+export function importRecordDomId(recordId: string): string {
+  return `import-record-${recordId}`;
+}
+
 export function ImportHistoryCard({
   record,
   expanded,
+  highlighted = false,
   onToggle,
   onDelete,
 }: {
   record: ApiImportRecord;
   expanded: boolean;
+  /** Briefly rings the card after "view record" so the eye lands on it. */
+  highlighted?: boolean;
   onToggle: () => void;
   onDelete: () => void;
 }) {
@@ -168,7 +176,13 @@ export function ImportHistoryCard({
         })
       : formatImportLabel("import.history.cardSummaryClean", { imported: record.totalImported });
   return (
-    <div className="rounded-xl border border-border/50 bg-background/60">
+    <div
+      id={importRecordDomId(record.id)}
+      className={cn(
+        "rounded-xl border border-border/50 bg-background/60 transition-shadow duration-700",
+        highlighted && "ring-2 ring-primary/40 shadow-md",
+      )}
+    >
       <div className="flex items-center gap-3 p-3">
         <ImportSourceIcon source={record.source} />
         <button type="button" onClick={onToggle} className="min-w-0 flex-1 text-left">

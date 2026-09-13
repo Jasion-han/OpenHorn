@@ -19,7 +19,7 @@ import {
   useImportStore,
 } from "../../stores/importStore";
 import { BackupFileImportRow } from "./import/BackupFileImportRow";
-import { ImportHistoryCard, ImportItemRow } from "./import/ImportHistoryCard";
+import { ImportHistoryCard, ImportItemRow, importRecordDomId } from "./import/ImportHistoryCard";
 import { ImportSourceDialog } from "./import/ImportSourceDialog";
 import { ImportSourceIcon } from "./import/ImportSourceIcon";
 
@@ -93,12 +93,26 @@ export function ImportSettings() {
     });
   };
 
+  // "View record" lands on the history list further down the page: the new
+  // record is expanded, scrolled into view and briefly highlighted, otherwise
+  // closing the dialog looks like nothing happened.
+  const [highlightedRecords, setHighlightedRecords] = useState<Set<string>>(new Set());
   const handleDone = (recordIds: string[]) => {
     setDialogSource(null);
     if (recordIds.length > 0) {
       setExpandedRecords((prev) => new Set([...prev, ...recordIds]));
+      setHighlightedRecords(new Set(recordIds));
     }
   };
+  useEffect(() => {
+    if (highlightedRecords.size === 0) return;
+    const [first] = highlightedRecords;
+    if (!records.some((record) => record.id === first)) return; // list not refreshed yet
+    const el = document.getElementById(importRecordDomId(first));
+    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+    const timer = window.setTimeout(() => setHighlightedRecords(new Set()), 2400);
+    return () => window.clearTimeout(timer);
+  }, [highlightedRecords, records]);
 
   const handlePickConfig = async () => {
     try {
@@ -244,6 +258,7 @@ export function ImportSettings() {
                 key={record.id}
                 record={record}
                 expanded={expandedRecords.has(record.id)}
+                highlighted={highlightedRecords.has(record.id)}
                 onToggle={() => toggleRecord(record.id)}
                 onDelete={() => void handleDelete(record.id)}
               />
