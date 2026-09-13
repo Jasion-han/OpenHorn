@@ -499,3 +499,41 @@ Claude Code/Codex 导入把一轮回复的多段 assistant 合并为一条；用
 ### Next Steps
 
 - None - task complete
+
+
+## Session 14: 导入保留工具调用与思考链，桌面端过程区与渠道弹层修缮
+
+**Date**: 2026-09-13
+**Task**: 导入保留工具调用与思考链，桌面端过程区与渠道弹层修缮
+**Package**: agent
+**Branch**: `main`
+
+### Summary
+
+四个导入来源（Claude Code / Codex / ChatGPT 导出 / Claude.ai 导出）的 AI 回合此前只留正文，工具调用、思考与中间过程全部丢弃。新增 importTurnBuilder 统一按回合累积片段，最后一段文本作正文、其余落 agentRun.steps，与原生 Agent 回合同形，桌面端零改动即可渲染；在三种运行时上各跑真实回合验证版式无错乱。桌面端同批修缮：过程区改为字色分层且思考并入正文排版、步骤组改为向下展开、导入对话框总开关联动与查看记录滚动高亮、API Key 眼睛查看明文、渠道弹层隐藏常驻滚动条。标题「顶部被遮挡」定位为外接 1x 屏对 16px 加粗中文的栅格化丢笔，非裁切，改字号解决。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e21a534` | (see git log) |
+| `9267edb` | (see git log) |
+| `dbfa02f` | (see git log) |
+| `6a5946d` | (see git log) |
+| `943f11f` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
