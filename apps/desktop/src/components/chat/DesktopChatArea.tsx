@@ -287,6 +287,18 @@ export function DesktopChatArea() {
     useFlushSync: false,
     rangeExtractor,
   });
+  // The default compensates any resize of a row whose *top* is above the
+  // viewport by scrolling the same amount — so expanding a step group inside a
+  // long round (its start off-screen, the chevron on-screen) shoved the content
+  // up instead of opening downward. Only rows entirely above the viewport need
+  // that compensation; a first measurement keeps the estimate→actual
+  // correction so initial layout still settles. Instance field, not an option.
+  virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) => {
+    const offset = instance.scrollOffset ?? 0;
+    if (!instance.itemSizeCache.has(item.key)) return item.start < offset;
+    if (instance.scrollDirection === "backward") return false;
+    return item.end <= offset;
+  };
 
   // The id is a trigger, not an input: switching conversations must re-arm the
   // scroll and refocus the composer. Taking biome's fix and dropping it would
@@ -1642,7 +1654,9 @@ export function DesktopChatArea() {
     <div className="flex h-full min-h-0 min-w-0 w-full flex-1 flex-col overflow-x-hidden">
       <div
         data-tauri-drag-region
-        style={{ padding: PAGE_PAD, paddingTop: "24px", paddingBottom: "8px" }}
+        // The top offset is a token, not a constant: it has to track the sidebar's
+        // first button, which sits lower in a browser than under the overlay title bar.
+        style={{ padding: PAGE_PAD, paddingTop: "var(--pane-header-top)", paddingBottom: "8px" }}
       >
         <DesktopChatHeader conversation={currentConversation} />
       </div>

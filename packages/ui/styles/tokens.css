@@ -87,6 +87,24 @@
   min-height: 32px;
 }
 
+/*
+ * Top offset for a content pane's own header row, so its title lines up with the
+ * sidebar's first button (新会话) at any window size.
+ *
+ * Derivation, both measured on a real window: the sidebar's icon row is a 44px
+ * band normally (pt-2 + a 28px control + pb-2) and a 32px band under the overlay
+ * title bar (the rule above), and the button below it is 36px tall, so that
+ * button's centre sits at band + 18. The pane's title line is 28px tall inside
+ * the shell's 8px pane padding, so its centre is 8 + pt + 14. Equating the two
+ * gives pt = band - 4.
+ */
+:root {
+  --pane-header-top: 40px;
+}
+:root[data-titlebar="overlay"] {
+  --pane-header-top: 28px;
+}
+
 /* ===== Proma-aligned utilities ===== */
 
 .shadow-minimal {
