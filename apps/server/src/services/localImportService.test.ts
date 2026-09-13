@@ -11,8 +11,12 @@ import { GLOBAL_SYSTEM_PROMPT_SETTING_KEY, PROMPT_TEMPLATES_SETTING_KEY } from "
 import type { PromptTemplate } from "shared/types";
 import { db } from "../db";
 import {
+  buildImportedAgentRun,
+  ImportTurnBuilder,
+  toolResultContentToText,
+} from "./importTurnBuilder";
+import {
   listLocalConversations,
-  mergeConsecutiveAssistant,
   mergeInstructions,
   parsePromptFile,
   runLocalImport,
@@ -240,11 +244,11 @@ test("claude: linearizes user/assistant text, folds one reply's message.ids into
 
     const rows = await loadMessages(CLAUDE_SESSION);
     // msg_1 ("Let me look.") and msg_2 ("I found it…" + "Fixed.") are one reply
-    // split by a tool call: text blocks of one message.id join with "\n", the
-    // message.ids of one turn join with a blank line.
+    // split by a tool call: the text before the call is a reasoning step, the
+    // text blocks of the final message.id join with "\n" as the body.
     expect(rows.map((m) => [m.role, m.content])).toEqual([
       ["user", "Fix the login bug"],
-      ["assistant", "Let me look.\n\nI found it in auth.ts\nFixed."],
+      ["assistant", "I found it in auth.ts\nFixed."],
       // gif skipped → the `[Image #1]` marker stays, the text is untouched
       ["user", "[Image #1] Thanks, also check signup"],
       ["assistant", "Signup looks fine."],
@@ -501,40 +505,79 @@ test("stripImagePlaceholders: removes markers, collapses spaces, drops marker-on
   expect(stripImagePlaceholders("[Image #x] kept")).toBe("[Image #x] kept");
 });
 
-test("mergeConsecutiveAssistant: folds assistant runs, sums usage, keeps first createdAt and last model", () => {
-  const merged = mergeConsecutiveAssistant([
-    { role: "user", content: "q", model: null, usage: null, createdAt: 1 },
-    { role: "assistant", content: " a \n", model: "m1", usage: null, createdAt: 2 },
-    { role: "assistant", content: "   ", model: null, usage: null, createdAt: 3 },
-    {
-      role: "assistant",
-      content: "b",
-      model: "m2",
-      usage: { promptTokens: 10, completionTokens: 1, totalTokens: 11 },
-      createdAt: 4,
-    },
-    {
-      role: "assistant",
-      content: "c",
-      model: null,
-      usage: { promptTokens: 20, completionTokens: 2, totalTokens: 22 },
-      createdAt: 5,
-    },
-    { role: "user", content: "q2", model: null, usage: null, createdAt: 6 },
-    { role: "assistant", content: "d", model: null, usage: null, createdAt: 7 },
-  ]);
-  expect(merged).toEqual([
-    { role: "user", content: "q", model: null, usage: null, createdAt: 1 },
-    {
-      role: "assistant",
-      content: "a\n\nb\n\nc",
-      model: "m2",
-      usage: { promptTokens: 30, completionTokens: 3, totalTokens: 33 },
-      createdAt: 2,
-    },
-    { role: "user", content: "q2", model: null, usage: null, createdAt: 6 },
-    { role: "assistant", content: "d", model: null, usage: null, createdAt: 7 },
-  ]);
+test("ImportTurnBuilder: last text is the body, everything else keeps its order as steps", () => {
+  const turn = new ImportTurnBuilder();
+  turn.touch(2);
+  turn.setModel("m1");
+  turn.thinking("  ");
+  turn.thinking("plan");
+  turn.text(" a \n");
+  turn.toolStart("Read", { file_path: "/x" }, "t1");
+  turn.addUsage({ promptTokens: 10, completionTokens: 1, totalTokens: 11 });
+  turn.toolResult("file body", { toolCallId: "t1" });
+  turn.text("   ");
+  turn.touch(3);
+  turn.setModel("m2");
+  turn.toolStart("Bash", { command: "ls" }, "t2");
+  turn.toolResult("boom", { toolCallId: "t2", isError: true });
+  turn.addUsage({ promptTokens: 20, completionTokens: 2, totalTokens: 22 });
+  turn.text("b");
+  expect(turn.flush(99)).toEqual({
+    content: "b",
+    model: "m2",
+    usage: { promptTokens: 30, completionTokens: 3, totalTokens: 33 },
+    createdAt: 2,
+    steps: [
+      { type: "thinking", content: "plan" },
+      { type: "reasoning", content: " a \n" },
+      { type: "tool_start", toolName: "Read", toolInput: { file_path: "/x" }, toolCallId: "t1" },
+      { type: "tool_result", content: "file body", toolName: "Read", toolCallId: "t1" },
+      { type: "tool_start", toolName: "Bash", toolInput: { command: "ls" }, toolCallId: "t2" },
+      { type: "error", content: "boom", toolName: "Bash", toolCallId: "t2" },
+    ],
+  });
+  // flushed: the next turn starts clean
+  expect(turn.flush(5)).toBe(null);
+  turn.text("d");
+  expect(turn.flush(7)).toEqual({
+    content: "d",
+    model: null,
+    usage: null,
+    createdAt: 7,
+    steps: [],
+  });
+});
+
+test("ImportTurnBuilder: a turn of only tool steps keeps an empty body; only-text turns get no agentRun", () => {
+  const turn = new ImportTurnBuilder();
+  turn.toolStart("Bash", { command: "ls" });
+  const t = turn.flush(1);
+  expect(t?.content).toBe("");
+  expect(t?.steps).toHaveLength(1);
+  expect(JSON.parse(buildImportedAgentRun(t?.steps ?? []) ?? "null")).toEqual({
+    status: "completed",
+    summary: "Agent 已调用 1 个工具",
+    toolCount: 1,
+    steps: [{ type: "tool_start", toolName: "Bash", toolInput: { command: "ls" } }],
+  });
+  expect(buildImportedAgentRun([])).toBe(null);
+});
+
+test("toolResultContentToText: strings, text blocks, image markers, unknown blocks", () => {
+  expect(toolResultContentToText("plain")).toBe("plain");
+  expect(
+    toolResultContentToText([
+      { type: "text", text: "line 1" },
+      {
+        type: "image",
+        source: { type: "base64", media_type: "image/png", data: "A".repeat(2048) },
+      },
+      { type: "text", text: "line 2" },
+      { type: "weird", x: 1 },
+    ]),
+  ).toBe('line 1\n[图片 image/png 1.5 KB]\nline 2\n{"type":"weird","x":1}');
+  expect(toolResultContentToText({ stdout: "x" })).toBe('{"stdout":"x"}');
+  expect(toolResultContentToText(null)).toBe("");
 });
 
 test("claude: one reply spread over 3 message.ids with tool calls in between imports as 1 user + 1 assistant", async () => {
@@ -558,8 +601,45 @@ test("claude: one reply spread over 3 message.ids with tool calls in between imp
     // first line is dropped, the inline one leaves a single space.
     expect(rows.map((m) => [m.role, m.content])).toEqual([
       ["user", "Remove the arrow from the icon"],
-      ["assistant", "Looking at the icon.\n\nFound it in Icon.tsx.\n\nRemoved the arrow."],
+      ["assistant", "Removed the arrow."],
     ]);
+    // Everything before the final text is a step, in source order: the readable
+    // thinking, the interim text as reasoning, each tool call with its result
+    // (named after the call it answers). The signature-only thinking is not a step.
+    expect(rows[0].agentRun).toBeNull();
+    expect(JSON.parse(rows[1].agentRun ?? "null")).toEqual({
+      status: "completed",
+      summary: "Agent 已调用 2 个工具",
+      toolCount: 2,
+      steps: [
+        { type: "thinking", content: "Need to read the icon first." },
+        { type: "reasoning", content: "Looking at the icon.  " },
+        {
+          type: "tool_start",
+          toolName: "Read",
+          toolInput: { file_path: "/Users/test/Project/merge/Icon.tsx" },
+          toolCallId: "toolu_1",
+        },
+        {
+          type: "tool_result",
+          content: '<svg><path d="arrow"/></svg>',
+          toolName: "Read",
+          toolCallId: "toolu_1",
+        },
+        { type: "reasoning", content: "Found it in Icon.tsx." },
+        {
+          type: "tool_start",
+          toolName: "Edit",
+          toolInput: {
+            file_path: "/Users/test/Project/merge/Icon.tsx",
+            old_string: "arrow",
+            new_string: "",
+          },
+          toolCallId: "toolu_2",
+        },
+        { type: "tool_result", content: "ok", toolName: "Edit", toolCallId: "toolu_2" },
+      ],
+    });
     const stored = await loadAttachments(CLAUDE_MERGE_SESSION);
     expect(stored).toHaveLength(2);
     expect(stored.map((a) => a.messageId)).toEqual([rows[0].id, rows[0].id]);
@@ -657,8 +737,28 @@ test("codex: one reply spread over 3 assistant messages with a tool call in betw
     const rows = await loadMessages(CODEX_MERGE_THREAD);
     expect(rows.map((m) => [m.role, m.content])).toEqual([
       ["user", "Add tests for the router"],
-      ["assistant", "Writing tests.\n\nTests pass.\n\nDone."],
+      ["assistant", "Tests pass.\n\nDone.\n"],
     ]);
+    // Reasoning summaries are thinking steps (the encrypted-only one is not);
+    // commentary before the call is interim text, the two text pieces after it
+    // are one body; the call's JSON arguments are parsed and its output is
+    // named after it.
+    expect(JSON.parse(rows[1].agentRun ?? "null")).toEqual({
+      status: "completed",
+      summary: "Agent 已调用 1 个工具",
+      toolCount: 1,
+      steps: [
+        { type: "thinking", content: "**Planning the tests**\n\nRouter needs unit tests." },
+        { type: "reasoning", content: "Writing tests." },
+        {
+          type: "tool_start",
+          toolName: "exec_command",
+          toolInput: { cmd: "bun test" },
+          toolCallId: "call_1",
+        },
+        { type: "tool_result", content: "3 pass", toolName: "exec_command", toolCallId: "call_1" },
+      ],
+    });
     expect(rows[1].model).toBe("gpt-5-codex");
     expect(JSON.parse(rows[1].usage ?? "null")).toEqual({
       promptTokens: 300,

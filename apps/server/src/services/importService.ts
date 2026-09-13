@@ -31,6 +31,13 @@ import yauzl from "yauzl";
 import { db } from "../db";
 import type { ExportManifest } from "./exportService";
 import { addPartItem, createImportRecord, createPart, IMPORT_DETAIL } from "./importRecordsService";
+import {
+  buildImportedAgentRun,
+  type ImportStep,
+  ImportTurnBuilder,
+  parseToolArguments,
+  toolResultContentToText,
+} from "./importTurnBuilder";
 
 const FILE_IMPORT_SOURCE = "file";
 
@@ -504,10 +511,11 @@ interface ChatGPTConversation {
       children?: string[];
       message?: {
         id: string;
-        author: { role: string };
-        // biome-ignore lint/suspicious/noExplicitAny: ChatGPT export parts can be string or object
-        content: { content_type: string; parts?: any[] };
+        author: { role: string; name?: string | null };
+        // biome-ignore lint/suspicious/noExplicitAny: ChatGPT export content varies by content_type
+        content: { content_type: string; parts?: any[]; text?: string; [key: string]: any };
         metadata?: { model_slug?: string };
+        recipient?: string | null;
         create_time?: number;
       } | null;
     }
@@ -515,9 +523,115 @@ interface ChatGPTConversation {
   current_node?: string;
 }
 
-function linearizeChatGPT(
-  conv: ChatGPTConversation,
-): { role: string; content: string; model: string | null; createdAt: Date }[] {
+/** One row to insert; assistant rows carry the turn's steps. */
+interface LinearMessage {
+  role: "user" | "assistant";
+  content: string;
+  model: string | null;
+  createdAt: Date;
+  steps?: ImportStep[];
+}
+
+/**
+ * Text of a `parts` list: strings as they are, image / audio pointers as a
+ * marker (the export references the asset by pointer; the file itself is not
+ * in conversations.json).
+ */
+function chatGPTPartsText(parts: unknown): string {
+  if (!Array.isArray(parts)) return "";
+  const out: string[] = [];
+  for (const part of parts) {
+    if (typeof part === "string") {
+      out.push(part);
+      continue;
+    }
+    if (!part || typeof part !== "object") continue;
+    const p = part as Record<string, unknown>;
+    if (typeof p.text === "string") {
+      out.push(p.text);
+      continue;
+    }
+    if (p.content_type === "image_asset_pointer") {
+      out.push(`[图片 ${typeof p.asset_pointer === "string" ? p.asset_pointer : "image"}]`);
+      continue;
+    }
+    if (p.content_type === "audio_transcription" && typeof p.text === "string") {
+      out.push(p.text);
+      continue;
+    }
+    try {
+      out.push(JSON.stringify(part));
+    } catch {
+      /* unserialisable part */
+    }
+  }
+  return out.join("\n");
+}
+
+/**
+ * What an assistant message addressed to a tool (`recipient` ≠ all) asked of
+ * it, keyed so the run panel summarises it well: code runs as `command`,
+ * browser / search calls as `query`, JSON arguments as they are.
+ */
+function chatGPTToolInput(recipient: string, contentType: string, text: string): unknown {
+  if (contentType === "code" || recipient === "python") return { command: text };
+  const parsed = parseToolArguments(text);
+  if (parsed && typeof parsed === "object") return parsed;
+  if (recipient === "browser" || recipient.startsWith("web")) return { query: text };
+  return { command: text };
+}
+
+/** Text the model saw from a tool: the whole thing, whatever shape the tool wrote. */
+function chatGPTToolOutput(content: Record<string, unknown>): string {
+  switch (content.content_type) {
+    case "execution_output":
+    case "text":
+    case "code":
+      return typeof content.text === "string" ? content.text : chatGPTPartsText(content.parts);
+    case "multimodal_text":
+      return chatGPTPartsText(content.parts);
+    case "tether_browsing_display": {
+      const result = typeof content.result === "string" ? content.result : "";
+      const summary = typeof content.summary === "string" ? content.summary : "";
+      return [summary, result].filter((s) => s.trim()).join("\n\n") || JSON.stringify(content);
+    }
+    case "tether_quote": {
+      const title = typeof content.title === "string" ? content.title : "";
+      const url = typeof content.url === "string" ? content.url : "";
+      const text = typeof content.text === "string" ? content.text : "";
+      return [title, url, text].filter((s) => s.trim()).join("\n");
+    }
+    default:
+      if (typeof content.text === "string") return content.text;
+      if (Array.isArray(content.parts)) return chatGPTPartsText(content.parts);
+      return JSON.stringify(content);
+  }
+}
+
+/** Reasoning models' `thoughts`: each summary + body as one thinking step. */
+function chatGPTThoughts(content: Record<string, unknown>): string[] {
+  if (!Array.isArray(content.thoughts)) return [];
+  const out: string[] = [];
+  for (const thought of content.thoughts) {
+    if (!thought || typeof thought !== "object") continue;
+    const t = thought as Record<string, unknown>;
+    const summary = typeof t.summary === "string" ? t.summary.trim() : "";
+    const body = typeof t.content === "string" ? t.content.trim() : "";
+    const text = summary && body ? `**${summary}**\n\n${body}` : summary || body;
+    if (text) out.push(text);
+  }
+  return out;
+}
+
+const CHATGPT_CONTEXT_TYPES = new Set(["model_editable_context", "user_editable_context"]);
+
+/**
+ * Walks the export's node tree along `current_node` and folds it into rows.
+ * Every non-user node between two prompts is part of the reply: thoughts,
+ * tool calls (assistant messages addressed to a tool), tool outputs, interim
+ * text — all kept as steps; the final visible text is the body.
+ */
+function linearizeChatGPT(conv: ChatGPTConversation): LinearMessage[] {
   if (!conv.mapping || !conv.current_node) return [];
 
   const chain: string[] = [];
@@ -527,27 +641,90 @@ function linearizeChatGPT(
     nodeId = conv.mapping[nodeId].parent;
   }
 
-  const result: { role: string; content: string; model: string | null; createdAt: Date }[] = [];
+  const result: LinearMessage[] = [];
+  const turn = new ImportTurnBuilder();
+  const flush = (fallback: number) => {
+    const folded = turn.flush(fallback);
+    if (!folded) return;
+    if (!folded.content.trim() && folded.steps.length === 0) return;
+    result.push({
+      role: "assistant",
+      content: folded.content,
+      model: folded.model,
+      createdAt: new Date(folded.createdAt),
+      ...(folded.steps.length ? { steps: folded.steps } : {}),
+    });
+  };
+  let lastTs = (conv.create_time ?? Date.now() / 1000) * 1000;
+
   for (const id of chain) {
     const node = conv.mapping[id];
     const msg = node?.message;
     if (!msg || !msg.author) continue;
     const role = msg.author.role;
-    if (role !== "user" && role !== "assistant") continue;
+    const content = (msg.content ?? {}) as Record<string, unknown>;
+    const contentType = typeof content.content_type === "string" ? content.content_type : "text";
+    const ts = (msg.create_time ?? conv.create_time ?? Date.now() / 1000) * 1000;
+    lastTs = ts;
+    if (CHATGPT_CONTEXT_TYPES.has(contentType)) continue;
 
-    let content = "";
-    if (msg.content?.parts) {
-      content = msg.content.parts.filter((p: unknown) => typeof p === "string").join("\n");
+    if (role === "user") {
+      const text =
+        chatGPTPartsText(content.parts) || (typeof content.text === "string" ? content.text : "");
+      if (!text.trim()) continue;
+      flush(ts);
+      result.push({ role: "user", content: text, model: null, createdAt: new Date(ts) });
+      continue;
     }
-    if (!content.trim()) continue;
 
-    result.push({
-      role,
-      content,
-      model: msg.metadata?.model_slug ?? null,
-      createdAt: new Date((msg.create_time ?? conv.create_time ?? Date.now() / 1000) * 1000),
-    });
+    if (role === "assistant") {
+      turn.touch(ts);
+      turn.setModel(msg.metadata?.model_slug ?? null);
+      const recipient = (msg.recipient ?? "all").trim() || "all";
+      switch (contentType) {
+        case "thoughts":
+          for (const thought of chatGPTThoughts(content)) turn.thinking(thought);
+          break;
+        case "reasoning_recap":
+          if (typeof content.content === "string") turn.thinking(content.content);
+          break;
+        case "code": {
+          const code = typeof content.text === "string" ? content.text : "";
+          turn.toolStart(
+            recipient === "all" ? "python" : recipient,
+            chatGPTToolInput(recipient, contentType, code),
+          );
+          break;
+        }
+        case "system_error":
+          turn.error(chatGPTToolOutput(content));
+          break;
+        default: {
+          const text =
+            typeof content.text === "string" && !Array.isArray(content.parts)
+              ? content.text
+              : chatGPTPartsText(content.parts);
+          if (!text.trim()) break;
+          if (recipient !== "all") {
+            turn.toolStart(recipient, chatGPTToolInput(recipient, contentType, text));
+          } else {
+            turn.text(text);
+          }
+        }
+      }
+      continue;
+    }
+
+    if (role === "tool") {
+      turn.touch(ts);
+      const toolName = msg.author.name?.trim() || undefined;
+      const output = chatGPTToolOutput(content);
+      if (contentType === "system_error") turn.toolResult(output, { toolName, isError: true });
+      else turn.toolResult(output, { toolName });
+    }
+    // system: the export's empty root / instructions, not part of the reply.
   }
+  flush(lastTs);
   return result;
 }
 
@@ -600,12 +777,14 @@ export async function importChatGPT(userId: string, filePath: string): Promise<I
     });
 
     for (const msg of linearMessages) {
+      const agentRun = buildImportedAgentRun(msg.steps ?? []);
       await db.insert(messages).values({
         id: crypto.randomUUID(),
         conversationId: convId,
         role: msg.role,
         content: msg.content,
         model: msg.model,
+        ...(agentRun ? { mode: "agent", agentRun } : {}),
         createdAt: msg.createdAt,
       });
       result.messages.imported++;
@@ -630,9 +809,65 @@ interface ClaudeConversation {
     uuid?: string;
     text?: string;
     sender?: string;
-    content?: { type: string; text?: string }[];
+    content?: Record<string, unknown>[];
     created_at?: string;
   }[];
+}
+
+/**
+ * Feeds one assistant message's content blocks into the turn: text, thinking,
+ * tool_use and tool_result in the order the export lists them. A message
+ * without blocks falls back to its flat `text`.
+ */
+function claudeExportBlocksToTurn(
+  turn: ImportTurnBuilder,
+  msg: NonNullable<ClaudeConversation["chat_messages"]>[number],
+) {
+  if (!Array.isArray(msg.content) || msg.content.length === 0) {
+    if (msg.text) turn.text(msg.text);
+    return;
+  }
+  for (const block of msg.content) {
+    if (!block || typeof block !== "object") continue;
+    switch (block.type) {
+      case "text":
+        if (typeof block.text === "string") turn.text(block.text);
+        break;
+      case "thinking":
+        if (typeof block.thinking === "string") turn.thinking(block.thinking);
+        break;
+      case "tool_use":
+        turn.toolStart(
+          typeof block.name === "string" ? block.name : "tool",
+          block.input,
+          typeof block.id === "string" ? block.id : undefined,
+        );
+        break;
+      case "tool_result":
+        turn.toolResult(toolResultContentToText(block.content), {
+          toolCallId: typeof block.tool_use_id === "string" ? block.tool_use_id : undefined,
+          toolName: typeof block.name === "string" ? block.name : undefined,
+          isError: block.is_error === true,
+        });
+        break;
+      default:
+        if (typeof block.text === "string") turn.text(block.text);
+        else turn.text(`[${typeof block.type === "string" ? block.type : "block"}]`);
+    }
+  }
+}
+
+/** Text of a human message: its blocks' text, else the flat `text`. */
+function claudeExportHumanText(
+  msg: NonNullable<ClaudeConversation["chat_messages"]>[number],
+): string {
+  if (Array.isArray(msg.content) && msg.content.length > 0) {
+    const texts = msg.content
+      .filter((c) => c && typeof c === "object" && c.type === "text" && typeof c.text === "string")
+      .map((c) => c.text as string);
+    if (texts.join("").trim()) return texts.join("\n");
+  }
+  return msg.text ?? "";
 }
 
 export async function importClaude(userId: string, filePath: string): Promise<ImportResult> {
@@ -678,31 +913,49 @@ export async function importClaude(userId: string, filePath: string): Promise<Im
     result.conversations.imported++;
     let importedMessages = 0;
 
-    for (const msg of chatMessages) {
-      const role =
-        msg.sender === "human" ? "user" : msg.sender === "assistant" ? "assistant" : null;
-      if (!role) continue;
-
-      let content = msg.text ?? "";
-      if (!content && msg.content) {
-        content = msg.content
-          .filter((c) => c.type === "text" && c.text)
-          .map((c) => c.text)
-          .join("\n");
-      }
-      if (!content.trim()) continue;
-
+    const turn = new ImportTurnBuilder();
+    const insertTurn = async (fallback: number) => {
+      const folded = turn.flush(fallback);
+      if (!folded) return;
+      if (!folded.content.trim() && folded.steps.length === 0) return;
+      const agentRun = buildImportedAgentRun(folded.steps);
       await db.insert(messages).values({
         id: crypto.randomUUID(),
         conversationId: convId,
-        role,
+        role: "assistant",
+        content: folded.content,
+        model: folded.model ?? conv.model ?? null,
+        ...(agentRun ? { mode: "agent", agentRun } : {}),
+        createdAt: new Date(folded.createdAt),
+      });
+      result.messages.imported++;
+      importedMessages++;
+    };
+    let lastTs = now.getTime();
+    for (const msg of chatMessages) {
+      const ts = msg.created_at ? new Date(msg.created_at).getTime() : now.getTime();
+      lastTs = ts;
+      if (msg.sender === "assistant") {
+        turn.touch(ts);
+        claudeExportBlocksToTurn(turn, msg);
+        continue;
+      }
+      if (msg.sender !== "human") continue;
+      const content = claudeExportHumanText(msg);
+      if (!content.trim()) continue;
+      await insertTurn(ts);
+      await db.insert(messages).values({
+        id: crypto.randomUUID(),
+        conversationId: convId,
+        role: "user",
         content,
         model: conv.model ?? null,
-        createdAt: msg.created_at ? new Date(msg.created_at) : now,
+        createdAt: new Date(ts),
       });
       result.messages.imported++;
       importedMessages++;
     }
+    await insertTurn(lastTs);
     collector.add("conversations", {
       label: title,
       detail: IMPORT_DETAIL.messageCount(importedMessages),

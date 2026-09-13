@@ -46,6 +46,15 @@ import {
   storeAttachment,
 } from "./attachmentService";
 import { addPartItem, createImportRecord, createPart, IMPORT_DETAIL } from "./importRecordsService";
+import {
+  buildImportedAgentRun,
+  type ImportStep,
+  type ImportTurn,
+  ImportTurnBuilder,
+  type ImportUsage,
+  parseToolArguments,
+  toolResultContentToText,
+} from "./importTurnBuilder";
 import { getSettingValues, setSettingValue } from "./settingsService";
 
 export interface LocalImportOptions {
@@ -172,9 +181,11 @@ interface ParsedMessage {
   role: "user" | "assistant";
   content: string;
   model: string | null;
-  usage: { promptTokens: number; completionTokens: number; totalTokens: number } | null;
+  usage: ImportUsage | null;
   createdAt: number;
   images?: ParsedImage[];
+  /** Assistant only: the turn's thinking / interim text / tool calls, in order. */
+  steps?: ImportStep[];
 }
 
 interface ParsedUserContent {
@@ -182,39 +193,18 @@ interface ParsedUserContent {
   images: ParsedImage[];
 }
 
-function addUsage(a: ParsedMessage["usage"], b: ParsedMessage["usage"]): ParsedMessage["usage"] {
-  if (!a) return b;
-  if (!b) return a;
-  return {
-    promptTokens: a.promptTokens + b.promptTokens,
-    completionTokens: a.completionTokens + b.completionTokens,
-    totalTokens: a.totalTokens + b.totalTokens,
-  };
-}
-
-/**
- * One reply turn in Claude Code / Codex is written as several API messages
- * (one per tool round-trip). Without the tool calls in between, those pieces
- * are one answer: fold every run of assistant messages not separated by a user
- * prompt into a single message. Content joins with a blank line, usage sums,
- * model is the last one seen, createdAt is the first piece's.
- */
-export function mergeConsecutiveAssistant(list: ParsedMessage[]): ParsedMessage[] {
-  const out: ParsedMessage[] = [];
-  for (const m of list) {
-    const last = out[out.length - 1];
-    if (m.role === "assistant" && last?.role === "assistant") {
-      last.content = [last.content, m.content]
-        .map((s) => s.trim())
-        .filter(Boolean)
-        .join("\n\n");
-      last.model = m.model ?? last.model;
-      last.usage = addUsage(last.usage, m.usage);
-      continue;
-    }
-    out.push({ ...m });
-  }
-  return out;
+/** Assistant message row for one folded turn; empty text with no steps is nothing. */
+function pushTurn(out: ParsedMessage[], turn: ImportTurn | null): void {
+  if (!turn) return;
+  if (!turn.content.trim() && turn.steps.length === 0) return;
+  out.push({
+    role: "assistant",
+    content: turn.content,
+    model: turn.model,
+    usage: turn.usage,
+    createdAt: turn.createdAt,
+    ...(turn.steps.length ? { steps: turn.steps } : {}),
+  });
 }
 
 interface ParsedSession {
@@ -341,15 +331,31 @@ function claudeUserContent(obj: Record<string, unknown>): ParsedUserContent | nu
   return joined.trim() ? { text: joined, images } : null;
 }
 
-interface ClaudeAssistantGroup {
-  messageId: string | null;
-  texts: string[];
-  model: string | null;
-  usage: ParsedMessage["usage"];
-  createdAt: number;
+/**
+ * The `tool_result` blocks of a user line (Claude Code writes one line per
+ * tool round-trip, `toolUseResult` alongside). Empty when the line is a real
+ * prompt. The block's own content is what the model saw, so it is what the
+ * step keeps; `toolUseResult` is Claude Code's structured copy of the same.
+ */
+function claudeToolResults(
+  obj: Record<string, unknown>,
+): Array<{ toolCallId?: string; content: string; isError: boolean }> {
+  const message = isRecord(obj.message) ? obj.message : null;
+  if (!message || !Array.isArray(message.content)) return [];
+  const out: Array<{ toolCallId?: string; content: string; isError: boolean }> = [];
+  for (const block of message.content) {
+    if (!isRecord(block) || block.type !== "tool_result") continue;
+    const toolCallId = asString(block.tool_use_id) ?? undefined;
+    out.push({
+      ...(toolCallId ? { toolCallId } : {}),
+      content: toolResultContentToText(block.content),
+      isError: block.is_error === true,
+    });
+  }
+  return out;
 }
 
-function claudeUsage(raw: unknown): ParsedMessage["usage"] {
+function claudeUsage(raw: unknown): ImportUsage | null {
   if (!isRecord(raw)) return null;
   const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
   const promptTokens =
@@ -424,21 +430,18 @@ async function parseClaudeSession(file: SessionFile): Promise<ParsedSession | nu
   let createdAt: number | null = null;
   let updatedAt: number | null = null;
   const out: ParsedMessage[] = [];
-  let group: ClaudeAssistantGroup | null = null;
-
-  const flush = () => {
-    if (!group) return;
-    const content = group.texts.join("\n");
-    if (content.trim()) {
-      out.push({
-        role: "assistant",
-        content,
-        model: group.model,
-        usage: group.usage,
-        createdAt: group.createdAt,
-      });
-    }
-    group = null;
+  const turn = new ImportTurnBuilder();
+  // Claude Code repeats `message.usage` on every line of one API message
+  // (text / thinking / tool_use are split across lines); count it once per id.
+  let usageMessageId: string | null = null;
+  let lastTs: number | null = null;
+  // Text blocks of one message.id join with "\n" even when Claude Code split
+  // them over several lines; the builder joins text across messages with a
+  // blank line. Anything that is not text of the same message ends the run.
+  const texts: string[] = [];
+  const flushTexts = () => {
+    if (texts.length) turn.text(texts.join("\n"));
+    texts.length = 0;
   };
 
   for await (const line of iterLines(file.filePath)) {
@@ -466,12 +469,20 @@ async function parseClaudeSession(file: SessionFile): Promise<ParsedSession | nu
     const ts = parseTimestamp(obj.timestamp) ?? updatedAt ?? Date.now();
     if (createdAt === null) createdAt = ts;
     updatedAt = ts;
+    lastTs = ts;
     if (!cwd) cwd = asString(obj.cwd);
 
     if (obj.type === "user") {
+      flushTexts();
+      const results = claudeToolResults(obj);
+      if (results.length > 0) {
+        turn.touch(ts);
+        for (const r of results) turn.toolResult(r.content, r);
+        continue;
+      }
       const user = claudeUserContent(obj);
       if (!user) continue;
-      flush();
+      pushTurn(out, turn.flush(ts));
       if (!firstUserText) {
         if (isOpenHornLegacyPrompt(user.text)) return null;
         firstUserText = user.text;
@@ -491,29 +502,50 @@ async function parseClaudeSession(file: SessionFile): Promise<ParsedSession | nu
     if (obj.isApiErrorMessage === true) continue;
     const message = isRecord(obj.message) ? obj.message : null;
     if (!message) continue;
-    const messageId = asString(message.id);
-    if (!group || group.messageId === null || group.messageId !== messageId) {
-      flush();
-      group = { messageId, texts: [], model: null, usage: null, createdAt: ts };
-    }
-    const g: ClaudeAssistantGroup = group;
+    turn.touch(ts);
     const msgModel = asString(message.model);
     if (msgModel) {
-      g.model = msgModel;
+      turn.setModel(msgModel);
       model = msgModel;
     }
-    if (!g.usage) g.usage = claudeUsage(message.usage);
-    if (Array.isArray(message.content)) {
-      for (const block of message.content) {
-        if (isRecord(block) && block.type === "text" && typeof block.text === "string") {
-          g.texts.push(block.text);
-        }
+    const messageId = asString(message.id);
+    if (messageId === null || messageId !== usageMessageId) {
+      flushTexts();
+      usageMessageId = messageId;
+      turn.addUsage(claudeUsage(message.usage));
+    }
+    if (typeof message.content === "string") {
+      texts.push(message.content);
+      continue;
+    }
+    if (!Array.isArray(message.content)) continue;
+    for (const block of message.content) {
+      if (!isRecord(block)) continue;
+      if (block.type !== "text") flushTexts();
+      switch (block.type) {
+        case "text":
+          if (typeof block.text === "string") texts.push(block.text);
+          break;
+        case "thinking":
+          // Models that redact thinking leave only the signature; nothing to show.
+          if (typeof block.thinking === "string") turn.thinking(block.thinking);
+          break;
+        case "redacted_thinking":
+          break;
+        case "tool_use":
+          turn.toolStart(
+            asString(block.name) ?? "tool",
+            block.input,
+            asString(block.id) ?? undefined,
+          );
+          break;
+        default:
+          break;
       }
-    } else if (typeof message.content === "string") {
-      g.texts.push(message.content);
     }
   }
-  flush();
+  flushTexts();
+  pushTurn(out, turn.flush(lastTs ?? updatedAt ?? Date.now()));
 
   if (!firstUserText || out.length === 0 || createdAt === null || updatedAt === null) return null;
   return {
@@ -523,7 +555,7 @@ async function parseClaudeSession(file: SessionFile): Promise<ParsedSession | nu
     model,
     createdAt,
     updatedAt,
-    messages: mergeConsecutiveAssistant(out),
+    messages: out,
   };
 }
 
@@ -536,7 +568,11 @@ const CODEX_ROLLOUT_FILE =
 const CODEX_SUBAGENT_FILE =
   /_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jsonl$/i;
 const CODEX_KEEP_LINE =
-  /"type"\s*:\s*"(session_meta|turn_context)"|"type"\s*:\s*"message"|"type"\s*:\s*"token_count"/;
+  /"type"\s*:\s*"(session_meta|turn_context|response_item)"|"type"\s*:\s*"token_count"/;
+/** Fields of a Codex payload that are opaque ciphertext — never worth carrying. */
+const CODEX_ENCRYPTED_KEYS = new Set(["encrypted_content", "signature"]);
+/** Files an `apply_patch` input touches, one per line, for the step's summary. */
+const APPLY_PATCH_FILE_LINE = /^\*\*\* (?:Add|Update|Delete) File: (.+)$/gm;
 const CODEX_INJECTED_PREFIXES = [
   "<environment_context>",
   "<INSTRUCTIONS>",
@@ -684,9 +720,9 @@ function codexUserContent(payload: Record<string, unknown>): ParsedUserContent |
   return joined.trim() ? { text: joined, images } : null;
 }
 
+/** Text of an assistant `message` item; `phase` (commentary / final_answer) is
+ * the caller's business — both are the reply, commentary is just the interim part. */
 function codexAssistantText(payload: Record<string, unknown>): string | null {
-  const phase = asString(payload.phase);
-  if (phase && phase !== "final_answer") return null;
   if (!Array.isArray(payload.content)) return null;
   const texts: string[] = [];
   for (const block of payload.content) {
@@ -698,7 +734,86 @@ function codexAssistantText(payload: Record<string, unknown>): string | null {
   return joined.trim() ? joined : null;
 }
 
-function codexUsage(payload: Record<string, unknown>): ParsedMessage["usage"] {
+/** Readable part of a `reasoning` item: the summary texts (the content itself is encrypted). */
+function codexReasoningText(payload: Record<string, unknown>): string | null {
+  const texts: string[] = [];
+  const collect = (list: unknown) => {
+    if (!Array.isArray(list)) return;
+    for (const block of list) {
+      if (isRecord(block) && typeof block.text === "string" && block.text.trim()) {
+        texts.push(block.text);
+      }
+    }
+  };
+  collect(payload.summary);
+  collect(payload.content);
+  const joined = texts.join("\n\n");
+  return joined.trim() ? joined : null;
+}
+
+function stripEncrypted(payload: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(payload)) {
+    if (CODEX_ENCRYPTED_KEYS.has(key)) continue;
+    out[key] = value;
+  }
+  return out;
+}
+
+/**
+ * Feeds one non-message `response_item` into the turn. Every kind Codex writes
+ * is mapped; an unknown kind still lands as a tool step carrying its payload,
+ * so a new Codex release cannot silently drop a piece of the reply.
+ */
+function codexResponseItemToTurn(turn: ImportTurnBuilder, payload: Record<string, unknown>) {
+  const callId = asString(payload.call_id) ?? undefined;
+  switch (payload.type) {
+    case "reasoning": {
+      const text = codexReasoningText(payload);
+      if (text) turn.thinking(text);
+      return;
+    }
+    case "function_call":
+      turn.toolStart(
+        asString(payload.name) ?? "function",
+        parseToolArguments(payload.arguments),
+        callId,
+      );
+      return;
+    case "custom_tool_call": {
+      const name = asString(payload.name) ?? "tool";
+      const input = payload.input;
+      if (name === "apply_patch" && typeof input === "string") {
+        const files = [...input.matchAll(APPLY_PATCH_FILE_LINE)].map((m) => m[1].trim());
+        turn.toolStart(name, { path: files.join("\n"), patch: input }, callId);
+      } else {
+        turn.toolStart(name, typeof input === "string" ? { input } : input, callId);
+      }
+      return;
+    }
+    case "local_shell_call":
+      turn.toolStart("shell", payload.action, callId);
+      return;
+    case "web_search_call": {
+      const action = isRecord(payload.action) ? payload.action : {};
+      turn.toolStart("web_search", action, asString(payload.id) ?? undefined);
+      return;
+    }
+    case "tool_search_call":
+      turn.toolStart("tool_search", stripEncrypted(payload), callId);
+      return;
+    case "function_call_output":
+    case "custom_tool_call_output":
+    case "local_shell_call_output":
+    case "tool_search_output":
+      turn.toolResult(toolResultContentToText(payload.output), { toolCallId: callId });
+      return;
+    default:
+      turn.toolStart(asString(payload.type) ?? "item", stripEncrypted(payload), callId);
+  }
+}
+
+function codexUsage(payload: Record<string, unknown>): ImportUsage | null {
   const info = isRecord(payload.info) ? payload.info : null;
   const last = info && isRecord(info.last_token_usage) ? info.last_token_usage : null;
   if (!last) return null;
@@ -752,8 +867,9 @@ async function parseCodexSession(
   let firstUserText: string | null = null;
   let createdAt: number | null = null;
   let updatedAt: number | null = null;
-  let pendingUsage: ParsedMessage["usage"] = null;
   const out: ParsedMessage[] = [];
+  const turn = new ImportTurnBuilder();
+  let lastTs: number | null = null;
 
   for await (const line of iterLines(file.filePath)) {
     if (!CODEX_KEEP_LINE.test(line)) continue;
@@ -776,18 +892,30 @@ async function parseCodexSession(
       continue;
     }
     if (obj.type === "event_msg") {
-      if (payload.type === "token_count") pendingUsage = codexUsage(payload) ?? pendingUsage;
+      // token_count arrives after the pieces it counts; it belongs to the open turn.
+      if (payload.type === "token_count") turn.addUsage(codexUsage(payload));
       continue;
     }
-    if (obj.type !== "response_item" || payload.type !== "message") continue;
+    if (obj.type !== "response_item") continue;
 
     const ts = parseTimestamp(obj.timestamp) ?? updatedAt ?? createdAt ?? Date.now();
+    if (payload.type !== "message") {
+      if (createdAt === null) createdAt = ts;
+      updatedAt = ts;
+      lastTs = ts;
+      turn.touch(ts);
+      turn.setModel(model);
+      codexResponseItemToTurn(turn, payload);
+      continue;
+    }
     const role = payload.role;
     if (role === "user") {
       const user = codexUserContent(payload);
       if (!user) continue;
       if (createdAt === null) createdAt = ts;
       updatedAt = ts;
+      lastTs = ts;
+      pushTurn(out, turn.flush(ts));
       if (!firstUserText) firstUserText = user.text;
       out.push({
         role: "user",
@@ -802,11 +930,14 @@ async function parseCodexSession(
       if (!text) continue;
       if (createdAt === null) createdAt = ts;
       updatedAt = ts;
-      out.push({ role: "assistant", content: text, model, usage: pendingUsage, createdAt: ts });
-      pendingUsage = null;
+      lastTs = ts;
+      turn.touch(ts);
+      turn.setModel(model);
+      turn.text(text);
     }
     // developer role: always injected; dropped.
   }
+  pushTurn(out, turn.flush(lastTs ?? updatedAt ?? createdAt ?? Date.now()));
 
   if (!firstUserText || out.length === 0 || createdAt === null || updatedAt === null) return null;
   const id = meta?.id ?? file.id;
@@ -817,7 +948,7 @@ async function parseCodexSession(
     model,
     createdAt,
     updatedAt,
-    messages: mergeConsecutiveAssistant(out),
+    messages: out,
   };
 }
 
@@ -1422,6 +1553,7 @@ async function persistSession(
       content: m.content,
       model: m.model,
       mode: "agent",
+      agentRun: buildImportedAgentRun(m.steps ?? []),
       usage: m.usage ? JSON.stringify(m.usage) : null,
       createdAt: stamps[i],
     });
