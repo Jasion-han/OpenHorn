@@ -1,4 +1,4 @@
-import { Plus, Search, Wand2 } from "lucide-react";
+import { Eye, EyeOff, Plus, Search, Wand2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Badge,
@@ -29,7 +29,13 @@ import type { Channel } from "../../types/chat";
 import { DesktopProviderLogo } from "../chat/DesktopProviderLogo";
 
 const api = createServerApi();
-const API_KEY_MASK = "********";
+/**
+ * Stand-in for a stored key, shown when editing a channel that has one. The
+ * server never returns the plaintext, so this is a placeholder rather than the
+ * value: 24 dots so it reads as a real secret, and a character the user cannot
+ * type by accident, which keeps the "unchanged" comparison below reliable.
+ */
+const API_KEY_MASK = "•".repeat(24);
 const NEW_CHANNEL_KEY = "__new__";
 
 const CHANNEL_PROTOCOLS = {
@@ -217,6 +223,16 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
   const [baseUrl, setBaseUrl] = useState<string>(CHANNEL_PROTOCOLS.openai.baseUrl);
   const [enabled, setEnabled] = useState(true);
   const [apiKey, setApiKey] = useState("");
+  const [showApiKey, setShowApiKey] = useState(false);
+  const [revealingKey, setRevealingKey] = useState(false);
+  /**
+   * The fetched plaintext, held only while the eye is open. It deliberately does
+   * not go into `apiKey`: that would make the masked field as long as the real
+   * key, so the dots would grow the first time you peeked.
+   */
+  const [revealedKey, setRevealedKey] = useState<string | null>(null);
+  /** The field still holds the placeholder for a stored key, not a real value. */
+  const isStoredKeyMask = apiKey === API_KEY_MASK;
   // ACP channels: local agent launch config, JSON-encoded into the apiKey slot
   // on save. args/env are edited one-per-line.
   const [acpCommand, setAcpCommand] = useState("");
@@ -263,12 +279,51 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
     return channels.find((channel) => channel.id === activeKey) || null;
   }, [activeKey, channels, isCreate]);
 
+  /**
+   * Eye toggle. While the field only holds the stored-key placeholder there is
+   * nothing to reveal client-side, so the first click fetches the decrypted key
+   * (owner-scoped endpoint, the same one the sidecar bootstrap uses) and puts it
+   * in the field; saving it back unchanged is a no-op.
+   */
+  const toggleApiKeyVisible = async () => {
+    if (showApiKey) {
+      setShowApiKey(false);
+      // Untouched stored key: drop the plaintext so the field goes back to the
+      // fixed-length placeholder rather than a mask of the real key.
+      if (isStoredKeyMask) setRevealedKey(null);
+      return;
+    }
+    if (isStoredKeyMask && activeChannel) {
+      setRevealingKey(true);
+      try {
+        const { credentials } = await api.channels.getCredentials(activeChannel.id);
+        setRevealedKey(credentials.apiKey);
+        setShowApiKey(true);
+      } catch (error) {
+        setFormNotice({
+          kind: "error",
+          title: getChannelLabel("settings.channel.editor.apiKeyRevealFailedTitle"),
+          message:
+            error instanceof Error
+              ? error.message
+              : getChannelLabel("settings.channel.editor.apiKeyRevealFailedBody"),
+        });
+      } finally {
+        setRevealingKey(false);
+      }
+      return;
+    }
+    setShowApiKey(true);
+  };
+
   const prefillCreate = () => {
     setName("");
     setProvider("openai");
     setBaseUrl(CHANNEL_PROTOCOLS.openai.baseUrl);
     setEnabled(true);
     setApiKey("");
+    setShowApiKey(false);
+    setRevealedKey(null);
     setAcpCommand("");
     setAcpArgs("");
     setAcpEnv("");
@@ -316,6 +371,8 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
     );
     setEnabled(Boolean(channel.enabled));
     setApiKey(channel.hasApiKey ? API_KEY_MASK : "");
+    setShowApiKey(false);
+    setRevealedKey(null);
     setAcpCommand("");
     setAcpArgs("");
     setAcpEnv("");
@@ -678,7 +735,9 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
               />
             </div>
 
-            <ScrollArea className="flex-1">
+            {/* The permanent grey rail reads as chrome in a dialog this small; the
+                pane still scrolls by wheel and trackpad. */}
+            <ScrollArea className="flex-1" hideScrollbar>
               <div className="flex flex-col gap-1 pr-2">
                 {filteredChannels.map((channel) => {
                   const selected = channel.id === activeKey;
@@ -757,7 +816,9 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
               )}
             </div>
 
-            <ScrollArea className="flex-1">
+            {/* The permanent grey rail reads as chrome in a dialog this small; the
+                pane still scrolls by wheel and trackpad. */}
+            <ScrollArea className="flex-1" hideScrollbar>
               <div className="flex flex-col gap-3 pr-2">
                 <div className="grid grid-cols-2 gap-3">
                   <div className="flex flex-col gap-1.5">
@@ -947,17 +1008,45 @@ export function ChannelEditorModal(props: ChannelEditorModalProps) {
                     <Label htmlFor="channel-api-key">
                       API Key {isCreate && authSource === "manual" && "*"}
                     </Label>
-                    <Input
-                      id="channel-api-key"
-                      type="password"
-                      placeholder={
-                        isCreate
-                          ? getChannelLabel("settings.channel.editor.apiKeyPlaceholderCreate")
-                          : getChannelLabel("settings.channel.editor.apiKeyPlaceholderEdit")
-                      }
-                      value={apiKey}
-                      onChange={(event) => setApiKey(event.target.value)}
-                    />
+                    <div className="relative">
+                      <Input
+                        id="channel-api-key"
+                        type={showApiKey ? "text" : "password"}
+                        className="pr-9"
+                        placeholder={
+                          isCreate
+                            ? getChannelLabel("settings.channel.editor.apiKeyPlaceholderCreate")
+                            : getChannelLabel("settings.channel.editor.apiKeyPlaceholderEdit")
+                        }
+                        value={revealedKey ?? apiKey}
+                        onChange={(event) => {
+                          const next = event.target.value;
+                          setApiKey(next);
+                          // Editing a revealed key turns it into the value to save.
+                          if (revealedKey !== null) setRevealedKey(next);
+                        }}
+                      />
+                      {(apiKey || revealedKey) && (
+                        <button
+                          type="button"
+                          disabled={revealingKey}
+                          onClick={() => void toggleApiKeyVisible()}
+                          aria-label={getChannelLabel(
+                            showApiKey
+                              ? "settings.channel.editor.apiKeyHide"
+                              : "settings.channel.editor.apiKeyShow",
+                          )}
+                          title={getChannelLabel(
+                            showApiKey
+                              ? "settings.channel.editor.apiKeyHide"
+                              : "settings.channel.editor.apiKeyShow",
+                          )}
+                          className="-translate-y-1/2 absolute top-1/2 right-2 rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+                        >
+                          {showApiKey ? <EyeOff size={15} /> : <Eye size={15} />}
+                        </button>
+                      )}
+                    </div>
                     {!isCreate && (
                       <p className="text-xs text-muted-foreground">
                         {getChannelLabel("settings.channel.editor.apiKeyHint")}

@@ -358,9 +358,12 @@ export const channelLabels = {
   "settings.channel.editor.localAuthHint":
     "Sidecar 将自动使用检测到的本地认证，无需手动填写 API Key。",
   "settings.channel.editor.apiKeyPlaceholderCreate": "输入 API Key",
-  "settings.channel.editor.apiKeyPlaceholderEdit": "保持为 ******** 或留空表示不修改",
-  "settings.channel.editor.apiKeyHint":
-    "出于安全原因，不会展示已保存的明文 Key。输入新 Key 才会更新。",
+  "settings.channel.editor.apiKeyPlaceholderEdit": "留空表示不修改已保存的 Key",
+  "settings.channel.editor.apiKeyHint": "点击右侧眼睛可查看已保存的 Key；留空表示不修改。",
+  "settings.channel.editor.apiKeyShow": "显示 API Key",
+  "settings.channel.editor.apiKeyRevealFailedTitle": "无法读取已保存的 Key",
+  "settings.channel.editor.apiKeyRevealFailedBody": "请稍后重试，或直接输入新的 Key。",
+  "settings.channel.editor.apiKeyHide": "隐藏 API Key",
   "settings.channel.editor.fillFromSource": "从 {source} 填入",
   // Channel editor modal — footer buttons
   "settings.channel.editor.processing": "处理中...",

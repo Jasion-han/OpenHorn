@@ -5,8 +5,15 @@ import { cn } from "../../lib/cn";
 
 const ScrollArea = React.forwardRef<
   React.ElementRef<typeof ScrollAreaPrimitive.Root>,
-  React.ComponentPropsWithoutRef<typeof ScrollAreaPrimitive.Root>
->(({ className, children, ...props }, ref) => (
+  React.ComponentPropsWithoutRef<typeof ScrollAreaPrimitive.Root> & {
+    /**
+     * Scroll without a visible bar, for panes where a permanent rail reads as
+     * chrome. The scrollbar still mounts: Radix only switches the viewport to
+     * `overflow: scroll` while one is present, so dropping it stops the wheel.
+     */
+    hideScrollbar?: boolean;
+  }
+>(({ className, children, hideScrollbar = false, ...props }, ref) => (
   <ScrollAreaPrimitive.Root
     ref={ref}
     className={cn("relative overflow-hidden", className)}
@@ -15,7 +22,9 @@ const ScrollArea = React.forwardRef<
     <ScrollAreaPrimitive.Viewport className="h-full w-full rounded-[inherit] [&>div]:!block">
       {children}
     </ScrollAreaPrimitive.Viewport>
-    <ScrollBar />
+    <ScrollBar
+      className={hideScrollbar ? "pointer-events-none w-0 border-0 p-0 opacity-0" : undefined}
+    />
     <ScrollAreaPrimitive.Corner />
   </ScrollAreaPrimitive.Root>
 ));
