@@ -18,12 +18,16 @@ export function InlineClampStep({
   isResult,
   tone,
   maxLines = 3,
+  marker = true,
 }: {
   label: string;
   detail: string | null;
   isResult: boolean;
   tone: StreamTone;
   maxLines?: number;
+  /** The leading dot; off when the caller draws its own marker on a timeline rail. */
+  marker?: boolean;
+  /** Empty label: no "label · " prefix, the detail alone in muted text (a thinking beat). */
 }) {
   const [expanded, setExpanded] = useState(false);
   const [needsCollapse, setNeedsCollapse] = useState(false);
@@ -43,7 +47,8 @@ export function InlineClampStep({
     measure.style.boxSizing = "border-box";
     measure.style.width = `${content.clientWidth}px`;
 
-    const labelText = `${label}${isResult ? " done" : ""}`;
+    const labelText = label ? `${label}${isResult ? " done" : ""}` : "";
+    const sep = label ? " · " : "";
     // Build/reuse the offscreen measurement children so we only mutate text content
     // (no React re-render churn) while binary searching.
     let labelSpan = measure.querySelector<HTMLSpanElement>("[data-m='label']");
@@ -68,7 +73,7 @@ export function InlineClampStep({
 
     const threshold = CLAMP_LINE_HEIGHT * maxLines + 2;
     const heightFor = (text: string, withReserve: boolean): number => {
-      detailNode.textContent = text ? ` · ${text}` : "";
+      detailNode.textContent = text ? `${sep}${text}` : "";
       reserveNode.style.display = withReserve ? "inline-block" : "none";
       return measure.scrollHeight;
     };
@@ -126,16 +131,18 @@ export function InlineClampStep({
 
   return (
     <div className={cn("relative py-0.5 text-sm leading-6", toneClassName(tone))}>
-      <span
-        aria-hidden="true"
-        className="absolute left-0 top-[8px] h-1.5 w-1.5 rounded-full bg-current opacity-20"
-      />
+      {marker && (
+        <span
+          aria-hidden="true"
+          className="absolute left-0 top-[8px] h-1.5 w-1.5 rounded-full bg-current opacity-20"
+        />
+      )}
       {/* Offscreen measurement clone: same width (pl-3.5, full-width block) and text
           metrics (text-sm leading-6) as the visible content below. */}
       <div
         ref={measureRef}
         aria-hidden="true"
-        className="pl-3.5 text-sm leading-6"
+        className={cn("text-sm leading-6", marker && "pl-3.5")}
         style={{
           position: "absolute",
           top: 0,
@@ -146,7 +153,7 @@ export function InlineClampStep({
       />
       <div
         ref={contentRef}
-        className="pl-3.5"
+        className={marker ? "pl-3.5" : undefined}
         // Hard cap the collapsed block at `maxLines` rows so that even if the inline
         // reserve span wraps, the overflow (a would-be 4th line) is clipped and the
         // absolutely-positioned More/Less button stays anchored to the 3rd line.
@@ -154,13 +161,15 @@ export function InlineClampStep({
           collapsed ? { maxHeight: maxLines * CLAMP_LINE_HEIGHT, overflow: "hidden" } : undefined
         }
       >
-        <span>
-          {label}
-          {isResult ? " done" : ""}
-        </span>
+        {label ? (
+          <span>
+            {label}
+            {isResult ? " done" : ""}
+          </span>
+        ) : null}
         {detail ? (
-          <span className="text-foreground opacity-32">
-            {" · "}
+          <span className={label ? "text-foreground opacity-32" : "text-muted-foreground"}>
+            {label ? " · " : ""}
             {collapsed ? clampedDetail : detail}
             {collapsed ? (
               <span aria-hidden="true" style={{ display: "inline-block", width: CLAMP_RESERVE }} />

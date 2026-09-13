@@ -534,22 +534,22 @@ function ProcessGroupSection({
   const showPreview = isActive && !expanded && previewLabel;
 
   return (
-    <div className="my-1">
+    <div>
       <button
         type="button"
         onClick={toggle}
-        className="flex w-full items-center gap-1.5 rounded px-1 py-0.5 text-xs text-muted-foreground/60 hover:bg-accent/40 hover:text-muted-foreground transition-colors"
+        className="flex w-full items-center gap-1.5 rounded py-0.5 pr-1 text-sm leading-6 text-muted-foreground/70 hover:text-foreground/80 transition-colors"
       >
-        <Sparkles size={12} className="shrink-0 opacity-50" />
-        <ChevronRight
-          size={12}
-          className={cn("shrink-0 transition-transform", showExpanded && "rotate-90")}
-        />
+        <Sparkles size={12} className="shrink-0 opacity-60" />
         <span>{summaryLabel}</span>
+        <ChevronRight
+          size={13}
+          className={cn("shrink-0 opacity-60 transition-transform", showExpanded && "rotate-90")}
+        />
       </button>
       {/* Current step preview for active group (collapsed state) */}
       {showPreview && (
-        <div className="mt-0.5 flex items-center gap-1.5 pl-7 text-xs text-muted-foreground/40">
+        <div className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground/40">
           <span className="truncate">
             {previewLabel}
             {previewDetail && (
@@ -559,7 +559,7 @@ function ProcessGroupSection({
         </div>
       )}
       {showExpanded && (
-        <div className="mt-1 flex flex-col gap-1.5 border-l-2 border-border/25 pl-3">
+        <div className="mb-1 flex flex-col gap-1 pl-5">
           {steps.map((step, i) => {
             if (step.type === "tool_detail") {
               return <ToolDetailStep key={`detail-${step.toolCallId || i}`} step={step} />;
@@ -648,36 +648,6 @@ function ProcessGroupSection({
   );
 }
 
-function ThinkingSection({ step }: { step: ApiAgentRunStep }) {
-  const [expanded, setExpanded] = useState(false);
-  const raw = (step.content ?? "").trim();
-  if (!raw) return null;
-
-  const lines = raw.split("\n");
-  const needsCollapse = lines.length > 3;
-  const preview = needsCollapse && !expanded ? lines.slice(0, 3).join("\n") : raw;
-
-  return (
-    <div className="my-1">
-      <button
-        type="button"
-        onClick={() => setExpanded((v) => !v)}
-        className="flex items-center gap-1.5 rounded px-1 py-0.5 text-xs text-muted-foreground/50 hover:bg-accent/40 hover:text-muted-foreground transition-colors"
-      >
-        <ChevronRight
-          size={12}
-          className={cn("shrink-0 transition-transform", expanded && "rotate-90")}
-        />
-        <span>{getChatLabel("chat.agent.thinking")}</span>
-      </button>
-      <div className="mt-0.5 pl-5 text-xs leading-5 text-muted-foreground/50 font-mono whitespace-pre-wrap">
-        {preview}
-        {needsCollapse && !expanded && <span className="text-muted-foreground/30">{" ..."}</span>}
-      </div>
-    </div>
-  );
-}
-
 function WaitingIndicator() {
   return (
     <div className="flex items-center gap-2 py-1 pl-1 text-xs text-muted-foreground/40">
@@ -705,7 +675,7 @@ function TimelineSegments({
   const showWaiting = isInProgress && lastStep?.type === "tool_result" && !hasActiveProcessGroup;
 
   return (
-    <div className="mt-2 flex flex-col gap-1">
+    <div className="mt-1 flex flex-col">
       {run.error && <DesktopAgentTaskMetaLine text={run.error} tone="danger" />}
       {segments.map((seg, segIndex) => {
         if (seg.kind === "process") {
@@ -742,7 +712,22 @@ function TimelineSegments({
           );
         }
         if (seg.kind === "thinking") {
-          return <ThinkingSection key={`thinking-${seg.stepIndex}`} step={seg.step} />;
+          const raw = (seg.step.content ?? "").trim();
+          if (!raw) return null;
+          // Body-style paragraph in muted text (3-line clamp with More/Less):
+          // the grey alone says "thinking". Labels and markers on every beat
+          // were the loudest thing on the screen.
+          return (
+            <div key={`thinking-${seg.stepIndex}`} title={getChatLabel("chat.agent.thinking")}>
+              <InlineClampStep
+                label=""
+                detail={raw}
+                isResult={false}
+                tone="default"
+                marker={false}
+              />
+            </div>
+          );
         }
         const raw = (seg.step.content ?? "").trim();
         if (!raw) return null;
@@ -752,7 +737,7 @@ function TimelineSegments({
         return (
           <div
             key={`text-${seg.stepIndex}`}
-            className="text-sm leading-6"
+            className="py-0.5 text-sm leading-6"
             style={{ overflowWrap: "anywhere", wordBreak: "break-word", maxWidth: "100%" }}
           >
             {useStreaming ? (
