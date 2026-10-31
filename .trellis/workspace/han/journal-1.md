@@ -537,3 +537,37 @@ Claude Code/Codex 导入把一轮回复的多段 assistant 合并为一条；用
 ### Next Steps
 
 - None - task complete
+
+
+## Session 15: 生成式 UI：受约束组件 + 沙箱 HTML 混合渲染
+
+**Date**: 2026-10-31
+**Task**: 生成式 UI：受约束组件 + 沙箱 HTML 混合渲染
+**Package**: agent
+**Branch**: `main`
+
+### Summary
+
+分析 thesys 与 CopilotKit 两个 Open Intelligent UI 实现并融合进桌面端：openui-lang 组件块（OpenUI Lang 1.0 + 22 组件 + 11 函数，前端状态计算、按消息持久化）与 html-ui 沙箱块（allow-scripts 无同源、前置 CSP、流式无脚本预览、bridge 校验且仅响应用户操作、自导航卸载）；Interactive 开关按需注入提示词（OpenUI 懒加载，主包 +31KB）；server regenerate/edit 接受 appendSystemPrompt（不落库）。Chrome 实测渲染/交互/隔离；静态分析确认沙箱拿不到 Tauri invoke key；WKWebView 实机功能清单见归档 tauri-verification.md。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8fb4529` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
