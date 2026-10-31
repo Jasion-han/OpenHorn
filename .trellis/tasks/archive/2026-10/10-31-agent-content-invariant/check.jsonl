@@ -1,0 +1,9 @@
+{"file": "packages/shared/src/message-text.ts", "reason": "derivation"}
+{"file": "apps/desktop/src/stores/chatStore.ts", "reason": "store invariant"}
+{"file": "apps/desktop/src/components/chat/DesktopMessageBubble.tsx", "reason": "rendering"}
+{"file": "apps/desktop/src/components/chat/DesktopAgentRunPanel.tsx", "reason": "timeline text rendering"}
+{"file": "apps/desktop/src/lib/conversationHistory.ts", "reason": "remove fallback"}
+{"file": "apps/server/src/services/messageService.ts", "reason": "write paths + withAgentReplyText"}
+{"file": "apps/server/src/routes/messages.ts", "reason": "sync-sidecar"}
+{"file": "apps/server/src/db/bootstrap.ts", "reason": "backfill + fts"}
+{"file": ".trellis/spec/desktop/frontend/state-management.md", "reason": "update gotcha"}
