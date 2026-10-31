@@ -308,6 +308,7 @@ export function AgentRunPanel({
   run,
   hideIdleIndicator = false,
   isStreaming = false,
+  genUiScope,
 }: {
   run?: ApiAgentRun;
   /**
@@ -319,6 +320,8 @@ export function AgentRunPanel({
   /** Whether the message is currently being streamed — used to decide between
    *  the streaming and static Markdown renderer for the last text step. */
   isStreaming?: boolean;
+  /** The message id; with the text step index it keys generative-UI state. */
+  genUiScope?: string | null;
 }) {
   if (!run) return null;
   const toolCount = run.steps.filter(
@@ -389,7 +392,12 @@ export function AgentRunPanel({
         }
       `}</style>
       {agentLabel && <div className="mb-1 text-xs text-muted-foreground/40">{agentLabel}</div>}
-      <TimelineSegments run={run} isStreaming={isStreaming} presentToolLabel={presentToolLabel} />
+      <TimelineSegments
+        run={run}
+        isStreaming={isStreaming}
+        presentToolLabel={presentToolLabel}
+        genUiScope={genUiScope}
+      />
       {/* Context usage bar (ACP only) */}
       {run.contextUsage && <ContextUsageBar contextUsage={run.contextUsage} />}
     </div>
@@ -661,10 +669,12 @@ function TimelineSegments({
   run,
   isStreaming,
   presentToolLabel,
+  genUiScope,
 }: {
   run: ApiAgentRun;
   isStreaming: boolean;
   presentToolLabel: (name: string | null | undefined) => string;
+  genUiScope?: string | null;
 }) {
   const segments = segmentSteps(run.steps);
   const isInProgress = run.status === "partial" || run.status === "running";
@@ -734,6 +744,7 @@ function TimelineSegments({
         const isLastText = !segments.slice(segIndex + 1).some((s) => s.kind === "text");
         const useStreaming = isStreaming && isLastText;
         const displayText = stripLeadingThematicBreak(raw);
+        const segmentScope = genUiScope ? `${genUiScope}:${seg.stepIndex}` : null;
         return (
           <div
             key={`text-${seg.stepIndex}`}
@@ -741,9 +752,13 @@ function TimelineSegments({
             style={{ overflowWrap: "anywhere", wordBreak: "break-word", maxWidth: "100%" }}
           >
             {useStreaming ? (
-              <DesktopStreamingMarkdownMessage content={displayText} pulseKey={0} />
+              <DesktopStreamingMarkdownMessage
+                content={displayText}
+                pulseKey={0}
+                genUiScope={segmentScope}
+              />
             ) : (
-              <DesktopMarkdownMessage content={displayText} />
+              <DesktopMarkdownMessage content={displayText} genUiScope={segmentScope} />
             )}
           </div>
         );

@@ -1,5 +1,14 @@
 import { Check, Copy, FileCode2 } from "lucide-react";
-import { Fragment, memo, startTransition, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  memo,
+  Suspense,
+  startTransition,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { Components } from "react-markdown";
 import ReactMarkdown from "react-markdown";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
@@ -7,6 +16,8 @@ import { oneDark, oneLight } from "react-syntax-highlighter/dist/esm/styles/pris
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import { getDomainBadge } from "../../lib/domainBadge";
+import { blockStateKey } from "../../lib/genui/blockState";
+import { endsInsideOpenFence, genUiKindOf } from "../../lib/genui/fence";
 import { formatPreviewLabel, getPreviewLabel } from "../../lib/i18n/agent";
 import { notifyError } from "../../lib/notify";
 import { classifyReferenceHref, referenceUrlTransform } from "../../lib/referenceLink";
@@ -18,6 +29,8 @@ import { usePreviewPanelStore } from "../../stores/previewPanelStore";
 import { resolveProjectRootForConversation } from "../../stores/projectStore";
 import { useSidecarStore } from "../../stores/sidecarStore";
 import styles from "./desktop-markdown.module.css";
+import { HtmlUiBlock } from "./genui/HtmlUiBlock";
+import { LazyGenUiBlock } from "./genui/lazy";
 
 // Micromark fails to recognise **…** as bold when a CJK character sits
 // directly before the opening ** (CommonMark left-flanking delimiter rule).
@@ -303,9 +316,36 @@ const CodeBlock = memo(
     prev.isDark === next.isDark,
 );
 
-function DesktopMarkdownMessageImpl({ content }: { content: string }) {
+type DesktopMarkdownMessageProps = {
+  content: string;
+  /** True while this text is still arriving; the last open UI block renders as streaming. */
+  streaming?: boolean;
+  /**
+   * Identifies the message (and agent text segment) so interaction state in
+   * generative UI blocks can be persisted. Omit to keep that state in memory.
+   */
+  genUiScope?: string | null;
+};
+
+type HastPosition = { start?: { offset?: number }; end?: { offset?: number } };
+
+function DesktopMarkdownMessageImpl({
+  content,
+  streaming = false,
+  genUiScope,
+}: DesktopMarkdownMessageProps) {
   const normalized = fixCjkBold((content || "").replace(/\r\n/g, "\n").trim());
   const [isDark, setIsDark] = useState(false);
+  // Read by the `code` renderer at render time instead of being memo
+  // dependencies: recreating `components` on every delta would remount every
+  // block (see the note on `components` below).
+  const genUiRef = useRef({ streaming, scope: genUiScope ?? null, length: 0, openTail: false });
+  genUiRef.current = {
+    streaming,
+    scope: genUiScope ?? null,
+    length: normalized.length,
+    openTail: streaming && endsInsideOpenFence(normalized),
+  };
 
   useEffect(() => {
     const compute = () => {
@@ -446,12 +486,49 @@ function DesktopMarkdownMessageImpl({ content }: { content: string }) {
           </a>
         );
       },
-      code({ className, children, ...props }: CodeProps) {
+      code({ className, children, node, ...props }: CodeProps) {
         const match = /language-([\w-]+)/.exec(className || "");
         const lang = match?.[1];
         const langMeta = getLanguageMeta(lang);
         const codeString = String(children).replace(/\n$/, "");
         const isBlock = codeString.includes("\n") || Boolean(match);
+        const genUiKind = isBlock ? genUiKindOf(lang) : null;
+        if (genUiKind) {
+          const position = (node as { position?: HastPosition } | undefined)?.position;
+          const state = genUiRef.current;
+          // Only the block the text currently ends in can still be streaming.
+          const blockStreaming =
+            state.openTail && (position?.end?.offset ?? state.length) >= state.length;
+          const start = position?.start?.offset;
+          const fallback = (
+            <CodeBlock
+              codeString={codeString}
+              className={className}
+              language={langMeta.syntax}
+              accent={langMeta.accent}
+              label={langMeta.label}
+              lineCount={codeString.split("\n").length}
+              isDark={isDark}
+              syntaxTheme={syntaxTheme}
+              codeProps={props}
+            />
+          );
+          return genUiKind === "openui" ? (
+            // The plain code block stands in while the renderer loads.
+            <Suspense fallback={fallback}>
+              <LazyGenUiBlock
+                code={codeString}
+                streaming={blockStreaming}
+                stateKey={
+                  state.scope && start !== undefined ? blockStateKey(state.scope, start) : null
+                }
+                fallback={fallback}
+              />
+            </Suspense>
+          ) : (
+            <HtmlUiBlock code={codeString} streaming={blockStreaming} />
+          );
+        }
         if (isBlock) {
           const lineCount = codeString.split("\n").length;
           return (
@@ -497,5 +574,8 @@ function DesktopMarkdownMessageImpl({ content }: { content: string }) {
 
 export const DesktopMarkdownMessage = memo(
   DesktopMarkdownMessageImpl,
-  (prev, next) => prev.content === next.content,
+  (prev, next) =>
+    prev.content === next.content &&
+    prev.streaming === next.streaming &&
+    prev.genUiScope === next.genUiScope,
 );

@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@openuidev/react-lang": "1.0.2",
     "@tanstack/react-virtual": "^3.14.5",
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-shell": "^2.3.5",
@@ -24,6 +25,7 @@
     "remark-gfm": "^4.0.1",
     "shared": "workspace:*",
     "ui": "workspace:*",
+    "zod": "^4.4.3",
     "zustand": "^5.0.0"
   },
   "devDependencies": {

@@ -1314,3 +1314,24 @@ export function formatPreviewLabel(
   }
   return text;
 }
+
+/**
+ * Generative UI in answers (```openui-lang / ```html-ui blocks) and the
+ * composer's "Interactive" chip. The chip label itself stays English like
+ * "Web Search"; only the explanatory copy is localized.
+ */
+export const genUiLabels = {
+  "genui.renderFailed": "交互内容无法渲染，以下为源代码",
+  "genui.partialErrors": "部分交互内容无法显示",
+  "genui.preparing": "正在生成交互内容…",
+  "genui.frameTitle": "交互内容",
+  "genui.frameNavigated": "交互内容试图跳转到外部页面，已停止运行",
+  "genui.toggle.on": "交互式回答：开（回答可包含可操作的界面，提示词会变长）",
+  "genui.toggle.off": "交互式回答：关",
+} as const;
+
+export type GenUiLabelKey = keyof typeof genUiLabels;
+
+export function getGenUiLabel(key: GenUiLabelKey): string {
+  return genUiLabels[key];
+}

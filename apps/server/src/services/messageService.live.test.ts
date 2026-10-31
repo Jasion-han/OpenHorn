@@ -425,6 +425,7 @@ test("regenerate falls back to the previous user message when assistant id is mi
     const stream = await regenerateMessage("user-1", "missing-assistant-id", {
       fallbackUserMessageId: "user-msg-1",
       fallbackUserContent: "OpenClaw 有什么能力？",
+      appendSystemPrompt: "GENUI_SECTION_MARKER",
     });
     const payloads = parseSsePayloads(await readStreamText(stream));
 
@@ -453,6 +454,16 @@ test("regenerate falls back to the previous user message when assistant id is mi
       model: "claude-3-7-sonnet",
     });
     expect(chatStreamCalls).toHaveLength(1);
+    // The per-call addendum reaches the LLM system prompt (after the base prompt)...
+    const systemMessage = chatStreamCalls[0]?.messages.find((m) => m.role === "system");
+    expect(typeof systemMessage?.content === "string").toBe(true);
+    const systemText = String(systemMessage?.content);
+    expect(systemText.startsWith("Base system prompt")).toBe(true);
+    expect(systemText.endsWith("GENUI_SECTION_MARKER")).toBe(true);
+    // ...and is never persisted.
+    expect(JSON.stringify([insertedRows, updatedRows]).includes("GENUI_SECTION_MARKER")).toBe(
+      false,
+    );
   } finally {
     mock.restore();
   }
@@ -616,7 +627,9 @@ test("edit user message creates a new assistant reply when the user message is t
 
   try {
     const { editUserMessage } = await import(`./messageService?edit-agent=${crypto.randomUUID()}`);
-    const stream = await editUserMessage("user-1", "user-msg-1", "新问题");
+    const stream = await editUserMessage("user-1", "user-msg-1", "新问题", {
+      appendSystemPrompt: "GENUI_SECTION_MARKER",
+    });
     const payloads = parseSsePayloads(await readStreamText(stream));
 
     expect(payloads[0]).toEqual({
@@ -650,6 +663,11 @@ test("edit user message creates a new assistant reply when the user message is t
       role: "user",
       content: "新问题",
     });
+    const systemMessage = chatStreamCalls[0]?.messages.find((m) => m.role === "system");
+    expect(String(systemMessage?.content).endsWith("GENUI_SECTION_MARKER")).toBe(true);
+    expect(JSON.stringify([insertedRows, updatedRows]).includes("GENUI_SECTION_MARKER")).toBe(
+      false,
+    );
   } finally {
     mock.restore();
   }

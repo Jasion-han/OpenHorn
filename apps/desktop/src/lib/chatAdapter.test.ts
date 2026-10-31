@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { ApiChannel, ApiConversation, ApiMessage } from "../types/chat";
 import { createChatAdapter } from "./chatAdapter";
-import type { ServerApi } from "./serverApi";
+import { createServerApi, type ServerApi } from "./serverApi";
 
 function createStubServerApi() {
   let streamedBody: unknown;
@@ -445,5 +445,70 @@ describe("chatAdapter", () => {
     expect(await adapter.getSettings(["desktop_theme"])).toEqual({
       desktop_theme: "system",
     });
+  });
+});
+
+describe("chatAdapter appendSystemPrompt over the real server api", () => {
+  function createRecordingAdapter() {
+    const requests: Array<{ url: string; body: unknown }> = [];
+    const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const raw = typeof init?.body === "string" ? init.body : undefined;
+      requests.push({ url: String(input), body: raw === undefined ? undefined : JSON.parse(raw) });
+      return new Response("ok", { status: 200 });
+    }) as typeof fetch;
+    const adapter = createChatAdapter(
+      createServerApi({ baseUrl: "http://server.test", fetch: fetchImpl }),
+    );
+    return { adapter, requests };
+  }
+
+  test("regenerate sends appendSystemPrompt in the body when provided", async () => {
+    const { adapter, requests } = createRecordingAdapter();
+
+    await adapter.regenerateMessage("msg-1", {
+      userMessageId: "msg-user-1",
+      userContent: "again",
+      appendSystemPrompt: "GENUI",
+    });
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.url).toBe("http://server.test/messages/msg-1/regenerate");
+    expect(requests[0]?.body).toEqual({
+      userMessageId: "msg-user-1",
+      userContent: "again",
+      appendSystemPrompt: "GENUI",
+    });
+  });
+
+  test("regenerate omits appendSystemPrompt when absent or blank", async () => {
+    const { adapter, requests } = createRecordingAdapter();
+
+    await adapter.regenerateMessage("msg-1", { userMessageId: "msg-user-1", userContent: "a" });
+    await adapter.regenerateMessage("msg-2", { appendSystemPrompt: "   " });
+
+    expect(requests).toHaveLength(2);
+    expect(requests[0]?.body).toEqual({ userMessageId: "msg-user-1", userContent: "a" });
+    expect(requests[1]?.body).toEqual({});
+  });
+
+  test("edit sends appendSystemPrompt in the body when provided", async () => {
+    const { adapter, requests } = createRecordingAdapter();
+
+    await adapter.editUserMessage("msg-user-1", "new question", { appendSystemPrompt: "GENUI" });
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.url).toBe("http://server.test/messages/msg-user-1/edit");
+    expect(requests[0]?.body).toEqual({ content: "new question", appendSystemPrompt: "GENUI" });
+  });
+
+  test("edit omits appendSystemPrompt when absent", async () => {
+    const { adapter, requests } = createRecordingAdapter();
+
+    await adapter.editUserMessage("msg-user-1", "new question");
+    await adapter.editUserMessage("msg-user-1", "new question", {});
+
+    expect(requests).toHaveLength(2);
+    expect(requests[0]?.body).toEqual({ content: "new question" });
+    expect(requests[1]?.body).toEqual({ content: "new question" });
   });
 });

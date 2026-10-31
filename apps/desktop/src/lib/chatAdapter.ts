@@ -32,9 +32,13 @@ export interface ChatAdapter {
   deleteMessage: (messageId: string) => Promise<void>;
   regenerateMessage: (
     messageId: string,
-    data?: { userMessageId?: string; userContent?: string },
+    data?: { userMessageId?: string; userContent?: string; appendSystemPrompt?: string },
   ) => Promise<Response>;
-  editUserMessage: (messageId: string, content: string) => Promise<Response>;
+  editUserMessage: (
+    messageId: string,
+    content: string,
+    options?: { appendSystemPrompt?: string },
+  ) => Promise<Response>;
   searchMessages: (query: string) => Promise<MessageSearchResult[]>;
   abortActiveStream: () => void;
   getSettings: (keys: string[]) => Promise<Record<string, string>>;
@@ -264,7 +268,7 @@ export function createChatAdapter(api: ServerApi = createServerApi()): ChatAdapt
       return response;
     },
 
-    async editUserMessage(messageId, content) {
+    async editUserMessage(messageId, content, options) {
       if (activeController) {
         activeController.abort();
       }
@@ -274,6 +278,7 @@ export function createChatAdapter(api: ServerApi = createServerApi()): ChatAdapt
 
       const response = await api.messages.edit(messageId, content, {
         signal: controller.signal,
+        appendSystemPrompt: options?.appendSystemPrompt,
       });
       if (!response.ok) {
         if (activeController === controller) {

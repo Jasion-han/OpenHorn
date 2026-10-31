@@ -5,9 +5,11 @@ import { DesktopMarkdownMessage } from "./DesktopMarkdownMessage";
 export function DesktopStreamingMarkdownMessage({
   content,
   pulseKey,
+  genUiScope,
 }: {
   content: string;
   pulseKey: number;
+  genUiScope?: string | null;
 }) {
   const [renderedContent, setRenderedContent] = useState("");
   const smootherRef = useRef<TextStreamSmoother | null>(null);
@@ -77,5 +79,5 @@ export function DesktopStreamingMarkdownMessage({
     targetContentRef.current = nextContent;
   }, [content, pulseKey]);
 
-  return <DesktopMarkdownMessage content={renderedContent} />;
+  return <DesktopMarkdownMessage content={renderedContent} streaming genUiScope={genUiScope} />;
 }

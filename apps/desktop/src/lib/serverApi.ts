@@ -67,10 +67,14 @@ export interface ServerApi {
     delete: (id: string) => Promise<{ success: boolean }>;
     regenerate: (
       id: string,
-      data?: { userMessageId?: string; userContent?: string },
+      data?: { userMessageId?: string; userContent?: string; appendSystemPrompt?: string },
       options?: { signal?: AbortSignal },
     ) => Promise<Response>;
-    edit: (id: string, content: string, options?: { signal?: AbortSignal }) => Promise<Response>;
+    edit: (
+      id: string,
+      content: string,
+      options?: { signal?: AbortSignal; appendSystemPrompt?: string },
+    ) => Promise<Response>;
     syncSidecar: (data: {
       conversationId: string;
       userContent: string;
@@ -289,6 +293,19 @@ export async function readErrorMessage(response: Response, fallback = "Request f
   return extractErrorMessage(rawText, fallback);
 }
 
+/**
+ * Per-request system-prompt addendum (the generative-UI section) for the
+ * server-side regenerate / edit LLM call. Only sent when it is a non-empty string.
+ */
+function withAppendSystemPrompt<T extends { appendSystemPrompt?: string }>(
+  body: T,
+): Omit<T, "appendSystemPrompt"> & { appendSystemPrompt?: string } {
+  const { appendSystemPrompt, ...rest } = body;
+  return typeof appendSystemPrompt === "string" && appendSystemPrompt.trim()
+    ? { ...rest, appendSystemPrompt }
+    : rest;
+}
+
 async function requestWithBackendStatus(
   fetchImpl: FetchLike,
   url: string,
@@ -407,7 +424,7 @@ export function createServerApi(options?: { baseUrl?: string; fetch?: FetchLike 
             headers: {
               "Content-Type": "application/json",
             },
-            body: data ? JSON.stringify(data) : undefined,
+            body: data ? JSON.stringify(withAppendSystemPrompt(data)) : undefined,
           },
         );
       },
@@ -422,7 +439,12 @@ export function createServerApi(options?: { baseUrl?: string; fetch?: FetchLike 
             headers: {
               "Content-Type": "application/json",
             },
-            body: JSON.stringify({ content }),
+            body: JSON.stringify(
+              withAppendSystemPrompt({
+                content,
+                appendSystemPrompt: options?.appendSystemPrompt,
+              }),
+            ),
           },
         );
       },

@@ -89,6 +89,7 @@ function MessageBubbleImpl({
         run={message.agentRun}
         hideIdleIndicator={liveIndicator === "trailing"}
         isStreaming={isMessageStreaming}
+        genUiScope={message.id}
       />
     )
   ) : null;
@@ -148,9 +149,10 @@ function MessageBubbleImpl({
                   <DesktopStreamingMarkdownMessage
                     content={displayContent}
                     pulseKey={message.streamPulseKey ?? 0}
+                    genUiScope={message.id}
                   />
                 ) : (
-                  <DesktopMarkdownMessage content={displayContent} />
+                  <DesktopMarkdownMessage content={displayContent} genUiScope={message.id} />
                 )
               ) : isMessageStreaming && !isFlatAgentAssistant ? (
                 <TypingIndicator />

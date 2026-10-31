@@ -12,6 +12,7 @@ import type {
   AgentTaskRecord,
   AgentTaskUxMode,
 } from "./agentTaskService";
+import { withAppendedSystemPrompt } from "./appendSystemPrompt";
 import {
   buildAttachmentPayloadFromIds,
   getEmbeddingApiKey,
@@ -1293,6 +1294,10 @@ export async function editUserMessage(
   userId: string,
   userMessageId: string,
   newContent: string,
+  options?: {
+    /** Per-call system-prompt addendum; used for this LLM call only, never persisted. */
+    appendSystemPrompt?: string;
+  },
 ): Promise<ReadableStream> {
   return createSseStream(async (send, ctx) => {
     const [userMsg] = await db.select().from(messages).where(eq(messages.id, userMessageId));
@@ -1399,7 +1404,10 @@ export async function editUserMessage(
       forceWebSearch: Boolean(conversation.forceWebSearch),
       classifier,
     });
-    const effectiveSystemPrompt = buildEffectiveSystemPrompt(baseSystemPrompt, liveContext);
+    const effectiveSystemPrompt = withAppendedSystemPrompt(
+      buildEffectiveSystemPrompt(baseSystemPrompt, liveContext),
+      options?.appendSystemPrompt,
+    );
     send(buildLiveStatusPayload(liveContext));
     const citationsPayload = buildCitationsPayload(liveContext.citations);
     if (citationsPayload) {
@@ -1476,6 +1484,8 @@ export async function regenerateMessage(
   fallback?: {
     fallbackUserMessageId?: string;
     fallbackUserContent?: string;
+    /** Per-call system-prompt addendum; used for this LLM call only, never persisted. */
+    appendSystemPrompt?: string;
   },
 ): Promise<ReadableStream> {
   const [prefetchedAssistantMsg] = await db
@@ -1488,7 +1498,9 @@ export async function regenerateMessage(
     fallback?.fallbackUserMessageId &&
     fallback.fallbackUserContent
   ) {
-    return editUserMessage(userId, fallback.fallbackUserMessageId, fallback.fallbackUserContent);
+    return editUserMessage(userId, fallback.fallbackUserMessageId, fallback.fallbackUserContent, {
+      appendSystemPrompt: fallback.appendSystemPrompt,
+    });
   }
 
   return createSseStream(async (send, ctx) => {
@@ -1579,7 +1591,10 @@ export async function regenerateMessage(
       forceWebSearch: Boolean(conversation.forceWebSearch),
       classifier,
     });
-    const effectiveSystemPrompt = buildEffectiveSystemPrompt(baseSystemPrompt, liveContext);
+    const effectiveSystemPrompt = withAppendedSystemPrompt(
+      buildEffectiveSystemPrompt(baseSystemPrompt, liveContext),
+      fallback?.appendSystemPrompt,
+    );
     send(buildLiveStatusPayload(liveContext));
     const citationsPayload = buildCitationsPayload(liveContext.citations);
     if (citationsPayload) {

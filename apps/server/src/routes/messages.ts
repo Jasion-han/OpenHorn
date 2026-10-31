@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { parseAppendSystemPrompt } from "../services/appendSystemPrompt";
 import {
   completeChatFromSidecar,
   deleteMessage,
@@ -139,11 +140,16 @@ messages.post("/:id/regenerate", async (c) => {
   const messageId = c.req.param("id");
   try {
     const body = await c.req.json().catch(() => ({}));
+    const append = parseAppendSystemPrompt(body?.appendSystemPrompt);
+    if (append.error) {
+      return c.json({ error: append.error }, 400);
+    }
     const stream = await regenerateMessage(user.id, messageId, {
       fallbackUserMessageId:
         typeof body?.userMessageId === "string" ? body.userMessageId.trim() : undefined,
       fallbackUserContent:
         typeof body?.userContent === "string" ? body.userContent.trim() : undefined,
+      appendSystemPrompt: append.value,
     });
     return new Response(stream, {
       headers: {
@@ -166,7 +172,13 @@ messages.post("/:id/edit", async (c) => {
     if (!content) {
       return c.json({ error: "content is required" }, 400);
     }
-    const stream = await editUserMessage(user.id, messageId, content);
+    const append = parseAppendSystemPrompt(body?.appendSystemPrompt);
+    if (append.error) {
+      return c.json({ error: append.error }, 400);
+    }
+    const stream = await editUserMessage(user.id, messageId, content, {
+      appendSystemPrompt: append.value,
+    });
     return new Response(stream, {
       headers: {
         "Content-Type": "text/event-stream",

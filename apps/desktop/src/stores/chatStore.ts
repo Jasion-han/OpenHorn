@@ -334,9 +334,13 @@ export interface ChatState {
   deleteMessage: (messageId: string) => Promise<void>;
   regenerateMessage: (
     messageId: string,
-    data?: { userMessageId?: string; userContent?: string },
+    data?: { userMessageId?: string; userContent?: string; appendSystemPrompt?: string },
   ) => Promise<Response>;
-  editUserMessage: (messageId: string, content: string) => Promise<Response>;
+  editUserMessage: (
+    messageId: string,
+    content: string,
+    options?: { appendSystemPrompt?: string },
+  ) => Promise<Response>;
   abortStreaming: () => void;
   applyStreamEvent: (messageId: string, event: ChatStreamEvent) => void;
   completeStreamingMessage: (messageId: string) => void;
@@ -820,8 +824,8 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
       return adapter.regenerateMessage(messageId, data);
     },
 
-    async editUserMessage(messageId, content) {
-      return adapter.editUserMessage(messageId, content);
+    async editUserMessage(messageId, content, options) {
+      return adapter.editUserMessage(messageId, content, options);
     },
 
     abortStreaming() {

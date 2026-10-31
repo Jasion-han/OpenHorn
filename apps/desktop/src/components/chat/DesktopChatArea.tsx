@@ -28,6 +28,7 @@ import { COMPOSER_PLACEHOLDERS } from "../../lib/composerPlaceholder";
 import { deriveComposerRunState } from "../../lib/composerRunState";
 import { isDefaultConversationTitle } from "../../lib/conversationTitle";
 import { getEffectiveModelForConversation } from "../../lib/effectiveModel";
+import { withGenUiMessages, withGenUiPrompt } from "../../lib/genui/promptMerge";
 import { getChatLabel, getSlashLabel } from "../../lib/i18n/agent";
 import {
   findGroupIndexByMessageId,
@@ -47,6 +48,7 @@ import { readSseStream } from "../../lib/sse";
 import { discoverSkills, skillsDisabledList } from "../../lib/tauriBridge";
 import { useChatStore } from "../../stores/chatStore";
 import { useDesktopShellStore } from "../../stores/desktopShellStore";
+import { useGenUiStore } from "../../stores/genUiStore";
 import { useImportStore } from "../../stores/importStore";
 import { useSidecarStore } from "../../stores/sidecarStore";
 import type { ChatStreamEvent, Message, MessageAttachmentMeta } from "../../types/chat";
@@ -56,6 +58,7 @@ import { MessageBubble } from "./DesktopMessageBubble";
 import { DesktopModelPickerModal } from "./DesktopModelPickerModal";
 import { DesktopSidecarRuntimePanel } from "./DesktopSidecarRuntimePanel";
 import { DesktopWelcomeScreen } from "./DesktopWelcomeScreen";
+import { loadCurrentGenUiSection } from "./genui/lazy";
 
 const PAGE_PAD = "16px";
 const COMPOSER_PAD_BOTTOM = "env(safe-area-inset-bottom, 0px)";
@@ -200,6 +203,7 @@ export function DesktopChatArea() {
   const hasInput = Boolean(input.trim());
   const hasFiles = pendingAttachments.length > 0;
   const forceWebSearch = currentConversation?.forceWebSearch ?? true;
+  const genUiComposerRequest = useGenUiStore((state) => state.composerRequest);
   // The sidecar runs one turn at a time: Stop must only target the turn that
   // belongs to this conversation, and sending from another conversation would
   // kill the running one — hence `!isStreaming` (global) stays in `canSend`.
@@ -310,6 +314,18 @@ export function DesktopChatArea() {
     historyNavRef.current = resetHistoryNav();
     queueMicrotask(() => inputRef.current?.focus());
   }, [currentConversation?.id]);
+
+  // A generative-UI answer asked to send a follow-up (@ToAssistant, or
+  // openhorn.sendPrompt from a sandbox). It goes into the composer for the user
+  // to review and send — appended, so a draft in progress is never lost.
+  useEffect(() => {
+    if (!genUiComposerRequest) return;
+    const { text, nonce } = genUiComposerRequest;
+    setInput((current) => (current.trim() ? `${current.trimEnd()}\n\n${text}` : text));
+    historyNavRef.current = resetHistoryNav();
+    useGenUiStore.getState().clearComposerRequest(nonce);
+    queueMicrotask(() => inputRef.current?.focus());
+  }, [genUiComposerRequest]);
 
   // `messages`, the conversation id and `editingMessageId` are triggers: they say
   // "the list just changed shape, re-run the pending scroll", which is why the
@@ -1020,7 +1036,7 @@ export function DesktopChatArea() {
           prompt: sendContent,
           displayContent,
           permissionMode: fullAccessEnabled ? "full-access" : "default",
-          systemPrompt: globalSystemPrompt,
+          systemPrompt: withGenUiPrompt(globalSystemPrompt, await loadCurrentGenUiSection()),
           webSearchEnabled: forceWebSearch,
           tavilyApiKey,
           targetMcpServer,
@@ -1079,6 +1095,7 @@ export function DesktopChatArea() {
         completionTokens: number;
         totalTokens: number;
       } | null = null;
+      const genUiSection = await loadCurrentGenUiSection();
       await new Promise<void>((resolve, reject) => {
         sidecarClient
           .chatStream({
@@ -1086,7 +1103,7 @@ export function DesktopChatArea() {
             baseUrl: prepared.baseUrl || undefined,
             protocol: prepared.protocol,
             model: prepared.model,
-            messages: prepared.messages,
+            messages: withGenUiMessages(prepared.messages, genUiSection),
             onEvent: (event) => {
               if (event.type === "execution_event" && event.eventType === "text") {
                 chatContent += event.content || "";
@@ -1307,7 +1324,7 @@ export function DesktopChatArea() {
           prompt: retrySendContent,
           displayContent: userMessage.content,
           permissionMode: fullAccessEnabled ? "full-access" : "default",
-          systemPrompt: retrySystemPrompt,
+          systemPrompt: withGenUiPrompt(retrySystemPrompt, await loadCurrentGenUiSection()),
           webSearchEnabled: forceWebSearch,
           tavilyApiKey: retryTavilyApiKey,
           targetMcpServer: retryTargetMcpServer,
@@ -1316,15 +1333,18 @@ export function DesktopChatArea() {
         });
         setLoading(false);
       } else {
-        const response = await regenerateMessage(
-          messageId,
-          userMessage && !userMessage.id.startsWith("draft-")
+        // Chat-mode retry runs the LLM call on the server, so the generative-UI
+        // section travels as a per-request addendum (never persisted server-side).
+        const genUiSection = await loadCurrentGenUiSection();
+        const response = await regenerateMessage(messageId, {
+          ...(userMessage && !userMessage.id.startsWith("draft-")
             ? {
                 userMessageId: userMessage.id,
                 userContent: userMessage.content,
               }
-            : undefined,
-        );
+            : {}),
+          appendSystemPrompt: genUiSection ?? undefined,
+        });
 
         if (!response.ok) {
           throw new Error(await readErrorMessage(response, "Failed to regenerate message"));
@@ -1467,7 +1487,7 @@ export function DesktopChatArea() {
           existingUserMessageId: userMessage.id,
           existingAssistantMessageId: existingAssistantMessage?.id,
           permissionMode: fullAccessEnabled ? "full-access" : "default",
-          systemPrompt: editSystemPrompt,
+          systemPrompt: withGenUiPrompt(editSystemPrompt, await loadCurrentGenUiSection()),
           webSearchEnabled: forceWebSearch,
           tavilyApiKey: editTavilyApiKey,
           targetMcpServer: editTargetMcpServer,
@@ -1476,7 +1496,10 @@ export function DesktopChatArea() {
         });
         setLoading(false);
       } else {
-        const response = await editUserMessage(userMessage.id, nextContent);
+        const genUiSection = await loadCurrentGenUiSection();
+        const response = await editUserMessage(userMessage.id, nextContent, {
+          appendSystemPrompt: genUiSection ?? undefined,
+        });
         await consumeStreamingResponse(assistantMessageId, response);
         setStreaming(false);
         setStreamingAssistantId(null);
