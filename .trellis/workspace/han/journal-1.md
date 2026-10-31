@@ -674,3 +674,38 @@ OAuth 计费标记单独成 system 块，默认 Claude Code 渠道恢复系统�
 ### Next Steps
 
 - None - task complete
+
+
+## Session 19: Agent 回复进入对话历史
+
+**Date**: 2026-10-31
+**Task**: Agent 回复进入对话历史
+**Package**: desktop
+**Branch**: `main`
+
+### Summary
+
+Agent 回复只存在 agentRun text 步骤、content 为空，历史组装只读 content 导致模型看不到自己之前的回答而重复作答。新增 shared messageText，桌面历史/复制/服务端 buildChatMessages 统一使用；sidecar Claude/直连运行时改为真实多轮消息。桌面端三轮暗号测试通过。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `fe84395` | (see git log) |
+| `bde9268` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
