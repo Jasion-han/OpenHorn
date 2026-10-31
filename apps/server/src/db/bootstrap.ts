@@ -1,8 +1,11 @@
+import { mkdirSync, readdirSync, rmSync } from "node:fs";
 import { userInfo } from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { ResultSet, Row } from "@libsql/client";
 import { normalizeStoredAgentReply } from "../services/agentReplyNormalization";
 import { selectTaskFailure, selectTaskReplyText } from "../services/agentTaskMessage";
-import { client } from "./index";
+import { client, databaseUrl } from "./index";
 import { settleServerAgentTasks } from "./settleServerAgentTasks";
 
 type ForeignKeyExpectation = {
@@ -24,6 +27,8 @@ const SCHEMA_DDL: string[] = [
     username TEXT NOT NULL,
     password_hash TEXT,
     token_version INTEGER NOT NULL DEFAULT 0,
+    email_verified INTEGER DEFAULT 0,
+    image TEXT,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
   );`,
@@ -400,12 +405,15 @@ const SCHEMA_DDL: string[] = [
   `CREATE INDEX IF NOT EXISTS scheduled_task_runs_task_idx ON scheduled_task_runs(task_id);`,
   `CREATE INDEX IF NOT EXISTS scheduled_task_runs_user_idx ON scheduled_task_runs(user_id);`,
   `CREATE INDEX IF NOT EXISTS import_records_user_created_idx ON import_records(user_id, created_at);`,
-  // Existing DBs may hold duplicate (user_id, key) settings rows from the old
-  // delete-then-insert code before the upsert fix. Remove dupes (keeping the
-  // latest = highest rowid) BEFORE creating the unique index below, otherwise
-  // CREATE UNIQUE INDEX fails and breaks startup. No-op on a fresh/empty DB.
-  `DELETE FROM settings WHERE rowid NOT IN (SELECT MAX(rowid) FROM settings GROUP BY user_id, key);`,
+  // Duplicate (user_id, key) rows on old databases are removed by
+  // dedupeSettings before this pass, or this index could not be built.
   `CREATE UNIQUE INDEX IF NOT EXISTS settings_user_key_unique ON settings(user_id, key);`,
+
+  // One row per applied one-time data migration (see ONE_TIME_MIGRATIONS).
+  `CREATE TABLE IF NOT EXISTS schema_migrations (
+    id TEXT PRIMARY KEY,
+    applied_at INTEGER NOT NULL
+  );`,
 ];
 
 function getRows(result: ResultSet): Row[] {
@@ -427,6 +435,278 @@ function getColumnDefaultValue(rows: Row[], columnName: string): string | null {
   return String(raw)
     .trim()
     .replace(/^['"]|['"]$/g, "");
+}
+
+async function tableExists(tableName: string): Promise<boolean> {
+  const result = await client.execute({
+    sql: `SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?;`,
+    args: [tableName],
+  });
+  return getRows(result).length > 0;
+}
+
+/** Column names of `tableName`, in declaration order (empty when it does not exist). */
+async function tableColumnNames(tableName: string): Promise<string[]> {
+  const result = await client.execute(`PRAGMA table_info('${tableName}');`);
+  return getRows(result)
+    .map((row) => row.name)
+    .filter((name): name is string => typeof name === "string");
+}
+
+// ---------------------------------------------------------------------------
+// Backups before migrating
+// ---------------------------------------------------------------------------
+
+/** Where a database's pre-migration snapshots go, and how many to keep. */
+export type MigrationBackupTarget = {
+  /** Absolute path of the live database file. */
+  databasePath: string;
+  /** Directory the snapshots are written to. */
+  directory: string;
+  /** Snapshots of this database kept after a new one is written (oldest pruned first). */
+  keep: number;
+};
+
+const DEFAULT_BACKUP_KEEP = 5;
+
+/**
+ * Backup target for a libsql URL: `<db dir>/backups/`, or null for databases
+ * there is no file to snapshot (in-memory, remote).
+ */
+export function resolveMigrationBackupTarget(
+  url: string | undefined,
+  keep = DEFAULT_BACKUP_KEEP,
+): MigrationBackupTarget | null {
+  if (!url || !url.startsWith("file:")) return null;
+  const withoutQuery = url.split("?")[0] ?? "";
+  const rest = withoutQuery.slice("file:".length);
+  if (!rest || rest.includes(":memory:")) return null;
+  const databasePath = rest.startsWith("//") ? fileURLToPath(withoutQuery) : path.resolve(rest);
+  return { databasePath, directory: path.join(path.dirname(databasePath), "backups"), keep };
+}
+
+function backupFilePrefix(target: MigrationBackupTarget): string {
+  return `${path.basename(target.databasePath).replace(/\.[^.]+$/, "")}-`;
+}
+
+/** `<name>-2026-10-31T14-53-00-123Z-v2.db`: sorts chronologically by name. */
+function isBackupFileOf(target: MigrationBackupTarget, fileName: string): boolean {
+  const prefix = backupFilePrefix(target);
+  return (
+    fileName.startsWith(prefix) &&
+    /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z-v\d+\.db$/.test(fileName.slice(prefix.length))
+  );
+}
+
+/**
+ * How far this database's migrations got: the number of recorded one-time
+ * migrations, or the legacy `user_version` count before the record table has
+ * any rows. Only used to label backups.
+ */
+async function readMigrationLevel(): Promise<number> {
+  if (await tableExists("schema_migrations")) {
+    const result = await client.execute(`SELECT COUNT(*) AS n FROM schema_migrations;`);
+    const count = Number(getRows(result)[0]?.n ?? 0);
+    if (count > 0) return count;
+  }
+  return readUserVersion();
+}
+
+/**
+ * Writes a consistent snapshot of the live database (`VACUUM INTO`) and prunes
+ * this database's older snapshots down to `target.keep`. Throws when the
+ * snapshot cannot be written — callers must not migrate then. Exported for tests.
+ */
+export async function createMigrationBackup(
+  target: MigrationBackupTarget,
+  reason: string,
+): Promise<string> {
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const level = await readMigrationLevel();
+  const file = path.join(target.directory, `${backupFilePrefix(target)}${stamp}-v${level}.db`);
+  try {
+    mkdirSync(target.directory, { recursive: true });
+    await client.execute(`VACUUM INTO '${file.replaceAll("'", "''")}';`);
+  } catch (error) {
+    try {
+      rmSync(file, { force: true }); // a partial snapshot, if any
+    } catch {
+      // The directory itself may be unusable; the original error is what matters.
+    }
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `[db] Could not back up ${target.databasePath} to ${file} before ${reason}; ` +
+        `refusing to migrate without a backup. ${detail}`,
+      { cause: error },
+    );
+  }
+  console.log(`[db] Backed up the database to ${file} before ${reason}.`);
+
+  try {
+    const snapshots = readdirSync(target.directory)
+      .filter((name) => isBackupFileOf(target, name))
+      .sort();
+    for (const name of snapshots.slice(0, Math.max(0, snapshots.length - target.keep))) {
+      rmSync(path.join(target.directory, name), { force: true });
+    }
+  } catch (error) {
+    console.warn("[db] Could not prune old migration backups:", error);
+  }
+  return file;
+}
+
+/**
+ * Takes at most one snapshot per bootstrap, right before the first step that
+ * would delete rows, overwrite existing values or rebuild a table. Steps that
+ * only add tables / columns / indexes, or fill in NULLs of a column they just
+ * added, do not call it — so a boot with nothing to migrate copies nothing.
+ *
+ * A database that had no tables when bootstrap started has nothing to lose
+ * and is never backed up.
+ */
+class MigrationBackup {
+  private taken = false;
+
+  constructor(
+    private readonly target: MigrationBackupTarget | null,
+    private readonly hasExistingData: boolean,
+  ) {}
+
+  /** Must be called outside a transaction (`VACUUM INTO` cannot run in one). */
+  async ensure(reason: string): Promise<void> {
+    if (this.taken || !this.target || !this.hasExistingData) return;
+    await createMigrationBackup(this.target, reason);
+    this.taken = true;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Table rebuilds
+// ---------------------------------------------------------------------------
+
+/**
+ * SCHEMA_DDL's `CREATE TABLE` for `tableName`, renamed to `as`. Table rebuilds
+ * use it so the rebuilt table always has the current, complete column list —
+ * a hand-copied list goes stale and silently drops every column added later.
+ */
+function canonicalCreateTable(tableName: string, as: string): string {
+  const head = new RegExp(`^\\s*CREATE TABLE IF NOT EXISTS ${tableName} \\(`);
+  const statement = SCHEMA_DDL.find((stmt) => head.test(stmt));
+  if (!statement) throw new Error(`[db] No CREATE TABLE for ${tableName} in SCHEMA_DDL`);
+  return statement.replace(head, `CREATE TABLE ${as} (`);
+}
+
+/**
+ * `INSERT INTO to SELECT ... FROM from`, matching columns BY NAME. Columns the
+ * source lacks take the target's default; a NULL going into a `NOT NULL
+ * DEFAULT` column takes the default; `overrides` replace a column's value
+ * with a SQL expression. Source columns the target no longer has are dropped
+ * (logged — the pre-migration backup still holds them).
+ */
+async function buildCopyStatement(
+  from: string,
+  to: string,
+  overrides: Record<string, string>,
+): Promise<string> {
+  const sourceColumns = new Set(await tableColumnNames(from));
+  const targetRows = getRows(await client.execute(`PRAGMA table_info('${to}');`));
+  const columns: string[] = [];
+  const values: string[] = [];
+  for (const row of targetRows) {
+    const name = String(row.name);
+    const override = overrides[name];
+    if (override !== undefined) {
+      columns.push(`"${name}"`);
+      values.push(override);
+      continue;
+    }
+    if (!sourceColumns.has(name)) continue;
+    columns.push(`"${name}"`);
+    values.push(
+      Number(row.notnull) === 1 && row.dflt_value != null
+        ? `COALESCE("${name}", ${String(row.dflt_value)})`
+        : `"${name}"`,
+    );
+  }
+  const targetNames = new Set(targetRows.map((row) => String(row.name)));
+  const dropped = [...sourceColumns].filter((name) => !targetNames.has(name));
+  if (dropped.length > 0) {
+    console.warn(`[db] Rebuilding ${from} drops obsolete columns: ${dropped.join(", ")}`);
+  }
+  return `INSERT INTO "${to}" (${columns.join(", ")}) SELECT ${values.join(", ")} FROM "${from}";`;
+}
+
+type TableRebuild = {
+  table: string;
+  /** Column → SQL expression used instead of the copied value. */
+  overrides?: Record<string, string>;
+};
+
+/**
+ * Recreates tables from their SCHEMA_DDL definition (to change constraints
+ * SQLite cannot ALTER), copying rows by column name. Backs up first, runs in
+ * one transaction (a failure leaves every table as it was), and replays the
+ * index DDL afterwards — SQLite drops a table's indexes with the table.
+ */
+async function rebuildTables(
+  rebuilds: TableRebuild[],
+  backup: MigrationBackup,
+  reason: string,
+): Promise<void> {
+  await backup.ensure(reason);
+  // Must be set outside the transaction: inside one, PRAGMA foreign_keys is a
+  // no-op, and DROP TABLE with enforcement on would cascade-delete child rows.
+  await client.execute("PRAGMA foreign_keys=OFF;");
+  try {
+    await client.execute("BEGIN;");
+    try {
+      for (const { table, overrides } of rebuilds) {
+        const temp = `${table}__migrated`;
+        await client.execute(`DROP TABLE IF EXISTS ${temp};`);
+        await client.execute(canonicalCreateTable(table, temp));
+        await client.execute(await buildCopyStatement(table, temp, overrides ?? {}));
+      }
+      for (const { table } of rebuilds) {
+        await client.execute(`DROP TABLE ${table};`);
+      }
+      for (const { table } of rebuilds) {
+        await client.execute(`ALTER TABLE ${table}__migrated RENAME TO ${table};`);
+      }
+      await client.execute("COMMIT;");
+    } catch (error) {
+      try {
+        await client.execute("ROLLBACK;");
+      } catch {
+        // SQLite may already have rolled back; the original error is what matters.
+      }
+      throw error;
+    }
+  } finally {
+    await client.execute("PRAGMA foreign_keys=ON;");
+  }
+  for (const stmt of SCHEMA_DDL) {
+    if (isCreateIndexStatement(stmt)) {
+      await client.execute(stmt);
+    }
+  }
+}
+
+/**
+ * Old databases may hold duplicate (user_id, key) settings rows from the
+ * delete-then-insert code before the upsert fix. Removes the dupes (keeping
+ * the latest = highest rowid) so the unique index in SCHEMA_DDL can be built.
+ * Must run before the SCHEMA_DDL pass.
+ */
+async function dedupeSettings(backup: MigrationBackup): Promise<void> {
+  if (!(await tableExists("settings"))) return;
+  const dupes = await client.execute(
+    `SELECT 1 FROM settings GROUP BY user_id, key HAVING COUNT(*) > 1 LIMIT 1;`,
+  );
+  if (getRows(dupes).length === 0) return;
+  await backup.ensure("removing duplicate settings rows");
+  await client.execute(
+    `DELETE FROM settings WHERE rowid NOT IN (SELECT MAX(rowid) FROM settings GROUP BY user_id, key);`,
+  );
 }
 
 async function ensureUserTokenVersionColumn(): Promise<void> {
@@ -509,79 +789,21 @@ async function ensureConversationForceWebSearchColumn(): Promise<void> {
   }
 }
 
-async function ensureConversationForceWebSearchEnabledByDefault(): Promise<void> {
+async function ensureConversationForceWebSearchEnabledByDefault(
+  backup: MigrationBackup,
+): Promise<void> {
   const result = await client.execute(`PRAGMA table_info('conversations');`);
   const rows = getRows(result);
   const defaultValue = getColumnDefaultValue(rows, "force_web_search");
   if (defaultValue === "1") {
     return;
   }
-
-  await client.execute(`PRAGMA foreign_keys=OFF;`);
-  try {
-    await client.execute(`BEGIN;`);
-    await client.execute(`CREATE TABLE conversations__migrated (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      channel_id TEXT,
-      model_id TEXT,
-      title TEXT NOT NULL,
-      system_prompt TEXT,
-      context_length INTEGER DEFAULT 4096,
-      default_mode TEXT DEFAULT 'agent',
-      last_mode TEXT DEFAULT 'agent',
-      is_pinned INTEGER DEFAULT 0,
-      force_web_search INTEGER DEFAULT 1,
-      run_status TEXT,
-      workspace_id TEXT,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL,
-      FOREIGN KEY (user_id) REFERENCES users(id),
-      FOREIGN KEY (channel_id) REFERENCES channels(id) ON DELETE SET NULL
-    );`);
-    await client.execute(`INSERT INTO conversations__migrated (
-      id,
-      user_id,
-      channel_id,
-      model_id,
-      title,
-      system_prompt,
-      context_length,
-      default_mode,
-      last_mode,
-      is_pinned,
-      force_web_search,
-      run_status,
-      workspace_id,
-      created_at,
-      updated_at
-    )
-    SELECT
-      id,
-      user_id,
-      channel_id,
-      model_id,
-      title,
-      system_prompt,
-      COALESCE(context_length, 4096),
-      COALESCE(default_mode, 'agent'),
-      COALESCE(last_mode, 'agent'),
-      COALESCE(is_pinned, 0),
-      1,
-      run_status,
-      workspace_id,
-      created_at,
-      updated_at
-    FROM conversations;`);
-    await client.execute(`DROP TABLE conversations;`);
-    await client.execute(`ALTER TABLE conversations__migrated RENAME TO conversations;`);
-    await client.execute(`COMMIT;`);
-  } catch (error) {
-    await client.execute(`ROLLBACK;`);
-    throw error;
-  } finally {
-    await client.execute(`PRAGMA foreign_keys=ON;`);
-  }
+  // Changing a column default needs a rebuild; existing rows are switched on too.
+  await rebuildTables(
+    [{ table: "conversations", overrides: { force_web_search: "1" } }],
+    backup,
+    "enabling web search by default",
+  );
 }
 
 async function ensureConversationWorkspaceIdColumn(): Promise<void> {
@@ -753,11 +975,10 @@ async function tableHasExpectedForeignKeys(
 }
 
 /**
- * Returns true when it actually rebuilt tables, so the caller can replay the
- * index DDL — SQLite drops a table's indexes along with the table, and this
- * migration recreates 7 core tables via DROP TABLE.
+ * Rebuilds the 7 core tables (all together) when any of their foreign keys
+ * lacks the expected ON DELETE semantics.
  */
-async function ensureDeleteSemanticsForeignKeys(): Promise<boolean> {
+async function ensureDeleteSemanticsForeignKeys(backup: MigrationBackup): Promise<void> {
   const expectations: Array<{ tableName: string; foreignKeys: ForeignKeyExpectation[] }> = [
     {
       tableName: "channel_models",
@@ -847,238 +1068,14 @@ async function ensureDeleteSemanticsForeignKeys(): Promise<boolean> {
     expectations.map((item) => tableHasExpectedForeignKeys(item.tableName, item.foreignKeys)),
   );
   if (matches.every(Boolean)) {
-    return false;
+    return;
   }
 
-  await client.execute("PRAGMA foreign_keys=OFF;");
-  try {
-    await client.execute("BEGIN;");
-
-    await client.execute(`CREATE TABLE channel_models__migrated (
-      id TEXT PRIMARY KEY,
-      channel_id TEXT NOT NULL,
-      model_id TEXT NOT NULL,
-      display_name TEXT NOT NULL,
-      enabled INTEGER DEFAULT 1,
-      is_default INTEGER DEFAULT 0,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL,
-      FOREIGN KEY (channel_id) REFERENCES channels(id) ON DELETE CASCADE
-    );`);
-    await client.execute(`INSERT INTO channel_models__migrated
-      SELECT id, channel_id, model_id, display_name, enabled, is_default, created_at, updated_at
-      FROM channel_models;`);
-
-    await client.execute(`CREATE TABLE conversations__migrated (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      channel_id TEXT,
-      model_id TEXT,
-      title TEXT NOT NULL,
-      system_prompt TEXT,
-      context_length INTEGER DEFAULT 4096,
-      default_mode TEXT DEFAULT 'agent',
-      last_mode TEXT DEFAULT 'agent',
-      is_pinned INTEGER DEFAULT 0,
-      force_web_search INTEGER DEFAULT 1,
-      run_status TEXT,
-      workspace_id TEXT,
-      summary TEXT,
-      key_facts TEXT,
-      last_summarized_at INTEGER,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL,
-      FOREIGN KEY (user_id) REFERENCES users(id),
-      FOREIGN KEY (channel_id) REFERENCES channels(id) ON DELETE SET NULL
-    );`);
-    await client.execute(`INSERT INTO conversations__migrated
-      SELECT
-        id,
-        user_id,
-        channel_id,
-        model_id,
-        title,
-        system_prompt,
-        COALESCE(context_length, 4096),
-        COALESCE(default_mode, 'agent'),
-        COALESCE(last_mode, 'agent'),
-        COALESCE(is_pinned, 0),
-        COALESCE(force_web_search, 1),
-        run_status,
-        workspace_id,
-        summary,
-        key_facts,
-        last_summarized_at,
-        created_at,
-        updated_at
-      FROM conversations;`);
-
-    await client.execute(`CREATE TABLE messages__migrated (
-      id TEXT PRIMARY KEY,
-      conversation_id TEXT NOT NULL,
-      role TEXT NOT NULL,
-      content TEXT NOT NULL,
-      model TEXT,
-      mode TEXT DEFAULT 'chat',
-      attachments TEXT,
-      agent_run TEXT,
-      workspace_id TEXT,
-      context_paths TEXT,
-      live_metadata TEXT,
-      citations TEXT,
-      usage TEXT,
-      created_at INTEGER NOT NULL,
-      FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
-    );`);
-    await client.execute(`INSERT INTO messages__migrated
-      SELECT
-        id,
-        conversation_id,
-        role,
-        content,
-        model,
-        COALESCE(mode, 'chat'),
-        attachments,
-        agent_run,
-        workspace_id,
-        context_paths,
-        live_metadata,
-        citations,
-        usage,
-        created_at
-      FROM messages;`);
-
-    await client.execute(`CREATE TABLE agent_sessions__migrated (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      conversation_id TEXT,
-      channel_id TEXT,
-      model_id TEXT,
-      title TEXT NOT NULL,
-      status TEXT DEFAULT 'active',
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL,
-      FOREIGN KEY (user_id) REFERENCES users(id),
-      FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
-      FOREIGN KEY (channel_id) REFERENCES channels(id) ON DELETE SET NULL
-    );`);
-    await client.execute(`INSERT INTO agent_sessions__migrated
-      SELECT
-        id,
-        user_id,
-        conversation_id,
-        channel_id,
-        model_id,
-        title,
-        COALESCE(status, 'active'),
-        created_at,
-        updated_at
-      FROM agent_sessions;`);
-
-    await client.execute(`CREATE TABLE agent_tasks__migrated (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      conversation_id TEXT,
-      channel_id TEXT,
-      model_id TEXT,
-      title TEXT NOT NULL,
-      goal TEXT NOT NULL,
-      attachments TEXT,
-      complexity TEXT NOT NULL DEFAULT 'deep',
-      ux_mode TEXT NOT NULL DEFAULT 'full',
-      requires_plan_approval INTEGER NOT NULL DEFAULT 1,
-      auto_start INTEGER NOT NULL DEFAULT 0,
-      status TEXT NOT NULL DEFAULT 'draft',
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL,
-      FOREIGN KEY (user_id) REFERENCES users(id),
-      FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
-      FOREIGN KEY (channel_id) REFERENCES channels(id) ON DELETE SET NULL
-    );`);
-    await client.execute(`INSERT INTO agent_tasks__migrated
-      SELECT
-        id,
-        user_id,
-        conversation_id,
-        channel_id,
-        model_id,
-        title,
-        goal,
-        attachments,
-        COALESCE(complexity, 'deep'),
-        COALESCE(ux_mode, 'full'),
-        COALESCE(requires_plan_approval, 1),
-        COALESCE(auto_start, 0),
-        COALESCE(status, 'draft'),
-        created_at,
-        updated_at
-      FROM agent_tasks;`);
-
-    await client.execute(`CREATE TABLE attachments__migrated (
-      id TEXT PRIMARY KEY,
-      conversation_id TEXT,
-      session_id TEXT,
-      message_id TEXT,
-      file_name TEXT NOT NULL,
-      file_path TEXT NOT NULL,
-      file_type TEXT NOT NULL,
-      file_size INTEGER NOT NULL,
-      created_at INTEGER NOT NULL,
-      FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
-      FOREIGN KEY (session_id) REFERENCES agent_sessions(id) ON DELETE CASCADE,
-      FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
-    );`);
-    await client.execute(`INSERT INTO attachments__migrated
-      SELECT
-        id,
-        conversation_id,
-        session_id,
-        message_id,
-        file_name,
-        file_path,
-        file_type,
-        file_size,
-        created_at
-      FROM attachments;`);
-
-    await client.execute(`CREATE TABLE agent_events__migrated (
-      id TEXT PRIMARY KEY,
-      session_id TEXT NOT NULL,
-      type TEXT NOT NULL,
-      content TEXT,
-      tool_name TEXT,
-      tool_input TEXT,
-      created_at INTEGER NOT NULL,
-      FOREIGN KEY (session_id) REFERENCES agent_sessions(id) ON DELETE CASCADE
-    );`);
-    await client.execute(`INSERT INTO agent_events__migrated
-      SELECT id, session_id, type, content, tool_name, tool_input, created_at
-      FROM agent_events;`);
-
-    await client.execute("DROP TABLE channel_models;");
-    await client.execute("DROP TABLE attachments;");
-    await client.execute("DROP TABLE agent_events;");
-    await client.execute("DROP TABLE messages;");
-    await client.execute("DROP TABLE agent_sessions;");
-    await client.execute("DROP TABLE agent_tasks;");
-    await client.execute("DROP TABLE conversations;");
-
-    await client.execute("ALTER TABLE conversations__migrated RENAME TO conversations;");
-    await client.execute("ALTER TABLE messages__migrated RENAME TO messages;");
-    await client.execute("ALTER TABLE agent_sessions__migrated RENAME TO agent_sessions;");
-    await client.execute("ALTER TABLE agent_tasks__migrated RENAME TO agent_tasks;");
-    await client.execute("ALTER TABLE attachments__migrated RENAME TO attachments;");
-    await client.execute("ALTER TABLE agent_events__migrated RENAME TO agent_events;");
-    await client.execute("ALTER TABLE channel_models__migrated RENAME TO channel_models;");
-
-    await client.execute("COMMIT;");
-    return true;
-  } catch (error) {
-    await client.execute("ROLLBACK;");
-    throw error;
-  } finally {
-    await client.execute("PRAGMA foreign_keys=ON;");
-  }
+  await rebuildTables(
+    expectations.map((item) => ({ table: item.tableName })),
+    backup,
+    "rebuilding tables for foreign-key delete semantics",
+  );
 }
 
 async function ensureAgentTaskComplexityColumn(): Promise<void> {
@@ -1121,30 +1118,60 @@ async function ensureAgentTaskAutoStartColumn(): Promise<void> {
   }
 }
 
-async function ensurePasswordHashNullable(): Promise<void> {
+/**
+ * Makes `users.password_hash` nullable (OAuth / local users have none) by
+ * rebuilding the table.
+ *
+ * This used to copy with `INSERT INTO users SELECT * FROM <copy>`: positional,
+ * so a database whose users table had a different column count or order
+ * (e.g. July 2026: 7 columns with token_version last) failed with "table users
+ * has 9 columns but 7 values" — and because nothing ran in a transaction, the
+ * failure left `users` dropped-and-empty with the rows stranded in
+ * `users__ph_mig`, where the next boot's cleanup would delete them.
+ */
+async function ensurePasswordHashNullable(backup: MigrationBackup): Promise<void> {
   const result = await client.execute(`PRAGMA table_info('users');`);
-  const rows = getRows(result);
-  const col = rows.find((r) => (r as Record<string, unknown>).name === "password_hash");
-  if (col && (col as Record<string, unknown>).notnull === 1) {
-    await client.execute(`PRAGMA foreign_keys = OFF;`);
-    await client.execute(`DROP TABLE IF EXISTS users__ph_mig;`);
-    await client.execute(`CREATE TABLE users__ph_mig AS SELECT * FROM users;`);
-    await client.execute(`DROP TABLE users;`);
-    await client.execute(`CREATE TABLE users (
-      id TEXT PRIMARY KEY,
-      email TEXT NOT NULL,
-      username TEXT NOT NULL,
-      password_hash TEXT,
-      token_version INTEGER NOT NULL DEFAULT 0,
-      email_verified INTEGER DEFAULT 0,
-      image TEXT,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
-    );`);
-    await client.execute(`INSERT INTO users SELECT * FROM users__ph_mig;`);
+  const col = getRows(result).find((row) => row.name === "password_hash");
+  if (col && Number(col.notnull) === 1) {
+    await rebuildTables([{ table: "users" }], backup, "making users.password_hash nullable");
+  }
+}
+
+/**
+ * Puts back the users stranded by an interrupted run of the old, untransacted
+ * password_hash rebuild (see ensurePasswordHashNullable): rows still in
+ * `users__ph_mig` that `users` lacks are restored by column name, and the copy
+ * is dropped once every row is back. Runs before ensureDefaultLocalUser so a
+ * restored database does not also get a fresh local user.
+ */
+async function recoverInterruptedUsersRebuild(backup: MigrationBackup): Promise<void> {
+  if (!(await tableExists("users__ph_mig"))) return;
+  // Every path below writes users or drops the copy, and the copy can be the
+  // only record of a user's original values (email, created_at) even when the
+  // id is back in users — e.g. a user row recreated by hand.
+  await backup.ensure("restoring users from an interrupted users rebuild");
+  const missing = await client.execute(
+    `SELECT COUNT(*) AS n FROM users__ph_mig WHERE id NOT IN (SELECT id FROM users);`,
+  );
+  if (Number(getRows(missing)[0]?.n ?? 0) > 0) {
+    const source = new Set(await tableColumnNames("users__ph_mig"));
+    const columns = (await tableColumnNames("users")).filter((name) => source.has(name));
+    const list = columns.map((name) => `"${name}"`).join(", ");
+    // Same rule as ensureUserEmailVerifiedColumn: pre-existing users are verified.
+    const verified = source.has("email_verified") ? "" : ", email_verified";
+    await client.execute(
+      `INSERT OR IGNORE INTO users (${list}${verified})
+       SELECT ${list}${verified ? ", 1" : ""} FROM users__ph_mig
+       WHERE id NOT IN (SELECT id FROM users);`,
+    );
+  }
+  const stillMissing = await client.execute(
+    `SELECT COUNT(*) AS n FROM users__ph_mig WHERE id NOT IN (SELECT id FROM users);`,
+  );
+  if (Number(getRows(stillMissing)[0]?.n ?? 0) === 0) {
     await client.execute(`DROP TABLE users__ph_mig;`);
-    await client.execute(`CREATE UNIQUE INDEX IF NOT EXISTS users_email_unique ON users(email);`);
-    await client.execute(`PRAGMA foreign_keys = ON;`);
+  } else {
+    console.warn("[db] users__ph_mig holds users that could not be restored; leaving it in place.");
   }
 }
 
@@ -1458,8 +1485,33 @@ async function loadTaskReplies(
   return replies;
 }
 
-export async function bootstrapDatabase(): Promise<void> {
+export type BootstrapOptions = {
+  /**
+   * Where to snapshot the database before migrating. Defaults to
+   * `<db dir>/backups/` for a file database, and to none under `bun test`
+   * (NODE_ENV=test) or for in-memory / remote databases. `null` disables.
+   */
+  backup?: MigrationBackupTarget | null;
+};
+
+function defaultBackupTarget(): MigrationBackupTarget | null {
+  if (process.env.NODE_ENV === "test") return null;
+  return resolveMigrationBackupTarget(databaseUrl);
+}
+
+export async function bootstrapDatabase(options: BootstrapOptions = {}): Promise<void> {
   await client.execute("PRAGMA foreign_keys=ON;");
+
+  const existing = await client.execute(
+    `SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%';`,
+  );
+  const backup = new MigrationBackup(
+    options.backup === undefined ? defaultBackupTarget() : options.backup,
+    Number(getRows(existing)[0]?.n ?? 0) > 0,
+  );
+
+  // Before the SCHEMA_DDL pass, which builds the settings unique index.
+  await dedupeSettings(backup);
 
   for (const stmt of SCHEMA_DDL) {
     await client.execute(stmt);
@@ -1474,16 +1526,12 @@ export async function bootstrapDatabase(): Promise<void> {
   await ensureConversationForceWebSearchColumn();
   await ensureConversationRunStatusColumn();
   await ensureConversationWorkspaceIdColumn();
-  await ensureConversationForceWebSearchEnabledByDefault();
   await ensureMessageModeColumn();
   await ensureMessageAgentRunColumn();
   await ensureMessageWorkspaceIdColumn();
   await ensureMessageContextPathsColumn();
   await ensureMessageLiveMetadataColumn();
   await ensureMessageCitationsColumn();
-  // Must run before ensureDeleteSemanticsForeignKeys: that migration does
-  // `SELECT ... usage ... FROM messages`, which fails on a database that
-  // predates this column.
   await ensureMessageUsageColumn();
   await ensureMessageUpdatedAtColumn();
   await ensureMcpServerUserIdColumn();
@@ -1496,66 +1544,76 @@ export async function bootstrapDatabase(): Promise<void> {
   await ensureAgentTaskAutoStartColumn();
   await ensureAttachmentsSessionIdColumn();
 
-  await ensurePasswordHashNullable();
+  // Before the users rebuild, so it copies these columns instead of creating
+  // them with defaults (pre-existing users count as verified).
   await ensureUserEmailVerifiedColumn();
   await ensureUserImageColumn();
+  await recoverInterruptedUsersRebuild(backup);
+  await ensurePasswordHashNullable(backup);
   await ensureAccountIssuerColumn();
   await migratePasswordsToAccountTable();
   await ensureDefaultLocalUser();
 
   await ensureConversationSummaryColumns();
   await ensureScheduledTaskRunConversationIdColumn();
+  // Before any conversations rebuild: its backfill only runs when it adds the
+  // column, and a rebuild from SCHEMA_DDL would add it empty.
   await ensureConversationScheduledTaskIdColumn();
 
-  // Runs LAST and rebuilds 7 core tables with DROP TABLE + RENAME. SQLite drops
-  // a table's indexes with the table, and the SCHEMA_DDL pass above already
-  // ran — so without replaying the index DDL here, a database that just took
-  // this migration would full-table-scan every query for the rest of the
-  // process's life (until the next restart re-created them).
-  if (await ensureDeleteSemanticsForeignKeys()) {
-    for (const stmt of SCHEMA_DDL) {
-      if (isCreateIndexStatement(stmt)) {
-        await client.execute(stmt);
-      }
-    }
-  }
+  // Table rebuilds. Both copy rows by column name into the SCHEMA_DDL
+  // definition, so no column added above is lost, and replay the index DDL.
+  await ensureConversationForceWebSearchEnabledByDefault(backup);
+  await ensureDeleteSemanticsForeignKeys(backup);
 
-  // After the FK rebuild: that migration re-creates `conversations` from an
-  // explicit column list that predates this column, so adding it earlier would
-  // only have it dropped again on a database taking both migrations at once.
+  // No-ops after a rebuild (SCHEMA_DDL already has these columns); on other
+  // databases they add what is missing.
   await ensureConversationProjectIdColumn();
-  // Same reason as project_id: the FK rebuild copies an explicit column list
-  // that predates these columns, so they must be (re-)added after it.
   await ensureConversationImportColumns();
   await ensureMcpServerImportColumns();
 
   // FTS5 virtual table for full-text search over message content. Must run
-  // after ensureDeleteSemanticsForeignKeys (which may rebuild the messages
-  // table) so the backfill reads the final rows.
+  // after the rebuilds (which may recreate the messages table) so the backfill
+  // reads the final rows.
   await ensureMessagesFtsTable();
 
   // After the FTS table exists, so backfilled text is indexed too. Reads
   // agent_tasks / agent_runs / agent_artifacts, all created above.
-  await runOneTimeMigrations();
+  await applyOneTimeMigrations(backup);
 }
 
+type OneTimeMigration = {
+  /** Recorded in `schema_migrations` once applied. Never rename. */
+  id: string;
+  run: () => Promise<unknown>;
+};
+
 /**
- * Data migrations that only ever need to run once per database, in order. The
- * database's `PRAGMA user_version` records how many have been applied, so each
- * runs on the first boot that sees it and never again. Append only: never
- * reorder or remove an entry, or a database will skip or re-run one.
+ * Data migrations that only ever need to run once per database, in order.
+ * Each is recorded by id in `schema_migrations` once it has run, and never
+ * runs again. Append only; never rename an id. Pending ones run after a
+ * pre-migration backup (see MigrationBackup).
  *
  * Schema changes do not belong here — they stay idempotent `ensure*` steps
  * above, which also cover a database rebuilt from SCHEMA_DDL.
  */
-const ONE_TIME_MIGRATIONS: ReadonlyArray<() => Promise<unknown>> = [
-  // 1. Server-run agent turns can no longer execute or be approved: settle
-  //    the ones left open. Before the backfill, so it sees the final statuses.
-  settleServerAgentTasks,
-  // 2. Reply-text invariant for agent rows stored before it. Every write path
-  //    has upheld it since, so a full-table pass per boot is wasted work.
-  backfillAgentReplyContent,
+const ONE_TIME_MIGRATIONS: readonly OneTimeMigration[] = [
+  // Server-run agent turns can no longer execute or be approved: settle the
+  // ones left open. Before the backfill, so it sees the final statuses.
+  { id: "settle-server-agent-tasks", run: settleServerAgentTasks },
+  // Reply-text invariant for agent rows stored before it. Every write path has
+  // upheld it since, so a full-table pass per boot is wasted work.
+  { id: "backfill-agent-reply-content", run: backfillAgentReplyContent },
 ];
+
+/**
+ * The migrations that were tracked by counting in `PRAGMA user_version`
+ * before `schema_migrations` existed, in their original order. A database
+ * with user_version = n had applied the first n. Frozen: never extend it.
+ */
+const USER_VERSION_MIGRATION_IDS = [
+  "settle-server-agent-tasks",
+  "backfill-agent-reply-content",
+] as const;
 
 async function readUserVersion(): Promise<number> {
   const result = await client.execute("PRAGMA user_version;");
@@ -1564,14 +1622,53 @@ async function readUserVersion(): Promise<number> {
 }
 
 /**
- * Applies the one-time migrations this database has not run yet. A migration
- * that throws leaves the version where it was, so it is retried on next boot.
- * Exported for tests.
+ * One-time hand-over from the `user_version` counter: while `schema_migrations`
+ * is still empty, records the first `user_version` legacy migrations as
+ * applied. From then on user_version is never read again, so another tool
+ * setting it cannot make a migration be skipped. A value above the legacy
+ * count was not written by OpenHorn and is ignored (the legacy migrations are
+ * idempotent, so re-running them is safe).
  */
-export async function runOneTimeMigrations(): Promise<void> {
-  const applied = await readUserVersion();
-  for (let index = applied; index < ONE_TIME_MIGRATIONS.length; index++) {
-    await ONE_TIME_MIGRATIONS[index]();
-    await client.execute(`PRAGMA user_version = ${index + 1};`);
+async function adoptUserVersionRecords(): Promise<void> {
+  const recorded = await client.execute(`SELECT COUNT(*) AS n FROM schema_migrations;`);
+  if (Number(getRows(recorded)[0]?.n ?? 0) > 0) return;
+  const userVersion = await readUserVersion();
+  if (userVersion < 1 || userVersion > USER_VERSION_MIGRATION_IDS.length) return;
+  const now = Math.floor(Date.now() / 1000);
+  await client.batch(
+    USER_VERSION_MIGRATION_IDS.slice(0, userVersion).map((id) => ({
+      sql: `INSERT OR IGNORE INTO schema_migrations (id, applied_at) VALUES (?, ?);`,
+      args: [id, now],
+    })),
+    "write",
+  );
+}
+
+async function applyOneTimeMigrations(backup: MigrationBackup): Promise<void> {
+  await adoptUserVersionRecords();
+  const recorded = await client.execute(`SELECT id FROM schema_migrations;`);
+  const applied = new Set(getRows(recorded).map((row) => String(row.id)));
+  const pending = ONE_TIME_MIGRATIONS.filter((migration) => !applied.has(migration.id));
+  if (pending.length === 0) return;
+
+  await backup.ensure(`one-time migrations (${pending.map((m) => m.id).join(", ")})`);
+  for (const migration of pending) {
+    await migration.run();
+    await client.execute({
+      sql: `INSERT OR IGNORE INTO schema_migrations (id, applied_at) VALUES (?, ?);`,
+      args: [migration.id, Math.floor(Date.now() / 1000)],
+    });
   }
+}
+
+/**
+ * Applies the one-time migrations this database has not recorded yet. A
+ * migration that throws is not recorded, so it is retried on next boot.
+ * `backup` is where to snapshot first when any are pending (none by default).
+ * Exported for tests; the server runs them through bootstrapDatabase.
+ */
+export async function runOneTimeMigrations(
+  backup: MigrationBackupTarget | null = null,
+): Promise<void> {
+  await applyOneTimeMigrations(new MigrationBackup(backup, true));
 }

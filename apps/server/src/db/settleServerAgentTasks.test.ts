@@ -221,39 +221,49 @@ test("settles stuck server agent turns without touching reply text", async () =>
   }
 });
 
-test("one-time migrations run once per database, tracked by user_version", async () => {
+test("one-time migrations run once per database, tracked in schema_migrations", async () => {
   const { runOneTimeMigrations } = await import("./bootstrap");
   const userId = crypto.randomUUID();
   const conversationId = crypto.randomUUID();
   const firstTask = crypto.randomUUID();
   const laterTask = crypto.randomUUID();
-  const original = Number(
-    (await client.execute("PRAGMA user_version;")).rows[0]?.user_version ?? 0,
-  );
+  const recorded = (await client.execute("SELECT id, applied_at FROM schema_migrations;")).rows;
   try {
     await seed(userId, conversationId, null);
     await seedTask(userId, conversationId, firstTask, "draft", {
       phase: "planning",
       status: "completed",
     });
+    await client.execute("DELETE FROM schema_migrations;");
     await client.execute("PRAGMA user_version = 0;");
 
     await runOneTimeMigrations();
-    const version = Number((await client.execute("PRAGMA user_version;")).rows[0]?.user_version);
-    expect(version >= 2).toBe(true);
+    expect(
+      await scalar("SELECT COUNT(*) FROM schema_migrations WHERE id = ?", [
+        "settle-server-agent-tasks",
+      ]),
+    ).toBe(1);
     expect(await scalar("SELECT status FROM agent_tasks WHERE id = ?", [firstTask])).toBe(
       "cancelled",
     );
 
-    // Already applied: a later boot does not run the settle pass again.
+    // Already applied: a later boot does not run the settle pass again — even
+    // when something else rewrites user_version, which is no longer consulted.
     await seedTask(userId, conversationId, laterTask, "draft", {
       phase: "planning",
       status: "completed",
     });
+    await client.execute("PRAGMA user_version = 0;");
     await runOneTimeMigrations();
     expect(await scalar("SELECT status FROM agent_tasks WHERE id = ?", [laterTask])).toBe("draft");
   } finally {
-    await client.execute(`PRAGMA user_version = ${Math.max(original, 2)};`);
+    await client.execute("DELETE FROM schema_migrations;");
+    for (const row of recorded) {
+      await client.execute({
+        sql: "INSERT INTO schema_migrations (id, applied_at) VALUES (?, ?);",
+        args: [String(row.id), Number(row.applied_at)],
+      });
+    }
     await cleanup(userId, conversationId);
   }
 });

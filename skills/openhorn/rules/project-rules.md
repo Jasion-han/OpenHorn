@@ -16,7 +16,11 @@
 
 对全新部署而言，bootstrap DDL 才是权威。
 
-只需对每个数据库执行一次的**数据**迁移（回填、存量修正）追加到 `bootstrap.ts` 的 `ONE_TIME_MIGRATIONS` 末尾：`PRAGMA user_version` 记录已执行条数，只能追加，不能重排或删除。Schema 变更仍写成幂等的 `ensure*` 步骤。
+只需对每个数据库执行一次的**数据**迁移（回填、存量修正）追加到 `bootstrap.ts` 的 `ONE_TIME_MIGRATIONS` 末尾，每条带固定 `id`：执行后按 id 记入 `schema_migrations` 表（不再用 `PRAGMA user_version` 计数，旧库的 user_version 在首次启动时一次性折算成记录），只能追加，id 不能改。Schema 变更仍写成幂等的 `ensure*` 步骤。
+
+**迁移前自动备份**：bootstrap 在第一个会删行 / 覆盖已有值 / 重建表的步骤之前，用 `VACUUM INTO` 把库快照到 `<库所在目录>/backups/`（文件名含时间戳和迁移前已应用的迁移数，保留最近 5 份）；快照失败则拒绝迁移、启动失败。待执行的 `ONE_TIME_MIGRATIONS` 和 `rebuildTables` 自动走这道闸；新写的破坏性 `ensure*` 步骤必须先 `backup.ensure(...)`。只加表 / 加列 / 加索引、给刚加的列填值的步骤不备份，所以无事可做的启动不拷贝。`bun test`（NODE_ENV=test）、内存库、远程库不备份。
+
+**重建表**一律用 `rebuildTables`：按 SCHEMA_DDL 的建表语句、**按列名**拷贝、单事务、事后重放索引 DDL。禁止手写固定列清单或 `INSERT ... SELECT *`——旧库列数 / 列序不同会失败或错位（2026-07 旧库启动即失败、users 被清空的根因）。
 
 ## Agent Runtime
 

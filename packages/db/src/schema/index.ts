@@ -517,3 +517,13 @@ export const importRecords = sqliteTable(
   },
   (table) => [index("import_records_user_created_idx").on(table.userId, table.createdAt)],
 );
+
+/**
+ * One row per applied one-time data migration (`ONE_TIME_MIGRATIONS` in the
+ * server's db/bootstrap.ts), keyed by migration id. Replaced counting in
+ * `PRAGMA user_version`, which any external tool can overwrite.
+ */
+export const schemaMigrations = sqliteTable("schema_migrations", {
+  id: text("id").primaryKey(),
+  appliedAt: integer("applied_at", { mode: "timestamp" }).notNull(),
+});
