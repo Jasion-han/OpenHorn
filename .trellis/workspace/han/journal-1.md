@@ -605,3 +605,37 @@ Claude Code/Codex 导入把一轮回复的多段 assistant 合并为一条；用
 ### Next Steps
 
 - None - task complete
+
+
+## Session 17: 生成式 UI 本地切换与派生状态修复
+
+**Date**: 2026-10-31
+**Task**: 生成式 UI 本地切换与派生状态修复
+**Package**: agent
+**Branch**: `main`
+
+### Summary
+
+提示词规定本地可算的切换用 $state+@Set、@ToAssistant 仅用于需要模型的追问；新房贷示例带模式切换；渲染前把 $x=表达式 改写为派生名，gpt-5.4-nano 实机两种模式数值正确。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3d71814` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 16
+- **Total Sessions**: 17
 - **Last Active**: 2026-10-31
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~607 | Active |
+| `journal-1.md` | ~641 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 17 | 2026-10-31 | 生成式 UI 本地切换与派生状态修复 | `3d71814` | `main` |
 | 16 | 2026-10-31 | 生成式 UI 桌面端实机验证与修复 | `4231e20` | `main` |
 | 15 | 2026-10-31 | 生成式 UI：受约束组件 + 沙箱 HTML 混合渲染 | `8fb4529` | `main` |
 | 14 | 2026-09-13 | 导入保留工具调用与思考链，桌面端过程区与渠道弹层修缮 | `e21a534`, `9267edb`, `dbfa02f`, `6a5946d`, `943f11f` | `main` |
