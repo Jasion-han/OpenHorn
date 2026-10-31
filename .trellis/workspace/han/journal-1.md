@@ -571,3 +571,37 @@ Claude Code/Codex 导入把一轮回复的多段 assistant 合并为一条；用
 ### Next Steps
 
 - None - task complete
+
+
+## Session 16: 生成式 UI 桌面端实机验证与修复
+
+**Date**: 2026-10-31
+**Task**: 生成式 UI 桌面端实机验证与修复
+**Package**: agent
+**Branch**: `main`
+
+### Summary
+
+用截图+CGEvent 在 tauri dev 实机走完验证清单；修复 on_navigation 拦截 about:srcdoc 导致 html-ui 沙箱空白、沙箱跳转被交给系统 open；关闭 OpenUI Inspect 开发浮层；numberText 防 [object Object]。发现 Claude Code OAuth 渠道收不到系统提示。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4231e20` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
