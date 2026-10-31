@@ -1,0 +1,7 @@
+{"file": "apps/server/src/services/messageService.ts", "reason": "buildTaskBackedAgentRun, task-backed writes, syncSidecarMessages"}
+{"file": "apps/server/src/services/agentTaskMessage.ts", "reason": "buildTaskMessageSummary"}
+{"file": "apps/server/src/services/agentTaskService.ts", "reason": "buildTaskInsight / artifacts"}
+{"file": "apps/server/src/db/bootstrap.ts", "reason": "backfill"}
+{"file": "packages/shared/src/message-text.ts", "reason": "derivation"}
+{"file": "apps/desktop/src/stores/chatStore.ts", "reason": "withDerivedContent"}
+{"file": ".trellis/spec/desktop/frontend/state-management.md", "reason": "update invariant note"}
