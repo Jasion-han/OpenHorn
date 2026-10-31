@@ -1,0 +1,6 @@
+{"file": "apps/desktop/src/components/chat/DesktopChatArea.tsx", "reason": "send/regenerate/edit routing"}
+{"file": "apps/server/src/services/messageService.ts", "reason": "task-backed turn paths"}
+{"file": "apps/server/src/services/agentTaskService.ts", "reason": "planTaskForTurn and task service"}
+{"file": "apps/server/src/routes/messages.ts", "reason": "message routes"}
+{"file": "apps/server/src/db/bootstrap.ts", "reason": "one-time migrations"}
+{"file": "apps/desktop/src/lib/i18n/agent.ts", "reason": "UI strings"}
