@@ -709,3 +709,38 @@ Agent 回复只存在 agentRun text 步骤、content 为空，历史组装只读
 ### Next Steps
 
 - None - task complete
+
+
+## Session 20: Agent 回复正文以 content 为唯一事实来源
+
+**Date**: 2026-10-31
+**Task**: Agent 回复正文以 content 为唯一事实来源
+**Package**: desktop
+**Branch**: `main`
+
+### Summary
+
+按第一性原理重做 fe84395：在写入端保证 assistant content = 回复正文（store 推导、服务端 sync-sidecar 规范化、bootstrap 回填 28 条并同步 FTS），撤掉读取端兜底；修复停止生成误删已保存 Agent 回复。实测：新回复只显示一次、content 落库、FTS 可搜到。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8280c44` | (see git log) |
+| `f53c70e` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
