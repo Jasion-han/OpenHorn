@@ -1,0 +1,163 @@
+// Real gpt-5.4-nano output (2026-10-31): derived values declared as `$x = <expression>`,
+// plus one unsupported lambda line. Used by the computed-state repair tests.
+export const NANO_MORTGAGE = `
+root = Col([titleCard, calcCard])
+
+$mode = "等额本息"
+$amount = 1000000
+$rate = 3.5
+$years = 30
+
+titleCard = Card([
+  headRow,
+  subtitle
+], "soft", 6)
+
+headRow = Row([
+  Title("房贷月供计算器", "xl"),
+  Spacer(),
+  Badge($mode)
+], 3, "stretch", "between")
+
+subtitle = Caption("输入贷款金额、年利率、年限；在等额本息/等额本金之间切换")
+
+calcCard = Card([
+  inputsRow,
+  divider,
+  resultRow,
+  chart,
+  notes
+], "outline", 6)
+
+inputsRow = Col([
+  modeRow,
+  slidersGrid
+], 4, "start")
+
+modeRow = Row([
+  Text("还款方式：", "md", null, "semibold"),
+  SegmentedControl($mode, ["等额本息", "等额本金"], "还款方式")
+], 2, "center", "start")
+
+slidersGrid = Grid([
+  Slider($amount, 100000, 5000000, 50000, "贷款金额", "¥"),
+  Slider($rate, 1, 8, 0.05, "年利率", "%"),
+  Slider($years, 1, 40, 1, "年限", "年")
+], 3, 160)
+
+divider = Divider()
+
+$months = $years * 12
+$r = $rate / 1200
+
+// 等额本息：每月固定月供
+$monthlyPaymentA = @Payment($amount, $rate, $months, 12)
+
+// 等额本金：每月第1期 = 首月 = 本金/期数 + 本金*利率/期数
+$monthlyPaymentB_first = $amount / $months + $amount * $r
+// 近似总利息用公式：总利息 = (n+1)/2 * A - principal
+$interestTotalB = $amount * $r * ($months + 1) / 2
+$interestTotalA = $monthlyPaymentA * $months - $amount
+
+// 根据模式选择展示
+$monthlyPaymentShow = $mode == "等额本息" ? $monthlyPaymentA : $monthlyPaymentB_first
+$interestTotalShow = $mode == "等额本息" ? $interestTotalA : $interestTotalB
+
+resultRow = Grid([
+  Card([statMonthly, statInterest], "soft", 6),
+  Card([statHint], "soft", 6)
+], 2, 260)
+
+statMonthly = Col([
+  Text($mode == "等额本息" ? "每月还款（固定）" : "首月还款（等额本金）", "sm", null, "medium"),
+  Stat(
+    $mode == "等额本息" ? "月供" : "首月月供",
+    @Format($monthlyPaymentShow, "currency", 0),
+    $mode == "等额本息" ? "之后每月相同" : "之后逐月递减",
+    $mode == "等额本息" ? "default" : "warning"
+  )
+], 2)
+
+statInterest = Col([
+  Text("总利息（估算）", "sm", null, "medium"),
+  Stat("总利息", @Format($interestTotalShow, "currency", 0), null, "warning")
+], 2)
+
+statHint = Col([
+  Text("你现在看到的是：", "sm", null, "medium"),
+  List([
+    $mode == "等额本息" ? "固定月供：每月还款不变" : "等额本金：每月还款逐月减少",
+    "利息计算基于月利率 = 年利率 / 12（按期数 = 年限 × 12）",
+    "总利息为对应还款方式的计算结果（非银行报价单的可能性差异不排除）"
+  ])
+], 3)
+
+chart = Card([
+  chartHead,
+  chartHint,
+  Chart(
+    $mode == "等额本息" ? "line" : "bar",
+    chartLabels,
+    chartSeries,
+    "¥",
+    220
+  )
+], "soft", 6)
+
+chartHead = Row([
+  Text("还款对比可视化", "md", null, "semibold"),
+  Spacer(),
+  Badge($mode == "等额本息" ? "月供固定" : "首月最高")
+], 2, "center", "between")
+
+chartHint = Caption($mode == "等额本息" ? "折线仅用于展示月供概念（固定为常量）" : "柱状展示若干期的月供递减趋势（示意）")
+
+$chartLabels = $mode == "等额本息"
+  ? ["第1期", "第6期", "第12期", "第24期", "第36期", "第48期"]
+  : ["第1期(首月)", "第6期", "第12期", "第24期", "第36期", "第48期"]
+
+// 生成若干期的“示意月供”
+// 等额本息：所有期相同
+// 等额本金：第k期月供 = 本金/月份 + (本金 - (k-1)*本金/月份) * r
+// 这里用离散的示意期号：1,6,12,24,36,48
+$k1 = 1
+$k6 = 6
+$k12 = 12
+$k24 = 24
+$k36 = 36
+$k48 = 48
+
+$principalPerMonth = $amount / $months
+$monthlyB_k = (k) => $principalPerMonth + ($amount - (k - 1) * $principalPerMonth) * $r
+
+$showK1 = @Clamp($k1, 1, $months)
+$showK6 = @Clamp($k6, 1, $months)
+$showK12 = @Clamp($k12, 1, $months)
+$showK24 = @Clamp($k24, 1, $months)
+$showK36 = @Clamp($k36, 1, $months)
+$showK48 = @Clamp($k48, 1, $months)
+
+$seriesA = [$monthlyPaymentA, $monthlyPaymentA, $monthlyPaymentA, $monthlyPaymentA, $monthlyPaymentA, $monthlyPaymentA]
+$seriesB = [
+  $principalPerMonth + ($amount - ($showK1 - 1) * $principalPerMonth) * $r,
+  $principalPerMonth + ($amount - ($showK6 - 1) * $principalPerMonth) * $r,
+  $principalPerMonth + ($amount - ($showK12 - 1) * $principalPerMonth) * $r,
+  $principalPerMonth + ($amount - ($showK24 - 1) * $principalPerMonth) * $r,
+  $principalPerMonth + ($amount - ($showK36 - 1) * $principalPerMonth) * $r,
+  $principalPerMonth + ($amount - ($showK48 - 1) * $principalPerMonth) * $r
+]
+
+$chartSeries = $mode == "等额本息"
+  ? [{name: "月供(固定)", values: $seriesA}]
+  : [{name: "月供(递减示意)", values: $seriesB}]
+
+notes = Col([
+  Divider(),
+  Text("温馨提示", "sm", null, "semibold"),
+  List([
+    "不同银行可能对“放款日/计息起始日/罚息/浮动利率”等细节处理不同，页面结果用于快速估算。",
+    "若你提供“实际放款日期”和是否为“LPR浮动”，我也可以帮你把模型调整得更贴近真实账单。"
+  ])
+], 3)
+
+`;

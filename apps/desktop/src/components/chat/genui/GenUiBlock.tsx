@@ -1,7 +1,16 @@
-import { type ActionEvent, Renderer } from "@openuidev/react-lang";
-import { Component, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { type ActionEvent, createParser, Renderer } from "@openuidev/react-lang";
+import {
+  Component,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { loadBlockState, saveBlockState } from "../../../lib/genui/blockState";
 import { safeWebUrl } from "../../../lib/genui/sandbox";
+import { computedStateNames, repairComputedState } from "../../../lib/genui/stateCheck";
 import { getGenUiLabel } from "../../../lib/i18n/agent";
 import { useGenUiStore } from "../../../stores/genUiStore";
 import { usePreviewPanelStore } from "../../../stores/previewPanelStore";
@@ -10,6 +19,24 @@ import styles from "./genui.module.css";
 import { genUiLibrary } from "./library";
 
 const SAVE_DELAY_MS = 300;
+
+let parser: ReturnType<typeof createParser> | null = null;
+
+/**
+ * The program the Renderer gets: once the block is complete, `$x = <expression>`
+ * declarations are rewritten to plain derived values so they compute (see
+ * `repairComputedState`). The stored message text is never changed.
+ */
+export function renderableProgram(code: string, streaming: boolean): string {
+  if (streaming) return code;
+  parser ??= createParser(genUiLibrary.toJSONSchema(), genUiLibrary.root);
+  const active = parser;
+  try {
+    return repairComputedState(code, (source) => active.parse(source));
+  } catch {
+    return code;
+  }
+}
 
 /** Runs the actions an answer can trigger. Exported for tests. */
 export function runGenUiAction(event: ActionEvent): void {
@@ -81,6 +108,7 @@ export function GenUiBlock({
   const [hasErrors, setHasErrors] = useState(false);
   const saveTimer = useRef<number | null>(null);
   const pending = useRef<Record<string, unknown> | null>(null);
+  const program = useMemo(() => renderableProgram(code, streaming), [code, streaming]);
 
   const flush = useCallback(() => {
     if (saveTimer.current !== null) {
@@ -113,13 +141,13 @@ export function GenUiBlock({
   if (!streaming && rendered === false) return fallbackView;
 
   return (
-    <RenderBoundary fallback={fallbackView} resetKey={code}>
+    <RenderBoundary fallback={fallbackView} resetKey={program}>
       <div className={styles.block}>
         {!streaming && hasErrors ? (
           <div className={styles.error}>{getGenUiLabel("genui.partialErrors")}</div>
         ) : null}
         <Renderer
-          response={code}
+          response={program}
           library={genUiLibrary}
           isStreaming={streaming}
           initialState={initialState}
@@ -127,7 +155,10 @@ export function GenUiBlock({
           onAction={runGenUiAction}
           onParseResult={(result) => {
             setRendered(result ? result.root !== null : false);
-            setHasErrors((result?.meta.errors.length ?? 0) > 0);
+            setHasErrors(
+              (result?.meta.errors.length ?? 0) > 0 ||
+                computedStateNames(result?.stateDeclarations).length > 0,
+            );
           }}
         />
       </div>

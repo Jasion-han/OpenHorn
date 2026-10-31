@@ -34,6 +34,39 @@ their fence closes.
   body (server: `services/appendSystemPrompt.ts`, 32,000-char cap → 400). The
   server appends it to that one call's system prompt and never persists it.
   Off means the request is byte-for-byte what it was before (the field is omitted).
+- Local vs. model interactions (task `10-31-genui-local-actions`): anything
+  computable from data the block already has (mode / view switch, filter,
+  sort, details) is a `$variable` + `@Set` / an input + ternary inside the
+  block. `@ToAssistant` (and `openhorn.sendPrompt` in `html-ui`) is only for
+  follow-ups that need new model content, and still only fills the composer.
+  The mortgage example in `OPENUI_EXAMPLES` shows both side by side
+  (`SegmentedControl($mode, ...)` + `byPrincipal ? ... : ...`, plus one
+  `@ToAssistant` follow-up); `prompt.test.ts` keeps it that way.
+- Only user-editable values are `$variables`, with literal defaults; derived
+  values are plain names (`periods = $years * 12`). OpenUI Lang 1.0 does
+  **not** report `$x = <expression>`: `materializeValue` leaves the AST node
+  (`{k: "BinOp" | "Comp" | ...}`, also nested inside array / object literals)
+  in `ParseResult.stateDeclarations`, `meta.errors` stays empty, and the store
+  is seeded with that node, so it renders as blank / `0` / `[object Object]`.
+  The prompt rule alone did not stop gpt-5.4-nano from writing it, so complete
+  blocks are repaired before rendering (`lib/genui/stateCheck.ts`):
+  `computedStateNames` finds those entries, `repairComputedState` rewrites each
+  such `$name` to a plain name (`$months` -> `months`; `months_` if `months` is
+  already a statement, another renamed name, or `true` / `false` / `null`) and
+  re-parses, up to 3 passes. A computed `$x` that is also an input binding or a
+  `@Set` target becomes a read-only derived value; it parses cleanly, so no
+  notice is shown (accepted: before the repair it never rendered a value). The rewrite is
+  token-aware like lang-core's lexer: string literals (both quotes, escapes) and
+  `//` / `#` comments are left alone, and only whole identifiers match (`$r`
+  never touches `$rate`). `GenUiBlock` applies it via `renderableProgram` only
+  when not streaming (memoized on `code`); the stored message text is
+  unchanged, user-input `$variables` keep their names so saved block state
+  still applies, and `genui.partialErrors` shows only when the repaired program
+  still has `meta.errors` or unrepaired computed state. Unsupported syntax such
+  as lambdas (`$f = (k) => ...`) materializes as `null` and is not repaired.
+  Fixture: `components/chat/genui/fixtures/nanoMortgage.ts`; `prompt.test.ts`
+  evaluates the repaired Stat values with lang-core's `evaluate` (resolved
+  through react-lang, which depends on it) for both modes.
 - Channels that drop the system prompt cannot use components: Codex CLI and
   ACP ignore `systemPrompt`, and a Claude Code OAuth channel (`sk-ant-oat…`)
   was observed answering as if it had no system prompt at all (2026-10-31).
