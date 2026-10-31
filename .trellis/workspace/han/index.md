@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 17
+- **Total Sessions**: 18
 - **Last Active**: 2026-10-31
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~641 | Active |
+| `journal-1.md` | ~676 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 18 | 2026-10-31 | Claude OAuth 系统提示与 sidecar 残留 | `59f2880`, `82f0624` | `main` |
 | 17 | 2026-10-31 | 生成式 UI 本地切换与派生状态修复 | `3d71814` | `main` |
 | 16 | 2026-10-31 | 生成式 UI 桌面端实机验证与修复 | `4231e20` | `main` |
 | 15 | 2026-10-31 | 生成式 UI：受约束组件 + 沙箱 HTML 混合渲染 | `8fb4529` | `main` |

@@ -639,3 +639,38 @@ Claude Code/Codex 导入把一轮回复的多段 assistant 合并为一条；用
 ### Next Steps
 
 - None - task complete
+
+
+## Session 18: Claude OAuth 系统提示与 sidecar 残留
+
+**Date**: 2026-10-31
+**Task**: Claude OAuth 系统提示与 sidecar 残留
+**Package**: agent
+**Branch**: `main`
+
+### Summary
+
+OAuth 计费标记单独成 system 块，默认 Claude Code 渠道恢复系统提示与生成式 UI；应用退出/强杀后 sidecar 不再残留（RunEvent::Exit 清理 + 父进程看门狗）。均已实机验证。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `59f2880` | (see git log) |
+| `82f0624` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
