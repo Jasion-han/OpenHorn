@@ -68,11 +68,13 @@ their fence closes.
   evaluates the repaired Stat values with lang-core's `evaluate` (resolved
   through react-lang, which depends on it) for both modes.
 - Channels that drop the system prompt cannot use components: Codex CLI and
-  ACP ignore `systemPrompt`, and a Claude Code OAuth channel (`sk-ant-oat…`)
-  was observed answering as if it had no system prompt at all (2026-10-31).
-  The model then invents `openui-lang` syntax, which only renders as the
-  plain-code fallback. Verify a channel by asking it to quote a component
-  signature from its system prompt.
+  ACP ignore `systemPrompt`. The model then invents `openui-lang` syntax, which
+  only renders as the plain-code fallback. Verify a channel by asking it to
+  quote a component signature from its system prompt.
+- Claude Code OAuth channels (`sk-ant-oat…`, sidecar `runClaudeAgent`) lost the
+  whole system prompt until 2026-10-31: the billing marker was joined into the
+  same `system` text as the prompt, and the API treats that block as billing
+  metadata. `buildClaudeSystem` now sends the marker as its own first block.
 
 ## Security boundaries (keep intact)
 

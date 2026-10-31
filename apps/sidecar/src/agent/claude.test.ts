@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { canonicalizeWorkspaceRoot } from "../workspace";
 import {
+  buildClaudeSystem,
   buildNetworkAllowedDomains,
   checkSdkFsToolPath,
   DEFAULT_ANTHROPIC_HOST,
@@ -137,5 +138,30 @@ describe("buildNetworkAllowedDomains", () => {
   test("falls back to the default when the user URL is unparseable", () => {
     const result = buildNetworkAllowedDomains("nonsense");
     expect(result).toEqual([DEFAULT_ANTHROPIC_HOST]);
+  });
+});
+
+describe("buildClaudeSystem", () => {
+  const marker = "x-anthropic-billing-header: cc_version=2.1.267; cc_entrypoint=sdk-cli;";
+
+  test("OAuth: billing marker is its own first block, prompt in the second", () => {
+    const blocks = buildClaudeSystem(marker, ["agent prompt", "react", "openui-lang Slider"]);
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0]).toEqual({ type: "text", text: marker });
+    expect(blocks[1]?.text).toBe("agent prompt\n\nreact\n\nopenui-lang Slider");
+    expect(blocks[1]?.text.includes("x-anthropic-billing-header")).toBe(false);
+  });
+
+  test("non-OAuth: single prompt block without the marker", () => {
+    const blocks = buildClaudeSystem(null, ["agent prompt", "user prompt"]);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]).toEqual({ type: "text", text: "agent prompt\n\nuser prompt" });
+  });
+
+  test("drops empty, null and undefined sections", () => {
+    const blocks = buildClaudeSystem(marker, ["a", null, "", "  ", undefined, "b"]);
+    expect(blocks).toHaveLength(2);
+    expect(blocks[1]?.text).toBe("a\n\nb");
+    expect(buildClaudeSystem(null, [null, ""])).toHaveLength(0);
   });
 });

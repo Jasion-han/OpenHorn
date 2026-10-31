@@ -419,6 +419,13 @@ function mapToolForExecution(
  * an opaque 429 `rate_limit_error` (Haiku still passes on its free tier), which
  * is why the marker is mandatory and not merely cosmetic.
  *
+ * The marker MUST be its own system text block (see `buildClaudeSystem`). The
+ * server treats the block carrying it as billing metadata rather than prompt
+ * text; when the marker was `\n\n`-joined in front of the real prompt as one
+ * string, the model received no system prompt at all (it denied having one and
+ * ignored the agent / generative-UI instructions). The Claude CLI likewise
+ * sends the marker alone as `system[0]` and the actual prompt as `system[1]`.
+ *
  * Verified 2026-09-10 against api.anthropic.com: the marker alone unlocks
  * Sonnet 4.6 and Opus 4.6 over Bearer auth; no beta header, metadata, or
  * `?beta=true` endpoint is required, and the build-hash suffix on the version
@@ -441,6 +448,25 @@ async function buildOAuthBillingHeader(): Promise<string> {
   }
   cachedBillingHeader = `x-anthropic-billing-header: cc_version=${version}; cc_entrypoint=sdk-cli;`;
   return cachedBillingHeader;
+}
+
+/**
+ * Builds the Messages API `system` param. With an OAuth billing marker the
+ * marker becomes block 1 on its own and every other non-empty section is
+ * joined into block 2 — merging them would make the API drop the whole prompt
+ * (see the billing doc above). Without a marker a single prompt block is sent.
+ */
+export function buildClaudeSystem(
+  billingHeader: string | null,
+  sections: Array<string | null | undefined>,
+): Anthropic.TextBlockParam[] {
+  const prompt = sections
+    .filter((s): s is string => typeof s === "string" && s.trim().length > 0)
+    .join("\n\n");
+  const blocks: Anthropic.TextBlockParam[] = [];
+  if (billingHeader) blocks.push({ type: "text", text: billingHeader });
+  if (prompt) blocks.push({ type: "text", text: prompt });
+  return blocks;
 }
 
 // ---------------------------------------------------------------------------
@@ -471,8 +497,7 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
   const intentResult = await buildIntentContext(input.prompt, {
     webSearchEnabled: input.webSearchEnabled,
   });
-  const finalSystemPrompt = [
-    isOAuth ? await buildOAuthBillingHeader() : null,
+  const finalSystem = buildClaudeSystem(isOAuth ? await buildOAuthBillingHeader() : null, [
     buildAgentSystemPrompt({
       cwd: input.cwd,
       permissionMode: input.permissionMode ?? "full-access",
@@ -482,9 +507,7 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
     buildReActBehaviorSection(),
     input.systemPrompt,
     intentResult.context,
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+  ]);
 
   // Build tool definitions
   const anthropicTools = buildAnthropicTools({ webSearchEnabled: input.webSearchEnabled });
@@ -550,7 +573,7 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
         {
           model,
           max_tokens: DEFAULT_MAX_TOKENS,
-          system: finalSystemPrompt,
+          system: finalSystem,
           messages: messages as Anthropic.MessageParam[],
           tools: anthropicTools as unknown as Anthropic.Tool[],
         },
