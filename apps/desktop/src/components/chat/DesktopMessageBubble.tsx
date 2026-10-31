@@ -1,6 +1,6 @@
 import { Bot, MessageSquare } from "lucide-react";
 import { memo } from "react";
-import { messageText } from "shared/message-text";
+import { hasAgentReplyTextSteps } from "shared/message-text";
 import { cn } from "ui";
 import { sanitizeDisplayContent } from "../../lib/citations";
 import { formatMessageTime, formatTokenCount } from "../../lib/conversationTitle";
@@ -72,6 +72,11 @@ function MessageBubbleImpl({
   const hasAssistantText = isAssistant && Boolean((displayContent || "").trim());
   const isAssistantPlaceholder = isAssistant && isMessageStreaming && !hasAssistantText;
   const isFlatAgentAssistant = isAssistant && message.mode === "agent";
+  // `content` mirrors the run's text steps, which the run panel already renders
+  // inline in the timeline — rendering the content block too would show the
+  // answer twice. Older rows without text steps still render from `content`.
+  const replyInTimeline = isAssistant && hasAgentReplyTextSteps(message.agentRun);
+  const showContentBody = hasAssistantText && !replyInTimeline;
   const liveIndicator = resolveAgentLiveIndicator({
     isAgentAssistant: isFlatAgentAssistant,
     isStreaming: isMessageStreaming,
@@ -145,7 +150,7 @@ function MessageBubbleImpl({
                 maxWidth: "100%",
               }}
             >
-              {hasAssistantText ? (
+              {showContentBody ? (
                 isMessageStreaming && !isFlatAgentAssistant ? (
                   <DesktopStreamingMarkdownMessage
                     content={displayContent}
@@ -225,11 +230,7 @@ function MessageBubbleImpl({
       )}
       <MessageActionBar
         message={message}
-        copyValue={
-          displayContent.trim() || !isAssistant
-            ? displayContent
-            : messageText({ content: "", agentRun: message.agentRun })
-        }
+        copyValue={displayContent}
         canEdit={canEdit}
         canRetry={canRetry}
         canDelete={canDelete}

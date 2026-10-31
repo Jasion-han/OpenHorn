@@ -1,3 +1,4 @@
+import { agentRunReplyText } from "shared/message-text";
 import { create } from "zustand";
 import { type ChatAdapter, createChatAdapter } from "../lib/chatAdapter";
 import type {
@@ -69,6 +70,18 @@ function applyStreamDelta(message: Message, delta: string, updates?: Partial<Mes
     streamTail: getRollingTail(`${message.streamTail ?? ""}${delta}`),
     streamPulseKey: (message.streamPulseKey ?? 0) + 1,
   };
+}
+
+/**
+ * An assistant message with an agent run mirrors the run's text steps into
+ * `content` — the reply text everything else (history, copy, search, export)
+ * reads. Every store path that changes `agentRun` goes through this, so the two
+ * can never drift; the bubble renders the steps, not `content`, for such runs.
+ */
+export function withDerivedContent(message: Message): Message {
+  if (!message.agentRun) return message;
+  const content = agentRunReplyText(message.agentRun);
+  return content === message.content ? message : { ...message, content };
 }
 
 export function applyAgentEventToRun(
@@ -427,6 +440,23 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
       }
     }
     return false;
+  }
+
+  // Applies an agent-run change to a message wherever it lives (on screen or in
+  // the background cache) and re-derives `content` from the new run.
+  function updateAgentMessage(
+    store: { get: () => ChatState; set: (fn: (state: ChatState) => Partial<ChatState>) => void },
+    messageId: string,
+    updater: (msg: Message) => Message,
+  ) {
+    const apply = (msg: Message) => withDerivedContent(updater(msg));
+    if (store.get().messages.some((m) => m.id === messageId)) {
+      store.set((state) => ({
+        messages: state.messages.map((m) => (m.id === messageId ? apply(m) : m)),
+      }));
+    } else {
+      updateCachedMessage(messageId, apply);
+    }
   }
 
   return create<ChatState>((set, get) => ({
@@ -843,24 +873,10 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
         const msg = get().findMessageAnywhere(messageId);
         if (msg?.agentRun) {
           const agentEvent = { type: "text", content };
-          const found = get().messages.some((m) => m.id === messageId);
-          if (found) {
-            set((state) => ({
-              messages: state.messages.map((message) =>
-                message.id === messageId
-                  ? {
-                      ...message,
-                      agentRun: applyAgentEventToRun(message.agentRun, agentEvent),
-                    }
-                  : message,
-              ),
-            }));
-          } else {
-            updateCachedMessage(messageId, (m) => ({
-              ...m,
-              agentRun: applyAgentEventToRun(m.agentRun, agentEvent),
-            }));
-          }
+          updateAgentMessage({ get, set }, messageId, (m) => ({
+            ...m,
+            agentRun: applyAgentEventToRun(m.agentRun, agentEvent),
+          }));
         } else {
           get().appendMessageDelta(messageId, content);
         }
@@ -882,14 +898,7 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
             });
             return { ...m, agentRun: { ...m.agentRun, steps } };
           };
-          const found = get().messages.some((m) => m.id === messageId);
-          if (found) {
-            set((state) => ({
-              messages: state.messages.map((m) => (m.id === messageId ? updater(m) : m)),
-            }));
-          } else {
-            updateCachedMessage(messageId, updater);
-          }
+          updateAgentMessage({ get, set }, messageId, updater);
         } else {
           get().updateMessage(messageId, { content: "" });
         }
@@ -913,24 +922,10 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
       }
 
       if (event.type === "agent_event") {
-        const found = get().messages.some((m) => m.id === messageId);
-        if (found) {
-          set((state) => ({
-            messages: state.messages.map((message) =>
-              message.id === messageId
-                ? {
-                    ...message,
-                    agentRun: applyAgentEventToRun(message.agentRun, event.event),
-                  }
-                : message,
-            ),
-          }));
-        } else {
-          updateCachedMessage(messageId, (msg) => ({
-            ...msg,
-            agentRun: applyAgentEventToRun(msg.agentRun, event.event),
-          }));
-        }
+        updateAgentMessage({ get, set }, messageId, (msg) => ({
+          ...msg,
+          agentRun: applyAgentEventToRun(msg.agentRun, event.event),
+        }));
         return;
       }
 
@@ -943,7 +938,8 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
         const currentMsg = get().findMessageAnywhere(messageId);
         const existingRun = currentMsg?.agentRun;
         const doneRun = event.agentRun ?? completeAgentRun(existingRun);
-        get().updateMessage(messageId, {
+        updateAgentMessage({ get, set }, messageId, (msg) => ({
+          ...msg,
           id: event.messageId || messageId,
           model: event.model,
           agentRun: doneRun,
@@ -951,7 +947,7 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
           // stamp it here instead of waiting for the next reload to carry the
           // server's value. Regenerating replaces it with the new time.
           updatedAt: new Date(),
-        });
+        }));
         get().completeStreamingMessage(event.messageId || messageId);
         return;
       }
@@ -966,39 +962,15 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
     },
 
     failStreamingMessage(messageId, error) {
-      const found = get().messages.some((m) => m.id === messageId);
-      if (found) {
-        set((state) => ({
-          isStreaming: false,
-          streamingConversationId: null,
-          error,
-          messages: state.messages.map((message) =>
-            message.id === messageId
-              ? {
-                  ...message,
-                  content: message.content || error,
-                  agentRun: message.agentRun
-                    ? {
-                        ...message.agentRun,
-                        status: "failed",
-                        summary: "Error",
-                        error,
-                      }
-                    : message.agentRun,
-                }
-              : message,
-          ),
-        }));
-      } else {
-        set({ isStreaming: false, streamingConversationId: null, error });
-        updateCachedMessage(messageId, (msg) => ({
-          ...msg,
-          content: msg.content || error,
-          agentRun: msg.agentRun
-            ? { ...msg.agentRun, status: "failed", summary: "Error", error }
-            : msg.agentRun,
-        }));
-      }
+      set({ isStreaming: false, streamingConversationId: null, error });
+      // An agent run keeps the error in `agentRun.error` (the run panel renders
+      // it); its `content` stays the reply text. A message without a run has no
+      // other place to show the failure, so the error becomes its content.
+      updateAgentMessage({ get, set }, messageId, (msg) =>
+        msg.agentRun
+          ? { ...msg, agentRun: { ...msg.agentRun, status: "failed", summary: "Error", error } }
+          : { ...msg, content: msg.content || error },
+      );
     },
 
     updateMessage(messageId, updates) {

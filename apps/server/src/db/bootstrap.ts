@@ -1,5 +1,6 @@
 import { userInfo } from "node:os";
 import type { ResultSet, Row } from "@libsql/client";
+import { agentRunReplyText } from "shared/message-text";
 import { client } from "./index";
 
 type ForeignKeyExpectation = {
@@ -1334,6 +1335,44 @@ async function ensureMessagesFtsTable(): Promise<void> {
   );
 }
 
+/**
+ * Agent replies used to be stored with an empty `content` and the answer only
+ * in `agent_run` text steps, which hid them from everything that reads
+ * `content` (history, full-text search, export, summaries, titles). Fill those
+ * rows from their text steps and re-point the FTS row at the new text.
+ *
+ * Idempotent: a filled row no longer matches `trim(content) = ''`, and a row
+ * whose text steps are all blank derives "" and is left alone. Exported for
+ * tests.
+ */
+export async function backfillAgentReplyContent(): Promise<number> {
+  const result = await client.execute(
+    `SELECT id, conversation_id, agent_run FROM messages
+     WHERE role = 'assistant'
+       AND trim(content) = ''
+       AND agent_run IS NOT NULL
+       AND agent_run LIKE '%"type":"text"%';`,
+  );
+  let filled = 0;
+  for (const row of getRows(result)) {
+    const id = String(row.id);
+    const conversationId = String(row.conversation_id);
+    const content = agentRunReplyText(row.agent_run);
+    if (!content) continue;
+    await client.execute({
+      sql: `UPDATE messages SET content = ? WHERE id = ?;`,
+      args: [content, id],
+    });
+    await client.execute({ sql: `DELETE FROM messages_fts WHERE message_id = ?;`, args: [id] });
+    await client.execute({
+      sql: `INSERT INTO messages_fts(message_id, conversation_id, content) VALUES (?, ?, ?);`,
+      args: [id, conversationId, content.substring(0, 5000)],
+    });
+    filled++;
+  }
+  return filled;
+}
+
 export async function bootstrapDatabase(): Promise<void> {
   await client.execute("PRAGMA foreign_keys=ON;");
 
@@ -1409,4 +1448,7 @@ export async function bootstrapDatabase(): Promise<void> {
   // after ensureDeleteSemanticsForeignKeys (which may rebuild the messages
   // table) so the backfill reads the final rows.
   await ensureMessagesFtsTable();
+
+  // After the FTS table exists, so the backfilled text is indexed too.
+  await backfillAgentReplyContent();
 }

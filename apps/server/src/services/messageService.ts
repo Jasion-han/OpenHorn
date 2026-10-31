@@ -1,6 +1,6 @@
 import { attachments, conversations, messages } from "db";
 import { and, asc, eq, inArray } from "drizzle-orm";
-import { messageText } from "shared/message-text";
+import { agentReplyContent } from "shared/message-text";
 import { type ChatContentPart, type ChatMessage, createAdapter } from "../agent-adapters";
 import { client, db } from "../db";
 import { generateId } from "../utils";
@@ -697,35 +697,13 @@ async function buildUserContentWithAttachments(
   return parts;
 }
 
-/**
- * Agent-mode replies keep their answer in `agentRun` text steps with an empty
- * `content`. Fill those in via `messageText` before building model context, or a
- * conversation that switches from Agent to Chat mode loses every earlier Agent
- * answer. Exported for tests.
- */
-export function withAgentReplyText<
-  T extends { role: string; content: string; agentRun?: string | null },
->(conversationMessages: T[]): T[] {
-  return conversationMessages.map((message) =>
-    message.role === "assistant" && !message.content.trim() && message.agentRun
-      ? { ...message, content: messageText(message) }
-      : message,
-  );
-}
-
 async function buildChatMessages(
   userId: string,
-  rawConversationMessages: Array<{
-    role: string;
-    content: string;
-    attachments?: string | null;
-    agentRun?: string | null;
-  }>,
+  conversationMessages: Array<{ role: string; content: string; attachments?: string | null }>,
   systemPrompt?: string | null,
   conversationId?: string | null,
 ): Promise<ChatMessage[]> {
   const chatMessages: ChatMessage[] = [];
-  const conversationMessages = withAgentReplyText(rawConversationMessages);
 
   let effectiveSystemPrompt = systemPrompt || "";
 
@@ -1734,6 +1712,9 @@ export async function syncSidecarMessages(
   if (!conversation) throw new Error("Conversation not found");
 
   const now = new Date();
+  // The reply text of an agent run lives in its text steps; `content` must equal
+  // it no matter what the client sent (older builds sent "" or the error text).
+  const assistantContent = agentReplyContent(input.assistantContent ?? "", input.agentRun);
 
   if (input.userMessageId && input.assistantMessageId) {
     const [existingUser, existingAssistant] = await Promise.all([
@@ -1759,7 +1740,7 @@ export async function syncSidecarMessages(
       await db
         .update(messages)
         .set({
-          content: input.assistantContent,
+          content: assistantContent,
           model: input.model || null,
           agentRun: input.agentRun ? JSON.stringify(input.agentRun) : null,
           // Regenerate re-runs the turn, so the previous count is stale — clear
@@ -1770,7 +1751,7 @@ export async function syncSidecarMessages(
           updatedAt: new Date(),
         })
         .where(eq(messages.id, input.assistantMessageId));
-      await ftsUpsert(input.assistantMessageId, input.conversationId, input.assistantContent);
+      await ftsUpsert(input.assistantMessageId, input.conversationId, assistantContent);
       if (Array.isArray(input.attachmentsMeta)) {
         // Replace, not append: the edit's meta is authoritative for this message.
         await db.delete(attachments).where(eq(attachments.messageId, input.userMessageId));
@@ -1816,7 +1797,7 @@ export async function syncSidecarMessages(
     id: assistantMessageId,
     conversationId: input.conversationId,
     role: "assistant",
-    content: input.assistantContent,
+    content: assistantContent,
     model: input.model || null,
     mode: input.mode || "agent",
     attachments: null,
@@ -1826,7 +1807,7 @@ export async function syncSidecarMessages(
     citations: null,
     createdAt: new Date(now.getTime() + 1),
   });
-  await ftsUpsert(assistantMessageId, input.conversationId, input.assistantContent);
+  await ftsUpsert(assistantMessageId, input.conversationId, assistantContent);
 
   // Fire-and-forget: generate summary if the conversation is long enough
   void maybeSummarize(userId, input.conversationId).catch(() => {});

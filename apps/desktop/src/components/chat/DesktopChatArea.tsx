@@ -1554,7 +1554,16 @@ export function DesktopChatArea() {
       // ignore reload failures after stop
     }
     const msgs = useChatStore.getState().messages;
-    const orphans = msgs.filter((m) => m.role === "assistant" && !m.content?.trim());
+    // An agent run that failed keeps its error in agentRun, and a run that only
+    // used tools has a timeline but no reply text — an empty `content` alone does
+    // not make either an orphan.
+    const orphans = msgs.filter(
+      (m) =>
+        m.role === "assistant" &&
+        !m.content?.trim() &&
+        !m.agentRun?.error &&
+        !(m.agentRun?.steps?.length ?? 0),
+    );
     for (const orphan of orphans) {
       try {
         await deleteMessage(orphan.id);

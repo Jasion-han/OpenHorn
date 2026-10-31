@@ -130,9 +130,13 @@ await api.messages.syncSidecar({ ..., myNewField: stripEphemeral(msg.myNewField)
 并跳过空文本的地方（历史组装、复制、服务端 `buildChatMessages`）都会把 Agent 回复整条丢掉，
 模型只看到用户连续几条提问
 
-**Fix / Prevention**: 需要消息正文时一律用 `messageText({ content, agentRun })`
-（`shared/message-text`：content 优先，否则拼 text 步骤；`agentRun` 可以是对象或服务端行里的
-JSON 字符串）。桌面端历史只经 `lib/conversationHistory.ts` 的 `buildConversationHistory`，
-服务端在 `buildChatMessages` 入口用 `withAgentReplyText`。sidecar 的 Claude / 直连运行时把历史作为
-真实的 user / assistant 消息发送（`agent/context.ts` `buildHistoryMessages`），Codex / ACP 只收
-单段文本，仍是拼接
+**Fix / Prevention**（task `10-31-agent-content-invariant` 起改为写入端不变量）：
+有 `agentRun` 的 assistant 消息，`content` 恒等于 text 步骤按序 trim、去空、以 `\n\n` 拼接
+（`shared/message-text` 的 `agentRunReplyText`）。桌面 `chatStore` 所有改 agentRun 的路径都经
+`updateAgentMessage` → `withDerivedContent` 推导 content；Agent 失败只写 `agentRun.error`，
+不写进 content。服务端 `syncSidecarMessages` 落库前用 `agentReplyContent(content, agentRun)`
+规范化（有 text 步骤则以步骤为准，否则保留传入值——服务端任务型回合存的是任务摘要、没有 text
+步骤）。`bootstrap.ts` 的 `backfillAgentReplyContent` 幂等回填存量并同步 messages_fts。
+读取端一律直接读 `content`；`DesktopMessageBubble` 对含 text 步骤的消息只渲染时间线，不再渲染
+content 块。sidecar 的 Claude / 直连运行时把历史作为真实的 user / assistant 消息发送
+（`agent/context.ts` `buildHistoryMessages`），Codex / ACP 只收单段文本，仍是拼接
