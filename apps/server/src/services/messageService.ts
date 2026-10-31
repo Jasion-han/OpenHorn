@@ -5,14 +5,6 @@ import { type ChatContentPart, type ChatMessage, createAdapter } from "../agent-
 import { client, db } from "../db";
 import { generateId } from "../utils";
 import { createSseStream } from "../utils/sse";
-import { buildAgentPlan } from "./agentPlanBuilder";
-import { buildTaskCardSummary, buildTaskFailure, buildTaskReplyText } from "./agentTaskMessage";
-import type {
-  AgentTaskComplexity,
-  AgentTaskDetail,
-  AgentTaskRecord,
-  AgentTaskUxMode,
-} from "./agentTaskService";
 import { withAppendedSystemPrompt } from "./appendSystemPrompt";
 import {
   buildAttachmentPayloadFromIds,
@@ -97,14 +89,22 @@ export async function ftsDeleteConversation(conversationId: string): Promise<voi
   }
 }
 
-const AGENT_DEFAULT_COMPLEXITY_SETTING = "agent.defaultComplexity";
-const AGENT_DEFAULT_UX_MODE_SETTING = "agent.defaultUxMode";
-const AGENT_DEFAULT_REQUIRES_PLAN_APPROVAL_SETTING = "agent.defaultRequiresPlanApproval";
-const AGENT_DEFAULT_AUTO_START_SETTING = "agent.defaultAutoStart";
-
-async function loadAgentTaskService() {
-  return import("./agentTaskService");
+/**
+ * Agent turns run only in the desktop sidecar. The server once planned
+ * "task-backed" agent turns itself, but nothing executes or approves those any
+ * more — a request for one would only produce a reply that never arrives. Every
+ * entry point that would have started one rejects with this error instead.
+ */
+export class AgentModeUnsupportedError extends Error {
+  readonly code = "agent_mode_unsupported";
+  constructor() {
+    super(
+      "Agent mode runs in the desktop app's local runtime; the server does not execute agent turns.",
+    );
+    this.name = "AgentModeUnsupportedError";
+  }
 }
+
 export interface SendMessageInput {
   conversationId: string;
   content: string;
@@ -116,51 +116,9 @@ export interface StreamMessageInput {
   conversationId: string;
   content: string;
   attachments?: string[];
+  /** Only "chat" is served; anything else is an agent request and is rejected. */
   mode?: "chat" | "agent";
-  /**
-   * Per-message overrides for agent task creation. When present, these
-   * take priority over the user's stored AgentSettings defaults. This
-   * lets the desktop Composer provide ephemeral per-task controls
-   * ("计划审批" / "深度思考") without altering the global defaults.
-   */
-  agentOverrides?: {
-    complexity?: "light" | "standard" | "deep";
-    requiresPlanApproval?: boolean;
-  };
 }
-
-type AgentRunStep = {
-  type: "tool_start" | "tool_result" | "error" | "text";
-  toolName?: string;
-  content?: string;
-  toolInput?: unknown;
-};
-
-type AgentRunData = {
-  status: "running" | "awaiting_approval" | "completed" | "failed" | "cancelled" | "partial";
-  summary: string;
-  error?: string;
-  steps: AgentRunStep[];
-  toolCount?: number;
-  taskId?: string;
-  complexity?: "light" | "standard" | "deep";
-  uxMode?: "direct" | "compact" | "full";
-  requiresPlanApproval?: boolean;
-  autoStart?: boolean;
-  taskStatus?:
-    | "draft"
-    | "planning"
-    | "awaiting_approval"
-    | "running"
-    | "completed"
-    | "failed"
-    | "cancelled";
-  latestRunId?: string | null;
-  latestRunPhase?: "planning" | "execution" | null;
-  latestApprovalId?: string | null;
-  latestApprovalType?: "plan_approval" | "tool_approval" | null;
-  latestApprovalStatus?: "pending" | "approved" | "rejected" | null;
-};
 
 type LiveStatusPayload = {
   type: "live_status";
@@ -173,416 +131,6 @@ type CitationsPayload = {
   type: "citations";
   citations: SearchCitation[];
 };
-
-type AgentTaskDefaults = {
-  complexity: AgentTaskComplexity;
-  uxMode: AgentTaskUxMode;
-  requiresPlanApproval: boolean;
-  autoStart: boolean;
-};
-
-function parseBooleanSetting(value: string | undefined, fallback: boolean) {
-  if (typeof value !== "string") return fallback;
-  const normalized = value.trim().toLowerCase();
-  if (normalized === "true") return true;
-  if (normalized === "false") return false;
-  return fallback;
-}
-
-function parseAgentTaskComplexity(
-  value: string | undefined,
-  fallback: AgentTaskComplexity,
-): AgentTaskComplexity {
-  if (value === "light" || value === "standard" || value === "deep") return value;
-  return fallback;
-}
-
-function parseAgentTaskUxMode(
-  value: string | undefined,
-  fallback: AgentTaskUxMode,
-): AgentTaskUxMode {
-  if (value === "direct" || value === "compact" || value === "full") return value;
-  return fallback;
-}
-
-function getAgentTaskDefaults(settings: Record<string, string>): AgentTaskDefaults {
-  return {
-    complexity: parseAgentTaskComplexity(settings[AGENT_DEFAULT_COMPLEXITY_SETTING], "standard"),
-    uxMode: parseAgentTaskUxMode(settings[AGENT_DEFAULT_UX_MODE_SETTING], "compact"),
-    requiresPlanApproval: parseBooleanSetting(
-      settings[AGENT_DEFAULT_REQUIRES_PLAN_APPROVAL_SETTING],
-      false,
-    ),
-    autoStart: parseBooleanSetting(settings[AGENT_DEFAULT_AUTO_START_SETTING], true),
-  };
-}
-
-function buildTaskPlan(task: Pick<AgentTaskRecord, "goal" | "complexity" | "attachments">) {
-  return buildAgentPlan({
-    goal: task.goal,
-    complexity: task.complexity,
-    attachments: task.attachments,
-  });
-}
-
-/**
- * The agentRun of a task-backed (server-run) agent turn. The reply is the full
- * final_result, carried as a `text` step exactly like a sidecar run's answer,
- * so the message `content` derives from it through the same rule. A failure
- * goes to `error`; `summary` is the clipped card preview for the meta line.
- * Exported for tests.
- */
-export function buildTaskBackedAgentRun(detail: AgentTaskDetail): AgentRunData {
-  const latestRun = detail.runs[0] ?? null;
-  const latestApproval = detail.approvals[0] ?? null;
-  const toolCount = detail.events.filter(
-    (event) =>
-      event.type === "execution_event" &&
-      event.metadata &&
-      typeof event.metadata === "object" &&
-      !Array.isArray(event.metadata) &&
-      (event.metadata as Record<string, unknown>).eventType === "tool_start",
-  ).length;
-  const replyText = buildTaskReplyText(detail);
-  const error = buildTaskFailure(detail);
-
-  return {
-    status:
-      detail.task.status === "awaiting_approval"
-        ? "awaiting_approval"
-        : detail.task.status === "running"
-          ? "running"
-          : detail.task.status === "failed"
-            ? "failed"
-            : detail.task.status === "cancelled"
-              ? "cancelled"
-              : "completed",
-    summary: buildTaskCardSummary(detail),
-    ...(error ? { error } : {}),
-    steps: replyText ? [{ type: "text", content: replyText }] : [],
-    toolCount,
-    taskId: detail.task.id,
-    complexity: detail.task.complexity,
-    uxMode: detail.task.uxMode,
-    requiresPlanApproval: detail.task.requiresPlanApproval,
-    autoStart: detail.task.autoStart,
-    taskStatus: detail.task.status,
-    latestRunId: latestRun?.id ?? null,
-    latestRunPhase: latestRun?.phase ?? null,
-    latestApprovalId: latestApproval?.id ?? null,
-    latestApprovalType: latestApproval?.type ?? null,
-    latestApprovalStatus: latestApproval?.status ?? null,
-  };
-}
-
-function parseAgentRunData(value: string | null | undefined): AgentRunData | null {
-  if (!value) return null;
-  try {
-    const parsed = JSON.parse(value) as AgentRunData;
-    return parsed && typeof parsed === "object" ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * True once a task can no longer change. Used to skip pointless re-syncs on the
- * read path — see getMessagesForUserWithAttachments.
- *
- * A message whose stored agentRun has no taskStatus predates this field (or was
- * never synced), so it is deliberately treated as non-terminal and still synced.
- */
-export function isTerminalTaskStatus(status: AgentRunData["taskStatus"]): boolean {
-  return status === "completed" || status === "failed" || status === "cancelled";
-}
-
-function getTaskFinalResultCitations(detail: AgentTaskDetail) {
-  const finalResult = detail.artifacts.find((artifact) => artifact.type === "final_result") ?? null;
-  if (
-    !finalResult?.metadata ||
-    typeof finalResult.metadata !== "object" ||
-    Array.isArray(finalResult.metadata)
-  ) {
-    return undefined;
-  }
-
-  const citations = (finalResult.metadata as Record<string, unknown>).citations;
-  return Array.isArray(citations) ? citations : undefined;
-}
-
-export async function syncTaskBackedMessages(userId: string, taskId: string): Promise<void> {
-  const { getAgentTaskDetail } = await loadAgentTaskService();
-  const detail = await getAgentTaskDetail(userId, taskId);
-  const conversationId = detail.task.conversationId;
-  if (!conversationId) return;
-
-  const candidateMessages = await db
-    .select({
-      id: messages.id,
-      content: messages.content,
-      agentRun: messages.agentRun,
-    })
-    .from(messages)
-    .where(
-      and(
-        eq(messages.conversationId, conversationId),
-        eq(messages.role, "assistant"),
-        eq(messages.mode, "agent"),
-      ),
-    );
-
-  const targets = candidateMessages.filter(
-    (message) => parseAgentRunData(message.agentRun)?.taskId === taskId,
-  );
-
-  if (targets.length === 0) return;
-
-  const agentRun = buildTaskBackedAgentRun(detail);
-  const nextContent = assistantMessageContent("", agentRun);
-  const nextAgentRun = JSON.stringify(agentRun);
-
-  // Skip the write when nothing actually changed. This runs on a read path, so
-  // an unconditional UPDATE turns every message fetch into a write — and bumps
-  // rows that no client will render any differently.
-  const staleTargets = targets.filter(
-    (message) => message.content !== nextContent || message.agentRun !== nextAgentRun,
-  );
-  if (staleTargets.length === 0) return;
-
-  await db
-    .update(messages)
-    .set({
-      content: nextContent,
-      agentRun: nextAgentRun,
-      citations: (() => {
-        const citations = getTaskFinalResultCitations(detail);
-        return citations && citations.length > 0 ? JSON.stringify(citations) : null;
-      })(),
-      liveMetadata: null,
-    })
-    .where(
-      inArray(
-        messages.id,
-        staleTargets.map((message) => message.id),
-      ),
-    );
-
-  // Sync FTS for each updated message
-  await Promise.all(
-    staleTargets.map((target) => ftsUpsert(target.id, conversationId, nextContent)),
-  );
-}
-
-async function planTaskForTurn(userId: string, task: AgentTaskRecord) {
-  const {
-    createAgentApprovalRequest,
-    createAgentRun,
-    createAgentTaskEvent,
-    getAgentTaskDetail,
-    setAgentPlanSteps,
-    updateAgentRunStatus,
-    updateAgentTaskStatus,
-  } = await loadAgentTaskService();
-  await updateAgentTaskStatus(userId, task.id, "planning");
-  const run = await createAgentRun(userId, task.id, {
-    phase: "planning",
-    status: "running",
-    startedAt: new Date(),
-  });
-  await createAgentTaskEvent(userId, task.id, run.id, {
-    type: "task_status",
-    content: "Task entered planning.",
-    metadata: { status: "planning" },
-  });
-
-  const planSteps = await setAgentPlanSteps(userId, task.id, run.id, {
-    steps: buildTaskPlan(task),
-  });
-
-  for (const step of planSteps) {
-    await createAgentTaskEvent(userId, task.id, run.id, {
-      type: "plan_step",
-      content: step.title,
-      metadata: {
-        orderIndex: step.orderIndex,
-        description: step.description,
-        status: step.status,
-      },
-    });
-  }
-
-  if (task.requiresPlanApproval) {
-    const approval = await createAgentApprovalRequest(userId, task.id, run.id, {
-      type: "plan_approval",
-      title: "Approve task execution",
-      description: "Review the generated plan before the agent starts executing it.",
-      payload: {
-        planStepIds: planSteps.map((step) => step.id),
-        planStepCount: planSteps.length,
-      },
-    });
-
-    await createAgentTaskEvent(userId, task.id, run.id, {
-      type: "approval_requested",
-      content: approval.title,
-      metadata: { approvalId: approval.id, approvalType: approval.type },
-    });
-    await updateAgentRunStatus(userId, run.id, "awaiting_approval");
-    await updateAgentTaskStatus(userId, task.id, "awaiting_approval");
-    await createAgentTaskEvent(userId, task.id, run.id, {
-      type: "task_status",
-      content: "Task is awaiting approval.",
-      metadata: { status: "awaiting_approval" },
-    });
-  } else {
-    await updateAgentRunStatus(userId, run.id, "completed");
-    await updateAgentTaskStatus(userId, task.id, "draft");
-    await createAgentTaskEvent(userId, task.id, run.id, {
-      type: "task_status",
-      content: "Task is ready to execute.",
-      metadata: { status: "draft" },
-    });
-  }
-
-  return getAgentTaskDetail(userId, task.id);
-}
-
-async function createTaskBackedAgentTurn(params: {
-  userId: string;
-  conversationId: string;
-  conversation: Awaited<ReturnType<typeof getConversationForUser>>;
-  prompt: string;
-  attachmentIds?: string[];
-  agentOverrides?: StreamMessageInput["agentOverrides"];
-}) {
-  const { createAgentTask } = await loadAgentTaskService();
-  const resolvedChannel = await getResolvedChannelForConversation(params.userId, {
-    channelId: params.conversation.channelId || null,
-    modelId: params.conversation.modelId || null,
-  });
-  const settings = await getSettingValues(params.userId, [
-    AGENT_DEFAULT_COMPLEXITY_SETTING,
-    AGENT_DEFAULT_UX_MODE_SETTING,
-    AGENT_DEFAULT_REQUIRES_PLAN_APPROVAL_SETTING,
-    AGENT_DEFAULT_AUTO_START_SETTING,
-  ]);
-  const defaults = getAgentTaskDefaults(settings);
-
-  // Per-message overrides (from the Composer's per-task switches)
-  // take precedence over the user's stored defaults.
-  const complexity = params.agentOverrides?.complexity ?? defaults.complexity;
-  const requiresPlanApproval =
-    params.agentOverrides?.requiresPlanApproval ?? defaults.requiresPlanApproval;
-
-  const task = await createAgentTask(params.userId, {
-    conversationId: params.conversationId,
-    channelId: params.conversation.channelId || resolvedChannel?.channel.id || null,
-    modelId: params.conversation.modelId || resolvedChannel?.modelId || null,
-    title: null,
-    goal: params.prompt,
-    attachments: (params.attachmentIds || []).map((id) => ({
-      id,
-      fileName: "attachment",
-    })),
-    complexity,
-    uxMode: defaults.uxMode,
-    requiresPlanApproval,
-    autoStart: true,
-  });
-  const detail = await planTaskForTurn(params.userId, task);
-  const agentRun = buildTaskBackedAgentRun(detail);
-
-  return {
-    detail,
-    content: assistantMessageContent("", agentRun),
-    agentRun,
-    modelId: detail.task.modelId,
-  };
-}
-
-async function applyTaskBackedAgentTurnToMessage(params: {
-  userId: string;
-  conversation: Awaited<ReturnType<typeof getConversationForUser>>;
-  conversationId: string;
-  assistantMessageId: string;
-  prompt: string;
-  attachmentIds?: string[];
-  workspaceId?: string | null;
-  contextPaths?: string[];
-  agentOverrides?: StreamMessageInput["agentOverrides"];
-}) {
-  let turn: Awaited<ReturnType<typeof createTaskBackedAgentTurn>>;
-  try {
-    turn = await createTaskBackedAgentTurn({
-      userId: params.userId,
-      conversationId: params.conversationId,
-      conversation: params.conversation,
-      prompt: params.prompt,
-      attachmentIds: params.attachmentIds,
-      agentOverrides: params.agentOverrides,
-    });
-  } catch (error) {
-    // The caller set conversations.runStatus to "running" before this turn.
-    // If the turn throws (model/network failure), the success-path reset below
-    // never runs and the conversation is stuck showing "running" forever.
-    // Reset to "failed" so the UI unsticks; best-effort so the original error
-    // still propagates to the SSE error handler.
-    try {
-      await db
-        .update(conversations)
-        .set({ updatedAt: new Date(), runStatus: "failed" })
-        .where(eq(conversations.id, params.conversationId));
-    } catch {
-      // ignore — surfacing the original turn error matters more
-    }
-    throw error;
-  }
-  const { detail, content, agentRun, modelId } = turn;
-
-  await db
-    .update(messages)
-    .set({
-      content,
-      model: modelId,
-      mode: "agent",
-      workspaceId: params.workspaceId ?? null,
-      contextPaths:
-        params.contextPaths && params.contextPaths.length > 0
-          ? JSON.stringify(params.contextPaths)
-          : null,
-      agentRun: JSON.stringify(agentRun),
-      liveMetadata: null,
-      citations: null,
-      updatedAt: new Date(),
-    })
-    .where(eq(messages.id, params.assistantMessageId));
-
-  await ftsUpsert(params.assistantMessageId, params.conversationId, content);
-
-  await db
-    .update(conversations)
-    .set({
-      updatedAt: new Date(),
-      workspaceId: params.workspaceId ?? null,
-      lastMode: "agent",
-      runStatus: detail.task.status,
-    })
-    .where(eq(conversations.id, params.conversationId));
-
-  return { detail, content, agentRun, modelId };
-}
-
-function parseJsonArray(value: string | null | undefined): string[] {
-  if (!value) return [];
-  try {
-    const parsed = JSON.parse(value);
-    return Array.isArray(parsed)
-      ? parsed.filter((item): item is string => typeof item === "string")
-      : [];
-  } catch {
-    return [];
-  }
-}
 
 function normalizeChatContent(
   content: string | ChatContentPart[],
@@ -838,32 +386,10 @@ export async function getMessagesForUser(userId: string, conversationId: string)
 export async function getMessagesForUserWithAttachments(userId: string, conversationId: string) {
   // Ownership guard
   await getConversationForUser(userId, conversationId);
-  let result = await getMessages(conversationId);
-
-  // Only tasks that might still change are worth re-syncing. A task that has
-  // already been recorded as completed/failed/cancelled can never produce a
-  // different summary, so re-reading it on every message fetch costs 8 queries
-  // (6 for the detail, 1 scan, 1 write) and changes nothing. A conversation of
-  // 20 finished agent turns used to spend ~160 queries — plus a write — every
-  // time it was opened.
-  const taskIds = Array.from(
-    new Set(
-      result
-        .filter((message) => message.role === "assistant" && message.mode === "agent")
-        .map((message) => parseAgentRunData(message.agentRun))
-        .filter((run): run is AgentRunData => run !== null)
-        .filter((run) => !isTerminalTaskStatus(run.taskStatus))
-        .map((run) => run.taskId)
-        .filter(
-          (taskId): taskId is string => typeof taskId === "string" && taskId.trim().length > 0,
-        ),
-    ),
-  );
-
-  if (taskIds.length > 0) {
-    await Promise.allSettled(taskIds.map((taskId) => syncTaskBackedMessages(userId, taskId)));
-    result = await getMessages(conversationId);
-  }
+  // Stored rows are final: agent turns are persisted by the sidecar once they
+  // end, and the legacy server-run (task-backed) turns were settled by a
+  // one-time bootstrap migration — nothing on the read path needs re-syncing.
+  const result = await getMessages(conversationId);
 
   const messageIds = result.map((m) => m.id);
   if (messageIds.length === 0) return result;
@@ -903,6 +429,9 @@ export async function getMessagesForUserWithAttachments(userId: string, conversa
 }
 
 export async function sendMessage(userId: string, input: SendMessageInput) {
+  if (input.mode !== undefined && input.mode !== "chat") {
+    throw new AgentModeUnsupportedError();
+  }
   const conversation = await getConversationForUser(userId, input.conversationId);
 
   const userMessageId = generateId();
@@ -913,7 +442,7 @@ export async function sendMessage(userId: string, input: SendMessageInput) {
     conversationId: input.conversationId,
     role: "user",
     content: input.content,
-    mode: input.mode || "chat",
+    mode: "chat",
     attachments: input.attachments ? JSON.stringify(input.attachments) : null,
     agentRun: null,
     createdAt: now,
@@ -1008,7 +537,7 @@ export async function sendMessage(userId: string, input: SendMessageInput) {
     role: "assistant",
     content: responseContent,
     model: responseModel,
-    mode: input.mode || "chat",
+    mode: "chat",
     agentRun: null,
     liveMetadata: serializeLiveMetadata(liveContext),
     citations: serializeCitations(liveContext.citations),
@@ -1073,9 +602,13 @@ export async function streamMessage(
   userId: string,
   input: StreamMessageInput,
 ): Promise<ReadableStream> {
+  // An omitted mode used to mean "agent" here, so only an explicit "chat" is
+  // served — rejected before the stream opens, so the caller gets a 4xx.
+  if (input.mode !== "chat") {
+    throw new AgentModeUnsupportedError();
+  }
   return createSseStream(async (send, ctx) => {
     const conversation = await getConversationForUser(userId, input.conversationId);
-    const mode = input.mode === "chat" ? "chat" : "agent";
 
     const userMessageId = generateId();
     const now = new Date();
@@ -1084,7 +617,7 @@ export async function streamMessage(
       conversationId: input.conversationId,
       role: "user",
       content: input.content,
-      mode,
+      mode: "chat",
       attachments: input.attachments ? JSON.stringify(input.attachments) : null,
       agentRun: null,
       createdAt: now,
@@ -1102,47 +635,10 @@ export async function streamMessage(
       .update(conversations)
       .set({
         updatedAt: now,
-        lastMode: mode,
-        runStatus: mode === "agent" ? "running" : null,
+        lastMode: "chat",
+        runStatus: null,
       })
       .where(eq(conversations.id, input.conversationId));
-
-    if (mode === "agent") {
-      await db.insert(messages).values({
-        id: assistantMessageId,
-        conversationId: input.conversationId,
-        role: "assistant",
-        content: "",
-        model: conversation.modelId || null,
-        mode: "agent",
-        attachments: null,
-        agentRun: null,
-        liveMetadata: null,
-        citations: null,
-        createdAt: assistantCreatedAt,
-      });
-
-      const { agentRun, modelId } = await applyTaskBackedAgentTurnToMessage({
-        userId,
-        conversation,
-        conversationId: input.conversationId,
-        assistantMessageId,
-        prompt: input.content,
-        attachmentIds: input.attachments || [],
-        agentOverrides: input.agentOverrides,
-      });
-
-      // Fire-and-forget: generate summary if the conversation is long enough
-      void maybeSummarize(userId, input.conversationId).catch(() => {});
-
-      send({
-        type: "done",
-        messageId: assistantMessageId,
-        model: modelId || undefined,
-        agentRun,
-      });
-      return;
-    }
 
     const resolvedChannel = await getResolvedChannelForConversation(userId, conversation);
     const settings = await getSettingValues(userId, [
@@ -1303,6 +799,26 @@ export async function streamMessage(
   });
 }
 
+/**
+ * Edit-and-resend replays the round as the mode of its reply (or, when the user
+ * message is the conversation tail, of the user message). An agent round is
+ * re-run by the sidecar, never here — reject it before the stream opens so the
+ * caller gets a 4xx instead of an SSE error. Missing / foreign messages fall
+ * through to the stream, which reports them as before.
+ */
+async function assertEditTargetsChatTurn(userId: string, userMessageId: string) {
+  const [userMsg] = await db.select().from(messages).where(eq(messages.id, userMessageId));
+  if (!userMsg || userMsg.role !== "user") return;
+  await getConversationForUser(userId, userMsg.conversationId);
+  const allMsgs = await getMessages(userMsg.conversationId);
+  const idx = allMsgs.findIndex((m) => m.id === userMessageId);
+  if (idx < 0) return;
+  const nextMsg = allMsgs[idx + 1];
+  if ((nextMsg?.mode ?? userMsg.mode) === "agent") {
+    throw new AgentModeUnsupportedError();
+  }
+}
+
 export async function editUserMessage(
   userId: string,
   userMessageId: string,
@@ -1312,6 +828,7 @@ export async function editUserMessage(
     appendSystemPrompt?: string;
   },
 ): Promise<ReadableStream> {
+  await assertEditTargetsChatTurn(userId, userMessageId);
   return createSseStream(async (send, ctx) => {
     const [userMsg] = await db.select().from(messages).where(eq(messages.id, userMessageId));
     if (!userMsg || userMsg.role !== "user") {
@@ -1335,7 +852,6 @@ export async function editUserMessage(
       return;
     }
     const assistantMessageId = nextMsg?.id ?? generateId();
-    const assistantMode = (nextMsg?.mode ?? userMsg.mode) === "agent" ? "agent" : "chat";
 
     // Update the user message content
     await db
@@ -1348,50 +864,6 @@ export async function editUserMessage(
     const contextMsgs = allMsgs
       .slice(0, idx + 1)
       .map((m) => (m.id === userMessageId ? { ...m, content: newContent.trim() } : m));
-    if (assistantMode === "agent") {
-      const attachmentIds = parseJsonArray(userMsg.attachments);
-      const contextPaths = parseJsonArray(userMsg.contextPaths);
-      const workspaceId =
-        nextMsg?.workspaceId || userMsg.workspaceId || conversation.workspaceId || null;
-
-      if (shouldCreateAssistantReply) {
-        await db.insert(messages).values({
-          id: assistantMessageId,
-          conversationId: userMsg.conversationId,
-          role: "assistant",
-          content: "",
-          model: conversation.modelId || null,
-          mode: "agent",
-          attachments: null,
-          agentRun: null,
-          workspaceId,
-          contextPaths: contextPaths.length > 0 ? JSON.stringify(contextPaths) : null,
-          liveMetadata: null,
-          citations: null,
-          createdAt: new Date(),
-        });
-      }
-
-      const { agentRun, modelId } = await applyTaskBackedAgentTurnToMessage({
-        userId,
-        conversation,
-        conversationId: userMsg.conversationId,
-        assistantMessageId,
-        prompt: newContent.trim(),
-        attachmentIds,
-        workspaceId,
-        contextPaths,
-      });
-
-      send({
-        type: "done",
-        messageId: assistantMessageId,
-        model: modelId || undefined,
-        agentRun,
-      });
-      return;
-    }
-
     const resolvedChannel = await getResolvedChannelForConversation(userId, conversation);
     const settings = await getSettingValues(userId, [
       GLOBAL_SYSTEM_PROMPT_KEY,
@@ -1516,6 +988,12 @@ export async function regenerateMessage(
     });
   }
 
+  // An agent reply is regenerated by the sidecar, never here.
+  if (prefetchedAssistantMsg?.role === "assistant" && prefetchedAssistantMsg.mode === "agent") {
+    await getConversationForUser(userId, prefetchedAssistantMsg.conversationId);
+    throw new AgentModeUnsupportedError();
+  }
+
   return createSseStream(async (send, ctx) => {
     const assistantMsg =
       prefetchedAssistantMsg && prefetchedAssistantMsg.role === "assistant"
@@ -1527,54 +1005,6 @@ export async function regenerateMessage(
     }
 
     const conversation = await getConversationForUser(userId, assistantMsg.conversationId);
-    const assistantMode = assistantMsg.mode === "agent" ? "agent" : "chat";
-
-    if (assistantMode === "agent") {
-      const allMsgs = await getMessages(assistantMsg.conversationId);
-      const idx = allMsgs.findIndex((m) => m.id === assistantMessageId);
-      if (idx <= 0) {
-        send({ type: "error", message: "找不到对应的用户消息" });
-        return;
-      }
-
-      let userMsg: (typeof allMsgs)[number] | null = null;
-      for (let i = idx - 1; i >= 0; i -= 1) {
-        if (allMsgs[i]?.role === "user") {
-          userMsg = allMsgs[i];
-          break;
-        }
-      }
-
-      if (!userMsg) {
-        send({ type: "error", message: "找不到对应的用户消息" });
-        return;
-      }
-
-      const attachmentIds = parseJsonArray(userMsg.attachments);
-      const contextPaths = parseJsonArray(userMsg.contextPaths);
-      const workspaceId =
-        assistantMsg.workspaceId || userMsg.workspaceId || conversation.workspaceId || null;
-
-      const { agentRun, modelId } = await applyTaskBackedAgentTurnToMessage({
-        userId,
-        conversation,
-        conversationId: assistantMsg.conversationId,
-        assistantMessageId,
-        prompt: userMsg.content,
-        attachmentIds,
-        workspaceId,
-        contextPaths,
-      });
-
-      send({
-        type: "done",
-        messageId: assistantMessageId,
-        model: modelId || undefined,
-        agentRun,
-      });
-      return;
-    }
-
     const allMsgs = await getMessages(assistantMsg.conversationId);
     const idx = allMsgs.findIndex((m) => m.id === assistantMessageId);
     const contextMsgs = idx > 0 ? allMsgs.slice(0, idx) : allMsgs;
@@ -1713,7 +1143,8 @@ export async function syncSidecarMessages(
     attachmentsMeta?: Array<{ fileName: string; fileType?: string; fileSize?: number }>;
     // When both ids are provided and belong to this conversation, the existing
     // round is UPDATED in place (used by edit-and-resend) instead of inserting a
-    // new pair — otherwise editing would duplicate the round on reload.
+    // new pair — otherwise editing would duplicate the round on reload. With only
+    // `userMessageId`, that user message is updated and a reply inserted.
     userMessageId?: string;
     assistantMessageId?: string;
   },
@@ -1782,28 +1213,59 @@ export async function syncSidecarMessages(
     }
   }
 
-  const userMessageId = generateId();
+  // Only the user id: edit-and-resend of a user message that never got a reply.
+  // The user message is updated in place and the reply is inserted after it —
+  // inserting a fresh pair would duplicate the question on reload.
+  const existingUserOnly =
+    input.userMessageId && !input.assistantMessageId
+      ? await db.query.messages.findFirst({
+          where: and(
+            eq(messages.id, input.userMessageId),
+            eq(messages.conversationId, input.conversationId),
+            eq(messages.role, "user"),
+          ),
+        })
+      : undefined;
+
+  const userMessageId = existingUserOnly?.id ?? generateId();
   const assistantMessageId = generateId();
 
-  await db.insert(messages).values({
-    id: userMessageId,
-    conversationId: input.conversationId,
-    role: "user",
-    content: input.userContent,
-    mode: input.mode || "agent",
-    attachments: null,
-    agentRun: null,
-    createdAt: now,
-  });
-  await ftsUpsert(userMessageId, input.conversationId, input.userContent);
+  if (existingUserOnly) {
+    await db
+      .update(messages)
+      .set({ content: input.userContent })
+      .where(eq(messages.id, userMessageId));
+    await ftsUpsert(userMessageId, input.conversationId, input.userContent);
+    if (Array.isArray(input.attachmentsMeta)) {
+      await db.delete(attachments).where(eq(attachments.messageId, userMessageId));
+      await insertSidecarAttachmentMeta(
+        input.conversationId,
+        userMessageId,
+        input.attachmentsMeta,
+        now,
+      );
+    }
+  } else {
+    await db.insert(messages).values({
+      id: userMessageId,
+      conversationId: input.conversationId,
+      role: "user",
+      content: input.userContent,
+      mode: input.mode || "agent",
+      attachments: null,
+      agentRun: null,
+      createdAt: now,
+    });
+    await ftsUpsert(userMessageId, input.conversationId, input.userContent);
 
-  if (Array.isArray(input.attachmentsMeta) && input.attachmentsMeta.length > 0) {
-    await insertSidecarAttachmentMeta(
-      input.conversationId,
-      userMessageId,
-      input.attachmentsMeta,
-      now,
-    );
+    if (Array.isArray(input.attachmentsMeta) && input.attachmentsMeta.length > 0) {
+      await insertSidecarAttachmentMeta(
+        input.conversationId,
+        userMessageId,
+        input.attachmentsMeta,
+        now,
+      );
+    }
   }
 
   await db.insert(messages).values({
@@ -1818,7 +1280,11 @@ export async function syncSidecarMessages(
     usage: input.usage ? JSON.stringify(input.usage) : null,
     liveMetadata: null,
     citations: null,
-    createdAt: new Date(now.getTime() + 1),
+    // createdAt is stored in whole seconds; a reply to an existing user message
+    // must still sort after it.
+    createdAt: existingUserOnly
+      ? new Date(Math.max(now.getTime(), existingUserOnly.createdAt.getTime() + 1000))
+      : new Date(now.getTime() + 1),
   });
   await ftsUpsert(assistantMessageId, input.conversationId, assistantContent);
 

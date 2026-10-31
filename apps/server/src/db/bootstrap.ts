@@ -3,6 +3,7 @@ import type { ResultSet, Row } from "@libsql/client";
 import { normalizeStoredAgentReply } from "../services/agentReplyNormalization";
 import { selectTaskFailure, selectTaskReplyText } from "../services/agentTaskMessage";
 import { client } from "./index";
+import { settleServerAgentTasks } from "./settleServerAgentTasks";
 
 type ForeignKeyExpectation = {
   from: string;
@@ -1342,10 +1343,10 @@ async function ensureMessagesFtsTable(): Promise<void> {
  * the FTS row whenever `content` changes. See `normalizeStoredAgentReply` for
  * the legacy row shapes. Task-backed rows whose task still exists are rebuilt
  * from the task's full final_result (they used to store the 160-char card
- * preview, or the error string), with the same selection the live path uses.
+ * preview, or the error string), selecting the result as `agentTaskMessage` does.
  *
  * Idempotent: a row already in line normalizes to itself and is not written.
- * Exported for tests.
+ * Runs once per database (see ONE_TIME_MIGRATIONS). Exported for tests.
  */
 export async function backfillAgentReplyContent(): Promise<number> {
   const result = await client.execute(
@@ -1533,7 +1534,44 @@ export async function bootstrapDatabase(): Promise<void> {
   // table) so the backfill reads the final rows.
   await ensureMessagesFtsTable();
 
-  // After the FTS table exists, so the backfilled text is indexed too. Reads
+  // After the FTS table exists, so backfilled text is indexed too. Reads
   // agent_tasks / agent_runs / agent_artifacts, all created above.
-  await backfillAgentReplyContent();
+  await runOneTimeMigrations();
+}
+
+/**
+ * Data migrations that only ever need to run once per database, in order. The
+ * database's `PRAGMA user_version` records how many have been applied, so each
+ * runs on the first boot that sees it and never again. Append only: never
+ * reorder or remove an entry, or a database will skip or re-run one.
+ *
+ * Schema changes do not belong here — they stay idempotent `ensure*` steps
+ * above, which also cover a database rebuilt from SCHEMA_DDL.
+ */
+const ONE_TIME_MIGRATIONS: ReadonlyArray<() => Promise<unknown>> = [
+  // 1. Server-run agent turns can no longer execute or be approved: settle
+  //    the ones left open. Before the backfill, so it sees the final statuses.
+  settleServerAgentTasks,
+  // 2. Reply-text invariant for agent rows stored before it. Every write path
+  //    has upheld it since, so a full-table pass per boot is wasted work.
+  backfillAgentReplyContent,
+];
+
+async function readUserVersion(): Promise<number> {
+  const result = await client.execute("PRAGMA user_version;");
+  const value = Number(getRows(result)[0]?.user_version ?? 0);
+  return Number.isFinite(value) ? value : 0;
+}
+
+/**
+ * Applies the one-time migrations this database has not run yet. A migration
+ * that throws leaves the version where it was, so it is retried on next boot.
+ * Exported for tests.
+ */
+export async function runOneTimeMigrations(): Promise<void> {
+  const applied = await readUserVersion();
+  for (let index = applied; index < ONE_TIME_MIGRATIONS.length; index++) {
+    await ONE_TIME_MIGRATIONS[index]();
+    await client.execute(`PRAGMA user_version = ${index + 1};`);
+  }
 }

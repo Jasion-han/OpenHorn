@@ -87,7 +87,8 @@ export interface ServerApi {
       // stored so the user's bubble keeps its attachment chips across reloads.
       attachmentsMeta?: Array<{ fileName: string; fileType?: string; fileSize?: number }>;
       // When both are provided, the existing round is updated in place instead of
-      // inserting a new pair (edit-and-resend), preventing duplicate rounds.
+      // inserting a new pair (edit-and-resend), preventing duplicate rounds. With
+      // only `userMessageId`, that message is updated and the reply inserted.
       userMessageId?: string;
       assistantMessageId?: string;
     }) => Promise<{ userMessageId: string; assistantMessageId: string }>;

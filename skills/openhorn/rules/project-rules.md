@@ -16,6 +16,8 @@
 
 对全新部署而言，bootstrap DDL 才是权威。
 
+只需对每个数据库执行一次的**数据**迁移（回填、存量修正）追加到 `bootstrap.ts` 的 `ONE_TIME_MIGRATIONS` 末尾：`PRAGMA user_version` 记录已执行条数，只能追加，不能重排或删除。Schema 变更仍写成幂等的 `ensure*` 步骤。
+
 ## Agent Runtime
 
 - Agent runtime 的选择由 `channelAgentCheckService.resolveAgentRuntime()` 根据 channel 协议及端点探测结果决定
@@ -27,7 +29,7 @@
 - 中文用户面文案走 `apps/desktop/src/lib/i18n/agent.ts` 字典取值，这是**唯一允许出现中文用户文案的源头**
 - 禁止在组件里内联中文字符串；字典查不到时返回 `null`，调用方显式降级（不渲染），**禁止用 fallback 字符串**
 - 错误展示走结构化 `errorCode` / `runtimeIssue` 查字典，不做字符串匹配翻译
-- server 绝不编造 `message.content`：有 agentRun 的 assistant 消息 content 一律由 `shared/message-text` 的 `assistantMessageContent` 从 text 步骤推导；任务型回合无 final_result 时 content 为空字符串，卡片预览只进 `agentRun.summary`（`buildTaskCardSummary`）
+- server 绝不编造 `message.content`：有 agentRun 的 assistant 消息 content 一律由 `shared/message-text` 的 `assistantMessageContent` 从 text 步骤推导；服务端不再执行 Agent 回合（旧任务型回合仅由 bootstrap 一次性回填处理），没有 text 步骤的 run content 为空字符串
 - Process 行 / 状态机字面量 / 工具名一律保留英文（`Bash` / `Search` / `Approved` 等）
 
 ## 环境变量

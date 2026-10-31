@@ -1,18 +1,14 @@
-import type { AgentTaskDetail } from "./agentTaskService";
-
 /**
- * What a task-backed agent message shows, split by role:
+ * What a legacy task-backed (server-run) agent message shows, split by role:
  *
  * - the **reply text** — the full content of the task's final_result artifact,
  *   stored as the run's `text` step and therefore (through the shared
  *   `assistantMessageContent` rule) as the message `content`;
  * - the **failure** — the latest execution run's error, stored in
- *   `agentRun.error` and never in `content`;
- * - the **card summary** — `task.insight.previewText`, a 160-char clipped
- *   preview for the run's meta line. It is display chrome, never the reply.
+ *   `agentRun.error` and never in `content`.
  *
- * The selectors take minimal shapes so the bootstrap backfill can run the exact
- * same selection over raw rows.
+ * The server no longer creates such turns; these selectors are kept for the
+ * one-time bootstrap backfill, which runs them over raw rows.
  */
 
 type RunLike = { id: string; phase: string; error?: string | null };
@@ -40,20 +36,4 @@ export function selectTaskFailure(taskStatus: string, runs: RunLike[]): string |
   if (taskStatus !== "failed") return undefined;
   const error = runs.find((run) => run.phase === "execution")?.error?.trim();
   return error || undefined;
-}
-
-export function buildTaskReplyText(detail: AgentTaskDetail): string {
-  return selectTaskReplyText(detail.runs, detail.artifacts);
-}
-
-export function buildTaskFailure(detail: AgentTaskDetail): string | undefined {
-  return selectTaskFailure(detail.task.status, detail.runs);
-}
-
-/**
- * The clipped card preview for the run's meta line (`agentRun.summary`). Never
- * an invented placeholder: empty when the task has no real preview yet.
- */
-export function buildTaskCardSummary(detail: AgentTaskDetail): string {
-  return detail.task.insight?.previewText?.trim() ?? "";
 }

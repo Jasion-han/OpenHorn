@@ -39,10 +39,11 @@ export function normalizeStoredAgentReply(
   let next: Record<string, unknown> | null = null;
 
   if (task) {
-    const rebuilt = [
-      ...steps.filter((step) => !isTextStep(step)),
-      ...(task.replyText ? [{ type: "text", content: task.replyText }] : []),
-    ];
+    // A task without a final_result has no reply to rebuild from — the steps
+    // the row already carries are kept rather than dropped.
+    const rebuilt = task.replyText
+      ? [...steps.filter((step) => !isTextStep(step)), { type: "text", content: task.replyText }]
+      : steps;
     const error = task.failure ?? (typeof run.error === "string" ? run.error : undefined);
     const candidate: Record<string, unknown> = { ...run, steps: rebuilt };
     if (error) candidate.error = error;

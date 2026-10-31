@@ -338,7 +338,16 @@ export function AgentRunPanel({
     isInProgress ||
     Boolean(run.agentInfo) ||
     Boolean(run.contextUsage);
-  if (!shouldRender) return null;
+  if (!shouldRender) {
+    // A run that was cancelled before producing anything (e.g. a legacy
+    // server-run turn that never executed) would otherwise be a blank bubble.
+    if (run.status !== "cancelled") return null;
+    return (
+      <section className="mt-0.5 px-1 pt-0 pb-1">
+        <DesktopAgentTaskMetaLine text={getChatLabel("chat.agent.cancelled")} />
+      </section>
+    );
+  }
 
   // An in-progress run that has not yet produced any steps, text, or error would
   // otherwise render nothing — causing a brief blank when switching back to an

@@ -3,12 +3,7 @@ import { conversations, messages, users } from "db";
 import { eq } from "drizzle-orm";
 import { client, db } from "../db";
 import { backfillAgentReplyContent } from "../db/bootstrap";
-import type { AgentTaskDetail } from "./agentTaskService";
-import {
-  buildTaskBackedAgentRun,
-  syncSidecarMessages,
-  syncTaskBackedMessages,
-} from "./messageService";
+import { syncSidecarMessages } from "./messageService";
 
 /**
  * An agent reply's `content` must equal its agentRun text steps: search,
@@ -122,115 +117,10 @@ test("sidecar sync stores empty content for a run without text steps (no fallbac
 });
 
 // ---------------------------------------------------------------------------
-// Task-backed (server-run) turns
+// Legacy task-backed (server-run) turns — settled by the bootstrap backfill
 // ---------------------------------------------------------------------------
 
-function taskDetail(overrides: {
-  status: AgentTaskDetail["task"]["status"];
-  runs?: Array<{ id: string; phase: "planning" | "execution"; error?: string | null }>;
-  artifacts?: Array<{ runId: string; type: "final_result" | "execution_summary"; content: string }>;
-  previewText?: string | null;
-}): AgentTaskDetail {
-  const now = new Date().toISOString();
-  return {
-    task: {
-      id: "task-1",
-      userId: "user-1",
-      conversationId: "conv-1",
-      channelId: null,
-      modelId: null,
-      title: "t",
-      goal: "g",
-      attachments: [],
-      complexity: "standard",
-      uxMode: "compact",
-      requiresPlanApproval: false,
-      autoStart: true,
-      status: overrides.status,
-      insight: overrides.previewText
-        ? {
-            highlight: null,
-            summary: overrides.previewText,
-            previewKind: "result",
-            previewText: overrides.previewText,
-            runCount: 1,
-            latestRunStatus: null,
-            latestRunPhase: null,
-            latestApprovalType: null,
-            latestApprovalStatus: null,
-            hasFinalResult: true,
-          }
-        : null,
-      createdAt: now,
-      updatedAt: now,
-    },
-    runs: (overrides.runs ?? []).map((run) => ({
-      id: run.id,
-      taskId: "task-1",
-      phase: run.phase,
-      status: "completed",
-      summary: null,
-      error: run.error ?? null,
-      startedAt: null,
-      completedAt: null,
-      createdAt: now,
-      updatedAt: now,
-    })),
-    planSteps: [],
-    approvals: [],
-    artifacts: (overrides.artifacts ?? []).map((artifact, index) => ({
-      id: `artifact-${index}`,
-      taskId: "task-1",
-      runId: artifact.runId,
-      type: artifact.type,
-      title: "result",
-      content: artifact.content,
-      metadata: null,
-      createdAt: now,
-      updatedAt: now,
-    })),
-    events: [],
-    runtime: null,
-  };
-}
-
 const LONG_ANSWER = `answer ${"x".repeat(2000)}`;
-
-test("task-backed run carries the full final_result as its text step", () => {
-  const run = buildTaskBackedAgentRun(
-    taskDetail({
-      status: "completed",
-      runs: [{ id: "exec-1", phase: "execution" }],
-      artifacts: [{ runId: "exec-1", type: "final_result", content: LONG_ANSWER }],
-      previewText: "answer xxx…",
-    }),
-  );
-  expect(run.steps).toEqual([{ type: "text", content: LONG_ANSWER }]);
-  expect(run.summary).toBe("answer xxx…");
-  expect(run.error).toBeUndefined();
-  expect(run.status).toBe("completed");
-});
-
-test("task-backed run without a final result has no text step", () => {
-  const run = buildTaskBackedAgentRun(
-    taskDetail({ status: "awaiting_approval", runs: [{ id: "plan-1", phase: "planning" }] }),
-  );
-  expect(run.steps).toEqual([]);
-  expect(run.status).toBe("awaiting_approval");
-});
-
-test("failed task-backed run puts the error in agentRun.error, not in a step", () => {
-  const run = buildTaskBackedAgentRun(
-    taskDetail({
-      status: "failed",
-      runs: [{ id: "exec-1", phase: "execution", error: "provider exploded" }],
-      previewText: "provider exploded",
-    }),
-  );
-  expect(run.status).toBe("failed");
-  expect(run.error).toBe("provider exploded");
-  expect(run.steps).toEqual([]);
-});
 
 async function seedTask(
   userId: string,
@@ -257,36 +147,6 @@ async function seedTask(
     });
   }
 }
-
-test("syncTaskBackedMessages writes the full result as content and syncs FTS", async () => {
-  const userId = crypto.randomUUID();
-  const conversationId = crypto.randomUUID();
-  const taskId = crypto.randomUUID();
-  const messageId = crypto.randomUUID();
-  try {
-    await seed(userId, conversationId);
-    await seedTask(userId, conversationId, {
-      id: taskId,
-      status: "completed",
-      result: LONG_ANSWER,
-    });
-    await db.insert(messages).values({
-      id: messageId,
-      conversationId,
-      role: "assistant",
-      mode: "agent",
-      content: "answer xxx…",
-      agentRun: JSON.stringify({ status: "running", summary: "", steps: [], taskId }),
-      createdAt: new Date(),
-    });
-
-    await syncTaskBackedMessages(userId, taskId);
-    expect(await contentOf(messageId)).toBe(LONG_ANSWER);
-    expect(await ftsContentOf(messageId)).toEqual([LONG_ANSWER]);
-  } finally {
-    await cleanup(userId, conversationId);
-  }
-});
 
 test("backfill brings every legacy agent row in line with its run, once", async () => {
   const userId = crypto.randomUUID();

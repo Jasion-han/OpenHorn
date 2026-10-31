@@ -60,8 +60,8 @@ sidecar 侧有**三个** runtime 入口，共用 `agent/system-prompt.ts` 这一
 - `channelService.ts` — provider channel CRUD + 密钥加密
 - `channelAgentCheckService.ts` — agent 能力探测 + runtime 选择
 - `agentSdk.ts` — Claude Agent SDK 分支
-- `agentTaskService.ts` / `agentPlanBuilder.ts` / `agentTaskMessage.ts` — task / plan / run 数据模型
-- `messageService.ts` — 消息读写，含 `syncSidecarMessages`（sidecar 回合落库，带 usage）
+- `agentTaskMessage.ts` / `agentReplyNormalization.ts` — 旧服务端任务型 Agent 回合的回复选择，只供 bootstrap 一次性回填
+- `messageService.ts` — 消息读写，含 `syncSidecarMessages`（sidecar 回合落库，带 usage）。Agent 只在 sidecar 执行：`/messages`、`/messages/stream`、regenerate、edit 收到 Agent 回合一律 400（`code: "agent_mode_unsupported"`）
 - `mcpLoader.ts` / `mcpService.ts` — MCP server 配置
 - `liveCapabilities.ts` / `liveRouteClassifier.ts` / `searchService.ts` — 实时搜索路由
 - `attachmentService.ts` / `attachmentParser.ts` — 附件上传与解析

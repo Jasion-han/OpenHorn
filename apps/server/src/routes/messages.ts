@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { parseAppendSystemPrompt } from "../services/appendSystemPrompt";
 import {
+  AgentModeUnsupportedError,
   completeChatFromSidecar,
   deleteMessage,
   editUserMessage,
@@ -36,6 +37,11 @@ function parseUsagePayload(
     return undefined;
   }
   return { promptTokens, completionTokens, totalTokens };
+}
+
+/** Body for a rejected agent-mode request; agent turns run only in the sidecar. */
+function agentModeUnsupportedBody(error: AgentModeUnsupportedError) {
+  return { error: error.message, code: error.code };
 }
 
 const messages = new Hono<UserEnv>();
@@ -84,6 +90,9 @@ messages.post("/", async (c) => {
     const result = await sendMessage(user.id, body);
     return c.json(result);
   } catch (error) {
+    if (error instanceof AgentModeUnsupportedError) {
+      return c.json(agentModeUnsupportedBody(error), 400);
+    }
     return c.json(
       {
         error: error instanceof Error ? error.message : "Failed to send message",
@@ -118,6 +127,9 @@ messages.post("/stream", async (c) => {
       },
     });
   } catch (error) {
+    if (error instanceof AgentModeUnsupportedError) {
+      return c.json(agentModeUnsupportedBody(error), 400);
+    }
     return c.json(
       {
         error: error instanceof Error ? error.message : "Failed to stream message",
@@ -159,6 +171,9 @@ messages.post("/:id/regenerate", async (c) => {
       },
     });
   } catch (error) {
+    if (error instanceof AgentModeUnsupportedError) {
+      return c.json(agentModeUnsupportedBody(error), 400);
+    }
     return c.json({ error: error instanceof Error ? error.message : "Failed" }, 400);
   }
 });
@@ -187,6 +202,9 @@ messages.post("/:id/edit", async (c) => {
       },
     });
   } catch (error) {
+    if (error instanceof AgentModeUnsupportedError) {
+      return c.json(agentModeUnsupportedBody(error), 400);
+    }
     return c.json({ error: error instanceof Error ? error.message : "Failed" }, 400);
   }
 });

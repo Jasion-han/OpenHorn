@@ -249,9 +249,11 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
         // temp-/draft- ids don't exist server-side, so fall back to insert.
         const isPersistedId = (id?: string) =>
           Boolean(id && !id.startsWith("temp-") && !id.startsWith("draft-"));
-        const updateInPlace =
-          isPersistedId(input.existingUserMessageId) &&
-          isPersistedId(input.existingAssistantMessageId);
+        // Both ids: the round is updated in place (retry / edit-and-resend).
+        // Only the user id: an edit of a user message that never got a reply —
+        // it is updated in place and the reply inserted after it.
+        const reuseUser = isPersistedId(input.existingUserMessageId);
+        const reuseAssistant = reuseUser && isPersistedId(input.existingAssistantMessageId);
         const res = await api.messages.syncSidecar({
           conversationId: input.conversationId,
           userContent: input.displayContent ?? input.prompt,
@@ -260,12 +262,8 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
           agentRun: agentRun ?? undefined,
           usage: runUsage ?? undefined,
           attachmentsMeta: input.attachmentsMeta,
-          ...(updateInPlace
-            ? {
-                userMessageId: input.existingUserMessageId,
-                assistantMessageId: input.existingAssistantMessageId,
-              }
-            : {}),
+          ...(reuseUser ? { userMessageId: input.existingUserMessageId } : {}),
+          ...(reuseAssistant ? { assistantMessageId: input.existingAssistantMessageId } : {}),
         });
         // If cancel() fired while syncSidecar was in flight, undo the
         // persistence immediately so the empty round doesn't resurface
@@ -273,7 +271,10 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
         if (cancelledRef.current && res?.userMessageId && res?.assistantMessageId) {
           try {
             await api.messages.delete(res.assistantMessageId);
-            await api.messages.delete(res.userMessageId);
+            // A reused user message predates this run — only undo what it inserted.
+            if (res.userMessageId !== input.existingUserMessageId) {
+              await api.messages.delete(res.userMessageId);
+            }
           } catch {
             // best-effort undo
           }

@@ -13,6 +13,7 @@ import {
   Textarea,
 } from "ui";
 import { useSidecarAgentRun } from "../../hooks/useSidecarAgentRun";
+import { type RerunRoute, resolveRerunRoute } from "../../lib/agentRerunRoute";
 import { filesToAttachmentParts } from "../../lib/attachmentParts";
 import { uploadAttachments } from "../../lib/attachments";
 import { getDesktopBackendBase } from "../../lib/backendBase";
@@ -46,6 +47,7 @@ import {
   stripSlashToken,
 } from "../../lib/slashToken";
 import { readSseStream } from "../../lib/sse";
+import { selectStoppedRunOrphans } from "../../lib/stopCleanup";
 import { discoverSkills, skillsDisabledList } from "../../lib/tauriBridge";
 import { useChatStore } from "../../stores/chatStore";
 import { useDesktopShellStore } from "../../stores/desktopShellStore";
@@ -1228,6 +1230,26 @@ export function DesktopChatArea() {
     }
   };
 
+  // Regenerate / edit-and-resend of an agent round runs in the sidecar, exactly
+  // like a fresh agent send: without a channel or a usable model it reports the
+  // send path's error instead of handing the round to the server (which no
+  // longer runs agent turns). Checked before the bubble is touched, so a refused
+  // rerun leaves the existing answer on screen.
+  const routeRerun = (mode: Message["mode"]): RerunRoute | null => {
+    const route = resolveRerunRoute({
+      mode,
+      channelId: currentConversation?.channelId,
+      effectiveModel,
+    });
+    if (route.kind !== "unavailable") return route;
+    const message = getChatLabel(
+      route.reason === "noChannel" ? "chat.error.noChannel" : "chat.error.noModel",
+    );
+    notifyWarning(getChatLabel("chat.agentUnavailableTitle"), message);
+    setError(message);
+    return null;
+  };
+
   const handleRetryMessage = async (messageId: string) => {
     if (!currentConversation) return;
 
@@ -1245,6 +1267,11 @@ export function DesktopChatArea() {
         break;
       }
     }
+
+    const route = routeRerun(assistantMessage.mode);
+    if (!route) return;
+    // An agent reply is re-run from its prompt; without one there is nothing to run.
+    if (route.kind === "sidecar" && !userMessage) return;
 
     if (userMessage) {
       pendingScrollTargetRef.current = { type: "message", id: userMessage.id };
@@ -1271,11 +1298,8 @@ export function DesktopChatArea() {
           : undefined,
     });
 
-    const isSidecarRetry =
-      assistantMessage?.mode === "agent" && currentConversation.channelId && effectiveModel.ok;
-
     try {
-      if (isSidecarRetry && userMessage) {
+      if (route.kind === "sidecar" && userMessage) {
         if (sidecarRun.isBusy) {
           await sidecarRun.cancel();
         }
@@ -1296,11 +1320,8 @@ export function DesktopChatArea() {
           resolveSkillMcpSlash(userMessage.content);
         await sidecarRun.startRun({
           conversationId: currentConversation.id,
-          // Guarded: `isSidecarRetry` is only truthy when channelId is, so this is
-          // non-null at runtime. TypeScript cannot narrow through the alias.
-          // biome-ignore lint/style/noNonNullAssertion: guarded by isSidecarRetry above
-          channelId: currentConversation.channelId!,
-          modelId: effectiveModel.ok ? effectiveModel.modelId : "",
+          channelId: route.channelId,
+          modelId: route.modelId,
           assistantMessageId: messageId,
           // Regenerating REPLACES this round. Without these ids the sidecar's
           // persist step falls back to inserting a fresh user+assistant pair, so
@@ -1394,6 +1415,12 @@ export function DesktopChatArea() {
     }
 
     const { userMessage, assistantMessage: existingAssistantMessage } = editable;
+    // The round's mode is the user message's: an editable round's reply, when
+    // there is one, has the same mode. A user message with no reply yet is still
+    // an agent round and runs in the sidecar like a fresh send. A refused rerun
+    // keeps the editor open with the draft intact.
+    const route = routeRerun(userMessage.mode);
+    if (!route) return;
     const assistantMessageId = existingAssistantMessage?.id ?? `temp-assistant-edit-${Date.now()}`;
     handleCancelEdit();
     pendingScrollTargetRef.current = { type: "message", id: userMessage.id };
@@ -1439,13 +1466,8 @@ export function DesktopChatArea() {
       });
     }
 
-    const useSidecarForEdit =
-      existingAssistantMessage?.mode === "agent" &&
-      currentConversation.channelId &&
-      effectiveModel.ok;
-
     try {
-      if (useSidecarForEdit) {
+      if (route.kind === "sidecar") {
         const historyMsgs = useChatStore
           .getState()
           .messages.filter(
@@ -1457,10 +1479,8 @@ export function DesktopChatArea() {
           await resolveRunSettings(chatAreaApi, forceWebSearch);
         await sidecarRun.startRun({
           conversationId: currentConversation.id,
-          // Same guarantee as the retry path, via `useSidecarForEdit`.
-          // biome-ignore lint/style/noNonNullAssertion: guarded by useSidecarForEdit above
-          channelId: currentConversation.channelId!,
-          modelId: effectiveModel.ok ? effectiveModel.modelId : "",
+          channelId: route.channelId,
+          modelId: route.modelId,
           assistantMessageId,
           prompt: editSendContent,
           displayContent: editDisplayContent,
@@ -1539,6 +1559,27 @@ export function DesktopChatArea() {
   const handleStop = async () => {
     // Never cancel another conversation's run from here.
     if (!streamingHere) return;
+    // Identify the stopped run's own reply BEFORE anything is reset: the id the
+    // area is streaming into, the sidecar run's bound message, and any reply of
+    // this conversation still marked in progress (the area's own id is cleared
+    // on a conversation switch while the run keeps going). Cleanup below never
+    // looks beyond these — other rows of the conversation are not this run's.
+    const stoppedConversationId = currentConversation?.id ?? null;
+    const before = useChatStore.getState().messages;
+    const stoppedAssistantIds = [
+      streamingAssistantId,
+      sidecarRun.activeRun?.conversationId === stoppedConversationId
+        ? sidecarRun.activeRun?.messageId
+        : null,
+      ...before
+        .filter(
+          (m) =>
+            m.conversationId === stoppedConversationId &&
+            m.role === "assistant" &&
+            (m.agentRun?.status === "partial" || m.agentRun?.status === "running"),
+        )
+        .map((m) => m.id),
+    ];
     if (sidecarRun.isBusy) {
       await sidecarRun.cancel();
     }
@@ -1547,28 +1588,18 @@ export function DesktopChatArea() {
     setLoading(false);
     setStreaming(false);
     setStreamingAssistantId(null);
-    if (!currentConversation) return;
+    if (!stoppedConversationId) return;
     try {
-      await loadMessages(currentConversation.id);
+      await loadMessages(stoppedConversationId);
     } catch {
       // ignore reload failures after stop
     }
-    const msgs = useChatStore.getState().messages;
-    // An agent run that failed keeps its error in agentRun, and a run that only
-    // used tools has a timeline but no reply text — an empty `content` alone does
-    // not make either an orphan.
-    const orphans = msgs.filter(
-      (m) =>
-        m.role === "assistant" &&
-        !m.content?.trim() &&
-        !m.agentRun?.error &&
-        !(m.agentRun?.steps?.length ?? 0),
-    );
-    for (const orphan of orphans) {
+    const after = useChatStore.getState().messages;
+    for (const orphanId of selectStoppedRunOrphans({ stoppedAssistantIds, before, after })) {
       try {
-        await deleteMessage(orphan.id);
+        await deleteMessage(orphanId);
       } catch {
-        // best-effort: draft IDs don't exist server-side, ignore 404s
+        // best-effort: the row may already be gone server-side
       }
     }
     queueMicrotask(() => inputRef.current?.focus());

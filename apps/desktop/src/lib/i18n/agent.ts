@@ -668,6 +668,8 @@ export const chatLabels = {
   "chat.agent.processGroupRunning": "处理中 · {time} · {count} 个步骤",
   "chat.agent.processGroupNoTime": "{count} 个步骤",
   "chat.agent.waitingForModel": "等待模型响应",
+  // An agent run cancelled before it produced anything (no steps, no reply)
+  "chat.agent.cancelled": "已取消",
   "chat.agent.thinking": "思考",
   // ACP diff
   "chat.agent.diff.newFile": "New file",
