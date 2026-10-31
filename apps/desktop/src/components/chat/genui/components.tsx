@@ -59,10 +59,20 @@ const ALIGN: Record<string, string> = {
 const isElement = (value: unknown) =>
   !!value && typeof value === "object" && (value as { type?: unknown }).type === "element";
 
-const numberText = (value: unknown) =>
-  typeof value === "number" && Number.isFinite(value)
-    ? value.toLocaleString("zh-CN", { maximumFractionDigits: 2 })
-    : String(value ?? "");
+/**
+ * A model value as display text. Only scalars print (booleans too: Table cells
+ * and List items accept any value); an object (e.g. a derived `$x = ...` the
+ * model left unevaluated) would otherwise show as "[object Object]", so it and
+ * other non-scalars render empty.
+ */
+export const numberText = (value: unknown): string => {
+  if (typeof value === "string") return value;
+  if (typeof value === "boolean") return String(value);
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value.toLocaleString("zh-CN", { maximumFractionDigits: 2 });
+  }
+  return "";
+};
 
 /** The state key of a control: its label, its statement name, or a generated id. */
 function useFieldName(label: unknown, statementId?: string) {
@@ -75,7 +85,7 @@ function Field({ label, children: content }: { label?: string; children: ReactNo
   return (
     // biome-ignore lint/a11y/noLabelWithoutControl: the control is the child
     <label className={styles.field}>
-      <span className={styles.label}>{label}</span>
+      <span className={styles.label}>{numberText(label)}</span>
       {content}
     </label>
   );
@@ -202,7 +212,7 @@ export const Title = defineComponent({
   props: z.object({ text: z.string(), size: z.enum(["sm", "md", "lg", "xl"]).optional() }),
   description: "Heading; md for a card title, xl for the answer's headline.",
   component: ({ props }) => (
-    <h3 className={cn(styles.title, TITLE_SIZE[props.size ?? "md"])}>{String(props.text ?? "")}</h3>
+    <h3 className={cn(styles.title, TITLE_SIZE[props.size ?? "md"])}>{numberText(props.text)}</h3>
   ),
 });
 
@@ -243,7 +253,7 @@ export const Caption = defineComponent({
   name: "Caption",
   props: z.object({ text: z.string() }),
   description: "Small secondary text: units, sources, footnotes.",
-  component: ({ props }) => <span className={styles.caption}>{String(props.text ?? "")}</span>,
+  component: ({ props }) => <span className={styles.caption}>{numberText(props.text)}</span>,
 });
 
 export const Badge = defineComponent({
@@ -251,7 +261,7 @@ export const Badge = defineComponent({
   props: z.object({ text: z.string(), tone: tone.optional() }),
   description: "Short status chip.",
   component: ({ props }) => (
-    <span className={cn(styles.badge, toneClass(props.tone))}>{String(props.text ?? "")}</span>
+    <span className={cn(styles.badge, toneClass(props.tone))}>{numberText(props.text)}</span>
   ),
 });
 
@@ -266,7 +276,7 @@ export const List = defineComponent({
       <Tag className={styles.list} style={{ listStyleType: props.ordered ? "decimal" : "disc" }}>
         {items.map((item, index) => (
           // biome-ignore lint/suspicious/noArrayIndexKey: model-written lists have no ids
-          <li key={index}>{isElement(item) ? renderNode(item) : String(item ?? "")}</li>
+          <li key={index}>{isElement(item) ? renderNode(item) : numberText(item)}</li>
         ))}
       </Tag>
     );
@@ -284,9 +294,9 @@ export const Stat = defineComponent({
   description: "A headline number with its label, e.g. a result a calculator computes.",
   component: ({ props }) => (
     <div className={styles.stat}>
-      <span className={styles.label}>{String(props.label ?? "")}</span>
+      <span className={styles.label}>{numberText(props.label)}</span>
       <span className={cn(styles.statValue, toneClass(props.tone))}>{numberText(props.value)}</span>
-      {props.hint ? <span className={styles.caption}>{props.hint}</span> : null}
+      {props.hint ? <span className={styles.caption}>{numberText(props.hint)}</span> : null}
     </div>
   ),
 });
@@ -418,7 +428,7 @@ export const Slider = defineComponent({
         {props.label || props.unit ? (
           <div className={styles.sliderHead}>
             <label htmlFor={id} className={styles.label}>
-              {props.label}
+              {numberText(props.label)}
             </label>
             <output htmlFor={id} className={styles.sliderValue}>
               {readout}
@@ -584,7 +594,7 @@ export const Checkbox = defineComponent({
           onChange={(event) => field.setValue(event.target.checked)}
         />
         <span className={cn(checked && props.lineThrough && styles.lineThrough)}>
-          {String(props.label ?? "")}
+          {numberText(props.label)}
         </span>
       </label>
     );
@@ -601,7 +611,7 @@ export const Table = defineComponent({
   description:
     "Each row lists its cells in column order; a cell may be a component. Number columns align right.",
   component: ({ props, renderNode }) => {
-    const columns = Array.isArray(props.columns) ? props.columns.map((c) => String(c ?? "")) : [];
+    const columns = Array.isArray(props.columns) ? props.columns.map((c) => numberText(c)) : [];
     const rows = (Array.isArray(props.rows) ? props.rows : []).filter(Array.isArray) as unknown[][];
     const numeric = columns.map((_, c) => {
       const cells = rows.map((r) => r[c]).filter((v) => v != null && v !== "");

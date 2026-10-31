@@ -34,6 +34,12 @@ their fence closes.
   body (server: `services/appendSystemPrompt.ts`, 32,000-char cap → 400). The
   server appends it to that one call's system prompt and never persists it.
   Off means the request is byte-for-byte what it was before (the field is omitted).
+- Channels that drop the system prompt cannot use components: Codex CLI and
+  ACP ignore `systemPrompt`, and a Claude Code OAuth channel (`sk-ant-oat…`)
+  was observed answering as if it had no system prompt at all (2026-10-31).
+  The model then invents `openui-lang` syntax, which only renders as the
+  plain-code fallback. Verify a channel by asking it to quote a component
+  signature from its system prompt.
 
 ## Security boundaries (keep intact)
 
@@ -57,6 +63,16 @@ their fence closes.
   `load` events per `runDoc` (the srcdoc load is the first), and on a second
   one replaces the iframe with a one-line notice (`genui.frameNavigated`). A
   new `runDoc` (theme switch) restarts the count.
+- Tauri / WKWebView: wry runs the main window's `on_navigation` for **every
+  frame**, child frames included (`src-tauri/src/lib.rs`
+  `main_window_allows_navigation`). It must admit `about:srcdoc`, or every
+  `html-ui` frame stays blank in the desktop app while working in a browser.
+  Anything else off-app is cancelled and never handed to the OS `open`: a frame
+  can navigate itself without a click, and `open` would launch browsers or
+  URL-scheme handlers for it. External link clicks in the app go through the
+  shell plugin (`App.tsx` click handler) instead. In the desktop app a frame
+  that navigates away is therefore cancelled before it loads; the
+  second-`load` unload above is the browser-side backstop.
 - Accepted risk: `img-src https:` lets frame script send data the user typed
   into that frame to any host via image URLs. The frame can read no app data,
   and model-written pages need remote images, so this is accepted.
@@ -81,3 +97,10 @@ modules; the OpenUI runtime plus the lucide namespace is ~850 KB.
   shorter than the measured content and scrolls.
 - `:global(.dark)` in the CSS module: biome rejects it; use hues that read on
   both themes or theme tokens.
+- Importing `@openuidev/react-lang` before `lazy.tsx` sets
+  `Symbol.for("openui.devtools.autoMount")`: in `NODE_ENV=development` the
+  library then mounts its OpenUI Inspect overlay (with a hosted-service upsell)
+  over the app.
+- Printing model values with `String(...)`: a mis-declared derived value
+  (`$x = expr`) arrives as an object and shows `[object Object]`. Display
+  text goes through `numberText`, which renders non-scalars as empty.

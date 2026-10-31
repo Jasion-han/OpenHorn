@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { createParser } from "@openuidev/react-lang";
 import { withGenUiMessages, withGenUiPrompt } from "../../../lib/genui/promptMerge";
 import { OPENUI_EXAMPLES } from "../../../lib/genui/promptText";
-import { iconFor } from "./components";
+import { iconFor, numberText } from "./components";
 import { genUiLibrary } from "./library";
 import { buildGenUiSystemPrompt } from "./prompt";
 
@@ -130,6 +130,23 @@ describe("iconFor", () => {
     expect(iconFor("definitely-not-an-icon")).toBe(null);
     expect(iconFor("create-lucide-icon")).toBe(null);
     expect(iconFor("")).toBe(null);
+  });
+});
+
+describe("numberText", () => {
+  test("prints strings unchanged and formats finite numbers", () => {
+    expect(numberText("12 km")).toBe("12 km");
+    expect(numberText(1234.567)).toBe((1234.57).toLocaleString("zh-CN"));
+    expect(numberText(true)).toBe("true");
+    expect(numberText(false)).toBe("false");
+  });
+
+  test("renders non-scalars empty instead of [object Object]", () => {
+    expect(numberText({ type: "binary", op: "+" })).toBe("");
+    expect(numberText([1, 2])).toBe("");
+    expect(numberText(null)).toBe("");
+    expect(numberText(undefined)).toBe("");
+    expect(numberText(Number.NaN)).toBe("");
   });
 });
 

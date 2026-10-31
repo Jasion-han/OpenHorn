@@ -1126,30 +1126,7 @@ pub fn run() {
                 .hidden_title(true);
 
             builder
-                .on_navigation(|url| {
-                    let s = url.as_str();
-                    if s.starts_with("http://localhost")
-                        || s.starts_with("https://localhost")
-                        || s.starts_with("tauri://")
-                    {
-                        return true;
-                    }
-                    #[cfg(target_os = "macos")]
-                    {
-                        let _ = std::process::Command::new("open").arg(s).spawn();
-                    }
-                    #[cfg(target_os = "linux")]
-                    {
-                        let _ = std::process::Command::new("xdg-open").arg(s).spawn();
-                    }
-                    #[cfg(target_os = "windows")]
-                    {
-                        let _ = std::process::Command::new("cmd")
-                            .args(["/c", "start", s])
-                            .spawn();
-                    }
-                    false
-                })
+                .on_navigation(|url| main_window_allows_navigation(url.as_str()))
                 .build()?;
 
             Ok(())
@@ -1201,9 +1178,40 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
+/// Navigation policy of the main window. wry runs it for every frame, child
+/// frames included, so it must admit the `about:srcdoc` load of the sandboxed
+/// generative-UI frames. Anything else off-app is cancelled and never handed to
+/// the OS: a sandboxed frame can navigate itself without a user gesture, and
+/// passing that URL to `open` would launch browsers or URL-scheme handlers on
+/// its behalf. Link clicks in the app open through the shell plugin instead
+/// (the click handler in App.tsx).
+fn main_window_allows_navigation(url: &str) -> bool {
+    url == "about:srcdoc"
+        || url.starts_with("http://localhost")
+        || url.starts_with("https://localhost")
+        || url.starts_with("tauri://")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn main_window_navigation_admits_app_and_srcdoc_frames() {
+        assert!(main_window_allows_navigation("http://localhost:5173/"));
+        assert!(main_window_allows_navigation("tauri://localhost/index.html"));
+        assert!(main_window_allows_navigation("about:srcdoc"));
+    }
+
+    #[test]
+    fn main_window_navigation_cancels_everything_else() {
+        assert!(!main_window_allows_navigation("https://example.com/"));
+        assert!(!main_window_allows_navigation("file:///Applications/Calculator.app"));
+        assert!(!main_window_allows_navigation("vscode://file/etc/hosts"));
+        assert!(!main_window_allows_navigation("about:blank"));
+        assert!(!main_window_allows_navigation("about:srcdoc#x"));
+        assert!(!main_window_allows_navigation("data:text/html,hi"));
+    }
 
     #[test]
     fn ready_parser_accepts_matching_json_line() {

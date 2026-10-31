@@ -1,6 +1,13 @@
 import { lazy } from "react";
 import { useGenUiStore } from "../../../stores/genUiStore";
 
+// @openuidev/react-lang mounts its Inspect overlay into document.body when first
+// evaluated under NODE_ENV=development, unless this flag (its own dedupe guard)
+// is already set. The overlay covers the chat and advertises a hosted service;
+// production builds drop it anyway. Every app path to the library goes through
+// the dynamic imports below, so setting it here runs before the library does.
+(globalThis as Record<symbol, unknown>)[Symbol.for("openui.devtools.autoMount")] = true;
+
 /**
  * The OpenUI runtime, the component library and the full lucide icon map are
  * several hundred KB; they load only when an answer contains a UI block or a
