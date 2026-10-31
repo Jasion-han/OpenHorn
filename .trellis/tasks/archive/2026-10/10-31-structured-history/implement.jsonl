@@ -1,0 +1,10 @@
+{"file": "apps/sidecar/src/agent/claude.ts", "reason": "history flattening at ~518"}
+{"file": "apps/sidecar/src/agent/direct.ts", "reason": "history flattening at ~872, agent.prompt at ~1070"}
+{"file": "apps/sidecar/src/agent/context.ts", "reason": "truncateHistory; place new helper here"}
+{"file": "skills/openhorn/rules/coding-standards.md", "reason": "conventions"}
+{"file": "apps/desktop/src/components/chat/DesktopChatArea.tsx", "reason": "3 history builders"}
+{"file": "apps/desktop/src/lib/backgroundTaskRunner.ts", "reason": "loadConversationHistory"}
+{"file": "apps/desktop/src/components/chat/DesktopMessageBubble.tsx", "reason": "copyValue"}
+{"file": "apps/desktop/src/stores/chatStore.ts", "reason": "delta -> agentRun text step"}
+{"file": "apps/server/src/services/messageService.ts", "reason": "buildChatMessages callers"}
+{"file": "skills/openhorn/rules/desktop-rules.md", "reason": "desktop conventions"}
