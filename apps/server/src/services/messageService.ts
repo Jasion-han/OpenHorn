@@ -1,5 +1,6 @@
 import { attachments, conversations, messages } from "db";
 import { and, asc, eq, inArray } from "drizzle-orm";
+import { messageText } from "shared/message-text";
 import { type ChatContentPart, type ChatMessage, createAdapter } from "../agent-adapters";
 import { client, db } from "../db";
 import { generateId } from "../utils";
@@ -696,13 +697,35 @@ async function buildUserContentWithAttachments(
   return parts;
 }
 
+/**
+ * Agent-mode replies keep their answer in `agentRun` text steps with an empty
+ * `content`. Fill those in via `messageText` before building model context, or a
+ * conversation that switches from Agent to Chat mode loses every earlier Agent
+ * answer. Exported for tests.
+ */
+export function withAgentReplyText<
+  T extends { role: string; content: string; agentRun?: string | null },
+>(conversationMessages: T[]): T[] {
+  return conversationMessages.map((message) =>
+    message.role === "assistant" && !message.content.trim() && message.agentRun
+      ? { ...message, content: messageText(message) }
+      : message,
+  );
+}
+
 async function buildChatMessages(
   userId: string,
-  conversationMessages: Array<{ role: string; content: string; attachments?: string | null }>,
+  rawConversationMessages: Array<{
+    role: string;
+    content: string;
+    attachments?: string | null;
+    agentRun?: string | null;
+  }>,
   systemPrompt?: string | null,
   conversationId?: string | null,
 ): Promise<ChatMessage[]> {
   const chatMessages: ChatMessage[] = [];
+  const conversationMessages = withAgentReplyText(rawConversationMessages);
 
   let effectiveSystemPrompt = systemPrompt || "";
 

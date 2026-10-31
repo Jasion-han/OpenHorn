@@ -10,6 +10,7 @@ import {
 import {
   type Api,
   type ImageContent,
+  type Message,
   type Model,
   streamSimple,
   type TSchema,
@@ -46,7 +47,12 @@ import {
   partitionImagesByFormat,
 } from "./attachments";
 import { sanitizeChildEnv } from "./childEnv";
-import { HISTORY_MAX_TOKENS, truncateHistory } from "./context";
+import {
+  buildHistoryMessages,
+  HISTORY_MAX_TOKENS,
+  type HistoryMessage,
+  truncateHistory,
+} from "./context";
 import { type AgentEvent, buildUsageEvent, toCount } from "./events";
 import { buildIntentContext } from "./intent-context";
 import { capMcpTools, connectMcpTools } from "./mcp-tools";
@@ -833,6 +839,37 @@ export function buildModel(input: RunDirectAgentInput, supportsVision: boolean):
   };
 }
 
+/**
+ * Converts normalized history into pi transcript messages for
+ * `initialState.messages`. Assistant turns are synthesized as completed
+ * (`stopReason: "stop"`) text replies attributed to the current model, so pi's
+ * message transform replays them as plain assistant text; usage is zeroed
+ * because these turns were already billed. Exported for tests.
+ */
+export function toPiHistoryMessages(history: HistoryMessage[], model: Model<Api>): Message[] {
+  return history.map((m, i): Message => {
+    const timestamp = Date.now() - (history.length - i);
+    if (m.role === "user") return { role: "user", content: m.content, timestamp };
+    return {
+      role: "assistant",
+      content: [{ type: "text", text: m.content }],
+      api: model.api,
+      provider: model.provider,
+      model: model.id,
+      usage: {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 0,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      },
+      stopReason: "stop",
+      timestamp,
+    };
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
@@ -869,14 +906,14 @@ export async function runDirectAgent(input: RunDirectAgentInput): Promise<void> 
   }
   const apiKey = input.apiKey;
 
-  let effectivePrompt = input.prompt;
-  if (input.conversationHistory && input.conversationHistory.length > 0) {
-    const trimmed = truncateHistory(input.conversationHistory, HISTORY_MAX_TOKENS);
-    const historyBlock = trimmed
-      .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
-      .join("\n\n");
-    effectivePrompt = `${historyBlock}\n\n---\n\nUser: ${input.prompt}`;
-  }
+  // History is seeded into the agent transcript as real user/assistant
+  // messages (see `toPiHistoryMessages`); the current prompt plus attachments
+  // stays the final user message sent via `agent.prompt`.
+  const history = buildHistoryMessages(
+    truncateHistory(input.conversationHistory ?? [], HISTORY_MAX_TOKENS),
+    input.prompt,
+  );
+  let effectivePrompt = history.prompt;
   // Inject file attachment text (works for every model regardless of vision).
   const fileContext = buildFileContext(input.attachments);
   if (fileContext) effectivePrompt += fileContext;
@@ -922,6 +959,7 @@ export async function runDirectAgent(input: RunDirectAgentInput): Promise<void> 
       model,
       tools,
       systemPrompt: finalSystemPrompt,
+      messages: toPiHistoryMessages(history.messages, model),
     },
     streamFn: streamSimple,
     getApiKey: () => apiKey,

@@ -26,6 +26,7 @@ import {
 } from "../../lib/composerHistory";
 import { COMPOSER_PLACEHOLDERS } from "../../lib/composerPlaceholder";
 import { deriveComposerRunState } from "../../lib/composerRunState";
+import { buildConversationHistory } from "../../lib/conversationHistory";
 import { isDefaultConversationTitle } from "../../lib/conversationTitle";
 import { getEffectiveModelForConversation } from "../../lib/effectiveModel";
 import { withGenUiMessages, withGenUiPrompt } from "../../lib/genui/promptMerge";
@@ -1016,14 +1017,7 @@ export function DesktopChatArea() {
           .getState()
           .messages.filter((m) => m.conversationId === conversationId && !m.id.startsWith("draft-"))
           .filter((m) => m.id !== userMessageId && m.id !== assistantMessageId);
-        const conversationHistory: Array<{ role: "user" | "assistant"; content: string }> = [];
-        for (const m of historyMsgs) {
-          const text = (m.content || "").trim();
-          if (!text) continue;
-          if (m.role === "user" || m.role === "assistant") {
-            conversationHistory.push({ role: m.role, content: text });
-          }
-        }
+        const conversationHistory = buildConversationHistory(historyMsgs);
         const { systemPrompt: globalSystemPrompt, tavilyApiKey } = await resolveRunSettings(
           chatAreaApi,
           forceWebSearch,
@@ -1291,14 +1285,7 @@ export function DesktopChatArea() {
             (m) => m.conversationId === currentConversation.id && !m.id.startsWith("draft-"),
           )
           .filter((m) => m.id !== userMessage.id && m.id !== messageId);
-        const conversationHistory: Array<{ role: "user" | "assistant"; content: string }> = [];
-        for (const m of historyMsgs) {
-          const text = (m.content || "").trim();
-          if (!text) continue;
-          if (m.role === "user" || m.role === "assistant") {
-            conversationHistory.push({ role: m.role, content: text });
-          }
-        }
+        const conversationHistory = buildConversationHistory(historyMsgs);
         const { systemPrompt: retrySystemPrompt, tavilyApiKey: retryTavilyApiKey } =
           await resolveRunSettings(chatAreaApi, forceWebSearch);
         // Re-parse the original message so a retried `/server` (or `/skill`)
@@ -1465,14 +1452,7 @@ export function DesktopChatArea() {
             (m) => m.conversationId === currentConversation.id && !m.id.startsWith("draft-"),
           )
           .filter((m) => m.id !== userMessage.id && m.id !== assistantMessageId);
-        const conversationHistory: Array<{ role: "user" | "assistant"; content: string }> = [];
-        for (const m of historyMsgs) {
-          const text = (m.content || "").trim();
-          if (!text) continue;
-          if (m.role === "user" || m.role === "assistant") {
-            conversationHistory.push({ role: m.role, content: text });
-          }
-        }
+        const conversationHistory = buildConversationHistory(historyMsgs);
         const { systemPrompt: editSystemPrompt, tavilyApiKey: editTavilyApiKey } =
           await resolveRunSettings(chatAreaApi, forceWebSearch);
         await sidecarRun.startRun({

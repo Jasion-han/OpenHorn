@@ -12,11 +12,17 @@ import {
 import {
   buildFileContext,
   getImageAttachments,
+  type ImageAttachment,
   imageFallbackText,
   imageUnsupportedFormatText,
   partitionImagesByFormat,
 } from "./attachments";
-import { HISTORY_MAX_TOKENS, truncateHistory } from "./context";
+import {
+  buildHistoryMessages,
+  HISTORY_MAX_TOKENS,
+  type HistoryMessage,
+  truncateHistory,
+} from "./context";
 import { executeTool } from "./direct";
 import { type AgentEvent, buildUsageEvent, toCount } from "./events";
 import { buildIntentContext } from "./intent-context";
@@ -469,6 +475,32 @@ export function buildClaudeSystem(
   return blocks;
 }
 
+/**
+ * Builds the opening `messages` for the Messages API loop: prior turns as real
+ * alternating user/assistant messages (already normalized by
+ * `buildHistoryMessages`), then the current prompt as the final user message.
+ * With vision images the final message is a multi-block content array (text
+ * first, then one image block per attachment); otherwise a plain string.
+ */
+export function buildClaudeInitialMessages(
+  history: HistoryMessage[],
+  prompt: string,
+  images: ImageAttachment[],
+): Array<{ role: "user" | "assistant"; content: unknown }> {
+  let content: string | Array<Record<string, unknown>> = prompt;
+  if (images.length > 0) {
+    const blocks: Array<Record<string, unknown>> = [{ type: "text", text: prompt }];
+    for (const img of images) {
+      blocks.push({
+        type: "image",
+        source: { type: "base64", media_type: img.mediaType, data: img.dataBase64 },
+      });
+    }
+    content = blocks;
+  }
+  return [...history.map((m) => ({ role: m.role, content: m.content })), { role: "user", content }];
+}
+
 // ---------------------------------------------------------------------------
 // Main entry point — self-managed Messages API loop
 // ---------------------------------------------------------------------------
@@ -515,15 +547,13 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
   // Skill read-allow roots for workspace boundary checks
   const skillRoots = (input.skills ?? []).map((s) => s.skillDir);
 
-  // Build effective prompt with history + attachments
-  let effectivePrompt = input.prompt;
-  if (input.conversationHistory && input.conversationHistory.length > 0) {
-    const trimmed = truncateHistory(input.conversationHistory, HISTORY_MAX_TOKENS);
-    const historyBlock = trimmed
-      .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
-      .join("\n\n");
-    effectivePrompt = `${historyBlock}\n\n---\n\nUser: ${input.prompt}`;
-  }
+  // History goes out as real alternating user/assistant messages; the current
+  // prompt (plus attachments) is the final user message.
+  const history = buildHistoryMessages(
+    truncateHistory(input.conversationHistory ?? [], HISTORY_MAX_TOKENS),
+    input.prompt,
+  );
+  let effectivePrompt = history.prompt;
   // Inject file attachment text (works for every model regardless of vision).
   const fileContext = buildFileContext(input.attachments);
   if (fileContext) effectivePrompt += fileContext;
@@ -535,7 +565,6 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
   const { injectable, unsupported } = supportsVision
     ? partitionImagesByFormat(images)
     : { injectable: [], unsupported: [] };
-  const useVisionImages = injectable.length > 0;
   if (!supportsVision && images.length > 0) {
     effectivePrompt += imageFallbackText(images);
   }
@@ -543,24 +572,8 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
     effectivePrompt += imageUnsupportedFormatText(unsupported);
   }
 
-  // Build the initial user message. For vision-capable models with images,
-  // use a multi-block content array; otherwise a plain string.
-  let initialUserContent: string | Array<Record<string, unknown>> = effectivePrompt;
-  if (useVisionImages) {
-    const blocks: Array<Record<string, unknown>> = [{ type: "text", text: effectivePrompt }];
-    for (const img of injectable) {
-      blocks.push({
-        type: "image",
-        source: { type: "base64", media_type: img.mediaType, data: img.dataBase64 },
-      });
-    }
-    initialUserContent = blocks;
-  }
-
   // Messages array for the API loop — grows as the agent interacts
-  const messages: Array<{ role: "user" | "assistant"; content: unknown }> = [
-    { role: "user", content: initialUserContent },
-  ];
+  const messages = buildClaudeInitialMessages(history.messages, effectivePrompt, injectable);
 
   let turnCount = 0;
   let totalPromptTokens = 0;

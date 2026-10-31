@@ -14,7 +14,8 @@
     "./search": "./src/search/index.ts",
     "./vision": "./src/vision/index.ts",
     "./shell-risk": "./src/shell-risk.ts",
-    "./child-env": "./src/child-env.ts"
+    "./child-env": "./src/child-env.ts",
+    "./message-text": "./src/message-text.ts"
   },
   "devDependencies": {
     "typescript": "^5.0.0"

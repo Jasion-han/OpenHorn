@@ -119,3 +119,20 @@ await api.messages.syncSidecar({ ..., myNewField: stripEphemeral(msg.myNewField)
 **Cause**: 字段只挂在 `useChatStore` 的 message 对象上，sidecar 落库路径（syncSidecar）没带它，重新拉取时自然没有
 
 **Fix / Prevention**: 按上方 Scenario 的五段链路逐段检查；新增用户消息渲染字段时五段必须同批改完
+
+### Agent 回复正文不在 `content` 里（2026-10-31，task `10-31-structured-history`）
+
+**Symptom**: Agent 模式多轮对话里模型把上一轮的问题再答一遍（「蓝鲸42\n\n你发了2条消息」），
+或者复制 Agent 回复得到空字符串
+
+**Cause**: `chatStore.applyStreamEvent` 有意把 Agent 的 `delta` 写成 `agentRun.steps[]` 里的
+`{type: "text"}` 步骤（按时间线渲染），`messages.content` 一直是 `""`。所有只读 `content`
+并跳过空文本的地方（历史组装、复制、服务端 `buildChatMessages`）都会把 Agent 回复整条丢掉，
+模型只看到用户连续几条提问
+
+**Fix / Prevention**: 需要消息正文时一律用 `messageText({ content, agentRun })`
+（`shared/message-text`：content 优先，否则拼 text 步骤；`agentRun` 可以是对象或服务端行里的
+JSON 字符串）。桌面端历史只经 `lib/conversationHistory.ts` 的 `buildConversationHistory`，
+服务端在 `buildChatMessages` 入口用 `withAgentReplyText`。sidecar 的 Claude / 直连运行时把历史作为
+真实的 user / assistant 消息发送（`agent/context.ts` `buildHistoryMessages`），Codex / ACP 只收
+单段文本，仍是拼接

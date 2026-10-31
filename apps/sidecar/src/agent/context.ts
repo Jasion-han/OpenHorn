@@ -26,3 +26,43 @@ export function truncateHistory(
   }
   return kept;
 }
+
+export type HistoryMessage = { role: "user" | "assistant"; content: string };
+
+/**
+ * Turns (already truncated) conversation history plus the current prompt into a
+ * sequence the chat APIs accept as real multi-turn messages:
+ *
+ * - empty / whitespace-only entries are dropped;
+ * - adjacent same-role entries are merged with `\n\n`;
+ * - leading assistant entries are dropped (the sequence must open with user);
+ * - a trailing user entry is merged into the current prompt, so the returned
+ *   `messages` always end with an assistant turn and the caller appends the
+ *   current prompt as the final user message — strict alternation holds.
+ *
+ * Sending history this way (instead of one `User: … Assistant: …` transcript
+ * blob) stops models from treating the transcript as text to continue and
+ * echoing the previous answer.
+ */
+export function buildHistoryMessages(
+  history: HistoryMessage[] | undefined,
+  prompt: string,
+): { messages: HistoryMessage[]; prompt: string } {
+  const messages: HistoryMessage[] = [];
+  for (const entry of history ?? []) {
+    if (!entry.content.trim()) continue;
+    const last = messages[messages.length - 1];
+    if (last && last.role === entry.role) {
+      last.content = `${last.content}\n\n${entry.content}`;
+      continue;
+    }
+    if (!last && entry.role === "assistant") continue;
+    messages.push({ role: entry.role, content: entry.content });
+  }
+  const tail = messages[messages.length - 1];
+  if (tail && tail.role === "user") {
+    messages.pop();
+    return { messages, prompt: `${tail.content}\n\n${prompt}` };
+  }
+  return { messages, prompt };
+}

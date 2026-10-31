@@ -1,5 +1,6 @@
 import { Bot, MessageSquare } from "lucide-react";
 import { memo } from "react";
+import { messageText } from "shared/message-text";
 import { cn } from "ui";
 import { sanitizeDisplayContent } from "../../lib/citations";
 import { formatMessageTime, formatTokenCount } from "../../lib/conversationTitle";
@@ -224,7 +225,11 @@ function MessageBubbleImpl({
       )}
       <MessageActionBar
         message={message}
-        copyValue={displayContent}
+        copyValue={
+          displayContent.trim() || !isAssistant
+            ? displayContent
+            : messageText({ content: "", agentRun: message.agentRun })
+        }
         canEdit={canEdit}
         canRetry={canRetry}
         canDelete={canDelete}

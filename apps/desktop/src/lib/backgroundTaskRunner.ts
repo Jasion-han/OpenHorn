@@ -5,6 +5,7 @@ import { useScheduledTaskStore } from "../stores/scheduledTaskStore";
 import { useSidecarStore } from "../stores/sidecarStore";
 import type { Message } from "../types/chat";
 import { getDesktopBackendBase } from "./backendBase";
+import { buildConversationHistory } from "./conversationHistory";
 import { getEffectiveModelForConversation } from "./effectiveModel";
 import { getScheduledTaskLabel } from "./i18n/agent";
 import { notifyError, notifySuccess } from "./notify";
@@ -484,14 +485,7 @@ async function loadConversationHistory(
 ): Promise<Array<{ role: "user" | "assistant"; content: string }>> {
   try {
     const { messages } = await api.messages.list(conversationId);
-    const history: Array<{ role: "user" | "assistant"; content: string }> = [];
-    for (const m of messages) {
-      const text = (m.content || "").trim();
-      if (!text) continue;
-      if (m.role === "user" || m.role === "assistant")
-        history.push({ role: m.role, content: text });
-    }
-    return history;
+    return buildConversationHistory(messages);
   } catch {
     return [];
   }
