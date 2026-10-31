@@ -71,10 +71,10 @@ their fence closes.
   ACP ignore `systemPrompt`. The model then invents `openui-lang` syntax, which
   only renders as the plain-code fallback. Verify a channel by asking it to
   quote a component signature from its system prompt.
-- Claude Code OAuth channels (`sk-ant-oat…`, sidecar `runClaudeAgent`) lost the
+- Claude Code OAuth channels (`sk-ant-oat…`) lost the
   whole system prompt until 2026-10-31: the billing marker was joined into the
   same `system` text as the prompt, and the API treats that block as billing
-  metadata. `buildClaudeSystem` now sends the marker as its own first block.
+  metadata. The marker is now its own first block, and all OAuth rules (Bearer auth, model date-suffix strip, marker block) live only in `packages/adapters/src/anthropic-oauth.ts`, used by both the agent runtime and the chat adapter (chat mode used to get 429 without the marker).
 
 ## Security boundaries (keep intact)
 

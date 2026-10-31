@@ -1,4 +1,5 @@
-import { type ChatMessage, createAdapter } from "adapters";
+import { type ChatMessage, createAdapter, isAnthropicOAuthToken } from "adapters";
+import { resolveClaudeBillingMarker } from "./anthropic-billing";
 import type { AgentEvent } from "./events";
 
 export type RunChatStreamInput = {
@@ -12,7 +13,14 @@ export type RunChatStreamInput = {
 };
 
 export async function runChatStream(input: RunChatStreamInput): Promise<void> {
-  const adapter = createAdapter(input.protocol, input.apiKey, input.baseUrl);
+  // Claude Code OAuth tokens: the adapter applies the OAuth request rules
+  // itself; the sidecar only supplies the billing marker for the local CLI.
+  const billingMarker = isAnthropicOAuthToken(input.apiKey)
+    ? await resolveClaudeBillingMarker()
+    : undefined;
+  const adapter = createAdapter(input.protocol, input.apiKey, input.baseUrl, {
+    anthropic: { billingMarker },
+  });
 
   try {
     const stream = adapter.chatStream({

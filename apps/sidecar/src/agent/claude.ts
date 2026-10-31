@@ -1,5 +1,6 @@
 import path from "node:path";
 import Anthropic from "@anthropic-ai/sdk";
+import { buildAnthropicSystem, isAnthropicOAuthToken, normalizeAnthropicModelId } from "adapters";
 import type { AttachmentPart } from "shared/types";
 import { modelSupportsVision } from "shared/vision";
 import { type CheckpointSession, ensureCheckpointBackup, finalizeCheckpoint } from "../checkpoints";
@@ -9,6 +10,7 @@ import {
   resolveWritePathInsideWorkspace,
   toWorkspaceRelative,
 } from "../workspace";
+import { resolveClaudeBillingMarker } from "./anthropic-billing";
 import {
   buildFileContext,
   getImageAttachments,
@@ -413,68 +415,6 @@ function mapToolForExecution(
   }
 }
 
-// ---------------------------------------------------------------------------
-// OAuth billing attribution
-// ---------------------------------------------------------------------------
-
-/**
- * Claude Code OAuth tokens (`sk-ant-oat…`) carry no API-billing quota. The
- * server attributes a request to the user's Claude Code subscription only when
- * the system prompt opens with this billing marker — exactly what the Claude
- * CLI sends as `system[0]`. Without it, Sonnet/Opus requests are refused with
- * an opaque 429 `rate_limit_error` (Haiku still passes on its free tier), which
- * is why the marker is mandatory and not merely cosmetic.
- *
- * The marker MUST be its own system text block (see `buildClaudeSystem`). The
- * server treats the block carrying it as billing metadata rather than prompt
- * text; when the marker was `\n\n`-joined in front of the real prompt as one
- * string, the model received no system prompt at all (it denied having one and
- * ignored the agent / generative-UI instructions). The Claude CLI likewise
- * sends the marker alone as `system[0]` and the actual prompt as `system[1]`.
- *
- * Verified 2026-09-10 against api.anthropic.com: the marker alone unlocks
- * Sonnet 4.6 and Opus 4.6 over Bearer auth; no beta header, metadata, or
- * `?beta=true` endpoint is required, and the build-hash suffix on the version
- * is optional. `cc_version` is taken from the installed CLI so the attribution
- * tracks whatever the user actually has. An OAuth token only ever comes from a
- * CLI login, so the CLI is present whenever this path runs; the constant is a
- * last-resort value that was verified to be accepted.
- */
-const VERIFIED_CC_VERSION = "2.1.267";
-let cachedBillingHeader: string | null = null;
-async function buildOAuthBillingHeader(): Promise<string> {
-  if (cachedBillingHeader) return cachedBillingHeader;
-  let version = VERIFIED_CC_VERSION;
-  try {
-    const { execSync } = await import("node:child_process");
-    const out = execSync("claude --version", { timeout: 5000 }).toString();
-    version = out.match(/(\d+\.\d+\.\d+)/)?.[1] ?? version;
-  } catch {
-    // CLI not on PATH — keep the verified constant
-  }
-  cachedBillingHeader = `x-anthropic-billing-header: cc_version=${version}; cc_entrypoint=sdk-cli;`;
-  return cachedBillingHeader;
-}
-
-/**
- * Builds the Messages API `system` param. With an OAuth billing marker the
- * marker becomes block 1 on its own and every other non-empty section is
- * joined into block 2 — merging them would make the API drop the whole prompt
- * (see the billing doc above). Without a marker a single prompt block is sent.
- */
-export function buildClaudeSystem(
-  billingHeader: string | null,
-  sections: Array<string | null | undefined>,
-): Anthropic.TextBlockParam[] {
-  const prompt = sections
-    .filter((s): s is string => typeof s === "string" && s.trim().length > 0)
-    .join("\n\n");
-  const blocks: Anthropic.TextBlockParam[] = [];
-  if (billingHeader) blocks.push({ type: "text", text: billingHeader });
-  if (prompt) blocks.push({ type: "text", text: prompt });
-  return blocks;
-}
-
 /**
  * Builds the opening `messages` for the Messages API loop: prior turns as real
  * alternating user/assistant messages (already normalized by
@@ -517,19 +457,21 @@ export function buildClaudeInitialMessages(
  * path.
  */
 export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> {
-  const isOAuth = input.apiKey.startsWith("sk-ant-oat");
+  // Claude Code OAuth request rules (Bearer auth, model id, billing marker as
+  // its own system[0] block) are defined once in `adapters` (anthropic-oauth).
+  const isOAuth = isAnthropicOAuthToken(input.apiKey);
   const anthropic = new Anthropic({
     apiKey: isOAuth ? null : input.apiKey,
     ...(isOAuth ? { authToken: input.apiKey } : {}),
     ...(input.baseUrl ? { baseURL: input.baseUrl } : {}),
   });
-  const model = isOAuth ? input.model.replace(/-\d{8}$/, "") : input.model;
+  const model = normalizeAnthropicModelId(input.model, isOAuth);
 
   // Merge user system prompt with intent context (time / weather)
   const intentResult = await buildIntentContext(input.prompt, {
     webSearchEnabled: input.webSearchEnabled,
   });
-  const finalSystem = buildClaudeSystem(isOAuth ? await buildOAuthBillingHeader() : null, [
+  const finalSystem = buildAnthropicSystem(isOAuth ? await resolveClaudeBillingMarker() : null, [
     buildAgentSystemPrompt({
       cwd: input.cwd,
       permissionMode: input.permissionMode ?? "full-access",

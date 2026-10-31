@@ -47,6 +47,13 @@ export interface ProviderAdapter {
   chatStream(options: ChatOptions): AsyncGenerator<string, ChatUsage | undefined>;
 }
 
+import {
+  anthropicAuthHeaders,
+  buildAnthropicBillingMarker,
+  buildAnthropicSystem,
+  isAnthropicOAuthToken,
+  normalizeAnthropicModelId,
+} from "./anthropic-oauth";
 import type {
   GenericAgentConversationMessage,
   GenericAgentTurnResult,
@@ -1235,21 +1242,40 @@ export class AnthropicAdapter implements ProviderAdapter {
   // which the constructor derives once. Storing it too meant a second copy of a
   // secret living on the instance for no reader.
   private authHeader: Record<string, string>;
+  // Non-null only for Claude Code OAuth tokens: the billing marker that must go
+  // out as its own `system[0]` block (see anthropic-oauth.ts).
+  private billingMarker: string | null;
 
-  constructor(apiKey: string, baseUrl?: string) {
+  constructor(apiKey: string, baseUrl?: string, options?: AnthropicAdapterOptions) {
     const raw = baseUrl || "https://api.anthropic.com";
     this.baseUrl = raw.replace(/\/+$/, "").replace(/\/v1$/, "");
-    this.authHeader = apiKey.startsWith("sk-ant-oat")
-      ? { Authorization: `Bearer ${apiKey}` }
-      : { "x-api-key": apiKey };
+    this.authHeader = anthropicAuthHeaders(apiKey);
+    this.billingMarker = isAnthropicOAuthToken(apiKey)
+      ? (options?.billingMarker ?? buildAnthropicBillingMarker())
+      : null;
+  }
+
+  /** Applies the OAuth model-id rule; API-key requests pass the model through. */
+  private requestModel(model: string): string {
+    return normalizeAnthropicModelId(model, this.billingMarker !== null);
+  }
+
+  /**
+   * The `system` field of the request body. API keys keep the plain-string form
+   * (some Anthropic-compatible gateways only accept that); OAuth tokens send the
+   * billing marker as its own first block, even when there is no prompt.
+   */
+  private systemField(system: string | undefined): Record<string, unknown> {
+    if (this.billingMarker === null) return system ? { system } : {};
+    return { system: buildAnthropicSystem(this.billingMarker, [system]) };
   }
 
   async chat(options: ChatOptions): Promise<ChatResponse> {
     const split = splitSystem(options.messages);
     const url = `${this.baseUrl}/v1/messages`;
     const body = JSON.stringify({
-      model: options.model,
-      ...(split.system ? { system: split.system } : {}),
+      model: this.requestModel(options.model),
+      ...this.systemField(split.system),
       messages: split.messages.map((m) => {
         if (typeof m.content === "string") {
           return { role: m.role, content: [{ type: "text", text: m.content || " " }] };
@@ -1347,8 +1373,8 @@ export class AnthropicAdapter implements ProviderAdapter {
     const split = splitSystem(options.messages);
     const url = `${this.baseUrl}/v1/messages`;
     const body = JSON.stringify({
-      model: options.model,
-      ...(split.system ? { system: split.system } : {}),
+      model: this.requestModel(options.model),
+      ...this.systemField(split.system),
       messages: split.messages.map((m) => {
         if (typeof m.content === "string") {
           return { role: m.role, content: [{ type: "text", text: m.content || " " }] };
@@ -1549,8 +1575,8 @@ export class AnthropicAdapter implements ProviderAdapter {
     }
 
     const body = JSON.stringify({
-      model: options.model,
-      ...(system ? { system } : {}),
+      model: this.requestModel(options.model),
+      ...this.systemField(system),
       messages: mappedMessages,
       tools: options.tools.map((tool) => ({
         name: tool.name,
@@ -2108,7 +2134,25 @@ export class GoogleAdapter implements ToolCallingAdapter {
   }
 }
 
-export function createAdapter(protocol: string, apiKey: string, baseUrl?: string): ProviderAdapter {
+export type AnthropicAdapterOptions = {
+  /**
+   * Billing marker for Claude Code OAuth tokens. The sidecar injects one built
+   * from the locally installed CLI version; when omitted the verified default
+   * from `buildAnthropicBillingMarker()` is used. Ignored for API keys.
+   */
+  billingMarker?: string;
+};
+
+export type CreateAdapterOptions = {
+  anthropic?: AnthropicAdapterOptions;
+};
+
+export function createAdapter(
+  protocol: string,
+  apiKey: string,
+  baseUrl?: string,
+  options?: CreateAdapterOptions,
+): ProviderAdapter {
   const normalized = (protocol || "").trim().toLowerCase() as AdapterProtocol | string;
   if (normalized === "acp") {
     // An ACP channel stores a local agent launch config, not provider
@@ -2117,7 +2161,7 @@ export function createAdapter(protocol: string, apiKey: string, baseUrl?: string
     throw new Error("ACP 渠道仅支持桌面端 Agent 模式，不支持对话补全接口");
   }
   if (normalized === "anthropic") {
-    return new AnthropicAdapter(apiKey, baseUrl);
+    return new AnthropicAdapter(apiKey, baseUrl, options?.anthropic);
   }
   if (normalized === "google") {
     return new GoogleAdapter(apiKey, baseUrl);
