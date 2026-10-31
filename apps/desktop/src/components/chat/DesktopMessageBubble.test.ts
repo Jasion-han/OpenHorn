@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { resolveAgentLiveIndicator } from "./DesktopMessageBubble";
+import { resolveAgentLiveIndicator, resolveBubbleEndLabel } from "./DesktopMessageBubble";
 
 const base = {
   isAgentAssistant: true,
@@ -43,5 +43,30 @@ describe("resolveAgentLiveIndicator", () => {
 
   test("shows nothing for chat-mode answers", () => {
     expect(resolveAgentLiveIndicator({ ...base, isAgentAssistant: false })).toBe("none");
+  });
+});
+
+describe("resolveBubbleEndLabel", () => {
+  type ReplyInput = Parameters<typeof resolveBubbleEndLabel>[0]["message"];
+  const reply: ReplyInput = { role: "assistant", content: "" };
+  const label = (message: Partial<ReplyInput>, isStreaming = false) =>
+    resolveBubbleEndLabel({ message: { ...reply, ...message }, isStreaming });
+
+  test("a finished empty reply without a run says so instead of rendering blank", () => {
+    expect(label({})).toBe("chat.reply.empty");
+  });
+
+  test("a stopped chat reply keeps its stopped state after a reload", () => {
+    expect(label({ content: "half an answer", finishReason: "stopped" })).toBe(
+      "chat.agent.stopped",
+    );
+    expect(label({ finishReason: "stopped" })).toBe("chat.agent.cancelled");
+  });
+
+  test("nothing for a finished reply, while streaming, with a run, or for users", () => {
+    expect(label({ content: "answer" })).toBe(null);
+    expect(label({}, true)).toBe(null);
+    expect(label({ agentRun: { status: "cancelled", summary: "", steps: [] } })).toBe(null);
+    expect(label({ role: "user" })).toBe(null);
   });
 });

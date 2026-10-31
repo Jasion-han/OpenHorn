@@ -6,6 +6,7 @@ import { sanitizeDisplayContent } from "../../lib/citations";
 import { formatMessageTime, formatTokenCount } from "../../lib/conversationTitle";
 import { getChatLabel } from "../../lib/i18n/agent";
 import { findKnownSlashToken, type SlashCommandType } from "../../lib/slashToken";
+import { resolvePlainReplyEndState } from "../../lib/stopTurn";
 import type { Message } from "../../types/chat";
 import { AgentRunPanel } from "./DesktopAgentRunPanel";
 import { DesktopAgentTaskMetaLine } from "./DesktopAgentTaskMetaLine";
@@ -35,6 +36,27 @@ export function resolveAgentLiveIndicator(input: {
   if (!input.isAgentAssistant || !input.isStreaming) return "none";
   if (input.stepCount > 0) return "none";
   return input.hasText ? "trailing" : "leading";
+}
+
+/**
+ * The closing line of a finished assistant reply without a run record (a chat
+ * reply, or an agent row stored without one): "stopped" under a reply the user
+ * stopped, and an explicit state instead of a blank bubble when it holds no
+ * text. A reply with a run gets its closing line from the run panel (see
+ * resolveRunEndState). Read from the persisted `finishReason`, so it survives
+ * a reload.
+ */
+export function resolveBubbleEndLabel(input: {
+  message: Pick<Message, "role" | "content" | "agentRun" | "finishReason">;
+  isStreaming: boolean;
+}): "chat.agent.stopped" | "chat.agent.cancelled" | "chat.reply.empty" | null {
+  const { message } = input;
+  if (message.role !== "assistant" || input.isStreaming || message.agentRun) return null;
+  const state = resolvePlainReplyEndState(message);
+  if (state === "stopped") return "chat.agent.stopped";
+  if (state === "cancelled") return "chat.agent.cancelled";
+  if (state === "noReply") return "chat.reply.empty";
+  return null;
 }
 
 function MessageBubbleImpl({
@@ -78,6 +100,7 @@ function MessageBubbleImpl({
   // its failure, if any, is the panel's `agentRun.error` line.
   const replyInTimeline = isAssistant && hasAgentReplyTextSteps(message.agentRun);
   const showContentBody = hasAssistantText && !replyInTimeline;
+  const endLabel = resolveBubbleEndLabel({ message, isStreaming: isMessageStreaming });
   const liveIndicator = resolveAgentLiveIndicator({
     isAgentAssistant: isFlatAgentAssistant,
     isStreaming: isMessageStreaming,
@@ -164,6 +187,7 @@ function MessageBubbleImpl({
               ) : isMessageStreaming && !isFlatAgentAssistant ? (
                 <TypingIndicator />
               ) : null}
+              {endLabel && <DesktopAgentTaskMetaLine text={getChatLabel(endLabel)} />}
             </div>
             <DesktopCitationList citations={message.citations} content={displayContent} />
           </div>

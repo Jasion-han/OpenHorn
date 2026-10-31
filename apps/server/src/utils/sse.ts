@@ -60,7 +60,14 @@ export function createSseStream(
         // ignore
       }
       if (streamController) {
-        streamController.close();
+        // A client that stopped the stream already cancelled it; closing a
+        // cancelled stream throws, which would surface as an unhandled
+        // rejection after every Stop.
+        try {
+          streamController.close();
+        } catch {
+          // already closed by the client
+        }
       } else {
         shouldCloseOnStart = true;
       }

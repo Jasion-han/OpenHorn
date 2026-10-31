@@ -1,4 +1,4 @@
-import type { ImportRecord } from "shared/types";
+import type { ImportRecord, MessageFinishReason } from "shared/types";
 
 export type ChatMode = "chat" | "agent";
 
@@ -186,6 +186,8 @@ export interface ApiMessage {
   citations: string | null;
   /** JSON blob of ApiMessageUsage, or null when the provider reported none. */
   usage: string | null;
+  /** "stopped" when the user stopped the reply; null otherwise or for older rows. */
+  finishReason?: MessageFinishReason | null;
   attachmentsMeta?: ApiMessageAttachmentMeta[];
   createdAt: string;
   /** Set when the answer finished being produced; null for pre-existing rows. */
@@ -273,6 +275,12 @@ export interface Message {
   citations?: ApiCitation[];
   /** Token counts for the turn; absent when the provider did not report them. */
   usage?: ApiMessageUsage;
+  /**
+   * "stopped": the user stopped this reply and it was kept as far as it got.
+   * The persisted counterpart of an agent run's "cancelled" status, and the
+   * only record of the stop for a chat reply (which has no run).
+   */
+  finishReason?: MessageFinishReason;
   streamTail?: string;
   streamPulseKey?: number;
   createdAt: Date;

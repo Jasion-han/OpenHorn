@@ -1,3 +1,5 @@
+import type { MessageFinishReason } from "./types";
+
 /**
  * The reply text of an Agent run.
  *
@@ -33,6 +35,22 @@ export function hasAgentReplyTextSteps(agentRun: unknown): boolean {
  */
 export function assistantMessageContent(content: string, agentRun: unknown): string {
   return parseAgentRun(agentRun) ? agentRunReplyText(agentRun) : content;
+}
+
+/**
+ * The one rule for an assistant message's stored `finish_reason`, shared by
+ * every writer. "stopped" when the writer says so, or when the message carries
+ * an agent run the user cancelled — the run status is the agent's own record of
+ * the stop, so the column can never disagree with it (and older clients that
+ * only send the run still get the column right). Anything else is null: a
+ * re-produced reply that finished clears an earlier "stopped".
+ */
+export function assistantFinishReason(
+  finishReason: unknown,
+  agentRun: unknown,
+): MessageFinishReason | null {
+  if (finishReason === "stopped") return "stopped";
+  return parseAgentRun(agentRun)?.status === "cancelled" ? "stopped" : null;
 }
 
 function parseAgentRun(agentRun: unknown): Record<string, unknown> | null {

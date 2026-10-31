@@ -1,6 +1,6 @@
 import { attachments, conversations, messages } from "db";
 import { and, asc, eq, inArray } from "drizzle-orm";
-import { assistantMessageContent } from "shared/message-text";
+import { assistantFinishReason, assistantMessageContent } from "shared/message-text";
 import { type ChatContentPart, type ChatMessage, createAdapter } from "../agent-adapters";
 import { client, db } from "../db";
 import { generateId } from "../utils";
@@ -774,6 +774,7 @@ export async function streamMessage(
         model: resolvedChannel.modelId,
         liveMetadata: serializeLiveMetadata(liveContext),
         citations: serializeCitations(liveContext.citations),
+        finishReason: assistantFinishReason(ctx.signal.aborted ? "stopped" : null, null),
         updatedAt: new Date(),
       })
       .where(eq(messages.id, assistantMessageId));
@@ -797,6 +798,39 @@ export async function streamMessage(
       model: resolvedChannel.modelId,
     });
   });
+}
+
+/**
+ * Streams a chat reply to the client and returns its text. A client stop (the
+ * request is aborted, which aborts `signal`) is "stop generating", not a
+ * failure: the text streamed so far is returned — with `stopped` set, so the
+ * caller stores the reply as stopped — and persisted like any finished reply.
+ * Any other provider error propagates unchanged.
+ */
+async function streamReplyUntilStopped(
+  adapter: ReturnType<typeof createAdapter>,
+  input: { model: string; messages: ChatMessage[]; signal: AbortSignal },
+  send: (event: { type: string; [key: string]: unknown }) => void,
+): Promise<{ content: string; stopped: boolean }> {
+  let responseContent = "";
+  try {
+    const stream = await adapter.chatStream({
+      model: input.model,
+      messages: input.messages,
+      maxTokens: 4096,
+      signal: input.signal,
+    });
+    for await (const chunk of stream) {
+      if (typeof chunk !== "string" || chunk.length === 0) continue;
+      responseContent += chunk;
+      send({ type: "delta", content: chunk });
+    }
+  } catch (error) {
+    if (!input.signal.aborted) throw error;
+  }
+  // Read once the stream has ended, however it ended: some adapters end the
+  // iteration quietly on abort instead of throwing.
+  return { content: responseContent, stopped: input.signal.aborted };
 }
 
 /**
@@ -933,19 +967,11 @@ export async function editUserMessage(
       resolvedChannel.channel.baseUrl || undefined,
     );
 
-    let responseContent = "";
-    const stream = await adapter.chatStream({
-      model: resolvedChannel.modelId,
-      messages: chatMessages,
-      maxTokens: 4096,
-      signal: ctx.signal,
-    });
-
-    for await (const chunk of stream) {
-      if (typeof chunk !== "string" || chunk.length === 0) continue;
-      responseContent += chunk;
-      send({ type: "delta", content: chunk });
-    }
+    const { content: responseContent, stopped } = await streamReplyUntilStopped(
+      adapter,
+      { model: resolvedChannel.modelId, messages: chatMessages, signal: ctx.signal },
+      send,
+    );
 
     await db
       .update(messages)
@@ -954,6 +980,7 @@ export async function editUserMessage(
         model: resolvedChannel.modelId,
         liveMetadata: serializeLiveMetadata(liveContext),
         citations: serializeCitations(liveContext.citations),
+        finishReason: assistantFinishReason(stopped ? "stopped" : null, null),
         updatedAt: new Date(),
       })
       .where(eq(messages.id, assistantMessageId));
@@ -1061,19 +1088,14 @@ export async function regenerateMessage(
       resolvedChannel.channel.baseUrl || undefined,
     );
 
-    let responseContent = "";
-    const stream = await adapter.chatStream({
-      model: resolvedChannel.modelId,
-      messages: chatMessages,
-      maxTokens: 4096,
-      signal: ctx.signal,
-    });
-
-    for await (const chunk of stream) {
-      if (typeof chunk !== "string" || chunk.length === 0) continue;
-      responseContent += chunk;
-      send({ type: "delta", content: chunk });
-    }
+    const { content: responseContent, stopped } = await streamReplyUntilStopped(
+      adapter,
+      { model: resolvedChannel.modelId, messages: chatMessages, signal: ctx.signal },
+      send,
+    );
+    // Stopped before anything was generated: nothing replaces the previous
+    // reply, so it stays as it was (its own finish reason included).
+    if (stopped && !responseContent) return;
 
     await db
       .update(messages)
@@ -1082,6 +1104,7 @@ export async function regenerateMessage(
         model: resolvedChannel.modelId,
         liveMetadata: serializeLiveMetadata(liveContext),
         citations: serializeCitations(liveContext.citations),
+        finishReason: assistantFinishReason(stopped ? "stopped" : null, null),
         updatedAt: new Date(),
       })
       .where(eq(messages.id, assistantMessageId));
@@ -1137,6 +1160,8 @@ export async function syncSidecarMessages(
      * value means "not reported", never "zero".
      */
     usage?: { promptTokens: number; completionTokens: number; totalTokens: number };
+    /** "stopped" when the user stopped the run; normalized by assistantFinishReason. */
+    finishReason?: unknown;
     // Metadata-only attachment info for local (sidecar) runs — see
     // insertSidecarAttachmentMeta. When provided on an in-place update, it
     // replaces the user message's existing attachment rows.
@@ -1159,6 +1184,7 @@ export async function syncSidecarMessages(
   // it no matter what the client sent (older builds sent "" or the error text).
   // A run without text steps stores "" — its failure, if any, is agentRun.error.
   const assistantContent = assistantMessageContent(input.assistantContent ?? "", input.agentRun);
+  const finishReason = assistantFinishReason(input.finishReason, input.agentRun);
 
   if (input.userMessageId && input.assistantMessageId) {
     const [existingUser, existingAssistant] = await Promise.all([
@@ -1190,6 +1216,8 @@ export async function syncSidecarMessages(
           // Regenerate re-runs the turn, so the previous count is stale — clear
           // it when the new run reported nothing rather than leaving the old one.
           usage: input.usage ? JSON.stringify(input.usage) : null,
+          // Same as usage: a re-run that finished clears an earlier stop.
+          finishReason,
           liveMetadata: null,
           citations: null,
           updatedAt: new Date(),
@@ -1278,6 +1306,7 @@ export async function syncSidecarMessages(
     attachments: null,
     agentRun: input.agentRun ? JSON.stringify(input.agentRun) : null,
     usage: input.usage ? JSON.stringify(input.usage) : null,
+    finishReason,
     liveMetadata: null,
     citations: null,
     // createdAt is stored in whole seconds; a reply to an existing user message
@@ -1397,6 +1426,8 @@ export interface CompleteChatInput {
     completionTokens: number;
     totalTokens: number;
   };
+  /** "stopped" when the user stopped the reply; anything else stores null. */
+  finishReason?: unknown;
 }
 
 export async function completeChatFromSidecar(
@@ -1411,6 +1442,7 @@ export async function completeChatFromSidecar(
       content: input.content,
       model: input.model || null,
       usage: input.usage ? JSON.stringify(input.usage) : null,
+      finishReason: assistantFinishReason(input.finishReason, null),
       updatedAt: new Date(),
     })
     .where(

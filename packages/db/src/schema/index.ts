@@ -186,6 +186,12 @@ export const messages = sqliteTable(
     citations: text("citations"),
     /** JSON: { promptTokens, completionTokens, totalTokens }. Null when the provider reported none. */
     usage: text("usage"),
+    /**
+     * Why the reply ended early: "stopped" (the user pressed Stop and the reply
+     * was kept as far as it got). Null = ran to completion / predates the column.
+     * Written through shared `assistantFinishReason`. See shared MessageFinishReason.
+     */
+    finishReason: text("finish_reason"),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
     /**
      * Last time the answer was re-produced (regenerate / edit-and-resend). Null

@@ -248,6 +248,7 @@ messages.post("/chat/complete", async (c) => {
       content: body.content || "",
       model: body.model,
       usage: parseUsagePayload(body.usage),
+      finishReason: body.finishReason,
     });
     return c.json({ success: true });
   } catch (error) {

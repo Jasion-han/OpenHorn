@@ -6,6 +6,7 @@ import type {
   LocalImportRunResult,
   LocalImportScanResult,
   LocalImportServerSource,
+  MessageFinishReason,
   PromptTemplate,
 } from "shared/types";
 import { useBackendStatusStore } from "../stores/backendStatusStore";
@@ -83,6 +84,8 @@ export interface ServerApi {
       agentRun?: unknown;
       /** Token counts for the turn. Absent when the runtime did not report them. */
       usage?: { promptTokens: number; completionTokens: number; totalTokens: number };
+      /** "stopped" when the user stopped the run (the server also derives it from a cancelled run). */
+      finishReason?: MessageFinishReason;
       // Local-run attachments never reach the server as files; this metadata is
       // stored so the user's bubble keeps its attachment chips across reloads.
       attachmentsMeta?: Array<{ fileName: string; fileType?: string; fileSize?: number }>;
@@ -103,6 +106,8 @@ export interface ServerApi {
       content: string;
       model?: string;
       usage?: { promptTokens: number; completionTokens: number; totalTokens: number };
+      /** "stopped" when the user stopped the reply; absent = it ran to completion. */
+      finishReason?: MessageFinishReason;
     }) => Promise<{ success: boolean }>;
   };
   channels: {

@@ -146,6 +146,7 @@ const SCHEMA_DDL: string[] = [
 	    live_metadata TEXT,
 	    citations TEXT,
 	    usage TEXT,
+	    finish_reason TEXT,
 	    created_at INTEGER NOT NULL,
 	    updated_at INTEGER,
 	    FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
@@ -879,6 +880,17 @@ async function ensureMessageUsageColumn(): Promise<void> {
   }
 }
 
+// Additive and nullable: existing rows read as "ran to completion", which is
+// what they were as far as anything recorded — no backfill, so no backup.
+async function ensureMessageFinishReasonColumn(): Promise<void> {
+  const result = await client.execute(`PRAGMA table_info('messages');`);
+  const rows = getRows(result);
+  const hasColumn = hasColumnNamed(rows, "finish_reason");
+  if (!hasColumn) {
+    await client.execute(`ALTER TABLE messages ADD COLUMN finish_reason TEXT;`);
+  }
+}
+
 async function ensureMessageUpdatedAtColumn(): Promise<void> {
   const result = await client.execute(`PRAGMA table_info('messages');`);
   const rows = getRows(result);
@@ -1534,6 +1546,7 @@ export async function bootstrapDatabase(options: BootstrapOptions = {}): Promise
   await ensureMessageCitationsColumn();
   await ensureMessageUsageColumn();
   await ensureMessageUpdatedAtColumn();
+  await ensureMessageFinishReasonColumn();
   await ensureMcpServerUserIdColumn();
   await ensureAgentEventsTable();
   await ensureAgentSessionModelIdColumn();

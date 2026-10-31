@@ -47,7 +47,7 @@ import {
   stripSlashToken,
 } from "../../lib/slashToken";
 import { readSseStream } from "../../lib/sse";
-import { selectStoppedRunOrphans } from "../../lib/stopCleanup";
+import { replyHasOutput } from "../../lib/stopTurn";
 import { discoverSkills, skillsDisabledList } from "../../lib/tauriBridge";
 import { useChatStore } from "../../stores/chatStore";
 import { useDesktopShellStore } from "../../stores/desktopShellStore";
@@ -92,6 +92,14 @@ function collapseLine(text: string): string {
 function isAbortError(error: unknown) {
   return error instanceof DOMException && error.name === "AbortError";
 }
+
+/**
+ * The turn the composer is producing right now (send / regenerate / edit).
+ * Stop flips `stopped` and calls `abort` — the turn itself then persists what it
+ * has. A turn checks `stopped` after each await of its preparation, so a Stop
+ * pressed before generation even began still ends it (question kept).
+ */
+type ActiveTurn = { stopped: boolean; abort?: () => void };
 
 // Meta persisted with a local (sidecar) run's user message. Only durable fields
 // go to the server — previewUrl is a session-scoped objectURL and must not leak.
@@ -141,6 +149,15 @@ export function DesktopChatArea() {
     { type: "bottom" } | { type: "message"; id: string } | null
   >(null);
   const [streamingAssistantId, setStreamingAssistantId] = useState<string | null>(null);
+  const activeTurnRef = useRef<ActiveTurn | null>(null);
+  const beginTurn = (): ActiveTurn => {
+    const turn: ActiveTurn = { stopped: false };
+    activeTurnRef.current = turn;
+    return turn;
+  };
+  const endTurn = (turn: ActiveTurn) => {
+    if (activeTurnRef.current === turn) activeTurnRef.current = null;
+  };
   const autoSendRef = useRef(false);
   const pendingPrompt = useDesktopShellStore((state) => state.pendingPrompt);
   const setPendingPrompt = useDesktopShellStore((state) => state.setPendingPrompt);
@@ -960,6 +977,7 @@ export function DesktopChatArea() {
     }
 
     let attachmentIds: string[] | undefined;
+    const turn = beginTurn();
 
     try {
       addMessage({
@@ -1024,6 +1042,7 @@ export function DesktopChatArea() {
           chatAreaApi,
           forceWebSearch,
         );
+        const sendGenUiSection = await loadCurrentGenUiSection();
         await sidecarRun.startRun({
           conversationId,
           channelId: currentConversation.channelId,
@@ -1031,8 +1050,9 @@ export function DesktopChatArea() {
           assistantMessageId,
           prompt: sendContent,
           displayContent,
+          stoppedBeforeStart: turn.stopped,
           permissionMode: fullAccessEnabled ? "full-access" : "default",
-          systemPrompt: withGenUiPrompt(globalSystemPrompt, await loadCurrentGenUiSection()),
+          systemPrompt: withGenUiPrompt(globalSystemPrompt, sendGenUiSection),
           webSearchEnabled: forceWebSearch,
           tavilyApiKey,
           targetMcpServer,
@@ -1078,7 +1098,7 @@ export function DesktopChatArea() {
 
       updateMessage(userMessageId, { id: prepared.userMessageId });
       updateMessage(assistantMessageId, { id: prepared.assistantMessageId });
-      setStreamingAssistantId(prepared.assistantMessageId);
+      if (!turn.stopped) setStreamingAssistantId(prepared.assistantMessageId);
 
       const sidecarClient = useSidecarStore.getState().client;
       if (!sidecarClient) {
@@ -1092,46 +1112,67 @@ export function DesktopChatArea() {
         totalTokens: number;
       } | null = null;
       const genUiSection = await loadCurrentGenUiSection();
-      await new Promise<void>((resolve, reject) => {
-        sidecarClient
-          .chatStream({
-            apiKey: prepared.apiKey,
-            baseUrl: prepared.baseUrl || undefined,
-            protocol: prepared.protocol,
-            model: prepared.model,
-            messages: withGenUiMessages(prepared.messages, genUiSection),
-            onEvent: (event) => {
-              if (event.type === "execution_event" && event.eventType === "text") {
-                chatContent += event.content || "";
+      // Stopped while the turn was being prepared: the question is already
+      // persisted (chatPrepare), so the turn just ends with an empty reply.
+      if (!turn.stopped) {
+        await new Promise<void>((resolve, reject) => {
+          let chatRunId: string | null = null;
+          // Stop = stop generating and keep what streamed: abort the sidecar
+          // stream and let the turn persist its partial reply right away,
+          // instead of waiting for the provider to notice the abort.
+          turn.abort = () => {
+            if (chatRunId) void sidecarClient.cancelRun(chatRunId).catch(() => {});
+            resolve();
+          };
+          sidecarClient
+            .chatStream({
+              apiKey: prepared.apiKey,
+              baseUrl: prepared.baseUrl || undefined,
+              protocol: prepared.protocol,
+              model: prepared.model,
+              messages: withGenUiMessages(prepared.messages, genUiSection),
+              onEvent: (event) => {
+                // Late chunks after Stop are dropped: the reply is what was on
+                // screen when the user stopped it.
+                if (turn.stopped) return;
+                if (event.type === "execution_event" && event.eventType === "text") {
+                  chatContent += event.content || "";
+                  useChatStore
+                    .getState()
+                    .appendMessageDelta(prepared.assistantMessageId, event.content || "");
+                  return;
+                }
+                // Token counts arrive once, right before done. Not every provider
+                // (or gateway) reports them, so this stays optional throughout.
+                if (event.type === "execution_event" && event.eventType === "usage") {
+                  const meta = event.metadata as Record<string, unknown> | undefined;
+                  if (meta) {
+                    chatUsage = {
+                      promptTokens: Number(meta.promptTokens) || 0,
+                      completionTokens: Number(meta.completionTokens) || 0,
+                      totalTokens: Number(meta.totalTokens) || 0,
+                    };
+                  }
+                }
+              },
+              onError: (message) => {
+                if (turn.stopped) return;
+                chatContent = `Error: ${message}`;
                 useChatStore
                   .getState()
-                  .appendMessageDelta(prepared.assistantMessageId, event.content || "");
-                return;
-              }
-              // Token counts arrive once, right before done. Not every provider
-              // (or gateway) reports them, so this stays optional throughout.
-              if (event.type === "execution_event" && event.eventType === "usage") {
-                const meta = event.metadata as Record<string, unknown> | undefined;
-                if (meta) {
-                  chatUsage = {
-                    promptTokens: Number(meta.promptTokens) || 0,
-                    completionTokens: Number(meta.completionTokens) || 0,
-                    totalTokens: Number(meta.totalTokens) || 0,
-                  };
-                }
-              }
-            },
-            onError: (message) => {
-              chatContent = `Error: ${message}`;
-              useChatStore
-                .getState()
-                .updateMessage(prepared.assistantMessageId, { content: chatContent });
-              reject(new Error(message));
-            },
-            onDone: () => resolve(),
-          })
-          .catch(reject);
-      });
+                  .updateMessage(prepared.assistantMessageId, { content: chatContent });
+                reject(new Error(message));
+              },
+              onDone: () => resolve(),
+            })
+            .then((runId) => {
+              chatRunId = runId;
+              // Stop landed while the sidecar was accepting the stream.
+              if (turn.stopped) void sidecarClient.cancelRun(runId).catch(() => {});
+            })
+            .catch(reject);
+        });
+      }
 
       await chatAreaApi.messages.chatComplete({
         assistantMessageId: prepared.assistantMessageId,
@@ -1139,11 +1180,24 @@ export function DesktopChatArea() {
         content: chatContent,
         model: prepared.model,
         usage: chatUsage ?? undefined,
+        // The chat reply's only record of the stop — it has no run to mark.
+        finishReason: turn.stopped ? "stopped" : undefined,
       });
 
-      setStreaming(false);
-      setStreamingAssistantId(null);
-      await Promise.all([loadMessages(conversationId), loadConversations()]);
+      if (turn.stopped) {
+        // Stop already reset the streaming state, and the user may have started
+        // a new turn since — reloading now would wipe its optimistic messages.
+        // The on-screen copy is what was just persisted; only stamp it.
+        updateMessage(prepared.assistantMessageId, {
+          updatedAt: new Date(),
+          finishReason: "stopped",
+          ...(chatUsage ? { usage: chatUsage } : {}),
+        });
+      } else {
+        setStreaming(false);
+        setStreamingAssistantId(null);
+        await Promise.all([loadMessages(conversationId), loadConversations()]);
+      }
       const nextConversation = useChatStore.getState().currentConversation;
       if (
         nextConversation &&
@@ -1176,6 +1230,7 @@ export function DesktopChatArea() {
       useChatStore.getState().failStreamingMessage(assistantMessageId, message);
       setError(message);
     } finally {
+      endTurn(turn);
       setLoading(false);
       setIsUploading(false);
       queueMicrotask(() => inputRef.current?.focus());
@@ -1272,6 +1327,10 @@ export function DesktopChatArea() {
     if (!route) return;
     // An agent reply is re-run from its prompt; without one there is nothing to run.
     if (route.kind === "sidecar" && !userMessage) return;
+    // The reply this attempt replaces. A regenerate stopped before it produced
+    // anything puts it back — stopping the new attempt must not lose the old one.
+    const previousReply = assistantMessage;
+    const turn = beginTurn();
 
     if (userMessage) {
       pendingScrollTargetRef.current = { type: "message", id: userMessage.id };
@@ -1288,6 +1347,7 @@ export function DesktopChatArea() {
       liveStatus: undefined,
       liveRoute: undefined,
       liveLabel: undefined,
+      finishReason: undefined,
       agentRun:
         assistantMessage.mode === "agent"
           ? {
@@ -1300,9 +1360,6 @@ export function DesktopChatArea() {
 
     try {
       if (route.kind === "sidecar" && userMessage) {
-        if (sidecarRun.isBusy) {
-          await sidecarRun.cancel();
-        }
         const historyMsgs = useChatStore
           .getState()
           .messages.filter(
@@ -1318,6 +1375,9 @@ export function DesktopChatArea() {
         // bubble/persisted content keeps the raw `/token` text.
         const { sendContent: retrySendContent, targetMcpServer: retryTargetMcpServer } =
           resolveSkillMcpSlash(userMessage.content);
+        const retryGenUiSection = await loadCurrentGenUiSection();
+        // startRun stops a run still in flight (one turn at a time) — that run
+        // keeps whatever it produced.
         await sidecarRun.startRun({
           conversationId: currentConversation.id,
           channelId: route.channelId,
@@ -1329,10 +1389,12 @@ export function DesktopChatArea() {
           // path below already passed them; retry was the odd one out.)
           existingUserMessageId: userMessage.id,
           existingAssistantMessageId: messageId,
+          previousReply,
+          stoppedBeforeStart: turn.stopped,
           prompt: retrySendContent,
           displayContent: userMessage.content,
           permissionMode: fullAccessEnabled ? "full-access" : "default",
-          systemPrompt: withGenUiPrompt(retrySystemPrompt, await loadCurrentGenUiSection()),
+          systemPrompt: withGenUiPrompt(retrySystemPrompt, retryGenUiSection),
           webSearchEnabled: forceWebSearch,
           tavilyApiKey: retryTavilyApiKey,
           targetMcpServer: retryTargetMcpServer,
@@ -1357,6 +1419,10 @@ export function DesktopChatArea() {
         if (!response.ok) {
           throw new Error(await readErrorMessage(response, "Failed to regenerate message"));
         }
+        // Stopped while the request was going out: there was no stream to abort
+        // yet. Abort it now — the server keeps the previous reply when nothing
+        // was generated, and the abort branch below restores it on screen.
+        if (turn.stopped) abortStreaming();
 
         await consumeStreamingResponse(messageId, response);
         setStreaming(false);
@@ -1368,6 +1434,16 @@ export function DesktopChatArea() {
       setStreaming(false);
       setStreamingAssistantId(null);
       if (isAbortError(error)) {
+        // Stopped: the server persisted what streamed. If nothing did, it kept
+        // the previous reply — show that again rather than an empty bubble.
+        // Otherwise the partial reply stays, marked stopped like the server row.
+        const current = useChatStore.getState().findMessageAnywhere(messageId);
+        if (current && !replyHasOutput(current)) {
+          const { id: _id, conversationId: _conversationId, ...previous } = previousReply;
+          useChatStore.getState().updateMessage(messageId, previous);
+        } else if (current) {
+          useChatStore.getState().updateMessage(messageId, { finishReason: "stopped" });
+        }
         return;
       }
       setError(error instanceof Error ? error.message : "Retry message failed");
@@ -1378,6 +1454,7 @@ export function DesktopChatArea() {
           error instanceof Error ? error.message : "Retry message failed",
         );
     } finally {
+      endTurn(turn);
       setLoading(false);
     }
   };
@@ -1422,6 +1499,7 @@ export function DesktopChatArea() {
     const route = routeRerun(userMessage.mode);
     if (!route) return;
     const assistantMessageId = existingAssistantMessage?.id ?? `temp-assistant-edit-${Date.now()}`;
+    const turn = beginTurn();
     handleCancelEdit();
     pendingScrollTargetRef.current = { type: "message", id: userMessage.id };
     setLoading(true);
@@ -1438,6 +1516,7 @@ export function DesktopChatArea() {
         liveStatus: undefined,
         liveRoute: undefined,
         liveLabel: undefined,
+        finishReason: undefined,
         agentRun:
           existingAssistantMessage.mode === "agent"
             ? {
@@ -1477,6 +1556,7 @@ export function DesktopChatArea() {
         const conversationHistory = buildConversationHistory(historyMsgs);
         const { systemPrompt: editSystemPrompt, tavilyApiKey: editTavilyApiKey } =
           await resolveRunSettings(chatAreaApi, forceWebSearch);
+        const editGenUiSection = await loadCurrentGenUiSection();
         await sidecarRun.startRun({
           conversationId: currentConversation.id,
           channelId: route.channelId,
@@ -1486,8 +1566,12 @@ export function DesktopChatArea() {
           displayContent: editDisplayContent,
           existingUserMessageId: userMessage.id,
           existingAssistantMessageId: existingAssistantMessage?.id,
+          // No previousReply: the question changed, so the old reply no longer
+          // answers it — a stop before any output keeps the edit and an empty,
+          // explicitly stopped reply.
+          stoppedBeforeStart: turn.stopped,
           permissionMode: fullAccessEnabled ? "full-access" : "default",
-          systemPrompt: withGenUiPrompt(editSystemPrompt, await loadCurrentGenUiSection()),
+          systemPrompt: withGenUiPrompt(editSystemPrompt, editGenUiSection),
           webSearchEnabled: forceWebSearch,
           tavilyApiKey: editTavilyApiKey,
           targetMcpServer: editTargetMcpServer,
@@ -1500,6 +1584,9 @@ export function DesktopChatArea() {
         const response = await editUserMessage(userMessage.id, nextContent, {
           appendSystemPrompt: genUiSection ?? undefined,
         });
+        // Stopped while the request was going out: abort it now. The server has
+        // already saved the edited question and persists whatever streamed.
+        if (turn.stopped) abortStreaming();
         await consumeStreamingResponse(assistantMessageId, response);
         setStreaming(false);
         setStreamingAssistantId(null);
@@ -1510,6 +1597,9 @@ export function DesktopChatArea() {
       setStreaming(false);
       setStreamingAssistantId(null);
       if (isAbortError(error)) {
+        // Stopped: the server saved the edited question and the reply as far as
+        // it got, marked stopped — mirror the mark on the on-screen copy.
+        useChatStore.getState().updateMessage(assistantMessageId, { finishReason: "stopped" });
         return;
       }
       setError(error instanceof Error ? error.message : "Edit message failed");
@@ -1520,6 +1610,7 @@ export function DesktopChatArea() {
           error instanceof Error ? error.message : "Edit message failed",
         );
     } finally {
+      endTurn(turn);
       setLoading(false);
     }
   };
@@ -1556,52 +1647,25 @@ export function DesktopChatArea() {
     }
   };
 
+  // Stop = stop generating, never "undo this turn". Every path keeps the
+  // question and persists the reply as far as it got (an agent reply is marked
+  // "cancelled"); nothing is deleted and nothing is reloaded over the live copy.
   const handleStop = async () => {
     // Never cancel another conversation's run from here.
     if (!streamingHere) return;
-    // Identify the stopped run's own reply BEFORE anything is reset: the id the
-    // area is streaming into, the sidecar run's bound message, and any reply of
-    // this conversation still marked in progress (the area's own id is cleared
-    // on a conversation switch while the run keeps going). Cleanup below never
-    // looks beyond these — other rows of the conversation are not this run's.
-    const stoppedConversationId = currentConversation?.id ?? null;
-    const before = useChatStore.getState().messages;
-    const stoppedAssistantIds = [
-      streamingAssistantId,
-      sidecarRun.activeRun?.conversationId === stoppedConversationId
-        ? sidecarRun.activeRun?.messageId
-        : null,
-      ...before
-        .filter(
-          (m) =>
-            m.conversationId === stoppedConversationId &&
-            m.role === "assistant" &&
-            (m.agentRun?.status === "partial" || m.agentRun?.status === "running"),
-        )
-        .map((m) => m.id),
-    ];
-    if (sidecarRun.isBusy) {
-      await sidecarRun.cancel();
+    const turn = activeTurnRef.current;
+    if (turn) {
+      turn.stopped = true;
+      turn.abort?.();
     }
+    // Server-streamed chat regenerate / edit: the server keeps what streamed.
     abortStreaming();
+    // Agent run: aborts it in the sidecar and persists the stopped turn.
+    await sidecarRun.cancel();
 
     setLoading(false);
     setStreaming(false);
     setStreamingAssistantId(null);
-    if (!stoppedConversationId) return;
-    try {
-      await loadMessages(stoppedConversationId);
-    } catch {
-      // ignore reload failures after stop
-    }
-    const after = useChatStore.getState().messages;
-    for (const orphanId of selectStoppedRunOrphans({ stoppedAssistantIds, before, after })) {
-      try {
-        await deleteMessage(orphanId);
-      } catch {
-        // best-effort: the row may already be gone server-side
-      }
-    }
     queueMicrotask(() => inputRef.current?.focus());
   };
 

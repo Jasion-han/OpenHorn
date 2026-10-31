@@ -140,6 +140,7 @@ function mapMessage(message: ApiMessage): Message {
     liveLabel: liveMetadata?.label,
     citations,
     usage,
+    finishReason: message.finishReason === "stopped" ? "stopped" : undefined,
     createdAt: new Date(message.createdAt),
     updatedAt: message.updatedAt ? new Date(message.updatedAt) : undefined,
   };

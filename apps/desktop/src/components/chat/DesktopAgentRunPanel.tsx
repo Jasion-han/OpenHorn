@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { cn } from "ui";
 import { extractToolUrls, summarizeToolInput } from "../../lib/agentToolSummary";
 import { formatChatLabel, getChatLabel } from "../../lib/i18n/agent";
+import { resolveRunEndState } from "../../lib/stopTurn";
 import type { ApiAgentRun, ApiAgentRunStep } from "../../types/chat";
 import { DesktopAgentTaskMetaLine } from "./DesktopAgentTaskMetaLine";
 import { InlineClampStep } from "./DesktopInlineClampStep";
@@ -338,15 +339,21 @@ export function AgentRunPanel({
     isInProgress ||
     Boolean(run.agentInfo) ||
     Boolean(run.contextUsage);
+  // How a finished run closes: "stopped" under the output of a reply the user
+  // stopped, or an explicit line for a run that holds nothing — a stopped-early
+  // or legacy run without a reply would otherwise be a blank bubble.
+  const endState = resolveRunEndState(run);
+  const endLine =
+    endState === "stopped" ? (
+      <DesktopAgentTaskMetaLine text={getChatLabel("chat.agent.stopped")} />
+    ) : endState === "cancelled" ? (
+      <DesktopAgentTaskMetaLine text={getChatLabel("chat.agent.cancelled")} />
+    ) : endState === "noReply" ? (
+      <DesktopAgentTaskMetaLine text={getChatLabel("chat.reply.empty")} />
+    ) : null;
   if (!shouldRender) {
-    // A run that was cancelled before producing anything (e.g. a legacy
-    // server-run turn that never executed) would otherwise be a blank bubble.
-    if (run.status !== "cancelled") return null;
-    return (
-      <section className="mt-0.5 px-1 pt-0 pb-1">
-        <DesktopAgentTaskMetaLine text={getChatLabel("chat.agent.cancelled")} />
-      </section>
-    );
+    if (!endLine) return null;
+    return <section className="mt-0.5 px-1 pt-0 pb-1">{endLine}</section>;
   }
 
   // An in-progress run that has not yet produced any steps, text, or error would
@@ -407,6 +414,7 @@ export function AgentRunPanel({
         presentToolLabel={presentToolLabel}
         genUiScope={genUiScope}
       />
+      {endLine && <div className="px-1 pt-1">{endLine}</div>}
       {/* Context usage bar (ACP only) */}
       {run.contextUsage && <ContextUsageBar contextUsage={run.contextUsage} />}
     </div>

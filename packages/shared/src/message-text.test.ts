@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { agentRunReplyText, assistantMessageContent, hasAgentReplyTextSteps } from "./message-text";
+import {
+  agentRunReplyText,
+  assistantFinishReason,
+  assistantMessageContent,
+  hasAgentReplyTextSteps,
+} from "./message-text";
 
 describe("agentRunReplyText", () => {
   test("joins text steps and skips reasoning / thinking / tool steps", () => {
@@ -59,5 +64,24 @@ describe("assistantMessageContent", () => {
     expect(assistantMessageContent("chat reply", undefined)).toBe("chat reply");
     expect(assistantMessageContent("chat reply", "null")).toBe("chat reply");
     expect(assistantMessageContent("chat reply", "{not json")).toBe("chat reply");
+  });
+});
+
+describe("assistantFinishReason", () => {
+  test("keeps an explicit stop", () => {
+    expect(assistantFinishReason("stopped", undefined)).toBe("stopped");
+  });
+
+  test("a cancelled agent run is a stopped reply, parsed or stored as JSON", () => {
+    expect(assistantFinishReason(undefined, { status: "cancelled", steps: [] })).toBe("stopped");
+    expect(assistantFinishReason(null, JSON.stringify({ status: "cancelled", steps: [] }))).toBe(
+      "stopped",
+    );
+  });
+
+  test("anything else is null — a finished reply clears an earlier stop", () => {
+    expect(assistantFinishReason(undefined, undefined)).toBe(null);
+    expect(assistantFinishReason("bogus", { status: "completed", steps: [] })).toBe(null);
+    expect(assistantFinishReason(null, "not json")).toBe(null);
   });
 });
