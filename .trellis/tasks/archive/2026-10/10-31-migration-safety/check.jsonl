@@ -1,0 +1,3 @@
+{"file": "apps/server/src/db/bootstrap.ts", "reason": "migrations"}
+{"file": "packages/db/src/schema/index.ts", "reason": "schema sync if new table"}
+{"file": "skills/openhorn/rules/project-rules.md", "reason": "DB sync / migration rules"}
