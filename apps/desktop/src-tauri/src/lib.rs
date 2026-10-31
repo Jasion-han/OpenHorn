@@ -155,7 +155,11 @@ fn start_sidecar_internal<R: tauri::Runtime>(
         .map_err(|e| SidecarError::Spawn(e.to_string()))?
         .env("OPENHORN_HANDSHAKE_TOKEN", &token)
         .env("OPENHORN_HOST", "127.0.0.1")
-        .env("OPENHORN_PORT", "0");
+        .env("OPENHORN_PORT", "0")
+        // Opt the sidecar into its parent watchdog: if this process dies
+        // without running shutdown_sidecar (crash, kill -9, `tauri dev`
+        // restart), the sidecar notices it was reparented and exits.
+        .env("OPENHORN_PARENT_WATCH", "1");
 
     let (mut rx, child) = sidecar
         .spawn()
@@ -295,6 +299,28 @@ fn start_sidecar(
     state: State<'_, SidecarState>,
 ) -> Result<SidecarEndpoint, String> {
     start_sidecar_internal(&app, &state).map_err(String::from)
+}
+
+/// Kills the running sidecar child (if any) and removes the endpoint file.
+/// Shared by window close and app exit so every shutdown path cleans up the
+/// same way. Never panics: a poisoned lock still gets the endpoint file removed.
+fn shutdown_sidecar(state: &SidecarState) {
+    if let Ok(mut guard) = state.inner.lock() {
+        if let Some(running) = guard.take() {
+            if let Err(e) = running.child.kill() {
+                log::warn!("sidecar kill failed during shutdown: {e}");
+            }
+        }
+    }
+    remove_endpoint_file();
+}
+
+/// Runs `shutdown_sidecar` if the app manages a `SidecarState`.
+fn shutdown_sidecar_for_app<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    match app.try_state::<SidecarState>() {
+        Some(state) => shutdown_sidecar(&state),
+        None => remove_endpoint_file(),
+    }
 }
 
 #[tauri::command]
@@ -1136,15 +1162,7 @@ pub fn run() {
         // user quits from the window chrome.
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { .. } = event {
-                let handle = window.app_handle();
-                if let Some(state) = handle.try_state::<SidecarState>() {
-                    if let Ok(mut guard) = state.inner.lock() {
-                        if let Some(running) = guard.take() {
-                            let _ = running.child.kill();
-                        }
-                    }
-                }
-                remove_endpoint_file();
+                shutdown_sidecar_for_app(window.app_handle());
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -1174,8 +1192,17 @@ pub fn run() {
             workspace_open::external_editors_detect,
             workspace_open::pick_editor_app
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        // macOS Cmd+Q / the app menu's Quit go through ExitRequested/Exit and
+        // never fire the window's CloseRequested, so clean up here as well.
+        // We don't call `api.prevent_exit()`: quitting must still quit.
+        .run(|app, event| match event {
+            tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit => {
+                shutdown_sidecar_for_app(app);
+            }
+            _ => {}
+        });
 }
 
 /// Navigation policy of the main window. wry runs it for every frame, child

@@ -43,6 +43,7 @@ function isChatGptOAuthToken(key: string): boolean {
 
 import type { ChatMessage } from "adapters";
 import { fsList, fsReadText, fsWriteText } from "./fs";
+import { isParentWatchEnabled, startParentWatchdog } from "./parent-watch";
 import {
   buildErrorResponse,
   buildEvent,
@@ -755,6 +756,17 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
 }
 
 process.on("exit", () => drainMcpPool());
+
+// The Tauri host sets OPENHORN_PARENT_WATCH=1. If the host dies without
+// killing us (crash, kill -9, `tauri dev` restart) we get reparented; exit so
+// we don't linger holding a loopback port. process.exit runs the "exit"
+// handlers above (MCP pool drain, ACP/Codex child teardown).
+if (isParentWatchEnabled(process.env)) {
+  startParentWatchdog(() => {
+    console.error("sidecar parent process is gone; exiting");
+    process.exit(0);
+  });
+}
 
 console.log(
   JSON.stringify({
