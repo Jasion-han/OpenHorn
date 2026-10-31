@@ -1,0 +1,4 @@
+{"file": "apps/sidecar/src/agent/claude.ts", "reason": "current complete OAuth rules"}
+{"file": "apps/sidecar/src/agent/chat.ts", "reason": "chat path"}
+{"file": "packages/adapters/src/adapters.ts", "reason": "Anthropic adapter"}
+{"file": "apps/sidecar/src/index.ts", "reason": "chat.stream dispatch"}
