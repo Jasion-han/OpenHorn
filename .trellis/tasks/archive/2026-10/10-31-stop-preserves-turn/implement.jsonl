@@ -1,0 +1,8 @@
+{"file": "apps/desktop/src/hooks/useSidecarAgentRun.ts", "reason": "cancel skips persistence"}
+{"file": "apps/desktop/src/components/chat/DesktopChatArea.tsx", "reason": "handleStop"}
+{"file": "apps/desktop/src/lib/stopCleanup.ts", "reason": "stop cleanup semantics"}
+{"file": "apps/desktop/src/stores/chatStore.ts", "reason": "withDerivedContent / run status"}
+{"file": "apps/desktop/src/components/chat/DesktopAgentRunPanel.tsx", "reason": "cancelled / empty rendering"}
+{"file": "apps/sidecar/src/index.ts", "reason": "chat.stream / abort protocol"}
+{"file": "apps/desktop/src/lib/sidecarClient.ts", "reason": "client protocol"}
+{"file": "apps/server/src/services/messageService.ts", "reason": "syncSidecarMessages"}
