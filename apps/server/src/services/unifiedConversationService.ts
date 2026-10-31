@@ -1,5 +1,6 @@
 import { agentEvents, agentSessions, conversations, messages } from "db";
 import { and, asc, desc, eq, isNull } from "drizzle-orm";
+import { assistantMessageContent } from "shared/message-text";
 import { db } from "../db";
 import { generateId } from "../utils";
 
@@ -14,7 +15,7 @@ type LegacyAgentSessionRow = typeof agentSessions.$inferSelect;
 type DbOrTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 type AgentRunStep = {
-  type: "tool_start" | "tool_result" | "error";
+  type: "tool_start" | "tool_result" | "error" | "text";
   toolName?: string;
   content?: string;
   toolInput?: unknown;
@@ -57,14 +58,16 @@ async function insertMigratedAssistantMessage(params: {
   tx: DbOrTx;
   conversationId: string;
   session: LegacyAgentSessionRow;
-  content: string;
   steps: AgentRunStep[];
   error?: string;
   createdAt: Date;
 }) {
   const runData: AgentRunData = {
     status: params.error ? "failed" : mapLegacyStatus(params.session.status),
-    summary: buildAgentRunSummary(params.steps, params.error),
+    summary: buildAgentRunSummary(
+      params.steps.filter((step) => step.type !== "text"),
+      params.error,
+    ),
     error: params.error,
     steps: params.steps,
     legacySessionId: params.session.id,
@@ -74,7 +77,8 @@ async function insertMigratedAssistantMessage(params: {
     id: generateId(),
     conversationId: params.conversationId,
     role: "assistant",
-    content: params.content || params.error || "",
+    // The reply is the run's text steps; the failure stays in `error`.
+    content: assistantMessageContent("", runData),
     model: params.session.modelId || null,
     mode: "agent",
     attachments: null,
@@ -94,23 +98,21 @@ async function migrateSessionEventsToConversation(
     .where(eq(agentEvents.sessionId, session.id))
     .orderBy(asc(agentEvents.createdAt));
 
-  let assistantText = "";
   let steps: AgentRunStep[] = [];
   let errorText: string | undefined;
   let assistantCreatedAt = session.createdAt;
 
   const flushAssistant = async (createdAt: Date) => {
-    if (!assistantText.trim() && steps.length === 0 && !errorText) return;
+    const hasContent = steps.some((step) => step.type !== "text" || step.content?.trim());
+    if (!hasContent && !errorText) return;
     await insertMigratedAssistantMessage({
       tx,
       conversationId,
       session,
-      content: assistantText,
       steps,
       error: errorText,
       createdAt,
     });
-    assistantText = "";
     steps = [];
     errorText = undefined;
     assistantCreatedAt = createdAt;
@@ -135,7 +137,15 @@ async function migrateSessionEventsToConversation(
     }
 
     if (row.type === "text") {
-      assistantText += row.content || "";
+      // Streamed chunks: consecutive ones form one text step, kept in place
+      // between the tool calls like a native agent run's timeline.
+      const chunk = row.content || "";
+      const last = steps[steps.length - 1];
+      if (last?.type === "text") {
+        last.content = `${last.content ?? ""}${chunk}`;
+      } else if (chunk) {
+        steps.push({ type: "text", content: chunk, createdAt: row.createdAt.toISOString() });
+      }
       assistantCreatedAt = row.createdAt;
       continue;
     }

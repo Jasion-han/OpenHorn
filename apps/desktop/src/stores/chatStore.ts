@@ -1,4 +1,4 @@
-import { agentRunReplyText } from "shared/message-text";
+import { assistantMessageContent } from "shared/message-text";
 import { create } from "zustand";
 import { type ChatAdapter, createChatAdapter } from "../lib/chatAdapter";
 import type {
@@ -79,8 +79,7 @@ function applyStreamDelta(message: Message, delta: string, updates?: Partial<Mes
  * can never drift; the bubble renders the steps, not `content`, for such runs.
  */
 export function withDerivedContent(message: Message): Message {
-  if (!message.agentRun) return message;
-  const content = agentRunReplyText(message.agentRun);
+  const content = assistantMessageContent(message.content, message.agentRun);
   return content === message.content ? message : { ...message, content };
 }
 

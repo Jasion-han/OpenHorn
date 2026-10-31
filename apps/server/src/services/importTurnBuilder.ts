@@ -164,12 +164,19 @@ export class ImportTurnBuilder {
  * `messages.agent_run` JSON for an imported turn — same shape and wording the
  * legacy agent-session migration writes, so the desktop treats both alike.
  * Returns null for a plain text turn so `agentRun` stays NULL like a chat row.
+ *
+ * The turn's body (`reply`) closes the run as a `text` step, like a native
+ * agent answer, so the stored `content` derives from the run through the
+ * shared `assistantMessageContent` rule — callers must store that, not `reply`.
  */
-export function buildImportedAgentRun(steps: ImportStep[]): string | null {
+export function buildImportedAgentRun(steps: ImportStep[], reply = ""): string | null {
   if (steps.length === 0) return null;
   const toolCount = steps.filter((step) => step.type === "tool_start").length;
   const summary = toolCount > 0 ? `Agent 已调用 ${toolCount} 个工具` : "Agent 已完成本轮执行";
-  return JSON.stringify({ status: "completed", summary, toolCount, steps });
+  const runSteps: Array<ImportStep | { type: "text"; content: string }> = reply.trim()
+    ? [...steps, { type: "text", content: reply }]
+    : steps;
+  return JSON.stringify({ status: "completed", summary, toolCount, steps: runSteps });
 }
 
 /**

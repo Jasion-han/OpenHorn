@@ -26,9 +26,11 @@ import {
   settings,
 } from "db";
 import { and, eq } from "drizzle-orm";
+import { assistantMessageContent } from "shared/message-text";
 import type { ImportKind, ImportPart } from "shared/types";
 import yauzl from "yauzl";
 import { db } from "../db";
+import { normalizeStoredAgentReply } from "./agentReplyNormalization";
 import type { ExportManifest } from "./exportService";
 import { addPartItem, createImportRecord, createPart, IMPORT_DETAIL } from "./importRecordsService";
 import {
@@ -309,7 +311,21 @@ export async function importOpenHornBackup(userId: string, zipPath: string): Pro
   );
   for (const msg of msgRows) {
     if (!importedConvIds.has(msg.conversationId)) continue;
-    await db.insert(messages).values(reviveDates(msg));
+    const row = reviveDates(msg);
+    // Backups written before the reply-text invariant may hold agent replies
+    // whose `content` disagrees with their run; restore them in line with it.
+    // (Their tasks are not in the backup, so task-backed rows take the generic
+    // path — see normalizeStoredAgentReply.)
+    if (row.role === "assistant" && typeof row.agentRun === "string") {
+      Object.assign(
+        row,
+        normalizeStoredAgentReply({
+          content: typeof row.content === "string" ? row.content : "",
+          agentRun: row.agentRun,
+        }),
+      );
+    }
+    await db.insert(messages).values(row);
     result.messages.imported++;
   }
   collector.noteMessages(result.messages.imported);
@@ -777,12 +793,12 @@ export async function importChatGPT(userId: string, filePath: string): Promise<I
     });
 
     for (const msg of linearMessages) {
-      const agentRun = buildImportedAgentRun(msg.steps ?? []);
+      const agentRun = buildImportedAgentRun(msg.steps ?? [], msg.content);
       await db.insert(messages).values({
         id: crypto.randomUUID(),
         conversationId: convId,
         role: msg.role,
-        content: msg.content,
+        content: assistantMessageContent(msg.content, agentRun),
         model: msg.model,
         ...(agentRun ? { mode: "agent", agentRun } : {}),
         createdAt: msg.createdAt,
@@ -918,12 +934,12 @@ export async function importClaude(userId: string, filePath: string): Promise<Im
       const folded = turn.flush(fallback);
       if (!folded) return;
       if (!folded.content.trim() && folded.steps.length === 0) return;
-      const agentRun = buildImportedAgentRun(folded.steps);
+      const agentRun = buildImportedAgentRun(folded.steps, folded.content);
       await db.insert(messages).values({
         id: crypto.randomUUID(),
         conversationId: convId,
         role: "assistant",
-        content: folded.content,
+        content: assistantMessageContent(folded.content, agentRun),
         model: folded.model ?? conv.model ?? null,
         ...(agentRun ? { mode: "agent", agentRun } : {}),
         createdAt: new Date(folded.createdAt),

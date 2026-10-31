@@ -134,9 +134,16 @@ await api.messages.syncSidecar({ ..., myNewField: stripEphemeral(msg.myNewField)
 有 `agentRun` 的 assistant 消息，`content` 恒等于 text 步骤按序 trim、去空、以 `\n\n` 拼接
 （`shared/message-text` 的 `agentRunReplyText`）。桌面 `chatStore` 所有改 agentRun 的路径都经
 `updateAgentMessage` → `withDerivedContent` 推导 content；Agent 失败只写 `agentRun.error`，
-不写进 content。服务端 `syncSidecarMessages` 落库前用 `agentReplyContent(content, agentRun)`
-规范化（有 text 步骤则以步骤为准，否则保留传入值——服务端任务型回合存的是任务摘要、没有 text
-步骤）。`bootstrap.ts` 的 `backfillAgentReplyContent` 幂等回填存量并同步 messages_fts。
+不写进 content。
+
+**唯一规则**（task `10-31-task-reply-text`）：`shared/message-text` 的
+`assistantMessageContent(content, agentRun)`——有 agentRun 则 content = text 步骤推导，**没有任何
+「无 text 步骤就保留传入 content」的回退**；无 agentRun（chat）则原样。所有写入方都走它：桌面
+`withDerivedContent`、服务端 `syncSidecarMessages`、任务型回合（`buildTaskBackedAgentRun` 把
+final_result 全文作为 text 步骤、失败放 `agentRun.error`、`summary` 才是 160 字卡片预览）、导入
+（`buildImportedAgentRun(steps, reply)` 把正文作为收尾 text 步骤）、旧 agent_sessions 迁移、备份恢复。
+`bootstrap.ts` 的 `backfillAgentReplyContent`（逻辑在 `services/agentReplyNormalization.ts`）幂等地把
+存量行拉齐并同步 messages_fts。回填**绝不丢弃 content 里有而 text 步骤里没有的文本**（2026-09-09 前的桌面版本完成时弹掉尾部 text 步骤、正文只在 content；这类行要把 content 作为收尾 text 步骤补回，而不是按步骤重算覆盖）。失败行只有在 content 等于 `agentRun.error`（或 status=failed 且无 error）时才视为错误文本；error 已存在且不同时 content 是部分回复。新增写 agentRun 的地方：要么把回复放进 text 步骤，要么接受 content 为 ""。
 读取端一律直接读 `content`；`DesktopMessageBubble` 对含 text 步骤的消息只渲染时间线，不再渲染
 content 块。sidecar 的 Claude / 直连运行时把历史作为真实的 user / assistant 消息发送
 （`agent/context.ts` `buildHistoryMessages`），Codex / ACP 只收单段文本，仍是拼接

@@ -1,12 +1,12 @@
 import { attachments, conversations, messages } from "db";
 import { and, asc, eq, inArray } from "drizzle-orm";
-import { agentReplyContent } from "shared/message-text";
+import { assistantMessageContent } from "shared/message-text";
 import { type ChatContentPart, type ChatMessage, createAdapter } from "../agent-adapters";
 import { client, db } from "../db";
 import { generateId } from "../utils";
 import { createSseStream } from "../utils/sse";
 import { buildAgentPlan } from "./agentPlanBuilder";
-import { buildTaskMessageSummary } from "./agentTaskMessage";
+import { buildTaskCardSummary, buildTaskFailure, buildTaskReplyText } from "./agentTaskMessage";
 import type {
   AgentTaskComplexity,
   AgentTaskDetail,
@@ -130,7 +130,7 @@ export interface StreamMessageInput {
 }
 
 type AgentRunStep = {
-  type: "tool_start" | "tool_result" | "error";
+  type: "tool_start" | "tool_result" | "error" | "text";
   toolName?: string;
   content?: string;
   toolInput?: unknown;
@@ -225,7 +225,14 @@ function buildTaskPlan(task: Pick<AgentTaskRecord, "goal" | "complexity" | "atta
   });
 }
 
-function buildTaskBackedAgentRun(detail: AgentTaskDetail): AgentRunData {
+/**
+ * The agentRun of a task-backed (server-run) agent turn. The reply is the full
+ * final_result, carried as a `text` step exactly like a sidecar run's answer,
+ * so the message `content` derives from it through the same rule. A failure
+ * goes to `error`; `summary` is the clipped card preview for the meta line.
+ * Exported for tests.
+ */
+export function buildTaskBackedAgentRun(detail: AgentTaskDetail): AgentRunData {
   const latestRun = detail.runs[0] ?? null;
   const latestApproval = detail.approvals[0] ?? null;
   const toolCount = detail.events.filter(
@@ -236,6 +243,8 @@ function buildTaskBackedAgentRun(detail: AgentTaskDetail): AgentRunData {
       !Array.isArray(event.metadata) &&
       (event.metadata as Record<string, unknown>).eventType === "tool_start",
   ).length;
+  const replyText = buildTaskReplyText(detail);
+  const error = buildTaskFailure(detail);
 
   return {
     status:
@@ -248,8 +257,9 @@ function buildTaskBackedAgentRun(detail: AgentTaskDetail): AgentRunData {
             : detail.task.status === "cancelled"
               ? "cancelled"
               : "completed",
-    summary: buildTaskMessageSummary(detail),
-    steps: [],
+    summary: buildTaskCardSummary(detail),
+    ...(error ? { error } : {}),
+    steps: replyText ? [{ type: "text", content: replyText }] : [],
     toolCount,
     taskId: detail.task.id,
     complexity: detail.task.complexity,
@@ -327,8 +337,9 @@ export async function syncTaskBackedMessages(userId: string, taskId: string): Pr
 
   if (targets.length === 0) return;
 
-  const nextContent = buildTaskMessageSummary(detail);
-  const nextAgentRun = JSON.stringify(buildTaskBackedAgentRun(detail));
+  const agentRun = buildTaskBackedAgentRun(detail);
+  const nextContent = assistantMessageContent("", agentRun);
+  const nextAgentRun = JSON.stringify(agentRun);
 
   // Skip the write when nothing actually changed. This runs on a read path, so
   // an unconditional UPDATE turns every message fetch into a write — and bumps
@@ -479,11 +490,12 @@ async function createTaskBackedAgentTurn(params: {
     autoStart: true,
   });
   const detail = await planTaskForTurn(params.userId, task);
+  const agentRun = buildTaskBackedAgentRun(detail);
 
   return {
     detail,
-    content: buildTaskMessageSummary(detail),
-    agentRun: buildTaskBackedAgentRun(detail),
+    content: assistantMessageContent("", agentRun),
+    agentRun,
     modelId: detail.task.modelId,
   };
 }
@@ -1714,7 +1726,8 @@ export async function syncSidecarMessages(
   const now = new Date();
   // The reply text of an agent run lives in its text steps; `content` must equal
   // it no matter what the client sent (older builds sent "" or the error text).
-  const assistantContent = agentReplyContent(input.assistantContent ?? "", input.agentRun);
+  // A run without text steps stores "" — its failure, if any, is agentRun.error.
+  const assistantContent = assistantMessageContent(input.assistantContent ?? "", input.agentRun);
 
   if (input.userMessageId && input.assistantMessageId) {
     const [existingUser, existingAssistant] = await Promise.all([

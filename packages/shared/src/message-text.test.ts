@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { agentReplyContent, agentRunReplyText, hasAgentReplyTextSteps } from "./message-text";
+import { agentRunReplyText, assistantMessageContent, hasAgentReplyTextSteps } from "./message-text";
 
 describe("agentRunReplyText", () => {
   test("joins text steps and skips reasoning / thinking / tool steps", () => {
@@ -34,22 +34,30 @@ describe("agentRunReplyText", () => {
   });
 });
 
-describe("agentReplyContent", () => {
+describe("assistantMessageContent", () => {
   test("text steps override whatever content the caller passed", () => {
     const run = { steps: [{ type: "text", content: "answer" }] };
-    expect(agentReplyContent("", run)).toBe("answer");
-    expect(agentReplyContent("stale", run)).toBe("answer");
+    expect(assistantMessageContent("", run)).toBe("answer");
+    expect(assistantMessageContent("stale", run)).toBe("answer");
+    expect(assistantMessageContent("stale", JSON.stringify(run))).toBe("answer");
   });
 
   test("whitespace-only text steps still own the content", () => {
-    expect(agentReplyContent("stale", { steps: [{ type: "text", content: " " }] })).toBe("");
+    expect(assistantMessageContent("stale", { steps: [{ type: "text", content: " " }] })).toBe("");
   });
 
-  test("runs without text steps keep the given content", () => {
-    expect(agentReplyContent("task summary", { status: "completed", steps: [] })).toBe(
-      "task summary",
-    );
-    expect(agentReplyContent("chat reply", null)).toBe("chat reply");
+  test("a run without text steps stores empty content, never the given text", () => {
+    expect(assistantMessageContent("task summary", { status: "completed", steps: [] })).toBe("");
+    expect(
+      assistantMessageContent("Error: boom", { status: "failed", error: "boom", steps: [] }),
+    ).toBe("");
     expect(hasAgentReplyTextSteps({ steps: [{ type: "reasoning", content: "x" }] })).toBe(false);
+  });
+
+  test("messages without an agent run keep their content", () => {
+    expect(assistantMessageContent("chat reply", null)).toBe("chat reply");
+    expect(assistantMessageContent("chat reply", undefined)).toBe("chat reply");
+    expect(assistantMessageContent("chat reply", "null")).toBe("chat reply");
+    expect(assistantMessageContent("chat reply", "{not json")).toBe("chat reply");
   });
 });

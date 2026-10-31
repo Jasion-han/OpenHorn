@@ -147,4 +147,30 @@ describe("agent reply content invariant", () => {
     expect(get()).toMatchObject({ content: "one\n\ntwo" });
     expect(get()?.agentRun?.status).toBe("completed");
   });
+
+  test("a server task-backed done event derives content from its text step, like the DB", async () => {
+    const { store, get } = await setup();
+    // A server-run turn streams nothing; its single done event carries the run.
+    const answer = `full answer ${"x".repeat(500)}`;
+    store.getState().applyStreamEvent("draft-assistant-1", {
+      type: "done",
+      messageId: "draft-assistant-1",
+      agentRun: {
+        status: "completed",
+        summary: "full answer xxx",
+        steps: [{ type: "text", content: answer }],
+        taskId: "task-1",
+      },
+    });
+    expect(get()?.content).toBe(answer);
+
+    // No final result yet: no text step, so no reply text — never the summary.
+    store.getState().addMessage({ ...agentDraft("draft-assistant-2", "conv-a"), content: "stale" });
+    store.getState().applyStreamEvent("draft-assistant-2", {
+      type: "done",
+      messageId: "draft-assistant-2",
+      agentRun: { status: "awaiting_approval", summary: "Task is awaiting approval.", steps: [] },
+    });
+    expect(store.getState().findMessageAnywhere("draft-assistant-2")?.content).toBe("");
+  });
 });

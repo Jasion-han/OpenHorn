@@ -3,7 +3,12 @@ import { conversations, messages, users } from "db";
 import { eq } from "drizzle-orm";
 import { client, db } from "../db";
 import { backfillAgentReplyContent } from "../db/bootstrap";
-import { syncSidecarMessages } from "./messageService";
+import type { AgentTaskDetail } from "./agentTaskService";
+import {
+  buildTaskBackedAgentRun,
+  syncSidecarMessages,
+  syncTaskBackedMessages,
+} from "./messageService";
 
 /**
  * An agent reply's `content` must equal its agentRun text steps: search,
@@ -36,6 +41,8 @@ async function seed(userId: string, conversationId: string) {
 }
 
 async function cleanup(userId: string, conversationId: string) {
+  // agent_tasks cascades to its runs / artifacts / events.
+  await client.execute({ sql: "DELETE FROM agent_tasks WHERE user_id = ?", args: [userId] });
   await client.execute({
     sql: "DELETE FROM messages_fts WHERE conversation_id = ?",
     args: [conversationId],
@@ -96,7 +103,7 @@ test("sidecar sync derives content from the run's text steps", async () => {
   }
 });
 
-test("sidecar sync keeps the given content when the run has no text steps", async () => {
+test("sidecar sync stores empty content for a run without text steps (no fallback)", async () => {
   const userId = crypto.randomUUID();
   const conversationId = crypto.randomUUID();
   try {
@@ -104,7 +111,8 @@ test("sidecar sync keeps the given content when the run has no text steps", asyn
     const { assistantMessageId } = await syncSidecarMessages(userId, {
       conversationId,
       userContent: "question",
-      assistantContent: "",
+      // Older desktop builds sent the error text as the reply.
+      assistantContent: "Error: boom",
       agentRun: { status: "failed", summary: "Error", error: "boom", steps: [] },
     });
     expect(await contentOf(assistantMessageId)).toBe("");
@@ -113,41 +121,354 @@ test("sidecar sync keeps the given content when the run has no text steps", asyn
   }
 });
 
-test("backfill fills empty agent replies from text steps, once", async () => {
+// ---------------------------------------------------------------------------
+// Task-backed (server-run) turns
+// ---------------------------------------------------------------------------
+
+function taskDetail(overrides: {
+  status: AgentTaskDetail["task"]["status"];
+  runs?: Array<{ id: string; phase: "planning" | "execution"; error?: string | null }>;
+  artifacts?: Array<{ runId: string; type: "final_result" | "execution_summary"; content: string }>;
+  previewText?: string | null;
+}): AgentTaskDetail {
+  const now = new Date().toISOString();
+  return {
+    task: {
+      id: "task-1",
+      userId: "user-1",
+      conversationId: "conv-1",
+      channelId: null,
+      modelId: null,
+      title: "t",
+      goal: "g",
+      attachments: [],
+      complexity: "standard",
+      uxMode: "compact",
+      requiresPlanApproval: false,
+      autoStart: true,
+      status: overrides.status,
+      insight: overrides.previewText
+        ? {
+            highlight: null,
+            summary: overrides.previewText,
+            previewKind: "result",
+            previewText: overrides.previewText,
+            runCount: 1,
+            latestRunStatus: null,
+            latestRunPhase: null,
+            latestApprovalType: null,
+            latestApprovalStatus: null,
+            hasFinalResult: true,
+          }
+        : null,
+      createdAt: now,
+      updatedAt: now,
+    },
+    runs: (overrides.runs ?? []).map((run) => ({
+      id: run.id,
+      taskId: "task-1",
+      phase: run.phase,
+      status: "completed",
+      summary: null,
+      error: run.error ?? null,
+      startedAt: null,
+      completedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    })),
+    planSteps: [],
+    approvals: [],
+    artifacts: (overrides.artifacts ?? []).map((artifact, index) => ({
+      id: `artifact-${index}`,
+      taskId: "task-1",
+      runId: artifact.runId,
+      type: artifact.type,
+      title: "result",
+      content: artifact.content,
+      metadata: null,
+      createdAt: now,
+      updatedAt: now,
+    })),
+    events: [],
+    runtime: null,
+  };
+}
+
+const LONG_ANSWER = `answer ${"x".repeat(2000)}`;
+
+test("task-backed run carries the full final_result as its text step", () => {
+  const run = buildTaskBackedAgentRun(
+    taskDetail({
+      status: "completed",
+      runs: [{ id: "exec-1", phase: "execution" }],
+      artifacts: [{ runId: "exec-1", type: "final_result", content: LONG_ANSWER }],
+      previewText: "answer xxx…",
+    }),
+  );
+  expect(run.steps).toEqual([{ type: "text", content: LONG_ANSWER }]);
+  expect(run.summary).toBe("answer xxx…");
+  expect(run.error).toBeUndefined();
+  expect(run.status).toBe("completed");
+});
+
+test("task-backed run without a final result has no text step", () => {
+  const run = buildTaskBackedAgentRun(
+    taskDetail({ status: "awaiting_approval", runs: [{ id: "plan-1", phase: "planning" }] }),
+  );
+  expect(run.steps).toEqual([]);
+  expect(run.status).toBe("awaiting_approval");
+});
+
+test("failed task-backed run puts the error in agentRun.error, not in a step", () => {
+  const run = buildTaskBackedAgentRun(
+    taskDetail({
+      status: "failed",
+      runs: [{ id: "exec-1", phase: "execution", error: "provider exploded" }],
+      previewText: "provider exploded",
+    }),
+  );
+  expect(run.status).toBe("failed");
+  expect(run.error).toBe("provider exploded");
+  expect(run.steps).toEqual([]);
+});
+
+async function seedTask(
+  userId: string,
+  conversationId: string,
+  task: { id: string; status: string; result?: string; error?: string },
+) {
+  const now = Date.now();
+  await client.execute({
+    sql: `INSERT INTO agent_tasks (id, user_id, conversation_id, title, goal, status, created_at, updated_at)
+          VALUES (?, ?, ?, 't', 'g', ?, ?, ?)`,
+    args: [task.id, userId, conversationId, task.status, now, now],
+  });
+  const runId = `${task.id}-exec`;
+  await client.execute({
+    sql: `INSERT INTO agent_runs (id, task_id, phase, status, error, created_at, updated_at)
+          VALUES (?, ?, 'execution', ?, ?, ?, ?)`,
+    args: [runId, task.id, task.status, task.error ?? null, now, now],
+  });
+  if (task.result !== undefined) {
+    await client.execute({
+      sql: `INSERT INTO agent_artifacts (id, task_id, run_id, type, title, content, created_at, updated_at)
+            VALUES (?, ?, ?, 'final_result', 'r', ?, ?, ?)`,
+      args: [`${task.id}-result`, task.id, runId, task.result, now, now],
+    });
+  }
+}
+
+test("syncTaskBackedMessages writes the full result as content and syncs FTS", async () => {
   const userId = crypto.randomUUID();
   const conversationId = crypto.randomUUID();
+  const taskId = crypto.randomUUID();
+  const messageId = crypto.randomUUID();
+  try {
+    await seed(userId, conversationId);
+    await seedTask(userId, conversationId, {
+      id: taskId,
+      status: "completed",
+      result: LONG_ANSWER,
+    });
+    await db.insert(messages).values({
+      id: messageId,
+      conversationId,
+      role: "assistant",
+      mode: "agent",
+      content: "answer xxx…",
+      agentRun: JSON.stringify({ status: "running", summary: "", steps: [], taskId }),
+      createdAt: new Date(),
+    });
+
+    await syncTaskBackedMessages(userId, taskId);
+    expect(await contentOf(messageId)).toBe(LONG_ANSWER);
+    expect(await ftsContentOf(messageId)).toEqual([LONG_ANSWER]);
+  } finally {
+    await cleanup(userId, conversationId);
+  }
+});
+
+test("backfill brings every legacy agent row in line with its run, once", async () => {
+  const userId = crypto.randomUUID();
+  const conversationId = crypto.randomUUID();
+  const taskOk = crypto.randomUUID();
+  const taskFailed = crypto.randomUUID();
   const ids = {
     empty: crypto.randomUUID(),
-    filled: crypto.randomUUID(),
-    noText: crypto.randomUUID(),
+    stale: crypto.randomUUID(),
     blankText: crypto.randomUUID(),
+    replyInContent: crypto.randomUUID(),
+    errorInContent: crypto.randomUUID(),
+    failedNoError: crypto.randomUUID(),
+    poppedFinal: crypto.randomUUID(),
+    concatenated: crypto.randomUUID(),
+    failedPartial: crypto.randomUUID(),
+    errorWithSteps: crypto.randomUUID(),
+    taskOk: crypto.randomUUID(),
+    taskFailed: crypto.randomUUID(),
+    taskGone: crypto.randomUUID(),
+    chat: crypto.randomUUID(),
   };
   try {
     await seed(userId, conversationId);
+    await seedTask(userId, conversationId, {
+      id: taskOk,
+      status: "completed",
+      result: LONG_ANSWER,
+    });
+    await seedTask(userId, conversationId, { id: taskFailed, status: "failed", error: "boom" });
     const base = { conversationId, role: "assistant", mode: "agent", createdAt: new Date() };
+    const tools = [{ type: "tool_start", toolName: "Bash" }];
     await db.insert(messages).values([
       { ...base, id: ids.empty, content: "", agentRun: JSON.stringify(run(["蓝鲸42"])) },
-      { ...base, id: ids.filled, content: "kept", agentRun: JSON.stringify(run(["other"])) },
+      // Text in content that the steps lack is never dropped.
+      { ...base, id: ids.stale, content: "kept", agentRun: JSON.stringify(run(["other"])) },
+      // Builds before the timeline stream popped the trailing text steps on
+      // completion: the preamble stays a step, the answer lives only in content.
       {
         ...base,
-        id: ids.noText,
-        content: "",
-        agentRun: JSON.stringify({ status: "failed", error: "x", steps: [] }),
+        id: ids.poppedFinal,
+        content: "the full answer",
+        agentRun: JSON.stringify({
+          status: "completed",
+          steps: [{ type: "text", content: "Let me check." }, ...tools],
+        }),
+      },
+      // ...and content was every streamed segment concatenated.
+      {
+        ...base,
+        id: ids.concatenated,
+        content: "Let me check.Found it: 42",
+        agentRun: JSON.stringify({
+          status: "completed",
+          steps: [{ type: "text", content: "Let me check." }, ...tools],
+        }),
+      },
+      // Older failed runs kept the partial reply in content, the error in agentRun.error.
+      {
+        ...base,
+        id: ids.failedPartial,
+        content: "partial answer",
+        agentRun: JSON.stringify({ status: "failed", error: "timeout", steps: tools }),
+      },
+      // A failed run with text steps whose content was overwritten by the error.
+      {
+        ...base,
+        id: ids.errorWithSteps,
+        content: "timeout",
+        agentRun: JSON.stringify({ ...run(["half"]), status: "failed", error: "timeout" }),
       },
       { ...base, id: ids.blankText, content: "", agentRun: JSON.stringify(run(["  "])) },
+      // Older desktop builds stripped the text steps and kept the reply in content.
+      {
+        ...base,
+        id: ids.replyInContent,
+        content: "the reply",
+        agentRun: JSON.stringify({ status: "completed", summary: "Done", steps: tools }),
+      },
+      // ...and wrote the failure into content.
+      {
+        ...base,
+        id: ids.errorInContent,
+        content: "Error: timeout",
+        agentRun: JSON.stringify({ status: "failed", error: "timeout", steps: [] }),
+      },
+      {
+        ...base,
+        id: ids.failedNoError,
+        content: "sidecar connection closed",
+        agentRun: JSON.stringify({ status: "failed", steps: [] }),
+      },
+      {
+        ...base,
+        id: ids.taskOk,
+        content: "answer xxx…",
+        agentRun: JSON.stringify({
+          status: "completed",
+          summary: "answer xxx…",
+          steps: [],
+          taskId: taskOk,
+        }),
+      },
+      {
+        ...base,
+        id: ids.taskFailed,
+        content: "boom",
+        agentRun: JSON.stringify({
+          status: "failed",
+          summary: "boom",
+          steps: [],
+          taskId: taskFailed,
+        }),
+      },
+      {
+        ...base,
+        id: ids.taskGone,
+        content: "clipped preview",
+        agentRun: JSON.stringify({
+          status: "completed",
+          summary: "clipped preview",
+          steps: [],
+          taskId: crypto.randomUUID(),
+        }),
+      },
+      { ...base, id: ids.chat, mode: "chat", content: "chat reply", agentRun: null },
     ]);
 
     await backfillAgentReplyContent();
+    const agentRunOf = async (id: string) => {
+      const [row] = await db.select().from(messages).where(eq(messages.id, id));
+      return JSON.parse(row?.agentRun ?? "null");
+    };
+
     expect(await contentOf(ids.empty)).toBe("蓝鲸42");
     expect(await ftsContentOf(ids.empty)).toEqual(["蓝鲸42"]);
-    expect(await contentOf(ids.filled)).toBe("kept");
-    expect(await contentOf(ids.noText)).toBe("");
+    expect(await contentOf(ids.stale)).toBe("other\n\nkept");
+    expect(await contentOf(ids.poppedFinal)).toBe("Let me check.\n\nthe full answer");
+    expect(await ftsContentOf(ids.poppedFinal)).toEqual(["Let me check.\n\nthe full answer"]);
+    expect(await contentOf(ids.concatenated)).toBe("Let me check.\n\nFound it: 42");
+    expect(await contentOf(ids.failedPartial)).toBe("partial answer");
+    expect((await agentRunOf(ids.failedPartial)).error).toBe("timeout");
+    expect(await contentOf(ids.errorWithSteps)).toBe("half");
+    expect((await agentRunOf(ids.errorWithSteps)).error).toBe("timeout");
     expect(await contentOf(ids.blankText)).toBe("");
 
-    // Second pass touches nothing and does not duplicate the FTS row.
+    expect(await contentOf(ids.replyInContent)).toBe("the reply");
+    expect((await agentRunOf(ids.replyInContent)).steps).toEqual([
+      ...tools,
+      { type: "text", content: "the reply" },
+    ]);
+
+    expect(await contentOf(ids.errorInContent)).toBe("");
+    expect(await ftsContentOf(ids.errorInContent)).toEqual([]);
+    expect((await agentRunOf(ids.errorInContent)).error).toBe("timeout");
+    expect(await contentOf(ids.failedNoError)).toBe("");
+    expect((await agentRunOf(ids.failedNoError)).error).toBe("sidecar connection closed");
+
+    expect(await contentOf(ids.taskOk)).toBe(LONG_ANSWER);
+    expect(await ftsContentOf(ids.taskOk)).toEqual([LONG_ANSWER]);
+    expect((await agentRunOf(ids.taskOk)).steps).toEqual([{ type: "text", content: LONG_ANSWER }]);
+    expect((await agentRunOf(ids.taskOk)).summary).toBe("answer xxx…");
+
+    expect(await contentOf(ids.taskFailed)).toBe("");
+    expect((await agentRunOf(ids.taskFailed)).error).toBe("boom");
+
+    // Task no longer on record: the stored text is all there is, kept as the reply.
+    expect(await contentOf(ids.taskGone)).toBe("clipped preview");
+    expect(await contentOf(ids.chat)).toBe("chat reply");
+
+    // Second pass changes nothing anywhere and does not duplicate FTS rows.
+    const snapshot = await db
+      .select()
+      .from(messages)
+      .where(eq(messages.conversationId, conversationId));
     await backfillAgentReplyContent();
-    expect(await contentOf(ids.empty)).toBe("蓝鲸42");
-    expect(await ftsContentOf(ids.empty)).toEqual(["蓝鲸42"]);
+    const again = await db
+      .select()
+      .from(messages)
+      .where(eq(messages.conversationId, conversationId));
+    expect(again).toEqual(snapshot);
+    expect(await ftsContentOf(ids.taskOk)).toEqual([LONG_ANSWER]);
   } finally {
     await cleanup(userId, conversationId);
   }

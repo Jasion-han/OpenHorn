@@ -561,6 +561,10 @@ test("ImportTurnBuilder: a turn of only tool steps keeps an empty body; only-tex
     steps: [{ type: "tool_start", toolName: "Bash", toolInput: { command: "ls" } }],
   });
   expect(buildImportedAgentRun([])).toBe(null);
+  expect(buildImportedAgentRun([], "plain reply")).toBe(null);
+  expect(
+    JSON.parse(buildImportedAgentRun(t?.steps ?? [], "listed") ?? "null").steps.at(-1),
+  ).toEqual({ type: "text", content: "listed" });
 });
 
 test("toolResultContentToText: strings, text blocks, image markers, unknown blocks", () => {
@@ -638,6 +642,8 @@ test("claude: one reply spread over 3 message.ids with tool calls in between imp
           toolCallId: "toolu_2",
         },
         { type: "tool_result", content: "ok", toolName: "Edit", toolCallId: "toolu_2" },
+        // The final text closes the run; `content` is derived from it.
+        { type: "text", content: "Removed the arrow." },
       ],
     });
     const stored = await loadAttachments(CLAUDE_MERGE_SESSION);
@@ -737,7 +743,8 @@ test("codex: one reply spread over 3 assistant messages with a tool call in betw
     const rows = await loadMessages(CODEX_MERGE_THREAD);
     expect(rows.map((m) => [m.role, m.content])).toEqual([
       ["user", "Add tests for the router"],
-      ["assistant", "Tests pass.\n\nDone.\n"],
+      // Derived from the closing text step, so trimmed like every agent reply.
+      ["assistant", "Tests pass.\n\nDone."],
     ]);
     // Reasoning summaries are thinking steps (the encrypted-only one is not);
     // commentary before the call is interim text, the two text pieces after it
@@ -757,6 +764,7 @@ test("codex: one reply spread over 3 assistant messages with a tool call in betw
           toolCallId: "call_1",
         },
         { type: "tool_result", content: "3 pass", toolName: "exec_command", toolCallId: "call_1" },
+        { type: "text", content: "Tests pass.\n\nDone.\n" },
       ],
     });
     expect(rows[1].model).toBe("gpt-5-codex");

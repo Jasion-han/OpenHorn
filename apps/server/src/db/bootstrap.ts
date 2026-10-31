@@ -1,6 +1,7 @@
 import { userInfo } from "node:os";
 import type { ResultSet, Row } from "@libsql/client";
-import { agentRunReplyText } from "shared/message-text";
+import { normalizeStoredAgentReply } from "../services/agentReplyNormalization";
+import { selectTaskFailure, selectTaskReplyText } from "../services/agentTaskMessage";
 import { client } from "./index";
 
 type ForeignKeyExpectation = {
@@ -1336,41 +1337,124 @@ async function ensureMessagesFtsTable(): Promise<void> {
 }
 
 /**
- * Agent replies used to be stored with an empty `content` and the answer only
- * in `agent_run` text steps, which hid them from everything that reads
- * `content` (history, full-text search, export, summaries, titles). Fill those
- * rows from their text steps and re-point the FTS row at the new text.
+ * Brings every stored agent reply in line with the reply-text invariant —
+ * `content` = the run's text steps, failures in `agentRun.error` — and re-points
+ * the FTS row whenever `content` changes. See `normalizeStoredAgentReply` for
+ * the legacy row shapes. Task-backed rows whose task still exists are rebuilt
+ * from the task's full final_result (they used to store the 160-char card
+ * preview, or the error string), with the same selection the live path uses.
  *
- * Idempotent: a filled row no longer matches `trim(content) = ''`, and a row
- * whose text steps are all blank derives "" and is left alone. Exported for
- * tests.
+ * Idempotent: a row already in line normalizes to itself and is not written.
+ * Exported for tests.
  */
 export async function backfillAgentReplyContent(): Promise<number> {
   const result = await client.execute(
-    `SELECT id, conversation_id, agent_run FROM messages
-     WHERE role = 'assistant'
-       AND trim(content) = ''
-       AND agent_run IS NOT NULL
-       AND agent_run LIKE '%"type":"text"%';`,
+    `SELECT id, conversation_id, content, agent_run FROM messages
+     WHERE role = 'assistant' AND agent_run IS NOT NULL;`,
   );
-  let filled = 0;
-  for (const row of getRows(result)) {
-    const id = String(row.id);
-    const conversationId = String(row.conversation_id);
-    const content = agentRunReplyText(row.agent_run);
-    if (!content) continue;
+  const rows = getRows(result).map((row) => ({
+    id: String(row.id),
+    conversationId: String(row.conversation_id),
+    content: typeof row.content === "string" ? row.content : "",
+    agentRun: typeof row.agent_run === "string" ? row.agent_run : null,
+  }));
+  const tasks = await loadTaskReplies(
+    rows.map((row) => taskIdOf(row.agentRun)).filter((id): id is string => id !== null),
+  );
+
+  let changed = 0;
+  for (const row of rows) {
+    const taskId = taskIdOf(row.agentRun);
+    const next = normalizeStoredAgentReply(
+      { content: row.content, agentRun: row.agentRun },
+      taskId ? tasks.get(taskId) : undefined,
+    );
+    if (next.content === row.content && next.agentRun === row.agentRun) continue;
     await client.execute({
-      sql: `UPDATE messages SET content = ? WHERE id = ?;`,
-      args: [content, id],
+      sql: `UPDATE messages SET content = ?, agent_run = ? WHERE id = ?;`,
+      args: [next.content, next.agentRun, row.id],
     });
-    await client.execute({ sql: `DELETE FROM messages_fts WHERE message_id = ?;`, args: [id] });
-    await client.execute({
-      sql: `INSERT INTO messages_fts(message_id, conversation_id, content) VALUES (?, ?, ?);`,
-      args: [id, conversationId, content.substring(0, 5000)],
-    });
-    filled++;
+    if (next.content !== row.content) {
+      await client.execute({
+        sql: `DELETE FROM messages_fts WHERE message_id = ?;`,
+        args: [row.id],
+      });
+      if (next.content) {
+        await client.execute({
+          sql: `INSERT INTO messages_fts(message_id, conversation_id, content) VALUES (?, ?, ?);`,
+          args: [row.id, row.conversationId, next.content.substring(0, 5000)],
+        });
+      }
+    }
+    changed++;
   }
-  return filled;
+  return changed;
+}
+
+function taskIdOf(agentRun: string | null): string | null {
+  if (!agentRun || !agentRun.includes('"taskId"')) return null;
+  try {
+    const taskId = (JSON.parse(agentRun) as { taskId?: unknown } | null)?.taskId;
+    return typeof taskId === "string" && taskId ? taskId : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Reply text + failure for each task that still exists, keyed by task id. */
+async function loadTaskReplies(
+  taskIds: string[],
+): Promise<Map<string, { replyText: string; failure?: string }>> {
+  const replies = new Map<string, { replyText: string; failure?: string }>();
+  if (taskIds.length === 0) return replies;
+  const ids = JSON.stringify([...new Set(taskIds)]);
+  const inIds = "IN (SELECT value FROM json_each(?))";
+  const [taskRows, runRows, artifactRows] = await Promise.all([
+    client.execute({ sql: `SELECT id, status FROM agent_tasks WHERE id ${inIds};`, args: [ids] }),
+    client.execute({
+      sql: `SELECT id, task_id, phase, error FROM agent_runs WHERE task_id ${inIds}
+            ORDER BY created_at DESC;`,
+      args: [ids],
+    }),
+    client.execute({
+      sql: `SELECT task_id, run_id, type, content FROM agent_artifacts
+            WHERE type = 'final_result' AND task_id ${inIds} ORDER BY created_at DESC;`,
+      args: [ids],
+    }),
+  ]);
+
+  const runsByTask = new Map<string, Array<{ id: string; phase: string; error: string | null }>>();
+  for (const row of getRows(runRows)) {
+    const list = runsByTask.get(String(row.task_id)) ?? [];
+    list.push({
+      id: String(row.id),
+      phase: String(row.phase),
+      error: typeof row.error === "string" ? row.error : null,
+    });
+    runsByTask.set(String(row.task_id), list);
+  }
+  const artifactsByTask = new Map<
+    string,
+    Array<{ runId: string; type: string; content: string }>
+  >();
+  for (const row of getRows(artifactRows)) {
+    const list = artifactsByTask.get(String(row.task_id)) ?? [];
+    list.push({
+      runId: String(row.run_id),
+      type: String(row.type),
+      content: typeof row.content === "string" ? row.content : "",
+    });
+    artifactsByTask.set(String(row.task_id), list);
+  }
+  for (const row of getRows(taskRows)) {
+    const taskId = String(row.id);
+    const runs = runsByTask.get(taskId) ?? [];
+    replies.set(taskId, {
+      replyText: selectTaskReplyText(runs, artifactsByTask.get(taskId) ?? []),
+      failure: selectTaskFailure(String(row.status), runs),
+    });
+  }
+  return replies;
 }
 
 export async function bootstrapDatabase(): Promise<void> {
@@ -1449,6 +1533,7 @@ export async function bootstrapDatabase(): Promise<void> {
   // table) so the backfill reads the final rows.
   await ensureMessagesFtsTable();
 
-  // After the FTS table exists, so the backfilled text is indexed too.
+  // After the FTS table exists, so the backfilled text is indexed too. Reads
+  // agent_tasks / agent_runs / agent_artifacts, all created above.
   await backfillAgentReplyContent();
 }

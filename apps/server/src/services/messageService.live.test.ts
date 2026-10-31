@@ -899,12 +899,13 @@ test("stream agent mode routes to a task-backed turn and emits a single done pay
       goal: "那他能做什么",
     });
 
-    // Assistant message is updated with the task summary + serialized agentRun.
+    // No final result yet: the run has no text step, so the reply content is
+    // empty — the preview only feeds agentRun.summary, never `content`.
     const assistantUpdate = updatedRows.find(
       (row) => row.mode === "agent" && typeof row.agentRun === "string",
     );
     expect(assistantUpdate).toMatchObject({
-      content: "Task is awaiting approval.",
+      content: "",
       model: "claude-3-7-sonnet",
       mode: "agent",
     });
@@ -1045,7 +1046,8 @@ test("edit agent user message returns the task-backed summary instead of streami
     runs: [{ id: "run-1", phase: "execution" }],
     approvals: [],
     planSteps: [],
-    artifacts: [],
+    // The full answer — the insight preview above is only its clipped card text.
+    artifacts: [{ runId: "run-1", type: "final_result", content: `完整答案${"。".repeat(400)}` }],
     events: [],
     runtime: null,
   };
@@ -1126,18 +1128,24 @@ test("edit agent user message returns the task-backed summary instead of streami
       messageId: "assistant-msg-1",
       model: "claude-3-7-sonnet",
     });
-    expect(payloads[0]?.agentRun).toMatchObject({ taskId: "task-1", summary: "已完成本轮执行。" });
+    // The reply is the full final_result as a text step; summary stays the card preview.
+    const fullAnswer = `完整答案${"。".repeat(400)}`;
+    expect(payloads[0]?.agentRun).toMatchObject({
+      taskId: "task-1",
+      summary: "已完成本轮执行。",
+      steps: [{ type: "text", content: fullAnswer }],
+    });
 
     // The user message content is updated with the new prompt.
     expect(updatedRows.find((row) => row.content === "新问题")).toBeDefined();
     expect(createTaskInputs[0]).toMatchObject({ goal: "新问题" });
 
-    // The existing assistant message is updated with the task summary.
+    // The existing assistant message's content is the full answer, not the preview.
     const assistantUpdate = updatedRows.find(
       (row) => row.mode === "agent" && typeof row.agentRun === "string",
     );
     expect(assistantUpdate).toMatchObject({
-      content: "已完成本轮执行。",
+      content: fullAnswer,
       model: "claude-3-7-sonnet",
       mode: "agent",
     });

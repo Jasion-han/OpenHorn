@@ -1,12 +1,11 @@
 /**
  * The reply text of an Agent run.
  *
- * Agent answers stream into `agentRun.steps[]` as `{ type: "text", content }`
- * steps so the bubble can render them inline in the run timeline. The stored
- * message `content` must still equal that text — search, export, summaries,
- * titles and conversation history all read `content` and nothing else. Every
- * write path therefore derives `content` from the steps through this module
- * instead of leaving it empty.
+ * Agent answers live in `agentRun.steps[]` as `{ type: "text", content }` steps
+ * so the bubble can render them inline in the run timeline. The stored message
+ * `content` must still equal that text — search, export, summaries, titles and
+ * conversation history all read `content` and nothing else. Every write path
+ * therefore derives `content` from the steps through this module.
  *
  * The text steps are trimmed, empty ones dropped, and the rest joined with a
  * blank line; reasoning / thinking / tool steps are never included. `agentRun`
@@ -25,26 +24,33 @@ export function hasAgentReplyTextSteps(agentRun: unknown): boolean {
 }
 
 /**
- * The `content` to store for an assistant message. A run that produced text
- * steps owns the reply text, so `content` is derived from them whatever the
- * caller passed. A run without text steps (server task-backed turns store a
- * task summary, failed runs store nothing) keeps the given `content`.
+ * The one rule for an assistant message's stored `content`, shared by every
+ * writer (desktop store, server sync, task-backed turns, imports, migrations):
+ * a message that carries an agent run gets its text steps' reply text — with
+ * no fallback to the caller's `content`, so a run without text steps (a failed
+ * run, an unfinished task) stores "" and its error lives in `agentRun.error`.
+ * A message without an agent run (chat mode) keeps `content` unchanged.
  */
-export function agentReplyContent(content: string, agentRun: unknown): string {
-  return hasAgentReplyTextSteps(agentRun) ? agentRunReplyText(agentRun) : content;
+export function assistantMessageContent(content: string, agentRun: unknown): string {
+  return parseAgentRun(agentRun) ? agentRunReplyText(agentRun) : content;
 }
 
-function textSteps(agentRun: unknown): string[] {
+function parseAgentRun(agentRun: unknown): Record<string, unknown> | null {
   let run = agentRun;
   if (typeof run === "string") {
     try {
       run = JSON.parse(run);
     } catch {
-      return [];
+      return null;
     }
   }
-  if (!run || typeof run !== "object") return [];
-  const steps = (run as { steps?: unknown }).steps;
+  return run && typeof run === "object" && !Array.isArray(run)
+    ? (run as Record<string, unknown>)
+    : null;
+}
+
+function textSteps(agentRun: unknown): string[] {
+  const steps = parseAgentRun(agentRun)?.steps;
   if (!Array.isArray(steps)) return [];
   const texts: string[] = [];
   for (const step of steps) {

@@ -162,6 +162,8 @@ test("chatgpt import: thoughts, tool calls, tool outputs and interim text are st
         { type: "reasoning", content: "Got the weather, now the math." },
         { type: "tool_start", toolName: "python", toolInput: { command: "print(2+2)" } },
         { type: "tool_result", content: "4\n", toolName: "python" },
+        // The body closes the run as a text step; `content` derives from it.
+        { type: "text", content: "Paris is 18°C and 2+2 is 4." },
       ],
     });
   } finally {
@@ -260,6 +262,7 @@ test("claude.ai import: thinking, tool_use and tool_result blocks are steps in o
           toolCallId: "toolu_1",
         },
         { type: "tool_result", content: "OK", toolName: "artifacts", toolCallId: "toolu_1" },
+        { type: "text", content: "Here is your chart." },
       ],
     });
     // A plain text reply stays a chat row with no run attached.

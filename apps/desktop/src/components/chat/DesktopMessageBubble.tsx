@@ -74,7 +74,8 @@ function MessageBubbleImpl({
   const isFlatAgentAssistant = isAssistant && message.mode === "agent";
   // `content` mirrors the run's text steps, which the run panel already renders
   // inline in the timeline — rendering the content block too would show the
-  // answer twice. Older rows without text steps still render from `content`.
+  // answer twice. A run without text steps has no reply text (content is "");
+  // its failure, if any, is the panel's `agentRun.error` line.
   const replyInTimeline = isAssistant && hasAgentReplyTextSteps(message.agentRun);
   const showContentBody = hasAssistantText && !replyInTimeline;
   const liveIndicator = resolveAgentLiveIndicator({

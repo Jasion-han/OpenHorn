@@ -24,6 +24,7 @@ import {
   LOCAL_IMPORT_RUN_MAX_CONVERSATIONS,
   PROMPT_TEMPLATES_SETTING_KEY,
 } from "shared/constants";
+import { assistantMessageContent } from "shared/message-text";
 import type {
   ImportPart,
   ImportSource,
@@ -1546,18 +1547,20 @@ async function persistSession(
   for (let i = 0; i < session.messages.length; i++) {
     const m = session.messages[i];
     const id = generateId();
+    const agentRun = buildImportedAgentRun(m.steps ?? [], m.content);
+    const content = assistantMessageContent(m.content, agentRun);
     await db.insert(messages).values({
       id,
       conversationId: session.id,
       role: m.role,
-      content: m.content,
+      content,
       model: m.model,
       mode: "agent",
-      agentRun: buildImportedAgentRun(m.steps ?? []),
+      agentRun,
       usage: m.usage ? JSON.stringify(m.usage) : null,
       createdAt: stamps[i],
     });
-    await ftsInsert(id, session.id, m.content);
+    await ftsInsert(id, session.id, content);
     if (m.role !== "user" || !m.images?.length) continue;
     let skippedHere = 0;
     for (let k = 0; k < m.images.length; k++) {
