@@ -11,6 +11,8 @@ or execute a command after a delayed approval.
 
 ```ts
 type PermissionMode = "default" | "full-access";
+// AgentRunParams / SidecarRunAgentInput:
+workspaceRoot?: string;
 type CodexApproval = {
   toolUseId: string;
   toolName: string;
@@ -84,6 +86,18 @@ identities and must never be used as the shared connection's approval-map key.
   uses developer instructions; ACP separates request instructions from user
   context; Direct includes them in its system prompt. Omitted instructions
   must not leak from a prior run on the same session.
+- Workspace selection belongs to the run as well. The desktop carries the
+  root returned by its successful workspace preparation in `agent.run`'s
+  `workspaceRoot`; failure must stop preparation. The sidecar canonicalizes
+  and checks that directory before accepting a run, then passes the captured
+  `cwd` to Direct, Codex and ACP. Explicit empty, invalid, nonexistent or forbidden
+  roots reject without falling back or launching a runtime. A stopped turn's
+  delayed `workspace.setCurrent` RPC must not redirect a newer turn. Do not
+  depend on the order of independently awaited connection-level RPCs.
+  Older callers that omit the field capture the connection's current root,
+  or the existing allowed default, for compatibility. The allowed-roots and
+  permission policies do not change. ACP session reuse already includes `cwd`
+  in its config key; a session preconnected in another project is not reusable.
 
 ## 4. Validation & Error Matrix
 
@@ -104,6 +118,9 @@ identities and must never be used as the shared connection's approval-map key.
 | Long run / approval wait past socket idle threshold | Keep socket connected |
 | ACP full-access followed by default reused session | Second turn asks again |
 | Host event publication throws | Remove approval resolver and reject the request |
+| Old stopped workspace RPC completes after the new project was selected | Explicit per-run workspace remains the new project |
+| Explicit empty/nonexistent/file/forbidden run root | Reject before runtime acceptance; no fallback |
+| ACP preconnected session belongs to another workspace | Start a new session in this run's canonical cwd |
 
 ## 5. Good / Base / Bad Cases
 
@@ -141,6 +158,13 @@ identities and must never be used as the shared connection's approval-map key.
   partial output. These tests must never call a real model/provider.
 - Full Server tests use `apps/server/bunfig.toml` and an explicitly disposable
   `OPENHORN_TEST_DATABASE_URL`; never run against the normal app's SQLite file.
+- `index.workspace.test.ts` starts the actual RPC router in an owned child,
+  gates only the old root's canonicalization, and mocks runtime entry points.
+  Check late stopped setup, canonical symlink roots across Direct/Codex/ACP,
+  explicit invalid-root refusal and omitted-root compatibility. Its token,
+  TMPDIR, workspaces and checkpoint home must all be disposable. The ACP
+  workspace test uses real local fake subprocesses to verify a preconnected
+  process in project A is not reused for a run in project B; no provider calls.
 
 ## 7. Wrong vs Correct
 

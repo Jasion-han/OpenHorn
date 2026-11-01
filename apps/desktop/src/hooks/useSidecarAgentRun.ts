@@ -1,6 +1,6 @@
-import { useRef, useState } from "react";
 import type { AttachmentPart, MessageFinishReason } from "shared/types";
-import { formatChatLabel } from "../lib/i18n/agent";
+import { create } from "zustand";
+import { formatChatLabel, getChatLabel } from "../lib/i18n/agent";
 import { createServerApi } from "../lib/serverApi";
 import type { SidecarApprovalRequest, SidecarClient } from "../lib/sidecarClient";
 import {
@@ -80,6 +80,8 @@ export interface SidecarAgentRunApi {
   pendingApproval: SidecarApprovalRequest | null;
   lastError: string | null;
   isBusy: boolean;
+  /** Synchronous ownership check, including preparation before React renders. */
+  hasActiveRun: () => boolean;
   lastFinishedRunId: string | null;
   isRollingBack: boolean;
   rollbackError: string | null;
@@ -136,42 +138,76 @@ export interface SidecarAgentRunApi {
  * chatStore.applyStreamEvent (which is the same interface the server
  * runtime uses).
  */
+interface AgentRunState {
+  activeRun: ActiveSidecarRun | null;
+  pendingApproval: SidecarApprovalRequest | null;
+  lastError: string | null;
+  isBusy: boolean;
+  lastFinishedRunId: string | null;
+  isRollingBack: boolean;
+  rollbackError: string | null;
+  sdkSession: { id: string; protocol: string; conversationId: string | null } | null;
+  acpAvailableModels: AcpAvailableModel[];
+  acpPreconnecting: boolean;
+}
+
+// Execution owns these values, rather than a settings/chat route's mount.
+// Existing callbacks continue publishing to the current subscriber after a
+// remount, including pending approvals and the actual Stop handle.
+const useAgentRunState = create<AgentRunState>(() => ({
+  activeRun: null,
+  pendingApproval: null,
+  lastError: null,
+  isBusy: false,
+  lastFinishedRunId: null,
+  isRollingBack: false,
+  rollbackError: null,
+  sdkSession: null,
+  acpAvailableModels: [],
+  acpPreconnecting: false,
+}));
+
+function stateSetter<K extends keyof AgentRunState>(key: K) {
+  return (value: AgentRunState[K]) => {
+    useAgentRunState.setState({ [key]: value } as Pick<AgentRunState, K>);
+  };
+}
+const setActiveRun = stateSetter("activeRun");
+const setPendingApproval = stateSetter("pendingApproval");
+const setLastError = stateSetter("lastError");
+const setIsBusy = stateSetter("isBusy");
+const setLastFinishedRunId = stateSetter("lastFinishedRunId");
+const setIsRollingBack = stateSetter("isRollingBack");
+const setRollbackError = stateSetter("rollbackError");
+const setSdkSession = stateSetter("sdkSession");
+const setAcpAvailableModels = stateSetter("acpAvailableModels");
+const setAcpPreconnecting = stateSetter("acpPreconnecting");
+const runRef: { current: ActiveSidecarRun | null } = { current: null };
+const controlRef: { current: { stop: () => Promise<void> } | null } = { current: null };
+const checkpointRunIdsRef = { current: new Set<string>() };
+
 export function useSidecarAgentRun(): SidecarAgentRunApi {
-  const [activeRun, setActiveRun] = useState<ActiveSidecarRun | null>(null);
-  const [pendingApproval, setPendingApproval] = useState<SidecarApprovalRequest | null>(null);
-  const [lastError, setLastError] = useState<string | null>(null);
-  const [isBusy, setIsBusy] = useState(false);
-  const [lastFinishedRunId, setLastFinishedRunId] = useState<string | null>(null);
-  const [isRollingBack, setIsRollingBack] = useState(false);
-  const [rollbackError, setRollbackError] = useState<string | null>(null);
-  // The resumable runtime session, tagged with where it came from. A session id
-  // is only handed back as `resume` to a run on the same protocol — and, for
-  // non-ACP runtimes, the same conversation. The hook lives in the always-mounted
-  // chat area, so without the tag the startup ACP preconnect's session id was
-  // passed to every later Anthropic run as `resume`, and the Claude CLI exited
-  // with code 1 because no such session existed.
-  const [sdkSession, setSdkSession] = useState<{
-    id: string;
-    protocol: string;
-    conversationId: string | null;
-  } | null>(null);
+  const {
+    activeRun,
+    pendingApproval,
+    lastError,
+    isBusy,
+    lastFinishedRunId,
+    isRollingBack,
+    rollbackError,
+    sdkSession,
+    acpAvailableModels,
+    acpPreconnecting,
+  } = useAgentRunState();
   const sdkSessionId = sdkSession?.id ?? null;
   const resumableSessionId = (protocol: string, conversationId: string): string | undefined => {
-    if (!sdkSession || sdkSession.protocol !== protocol) return undefined;
-    if (protocol !== "acp" && sdkSession.conversationId !== conversationId) return undefined;
-    return sdkSession.id;
+    // Preconnection can settle during another run's preparation. Read the live
+    // provenance, so a protocol/conversation mismatch cannot resume its session.
+    const session = useAgentRunState.getState().sdkSession;
+    if (!session || session.protocol !== protocol) return undefined;
+    if (protocol !== "acp" && session.conversationId !== conversationId) return undefined;
+    return session.id;
   };
-  const [acpAvailableModels, setAcpAvailableModels] = useState<AcpAvailableModel[]>([]);
-  const [acpPreconnecting, setAcpPreconnecting] = useState(false);
-  const runRef = useRef<ActiveSidecarRun | null>(null);
-  // Stop handle of the run currently owned by this hook. Installed synchronously
-  // at the start of startRun — before any await — so a Stop pressed while the
-  // run is still being set up (credentials, workspace, MCP) reaches it too.
-  const controlRef = useRef<{ stop: () => Promise<void> } | null>(null);
-  // Runs the sidecar wrote a rollback manifest for (checkpoint.ready). Only
-  // these may become a rollback target — offering rollback on a run that never
-  // touched a file would ENOENT in the sidecar and surface as a raw error.
-  const checkpointRunIdsRef = useRef<Set<string>>(new Set());
 
   const syncRun = (run: ActiveSidecarRun | null) => {
     if (run === null && runRef.current) {
@@ -188,10 +224,6 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
   const startRun = async (input: SidecarAgentRunInput): Promise<void> => {
     const sidecar = useSidecarStore.getState();
     const client = sidecar.client;
-    if (!client || sidecar.status !== "ready") {
-      setLastError("本地运行尚未就绪");
-      return;
-    }
     // Run-ownership guard. Regenerate re-uses the SAME assistant message id:
     // the retry path clears the bubble and calls startRun again while the old
     // run may still be streaming. Stopping the old run (below) is best-effort at
@@ -208,7 +240,9 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
     // Set once the user stopped this run. From then on every late event of the
     // run is dropped; the stop path alone decides what is persisted.
     let stopped = false;
-    const isLive = () => !stopped && ownsMessage();
+    let terminal = false;
+    let terminalPersistence: Promise<void> | null = null;
+    const isLive = () => !stopped && !terminal && ownsMessage() && controlRef.current === control;
     // Per-run one-shot persistence guard. A run ends through exactly one of
     // done / error / stop, but they can race; syncSidecar must run at most once
     // per run so we never duplicate the round. Lives in this closure — a
@@ -217,6 +251,8 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
     const shouldPersist = createRunPersistGuard(input.assistantMessageId, ownerToken);
     let runId: string | null = null;
     let runModel = input.modelId;
+    let runProtocol: string | null = null;
+    let streamingMessageId = input.assistantMessageId;
     // Token counts for the turn. The SDK reports them once, on its terminal
     // `result` message, so they land here shortly before `done` — captured in
     // the run closure rather than in the store because their only consumer is
@@ -261,6 +297,7 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
           attachmentsMeta: input.attachmentsMeta,
           ...resolveSidecarSyncIds(input),
         });
+        if (!ownsMessage()) return;
         // Align the optimistic draft ids with the persisted ids so revisiting
         // the conversation doesn't duplicate the round.
         if (res?.userMessageId && res?.assistantMessageId) {
@@ -271,23 +308,26 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
             assistantMessageId: res.assistantMessageId,
           });
           stampId = res.assistantMessageId;
+          streamingMessageId = res.assistantMessageId;
         }
       } catch {
         // Best-effort: a persistence failure must not affect the UI.
       } finally {
-        // Server row is now fresh (or we tried) — the stale-DB guard is no longer
-        // needed for these ids.
-        useChatStore.getState().unmarkMessagesActive(activeRunIds);
-        // The bubble only shows a timestamp once the answer is finished; stamp it
-        // now rather than waiting for the next reload to carry the server value.
-        // Token counts ride along for the same reason: they were just written to
-        // the row, but the in-memory message is still the optimistic object the
-        // run built, so without this the count only appears after navigating
-        // away and back.
-        useChatStore.getState().updateMessage(stampId, {
-          updatedAt: new Date(),
-          ...(runUsage ? { usage: runUsage } : {}),
-        });
+        if (ownsMessage()) {
+          // Server row is now fresh (or we tried) — the stale-DB guard is no longer
+          // needed for these ids.
+          useChatStore.getState().unmarkMessagesActive(activeRunIds);
+          // The bubble only shows a timestamp once the answer is finished; stamp it
+          // now rather than waiting for the next reload to carry the server value.
+          // Token counts ride along for the same reason: they were just written to
+          // the row, but the in-memory message is still the optimistic object the
+          // run built, so without this the count only appears after navigating
+          // away and back.
+          useChatStore.getState().updateMessage(stampId, {
+            updatedAt: new Date(),
+            ...(runUsage ? { usage: runUsage } : {}),
+          });
+        }
       }
     };
 
@@ -298,20 +338,38 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
       // A disowned run must not read the (already re-cleared) message or persist.
       if (!ownsMessage()) return;
       const msg = useChatStore.getState().findMessageAnywhere(input.assistantMessageId);
-      void persistOnce(
+      terminal = true;
+      // The failure itself is shown globally; it is not new output that should
+      // replace a retry's preceding answer when no text or steps were produced.
+      const outcome = resolveStoppedAgentReply({
+        current: msg?.agentRun ? { ...msg, agentRun: { ...msg.agentRun, error: undefined } } : msg,
+        previousReply: input.previousReply,
+      });
+      if (outcome.kind === "restore") {
+        shouldPersist();
+        const { id: _id, conversationId: _conversationId, ...previous } = outcome.reply;
+        useChatStore.getState().updateMessage(input.assistantMessageId, previous);
+        useChatStore.getState().unmarkMessagesActive(activeRunIds);
+        terminalPersistence = Promise.resolve().finally(finishRun);
+        return;
+      }
+      terminalPersistence = persistOnce(
         msg?.content || "",
         msg?.agentRun ?? { status: "failed", summary: message, error: message, steps: [] },
         model,
-      );
+      ).finally(finishRun);
     };
 
-    const control = { stop: () => stopRun() };
+    let stopping: Promise<void> | null = null;
+    const control = { stop: () => (stopping ??= stopRun()) };
     // Releases this run's hold on the hook's busy/active state. Only the run that
     // currently holds the control may clear it — a stopped predecessor finishing
     // late must not flip a newer run's state.
     const finishRun = () => {
       if (controlRef.current !== control) return;
       controlRef.current = null;
+      setPendingApproval(null);
+      useChatStore.getState().completeStreamingMessage(streamingMessageId);
       syncRun(null);
       setIsBusy(false);
     };
@@ -321,43 +379,61 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
     // A regenerate stopped before producing anything restores the reply it
     // replaced instead (see resolveStoppedAgentReply).
     const stopRun = async (): Promise<void> => {
-      if (stopped) return;
-      const owned = ownsMessage();
-      stopped = true;
-      const wasCurrent = controlRef.current === control;
-      if (wasCurrent) setPendingApproval(null);
-      finishRun();
-      const sidecarRunId = runId;
-      if (sidecarRunId) {
-        try {
-          await client.cancelRun(sidecarRunId);
-        } catch {
-          // The run may already have ended in the sidecar.
-        }
-      }
-      // A run superseded by a newer one for the same message leaves the message
-      // to that run — it writes nothing here.
-      if (!owned) return;
-      const store = useChatStore.getState();
-      const outcome = resolveStoppedAgentReply({
-        current: store.findMessageAnywhere(input.assistantMessageId),
-        previousReply: input.previousReply,
-      });
-      if (outcome.kind === "restore") {
-        // Nothing new exists: the stored round is still the previous one, so
-        // there is nothing to write — consume the guard so no late path does.
-        shouldPersist();
-        const { id: _id, conversationId: _conversationId, ...previous } = outcome.reply;
-        store.updateMessage(input.assistantMessageId, previous);
-        store.unmarkMessagesActive(activeRunIds);
+      if (terminalPersistence) {
+        await terminalPersistence;
         return;
       }
-      store.updateMessage(input.assistantMessageId, {
-        agentRun: outcome.agentRun,
-        content: outcome.assistantContent,
-        finishReason: "stopped",
+      const owned = ownsMessage();
+      stopped = true;
+      if (controlRef.current === control) setPendingApproval(null);
+      try {
+        if (runId && client) {
+          try {
+            await client.cancelRun(runId);
+          } catch {
+            // The run may already have ended in the sidecar.
+          }
+        }
+        if (!owned) return;
+        const store = useChatStore.getState();
+        const outcome = resolveStoppedAgentReply({
+          current: store.findMessageAnywhere(input.assistantMessageId),
+          previousReply: input.previousReply,
+        });
+        if (outcome.kind === "restore") {
+          shouldPersist();
+          const { id: _id, conversationId: _conversationId, ...previous } = outcome.reply;
+          store.updateMessage(input.assistantMessageId, previous);
+          store.unmarkMessagesActive(activeRunIds);
+          return;
+        }
+        store.updateMessage(input.assistantMessageId, {
+          agentRun: outcome.agentRun,
+          content: outcome.assistantContent,
+          finishReason: "stopped",
+        });
+        await persistOnce(outcome.assistantContent, outcome.agentRun, runModel, "stopped");
+      } finally {
+        finishRun();
+      }
+    };
+
+    // Both terminal callbacks converge here. The transport can deliver onDone
+    // before onEvent(done); either order must persist and complete exactly once.
+    const completeRun = () => {
+      if (!isLive()) return;
+      useChatStore.getState().applyStreamEvent(input.assistantMessageId, {
+        type: "done",
+        messageId: input.assistantMessageId,
       });
-      await persistOnce(outcome.assistantContent, outcome.agentRun, runModel, "stopped");
+      terminal = true;
+      const message = useChatStore.getState().findMessageAnywhere(input.assistantMessageId);
+      terminalPersistence = persistOnce(
+        message?.content || "",
+        message?.agentRun,
+        runModel,
+      ).finally(finishRun);
+      if (runProtocol !== "anthropic" && runProtocol !== "acp") setLastFinishedRunId(null);
     };
 
     // Install before any await so Stop reaches a run that is still being set up.
@@ -390,6 +466,17 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
       return;
     }
 
+    if (!client || sidecar.status !== "ready") {
+      const message = getChatLabel("chat.error.sidecarNotReady");
+      setLastError(message);
+      useChatStore.getState().applyStreamEvent(input.assistantMessageId, {
+        type: "error",
+        message,
+      });
+      persistFailure(message, input.modelId);
+      return;
+    }
+
     let credentials: {
       apiKey: string;
       baseUrl: string | null;
@@ -399,11 +486,11 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
     try {
       const result = await api.channels.getCredentials(input.channelId);
       credentials = result.credentials;
+      if (!isLive()) return;
     } catch (error) {
       // A newer run may have claimed this message (or the user stopped this
       // one) while we were awaiting — that path owns the outcome now.
       if (!isLive()) return;
-      finishRun();
       const message = error instanceof Error ? error.message : "获取凭据失败";
       setLastError(message);
       useChatStore.getState().applyStreamEvent(input.assistantMessageId, {
@@ -414,6 +501,7 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
       return;
     }
     runModel = input.modelId || credentials.modelId;
+    runProtocol = credentials.protocol;
 
     if (
       credentials.protocol !== "anthropic" &&
@@ -422,7 +510,6 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
     ) {
       // Same as above: skip entirely if a newer run took over during the await.
       if (!isLive()) return;
-      finishRun();
       const message = `本地运行暂不支持该协议：${credentials.protocol}`;
       setLastError(message);
       useChatStore.getState().applyStreamEvent(input.assistantMessageId, {
@@ -450,7 +537,6 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
         acpAgent = { command: parsed.command, args: parsed.args, env: parsed.env };
       } catch {
         if (!isLive()) return;
-        finishRun();
         const message = "ACP 渠道配置无效：缺少 agent 启动命令，请在渠道设置中重新配置";
         setLastError(message);
         useChatStore.getState().applyStreamEvent(input.assistantMessageId, {
@@ -483,12 +569,12 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
       }
     }
 
+    if (!isLive()) return;
     // Re-sync the workspace to the sidecar before EVERY run (for the agent's cwd
     // and MCP). The sidecar may have restarted and lost it, diverging from the
     // desktop's value. A conversation filed under a sidebar project runs in that
-    // project's folder; for a plain conversation this is best-effort and the run
-    // continues regardless. For a project it is not: a vanished folder must
-    // refuse the run rather than let the agent work in some other directory.
+    // project's folder. A failed resolution must refuse the run; falling back
+    // to connection-global cwd could execute it in another turn's directory.
     const projectRoot = resolveProjectRootForConversation(
       useChatStore.getState().conversations.find((c) => c.id === input.conversationId),
     );
@@ -496,12 +582,13 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
     try {
       workspaceRoot = await useSidecarStore.getState().ensureWorkspace(projectRoot);
     } catch {
-      // ignore; the sidecar keeps whatever workspace it already has
+      // The failure path below refuses a run without its own resolved root.
     }
-    if (projectRoot && !workspaceRoot) {
-      if (!isLive()) return;
-      finishRun();
-      const message = formatChatLabel("chat.run.projectRootUnavailable", { root: projectRoot });
+    if (!isLive()) return;
+    if (!workspaceRoot) {
+      const message = projectRoot
+        ? formatChatLabel("chat.run.projectRootUnavailable", { root: projectRoot })
+        : getChatLabel("chat.run.workspaceUnavailable");
       setLastError(message);
       useChatStore.getState().applyStreamEvent(input.assistantMessageId, {
         type: "error",
@@ -510,6 +597,7 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
       persistFailure(message, input.modelId || credentials.modelId);
       return;
     }
+    if (!isLive()) return;
 
     // Enabled Agent Skills — read IN PLACE from their real folders (Claude-style):
     // the run carries each skill's name/description + absolute folder path;
@@ -532,6 +620,7 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
     try {
       acceptedRunId = await client.runAgent({
         prompt: input.prompt,
+        workspaceRoot,
         // The acp config was already parsed into acpAgent — don't resend the
         // raw JSON in the apiKey slot.
         apiKey: credentials.protocol === "acp" ? "" : credentials.apiKey,
@@ -551,6 +640,7 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
         attachments: input.attachments,
         tokenBudgetPerRun: undefined,
         onSdkSessionId: (sessionId) => {
+          if (!isLive()) return;
           setSdkSession({
             id: sessionId,
             protocol: credentials.protocol,
@@ -572,6 +662,10 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
             // Text / tool steps / usage / failure state are projected onto the
             // assistant message by the shared bridge (same code path as a
             // scheduled run); only the side data comes back here.
+            if (event.type === "done") {
+              completeRun();
+              return;
+            }
             const outcome = applySidecarEventToChat(input.assistantMessageId, event);
             if (outcome.kind === "acp_models") {
               // ACP dynamic model list — update the hook state so the model
@@ -583,29 +677,14 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
               runUsage = outcome.usage;
               return;
             }
-            if (outcome.kind === "done") {
-              const assistantMsg = useChatStore
-                .getState()
-                .findMessageAnywhere(input.assistantMessageId);
-              const assistantContent = assistantMsg?.content || "";
-              // Persist even when the assistant produced no text, so an empty-output
-              // run still keeps the user's message. Deduped against onError via
-              // the per-run shouldPersist guard.
-              void persistOnce(
-                assistantContent,
-                assistantMsg?.agentRun ?? undefined,
-                input.modelId || credentials.modelId,
-              );
-              // Claude and ACP runs write checkpoints; other runtimes have no
-              // rollback manifest so the button must not be offered.
-              if (credentials.protocol !== "anthropic" && credentials.protocol !== "acp") {
-                setLastFinishedRunId(null);
-              }
-              finishRun();
+            if (outcome.kind === "error") {
+              setLastError(outcome.message);
+              persistFailure(outcome.message, runModel);
             }
           };
         })(),
         onApproval: (request) => {
+          if (!isLive()) return;
           setPendingApproval(request);
         },
         onError: (message) => {
@@ -620,19 +699,16 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
           // Keep the user's message (with the failure state) in the DB even
           // though the run never produced a persistable assistant result.
           persistFailure(message, input.modelId || credentials.modelId);
-          finishRun();
         },
         onDone: () => {
           // Ownership guard (see onEvent): the old run's done — e.g. after the
           // stop — must not clear the NEW run's busy/active state.
-          if (!isLive()) return;
-          finishRun();
+          completeRun();
         },
       });
     } catch (error) {
       // Ownership guard (see above): don't clobber a newer run's state.
       if (!isLive()) return;
-      finishRun();
       const message = error instanceof Error ? error.message : "启动本地运行失败";
       setLastError(message);
       useChatStore.getState().applyStreamEvent(input.assistantMessageId, {
@@ -667,14 +743,21 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
   };
 
   const respondToApproval = async (approvalId: string, allow: boolean): Promise<void> => {
-    const approval = pendingApproval;
+    const approval = useAgentRunState.getState().pendingApproval;
     if (!approval || approval.toolUseId !== approvalId) return;
+    const control = controlRef.current;
     const client = useSidecarStore.getState().client;
     if (!client) return;
     try {
       await client.respondApproval(approvalId, allow);
-      setPendingApproval(null);
+      if (
+        controlRef.current === control &&
+        useAgentRunState.getState().pendingApproval?.toolUseId === approvalId
+      ) {
+        setPendingApproval(null);
+      }
     } catch (error) {
+      if (controlRef.current !== control) return;
       const message = error instanceof Error ? error.message : "提交审批失败";
       setLastError(message);
     }
@@ -823,6 +906,7 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
     pendingApproval,
     lastError,
     isBusy,
+    hasActiveRun: () => controlRef.current !== null,
     lastFinishedRunId,
     isRollingBack,
     rollbackError,

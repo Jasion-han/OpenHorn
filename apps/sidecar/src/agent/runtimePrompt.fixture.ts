@@ -7,7 +7,7 @@ import * as acp from "@agentclientprotocol/sdk";
 const [mode, capturePath, commandJson] = process.argv.slice(2);
 if (!capturePath) throw new Error("capture path required");
 const record = (value: unknown) => appendFileSync(capturePath, `${JSON.stringify(value)}\n`);
-record({ pid: process.pid });
+record({ pid: process.pid, cwd: process.cwd() });
 
 if (mode === "agent") {
   const lines = createInterface({ input: process.stdin });

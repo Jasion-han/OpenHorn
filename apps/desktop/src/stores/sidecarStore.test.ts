@@ -258,6 +258,19 @@ describe("sidecarStore", () => {
     expect(store.getState().lastError).toBe("ENOENT: no such file or directory");
   });
 
+  test("a failed default resolution cannot return an older project's root", async () => {
+    const { store, fakeClient } = createStore();
+    await store.getState().start();
+    await store.getState().ensureWorkspace("/tmp/previous-project");
+    fakeClient.setWorkspaceImpl = async () => {
+      throw new Error("default workspace is unavailable");
+    };
+    expect(await store.getState().ensureWorkspace()).toBe(null);
+    expect(store.getState().lastError).toBe("default workspace is unavailable");
+    store.setState({ status: "connecting" });
+    expect(await store.getState().ensureWorkspace()).toBe(null);
+  });
+
   test("markUnsupported sets status to unsupported and records the reason", () => {
     const { store } = createStore();
     store.getState().markUnsupported("running outside Tauri");

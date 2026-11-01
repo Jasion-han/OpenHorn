@@ -115,6 +115,39 @@ try {
   await page.waitForFunction(() => document.querySelector('input[type="range"]')?.value === "0");
   assert.match(await text(), /Computed\s*0/);
 
+  for (const conditional of [true, false]) {
+    await render(
+      conditional
+        ? [
+            'root=Col([Slider($amount,0,100,1,"Memory base"),',
+            'Button("Show memory conflict",@Set($show,true)),',
+            '$show ? Slider($amount,200,300,1,"Memory conditional") : Text("Memory valid")])',
+            "$amount=50",
+            "$show=false",
+          ].join("\n")
+        : [
+            'root=Col([Slider($amount,0,100,1,"Memory base"),Slider($amount,0,$max,1,"Memory dynamic"),',
+            'Button("Change memory domain",@Set($max,20))])',
+            "$amount=50",
+            "$max=100",
+          ].join("\n"),
+    );
+    assert.equal(await page.getByTestId("source").count(), 0);
+    await page
+      .getByRole("button", {
+        name: conditional ? "Show memory conflict" : "Change memory domain",
+        exact: true,
+      })
+      .click();
+    await page.getByTestId("source").waitFor();
+    assert.match(await text(), /交互内容无法渲染/);
+    assert.equal(await page.getByRole("slider").count(), 0);
+    await render('root=Slider($amount,0,100,1,"Memory recovered")\n$amount=25');
+    await page.getByRole("slider", { name: "Memory recovered" }).press("ArrowRight");
+    assert.equal(await page.getByRole("slider").inputValue(), "26");
+    assert.equal(await page.getByTestId("source").count(), 0);
+  }
+
   await render(
     'root=Button("Assess",@ToAssistant("Assess these values",{amount:42,accepted:false}))',
     false,
@@ -129,7 +162,7 @@ try {
 
   assert.deepEqual(uncaught, []);
   console.log(
-    "GenUI runtime browser regressions passed (roots, stream recovery, runtime/render diagnostics, source repair, slider normalization, explicit follow-up context).",
+    "GenUI runtime browser regressions passed (roots, stream recovery, runtime/render diagnostics, source repair, slider normalization, memory-only Slider domains, explicit follow-up context).",
   );
 } finally {
   await browser?.close();

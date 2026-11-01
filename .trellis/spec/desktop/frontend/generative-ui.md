@@ -86,7 +86,10 @@ with a separate fence-line regex.
 
 - `html-ui` frames: `sandbox="allow-scripts"` only (never `allow-same-origin`),
   CSP meta first in the document (`lib/genui/sandbox.ts`: `default-src 'none'`,
-  scripts only inline + four CDNs, no other network).
+  scripts only inline + temporary Blob modules + four CDNs, no other network).
+  Blob URLs add no network destination; the bootstrap uses a module import
+  promise to observe one inline module's own evaluation and revokes its URL
+  on success or failure.
 - The streaming preview frame runs no script (`sandbox=""`, script-free CSP).
 - Bridge messages are accepted only from the block's own `contentWindow` and
   must pass `parseBridgeMessage`: `height` (clamped), `sendPrompt` (trimmed,
@@ -107,10 +110,16 @@ with a separate fence-line regex.
   showing `genui.frameNavigated`. A new program/theme creates a fresh session.
 - Fragment initialization replays `DOMContentLoaded` and `load` after ordered
   scripts (and async completion for `load`). Inline module completion must
-  resolve on success, import errors, evaluation errors and rejected top-level
-  await, so a failed module cannot strand later scripts. Modern `nomodule`
-  fallbacks are not awaited because the browser ignores them without events.
-  These local readiness events never authorize host actions.
+  resolve on success, syntax/import/evaluation errors and rejected top-level
+  await (including non-Error rejection values), so a failed module cannot
+  strand later scripts. Inline modules execute via one temporary Blob URL's
+  `import()` promise, preserving their original source as an inert DOM node;
+  a previous script's unrelated background error/rejection cannot complete
+  the pending module. Do not infer module completion from global error events
+  or a callback appended to the source. Report module failures separately and
+  revoke each Blob URL on either outcome. Modern `nomodule` fallbacks are not
+  awaited because the browser ignores them without events. These local
+  readiness events never authorize host actions.
 - Tauri / WKWebView: wry runs the main window's `on_navigation` for **every
   frame**, child frames included (`src-tauri/src/lib.rs`
   `main_window_allows_navigation`). It must admit `about:srcdoc`, or every
@@ -176,7 +185,33 @@ the outer React error boundary because OpenUI catches evaluation/component
 errors internally.
 
 Slider bounds and step changes normalize the actual bound value, not just its
-display, so dependent calculations agree with the slider. `@ToAssistant` keeps
+display, so dependent calculations agree with the slider. Read the committed
+native range's `valueAsNumber` for that normalization: separately calculating
+`(max - min) / step` can overflow even when all inputs and the native result
+are finite. Streaming controls never publish normalized values. Slider readouts
+and `aria-valuetext` must preserve the selected precision (a `0.001` step cannot
+be announced as `0` by the shared two-decimal display formatter).
+One reactive binding owns one Slider domain: all its Slider views must use the
+same effective `min`, `max` and `step`, regardless of their labels. Register
+domains in layout effects and validate the complete committed tree before any
+passive normalization. A mismatched domain uses the existing notice and source
+fallback; do not let controls compete by alternately clamping one variable.
+Common dynamic bounds must update together without comparing old and new
+views midway through the commit. Stage synchronous Renderer state callbacks
+until the resulting tree has committed and passed validation, preserving the
+last valid memory/disk snapshot when a conditional view introduces a conflict.
+Do not solve domain intersections with another floating-point algorithm or
+replace this contract with an update-count threshold.
+Numeric drafts retain the user's complete text until blur while publishing live
+canonical state. A block-local `ControlEditContext` records each input publication
+only through its committed effects: a Slider normalization of that publication
+updates the draft's ownership value, preserving its text. The record expires
+after the commit, so later Slider actions, resets and constraint changes still
+replace stale drafts. Never preserve every focused draft indiscriminately or
+wait until blur to publish numeric state. Test actual sequential typing in both
+component orders; one-event `fill` alone misses characters appended to a draft
+that normalization has rewritten in the middle of typing.
+`@ToAssistant` keeps
 explicit second-argument context in the visible composer draft; message plus
 context fit the shared 2,000-character limit and are never automatically sent.
 Preserve both in full when their combined length fits; allocate truncation
@@ -233,6 +268,37 @@ buildSandboxDocument(theme: ThemeSnapshot): string
   preparation has not reached the run hook, Stop persists the question or edit
   independently and awaits that one-shot save before enabling the next send;
   the old preparation must never start a run that cancels the new one.
+- Foreground turn ownership outlives the chat page. `lib/foregroundTurn.ts`
+  retains Chat and caller preparation cancellation, and the Agent hook's shared
+  lifecycle retains its controller, busy state, pending approval, session and
+  checkpoint state. A settings/task navigation or explicit remount must retain
+  Stop, partial output, pending approvals and the running bubble's appearance.
+  Every send, historical Retry and edit submission (including Enter) checks
+  the live controllers and `streamingMessageId` synchronously. Button disabling
+  supplements this admission check; it cannot replace it.
+- `streamingMessageId` owns composer streaming state and follows optimistic-ID
+  replacement, edited-tail terminal IDs and Agent reconciliation in both the
+  current view and cache. A background message's completion/error updates its
+  own message without releasing another reply or replacing the foreground error.
+  Conversation-list refresh after Agent completion uses `{background: true}`;
+  this read must not reset a new turn's loading flag or erase a failure.
+- Agent success/error terminal callbacks converge on one finalization path.
+  The transport calls `onDone` before the projected `done` event; both orders
+  must complete the message and persist once. Keep the controller until that
+  save settles and the message IDs reconcile, so Retry cannot start against
+  an ID that the previous save is still renaming. Stop shares one cancellation
+  promise, persists once and releases ownership after its save. Late events,
+  approvals and session IDs from a stopped or completed run are ignored.
+  A sidecar readiness failure after caller preparation uses this same failure
+  finalizer: persist a fresh/edited question, restore a zero-output retry's
+  previous answer, display the error separately and release the owner. An early
+  return that only records a hook error leaves an unpersisted, stuck partial turn.
+- Each Agent run forwards the root returned by its own successful
+  `ensureWorkspace` call as `agent.run.workspaceRoot`. A failed default or project
+  directory resolution refuses the run and persists the failed question;
+  neither an earlier store value nor the connection's mutable current directory
+  may substitute for that result. The sidecar validates and captures this root
+  for the run, so an older workspace-setting RPC cannot redirect a newer turn.
 - Fence completeness comes from Markdown grammar independently of transport
   state. Stop, error, history reload and remount never make an unclosed HTML or
   OpenUI fence executable. A preceding closed block remains interactive.

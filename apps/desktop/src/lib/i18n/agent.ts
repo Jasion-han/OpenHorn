@@ -685,6 +685,7 @@ export const chatLabels = {
   "chat.welcome.leaveProject": "退出项目",
   // Sidecar run refused: the conversation's project folder cannot be used as cwd
   "chat.run.projectRootUnavailable": "项目文件夹不可用，无法在该目录中运行：{root}",
+  "chat.run.workspaceUnavailable": "工作目录不可用，无法启动本地运行。请重新选择工作目录后重试。",
 } as const;
 
 type ChatLabelKey = keyof typeof chatLabels;

@@ -118,7 +118,14 @@ try {
   await failed.evaluate(() => window.genUiLoadTest.clear());
   await failed.getByText("Ordinary reply.", { exact: true }).waitFor();
   assert.deepEqual(failureErrors, [], "a missing chunk must retain readable source, not crash");
-  console.log("PASS a rejected lazy chunk retains source and leaves ordinary rendering usable");
+  await failed.unroute("**/chunks/GenUiBlock-*.js");
+  await failed.evaluate((program) => window.genUiLoadTest.render([program]), first);
+  await failed.getByText("First block", { exact: true }).waitFor();
+  assert.equal(await failed.getByTestId("source").count(), 0);
+  assert.deepEqual(failureErrors, []);
+  console.log(
+    "PASS rejected chunks retain source, ordinary replies remain usable and later mounts recover",
+  );
 } finally {
   await browser?.close();
   if (server) await new Promise((resolve) => server.close(resolve));

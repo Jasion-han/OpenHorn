@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { ChatMessage } from "adapters";
-import { runAcpAgent } from "./acp";
+import { preconnectAcpAgent, runAcpAgent } from "./acp";
 import { runCodexChat } from "./chatCodex";
 import { runCodexAgent } from "./codex";
 import type { AgentEvent } from "./events";
@@ -216,6 +216,45 @@ describe("external runtime prompt context", () => {
       // Capture the pid even if the first prompt failed after the process started.
       const pid = (await capture.read()).find((entry) => typeof entry.pid === "number")?.pid;
       if (typeof pid === "number") acpProcesses.add(pid);
+    }
+  }, 15000);
+
+  test("ACP rejects a preconnected session from another workspace and starts in this run's cwd", async () => {
+    const capture = await captureFixture();
+    const firstRoot = await realpath(capture.directory);
+    await mkdir(path.join(capture.directory, "other-project"));
+    const secondRoot = await realpath(path.join(capture.directory, "other-project"));
+    const agent = { command: process.execPath, args: [fixture, "acp", capture.file] };
+    const events: AgentEvent[] = [];
+    try {
+      const preconnected = await preconnectAcpAgent({ agent, cwd: firstRoot });
+      await runAcpAgent({
+        agent,
+        cwd: secondRoot,
+        acpSessionId: preconnected.sessionId,
+        prompt: "local workspace fixture",
+        abortController: new AbortController(),
+        checkpoint: {
+          runId: "workspace-fixture",
+          workspaceRoot: secondRoot,
+          checkpointDir: capture.directory,
+          files: new Map(),
+        },
+        requestApproval: async () => false,
+        onSessionId: () => {},
+        onEvent: (event) => events.push(event),
+      });
+      const records = await capture.read();
+      const processes = records.filter((entry) => typeof entry.pid === "number");
+      expect(processes.map((entry) => entry.cwd)).toEqual([firstRoot, secondRoot]);
+      expect(new Set(processes.map((entry) => entry.pid)).size).toBe(2);
+      expect(records.filter((entry) => entry.method === "session/prompt").length).toBe(1);
+      expect(events.some((event) => event.type === "error")).toBe(false);
+      expect(events.at(-1)?.type).toBe("done");
+    } finally {
+      for (const record of await capture.read()) {
+        if (typeof record.pid === "number") acpProcesses.add(record.pid);
+      }
     }
   }, 15000);
 });

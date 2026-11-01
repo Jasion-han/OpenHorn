@@ -10,6 +10,7 @@ delete process.env.CLAUDE_CODE_MESSAGING_TOKEN;
 delete process.env.CLAUDE_CODE_BRIDGE_SESSION_ID;
 delete process.env.CLAUDE_CODE_SESSION_ID;
 
+import { stat } from "node:fs/promises";
 import { preconnectAcpAgent, runAcpAgent } from "./agent/acp";
 import { waitForApproval } from "./agent/approval";
 import { runChatStream } from "./agent/chat";
@@ -402,7 +403,16 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
         // list, so silently using it would hand the agent read/write over
         // everything the user owns. The default workspace is a real, allowed
         // directory instead.
-        const cwd = state.workspaceRoot || (await resolveDefaultWorkspaceRoot());
+        // A stopped preparation can finish workspace.setCurrent after a newer
+        // turn selected another project. Capture and validate this request's
+        // root independently; later connection-level changes cannot redirect it.
+        // Older clients without the field retain their current-workspace behavior.
+        const { workspaceRoot } = params as { workspaceRoot?: string };
+        const selectedRoot = workspaceRoot ?? state.workspaceRoot;
+        const cwd = selectedRoot
+          ? await canonicalizeWorkspaceRoot(selectedRoot)
+          : await resolveDefaultWorkspaceRoot();
+        if (!(await stat(cwd)).isDirectory()) throw new Error("Workspace root must be a directory");
         const {
           prompt,
           apiKey,

@@ -34,6 +34,7 @@ import { deriveComposerRunState } from "../../lib/composerRunState";
 import { buildConversationHistory } from "../../lib/conversationHistory";
 import { isDefaultConversationTitle } from "../../lib/conversationTitle";
 import { getEffectiveModelForConversation } from "../../lib/effectiveModel";
+import { type ActiveTurn, activeTurnRef, beginTurn, endTurn } from "../../lib/foregroundTurn";
 import { withGenUiMessages, withGenUiPrompt } from "../../lib/genui/promptMerge";
 import { getChatLabel, getSlashLabel } from "../../lib/i18n/agent";
 import {
@@ -110,18 +111,6 @@ class ChatStreamFailure extends Error {
   }
 }
 
-/**
- * The turn the composer is producing right now (send / regenerate / edit).
- * Stop flips `stopped` and calls `abort` — the turn itself then persists what it
- * has. A turn checks `stopped` after each await of its preparation, so a Stop
- * pressed before generation even began still ends it (question kept).
- */
-type ActiveTurn = {
-  stopped: boolean;
-  abort?: () => void | Promise<void>;
-  stopping?: void | Promise<void>;
-};
-
 /** Persist a Stop during caller-side preparation without taking over the run hook. */
 async function persistStoppedAgentPreparation(input: {
   conversationId: string;
@@ -176,6 +165,7 @@ export function DesktopChatArea() {
   const ASSISTANT_BUBBLE_WIDTH = "92%";
   const USER_BUBBLE_MAX_WIDTH = "72%";
   const currentConversation = useChatStore((state) => state.currentConversation);
+  const streamingMessageId = useChatStore((state) => state.streamingMessageId);
   const channels = useChatStore((state) => state.channels);
   const messages = useChatStore((state) => state.messages);
   const isLoading = useChatStore((state) => state.isLoading);
@@ -212,15 +202,6 @@ export function DesktopChatArea() {
     { type: "bottom" } | { type: "message"; id: string } | null
   >(null);
   const [streamingAssistantId, setStreamingAssistantId] = useState<string | null>(null);
-  const activeTurnRef = useRef<ActiveTurn | null>(null);
-  const beginTurn = (): ActiveTurn => {
-    const turn: ActiveTurn = { stopped: false };
-    activeTurnRef.current = turn;
-    return turn;
-  };
-  const endTurn = (turn: ActiveTurn) => {
-    if (activeTurnRef.current === turn) activeTurnRef.current = null;
-  };
   const autoSendRef = useRef(false);
   const pendingPrompt = useDesktopShellStore((state) => state.pendingPrompt);
   const setPendingPrompt = useDesktopShellStore((state) => state.setPendingPrompt);
@@ -254,13 +235,18 @@ export function DesktopChatArea() {
     return map;
   }, [slashSkills, slashMcps]);
   const sidecarRun = useSidecarAgentRun();
+  // React's loading/streaming snapshot can lag an event, and an accepted Agent
+  // outlives handleSend's promise. Both owners must release before any entry
+  // point (Send, Retry or edit Enter) may start another turn.
+  const hasRunningTurn = () =>
+    activeTurnRef.current !== null ||
+    sidecarRun.hasActiveRun() ||
+    useChatStore.getState().streamingMessageId !== null;
   const prevSidecarBusyRef = useRef(false);
   useEffect(() => {
     const wasBusy = prevSidecarBusyRef.current;
     prevSidecarBusyRef.current = sidecarRun.isBusy;
     if (wasBusy && !sidecarRun.isBusy) {
-      setStreaming(false);
-      setStreamingAssistantId(null);
       const conv = useChatStore.getState().currentConversation;
       if (conv && isDefaultConversationTitle(conv.title)) {
         const firstUserMsg = useChatStore
@@ -271,12 +257,11 @@ export function DesktopChatArea() {
           void autoTitleConversation(conv.id, seed).catch(() => {});
         }
       }
-      void loadConversations();
+      void loadConversations({ background: true }).catch(() => {});
     }
-    // `setStreaming` and `loadConversations` are zustand actions selected off the
-    // store, so their identity never changes — adding them cannot re-trigger this.
-    // `autoTitleConversation` was already listed, which is the standing proof.
-  }, [sidecarRun.isBusy, autoTitleConversation, setStreaming, loadConversations]);
+    // Streaming cleanup belongs to the run hook's message owner; this effect
+    // only refreshes conversation metadata after an Agent finishes.
+  }, [sidecarRun.isBusy, autoTitleConversation, loadConversations]);
 
   const effectiveModel = getEffectiveModelForConversation(channels, currentConversation);
   const selectedProtocol = effectiveModel.ok
@@ -305,6 +290,7 @@ export function DesktopChatArea() {
     Boolean(currentConversation) &&
     !isLoading &&
     !isStreaming &&
+    !sidecarRun.isBusy &&
     !isUploading &&
     (hasInput || hasFiles);
   // Memoized: during streaming `messages` changes on every token, and without
@@ -1001,7 +987,7 @@ export function DesktopChatArea() {
   };
 
   const handleSend = async () => {
-    if (!canSend || !currentConversation) return;
+    if (!canSend || !currentConversation || hasRunningTurn()) return;
 
     if (composerMode === "agent" && !agentModeSupported) {
       notifyWarning(
@@ -1106,7 +1092,7 @@ export function DesktopChatArea() {
       historyNavRef.current = resetHistoryNav();
       setSlashOpen(false);
       setLoading(true);
-      setStreaming(true, conversationId);
+      setStreaming(true, conversationId, assistantMessageId);
       setStreamingAssistantId(assistantMessageId);
       setError(null);
       queueMicrotask(() => inputRef.current?.focus());
@@ -1457,7 +1443,7 @@ export function DesktopChatArea() {
   };
 
   const handleRetryMessage = async (messageId: string) => {
-    if (!currentConversation) return;
+    if (!currentConversation || hasRunningTurn()) return;
 
     // Same stale-closure hazard as getEditableMessageRound: read live state.
     const messages = useChatStore.getState().messages;
@@ -1498,7 +1484,7 @@ export function DesktopChatArea() {
       pendingScrollTargetRef.current = { type: "message", id: userMessage.id };
     }
     setLoading(true);
-    setStreaming(true, currentConversation.id);
+    setStreaming(true, currentConversation.id, messageId);
     setStreamingAssistantId(messageId);
     setError(null);
     useChatStore.getState().updateMessage(messageId, {
@@ -1647,7 +1633,7 @@ export function DesktopChatArea() {
 
   const handleSaveEdit = async (messageId: string) => {
     const nextContent = editingContent.trim();
-    if (!currentConversation || !nextContent) return;
+    if (!currentConversation || !nextContent || hasRunningTurn()) return;
 
     // Resolve slash commands just like a fresh send, so editing a `/web-access …`
     // message re-triggers the skill (wrapped prompt) instead of sending the raw
@@ -1680,7 +1666,7 @@ export function DesktopChatArea() {
     handleCancelEdit();
     pendingScrollTargetRef.current = { type: "message", id: userMessage.id };
     setLoading(true);
-    setStreaming(true, currentConversation.id);
+    setStreaming(true, currentConversation.id, assistantMessageId);
     setStreamingAssistantId(assistantMessageId);
     setError(null);
     useChatStore.getState().updateMessage(userMessage.id, { content: editDisplayContent });
@@ -1863,6 +1849,7 @@ export function DesktopChatArea() {
     await Promise.all([turn?.stopping, sidecarRun.cancel()]);
 
     if (activeTurnRef.current !== turn) return;
+    if (turn) endTurn(turn);
     setLoading(false);
     setStreaming(false);
     setStreamingAssistantId(null);
@@ -1893,7 +1880,7 @@ export function DesktopChatArea() {
         // agentRun. It also covers the brief window after sending an agent message
         // but before the first agent_event materializes agentRun.
         const isLocallyStreaming = Boolean(
-          isStreaming && streamingAssistantId && message.id === streamingAssistantId,
+          isStreaming && (message.id === streamingMessageId || message.id === streamingAssistantId),
         );
         const isMessageStreaming = isInProgress || isLocallyStreaming;
 
@@ -1903,7 +1890,12 @@ export function DesktopChatArea() {
             isStreaming={isMessageStreaming}
             canEdit={editableMessageIds.has(message.id)}
             canRetry={
-              message.role === "assistant" && !isLoading && !isMessageStreaming && !isUploading
+              message.role === "assistant" &&
+              !isLoading &&
+              !isStreaming &&
+              !sidecarRun.isBusy &&
+              !isMessageStreaming &&
+              !isUploading
             }
             canDelete={!message.id.startsWith("draft-")}
             onEdit={() => handleStartEdit(message)}

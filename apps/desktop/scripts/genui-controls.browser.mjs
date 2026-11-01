@@ -66,6 +66,7 @@ try {
       scope,
     });
   const state = () => page.evaluate(() => window.genUiControls.state());
+  const diskState = () => page.evaluate(() => window.genUiControls.state(true));
   const snapshot = () => page.evaluate(() => window.genUiControls.snapshot());
   const text = () => page.locator("#root").innerText();
   const button = (name) => page.getByRole("button", { name, exact: true });
@@ -102,7 +103,199 @@ try {
   assert.deepEqual(await page.evaluate(() => window.genUiControls.denseChart(200000)), {
     ok: true,
   });
-  // A bound input must follow normalization performed by another control.
+  for (const mode of ["chat", "agent"]) {
+    await start(
+      mode,
+      [
+        'root=Col([Slider($amount,$limits.min,$limits.max,$limits.step,"Native range"),Input($amount,"Native amount","number"),',
+        'Button("Change native bounds",@Set($limits,{min:0,max:1,step:0.001})),',
+        'Button("Change native step",@Set($limits,{min:0,max:1,step:0.1}))])',
+        "$amount=9e307",
+        "$limits={min:-1e308,max:1e308,step:3e307}",
+      ].join("\n"),
+      `native-range-${mode}`,
+    );
+    const range = page.getByRole("slider", { name: "Native range", exact: true });
+    const agree = async (expected) => {
+      await page.waitForFunction(
+        (value) => window.genUiControls.state()?.$amount === value,
+        expected,
+      );
+      assert.equal(await range.evaluate((node) => node.valueAsNumber), expected);
+      assert.equal(Number(await input("Native amount").inputValue()), expected);
+      assert.equal(await range.evaluate((node) => node.validity.valid), true);
+      assert.equal(
+        Number((await range.getAttribute("aria-valuetext")).replace(/,/g, "")),
+        expected,
+      );
+    };
+    await agree(8e307);
+    await page.evaluate(() => window.genUiControls.incomplete());
+    await page.waitForFunction(() => document.querySelector('#root input[type="range"]')?.disabled);
+    // A disabled preview may display the native sanitized position, but must
+    // not publish it into the streaming program's still-changing declaration.
+    assert.equal(Number(await input("Native amount").inputValue()), 9e307);
+    assert.equal((await state()).$amount, 8e307);
+    await page.evaluate(() => window.genUiControls.stop());
+    await page.evaluate(() => window.genUiControls.remount());
+    assert.equal(await range.isDisabled(), true);
+    assert.equal(Number(await input("Native amount").inputValue()), 9e307);
+    await page.evaluate(() => window.genUiControls.finish());
+    await page.waitForFunction(
+      () => !document.querySelector('#root input[type="range"]')?.disabled,
+    );
+    await agree(8e307);
+    await button("Change native bounds").click();
+    await agree(1);
+    await input("Native amount").fill("0.12345");
+    assert.equal(await input("Native amount").inputValue(), "0.12345");
+    await input("Native amount").press("Tab");
+    await agree(0.123);
+    await button("Change native step").click();
+    await agree(0.1);
+    await range.focus();
+    await range.press("ArrowRight");
+    await agree(0.2);
+    await page.evaluate(() => {
+      window.genUiControls.reconcile();
+      window.genUiControls.remount();
+    });
+    await agree(0.2);
+
+    await start(
+      mode,
+      'root=Col([Slider($amount,0,1,5e-324,"Native range"),Input($amount,"Native amount","number")])\n$amount=0.5',
+      `native-step-overflow-${mode}`,
+    );
+    await input("Native amount").fill("0.12345678901234566");
+    // The browser's supported precision is authoritative, including a step
+    // count that overflows JavaScript arithmetic. Do not duplicate its rounding.
+    const canonical = await range.evaluate((node) => node.valueAsNumber);
+    await input("Native amount").press("Tab");
+    await agree(canonical);
+
+    await start(
+      mode,
+      'root=Slider($amount,0,1,0.001,"Precise rate","%")\n$amount=0.001',
+      `precise-readout-${mode}`,
+    );
+    const precise = page.getByRole("slider", { name: "Precise rate", exact: true });
+    assert.equal(await precise.getAttribute("aria-valuetext"), "0.001%");
+    await precise.focus();
+    await precise.press("ArrowRight");
+    assert.equal((await state()).$amount, 0.002);
+    assert.equal(await precise.getAttribute("aria-valuetext"), "0.002%");
+    assert.equal(await page.locator("#root output").innerText(), "0.002%");
+    console.log(
+      `PASS ${mode}: native slider value/state agreement across overflow, changing constraints, keyboard, remount and precise accessible readouts`,
+    );
+  }
+  // Normalization of this input's own publication preserves its draft; later
+  // external interactions must still replace it.
+  for (const mode of ["chat", "agent"]) {
+    await start(
+      mode,
+      [
+        'root=Col([Slider($amount,0,$limit,1,"First shared range"),Slider($amount,0,$limit,1,"Second shared range"),',
+        'Input($amount,"Shared domain amount","number"),Button("Narrow both ranges",@Set($limit,10))])',
+        "$amount=20",
+        "$limit=100",
+      ].join("\n"),
+      `shared-domain-${mode}`,
+    );
+    await input("Shared domain amount").fill("25.4");
+    assert.equal(await input("Shared domain amount").inputValue(), "25.4");
+    assert.equal((await state()).$amount, 25);
+    assert.equal(await page.getByRole("slider", { name: "First shared range" }).inputValue(), "25");
+    assert.equal(
+      await page.getByRole("slider", { name: "Second shared range" }).inputValue(),
+      "25",
+    );
+    await button("Narrow both ranges").click();
+    assert.equal((await state()).$amount, 10);
+    assert.equal(await page.getByRole("slider", { name: "First shared range" }).inputValue(), "10");
+    assert.equal(
+      await page.getByRole("slider", { name: "Second shared range" }).inputValue(),
+      "10",
+    );
+    await page.getByRole("slider", { name: "Second shared range" }).press("ArrowLeft");
+    assert.equal((await state()).$amount, 9);
+    assert.equal(await input("Shared domain amount").inputValue(), "9");
+    assert.doesNotMatch(await text(), /部分交互内容无法显示|交互内容无法显示/);
+
+    for (const second of [
+      'Slider($amount,200,300,1,"Different range label")',
+      'Slider($amount,0,100,2,"Different step label")',
+    ]) {
+      await start(
+        mode,
+        `root=Col([Slider($amount,0,100,1,"Initial range label"),${second}])\n$amount=50`,
+        `conflicting-domain-${mode}-${second.includes("200") ? "bounds" : "step"}`,
+      );
+      await page.getByText("交互内容无法渲染，以下为源代码", { exact: true }).waitFor();
+      assert.equal(await page.getByRole("slider").count(), 0);
+      assert.equal(await state(), undefined);
+      assert.equal(await diskState(), undefined);
+    }
+
+    await start(
+      mode,
+      [
+        'root=Col([Slider($amount,0,100,1,"Existing domain"),Input($amount,"Conditional amount","number"),',
+        'Button("Show conflicting slider",@Set($show,true)),',
+        '$show ? Slider($amount,200,300,1,"Conditional other label") : Text("One domain")])',
+        "$amount=50",
+        "$show=false",
+      ].join("\n"),
+      `conditional-conflict-${mode}`,
+    );
+    await input("Conditional amount").fill("60");
+    const goodConditional = await state();
+    assert.equal(goodConditional.$amount, 60);
+    assert.equal(goodConditional.$show, false);
+    await button("Show conflicting slider").click();
+    await page.getByText("交互内容无法渲染，以下为源代码", { exact: true }).waitFor();
+    assert.equal(await page.getByRole("slider").count(), 0);
+    assert.deepEqual(await state(), goodConditional);
+    assert.deepEqual(await diskState(), goodConditional);
+    await page.evaluate(() => window.genUiControls.remount());
+    assert.equal(await input("Conditional amount").inputValue(), "60");
+    assert.equal(await page.getByRole("slider").count(), 1);
+    assert.deepEqual(await state(), goodConditional);
+
+    await start(
+      mode,
+      [
+        'root=Col([Slider($amount,0,100,1,"Fixed domain"),Slider($amount,0,$limit,1,"Changing domain"),',
+        'Input($amount,"Changing domain amount","number"),Button("Conflict one range",@Set($limit,50))])',
+        "$amount=80",
+        "$limit=100",
+      ].join("\n"),
+      `dynamic-domain-conflict-${mode}`,
+    );
+    await input("Changing domain amount").fill("81");
+    const goodDynamic = await state();
+    assert.equal(goodDynamic.$amount, 81);
+    assert.equal(goodDynamic.$limit, 100);
+    await button("Conflict one range").click();
+    await page.getByText("交互内容无法渲染，以下为源代码", { exact: true }).waitFor();
+    assert.deepEqual(await state(), goodDynamic);
+    assert.deepEqual(await diskState(), goodDynamic);
+    await page.evaluate(() =>
+      window.genUiControls.replaceProgram(
+        'root=Col([Slider($amount,0,100,1,"Recovered first"),Slider($amount,0,100,1,"Recovered second"),Input($amount,"Recovered amount","number")])\n$amount=20',
+      ),
+    );
+    await input("Recovered amount").fill("31");
+    assert.equal((await state()).$amount, 31);
+    assert.equal(await page.getByRole("slider", { name: "Recovered first" }).inputValue(), "31");
+    assert.equal(await page.getByRole("slider", { name: "Recovered second" }).inputValue(), "31");
+    assert.doesNotMatch(await text(), /部分交互内容无法显示|交互内容无法显示/);
+    console.log(
+      `PASS ${mode}: shared Slider domain commits, conflict rejection before state writes, conditional/dynamic fallback, valid snapshot and program recovery`,
+    );
+  }
+
   for (const mode of ["chat", "agent"]) {
     await start(
       mode,
@@ -111,11 +304,13 @@ try {
     );
     await input("Shared amount").fill("150");
     await page.waitForFunction(() => window.genUiControls.state()?.$value === 100);
-    assert.equal(await input("Shared amount").inputValue(), "100");
+    assert.equal(await input("Shared amount").inputValue(), "150");
     assert.equal(
       await page.getByRole("slider", { name: "Bound range", exact: true }).inputValue(),
       "100",
     );
+    await input("Shared amount").press("Tab");
+    assert.equal(await input("Shared amount").inputValue(), "100");
     await input("Shared amount").fill("1.");
     assert.equal(await input("Shared amount").inputValue(), "1.");
     await input("Shared amount").fill("-");
@@ -123,7 +318,60 @@ try {
     assert.equal(await input("Shared amount").inputValue(), "-");
     await input("Shared amount").press("Tab");
     assert.equal(await input("Shared amount").inputValue(), "1");
-    console.log(`PASS ${mode}: external bound-value normalization replaces a stale numeric draft`);
+    console.log(`PASS ${mode}: live bound-value normalization preserves an owned draft until blur`);
+  }
+
+  for (const mode of ["chat", "agent"]) {
+    for (const inputFirst of [true, false]) {
+      const editor = 'Input($amount,"Typing amount","number")';
+      const slider = 'Slider($amount,0,$max,0.001,"Typing range")';
+      await start(
+        mode,
+        [
+          `root=Col([${inputFirst ? editor : slider},${inputFirst ? slider : editor},`,
+          'Input($amount,"Other amount","number"),Stat("Live amount",$amount),',
+          'Button("Set typed amount",@Set($amount,0.456)),Button("Reset typed amount",@Reset($amount)),',
+          'Button("Narrow typed bounds",@Set($max,0.1))])',
+          "$amount=1",
+          "$max=1",
+        ].join("\n"),
+        `typing-source-${mode}-${inputFirst}`,
+      );
+      const editorInput = input("Typing amount");
+      const range = page.getByRole("slider", { name: "Typing range", exact: true });
+      const typeDraft = async () => {
+        await editorInput.evaluate((node) => node.select());
+        await editorInput.pressSequentially("0.12345");
+        assert.equal(await editorInput.inputValue(), "0.12345");
+        assert.equal((await state()).$amount, 0.123);
+        assert.equal(await range.inputValue(), "0.123");
+        assert.equal(await input("Other amount").inputValue(), "0.123");
+      };
+      await typeDraft();
+      await editorInput.press("Tab");
+      assert.equal(await editorInput.inputValue(), "0.123");
+      await editorInput.fill("0.12345");
+      assert.equal(await editorInput.inputValue(), "0.12345");
+      assert.equal((await state()).$amount, 0.123);
+      // Programmatic parent clicks keep input focus, proving that actual
+      // external writes (rather than blur alone) invalidate the old draft.
+      await button("Set typed amount").evaluate((node) => node.click());
+      assert.equal(await editorInput.inputValue(), "0.456");
+      await typeDraft();
+      await button("Reset typed amount").evaluate((node) => node.click());
+      assert.equal(await editorInput.inputValue(), "1");
+      await typeDraft();
+      await button("Narrow typed bounds").evaluate((node) => node.click());
+      assert.equal(await editorInput.inputValue(), "0.1");
+      assert.equal((await state()).$amount, 0.1);
+      await range.focus();
+      await range.press("ArrowLeft");
+      assert.equal(await editorInput.inputValue(), "0.099");
+      assert.equal((await state()).$amount, 0.099);
+      console.log(
+        `PASS ${mode} ${inputFirst ? "Input first" : "Slider first"}: real typing/fill keep draft, live canonical values and external action/reset/constraints/keyboard replace it`,
+      );
+    }
   }
 
   for (const mode of ["chat", "agent"]) {

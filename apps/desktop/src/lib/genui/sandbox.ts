@@ -3,7 +3,8 @@
  * back. The frame is `sandbox="allow-scripts"` without allow-same-origin, so it
  * has an opaque origin: no access to the app's DOM, storage, cookies or Tauri
  * IPC. The CSP below comes first in the document, so it covers all of the
- * model's markup: inline code and a few script CDNs only, no other network.
+ * model's markup: inline/temporary Blob code and a few script CDNs only, no
+ * other network. Blob modules provide per-evaluation completion promises.
  */
 
 const SCRIPT_CDNS =
@@ -11,7 +12,7 @@ const SCRIPT_CDNS =
 
 export const SANDBOX_CSP = [
   "default-src 'none'",
-  `script-src 'unsafe-inline' ${SCRIPT_CDNS}`,
+  `script-src 'unsafe-inline' blob: ${SCRIPT_CDNS}`,
   `style-src 'unsafe-inline' ${SCRIPT_CDNS} https://fonts.googleapis.com`,
   "font-src https://fonts.gstatic.com data:",
   "img-src data: blob: https:",
@@ -89,25 +90,27 @@ window.openhorn={
 sendPrompt:function(o){post({action:"sendPrompt",text:String(o&&o.text!=null?o.text:o)})},
 openLink:function(o){post({action:"openLink",url:String(o&&o.url!=null?o.url:o)})}
 };
-function executeScript(original,script,type){return new Promise(function(resolve){
-var completion,settled=false;
+function executeScript(original,script,type){
+if(type==="module"&&!script.hasAttribute("src")){
+// Native inline modules expose no completion event, and global error/rejection
+// events can belong to an earlier asynchronous script. One import promise owns
+// this module's full evaluation, including top-level await and every failure.
+// Keep the inert original node so its type, attributes and source remain visible.
+var source=script.textContent+"\\n//# sourceURL=openhorn-fragment-module-"+(++moduleSequence)+".js";
+var moduleUrl=URL.createObjectURL(new Blob([source],{type:"text/javascript"}));
+return import(moduleUrl).then(function(){URL.revokeObjectURL(moduleUrl)},function(error){
+URL.revokeObjectURL(moduleUrl);
+// Preserve browser error reporting without rejecting the fragment's readiness.
+if(typeof reportError==="function")reportError(error);else setTimeout(function(){throw error},0);
+});
+}
+return new Promise(function(resolve){
+var settled=false;
 function done(){
 if(settled)return;settled=true;
-if(completion)window.removeEventListener(completion,done);
-window.removeEventListener("error",done);window.removeEventListener("unhandledrejection",done);
 script.removeEventListener("load",done);script.removeEventListener("error",done);resolve();
 }
 script.addEventListener("load",done,{once:true});script.addEventListener("error",done,{once:true});
-if(type==="module"&&!script.hasAttribute("src")){
-// Inline modules have no load event. This local completion event only orders
-// the fragment's scripts; it carries no authority outside this document. Import
-// failures use the script's error event, evaluation failures a window error or
-// rejected top-level await. None may strand the rest of the fragment forever.
-completion="openhorn-fragment-module-"+(++moduleSequence);
-window.addEventListener(completion,done,{once:true});window.addEventListener("error",done,{once:true});
-window.addEventListener("unhandledrejection",done,{once:true});
-script.textContent+="\\n;window.dispatchEvent(new Event("+JSON.stringify(completion)+"));";
-}
 original.replaceWith(script);
 })}
 async function render(html){

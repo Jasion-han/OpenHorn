@@ -2,6 +2,7 @@ import {
   action,
   defineAction,
   defineComponent,
+  isReactiveAssign,
   reactive,
   tagSchemaId,
   useFormName,
@@ -11,11 +12,22 @@ import {
 } from "@openuidev/react-lang";
 import type { LucideIcon } from "lucide-react";
 import * as lucide from "lucide-react";
-import { type ReactNode, useEffect, useId, useState } from "react";
+import {
+  type ReactNode,
+  useCallback,
+  useContext,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { cn } from "ui";
 import { z } from "zod";
 import { BarLineChart, PieChart } from "./charts";
+import { ControlEditContext } from "./controlEditContext";
 import styles from "./genui.module.css";
+import { hasSliderDomainConflict, SliderDomainContext } from "./sliderDomainContext";
 
 /**
  * The primitives a model arranges in a ```openui-lang block. Layout is never
@@ -78,6 +90,10 @@ export const numberText = (value: unknown): string => {
 function useFieldName(label: unknown, statementId?: string) {
   const id = useId();
   return (typeof label === "string" && label) || statementId || id;
+}
+
+function controlBindingKey(value: unknown, fieldName: string): string {
+  return isReactiveAssign(value) ? `state:${value.target}` : `field:${fieldName}`;
 }
 
 function Field({ label, children: content }: { label?: string; children: ReactNode }) {
@@ -423,9 +439,14 @@ export const Slider = defineComponent({
     label: z.string().optional(),
     unit: z.string().optional(),
   }),
-  description: 'Shows label and current value; unit like "%" or "¥" formats the value.',
+  description:
+    'Shows label and current value; unit like "%" or "¥" formats the value. Sliders bound to the same $variable must share min, max and step.',
   component: function SliderView({ props, statementId }) {
     const field = useStateField(useFieldName(props.label, statementId), props.value);
+    const edits = useContext(ControlEditContext);
+    const domains = useContext(SliderDomainContext);
+    const domainOwner = useRef(Symbol("slider-domain"));
+    const bindingKey = controlBindingKey(props.value, field.name);
     const streaming = useIsStreaming();
     const min = Number.isFinite(props.min) ? props.min : 0;
     const max = Number.isFinite(props.max) && props.max > min ? props.max : min + 100;
@@ -434,26 +455,43 @@ export const Slider = defineComponent({
         ? props.step
         : 1;
     const raw = typeof field.value === "number" ? field.value : Number(field.value);
-    const clamped = Number.isFinite(raw) ? Math.min(max, Math.max(min, raw)) : min;
-    const steps = Math.min(
-      Math.floor((max - min) / step + 1e-10),
-      Math.round((clamped - min) / step),
-    );
-    const snapped = min + steps * step;
-    const value = Number.isFinite(snapped)
-      ? Math.min(max, Math.max(min, Number(snapped.toPrecision(15))))
-      : clamped;
+    const value = Number.isFinite(raw) ? raw : min;
+    const rangeRef = useRef<HTMLInputElement>(null);
+    useLayoutEffect(() => {
+      const owner = domainOwner.current;
+      domains?.set(owner, { binding: bindingKey, min, max, step });
+      return () => {
+        domains?.delete(owner);
+      };
+    });
     useEffect(() => {
-      // Wait for Renderer to initialize the binding; then normalize the value
-      // calculations actually read, including restored values and changing bounds.
-      if (!streaming && field.value !== undefined && !Object.is(field.value, value)) {
-        field.setValue(value);
+      // The native control owns range sanitization (clamping and step rounding).
+      // Publish that exact value rather than approximating it with overflowing
+      // arithmetic or a second set of precision rules.
+      const normalized = rangeRef.current?.valueAsNumber;
+      if (
+        !streaming &&
+        !hasSliderDomainConflict(domains) &&
+        field.value !== undefined &&
+        normalized !== undefined &&
+        Number.isFinite(normalized) &&
+        !Object.is(field.value, normalized)
+      ) {
+        const edit = edits?.get(bindingKey);
+        if (edit && Object.is(edit.value, field.value)) {
+          // This normalization belongs to the input publication in this commit,
+          // so retain its typed text while calculations receive the native value.
+          edits?.delete(bindingKey);
+          edit.normalize(normalized);
+        }
+        field.setValue(normalized);
       }
-    }, [field, value, streaming]);
+    });
     const unit = props.unit ?? "";
-    const readout = /^[$€£¥₹]/.test(unit)
-      ? `${unit}${numberText(value)}`
-      : `${numberText(value)}${unit}`;
+    const formatted = numberText(value);
+    // A two-decimal presentation must not announce 0 for a real 0.001 step.
+    const valueText = Number(formatted.replace(/,/g, "")) === value ? formatted : String(value);
+    const readout = /^[$€£¥₹]/.test(unit) ? `${unit}${valueText}` : `${valueText}${unit}`;
     const id = useId();
     return (
       <div className={styles.field}>
@@ -468,6 +506,7 @@ export const Slider = defineComponent({
           </div>
         ) : null}
         <input
+          ref={rangeRef}
           id={id}
           className={styles.range}
           type="range"
@@ -496,17 +535,37 @@ export const Input = defineComponent({
     "Text or number field; a number field stores numbers, or an empty string when cleared.",
   component: function InputView({ props, statementId }) {
     const field = useStateField(useFieldName(props.label, statementId), props.value);
+    const edits = useContext(ControlEditContext);
+    const bindingKey = controlBindingKey(props.value, field.name);
+    const editOwner = useRef(Symbol("numeric-draft"));
     const streaming = useIsStreaming();
     const numeric = props.type === "number";
     // A number field shows what is typed ("1." or "-") until it parses.
     const [draft, setDraft] = useState<{ text: string; value: unknown } | null>(null);
+    const draftRef = useRef(draft);
+    const updateDraft = useCallback((next: typeof draft) => {
+      draftRef.current = next;
+      setDraft(next);
+    }, []);
+    const discardEdit = useCallback(() => {
+      if (edits?.get(bindingKey)?.owner === editOwner.current) edits.delete(bindingKey);
+    }, [edits, bindingKey]);
     // A draft belongs to the value this input last published. Another bound
     // control or action can change it while this input still has focus.
     const keepDraft = numeric && draft !== null && Object.is(draft.value, field.value);
     const shown = keepDraft ? draft.text : String(field.value ?? "");
     useEffect(() => {
-      if (draft && !keepDraft) setDraft(null);
-    }, [draft, keepDraft]);
+      const edit = edits?.get(bindingKey);
+      if (edit?.owner === editOwner.current) {
+        // Other controls' effects in this commit may normalize this publication.
+        // Afterwards, actions and constraint changes are external edits again.
+        queueMicrotask(() => {
+          if (edits?.get(bindingKey) === edit) edits.delete(bindingKey);
+        });
+      }
+      if (draft && !keepDraft && draftRef.current === draft) updateDraft(null);
+    });
+    useEffect(() => discardEdit, [discardEdit]);
     return (
       <Field label={props.label}>
         <input
@@ -524,11 +583,26 @@ export const Input = defineComponent({
             }
             const parsed = Number(text.replace(/,/g, ""));
             const next = text.trim() === "" ? "" : Number.isFinite(parsed) ? parsed : field.value;
-            setDraft({ text, value: next });
+            updateDraft({ text, value: next });
+            if (text.trim() === "" || Number.isFinite(parsed)) {
+              edits?.set(bindingKey, {
+                owner: editOwner.current,
+                value: next,
+                normalize: (normalized) => {
+                  const current = draftRef.current;
+                  if (current && Object.is(current.value, next)) {
+                    updateDraft({ text: current.text, value: normalized });
+                  }
+                },
+              });
+            }
             if (text.trim() === "") field.setValue("");
             else if (Number.isFinite(parsed)) field.setValue(parsed);
           }}
-          onBlur={() => setDraft(null)}
+          onBlur={() => {
+            discardEdit();
+            updateDraft(null);
+          }}
         />
       </Field>
     );
@@ -794,6 +868,7 @@ export const genUiComponentGroups = [
     components: ["Button", "Slider", "Input", "Select", "SegmentedControl", "Checkbox"],
     notes: [
       "- An input's first argument is its value, usually a $variable other statements read: Slider($amount, 0, 100). Everything shown is computed from those $variables, so the answer works without another message.",
+      "- Multiple Sliders may share a $variable only with identical min, max and step, including when their bounds change.",
       "- No dead inputs: every input changes something shown.",
     ],
   },

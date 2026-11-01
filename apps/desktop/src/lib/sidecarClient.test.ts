@@ -284,6 +284,7 @@ describe("SidecarClient", () => {
       prompt: "do the thing",
       apiKey: "sk-test",
       model: "claude-3-5-sonnet",
+      workspaceRoot: "/fixture/per-run-workspace",
       onEvent: (event) => {
         events.push(event);
       },
@@ -301,6 +302,9 @@ describe("SidecarClient", () => {
     await Promise.resolve();
     const request = lastSent(socket);
     expect(request.method).toBe("agent.run");
+    expect((request.params as { workspaceRoot?: string }).workspaceRoot).toBe(
+      "/fixture/per-run-workspace",
+    );
     socket.receive(
       JSON.stringify({
         type: "response",

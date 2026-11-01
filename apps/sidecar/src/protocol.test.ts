@@ -39,4 +39,20 @@ describe("protocol", () => {
   test("rejects mcp.test params without a name", () => {
     expect(() => validateMethodParams("mcp.test", { config: {} })).toThrow();
   });
+
+  test("agent.run preserves an optional per-run workspace and rejects explicit empty roots", () => {
+    const base = { prompt: "fixture", model: "fixture" };
+    expect(validateMethodParams("agent.run", base)).not.toHaveProperty("workspaceRoot");
+    expect(
+      (
+        validateMethodParams("agent.run", {
+          ...base,
+          workspaceRoot: "/fixture/project with space ",
+        }) as { workspaceRoot: string }
+      ).workspaceRoot,
+    ).toBe("/fixture/project with space ");
+    for (const workspaceRoot of ["", "  ", null, 123]) {
+      expect(() => validateMethodParams("agent.run", { ...base, workspaceRoot })).toThrow();
+    }
+  });
 });

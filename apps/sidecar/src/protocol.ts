@@ -87,6 +87,11 @@ export const AgentRunParamsSchema = z.object({
   prompt: z.string().min(1),
   apiKey: z.string().default(""),
   model: z.string().min(1),
+  // Omitted preserves old clients; an explicit invalid root must never fall back.
+  workspaceRoot: z
+    .string()
+    .refine((root) => root.trim().length > 0, "Workspace root must not be empty")
+    .optional(),
   baseUrl: z.string().optional(),
   // "google" must be listed: the server's agent-capability check reports google
   // channels as agent-capable, so rejecting it here made those runs fail at the

@@ -310,10 +310,12 @@ export interface ChatState {
   isLoading: boolean;
   isStreaming: boolean;
   streamingConversationId: string | null;
+  /** The reply that owns composer streaming state, including while viewed elsewhere. */
+  streamingMessageId: string | null;
   error: string | null;
 
   loadChannels: () => Promise<void>;
-  loadConversations: () => Promise<void>;
+  loadConversations: (options?: { background?: boolean }) => Promise<void>;
   searchMessages: (query: string) => Promise<MessageSearchResult[]>;
   selectConversation: (conversationId: string) => Promise<void>;
   createConversation: (
@@ -389,7 +391,11 @@ export interface ChatState {
   setComposerMode: (mode: ChatMode) => void;
   setSelectedChannelId: (channelId: string | null) => void;
   setLoading: (loading: boolean) => void;
-  setStreaming: (streaming: boolean, conversationId?: string | null) => void;
+  setStreaming: (
+    streaming: boolean,
+    conversationId?: string | null,
+    messageId?: string | null,
+  ) => void;
   setError: (error: string | null) => void;
   reset: () => void;
 }
@@ -404,6 +410,7 @@ const INITIAL_STATE = {
   isLoading: false,
   isStreaming: false,
   streamingConversationId: null as string | null,
+  streamingMessageId: null as string | null,
   error: null as string | null,
 };
 
@@ -494,8 +501,9 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
       }
     },
 
-    async loadConversations() {
-      set({ isLoading: true, error: null });
+    async loadConversations(options) {
+      const background = options?.background === true;
+      if (!background) set({ isLoading: true, error: null });
       try {
         const conversations = await adapter.listConversations();
         set((state) => {
@@ -510,11 +518,11 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
             currentConversation,
             selectedChannelId: currentConversation?.channelId || state.selectedChannelId,
             composerMode: currentConversation?.lastMode || state.composerMode,
-            isLoading: false,
+            ...(!background ? { isLoading: false } : {}),
           };
         });
       } catch (error) {
-        set({ isLoading: false, error: toErrorMessage(error) });
+        if (!background) set({ isLoading: false, error: toErrorMessage(error) });
         throw error;
       }
     },
@@ -817,6 +825,7 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
         messages: nextMessages,
         isStreaming: true,
         streamingConversationId: state.currentConversation.id,
+        streamingMessageId: assistantMessageId,
         error: null,
       });
 
@@ -834,6 +843,7 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
           set({
             isStreaming: false,
             streamingConversationId: null,
+            streamingMessageId: null,
             error: toErrorMessage(error),
           });
         } else {
@@ -841,6 +851,7 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
             messages: state.messages,
             isStreaming: false,
             streamingConversationId: null,
+            streamingMessageId: null,
             error: toErrorMessage(error),
           });
         }
@@ -879,7 +890,7 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
 
     abortStreaming() {
       adapter.abortActiveStream();
-      set({ isStreaming: false, streamingConversationId: null });
+      set({ isStreaming: false, streamingConversationId: null, streamingMessageId: null });
     },
 
     applyStreamEvent(messageId, event) {
@@ -967,6 +978,11 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
           // server's value. Regenerating replaces it with the new time.
           updatedAt: new Date(),
         }));
+        // The event may rename an edited-tail reply. Transfer its streaming
+        // ownership before the terminal event checks the persisted id.
+        if (get().streamingMessageId === messageId && event.messageId) {
+          set({ streamingMessageId: event.messageId });
+        }
         get().completeStreamingMessage(event.messageId || messageId);
         return;
       }
@@ -976,12 +992,15 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
       }
     },
 
-    completeStreamingMessage(_messageId) {
-      set({ isStreaming: false, streamingConversationId: null });
+    completeStreamingMessage(messageId) {
+      if (get().streamingMessageId !== messageId) return;
+      set({ isStreaming: false, streamingConversationId: null, streamingMessageId: null });
     },
 
     failStreamingMessage(messageId, error) {
-      set({ isStreaming: false, streamingConversationId: null, error });
+      if (get().streamingMessageId === messageId) {
+        set({ isStreaming: false, streamingConversationId: null, streamingMessageId: null, error });
+      }
       // An agent run keeps the error in `agentRun.error` (the run panel renders
       // it); its `content` stays the reply text. A message without a run has no
       // other place to show the failure, so the error becomes its content.
@@ -998,12 +1017,18 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
       const found = get().messages.some((m) => m.id === messageId);
       if (found) {
         set((state) => ({
+          ...(state.streamingMessageId === messageId && updates.id
+            ? { streamingMessageId: updates.id }
+            : {}),
           messages: state.messages.map((message) =>
             message.id === messageId ? apply(message) : message,
           ),
         }));
       } else {
         updateCachedMessage(messageId, apply);
+        if (get().streamingMessageId === messageId && updates.id) {
+          set({ streamingMessageId: updates.id });
+        }
       }
     },
 
@@ -1074,6 +1099,9 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
         return next;
       };
 
+      if (get().streamingMessageId === assistantDraftId) {
+        set({ streamingMessageId: assistantMessageId });
+      }
       const remappedLive = remap(get().messages);
       if (remappedLive) {
         set({ messages: remappedLive });
@@ -1104,12 +1132,13 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
       set({ isLoading: loading });
     },
 
-    setStreaming(streaming, conversationId) {
+    setStreaming(streaming, conversationId, messageId) {
       set({
         isStreaming: streaming,
         streamingConversationId: streaming
           ? (conversationId ?? get().currentConversation?.id ?? null)
           : null,
+        streamingMessageId: streaming ? (messageId ?? null) : null,
       });
     },
 

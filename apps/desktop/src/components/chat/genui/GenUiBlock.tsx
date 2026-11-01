@@ -4,6 +4,7 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -15,8 +16,14 @@ import { getGenUiLabel } from "../../../lib/i18n/agent";
 import { useGenUiStore } from "../../../stores/genUiStore";
 import { usePreviewPanelStore } from "../../../stores/previewPanelStore";
 import { CopyToClipboard } from "./components";
+import { type ControlEdit, ControlEditContext } from "./controlEditContext";
 import styles from "./genui.module.css";
 import { genUiLibrary } from "./library";
+import {
+  hasSliderDomainConflict,
+  type SliderDomain,
+  SliderDomainContext,
+} from "./sliderDomainContext";
 
 const SAVE_DELAY_MS = 300;
 
@@ -133,6 +140,13 @@ export function GenUiBlock(props: GenUiBlockProps) {
 
 function GenUiSession({ code, streaming, stateKey, fallback }: GenUiBlockProps) {
   const [initialState] = useState(() => (stateKey ? loadBlockState(stateKey) : undefined));
+  const [controlEdits] = useState(() => new Map<string, ControlEdit>());
+  const [sliderDomains] = useState(() => new Map<symbol, SliderDomain>());
+  const [failedDomainProgram, setFailedDomainProgram] = useState<string | null>(null);
+  const [snapshot, setSnapshot] = useState<{
+    program: string;
+    state: Record<string, unknown>;
+  } | null>(null);
   const [diagnostic, setDiagnostic] = useState<{ program: string; failed: boolean } | null>(null);
   const saveTimer = useRef<number | null>(null);
   const pending = useRef<Record<string, unknown> | null>(null);
@@ -175,14 +189,29 @@ function GenUiSession({ code, streaming, stateKey, fallback }: GenUiBlockProps) 
 
   const onStateUpdate = useCallback(
     (state: Record<string, unknown>) => {
-      if (!stateKey || streaming) return;
-      rememberBlockState(stateKey, state);
-      pending.current = state;
-      if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
-      saveTimer.current = window.setTimeout(flush, SAVE_DELAY_MS);
+      if (streaming) return;
+      // Store subscriptions fire before the resulting conditional tree commits.
+      // Persist only after that tree's complete Slider domains are validated.
+      setSnapshot({ program, state });
     },
-    [stateKey, streaming, flush],
+    [streaming, program],
   );
+
+  useLayoutEffect(() => {
+    if (streaming) return;
+    if (hasSliderDomainConflict(sliderDomains)) {
+      // Keep the last validated snapshot; never save this conflicting tree or
+      // allow its Sliders to start competing writes in their passive effects.
+      flush();
+      setFailedDomainProgram(program);
+      return;
+    }
+    if (!stateKey || snapshot?.program !== program || failedDomainProgram === program) return;
+    rememberBlockState(stateKey, snapshot.state);
+    pending.current = snapshot.state;
+    if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
+    saveTimer.current = window.setTimeout(flush, SAVE_DELAY_MS);
+  });
 
   const fallbackView = (
     <div className={styles.block}>
@@ -191,7 +220,7 @@ function GenUiSession({ code, streaming, stateKey, fallback }: GenUiBlockProps) 
     </div>
   );
 
-  if (!streaming && !hasRoot) return fallbackView;
+  if (!streaming && (!hasRoot || failedDomainProgram === program)) return fallbackView;
 
   return (
     <RenderBoundary fallback={fallbackView} resetKey={program}>
@@ -199,15 +228,19 @@ function GenUiSession({ code, streaming, stateKey, fallback }: GenUiBlockProps) 
         {!streaming && hasErrors ? (
           <div className={styles.error}>{getGenUiLabel("genui.partialErrors")}</div>
         ) : null}
-        <Renderer
-          response={program}
-          library={genUiLibrary}
-          isStreaming={streaming}
-          initialState={initialState}
-          onStateUpdate={onStateUpdate}
-          onAction={runGenUiAction}
-          onError={onError}
-        />
+        <ControlEditContext.Provider value={controlEdits}>
+          <SliderDomainContext.Provider value={sliderDomains}>
+            <Renderer
+              response={program}
+              library={genUiLibrary}
+              isStreaming={streaming}
+              initialState={initialState}
+              onStateUpdate={onStateUpdate}
+              onAction={runGenUiAction}
+              onError={onError}
+            />
+          </SliderDomainContext.Provider>
+        </ControlEditContext.Provider>
         {!streaming && hasErrors ? fallback : null}
       </div>
     </RenderBoundary>

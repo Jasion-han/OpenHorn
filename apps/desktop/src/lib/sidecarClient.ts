@@ -75,6 +75,8 @@ export interface SidecarRunAgentInput {
   prompt: string;
   apiKey: string;
   model: string;
+  /** This turn's resolved workspace; independent of other workspace RPCs. */
+  workspaceRoot?: string;
   baseUrl?: string;
   protocol?: string;
   sdkSessionId?: string;
@@ -469,6 +471,7 @@ export class SidecarClient {
       prompt,
       apiKey,
       model,
+      workspaceRoot,
       baseUrl,
       protocol,
       sdkSessionId,
@@ -493,6 +496,7 @@ export class SidecarClient {
       prompt,
       apiKey,
       model,
+      ...(workspaceRoot !== undefined ? { workspaceRoot } : {}),
       ...(baseUrl ? { baseUrl } : {}),
       ...(protocol ? { protocol } : {}),
       ...(sdkSessionId ? { sdkSessionId } : {}),

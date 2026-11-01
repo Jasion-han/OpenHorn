@@ -151,6 +151,10 @@ const api = {
   },
   incomplete: () => update(markdown(source, false), true),
   finish: () => update(markdown(source), false),
+  replaceProgram(program: string) {
+    source = program;
+    update(markdown(source), false);
+  },
   stop: () => flushSync(() => store.getState().abortStreaming()),
   reconcile() {
     flushSync(() =>
@@ -170,10 +174,19 @@ const api = {
     flushSync(() => root.render(null));
     flushSync(() => root.render(<BubbleTree />));
   },
-  state() {
+  state(fromDisk = false) {
     const message = store.getState().messages[1];
     const scope = mode === "agent" ? `${message.id}:0` : message.id;
-    return loadBlockState(blockStateKey(scope, 0, source));
+    // A fresh storage identity skips the memory cache, so rejected programs can
+    // prove that neither memory nor the debounced disk snapshot was polluted.
+    const storage = fromDisk
+      ? {
+          getItem: (key: string) => localStorage.getItem(key),
+          setItem: (key: string, value: string) => localStorage.setItem(key, value),
+          removeItem: (key: string) => localStorage.removeItem(key),
+        }
+      : undefined;
+    return loadBlockState(blockStateKey(scope, 0, source), storage);
   },
   snapshot: () => ({
     request: useGenUiStore.getState().composerRequest,

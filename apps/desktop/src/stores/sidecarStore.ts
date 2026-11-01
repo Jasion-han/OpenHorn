@@ -60,6 +60,8 @@ export interface SidecarState {
    * `rootOverride` is the per-conversation folder (a sidebar project). It is
    * pushed to the sidecar for this run only and is NOT persisted as the user's
    * default workspace — the next plain conversation falls back to the saved one.
+   * Returns this call's resolved root, or null on failure/unready. An older
+   * store root cannot stand in for a failed resolution of this run's directory.
    */
   ensureWorkspace: (rootOverride?: string | null) => Promise<string | null>;
   markUnsupported: (reason: string) => void;
@@ -312,11 +314,9 @@ export function createDesktopSidecarStore(options: CreateSidecarStoreOptions) {
         } catch {}
         target = target || "";
       }
-      // ALWAYS re-push to the sidecar before a run. The sidecar may have
-      // restarted and reset its workspace to null (cwd then falls back to the
-      // home dir) while the desktop store kept a stale value — the two diverge,
-      // and Agent Skills silently vanish because the materialized skillsRoot no
-      // longer matches the sidecar's cwd. Re-syncing keeps them in lockstep.
+      // Resolve through the sidecar before every run. A restart can invalidate
+      // the remembered root, and the store may hold another project's override.
+      // Only this request's successful result may become the new run's cwd.
       if (status === "ready" && client) {
         try {
           const result = await client.setWorkspace(target);
@@ -328,16 +328,13 @@ export function createDesktopSidecarStore(options: CreateSidecarStoreOptions) {
           }
           return result.workspaceRoot;
         } catch (error) {
-          // A project folder that no longer exists (moved/deleted) must not be
-          // silent: the caller refuses the run instead of proceeding in the
-          // previous cwd.
-          if (override) {
-            set({ lastError: toErrorMessage(error) });
-            return null;
-          }
+          // Neither a project nor the default may reuse an older successful
+          // root after this resolution failed: each run needs its own result.
+          set({ lastError: toErrorMessage(error) });
+          return null;
         }
       }
-      return override ? null : get().workspaceRoot;
+      return null;
     },
 
     markUnsupported(reason) {

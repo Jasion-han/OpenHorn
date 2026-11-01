@@ -93,6 +93,12 @@ try {
   // until an evaluation confirms instrumentation is attached; no timing sleep.
   const networkGate =
     '<script type="module">await new Promise(resolve => { window.beginNetworkScripts = resolve; });</script>';
+  const trackModuleUrls = `<script>
+    window.moduleUrls=new Set();
+    const createUrl=URL.createObjectURL.bind(URL),revokeUrl=URL.revokeObjectURL.bind(URL);
+    URL.createObjectURL=(value)=>{const url=createUrl(value);window.moduleUrls.add(url);return url;};
+    URL.revokeObjectURL=(url)=>{window.moduleUrls.delete(url);revokeUrl(url);};
+  </script>`;
   const beginNetworkScripts = async () => {
     const element = await page.locator("#root iframe").elementHandle();
     assert.ok(element);
@@ -212,9 +218,12 @@ try {
     .route("https://cdn.jsdelivr.net/genui-module-missing.js", (route) =>
       route.fulfill({ status: 404, contentType: "text/javascript", body: "" }),
     );
-  await render(`<p id="status">waiting</p>${networkGate}
+  await render(`<p id="status">waiting</p>${trackModuleUrls}${networkGate}
     <script type="module">import "https://cdn.jsdelivr.net/genui-module-missing.js";</script>
     <script type="module">await Promise.reject(new Error("expected module rejection"));</script>
+    <script type="module">const = "expected module syntax failure";</script>
+    <script type="module">throw new Error("expected module runtime failure");</script>
+    <script type="module">await Promise.reject("expected scalar rejection");</script>
     <script>
       document.addEventListener("DOMContentLoaded", () => { document.getElementById("status").dataset.dom="ready"; });
       window.addEventListener("load", () => { document.getElementById("status").dataset.loaded="ready"; });
@@ -226,10 +235,82 @@ try {
     .locator('#status[data-dom="ready"][data-loaded="ready"]')
     .filter({ hasText: "After failed modules" })
     .waitFor();
-  assert.deepEqual(errors, ["expected module rejection"]);
+  assert.equal(
+    await page
+      .frameLocator("#root iframe")
+      .locator("#status")
+      .evaluate(() => window.moduleUrls.size),
+    0,
+    "failed module Blob URLs must be revoked",
+  );
+  assert.equal(errors.length, 5);
+  assert.ok(
+    errors.some((message) => message.startsWith("Failed to fetch dynamically imported module:")),
+  );
+  assert.ok(errors.includes("expected module rejection"));
+  assert.ok(errors.includes("Unexpected token '='"));
+  assert.ok(errors.includes("expected module runtime failure"));
+  assert.ok(errors.includes("expected scalar rejection"));
   errors.length = 0;
   console.log(
-    "PASS failed module imports and rejected top-level await do not block later scripts/readiness",
+    "PASS failed imports, syntax/runtime errors and Error/scalar await rejections release later scripts",
+  );
+
+  await reset();
+  await render(`<p id="module-order">waiting</p>${trackModuleUrls}<script>window.order=[];</script>
+    <script type="module">
+      await new Promise(resolve=>{window.releaseModule=resolve;});
+      window.order.push("module");
+    </script>
+    <script>
+      window.order.push("after");
+      const status=document.getElementById("module-order");
+      status.textContent=window.order.join(",");
+      document.addEventListener("DOMContentLoaded",()=>{status.dataset.dom="ready";});
+      window.addEventListener("load",()=>{status.dataset.loaded="ready";});
+    </script>`);
+  const moduleFrameElement = await page.locator("#root iframe").elementHandle();
+  const moduleFrame = await moduleFrameElement.contentFrame();
+  await moduleFrame.waitForFunction(() => typeof window.releaseModule === "function");
+  for (const [message, reject] of [
+    ["unrelated background error", false],
+    ["unrelated background rejection", true],
+  ]) {
+    await Promise.all([
+      page.waitForEvent("pageerror", (error) => error.message === message),
+      moduleFrame.evaluate(
+        ({ message, reject }) => {
+          if (reject) void Promise.reject(new Error(message));
+          else
+            setTimeout(() => {
+              throw new Error(message);
+            }, 0);
+        },
+        { message, reject },
+      ),
+    ]);
+    assert.deepEqual(
+      await moduleFrame.evaluate(() => window.order),
+      [],
+      "an unrelated error must not complete the pending module",
+    );
+    assert.equal(await moduleFrame.locator("#module-order").textContent(), "waiting");
+  }
+  await moduleFrame.evaluate(() => window.releaseModule());
+  await moduleFrame
+    .locator('#module-order[data-dom="ready"][data-loaded="ready"]')
+    .filter({ hasText: "module,after" })
+    .waitFor();
+  assert.deepEqual(await moduleFrame.evaluate(() => window.order), ["module", "after"]);
+  assert.equal(
+    await moduleFrame.evaluate(() => window.moduleUrls.size),
+    0,
+    "completed module Blob URLs must be revoked",
+  );
+  assert.deepEqual(errors, ["unrelated background error", "unrelated background rejection"]);
+  errors.length = 0;
+  console.log(
+    "PASS pending module owns its completion despite unrelated errors/rejections; Blob URLs released",
   );
 
   await reset();

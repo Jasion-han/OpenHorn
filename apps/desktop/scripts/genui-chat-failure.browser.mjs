@@ -18,6 +18,7 @@ let completes = 0;
 let retries = 0;
 let holdComplete = null;
 let holdSettings = null;
+let holdAgentSave = null;
 let syncedPreparations = 0;
 let retryMode = "success";
 let protocol = "openai";
@@ -63,9 +64,16 @@ const server = http.createServer(async (request, response) => {
   for await (const chunk of request) body += chunk;
   const data = body ? JSON.parse(body) : {};
   requests.push({ method: request.method, path, data });
-  if (path === "/conversations") return json(response, { conversations: [conversation] });
-  if (path === "/messages" || path === "/messages/failure-conversation")
-    return json(response, { messages: rows });
+  if (path === "/conversations")
+    return json(response, {
+      conversations: [conversation, { ...conversation, id: "other-conversation" }],
+    });
+  if (path === "/messages" || /^\/messages\/(?:failure|other)-conversation$/.test(path))
+    return json(response, {
+      messages: rows.filter(
+        (row) => path === "/messages" || row.conversationId === path.split("/")[2],
+      ),
+    });
   if (path === "/settings/search-status")
     return json(response, { configured: false, source: "none" });
   if (path === "/settings") {
@@ -77,6 +85,15 @@ const server = http.createServer(async (request, response) => {
     return json(response, { settings: { "prompts.templates": "[]" } });
   }
   if (path === "/mcp/servers") return json(response, { servers: [] });
+  if (path === "/channels/fixture-channel/credentials")
+    return json(response, {
+      credentials: {
+        apiKey: "fixture-only",
+        baseUrl: null,
+        modelId: "fixture-model",
+        protocol,
+      },
+    });
   if (path === "/messages/chat/prepare") {
     prepares++;
     const userMessageId = `saved-user-${prepares}`;
@@ -87,7 +104,7 @@ const server = http.createServer(async (request, response) => {
         [assistantMessageId, "assistant", ""],
       ].map(([id, role, content]) => ({
         id,
-        conversationId: conversation.id,
+        conversationId: data.conversationId,
         role,
         content,
         mode: "chat",
@@ -119,6 +136,9 @@ const server = http.createServer(async (request, response) => {
   }
   if (path === "/messages/sync-sidecar") {
     syncedPreparations++;
+    const held = holdAgentSave;
+    holdAgentSave = null;
+    if (held) await held;
     const userMessageId = data.userMessageId ?? `prepared-user-${syncedPreparations}`;
     const assistantMessageId =
       data.assistantMessageId ?? `prepared-assistant-${syncedPreparations}`;
@@ -572,6 +592,7 @@ try {
       await page.locator("textarea").first().press("Enter");
     }
     await settingRequest;
+    if (kind === "send") await page.evaluate(() => window.failureChat.remount());
     await page.getByRole("button", { name: "Stop", exact: true }).click();
     await page.waitForFunction(() => !window.failureChat.snapshot().loading);
     assert.equal(syncedPreparations, kind === "retry" ? 0 : 1);
@@ -731,6 +752,320 @@ try {
     );
     console.log(
       `PASS ACP ${welcome ? "welcome" : "current"} composer: Chat blocked before writes, notice/draft retained, Agent remains available`,
+    );
+  }
+  for (const kind of ["send", "retry", "edit"]) {
+    await reset();
+    if (kind !== "send") {
+      rows.push(
+        {
+          id: "disconnected-user",
+          conversationId: conversation.id,
+          role: "user",
+          content: "original disconnected question",
+          mode: "agent",
+          createdAt: new Date(0).toISOString(),
+        },
+        {
+          id: "disconnected-assistant",
+          conversationId: conversation.id,
+          role: "assistant",
+          content: closed,
+          mode: "agent",
+          agentRun: {
+            status: "completed",
+            summary: "Done",
+            steps: [{ type: "text", content: closed, timestamp: 0 }],
+          },
+          createdAt: new Date(0).toISOString(),
+        },
+      );
+      await page.evaluate(() => window.failureChat.reload());
+    }
+    let releaseSettings;
+    holdSettings = new Promise((resolve) => {
+      releaseSettings = resolve;
+    });
+    const preparing = page.waitForRequest((request) =>
+      new URL(request.url()).searchParams.get("keys")?.includes("chat.systemPrompt"),
+    );
+    if (kind === "send") {
+      await page.evaluate(() => window.failureChat.mode("agent"));
+      await page.locator("textarea").fill("disconnected fresh question");
+      await page.locator("textarea").press("Enter");
+    } else if (kind === "retry") {
+      await page.getByRole("textbox", { name: "Persist amount", exact: true }).fill("27");
+      await page.getByRole("button", { name: retryLabel, exact: true }).click();
+    } else {
+      await page.getByRole("button", { name: editLabel, exact: true }).click();
+      await page.locator("textarea").first().fill("disconnected edited question");
+      await page.locator("textarea").first().press("Enter");
+    }
+    await preparing;
+    await page.evaluate(
+      (keepClient) => window.failureChat.disconnectSidecar(keepClient),
+      kind === "retry",
+    );
+    releaseSettings();
+    const unavailable = await page.evaluate(() => window.failureChat.labels.sidecarNotReady);
+    await page.getByRole("alert").filter({ hasText: unavailable }).waitFor();
+    await page.waitForFunction(
+      () => !window.failureChat.snapshot().streaming && !window.failureChat.snapshot().loading,
+    );
+    await page.waitForFunction(
+      (label) =>
+        [...document.querySelectorAll("button")].some(
+          (button) => button.title === label && !button.disabled,
+        ),
+      retryLabel,
+    );
+    assert.equal((await snapshot()).agentRuns, 0);
+    assert.equal(rows.length, 2);
+    assert.equal(syncedPreparations, kind === "retry" ? 0 : 1);
+    assert.equal(
+      rows.find((row) => row.role === "user").content,
+      kind === "send"
+        ? "disconnected fresh question"
+        : kind === "edit"
+          ? "disconnected edited question"
+          : "original disconnected question",
+    );
+    if (kind === "retry") {
+      assert.equal(rows.find((row) => row.role === "assistant").content, closed);
+      assert.equal(
+        await page.getByRole("textbox", { name: "Persist amount", exact: true }).inputValue(),
+        "27",
+      );
+    } else assert.equal(rows.find((row) => row.role === "assistant").agentRun.status, "failed");
+    await page.evaluate(() => {
+      window.failureChat.reconnectSidecar();
+      window.failureChat.mode("chat");
+    });
+    await page.locator("textarea").fill("new Chat after startup failure");
+    await page.getByRole("button", { name: "Send", exact: true }).click();
+    await page.waitForFunction(() => window.failureChat.ready());
+    await page.evaluate(() => window.failureChat.done());
+    await page.waitForFunction(() => !window.failureChat.snapshot().streaming);
+    console.log(
+      `PASS Agent ${kind} disconnects during preparation: failure releases owner, preserves the round and allows recovery`,
+    );
+  }
+
+  await reset();
+  await page.evaluate(() => {
+    window.failureChat.workspaceUnavailable();
+    window.failureChat.mode("agent");
+  });
+  await page.locator("textarea").fill("refuse a run without its workspace");
+  await page.locator("textarea").press("Enter");
+  const workspaceError = await page.evaluate(() => window.failureChat.labels.workspaceUnavailable);
+  await page.getByRole("alert").filter({ hasText: workspaceError }).waitFor();
+  await page.waitForFunction(() =>
+    window.failureChat.snapshot().messages.some((message) => message.id === "prepared-assistant-1"),
+  );
+  assert.equal((await snapshot()).agentRuns, 0);
+  assert.equal(rows.length, 2);
+  assert.equal(rows.find((row) => row.role === "assistant").agentRun.status, "failed");
+  console.log(
+    "PASS unavailable default workspace: stale project root is refused, no Agent starts and the failed question persists",
+  );
+
+  for (const mode of ["chat", "agent"]) {
+    await reset();
+    await page.evaluate((mode) => window.failureChat.mode(mode), mode);
+    await page.locator("textarea").fill(`Stop ${mode} after remount`);
+    await page.locator("textarea").press("Enter");
+    await page.waitForFunction(
+      (mode) => (mode === "agent" ? window.failureChat.agentReady() : window.failureChat.ready()),
+      mode,
+    );
+    if (mode === "agent")
+      assert.deepEqual((await snapshot()).agentWorkspaceRoots, ["/fixture/workspace"]);
+    if (mode === "agent")
+      await page.evaluate(() => window.failureChat.agentEmit("kept Agent partial"));
+    else await emit("kept Chat partial");
+    if (mode === "agent") await page.evaluate(() => window.failureChat.agentApproval());
+    await page.evaluate(() => window.failureChat.remount());
+    if (mode === "agent") {
+      await page.getByTestId("sidecar-approval-deny").click();
+      assert.deepEqual((await snapshot()).approvals, [
+        { toolUseId: "fixture-approval", allow: false },
+      ]);
+      await page.evaluate(() => window.failureChat.agentApproval());
+      await page.getByTestId("sidecar-approval-allow").waitFor();
+    }
+    await page.getByRole("button", { name: "Stop", exact: true }).click();
+    await page.waitForFunction(() => !window.failureChat.snapshot().streaming);
+    const stopped = await snapshot();
+    assert.equal(stopped.cancelled.length, 1, "remounted Stop must cancel the real owned run");
+    await page.waitForFunction(() =>
+      window.failureChat.snapshot().messages.some((message) => message.finishReason === "stopped"),
+    );
+    const contents = (await snapshot()).messages.map((message) => message.content);
+    if (mode === "agent")
+      await page.evaluate(() => {
+        window.failureChat.agentEmit("ignored after remounted Stop");
+        window.failureChat.agentApproval();
+      });
+    else await emit("ignored after remounted Stop");
+    assert.deepEqual(
+      (await snapshot()).messages.map((message) => message.content),
+      contents,
+    );
+    assert.equal(await page.getByTestId("sidecar-approval-allow").count(), 0);
+    assert.equal(mode === "agent" ? syncedPreparations : completes, 1);
+    await page.evaluate(() => window.failureChat.mode("chat"));
+    await page.locator("textarea").fill("usable after remounted Stop");
+    await page.locator("textarea").press("Enter");
+    await page.waitForFunction(
+      (mode) => window.failureChat.snapshot().runs === (mode === "chat" ? 2 : 1),
+      mode,
+    );
+    assert.equal((await snapshot()).streaming, true);
+    await page.evaluate(() => window.failureChat.done());
+    await page.waitForFunction(() => !window.failureChat.snapshot().streaming);
+    console.log(
+      `PASS ${mode} remount: real Stop cancels once, persists partial, ignores late text and allows the next turn`,
+    );
+  }
+
+  await reset();
+  let releaseAgentSave;
+  holdAgentSave = new Promise((resolve) => {
+    releaseAgentSave = resolve;
+  });
+  await page.evaluate(() => window.failureChat.mode("agent"));
+  await page.locator("textarea").fill("Agent save barrier question");
+  await page.locator("textarea").press("Enter");
+  await page.waitForFunction(
+    () => window.failureChat.agentReady() && !window.failureChat.snapshot().loading,
+  );
+  await page.evaluate(() => {
+    window.failureChat.agentEmit("first saved Agent answer");
+    window.failureChat.agentDone();
+  });
+  await page.waitForFunction(() => !window.failureChat.snapshot().streaming);
+  assert.equal(syncedPreparations, 1);
+  assert.equal(
+    await page.getByRole("button", { name: retryLabel, exact: true }).isDisabled(),
+    true,
+  );
+  await page.evaluate(() => window.failureChat.remount());
+  assert.equal(
+    await page.getByRole("button", { name: retryLabel, exact: true }).isDisabled(),
+    true,
+  );
+  releaseAgentSave();
+  await page.waitForFunction(() =>
+    window.failureChat.snapshot().messages.some((message) => message.id === "prepared-assistant-1"),
+  );
+  await page.getByRole("button", { name: retryLabel, exact: true }).click();
+  await page.waitForFunction(() => window.failureChat.snapshot().agentRuns === 2);
+  await page.evaluate(() => {
+    window.failureChat.agentEmit("second saved Agent answer");
+    window.failureChat.agentDone(true);
+  });
+  await page.waitForFunction(() =>
+    window.failureChat
+      .snapshot()
+      .messages.some(
+        (message) =>
+          message.id === "prepared-assistant-1" &&
+          message.content === "second saved Agent answer" &&
+          message.agentRun?.status === "completed",
+      ),
+  );
+  await page.waitForFunction(() => !window.failureChat.snapshot().streaming);
+  assert.equal(rows.length, 2);
+  assert.equal(rows.find((row) => row.role === "assistant").content, "second saved Agent answer");
+  console.log(
+    "PASS Agent terminal save barrier: both callback orders persist once, remount cannot retry before ID reconciliation, subsequent same-ID retry finishes",
+  );
+
+  for (const { elsewhere, remount } of [
+    { elsewhere: false, remount: false },
+    { elsewhere: true, remount: false },
+    { elsewhere: false, remount: true },
+    { elsewhere: true, remount: true },
+  ]) {
+    await reset();
+    const historical = [
+      { id: "historical-user", role: "user", content: "historical question" },
+      { id: "historical-reply", role: "assistant", content: "historical reply" },
+    ].map((message) => ({
+      ...message,
+      conversationId: elsewhere ? "other-conversation" : conversation.id,
+      mode: "chat",
+      createdAt: new Date(0).toISOString(),
+    }));
+    rows.push(...historical);
+    if (!elsewhere)
+      await page.evaluate((messages) => window.failureChat.seedMessages(messages), historical);
+    await page.evaluate(() => window.failureChat.mode("agent"));
+    await page.locator("textarea").fill("keep this Agent running");
+    await page.locator("textarea").press("Enter");
+    await page.waitForFunction(
+      () => window.failureChat.agentReady() && !window.failureChat.snapshot().loading,
+    );
+    if (remount) await page.evaluate(() => window.failureChat.remount());
+    if (elsewhere) {
+      await page.evaluate(() => window.failureChat.showConversation("other-conversation"));
+      await page.evaluate((messages) => window.failureChat.seedMessages(messages), historical);
+    }
+    assert.equal((await snapshot()).streaming, true);
+    for (const retry of await page.getByRole("button", { name: retryLabel, exact: true }).all()) {
+      assert.equal(
+        await retry.isDisabled(),
+        true,
+        "historical retry must not start while an accepted Agent owns the composer",
+      );
+    }
+    await page.getByRole("button", { name: editLabel, exact: true }).first().click();
+    const edit = page.locator("textarea").first();
+    await edit.fill("blocked edit during Agent");
+    await edit.press("Enter");
+    assert.equal(retries, 0);
+    assert.equal(
+      requests.some((request) => request.path === "/messages/historical-user/edit"),
+      false,
+      "editor Enter must obey the same running-turn admission as its disabled button",
+    );
+    assert.equal(
+      (await snapshot()).messages.find((message) => message.id === "historical-user").content,
+      "historical question",
+    );
+    assert.equal((await snapshot()).agentRuns, 1);
+    assert.equal((await snapshot()).streaming, true);
+    await edit.press("Escape");
+    if (elsewhere) await page.evaluate(() => window.failureChat.agentFail());
+    else await page.evaluate(() => window.failureChat.agentDone());
+    await page.waitForFunction(() => !window.failureChat.snapshot().streaming);
+    if (elsewhere) assert.equal((await snapshot()).error, "fixture Agent failed");
+    await page.evaluate(() => window.failureChat.mode("chat"));
+    await page.locator("textarea").fill("new Chat after Agent terminal");
+    await page.getByRole("button", { name: "Send", exact: true }).click();
+    await page.waitForFunction(() => window.failureChat.ready());
+    await page.evaluate(() => {
+      window.failureChat.agentEmit("late finished Agent text");
+      window.failureChat.agentDone();
+      window.failureChat.agentFail();
+    });
+    assert.equal(
+      (await snapshot()).streaming,
+      true,
+      "an ended Agent cannot release the newer Chat owner",
+    );
+    assert.equal((await snapshot()).error, null);
+    assert.equal(
+      (await snapshot()).messages.some((message) =>
+        message.content.includes("late finished Agent"),
+      ),
+      false,
+    );
+    await page.evaluate(() => window.failureChat.done());
+    await page.waitForFunction(() => !window.failureChat.snapshot().streaming);
+    console.log(
+      `PASS accepted Agent ${elsewhere ? "elsewhere" : "here"}${remount ? " after remount" : ""}: historical Retry and edit Enter cannot overlap or replace its turn`,
     );
   }
   assert.deepEqual(errors, []);
