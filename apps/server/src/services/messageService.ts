@@ -324,7 +324,9 @@ async function buildChatMessages(
   let totalTokens = 0;
   let startIdx = boundedMessages.length;
   for (let i = boundedMessages.length - 1; i >= 0; i--) {
-    const tokens = estimateChatTokens(boundedMessages[i]!.content) + 10;
+    const message = boundedMessages[i];
+    if (!message) continue;
+    const tokens = estimateChatTokens(message.content) + 10;
     if (totalTokens + tokens > tokenBudget) break;
     totalTokens += tokens;
     startIdx = i;

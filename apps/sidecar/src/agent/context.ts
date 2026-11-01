@@ -11,7 +11,8 @@ export function truncateHistory(
   let totalTokens = 0;
   const kept: typeof history = [];
   for (let i = history.length - 1; i >= 0; i--) {
-    const msg = history[i]!;
+    const msg = history[i];
+    if (!msg) continue;
     const tokens = estimateTokens(msg.content) + 10;
     if (totalTokens + tokens > maxTokens) break;
     totalTokens += tokens;

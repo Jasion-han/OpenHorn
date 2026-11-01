@@ -1,6 +1,7 @@
 import { ChevronRight, CornerDownRight, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { cn } from "ui";
+import { keyedAgentSteps } from "../../lib/agentStepKeys";
 import { extractToolUrls, summarizeToolInput } from "../../lib/agentToolSummary";
 import { formatChatLabel, getChatLabel } from "../../lib/i18n/agent";
 import { resolveRunEndState } from "../../lib/stopTurn";
@@ -469,14 +470,12 @@ function segmentSteps(steps: ApiAgentRunStep[]): Segment[] {
 
 function ProcessGroupSection({
   steps,
-  groupIndex,
   isLast,
   isRunning,
   endTimestamp,
   presentToolLabel,
 }: {
   steps: ApiAgentRunStep[];
-  groupIndex: number;
   isLast: boolean;
   isRunning: boolean;
   endTimestamp?: number;
@@ -585,19 +584,19 @@ function ProcessGroupSection({
       )}
       {showExpanded && (
         <div className="mb-1 flex flex-col gap-1 pl-5">
-          {steps.map((step, i) => {
+          {keyedAgentSteps(steps).map(({ step, key }) => {
             if (step.type === "tool_detail") {
-              return <ToolDetailStep key={`detail-${step.toolCallId || i}`} step={step} />;
+              return <ToolDetailStep key={key} step={step} />;
             }
             if (step.type === "plan" && step.planEntries) {
-              return <PlanStep key={`plan-${groupIndex}-${i}`} entries={step.planEntries} />;
+              return <PlanStep key={key} entries={step.planEntries} />;
             }
             if (step.type === "reasoning") {
               const raw = (step.content ?? "").trim();
               if (!raw) return null;
               return (
                 <InlineClampStep
-                  key={`reasoning-${groupIndex}-${i}`}
+                  key={key}
                   label={getChatLabel("chat.agent.reasoning")}
                   detail={raw}
                   isResult={false}
@@ -618,7 +617,7 @@ function ProcessGroupSection({
               const urls = extractToolUrls(step.toolInput);
               if (urls.length > 1) {
                 return (
-                  <div key={`tool-${groupIndex}-${i}`}>
+                  <div key={key}>
                     <InlineClampStep
                       label={label || "Tool"}
                       detail={formatChatLabel("chat.agent.fetchTargets", { count: urls.length })}
@@ -646,7 +645,7 @@ function ProcessGroupSection({
             if (step.type === "tool_start" || step.type === "tool_result") {
               return (
                 <InlineClampStep
-                  key={`tool-${groupIndex}-${i}`}
+                  key={key}
                   label={label || "Tool"}
                   detail={detail}
                   isResult={step.type === "tool_result"}
@@ -658,7 +657,7 @@ function ProcessGroupSection({
             if (step.type === "error") {
               return (
                 <DesktopAgentTaskMetaLine
-                  key={`err-${groupIndex}-${i}`}
+                  key={key}
                   text={label ?? "Error"}
                   subtext={detail}
                   tone="danger"
@@ -717,7 +716,6 @@ function TimelineSegments({
             <ProcessGroupSection
               key={`pg-${seg.startIndex}`}
               steps={seg.steps}
-              groupIndex={seg.startIndex}
               isLast={isLastSegment}
               isRunning={isInProgress}
               endTimestamp={endTs}

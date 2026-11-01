@@ -128,9 +128,8 @@ async function fetchWithRetry(
   init: RequestInit,
   signal?: AbortSignal,
 ): Promise<Response> {
-  let response: Response | null = null;
   for (let attempt = 0; attempt <= MAX_RETRY_ATTEMPTS; attempt++) {
-    response = await fetch(url, { ...init, signal });
+    const response = await fetch(url, { ...init, signal });
     if (response.ok) return response;
     if (!shouldRetryStatus(response.status) || attempt === MAX_RETRY_ATTEMPTS) return response;
 
@@ -148,7 +147,7 @@ async function fetchWithRetry(
     const jitter = Math.random() * delayMs * 0.25;
     await sleep(Math.min(delayMs + jitter, RETRY_MAX_DELAY_MS));
   }
-  return response!;
+  throw new Error("Retry attempts exhausted without a response");
 }
 
 function createTimeoutError(message: string) {

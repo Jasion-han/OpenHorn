@@ -8,11 +8,13 @@
 import { createWriteStream } from "node:fs";
 import { mkdir, stat } from "node:fs/promises";
 import path from "node:path";
+
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const archiver = require("archiver") as (
   format: string,
   options?: object,
 ) => import("archiver").Archiver;
+
 import {
   attachments,
   channelModels,

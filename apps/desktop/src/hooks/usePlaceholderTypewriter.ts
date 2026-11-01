@@ -94,7 +94,7 @@ export function usePlaceholderTypewriter(
 
     const timer = window.setTimeout(step.run, step.delay);
     return () => window.clearTimeout(timer);
-  }, [placeholder, revealed, erasing, paused, settled]);
+  }, [placeholder, revealed, erasing, paused, settled, pool]);
 
   /**
    * Swaps in a different line and restarts the loop from an empty box.

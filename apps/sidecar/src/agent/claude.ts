@@ -35,11 +35,6 @@ import { buildAgentSystemPrompt, buildReActBehaviorSection } from "./system-prom
 // Types
 // ---------------------------------------------------------------------------
 
-type SdkMessage = {
-  type: string;
-  [key: string]: unknown;
-};
-
 export type RunClaudeAgentInput = {
   apiKey: string;
   baseUrl?: string;
@@ -181,20 +176,6 @@ export const DEFAULT_ANTHROPIC_HOST = "api.anthropic.com";
 export function buildNetworkAllowedDomains(baseUrl: string | undefined): string[] {
   const userHost = extractHostname(baseUrl);
   return Array.from(new Set([userHost ?? DEFAULT_ANTHROPIC_HOST, DEFAULT_ANTHROPIC_HOST]));
-}
-
-// ---------------------------------------------------------------------------
-// Kept for rollback — not used in the self-managed loop
-// ---------------------------------------------------------------------------
-
-/** Locate the `claude` CLI on PATH for the SDK to spawn. */
-async function findClaudeBinary(): Promise<string> {
-  const { execSync } = await import("node:child_process");
-  try {
-    return execSync("which claude", { timeout: 5000 }).toString().trim();
-  } catch {
-    return "claude";
-  }
 }
 
 // ---------------------------------------------------------------------------

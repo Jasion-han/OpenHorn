@@ -1,6 +1,6 @@
+import { users } from "db";
 import type { Context, MiddlewareHandler } from "hono";
 import { db } from "../db";
-import { users } from "db";
 
 export interface PublicUser {
   id: string;

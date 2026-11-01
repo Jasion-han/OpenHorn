@@ -967,14 +967,12 @@ export async function runDirectAgent(input: RunDirectAgentInput): Promise<void> 
   });
 
   let turnTextBuffer = "";
-  let turnHadToolCall = false;
 
   // Map pi-agent-core events to our AgentEvent format
   agent.subscribe((event: PiAgentEvent) => {
     switch (event.type) {
       case "turn_end": {
         turnTextBuffer = "";
-        turnHadToolCall = false;
 
         turnCount++;
         // pi's `input` has the cache buckets taken OUT of it (see its
@@ -1041,7 +1039,6 @@ export async function runDirectAgent(input: RunDirectAgentInput): Promise<void> 
           input.onEvent({ type: "reasoning", content: turnTextBuffer });
           turnTextBuffer = "";
         }
-        turnHadToolCall = true;
         input.onEvent({
           type: "tool_start",
           toolName: event.toolName,
