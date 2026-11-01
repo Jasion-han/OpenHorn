@@ -143,6 +143,20 @@ component state. `migrateBlockStateScope` runs before chatStore publishes a
 persisted replacement message ID; it migrates all Agent step keys and aliases
 pending writes from the optimistic ID.
 
+Keep the same Markdown renderer mounted when streaming ends or an Agent text
+step stops being the last text step. Completed HTML frames can already contain
+live DOM and script state; replacing a streaming wrapper with a static wrapper
+destroys that state. Finishing must synchronously flush the final content, and
+clearing for a retry must reset both the smoother target and displayed content.
+Program and theme changes still intentionally create a new HTML sandbox.
+
+Virtual message rows use `Message.renderKey ?? Message.id` for each member of a
+round. `renderKey` preserves the first mounted identity across optimistic ID
+replacement and server refreshes; keep it local to the frontend and never write
+it to the API or database. The actual persisted ID continues to own GenUI state
+scopes, so migrate those scopes before publishing the ID change. Server reloads
+inherit only the local rendering identity while accepting server content.
+
 Memory caches are separated by storage identity. Persistence is best effort,
 bounded at 300 entries, 64 KiB per payload and 4 MiB total; sizes use encoded
 bytes. Evict before writes and retry quota failures, including index writes.
@@ -174,7 +188,8 @@ budgets only when the combined draft exceeds that limit.
 
 These rules apply when streaming Markdown becomes executable UI, when React
 remounts a block, when an optimistic message ID is persisted, and when an
-external agent runtime receives the per-run system prompt.
+external agent runtime receives the per-run system prompt. Native integration
+checks also require the isolated QA environment below.
 
 ### 2. Signatures
 
@@ -203,6 +218,26 @@ buildSandboxDocument(theme: ThemeSnapshot): string
   actually forward it through its native instruction field or clearly
   separated context; no DB field or persistent session setting is added.
 
+#### Native QA environment
+
+- Keep the normal backend/data on port **3002**. Build the separate QA app
+  with `VITE_API_BASE=http://127.0.0.1:3302`, a task-local `frontendDist`,
+  `productName: "OpenHorn QA"` and `identifier: "com.openhorn.nativeqa"` in
+  its Tauri merge config. Preserve the normal `.app` unchanged. The distinct
+  bundle ID isolates WKWebView storage; it does not sandbox shared native
+  filesystem settings or the sidecar diagnostic endpoint.
+- Inject the persistent visible badge
+  `测试环境 · OpenHorn QA · 独立测试数据` into QA built HTML before bundling.
+  Keep it outside the React root with fixed contrasting colors and
+  `pointer-events: none`, so navigation/themes retain it without intercepting
+  controls. A different icon or bundle name alone does not distinguish an
+  otherwise identical app showing an empty test history.
+- The task-local seeder signature is
+  `node native-seed-fixtures.mjs --base http://127.0.0.1:3302`. Require an
+  explicit HTTP loopback origin on port 3302; reject 3002 and other origins
+  **before any fetch/write**. Use deterministic fixtures/local fake providers,
+  never real model credentials or model calls, for native regressions.
+
 ### 4. Validation & Error Matrix
 
 | Input / event | Required behavior |
@@ -219,6 +254,8 @@ buildSandboxDocument(theme: ThemeSnapshot): string
 | Real parent click on displayed pending proposal | Consume that exact proposal once |
 | Subsequent frame document load | Revoke bridge, remove frame and pending proposals |
 | `localhost@attacker` or `localhost.attacker` navigation | Reject |
+| Seeder base is normal port 3002 or a non-QA origin | Reject before network access |
+| QA bundle lacks badge, distinct ID or embedded 3302 base | Do not launch as a QA app; rebuild the isolated package |
 
 ### 5. Good / Base / Bad Cases
 
@@ -248,6 +285,10 @@ buildSandboxDocument(theme: ThemeSnapshot): string
   rejected userinfo, wrong ports/schemes and host lookalikes.
 - Fake Codex/ACP transports: inspect the actual submitted instruction/prompt
   payload with UI enabled and omitted; do not call a live model for this check.
+- Native QA packaging: verify `Info.plist` ID, the actual embedded frontend's
+  3302 base and visible badge, and unchanged normal-app hashes. Verify the
+  seeder rejects 3002 before fetch. Native checks must exercise the real
+  WKWebView; static history fixtures cannot prove streaming/retry transitions.
 
 ### 7. Wrong vs Correct
 
@@ -261,6 +302,13 @@ setTimeout(() => saveBlockState(key, state), 300);
 // Wrong: a generated frame can arrange its own focus.
 if (document.activeElement === iframe) requestComposerText(message.text);
 // Correct: display a bounded proposal, apply it from a real host button click.
+```
+
+```sh
+# Wrong: seed test conversations into the normal user backend (must fail).
+node native-seed-fixtures.mjs --base http://127.0.0.1:3002
+# Correct: use the explicit disposable QA origin and visibly marked QA app.
+node native-seed-fixtures.mjs --base http://127.0.0.1:3302
 ```
 
 ## Bundle

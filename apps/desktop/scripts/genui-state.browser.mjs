@@ -73,6 +73,77 @@ try {
     "PASS actual Agent timeline and chat-store ID reconciliation preserve edits and disk state",
   );
 
+  for (const [agent, reconcile] of [
+    [false, false],
+    [false, true],
+    [true, true],
+  ]) {
+    await page.evaluate((mode) => window.genUiStateTest.startHtml(mode), agent);
+    const htmlFrame = page.frameLocator("#root iframe");
+    await htmlFrame.getByRole("button", { name: "Stream button", exact: true }).click();
+    await page.evaluate(() => {
+      window.retainedHtmlFrame = document.querySelector("#root iframe");
+    });
+    if (agent) {
+      await page.evaluate(() => window.genUiStateTest.advanceHtmlAgent());
+      assert.equal(
+        await page.evaluate(
+          () => document.querySelector("#root iframe") === window.retainedHtmlFrame,
+        ),
+        true,
+        "Adding a later Agent text step must retain the prior live iframe",
+      );
+      await htmlFrame.getByRole("button", { name: "Clicked", exact: true }).waitFor();
+    }
+    await page.evaluate((remap) => window.genUiStateTest.finishHtml(remap), reconcile);
+    assert.equal(
+      await page.evaluate(
+        () => document.querySelector("#root iframe") === window.retainedHtmlFrame,
+      ),
+      true,
+      `${agent ? "Agent" : "Chat"} completion must retain the live iframe`,
+    );
+    await htmlFrame.getByRole("button", { name: "Clicked", exact: true }).waitFor();
+    await page.evaluate(() => window.genUiStateTest.reloadHtml());
+    assert.equal(
+      await page.evaluate(
+        () => document.querySelector("#root iframe") === window.retainedHtmlFrame,
+      ),
+      true,
+      "Refreshing persisted messages must retain mounted rendering identity",
+    );
+    await htmlFrame.getByRole("button", { name: "Clicked", exact: true }).waitFor();
+    await page.evaluate(() => window.genUiStateTest.replaceHtml());
+    await htmlFrame.getByRole("button", { name: "New program", exact: true }).waitFor();
+    assert.equal(
+      await page.evaluate(
+        () => document.querySelector("#root iframe") === window.retainedHtmlFrame,
+      ),
+      false,
+      "A different HTML program must get a fresh sandbox",
+    );
+    await htmlFrame.getByRole("button", { name: "New program", exact: true }).click();
+    await page.evaluate(() => window.genUiStateTest.theme());
+    await htmlFrame.getByRole("button", { name: "New program", exact: true }).waitFor();
+    console.log(
+      `PASS actual ${agent ? "Agent" : "Chat"} bubble preserves the live HTML frame through completion${reconcile ? ", ID reconciliation" : ""} and reload; program/theme reset it`,
+    );
+  }
+
+  // Retaining the renderer also retains its smoother; a retry must clear both.
+  await page.evaluate(() => window.genUiStateTest.renderStable("Completed earlier reply.", false));
+  await page.evaluate(() => window.genUiStateTest.renderStable("", true));
+  assert.equal(await stat(), "");
+  await page.evaluate(() => window.genUiStateTest.renderStable("A replacement answer.", true));
+  await page.waitForFunction(
+    () => document.getElementById("root").innerText === "A replacement answer.",
+    undefined,
+    { timeout: 5000 },
+  );
+  await page.evaluate(() => window.genUiStateTest.renderStable("A replacement answer.", false));
+  assert.equal(await stat(), "A replacement answer.");
+  console.log("PASS a retained renderer clears its smoother before a retry starts");
+
   for (const [name, prefix, indent] of [
     ["blockquote", "> ", "> "],
     ["numbered list", "12. ", "    "],
