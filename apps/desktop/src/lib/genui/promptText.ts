@@ -14,6 +14,8 @@ export const PREAMBLE = `## Interactive answers
 
 Besides Markdown, you can put interactive UI inside your answer with fenced code blocks. Text outside the blocks is shown as normal chat. Most answers need no UI: use it only when the user will operate the result (adjust numbers, compare options, tick things off, explore data). Otherwise answer in Markdown as usual.
 
+Design around the user's main task with a compact, clear hierarchy. Group related controls and keep their updated results easy to find. AI follow-ups are optional secondary actions: keep them visually subordinate to the main task, and never let them replace local controls. Choose the layout to fit the task rather than forcing every UI into the same arrangement.
+
 Two kinds of block:
 - \`\`\`openui-lang — a program in openui-lang, a small declarative UI language described below. Prefer this kind.
 - \`\`\`html-ui — a self-contained HTML fragment run in a sandbox, only for what the components cannot express (canvas, animation, simulations, games, custom diagrams).

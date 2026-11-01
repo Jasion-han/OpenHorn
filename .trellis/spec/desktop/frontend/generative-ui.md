@@ -64,6 +64,15 @@ with a separate fence-line regex.
   can use a solid button while still disclosing its editable-draft behavior.
   Keep the composer hint visually secondary, preserve explicit variants, and
   check contrast, wrapping and keyboard focus in both app themes.
+- In a self-contained calculator or explorer, emphasize its local controls
+  and results. Keep related modes and numerical inputs together, with their
+  results nearby. An optional AI continuation belongs to the secondary
+  hierarchy; do not append a dominant AI CTA merely to fill a footer. This is
+  task-based guidance, not a universal fixed widget layout.
+- Isolate GenUI heading rules from surrounding Markdown descendant selectors
+  with a scoped selector such as `.block .title`. Verify computed spacing
+  inside actual Chat and Agent bubbles; isolated component previews can hide
+  cascade regressions.
 - Updating generation instructions does not repair an existing program with
   missing business logic. Correct a specifically requested historical artifact
   explicitly, retaining its original revision and guarding against concurrent

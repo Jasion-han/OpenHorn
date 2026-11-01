@@ -109,6 +109,55 @@ try {
       assert.equal(descriptionId, null);
     }
   };
+  const hierarchy = async () => {
+    // These headings live inside Markdown, whose prose h3 rules must not
+    // override the compact Title component's spacing or font weight.
+    for (const name of ["房贷月供计算器", "贷款设置", "结果（概要）", "计算要点"]) {
+      const headingStyle = await page
+        .getByRole("heading", { name, exact: true })
+        .evaluate((heading) => {
+          const style = getComputedStyle(heading);
+          return {
+            marginTop: style.marginTop,
+            marginBottom: style.marginBottom,
+            fontWeight: style.fontWeight,
+          };
+        });
+      assert.deepEqual(
+        headingStyle,
+        { marginTop: "0px", marginBottom: "0px", fontWeight: "600" },
+        `${name} keeps component typography inside Markdown`,
+      );
+    }
+    const settings = page.getByRole("heading", { name: "贷款设置", exact: true }).locator("..");
+    assert.equal(await settings.getByRole("group", { name: "还款方式", exact: true }).count(), 1);
+    assert.equal(await settings.getByRole("slider").count(), 3);
+    for (const name of ["贷款金额", "年利率", "年限"]) {
+      assert.equal(await settings.getByRole("slider", { name, exact: true }).count(), 1);
+    }
+    const header = page.getByRole("heading", { name: "房贷月供计算器", exact: true }).locator("..");
+    assert.equal(await header.getByRole("button").count(), 0);
+    const results = page.getByRole("heading", { name: "结果（概要）", exact: true }).locator("..");
+    const details = page.getByRole("heading", { name: "计算要点", exact: true }).locator("..");
+    const followUp = button("请 AI 分析还款压力");
+    const sections = await Promise.all(
+      [settings, results, details, followUp].map((section) => section.boundingBox()),
+    );
+    for (let index = 0; index < sections.length - 1; index++) {
+      assert.ok(sections[index] && sections[index + 1]);
+      assert.ok(
+        sections[index].y + sections[index].height <= sections[index + 1].y,
+        "settings, immediate results, detail and optional follow-up stay in task order",
+      );
+    }
+    const footer = await followUp.evaluate((control) => ({
+      width: control.getBoundingClientRect().width,
+      availableWidth: control.parentElement.getBoundingClientRect().width,
+      background: getComputedStyle(control).backgroundColor,
+    }));
+    assert.ok(footer.width < footer.availableWidth, "AI follow-up keeps its intrinsic width");
+    assert.equal(footer.background, "rgba(0, 0, 0, 0)", "AI follow-up is visually secondary");
+  };
 
   for (const mode of ["chat", "agent"]) {
     const scope = `local-mortgage-${mode}`;
@@ -120,6 +169,10 @@ try {
     await hint("等额本息", false);
     await hint("等额本金", false);
     await hint("请 AI 分析还款压力", true);
+    await hierarchy();
+    console.log(
+      `PASS ${mode}: repayment mode and numerical inputs share one settings group, followed by results and an intrinsic secondary AI footer`,
+    );
     await page.evaluate(() => window.genUiLocalActions.seedDraft("已有草稿，请保留"));
     let draft = (await snapshot()).request;
     const initial = {
@@ -193,15 +246,24 @@ try {
     await button("等额本金").waitFor();
     assert.equal(await button("等额本金").isDisabled(), false);
     assert.deepEqual(await state(), edited);
-    await button("请 AI 分析还款压力").click();
+    await slider("年限").focus();
+    await page.keyboard.press("Tab");
+    assert.equal(
+      await button("请 AI 分析还款压力").evaluate((control) => document.activeElement === control),
+      true,
+      "the optional AI footer is reachable after the calculator controls",
+    );
+    await page.keyboard.press("Enter");
     const request = (await snapshot()).request;
-    assert.match(request.text, /^请结合我的收入和支出分析这笔房贷的还款压力/);
+    assert.match(request.text, /^请结合我已提供的财务信息分析这笔房贷的还款压力/);
+    assert.match(request.text, /如果缺少收入、固定支出或其他债务信息，请先向我确认，不要自行假设/);
     assert.match(request.text, /还款方式：等额本金/);
     assert.match(request.text, /1,050,000/);
     assert.match(request.text, /3.55%/);
     assert.match(request.text, /年限：1 年/);
+    assert.deepEqual(await state(), edited);
     console.log(
-      `PASS ${mode}: incomplete controls stay disabled; explicit AI follow-up only prepares its current-parameter draft`,
+      `PASS ${mode}: incomplete controls stay disabled; keyboard AI follow-up prepares a current-parameter draft that clarifies missing financial inputs`,
     );
 
     await start(mode, `zero-mortgage-${mode}`);
