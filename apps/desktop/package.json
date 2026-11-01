@@ -8,7 +8,7 @@
     "build:ui": "vite build",
     "build": "tauri build",
     "typecheck": "tsc --noEmit",
-    "test:genui:browser": "node scripts/genui-runtime.browser.mjs && node scripts/genui-html.browser.mjs && node scripts/genui-state.browser.mjs && node scripts/genui-controls.browser.mjs && node scripts/genui-loading.browser.mjs && node scripts/genui-chat-failure.browser.mjs"
+    "test:genui:browser": "node scripts/genui-runtime.browser.mjs && node scripts/genui-html.browser.mjs && node scripts/genui-state.browser.mjs && node scripts/genui-controls.browser.mjs && node scripts/genui-loading.browser.mjs && node scripts/genui-chat-failure.browser.mjs && node scripts/genui-local-actions.browser.mjs"
   },
   "dependencies": {
     "@openuidev/lang-core": "1.0.2",

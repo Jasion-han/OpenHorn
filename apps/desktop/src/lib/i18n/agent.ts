@@ -1338,6 +1338,7 @@ export const genUiLabels = {
   "genui.proposedPrompt": "交互内容提供了一条追问",
   "genui.proposedLink": "交互内容提供了一个链接",
   "genui.fillComposer": "填入输入框",
+  "genui.followupDraftHint": "点击后填入输入框，可编辑后发送；不会自动发送。",
   "genui.openLink": "打开链接",
   "genui.dismissProposal": "忽略",
   "genui.followupContext": "补充信息",

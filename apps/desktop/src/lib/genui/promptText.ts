@@ -8,6 +8,8 @@
  * components/chat/genui/prompt.ts (buildGenUiSystemPrompt).
  */
 
+import { MORTGAGE_EXAMPLE } from "./mortgageExample";
+
 export const PREAMBLE = `## Interactive answers
 
 Besides Markdown, you can put interactive UI inside your answer with fenced code blocks. Text outside the blocks is shown as normal chat. Most answers need no UI: use it only when the user will operate the result (adjust numbers, compare options, tick things off, explore data). Otherwise answer in Markdown as usual.
@@ -24,34 +26,20 @@ export const OPENUI_RULES = [
   "State lives in $variables bound to inputs; everything shown is computed from them with @functions, so the UI works without another message. Do not hardcode results that depend on inputs.",
   "Only values the user changes are $variables, and a $variable's default is a literal (number, string, true/false, [...] or {...}). A value computed from others is a plain name without $. WRONG: $monthly = @Payment($amount, $rate, $periods) and $periods = $years * 12 (they never compute and show 0 or [object Object]). RIGHT: periods = $years * 12 and monthly = @Payment($amount, $rate, periods).",
   'Anything the UI can work out from data it already has (switching a mode or view, filtering, sorting, showing details, changing units) happens in the block: a $variable set by a SegmentedControl, Select, Checkbox or Button with @Set($view, "value"), and results that pick with a ternary: total = $mode == "a" ? x : y. Never use @ToAssistant for that, and never leave such a Button without an action.',
+  "Implement every advertised mode and its calculation in the same block. Switching modes preserves the user's inputs and immediately updates the results and labels. For a loan calculator, include both fixed-payment and equal-principal formulas, with first/last payment and monthly decrease where applicable. Never offer a switch that merely asks you to add the missing logic later.",
   "A list the user edits (a checklist, items) is a $variable changed by Buttons with @Set($list, @Toggle($list, item)) or @Append / @Remove.",
-  'Use Button("Label", @ToAssistant("first-person request")) only for a follow-up that needs new content from you (advice, an explanation, more items). The message and any explicit second-argument context are shown in the user\'s input box for review; they are never sent automatically. Include the current values needed for the follow-up in that context.',
+  'Use Button("Ask AI to explain", @ToAssistant("first-person request")) only for a follow-up that needs new content from you (advice, an explanation, more items). Its label must clearly ask AI for that new content, rather than promise an immediate local operation. The message and any explicit second-argument context are shown in the user\'s input box for review; they are never sent automatically. Include the current values needed for the follow-up in that context.',
   "Never put code the user wants to read or copy in a UI block; use a normal code fence for that.",
 ];
 
 export const OPENUI_EXAMPLES = [
-  `root = Card([title, mode, inputs, result, chart, ask])
-$mode = "等额本息"
-$amount = 1000000
-$rate = 3.5
-$years = 30
-title = Title("房贷月供计算", "md")
-mode = SegmentedControl($mode, ["等额本息", "等额本金"], "还款方式")
-inputs = Grid([Slider($amount, 100000, 5000000, 50000, "贷款金额", "¥"), Slider($rate, 1, 8, 0.05, "年利率", "%"), Slider($years, 5, 30, 1, "年限", "年")], 3, 180)
-n = $years * 12
-r = $rate / 1200
-byPrincipal = $mode == "等额本金"
-monthly = byPrincipal ? $amount / n + $amount * r : @Payment($amount, $rate, n)
-interest = byPrincipal ? $amount * r * (n + 1) / 2 : monthly * n - $amount
-result = Row([Stat(byPrincipal ? "首月还款" : "每月还款", @Format(monthly, "currency", 0), byPrincipal ? "之后每月少还 " + @Format($amount / n * r, "currency", 2) : null), Stat("总利息", @Format(interest, "currency", 0), null, "warning")], 6)
-chart = Chart("pie", ["本金", "利息"], [{name: "构成", values: [$amount, interest]}], "¥")
-ask = Button("结合我的收入评估压力", @ToAssistant("结合我的月收入，帮我评估这笔房贷的还款压力"), "outline", "sparkles")`,
+  MORTGAGE_EXAMPLE,
   `root = Card([head, items, ask])
 $done = []
 tasks = ["护照与签证", "充电器与转换插头", "常用药品", "现金与银行卡"]
 head = Row([Title("出发前清单", "md"), Spacer(), Badge(@Count($done) + " / " + @Count(tasks), @Count($done) == @Count(tasks) ? "success" : "default")])
 items = Col(@Each(tasks, "t", Button(t, @Set($done, @Toggle($done, t)), "ghost", @Includes($done, t) ? "check-circle" : "circle")), 1, "start")
-ask = Button("再帮我补充几项", @ToAssistant("帮我把出发前清单再补充几项"), "outline", "sparkles")`,
+ask = Button("请 AI 补充清单", @ToAssistant("帮我把出发前清单再补充几项"), "outline", "sparkles")`,
 ];
 
 export const HTML_UI_SECTION = `## html-ui blocks
@@ -63,4 +51,5 @@ Use a \`\`\`html-ui block only when openui-lang cannot express the UI. Write one
 - window.openhorn.sendPrompt({text}) proposes a follow-up message; window.openhorn.openLink({url}) proposes an http(s) link. Both display a suggestion beside the page. Only when the user confirms that suggestion in the app is the message placed in the input box or the link opened.
 - Call sendPrompt and openLink from a page button click handler, so suggestions match the user's request. Calling either function never sends a message or opens a link automatically; the user confirms in the app.
 - sendPrompt is only for a follow-up that needs new content from you. Anything the page can compute or toggle itself (modes, filters, recalculating) is done in its own script, never through sendPrompt.
+- Implement every advertised mode and calculation in the page, preserving the current inputs when switching. A button that needs new AI content must say so (for example, "Ask AI to explain"); never use sendPrompt as a placeholder for a missing local mode or calculation.
 - Keep it under about 250 lines.`;

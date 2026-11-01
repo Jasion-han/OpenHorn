@@ -44,6 +44,27 @@ with a separate fence-line regex.
   The mortgage example in `OPENUI_EXAMPLES` shows both side by side
   (`SegmentedControl($mode, ...)` + `byPrincipal ? ... : ...`, plus one
   `@ToAssistant` follow-up); `prompt.test.ts` keeps it that way.
+- A control that promises a local operation must include the complete state
+  and calculation logic in the same program. A mode switch keeps the current
+  parameters and changes its results immediately; it cannot delegate a missing
+  formula to a follow-up. If new model content is required, the label must say
+  so. The canonical `lib/genui/mortgageExample.ts` program is shared by the
+  generation prompt and actual Chat/Agent browser regression: both repayment
+  modes include total repayment/interest, and declining payments identify the
+  first/last payment and monthly decrease. Zero interest is exactly zero at a
+  zero rate, rather than a floating-point subtraction that can display `-¥0`.
+- `Button` discloses draft preparation from its evaluated action semantics,
+  including implicit actionless follow-ups, legacy configs and mixed plans.
+  The visible localized composer hint is separate from the primary accessible
+  label; an accessible description explains that no message is sent. Local
+  Set/Reset and unrelated clipboard/link actions do not get a draft hint.
+  Never infer an action from words such as "switch" in a label, and never
+  change `@ToAssistant` or HTML proposals into automatic model sends.
+- Updating generation instructions does not repair an existing program with
+  missing business logic. Correct a specifically requested historical artifact
+  explicitly, retaining its original revision and guarding against concurrent
+  content changes. Do not ship per-user message IDs, source fingerprints or
+  broad natural-language rewrites as renderer compatibility logic.
 - Only user-editable values are `$variables`, with literal defaults; derived
   values are plain names (`periods = $years * 12`). OpenUI Lang 1.0 does
   **not** report `$x = <expression>`: `materializeValue` leaves the AST node
@@ -368,6 +389,13 @@ buildSandboxDocument(theme: ThemeSnapshot): string
 - `fence.test.ts`: CommonMark/GFM container syntax and non-fence HTML contexts.
 - `prompt.test.ts`: source-based computed-state repair, literal AST-shaped data,
   root sequence wrapping and bounded explicit follow-up context.
+- `mortgageExample.test.ts` compares both local repayment modes with independent
+  balance iteration, including zero rates and short/long terms.
+  `actionSemantics.test.ts` checks evaluated plans against the runtime's actual
+  follow-up projection. `genui-local-actions.browser.mjs` exercises the shared
+  canonical program through real Chat/Agent message trees, preserving input
+  values and modes across remount/reload while local switching leaves the
+  composer request unchanged. Include it in `test:genui:browser`.
 - Actual-component browser regressions under `apps/desktop/scripts/`: runtime
   diagnostics/recovery, native slider values and dependent output, Markdown
   fence completion, stream/theme/ID remounts, host-confirmed proposals, script

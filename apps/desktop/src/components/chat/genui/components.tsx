@@ -24,6 +24,8 @@ import {
 } from "react";
 import { cn } from "ui";
 import { z } from "zod";
+import { getGenUiLabel } from "../../../lib/i18n/agent";
+import { offersFollowUp } from "./actionSemantics";
 import { BarLineChart, PieChart } from "./charts";
 import { ControlEditContext } from "./controlEditContext";
 import styles from "./genui.module.css";
@@ -398,11 +400,13 @@ export const Button = defineComponent({
     disabled: z.boolean().optional(),
   }),
   description:
-    "Runs its action. Without an action it offers its label to the assistant as the user's next message.",
+    "Runs an explicit action: @Set/@Reset update this UI immediately; @ToAssistant prepares an editable follow-up draft, never sends it. Only follow-ups may omit action (legacy label-as-draft behavior). A mode switch or recalculation must have a local action and complete calculation logic.",
   component: ({ props }) => {
     const trigger = useTriggerAction();
     const formName = useFormName();
     const streaming = useIsStreaming();
+    const descriptionId = useId();
+    const followUp = offersFollowUp(props.action);
     const label = String(props.label ?? "");
     const Glyph = iconFor(props.icon);
     return (
@@ -410,12 +414,14 @@ export const Button = defineComponent({
         type="button"
         className={cn(
           styles.button,
+          followUp && styles.buttonFollowUp,
           props.variant === "outline"
             ? styles.buttonOutline
             : props.variant === "ghost"
               ? styles.buttonGhost
               : styles.buttonSolid,
         )}
+        aria-describedby={followUp ? descriptionId : undefined}
         disabled={!!props.disabled || streaming}
         onClick={() => {
           if (props.action) void trigger(label, formName, props.action as Plan);
@@ -424,6 +430,16 @@ export const Button = defineComponent({
       >
         {Glyph ? <Glyph size={14} aria-hidden /> : null}
         {label}
+        {followUp ? (
+          <>
+            <span className={styles.buttonHint} aria-hidden>
+              {getGenUiLabel("genui.fillComposer")}
+            </span>
+            <span id={descriptionId} hidden>
+              {getGenUiLabel("genui.followupDraftHint")}
+            </span>
+          </>
+        ) : null}
       </button>
     );
   },
