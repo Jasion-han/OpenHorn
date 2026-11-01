@@ -310,7 +310,7 @@ export type ChatStreamEvent =
         toolCallId?: string;
       };
     }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string; messageId?: string; model?: string };
 
 export interface CreateConversationInput {
   title: string;

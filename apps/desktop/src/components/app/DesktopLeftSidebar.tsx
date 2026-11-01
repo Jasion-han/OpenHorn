@@ -311,7 +311,6 @@ export function DesktopLeftSidebar() {
   const setSidebarCollapsed = useDesktopShellStore((state) => state.setSidebarCollapsed);
   const openSettings = useDesktopShellStore((state) => state.openSettings);
   const openScheduledTasks = useDesktopShellStore((state) => state.openScheduledTasks);
-  const openRunDetail = useDesktopShellStore((state) => state.openRunDetail);
   const user = useAuthStore((state) => state.user);
   const backendStatus = useBackendStatusStore((state) => state.status);
   const backendLastError = useBackendStatusStore((state) => state.lastError);
@@ -327,7 +326,6 @@ export function DesktopLeftSidebar() {
   const deleteConversation = useChatStore((state) => state.deleteConversation);
   const searchMessages = useChatStore((state) => state.searchMessages);
   const streamingConversationId = useChatStore((state) => state.streamingConversationId);
-  const reset = useChatStore((state) => state.reset);
   const projects = useProjectStore((state) => state.projects);
   const activeProjectId = useProjectStore((state) => state.activeProjectId);
   const projectsExpanded = useProjectStore((state) => state.expanded);
@@ -798,14 +796,16 @@ export function DesktopLeftSidebar() {
                       </button>
                       {(taskGroupsOpen[taskId] ?? false) &&
                         runs.map((run) => (
+                          // biome-ignore lint/a11y/useSemanticElements: same row layout as the conversation rows
                           <div
                             key={run.id}
                             role="button"
                             tabIndex={0}
                             onClick={() => {
-                              if (run.conversationId) {
+                              const conversationId = run.conversationId;
+                              if (conversationId) {
                                 void loadConversations().then(() => {
-                                  void selectConversation(run.conversationId!);
+                                  void selectConversation(conversationId);
                                   setActiveView("chat");
                                 });
                               } else {
@@ -815,9 +815,10 @@ export function DesktopLeftSidebar() {
                             onKeyDown={(event) => {
                               if (event.key === "Enter" || event.key === " ") {
                                 event.preventDefault();
-                                if (run.conversationId) {
+                                const conversationId = run.conversationId;
+                                if (conversationId) {
                                   void loadConversations().then(() => {
-                                    void selectConversation(run.conversationId!);
+                                    void selectConversation(conversationId);
                                     setActiveView("chat");
                                   });
                                 } else {

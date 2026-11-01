@@ -318,7 +318,7 @@ const CodeBlock = memo(
 
 type DesktopMarkdownMessageProps = {
   content: string;
-  /** True while this text is still arriving; the last open UI block renders as streaming. */
+  /** True while this text is still arriving. Unclosed UI fences always remain inert. */
   streaming?: boolean;
   /**
    * Identifies the message (and agent text segment) so interaction state in
@@ -336,10 +336,7 @@ function DesktopMarkdownMessageImpl({
 }: DesktopMarkdownMessageProps) {
   const normalized = fixCjkBold((content || "").replace(/\r\n/g, "\n").trim());
   const [isDark, setIsDark] = useState(false);
-  const openTail = useMemo(
-    () => streaming && endsInsideOpenFence(normalized),
-    [streaming, normalized],
-  );
+  const openTail = useMemo(() => endsInsideOpenFence(normalized), [normalized]);
   // Read by the `code` renderer at render time instead of being memo
   // dependencies: recreating `components` on every delta would remount every
   // block (see the note on `components` below).

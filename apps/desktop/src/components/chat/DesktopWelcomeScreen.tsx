@@ -5,6 +5,7 @@ import { fileKey } from "shared/format";
 import { Button, cn, Textarea } from "ui";
 import { useClockTick } from "../../hooks/useClockTick";
 import { usePlaceholderTypewriter } from "../../hooks/usePlaceholderTypewriter";
+import { chatModeUnavailableReason } from "../../lib/agentRerunRoute";
 import { getDesktopBackendBase } from "../../lib/backendBase";
 import { DEFAULT_CONVERSATION_TITLE } from "../../lib/conversationTitle";
 import { getGlobalDefaultChannel } from "../../lib/defaultChannel";
@@ -178,7 +179,6 @@ export function DesktopWelcomeScreen() {
   // exists, preconnect in the background so models are ready when the user
   // opens the model picker. Fires at most once per mount.
   const acpStartupPreconnectedRef = useRef(false);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: handleAcpChannelSelect is unstable by identity
   useEffect(() => {
     if (prefillComposer) {
       setDraft(prefillComposer);
@@ -187,6 +187,7 @@ export function DesktopWelcomeScreen() {
     }
   }, [prefillComposer, setPrefillComposer]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: handleAcpChannelSelect is unstable by identity
   useEffect(() => {
     if (acpStartupPreconnectedRef.current) return;
     const acpChannel = channels.find((c) => c.protocol === "acp" && c.enabled);
@@ -227,9 +228,14 @@ export function DesktopWelcomeScreen() {
   const selectedProvider = pickedModel
     ? (channels.find((channel) => channel.id === pickedModel.channelId)?.provider ?? null)
     : (defaultChannel?.provider ?? null);
+  const selectedProtocol = channels.find(
+    (channel) => channel.id === selection?.channelId,
+  )?.protocol;
+  const modeUnavailableReason = chatModeUnavailableReason(selectedProtocol, composerMode);
 
   const start = async (prompt: string) => {
     const trimmed = prompt.trim();
+    if (modeUnavailableReason) return;
     if ((!trimmed && attachments.length === 0) || starting) return;
     setStarting(true);
     try {
@@ -320,7 +326,8 @@ export function DesktopWelcomeScreen() {
     textareaRef.current?.focus();
   };
 
-  const canSubmit = (Boolean(draft.trim()) || attachments.length > 0) && !starting;
+  const canSubmit =
+    (Boolean(draft.trim()) || attachments.length > 0) && !starting && !modeUnavailableReason;
 
   // Reading the hour during render would strand a window left open all morning
   // on the phrase it launched with.
@@ -434,6 +441,12 @@ export function DesktopWelcomeScreen() {
                 <X className="size-[15px] transition-transform duration-300 ease-out group-hover:rotate-90 group-hover:scale-110" />
               </button>
             </div>
+
+            {modeUnavailableReason ? (
+              <p className="px-[15px] pb-1 text-xs text-muted-foreground">
+                {modeUnavailableReason}
+              </p>
+            ) : null}
 
             <DesktopComposerToolbar
               onAttach={() => fileInputRef.current?.click()}

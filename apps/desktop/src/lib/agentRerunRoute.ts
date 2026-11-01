@@ -1,5 +1,14 @@
 import type { ChatMode } from "../types/chat";
 import type { EffectiveModelResult } from "./effectiveModel";
+import { getChatLabel } from "./i18n/agent";
+
+/** ACP channels expose an Agent session, not a chat-completion endpoint. */
+export function chatModeUnavailableReason(
+  protocol: string | undefined,
+  mode: ChatMode,
+): string | null {
+  return protocol === "acp" && mode === "chat" ? getChatLabel("chat.mode.agentOnly") : null;
+}
 
 /**
  * Where a regenerate / edit-and-resend of a round runs.

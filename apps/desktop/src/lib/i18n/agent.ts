@@ -566,6 +566,7 @@ export const chatLabels = {
   // Agent mode availability
   "chat.agentUnavailableTitle": "Agent 当前不可用",
   "chat.agentUnavailableReason": "请先配置可用模型后再使用 Agent 模式。",
+  "chat.mode.agentOnly": "此渠道仅支持 Agent 模式，请切换到 Agent 后发送。",
   // Sidecar / run errors (surfaced via setError / failStreamingMessage)
   "chat.error.sidecarNotReady": "需要本地运行环境。请确认 sidecar 已就绪。",
   "chat.error.noChannel": "当前会话没有绑定渠道，无法本地运行",
