@@ -60,6 +60,10 @@ with a separate fence-line regex.
   Set/Reset and unrelated clipboard/link actions do not get a draft hint.
   Never infer an action from words such as "switch" in a label, and never
   change `@ToAssistant` or HTML proposals into automatic model sends.
+- Action semantics and visual priority are independent. A primary follow-up
+  can use a solid button while still disclosing its editable-draft behavior.
+  Keep the composer hint visually secondary, preserve explicit variants, and
+  check contrast, wrapping and keyboard focus in both app themes.
 - Updating generation instructions does not repair an existing program with
   missing business logic. Correct a specifically requested historical artifact
   explicitly, retaining its original revision and guarding against concurrent
