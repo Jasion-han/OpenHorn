@@ -30,13 +30,24 @@ export function niceTicks(min: number, max: number, count = 5): number[] {
   const hi = Math.max(0, max);
   if (hi === lo) return [lo];
   const rough = (hi - lo) / count;
+  const endpoints = () => [...new Set([lo, 0, hi])];
+  // Finite endpoints can still overflow their span, or underflow its division.
+  if (!Number.isFinite(rough) || rough <= 0) return endpoints();
   const magnitude = 10 ** Math.floor(Math.log10(rough));
   const step =
     [1, 2, 2.5, 5, 10].map((m) => m * magnitude).find((s) => s >= rough) ?? 10 * magnitude;
+  if (!Number.isFinite(step) || step <= 0) return endpoints();
   const first = Math.floor(lo / step);
   const last = Math.ceil(hi / step);
   const ticks: number[] = [];
-  for (let i = first; i <= last; i++) ticks.push(Number((i * step).toPrecision(12)));
+  for (let i = first; i <= last; i++) {
+    const tick = Number((i * step).toPrecision(12));
+    if (Number.isFinite(tick)) ticks.push(tick);
+  }
+  // Rounding outwards near Number.MAX_VALUE can overflow an otherwise valid tick.
+  if (ticks.length === 0) return endpoints();
+  if (ticks[0] > lo) ticks.unshift(lo);
+  if (ticks[ticks.length - 1] < hi) ticks.push(hi);
   return ticks;
 }
 
@@ -70,14 +81,25 @@ export function BarLineChart({
 }) {
   const width = 600;
   const pad = { top: 12, right: 12, bottom: 28, left: 44 };
-  const all = series.flatMap((s) => s.values);
-  const ticks = niceTicks(Math.min(...all), Math.max(...all));
+  // A dense series must not be passed as function arguments (Chromium has a
+  // much lower argument limit than the number of values arrays can contain).
+  let min = 0;
+  let max = 0;
+  for (const item of series) {
+    for (const value of item.values) {
+      min = Math.min(min, value);
+      max = Math.max(max, value);
+    }
+  }
+  const ticks = niceTicks(min, max);
   const lo = ticks[0] ?? 0;
   const hi = ticks[ticks.length - 1] ?? 1;
-  const span = hi - lo || 1;
+  const scale = Math.max(Math.abs(lo), Math.abs(hi)) || 1;
+  const scaledLo = lo / scale;
+  const span = hi / scale - scaledLo || 1;
   const plotW = width - pad.left - pad.right;
   const plotH = height - pad.top - pad.bottom;
-  const y = (v: number) => pad.top + plotH - ((v - lo) / span) * plotH;
+  const y = (v: number) => pad.top + plotH - ((v / scale - scaledLo) / span) * plotH;
   const band = plotW / labels.length;
   const xCenter = (i: number) => pad.left + band * (i + 0.5);
   const barGroup = band * 0.72;
@@ -184,7 +206,10 @@ export function PieChart({
   values: number[];
   unit?: string;
 }) {
-  const positive = values.map((v) => (v > 0 ? v : 0));
+  let scale = 0;
+  for (const value of values) scale = Math.max(scale, value);
+  if (scale <= 0) return null;
+  const positive = values.map((v) => (v > 0 ? v / scale : 0));
   const total = positive.reduce((a, b) => a + b, 0);
   if (total <= 0) return null;
   const r = 80;

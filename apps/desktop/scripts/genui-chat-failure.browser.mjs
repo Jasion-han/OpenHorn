@@ -240,9 +240,6 @@ try {
   await page.waitForFunction(() => !!window.failureChat);
   const snapshot = () => page.evaluate(() => window.failureChat.snapshot());
   const reset = async () => {
-    // Finishing a reply starts message/conversation reloads. Let those real
-    // requests finish before replacing the root/store for the next scenario.
-    await page.waitForLoadState("networkidle");
     rows.length = 0;
     prepares = 0;
     completes = 0;
@@ -250,7 +247,14 @@ try {
     retryMode = "success";
     syncedPreparations = 0;
     protocol = "openai";
-    await page.evaluate(() => window.failureChat.start());
+    // A finished HTTP request can still have application continuations queued.
+    // Reusing the realm and the same message IDs would let a previous case's
+    // late history reload repopulate the next case after store.reset(). A new
+    // document gives each scenario independent stores and pending promises;
+    // remounts and races being tested inside a scenario still share one realm.
+    await page.reload();
+    await page.waitForFunction(() => !!window.failureChat);
+    assert.deepEqual((await snapshot()).messages, [], "a new scenario starts without old replies");
   };
   const send = async () => {
     await page.locator("textarea").fill("test failure");

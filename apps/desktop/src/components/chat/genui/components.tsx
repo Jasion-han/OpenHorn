@@ -310,14 +310,28 @@ export const Progress = defineComponent({
   }),
   description: "Progress bar from 0 to max (default 100).",
   component: ({ props }) => {
-    const max = props.max && props.max > 0 ? props.max : 100;
-    const ratio = Number.isFinite(props.value) ? Math.min(Math.max(props.value / max, 0), 1) : 0;
+    const max = props.max && Number.isFinite(props.max) && props.max > 0 ? props.max : 100;
+    const value = Number.isFinite(props.value) ? Math.min(Math.max(props.value, 0), max) : 0;
+    const ratio = value / max;
+    const labelId = useId();
     return (
-      <Field label={props.label}>
-        <div className={styles.progressTrack}>
+      <div className={styles.field}>
+        {props.label ? (
+          <span id={labelId} className={styles.label}>
+            {numberText(props.label)}
+          </span>
+        ) : null}
+        <div
+          className={styles.progressTrack}
+          role="progressbar"
+          aria-labelledby={props.label ? labelId : undefined}
+          aria-valuemin={0}
+          aria-valuemax={max}
+          aria-valuenow={value}
+        >
           <div className={styles.progressFill} style={{ width: `${ratio * 100}%` }} />
         </div>
-      </Field>
+      </div>
     );
   },
 });
@@ -478,14 +492,21 @@ export const Input = defineComponent({
     type: z.enum(["text", "number"]).optional(),
     placeholder: z.string().optional(),
   }),
-  description: "Text or number field; a number field stores numbers.",
+  description:
+    "Text or number field; a number field stores numbers, or an empty string when cleared.",
   component: function InputView({ props, statementId }) {
     const field = useStateField(useFieldName(props.label, statementId), props.value);
     const streaming = useIsStreaming();
     const numeric = props.type === "number";
     // A number field shows what is typed ("1." or "-") until it parses.
-    const [draft, setDraft] = useState<string | null>(null);
-    const shown = draft ?? String(field.value ?? "");
+    const [draft, setDraft] = useState<{ text: string; value: unknown } | null>(null);
+    // A draft belongs to the value this input last published. Another bound
+    // control or action can change it while this input still has focus.
+    const keepDraft = numeric && draft !== null && Object.is(draft.value, field.value);
+    const shown = keepDraft ? draft.text : String(field.value ?? "");
+    useEffect(() => {
+      if (draft && !keepDraft) setDraft(null);
+    }, [draft, keepDraft]);
     return (
       <Field label={props.label}>
         <input
@@ -501,9 +522,10 @@ export const Input = defineComponent({
               field.setValue(text);
               return;
             }
-            setDraft(text);
             const parsed = Number(text.replace(/,/g, ""));
-            if (text.trim() === "") field.setValue(null as unknown as number);
+            const next = text.trim() === "" ? "" : Number.isFinite(parsed) ? parsed : field.value;
+            setDraft({ text, value: next });
+            if (text.trim() === "") field.setValue("");
             else if (Number.isFinite(parsed)) field.setValue(parsed);
           }}
           onBlur={() => setDraft(null)}
@@ -535,6 +557,13 @@ export const Select = defineComponent({
     const streaming = useIsStreaming();
     const choices = choiceList(props.options);
     const value = field.value == null ? "" : String(field.value);
+    const available = choices.some((option) => option.value === value);
+    useEffect(() => {
+      // Keep an explicit empty selection when dynamic options remove its value.
+      if (!streaming && field.value !== undefined && value !== "" && !available) {
+        field.setValue("");
+      }
+    }, [field, value, available, streaming]);
     return (
       <Field label={props.label}>
         <select
@@ -569,9 +598,21 @@ export const SegmentedControl = defineComponent({
     const streaming = useIsStreaming();
     const choices = choiceList(props.options);
     const value = field.value == null ? "" : String(field.value);
+    const available = choices.some((option) => option.value === value);
+    useEffect(() => {
+      if (!streaming && field.value !== undefined && value !== "" && !available) {
+        field.setValue("");
+      }
+    }, [field, value, available, streaming]);
+    const labelId = useId();
     return (
-      <Field label={props.label}>
-        <div className={styles.segmented}>
+      <div className={styles.field}>
+        {props.label ? (
+          <span id={labelId} className={styles.label}>
+            {numberText(props.label)}
+          </span>
+        ) : null}
+        <fieldset className={styles.segmented} aria-labelledby={props.label ? labelId : undefined}>
           {choices.map((o, i) => (
             <button
               // biome-ignore lint/suspicious/noArrayIndexKey: model-written values may repeat
@@ -585,8 +626,8 @@ export const SegmentedControl = defineComponent({
               {o.label}
             </button>
           ))}
-        </div>
-      </Field>
+        </fieldset>
+      </div>
     );
   },
 });

@@ -217,6 +217,31 @@ buildSandboxDocument(theme: ThemeSnapshot): string
 - `agent.run.systemPrompt` is optional per-run input. Each runtime must
   actually forward it through its native instruction field or clearly
   separated context; no DB field or persistent session setting is added.
+- Generation failure must preserve and persist the exact partial Markdown
+  using the prepared assistant ID. Show failure separately; never replace or
+  append an error inside a model-written code fence. Ignore chunks after a
+  terminal event. Terminal SSE errors can carry `messageId` and `model`; migrate
+  the local reply to that ID before offering retry, including newly created
+  edited-tail replies. An empty failed retry restores the preceding reply;
+  editing a question keeps only its new reply, which can be empty.
+- A stopped turn's save may finish after the next send begins. Message-specific
+  persistence still belongs to the old turn; loading/streaming/error state and
+  cleanup belong to the current turn. Never let an old save or finalizer end
+  the newer generation or reload a snapshot over its optimistic messages.
+  The same ownership check applies to delayed retry/edit responses and SSE
+  terminal events. Stop restores a zero-output retry synchronously. If Agent
+  preparation has not reached the run hook, Stop persists the question or edit
+  independently and awaits that one-shot save before enabling the next send;
+  the old preparation must never start a run that cancels the new one.
+- Fence completeness comes from Markdown grammar independently of transport
+  state. Stop, error, history reload and remount never make an unclosed HTML or
+  OpenUI fence executable. A preceding closed block remains interactive.
+- ACP is Agent-only. Both composers block Chat submission before creating or
+  preparing a round, preserve the draft and show a mode explanation. Historical
+  Chat retry/edit must also reject a currently selected ACP channel before
+  clearing the reply. Memoized historical bubbles retain callbacks, so route
+  capabilities from the live channel/model store at invocation. Agent access
+  and permission settings remain separate.
 
 #### Native QA environment
 
@@ -250,6 +275,10 @@ buildSandboxDocument(theme: ThemeSnapshot): string
 | Remount before 300 ms flush / persisted ID replacement | Restore newest memory snapshot |
 | Storage quota / blocked access / corrupt data | Bounded eviction/retry or memory-only continuity |
 | Unclosed quoted/list fence | Keep preview non-executable and controls disabled |
+| Stop/error while HTML/OpenUI fence is unclosed | Keep preview inert through reload/remount; preceding closed blocks still work |
+| Chat provider failure after partial output | Persist exact partial and ID; show a separate error with usable retry |
+| Old stopped save settles during next send | Preserve the newer turn's loading/streaming/error state |
+| ACP channel in Chat mode | Block Send/Enter and reruns before writes; retain draft and Agent support |
 | Frame focus / forged activation / unsolicited proposal | No composer edits or links opened |
 | Real parent click on displayed pending proposal | Consume that exact proposal once |
 | Subsequent frame document load | Revoke bridge, remove frame and pending proposals |
@@ -311,11 +340,55 @@ node native-seed-fixtures.mjs --base http://127.0.0.1:3002
 node native-seed-fixtures.mjs --base http://127.0.0.1:3302
 ```
 
+## Control and numeric contracts
+
+- The registry contains 22 components and one custom `CopyToClipboard` action.
+  `scripts/genui-controls.browser.mjs` exercises the complete registry through
+  the production Chat and Agent message trees. Keep it in `test:genui:browser`.
+  Its fixture uses an isolated store and local server; it never sends model
+  requests or touches the normal application's conversations or clipboard.
+- A numeric `Input` stores a finite number, or `""` when cleared. Its incomplete
+  text draft (such as `"1."` or `"-"`) belongs to the value it last published.
+  Changes from another bound control or an action invalidate that draft;
+  blur restores the canonical value. Never publish `null` through the reactive
+  setter: the upstream evaluator treats a null `$value` as a missing override.
+- Dynamic `Select` and `SegmentedControl` options preserve a selected value
+  while it remains present, including reorder and label changes. Removing a
+  nonempty selection clears the binding to `""`; it does not select an arbitrary
+  replacement. Empty lists and explicit empty-valued options are supported.
+  Normalization waits until streaming finishes. Segmented choices use a named
+  semantic group without changing the accessible name of the first button.
+- `Progress` exposes its label and finite clamped value with progressbar
+  semantics. A missing, nonpositive or nonfinite maximum uses 100. Compute
+  `aria-valuenow` directly from the clamped value, not from `ratio * max`,
+  which can underflow for tiny values.
+- Chart extents scan values without spreading a series into function arguments.
+  Finite endpoints may overflow their difference or underflow a tick step:
+  retain finite endpoint/zero ticks and scale coordinates before subtraction.
+  Pie weights scale by their largest positive value before summing so large
+  finite values retain valid shares. Do not add arbitrary series-length caps.
+- The browser matrix must cover external set/reset, incomplete number drafts,
+  cleared shared bindings and remounts, dynamic choices, keyboard controls,
+  disabled streaming, stop/completion, persisted message IDs and reloads,
+  all action categories, chart variants and finite numeric extremes. The dense
+  chart regression evaluates 200,000 real values in Chromium without attaching
+  a synthetic 200,000-element DOM; Bun alone does not reproduce its argument
+  limit.
+
 ## Bundle
 
 `GenUiBlock`, the library and the prompt builder load through
 `components/chat/genui/lazy.tsx`. Do not import them statically from always-loaded
-modules; the OpenUI runtime plus the lucide namespace is ~850 KB.
+modules; the OpenUI runtime plus the lucide namespace is ~950 KB.
+
+The block loader caches one dynamic import and publishes its resolved component
+through ordinary React state. React 19's first Suspense commit added a reproduced
+~300 ms delay even after that module was already evaluated; do not reintroduce
+`React.lazy` for this path without measuring production first-use latency. Keep
+readable source while the chunk loads or fails, ignore completion after a
+consumer unmounts, and reuse the cached component type after loading so controls
+retain their identity. Plain Markdown must not request the OpenUI chunk. The
+production split-chunk regression is `scripts/genui-loading.browser.mjs`.
 
 ## Common mistakes
 

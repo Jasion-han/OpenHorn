@@ -1,0 +1,126 @@
+/** Production split-chunk lifecycle: node apps/desktop/scripts/genui-loading.browser.mjs */
+import assert from "node:assert/strict";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { createServer } from "node:http";
+import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
+import { dirname, extname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { chromium } from "playwright";
+
+const appRoot = dirname(dirname(fileURLToPath(import.meta.url)));
+const { build } = createRequire(import.meta.resolve("vite"))("esbuild");
+const output = await mkdtemp(join(tmpdir(), "openhorn-genui-loading-"));
+let server;
+let browser;
+try {
+  await build({
+    entryPoints: [join(appRoot, "scripts/fixtures/genui-loading.tsx")],
+    outdir: output,
+    bundle: true,
+    splitting: true,
+    chunkNames: "chunks/[name]-[hash]",
+    format: "esm",
+    jsx: "automatic",
+    define: { "process.env.NODE_ENV": '"production"' },
+    logLevel: "warning",
+  });
+  server = createServer(async (request, response) => {
+    const pathname = new URL(request.url, "http://127.0.0.1").pathname;
+    if (/^\/(?:genui-loading\.js|chunks\/[\w-]+\.(?:js|css))$/.test(pathname)) {
+      response.setHeader(
+        "Content-Type",
+        extname(pathname) === ".css" ? "text/css" : "text/javascript",
+      );
+      response.end(await readFile(join(output, pathname)));
+    } else {
+      response.setHeader("Content-Type", "text/html");
+      response.end(
+        '<!doctype html><div id="root"></div><script type="module" src="/genui-loading.js"></script>',
+      );
+    }
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const url = `http://127.0.0.1:${server.address().port}`;
+  browser = await chromium.launch({
+    headless: true,
+    channel: process.env.PLAYWRIGHT_CHANNEL || "chrome",
+  });
+  const page = await browser.newPage();
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  let requests = 0;
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/chunks/GenUiBlock-*.js", async (route) => {
+    requests += 1;
+    await gate;
+    await route.continue();
+  });
+  await page.goto(url);
+  await page.waitForFunction(() => !!window.genUiLoadTest);
+  assert.equal(requests, 0, "ordinary replies must not request the OpenUI runtime");
+  const first = 'root=Text("First block")';
+  const second = 'root=Col([Input($name,"Name"),Text("Second block")])\n$name="Initial"';
+  await page.evaluate((programs) => window.genUiLoadTest.render(programs), [first, second]);
+  await page.getByTestId("source").first().waitFor();
+  await page.waitForFunction(
+    () => document.querySelectorAll('[data-testid="source"]').length === 2,
+  );
+  // Remove both pending consumers and mount the remaining block before its import settles.
+  await page.evaluate(() => window.genUiLoadTest.clear());
+  await page.evaluate((program) => window.genUiLoadTest.render([program]), second);
+  release();
+  await page.getByText("Second block", { exact: true }).waitFor();
+  assert.equal(requests, 1, "all pending blocks share one import");
+  assert.equal(await page.getByText("First block", { exact: true }).count(), 0);
+  assert.equal(await page.getByTestId("source").count(), 0);
+  const input = page.getByRole("textbox", { name: "Name" });
+  await input.fill("Edited");
+  await page.evaluate(() => {
+    window.retainedGenUiInput = document.querySelector("input");
+  });
+  await page.evaluate((program) => window.genUiLoadTest.render([program]), second);
+  assert.equal(await input.inputValue(), "Edited");
+  assert.equal(
+    await page.evaluate(() => document.querySelector("input") === window.retainedGenUiInput),
+    true,
+    "loaded renderer must retain its component identity and edited controls",
+  );
+  await page.evaluate(() => window.genUiLoadTest.clear());
+  await page.evaluate((program) => window.genUiLoadTest.render([program]), first);
+  assert.equal(await page.getByText("First block", { exact: true }).count(), 1);
+  assert.equal(await page.getByTestId("source").count(), 0, "cached mounts render immediately");
+  assert.deepEqual(errors, []);
+  console.log(
+    "PASS demand-only shared loading, pending unmount cleanup and stable cached identity",
+  );
+
+  const failed = await browser.newPage();
+  const failureErrors = [];
+  failed.on("pageerror", (error) => failureErrors.push(error.message));
+  let rejectChunk;
+  const rejection = new Promise((resolve) => {
+    rejectChunk = resolve;
+  });
+  await failed.route("**/chunks/GenUiBlock-*.js", async (route) => {
+    await route.abort("failed");
+    rejectChunk();
+  });
+  await failed.goto(url);
+  await failed.waitForFunction(() => !!window.genUiLoadTest);
+  await failed.evaluate((program) => window.genUiLoadTest.render([program]), first);
+  await rejection;
+  await failed.getByTestId("source").waitFor();
+  assert.match(await failed.getByTestId("source").innerText(), /First block/);
+  await failed.evaluate(() => window.genUiLoadTest.clear());
+  await failed.getByText("Ordinary reply.", { exact: true }).waitFor();
+  assert.deepEqual(failureErrors, [], "a missing chunk must retain readable source, not crash");
+  console.log("PASS a rejected lazy chunk retains source and leaves ordinary rendering usable");
+} finally {
+  await browser?.close();
+  if (server) await new Promise((resolve) => server.close(resolve));
+  await rm(output, { recursive: true, force: true });
+}
