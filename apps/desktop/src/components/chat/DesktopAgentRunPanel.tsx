@@ -766,15 +766,12 @@ function TimelineSegments({
             className="py-0.5 text-sm leading-6"
             style={{ overflowWrap: "anywhere", wordBreak: "break-word", maxWidth: "100%" }}
           >
-            {useStreaming ? (
-              <DesktopStreamingMarkdownMessage
-                content={displayText}
-                pulseKey={0}
-                genUiScope={segmentScope}
-              />
-            ) : (
-              <DesktopMarkdownMessage content={displayText} genUiScope={segmentScope} />
-            )}
+            <DesktopStreamingMarkdownMessage
+              content={displayText}
+              pulseKey={0}
+              genUiScope={segmentScope}
+              streaming={useStreaming}
+            />
           </div>
         );
       })}

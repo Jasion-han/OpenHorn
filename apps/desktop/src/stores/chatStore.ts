@@ -84,6 +84,18 @@ export function withDerivedContent(message: Message): Message {
   return content === message.content ? message : { ...message, content };
 }
 
+/** Preserve a mounted message while its draft id or server snapshot changes. */
+function withMessageRenderIdentity(previous: Message | undefined, message: Message): Message {
+  if (!previous) return message;
+  const idChanged = previous.id !== message.id;
+  if (idChanged && previous.role === "assistant") {
+    // State scopes follow the persisted id before the new message is published.
+    migrateBlockStateScope(previous.id, message.id);
+  }
+  const renderKey = previous.renderKey ?? (idChanged ? previous.id : message.renderKey);
+  return renderKey && renderKey !== message.renderKey ? { ...message, renderKey } : message;
+}
+
 export function applyAgentEventToRun(
   run: ApiAgentRun | undefined,
   event: Extract<ChatStreamEvent, { type: "agent_event" }>["event"],
@@ -449,7 +461,8 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
     messageId: string,
     updater: (msg: Message) => Message,
   ) {
-    const apply = (msg: Message) => withDerivedContent(updater(msg));
+    const apply = (msg: Message) =>
+      withMessageRenderIdentity(msg, withDerivedContent(updater(msg)));
     if (store.get().messages.some((m) => m.id === messageId)) {
       store.set((state) => ({
         messages: state.messages.map((m) => (m.id === messageId ? apply(m) : m)),
@@ -549,12 +562,12 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
         // ids belonging to an active run, prefer the live/cached message (edited
         // prompt + streaming answer) over the DB row.
         const currentById = new Map(current.map((m) => [m.id, m]));
-        const dbMerged =
-          activeRunMessageIds.size > 0
-            ? dbMessages.map((m) =>
-                activeRunMessageIds.has(m.id) ? (currentById.get(m.id) ?? m) : m,
-              )
-            : dbMessages;
+        const dbMerged = dbMessages.map((message) => {
+          const previous = currentById.get(message.id);
+          return activeRunMessageIds.has(message.id)
+            ? (previous ?? message)
+            : withMessageRenderIdentity(previous, message);
+        });
         // Optimistic drafts use client ids (draft-*). Once a run is persisted,
         // the server assigns new ids, so an id-only check would keep the stale
         // draft alongside the persisted copy and render the whole exchange
@@ -754,7 +767,13 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
         // apply the result (and clear the loading flag) if it's still current,
         // otherwise we'd clobber the newly selected conversation's state/cache.
         if (get().currentConversation?.id !== conversationId) return;
-        set({ messages, isLoading: false });
+        const currentById = new Map(get().messages.map((message) => [message.id, message]));
+        set({
+          messages: messages.map((message) =>
+            withMessageRenderIdentity(currentById.get(message.id), message),
+          ),
+          isLoading: false,
+        });
       } catch (error) {
         set({ isLoading: false, error: toErrorMessage(error) });
         throw error;
@@ -974,28 +993,32 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
     },
 
     updateMessage(messageId, updates) {
+      const apply = (message: Message) =>
+        withMessageRenderIdentity(message, { ...message, ...updates });
       const found = get().messages.some((m) => m.id === messageId);
       if (found) {
         set((state) => ({
           messages: state.messages.map((message) =>
-            message.id === messageId ? { ...message, ...updates } : message,
+            message.id === messageId ? apply(message) : message,
           ),
         }));
       } else {
-        updateCachedMessage(messageId, (msg) => ({ ...msg, ...updates }));
+        updateCachedMessage(messageId, apply);
       }
     },
 
     appendMessageDelta(messageId, delta, updates) {
+      const apply = (message: Message) =>
+        withMessageRenderIdentity(message, applyStreamDelta(message, delta, updates));
       const found = get().messages.some((m) => m.id === messageId);
       if (found) {
         set((state) => ({
           messages: state.messages.map((message) =>
-            message.id === messageId ? applyStreamDelta(message, delta, updates) : message,
+            message.id === messageId ? apply(message) : message,
           ),
         }));
       } else {
-        updateCachedMessage(messageId, (msg) => applyStreamDelta(msg, delta, updates));
+        updateCachedMessage(messageId, apply);
       }
     },
 
@@ -1027,9 +1050,6 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
       userMessageId,
       assistantMessageId,
     }) {
-      // UI state and delayed saves must follow the id before React remounts
-      // the reconciled message (including every Agent text-step scope).
-      migrateBlockStateScope(assistantDraftId, assistantMessageId);
       // After a sidecar run is persisted, the optimistic draft ids (draft-*)
       // must be swapped for the server-assigned ids. Otherwise a later
       // selectConversation() sees the draft ids as "not in the DB" and renders
@@ -1039,11 +1059,14 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
         const assistantIdx = msgs.findIndex((m) => m.id === assistantDraftId);
         if (assistantIdx === -1) return null;
         const next = [...msgs];
-        next[assistantIdx] = { ...next[assistantIdx], id: assistantMessageId };
+        next[assistantIdx] = withMessageRenderIdentity(next[assistantIdx], {
+          ...next[assistantIdx],
+          id: assistantMessageId,
+        });
         for (let i = assistantIdx - 1; i >= 0; i--) {
           if (next[i].role === "user") {
             if (next[i].id !== userMessageId) {
-              next[i] = { ...next[i], id: userMessageId };
+              next[i] = withMessageRenderIdentity(next[i], { ...next[i], id: userMessageId });
             }
             break;
           }

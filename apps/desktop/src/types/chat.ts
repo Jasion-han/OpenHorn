@@ -261,6 +261,8 @@ export interface MessageAttachmentMeta {
 
 export interface Message {
   id: string;
+  /** Frontend-only mounted identity, retained when an optimistic id is persisted. */
+  renderKey?: string;
   conversationId: string;
   role: "user" | "assistant";
   content: string;

@@ -13,7 +13,7 @@ import { DesktopAgentTaskMetaLine } from "./DesktopAgentTaskMetaLine";
 import { DesktopCitationList } from "./DesktopCitationList";
 import { SLASH_ICONS } from "./DesktopComposer";
 import { LiveStatusBadge } from "./DesktopLiveStatusBadge";
-import { DesktopMarkdownMessage, stripLeadingThematicBreak } from "./DesktopMarkdownMessage";
+import { stripLeadingThematicBreak } from "./DesktopMarkdownMessage";
 import { MessageActionBar } from "./DesktopMessageActionBar";
 import { DesktopMessageAttachments } from "./DesktopMessageAttachments";
 import { DesktopStreamingMarkdownMessage } from "./DesktopStreamingMarkdownMessage";
@@ -175,15 +175,12 @@ function MessageBubbleImpl({
               }}
             >
               {showContentBody ? (
-                isMessageStreaming && !isFlatAgentAssistant ? (
-                  <DesktopStreamingMarkdownMessage
-                    content={displayContent}
-                    pulseKey={message.streamPulseKey ?? 0}
-                    genUiScope={message.id}
-                  />
-                ) : (
-                  <DesktopMarkdownMessage content={displayContent} genUiScope={message.id} />
-                )
+                <DesktopStreamingMarkdownMessage
+                  content={displayContent}
+                  pulseKey={message.streamPulseKey ?? 0}
+                  genUiScope={message.id}
+                  streaming={isMessageStreaming && !isFlatAgentAssistant}
+                />
               ) : isMessageStreaming && !isFlatAgentAssistant ? (
                 <TypingIndicator />
               ) : null}

@@ -6,12 +6,15 @@ export function DesktopStreamingMarkdownMessage({
   content,
   pulseKey,
   genUiScope,
+  streaming = true,
 }: {
   content: string;
   pulseKey: number;
   genUiScope?: string | null;
+  /** Keep this renderer mounted when a live reply becomes a completed reply. */
+  streaming?: boolean;
 }) {
-  const [renderedContent, setRenderedContent] = useState("");
+  const [renderedContent, setRenderedContent] = useState(streaming ? "" : content);
   const smootherRef = useRef<TextStreamSmoother | null>(null);
   const targetContentRef = useRef("");
 
@@ -49,7 +52,22 @@ export function DesktopStreamingMarkdownMessage({
       return;
     }
 
+    if (!streaming) {
+      // Finishing bypasses animation without replacing the Markdown tree. A
+      // closed HTML block may already hold user-edited DOM while the tail
+      // streams; replacing this component would destroy that live sandbox.
+      smoother.replace(nextContent);
+      smoother.flushNow();
+      smoother.cancel();
+      targetContentRef.current = nextContent;
+      setRenderedContent(nextContent);
+      return;
+    }
+
     if (!nextContent) {
+      // A retained renderer may be reused for a retry. Clear the smoother's
+      // target as well as React state so the next delta cannot append to it.
+      smoother.replace("");
       smoother.cancel();
       targetContentRef.current = "";
       setRenderedContent("");
@@ -77,7 +95,13 @@ export function DesktopStreamingMarkdownMessage({
     }
 
     targetContentRef.current = nextContent;
-  }, [content, pulseKey]);
+  }, [content, pulseKey, streaming]);
 
-  return <DesktopMarkdownMessage content={renderedContent} streaming genUiScope={genUiScope} />;
+  return (
+    <DesktopMarkdownMessage
+      content={streaming ? renderedContent : content}
+      streaming={streaming}
+      genUiScope={genUiScope}
+    />
+  );
 }

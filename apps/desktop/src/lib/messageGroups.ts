@@ -14,8 +14,8 @@ export type MessageRoundGroup = {
 /**
  * Pack a flat message list into round groups (one user + its immediate
  * assistant reply of the same mode) so the virtualizer can treat a round as a
- * single measurable row. The `key` is derived from message ids, so it stays
- * stable across streaming token updates and post-stream full reloads — this is
+ * single measurable row. The `key` uses mounted message identities, so it stays
+ * stable across streaming updates, optimistic-id reconciliation and reloads — this is
  * what `getItemKey` relies on to keep measurements/scroll anchored.
  */
 export function groupMessagesByRound(messages: Message[]): MessageRoundGroup[] {
@@ -29,7 +29,7 @@ export function groupMessagesByRound(messages: Message[]): MessageRoundGroup[] {
       const next = messages[index + 1];
       if (next?.role === "assistant" && next.mode === msg.mode) {
         groups.push({
-          key: `${msg.id}:${next.id}`,
+          key: `${msg.renderKey ?? msg.id}:${next.renderKey ?? next.id}`,
           user: { msg, index },
           assistant: { msg: next, index: index + 1 },
         });
@@ -38,14 +38,14 @@ export function groupMessagesByRound(messages: Message[]): MessageRoundGroup[] {
       }
 
       groups.push({
-        key: msg.id,
+        key: msg.renderKey ?? msg.id,
         user: { msg, index },
       });
       continue;
     }
 
     groups.push({
-      key: msg.id,
+      key: msg.renderKey ?? msg.id,
       assistant: { msg, index },
     });
   }
