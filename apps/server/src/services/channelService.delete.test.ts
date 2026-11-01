@@ -5,6 +5,17 @@ import { db } from "../db";
 import { encrypt } from "../utils";
 import { deleteChannel } from "./channelService";
 
+function encryptFixtureApiKey(): string {
+  const previous = process.env.ENCRYPTION_KEY;
+  process.env.ENCRYPTION_KEY = "channel-delete-test-encryption-key";
+  try {
+    return encrypt("k");
+  } finally {
+    if (previous === undefined) delete process.env.ENCRYPTION_KEY;
+    else process.env.ENCRYPTION_KEY = previous;
+  }
+}
+
 test("deleteChannel clears conversation and agent session references before delete", async () => {
   const userId = crypto.randomUUID();
   const channelId = crypto.randomUUID();
@@ -12,6 +23,10 @@ test("deleteChannel clears conversation and agent session references before dele
   const sessionId = crypto.randomUUID();
   const taskId = crypto.randomUUID();
   const now = new Date();
+  // Restore the shared environment synchronously, before any database awaits.
+  const previousEncryptionKey = process.env.ENCRYPTION_KEY;
+  const apiKey = encryptFixtureApiKey();
+  expect(process.env.ENCRYPTION_KEY).toBe(previousEncryptionKey);
 
   await db.insert(users).values({
     id: userId,
@@ -27,7 +42,7 @@ test("deleteChannel clears conversation and agent session references before dele
     userId,
     name: "c",
     provider: "openai",
-    apiKey: encrypt("k"),
+    apiKey,
     baseUrl: "https://relay.example.com/v1",
     model: null,
     enabled: true,
