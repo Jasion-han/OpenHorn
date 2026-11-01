@@ -53,22 +53,21 @@ with a separate fence-line regex.
   modes include total repayment/interest, and declining payments identify the
   first/last payment and monthly decrease. Zero interest is exactly zero at a
   zero rate, rather than a floating-point subtraction that can display `-¥0`.
-- `Button` discloses draft preparation from its evaluated action semantics,
+- `Button` classifies draft preparation from evaluated action semantics,
   including implicit actionless follow-ups, legacy configs and mixed plans.
-  The visible localized composer hint is separate from the primary accessible
-  label; an accessible description explains that no message is sent. Local
-  Set/Reset and unrelated clipboard/link actions do not get a draft hint.
-  Never infer an action from words such as "switch" in a label, and never
-  change `@ToAssistant` or HTML proposals into automatic model sends.
-- Action semantics and visual priority are independent. A primary follow-up
-  can use a solid button while still disclosing its editable-draft behavior.
-  Keep the composer hint visually secondary, preserve explicit variants, and
-  check contrast, wrapping and keyboard focus in both app themes.
-- In a self-contained calculator or explorer, emphasize its local controls
-  and results. Keep related modes and numerical inputs together, with their
-  results nearby. An optional AI continuation belongs to the secondary
-  hierarchy; do not append a dominant AI CTA merely to fill a footer. This is
-  task-based guidance, not a universal fixed widget layout.
+  Keep its primary visible label concise: do not append composer-hint badges
+  or separators. A hidden accessible description explains that the action
+  prepares a draft without sending. Local Set/Reset and clipboard/link actions
+  do not get that draft description. Never infer actions from label wording
+  or change `@ToAssistant` / HTML proposals into automatic sends.
+- Action semantics and visual priority are independent. Respect explicit
+  variants and the user's requested hierarchy: an AI follow-up can be solid,
+  outline or ghost. Check contrast, wrapping and keyboard focus in both themes.
+  Do not impose a secondary-only style on every follow-up or add repetitive
+  instructions below controls that already explain their task.
+- In a self-contained calculator or explorer, keep related modes and numerical
+  inputs together with results nearby. Choose the continuation's emphasis for
+  that task and the user's preference, rather than a universal widget layout.
 - Isolate GenUI heading rules from surrounding Markdown descendant selectors
   with a scoped selector such as `.block .title`. Verify computed spacing
   inside actual Chat and Agent bubbles; isolated component previews can hide

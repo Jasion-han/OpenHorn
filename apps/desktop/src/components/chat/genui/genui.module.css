@@ -218,25 +218,6 @@
   flex-shrink: 0;
 }
 
-.buttonHint {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  color: inherit;
-  font-size: 0.75rem;
-  font-weight: 400;
-  white-space: nowrap;
-  opacity: 0.75;
-}
-
-.buttonHint::before {
-  content: "";
-  width: 1px;
-  height: 0.875rem;
-  background: currentColor;
-  opacity: 0.5;
-}
-
 .buttonSolid {
   background: hsl(var(--primary));
   color: hsl(var(--primary-foreground));

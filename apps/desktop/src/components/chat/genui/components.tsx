@@ -431,14 +431,9 @@ export const Button = defineComponent({
         {Glyph ? <Glyph size={14} aria-hidden /> : null}
         {label}
         {followUp ? (
-          <>
-            <span className={styles.buttonHint} aria-hidden>
-              {getGenUiLabel("genui.fillComposer")}
-            </span>
-            <span id={descriptionId} hidden>
-              {getGenUiLabel("genui.followupDraftHint")}
-            </span>
-          </>
+          <span id={descriptionId} hidden>
+            {getGenUiLabel("genui.followupDraftHint")}
+          </span>
         ) : null}
       </button>
     );

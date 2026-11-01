@@ -1,5 +1,5 @@
 /** Complete local calculator shared by the generation instructions and regressions. */
-export const MORTGAGE_EXAMPLE = `root = Col([head, inputsCard, resultCard, detailCard, footer], 4, "stretch")
+export const MORTGAGE_EXAMPLE = `root = Col([head, inputsCard, resultCard, detailCard, ask], 4, "stretch")
 $mode = "等额本息"
 $amount = 1000000
 $rate = 3.5
@@ -17,5 +17,4 @@ interest = $rate == 0 ? 0 : byPrincipal ? $amount * r * (n + 1) / 2 : fixedPayme
 total = $amount + interest
 resultCard = Card([Title("结果（概要）", "md"), Grid([Stat(byPrincipal ? "首月还款" : "每月还款", @Format(monthly, "currency", 0), byPrincipal ? "之后逐月递减" : "每月还款额固定"), Stat("总还款", @Format(total, "currency", 0)), Stat("总利息", @Format(interest, "currency", 0), null, "warning")], 3, 180)], "soft", 6)
 detailCard = Card([Title("计算要点", "md"), byPrincipal ? Row([Stat("末月还款", @Format(lastPayment, "currency", 2)), Stat("每月递减", @Format(monthlyDecrease, "currency", 2))], 6) : Text("等额本息：每月还款额固定，本金占比逐月增加，利息占比逐月减少。"), List(["月利率：" + @Format(r * 100, "percent", 4), "还款期数：" + n + " 期", byPrincipal ? "等额本金：每月本金固定，当月利息按剩余本金计算。" : "等额本息：按固定月供计算；零利率时月供为本金÷期数。"], false)], "outline", 6)
-ask = Button("请 AI 分析还款压力", @ToAssistant("请结合我已提供的财务信息分析这笔房贷的还款压力；如果缺少收入、固定支出或其他债务信息，请先向我确认，不要自行假设。", "还款方式：" + $mode + "；贷款金额：" + @Format($amount, "currency", 0) + "；年利率：" + @Format($rate, "percent", 2) + "；年限：" + $years + " 年；首期还款：" + @Format(monthly, "currency", 2) + "；总利息：" + @Format(interest, "currency", 2)), "ghost", "sparkles")
-footer = Row([ask], 2, "center", "start", true)`;
+ask = Button("请 AI 分析还款压力", @ToAssistant("请结合我已提供的财务信息分析这笔房贷的还款压力；如果缺少收入、固定支出或其他债务信息，请先向我确认，不要自行假设。", "还款方式：" + $mode + "；贷款金额：" + @Format($amount, "currency", 0) + "；年利率：" + @Format($rate, "percent", 2) + "；年限：" + $years + " 年；首期还款：" + @Format(monthly, "currency", 2) + "；总利息：" + @Format(interest, "currency", 2)), "solid", "sparkles")`;

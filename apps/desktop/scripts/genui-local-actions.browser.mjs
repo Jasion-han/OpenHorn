@@ -9,6 +9,7 @@ import { chromium } from "playwright";
 
 const desktop = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const require = createRequire(import.meta.url);
+const themeCss = await readFile(resolve(desktop, "../../packages/ui/styles/tokens.css"), "utf8");
 const { build } = createRequire(require.resolve("vite"))("esbuild");
 const bundle = await build({
   stdin: {
@@ -27,6 +28,7 @@ const bundle = await build({
   logLevel: "silent",
 });
 const files = new Map(bundle.outputFiles.map((file) => [file.path.split("/").pop(), file.text]));
+files.set("genui-local-actions.css", `${themeCss}\n${files.get("genui-local-actions.css")}`);
 const server = http.createServer((request, response) => {
   const name = request.url?.slice(1);
   if (name && files.has(name)) {
@@ -94,17 +96,20 @@ try {
       .innerText();
     assert.equal(Number(value.replace(/[^0-9.-]/g, "")), expected, `${name}: ${value}`);
   };
-  const hint = async (name, expected) => {
+  const disclosure = async (name, followUp) => {
     const control = button(name);
     assert.equal(
       (await control.innerText()).includes("填入输入框"),
-      expected,
-      `${name} should disclose its actual follow-up behavior`,
+      false,
+      `${name} keeps its visible label concise`,
     );
+    assert.equal((await control.innerText()).trim(), name);
     const descriptionId = await control.getAttribute("aria-describedby");
-    if (expected) {
+    if (followUp) {
       assert.ok(descriptionId);
-      assert.match(await page.locator(`[id="${descriptionId}"]`).textContent(), /不会自动发送/);
+      const description = page.locator(`[id="${descriptionId}"]`);
+      assert.match(await description.textContent(), /不会自动发送/);
+      assert.equal(await description.isVisible(), false);
     } else {
       assert.equal(descriptionId, null);
     }
@@ -150,13 +155,61 @@ try {
         "settings, immediate results, detail and optional follow-up stay in task order",
       );
     }
-    const footer = await followUp.evaluate((control) => ({
-      width: control.getBoundingClientRect().width,
-      availableWidth: control.parentElement.getBoundingClientRect().width,
-      background: getComputedStyle(control).backgroundColor,
-    }));
-    assert.ok(footer.width < footer.availableWidth, "AI follow-up keeps its intrinsic width");
-    assert.equal(footer.background, "rgba(0, 0, 0, 0)", "AI follow-up is visually secondary");
+    const wasDark = await page.evaluate(() => document.documentElement.classList.contains("dark"));
+    for (const dark of [false, true]) {
+      await page.evaluate(
+        (value) => document.documentElement.classList.toggle("dark", value),
+        dark,
+      );
+      await followUp.evaluate(async (control) => {
+        await Promise.all(control.getAnimations().map((animation) => animation.finished));
+      });
+      const footer = await followUp.evaluate((control) => {
+        const rect = control.getBoundingClientRect();
+        const style = getComputedStyle(control);
+        const contentRects = [...control.querySelectorAll("svg")].map((icon) =>
+          icon.getBoundingClientRect(),
+        );
+        for (const node of control.childNodes) {
+          if (node.nodeType !== Node.TEXT_NODE || !node.textContent.trim()) continue;
+          const range = document.createRange();
+          range.selectNodeContents(node);
+          contentRects.push(...range.getClientRects());
+        }
+        const contentLeft = Math.min(...contentRects.map((content) => content.left));
+        const contentRight = Math.max(...contentRects.map((content) => content.right));
+        const theme = document.createElement("span");
+        theme.style.backgroundColor = "hsl(var(--primary))";
+        theme.style.color = "hsl(var(--primary-foreground))";
+        document.body.append(theme);
+        const expected = getComputedStyle(theme);
+        const result = {
+          width: rect.width,
+          availableWidth: control.parentElement.getBoundingClientRect().width,
+          centerOffset: (contentLeft + contentRight) / 2 - (rect.left + rect.right) / 2,
+          justifyContent: style.justifyContent,
+          background: style.backgroundColor,
+          foreground: style.color,
+          expectedBackground: expected.backgroundColor,
+          expectedForeground: expected.color,
+        };
+        theme.remove();
+        return result;
+      });
+      assert.ok(
+        Math.abs(footer.width - footer.availableWidth) < 1,
+        "the final action fills its available width",
+      );
+      assert.equal(footer.justifyContent, "center");
+      assert.ok(Math.abs(footer.centerOffset) < 1, "the visible icon and label are centered");
+      assert.notEqual(footer.background, "rgba(0, 0, 0, 0)");
+      assert.equal(footer.background, footer.expectedBackground);
+      assert.equal(footer.foreground, footer.expectedForeground);
+    }
+    await page.evaluate(
+      (value) => document.documentElement.classList.toggle("dark", value),
+      wasDark,
+    );
   };
 
   for (const mode of ["chat", "agent"]) {
@@ -166,12 +219,12 @@ try {
     await stat("每月还款", 4490);
     await stat("总还款", 1616561);
     await stat("总利息", 616561);
-    await hint("等额本息", false);
-    await hint("等额本金", false);
-    await hint("请 AI 分析还款压力", true);
+    await disclosure("等额本息", false);
+    await disclosure("等额本金", false);
+    await disclosure("请 AI 分析还款压力", true);
     await hierarchy();
     console.log(
-      `PASS ${mode}: repayment mode and numerical inputs share one settings group, followed by results and an intrinsic secondary AI footer`,
+      `PASS ${mode}: grouped settings lead to results and a full-width solid centered final action in both themes`,
     );
     await page.evaluate(() => window.genUiLocalActions.seedDraft("已有草稿，请保留"));
     let draft = (await snapshot()).request;
@@ -292,7 +345,7 @@ try {
     await start(mode, `action-disclosure-${mode}`, "disclosure");
     await button("Local action").waitFor();
     for (const name of ["Local action", "Reset action", "Copy action", "Link action"]) {
-      await hint(name, false);
+      await disclosure(name, false);
     }
     for (const name of [
       "Explicit follow-up",
@@ -301,7 +354,7 @@ try {
       "Mixed follow-up",
       "Empty legacy follow-up",
     ]) {
-      await hint(name, true);
+      await disclosure(name, true);
     }
     await button("Local action").click();
     assert.equal((await state()).$count, 1);
@@ -333,7 +386,7 @@ try {
       assert.equal(await control.isDisabled(), true);
     }
     console.log(
-      `PASS ${mode}: explicit, implicit, legacy and mixed follow-ups disclose editable drafts while local/copy/link actions remain distinct`,
+      `PASS ${mode}: concise action labels preserve follow-up-only accessible draft descriptions across explicit, implicit, legacy and mixed plans`,
     );
   }
 
