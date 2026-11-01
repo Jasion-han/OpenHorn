@@ -1,6 +1,7 @@
 import { assistantMessageContent } from "shared/message-text";
 import { create } from "zustand";
 import { type ChatAdapter, createChatAdapter } from "../lib/chatAdapter";
+import { migrateBlockStateScope } from "../lib/genui/blockState";
 import type {
   ApiAgentRun,
   ApiAgentRunStep,
@@ -1026,6 +1027,9 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
       userMessageId,
       assistantMessageId,
     }) {
+      // UI state and delayed saves must follow the id before React remounts
+      // the reconciled message (including every Agent text-step scope).
+      migrateBlockStateScope(assistantDraftId, assistantMessageId);
       // After a sidecar run is persisted, the optimistic draft ids (draft-*)
       // must be swapped for the server-assigned ids. Otherwise a later
       // selectConversation() sees the draft ids as "not in the DB" and renders

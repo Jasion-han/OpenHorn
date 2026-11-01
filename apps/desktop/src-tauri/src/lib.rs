@@ -6,7 +6,7 @@ use std::sync::Mutex;
 use rand::rngs::OsRng;
 use rand::RngCore;
 use serde::Serialize;
-use tauri::{Manager, State, WebviewUrl, WebviewWindowBuilder};
+use tauri::{Manager, State, Url, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_shell::process::CommandChild;
 use tauri_plugin_shell::ShellExt;
 
@@ -1151,8 +1151,13 @@ pub fn run() {
                 .title_bar_style(tauri::TitleBarStyle::Overlay)
                 .hidden_title(true);
 
+            let dev_origin = if cfg!(debug_assertions) {
+                app.config().build.dev_url.clone()
+            } else {
+                None
+            };
             builder
-                .on_navigation(|url| main_window_allows_navigation(url.as_str()))
+                .on_navigation(move |url| main_window_allows_navigation(url, dev_origin.as_ref()))
                 .build()?;
 
             Ok(())
@@ -1212,11 +1217,22 @@ pub fn run() {
 /// passing that URL to `open` would launch browsers or URL-scheme handlers on
 /// its behalf. Link clicks in the app open through the shell plugin instead
 /// (the click handler in App.tsx).
-fn main_window_allows_navigation(url: &str) -> bool {
-    url == "about:srcdoc"
-        || url.starts_with("http://localhost")
-        || url.starts_with("https://localhost")
-        || url.starts_with("tauri://")
+fn main_window_allows_navigation(url: &Url, dev_origin: Option<&Url>) -> bool {
+    if url.as_str() == "about:srcdoc" {
+        return true;
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        return false;
+    }
+    let native_app_origin =
+        url.scheme() == "tauri" && url.host_str() == Some("localhost") && url.port().is_none();
+    let windows_app_origin = cfg!(target_os = "windows")
+        && url.scheme() == "http"
+        && url.host_str() == Some("tauri.localhost")
+        && url.port().is_none();
+    native_app_origin
+        || windows_app_origin
+        || dev_origin.is_some_and(|origin| url.origin() == origin.origin())
 }
 
 #[cfg(test)]
@@ -1225,19 +1241,44 @@ mod tests {
 
     #[test]
     fn main_window_navigation_admits_app_and_srcdoc_frames() {
-        assert!(main_window_allows_navigation("http://localhost:5173/"));
-        assert!(main_window_allows_navigation("tauri://localhost/index.html"));
-        assert!(main_window_allows_navigation("about:srcdoc"));
+        let dev_origin = Url::parse("http://localhost:5173").unwrap();
+        for url in [
+            "http://localhost:5173/",
+            "http://localhost:5173/src/main.tsx",
+            "tauri://localhost/index.html",
+            "about:srcdoc",
+        ] {
+            assert!(
+                main_window_allows_navigation(&Url::parse(url).unwrap(), Some(&dev_origin)),
+                "{url}"
+            );
+        }
     }
 
     #[test]
     fn main_window_navigation_cancels_everything_else() {
-        assert!(!main_window_allows_navigation("https://example.com/"));
-        assert!(!main_window_allows_navigation("file:///Applications/Calculator.app"));
-        assert!(!main_window_allows_navigation("vscode://file/etc/hosts"));
-        assert!(!main_window_allows_navigation("about:blank"));
-        assert!(!main_window_allows_navigation("about:srcdoc#x"));
-        assert!(!main_window_allows_navigation("data:text/html,hi"));
+        let dev_origin = Url::parse("http://localhost:5173").unwrap();
+        for url in [
+            "https://example.com/",
+            "file:///Applications/Calculator.app",
+            "vscode://file/etc/hosts",
+            "about:blank",
+            "about:srcdoc#x",
+            "data:text/html,hi",
+            "http://localhost:5174/",
+            "https://localhost:5173/",
+            "http://localhost@attacker.test/",
+            "https://localhost.attacker.test/",
+            "http://localhost:5173@attacker.test/",
+            "http://user@localhost:5173/",
+            "tauri://attacker.test/index.html",
+        ] {
+            assert!(
+                !main_window_allows_navigation(&Url::parse(url).unwrap(), Some(&dev_origin)),
+                "{url}"
+            );
+        }
+        assert!(!main_window_allows_navigation(&dev_origin, None));
     }
 
     #[test]

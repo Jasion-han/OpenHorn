@@ -1,5 +1,7 @@
+import type { ChatMessage } from "adapters";
 import { sanitizeChildEnv } from "./childEnv";
 import { type AgentEvent, buildUsageEvent, toCount } from "./events";
+import { codexChatContext } from "./runtimePrompt";
 
 /**
  * Token counts off a `codex exec --json` line, or null for any other event.
@@ -30,13 +32,31 @@ export function readCodexExecUsage(
 
 export type RunCodexChatInput = {
   model: string;
-  prompt: string;
+  messages: ChatMessage[];
   abortController: AbortController;
   onEvent: (event: AgentEvent) => void;
 };
 
-export async function runCodexChat(input: RunCodexChatInput): Promise<void> {
-  const codexPath = await findCodexBinary();
+type CodexChatDependencies = {
+  findBinary: typeof findCodexBinary;
+  spawn: (
+    command: string[],
+    options: {
+      stdin: Blob;
+      stdout: "pipe";
+      stderr: "pipe";
+      signal: AbortSignal;
+      env: NodeJS.ProcessEnv;
+    },
+  ) => Pick<Bun.Subprocess<"ignore", "pipe", "pipe">, "stdout" | "stderr" | "exited">;
+};
+
+export async function runCodexChat(
+  input: RunCodexChatInput,
+  dependencies: Partial<CodexChatDependencies> = {},
+): Promise<void> {
+  const { prompt, systemPrompt } = codexChatContext(input.messages);
+  const codexPath = await (dependencies.findBinary ?? findCodexBinary)();
   if (!codexPath) {
     input.onEvent({
       type: "error",
@@ -45,16 +65,17 @@ export async function runCodexChat(input: RunCodexChatInput): Promise<void> {
     return;
   }
 
-  const proc = Bun.spawn(
+  const proc = (dependencies.spawn ?? Bun.spawn)(
     [
       codexPath,
       "exec",
-      input.prompt,
+      prompt,
       "--model",
       input.model,
       "--json",
       "-c",
       'approval_policy="never"',
+      ...(systemPrompt ? ["-c", `developer_instructions=${JSON.stringify(systemPrompt)}`] : []),
     ],
     {
       stdin: new Blob([""]),

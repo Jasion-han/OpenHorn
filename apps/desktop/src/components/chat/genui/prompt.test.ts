@@ -2,14 +2,16 @@ import { describe, expect, test } from "bun:test";
 import { createParser } from "@openuidev/react-lang";
 import { withGenUiMessages, withGenUiPrompt } from "../../../lib/genui/promptMerge";
 import { OPENUI_EXAMPLES, OPENUI_RULES } from "../../../lib/genui/promptText";
+import { MAX_PROMPT_LENGTH } from "../../../lib/genui/sandbox";
 import {
   computedStateNames,
   renameStateRefs,
   repairComputedState,
 } from "../../../lib/genui/stateCheck";
+import { useGenUiStore } from "../../../stores/genUiStore";
 import { iconFor, numberText } from "./components";
 import { NANO_MORTGAGE } from "./fixtures/nanoMortgage";
-import { renderableProgram } from "./GenUiBlock";
+import { followUpDraft, renderableProgram, runGenUiAction } from "./GenUiBlock";
 import { genUiLibrary } from "./library";
 import { buildGenUiSystemPrompt } from "./prompt";
 
@@ -55,7 +57,7 @@ describe("prompt examples", () => {
       expect(result.meta.unresolved).toEqual([]);
       expect(result.meta.orphaned).toEqual([]);
       expect(result.meta.incomplete).toBe(false);
-      expect(computedStateNames(result.stateDeclarations)).toEqual([]);
+      expect(computedStateNames(program)).toEqual([]);
     });
 
     test(`example ${index + 1} gives every $variable a literal default`, () => {
@@ -98,19 +100,17 @@ describe("local interactions", () => {
 
   test("the parser keeps computed $variable defaults as expressions", () => {
     const parser = createParser(genUiLibrary.toJSONSchema(), "Col");
-    const result = parser.parse(
-      [
-        'root = Col([Stat("a", @Format($m, "currency", 0)), Stat("b", $p), Text($mode)])',
-        "$years = 30",
-        "$p = $years * 12",
-        "$m = @Payment(1000, 3.5, $p)",
-        '$mode = "a"',
-        "$list = [1, 2]",
-        "$o = {a: 1}",
-      ].join("\n"),
-    );
-    expect(result.meta.errors).toEqual([]);
-    expect(computedStateNames(result.stateDeclarations)).toEqual(["$p", "$m"]);
+    const source = [
+      'root = Col([Stat("a", @Format($m, "currency", 0)), Stat("b", $p), Text($mode)])',
+      "$years = 30",
+      "$p = $years * 12",
+      "$m = @Payment(1000, 3.5, $p)",
+      '$mode = "a"',
+      "$list = [1, 2]",
+      "$o = {a: 1}",
+    ].join("\n");
+    expect(parser.parse(source).meta.errors).toEqual([]);
+    expect(computedStateNames(source)).toEqual(["$p", "$m"]);
   });
 
   test("the rules forbid computed $variables and @ToAssistant for local switches", () => {
@@ -149,10 +149,10 @@ function findElements(node: unknown, typeName: string, found: Ast[] = []): Ast[]
 
 describe("computed $variable repair", () => {
   const parser = createParser(genUiLibrary.toJSONSchema(), "Col");
-  const repair = (source: string) => repairComputedState(source, (text) => parser.parse(text));
+  const repair = (source: string) => repairComputedState(source);
 
   test("the real model output has computed $variables before repair", () => {
-    const names = computedStateNames(parser.parse(NANO_MORTGAGE).stateDeclarations);
+    const names = computedStateNames(NANO_MORTGAGE);
     expect(names.includes("$months")).toBe(true);
     expect(names.includes("$monthlyPaymentA")).toBe(true);
     // Arrays of expressions are computed too.
@@ -162,7 +162,7 @@ describe("computed $variable repair", () => {
   test("after repair no $variable defaults to an expression and the program is clean", () => {
     const repaired = repair(NANO_MORTGAGE);
     const result = parser.parse(repaired);
-    expect(computedStateNames(result.stateDeclarations)).toEqual([]);
+    expect(computedStateNames(repaired)).toEqual([]);
     expect(result.meta.errors).toEqual([]);
     expect(result.root === null).toBe(false);
     // User inputs keep their names, so saved block state still applies.
@@ -353,5 +353,85 @@ describe("prompt size", () => {
   // (apps/server/src/services/appendSystemPrompt.ts) with a 400.
   test("stays under the server's appendSystemPrompt cap", () => {
     expect(buildGenUiSystemPrompt().trim().length < 32_000).toBe(true);
+  });
+});
+
+describe("source-based computed state and sequence roots", () => {
+  test("literal objects resembling any AST kind remain editable state", () => {
+    const source = [
+      'root = Card([Button("Add", @Set($rows, @Append($rows, {k: "Ref", name: "new"}))), Text(@Count($rows))])',
+      '$rows = [{k: "Ref", name: "one"}, {k: "Comp", args: []}, {k: "BinOp", left: 1}]',
+      "$negative = -5",
+      '$nested = {data: [{k: "Assign", target: "$negative"}]}',
+    ].join("\n");
+    expect(computedStateNames(source)).toEqual([]);
+    expect(renderableProgram(source, false)).toBe(source);
+  });
+
+  test("expressions nested inside literal containers are still repaired", () => {
+    const source =
+      '$value = 2\n$rows = [{k: "Ref", value: $value * 2}]\nroot = Text($rows[0].value)';
+    expect(computedStateNames(source)).toEqual(["$rows"]);
+    expect(computedStateNames(repairComputedState(source))).toEqual([]);
+  });
+
+  test("named root sequences preserve literal object keys and member references", () => {
+    const source = [
+      "root = entries",
+      'entries = @Each([1, 2], "item", Text(item))',
+      "$data = {root: 42}",
+      "unused = Text($data.root)",
+    ].join("\n");
+    const program = renderableProgram(source, false);
+    expect(program.includes("$data = {root: 42}")).toBe(true);
+    expect(program.includes("$data.root")).toBe(true);
+    const result = createParser(genUiLibrary.toJSONSchema(), "Col").parse(program);
+    expect(result.root?.typeName).toBe("Col");
+    expect(result.meta.errors).toEqual([]);
+  });
+
+  test("root sequences are wrapped in a component without shadowing existing names", () => {
+    const source = 'root = @Each([1, 2], "item", Text(item))\ngenUiRoot = "keep"';
+    const program = renderableProgram(source, false);
+    const result = createParser(genUiLibrary.toJSONSchema(), "Col").parse(program);
+    expect(program.includes("genUiRoot_ = @Each")).toBe(true);
+    expect(result.root?.typeName).toBe("Col");
+    expect(result.meta.errors).toEqual([]);
+  });
+});
+
+describe("reviewable follow-up context", () => {
+  test("preserves the whole message and context when they fit the shared limit", () => {
+    const message = "a".repeat(1500);
+    const draft = followUpDraft(message, { amount: 42 });
+    expect(draft.startsWith(message)).toBe(true);
+    expect(draft.includes('"amount": 42')).toBe(true);
+    expect(draft.length <= MAX_PROMPT_LENGTH).toBe(true);
+  });
+
+  test("preserves explicit context, including false and zero, in the bounded draft", () => {
+    const draft = followUpDraft("Assess these values", { amount: 42, accepted: false, rate: 0 });
+    expect(draft.includes("Assess these values")).toBe(true);
+    expect(draft.includes('"amount": 42')).toBe(true);
+    expect(draft.includes('"accepted": false')).toBe(true);
+    expect(followUpDraft("value", 0).includes("0")).toBe(true);
+    expect(followUpDraft("value", false).includes("false")).toBe(true);
+    const bounded = followUpDraft("a".repeat(4000), { context: "b".repeat(4000) });
+    expect(bounded.length <= MAX_PROMPT_LENGTH).toBe(true);
+    expect(bounded.includes('"context"')).toBe(true);
+    expect(followUpDraft(" normal ", undefined)).toBe("normal");
+  });
+
+  test("an action only queues its explicit context for review, without unrelated form state", () => {
+    runGenUiAction({
+      type: "continue_conversation",
+      humanFriendlyMessage: "Explain the result",
+      params: { context: { amount: 42 } },
+      formState: { secret: "unrelated" },
+    });
+    const request = useGenUiStore.getState().composerRequest;
+    expect(request?.text.includes('"amount": 42')).toBe(true);
+    expect(request?.text.includes("unrelated")).toBe(false);
+    if (request) useGenUiStore.getState().clearComposerRequest(request.nonce);
   });
 });

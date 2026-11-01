@@ -336,6 +336,10 @@ function DesktopMarkdownMessageImpl({
 }: DesktopMarkdownMessageProps) {
   const normalized = fixCjkBold((content || "").replace(/\r\n/g, "\n").trim());
   const [isDark, setIsDark] = useState(false);
+  const openTail = useMemo(
+    () => streaming && endsInsideOpenFence(normalized),
+    [streaming, normalized],
+  );
   // Read by the `code` renderer at render time instead of being memo
   // dependencies: recreating `components` on every delta would remount every
   // block (see the note on `components` below).
@@ -344,7 +348,7 @@ function DesktopMarkdownMessageImpl({
     streaming,
     scope: genUiScope ?? null,
     length: normalized.length,
-    openTail: streaming && endsInsideOpenFence(normalized),
+    openTail,
   };
 
   useEffect(() => {
@@ -520,7 +524,12 @@ function DesktopMarkdownMessageImpl({
                 code={codeString}
                 streaming={blockStreaming}
                 stateKey={
-                  state.scope && start !== undefined ? blockStateKey(state.scope, start) : null
+                  // Streaming inputs are disabled: use one stable placeholder
+                  // revision until the fence closes, then restore only the
+                  // state owned by this complete raw program.
+                  state.scope && start !== undefined
+                    ? blockStateKey(state.scope, start, blockStreaming ? "" : codeString)
+                    : null
                 }
                 fallback={fallback}
               />

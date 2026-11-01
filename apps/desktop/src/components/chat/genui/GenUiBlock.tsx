@@ -8,9 +8,9 @@ import {
   useRef,
   useState,
 } from "react";
-import { loadBlockState, saveBlockState } from "../../../lib/genui/blockState";
-import { safeWebUrl } from "../../../lib/genui/sandbox";
-import { computedStateNames, repairComputedState } from "../../../lib/genui/stateCheck";
+import { loadBlockState, rememberBlockState, saveBlockState } from "../../../lib/genui/blockState";
+import { MAX_PROMPT_LENGTH, safeWebUrl } from "../../../lib/genui/sandbox";
+import { repairComputedState, wrapSequenceRoot } from "../../../lib/genui/stateCheck";
 import { getGenUiLabel } from "../../../lib/i18n/agent";
 import { useGenUiStore } from "../../../stores/genUiStore";
 import { usePreviewPanelStore } from "../../../stores/previewPanelStore";
@@ -29,13 +29,33 @@ let parser: ReturnType<typeof createParser> | null = null;
  */
 export function renderableProgram(code: string, streaming: boolean): string {
   if (streaming) return code;
-  parser ??= createParser(genUiLibrary.toJSONSchema(), genUiLibrary.root);
-  const active = parser;
   try {
-    return repairComputedState(code, (source) => active.parse(source));
+    return wrapSequenceRoot(repairComputedState(code));
   } catch {
     return code;
   }
+}
+
+/** Explicit context is visible in the reviewable draft; unrelated form state stays local. */
+export function followUpDraft(message: string, context: unknown): string {
+  const text = message.trim();
+  if (context === undefined || context === null) return text.slice(0, MAX_PROMPT_LENGTH);
+  let serialized: string;
+  try {
+    serialized = typeof context === "string" ? context : JSON.stringify(context, null, 2);
+  } catch {
+    return text.slice(0, MAX_PROMPT_LENGTH);
+  }
+  if (!serialized?.trim()) return text.slice(0, MAX_PROMPT_LENGTH);
+  const heading = `\n\n${getGenUiLabel("genui.followupContext")}:\n`;
+  if (text.length + heading.length + serialized.length <= MAX_PROMPT_LENGTH) {
+    return `${text}${heading}${serialized}`;
+  }
+  const messageLimit = Math.min(text.length, Math.floor(MAX_PROMPT_LENGTH / 2));
+  const contextLimit = MAX_PROMPT_LENGTH - messageLimit - heading.length;
+  const bounded = (value: string, limit: number) =>
+    value.length > limit ? `${value.slice(0, limit - 1)}…` : value;
+  return `${bounded(text, messageLimit)}${heading}${bounded(serialized, contextLimit)}`;
 }
 
 /** Runs the actions an answer can trigger. Exported for tests. */
@@ -43,7 +63,11 @@ export function runGenUiAction(event: ActionEvent): void {
   switch (event.type) {
     case "continue_conversation": {
       // Placed in the composer for the user to review; never sent from here.
-      useGenUiStore.getState().requestComposerText(event.humanFriendlyMessage ?? "");
+      useGenUiStore
+        .getState()
+        .requestComposerText(
+          followUpDraft(event.humanFriendlyMessage ?? "", event.params?.context),
+        );
       return;
     }
     case "open_url": {
@@ -91,24 +115,52 @@ class RenderBoundary extends Component<
  * own $variables. A program that produces nothing falls back to `fallback`
  * (the plain code block) with a one-line notice.
  */
-export function GenUiBlock({
-  code,
-  streaming,
-  stateKey,
-  fallback,
-}: {
+interface GenUiBlockProps {
   code: string;
   streaming: boolean;
-  /** Where the block's interaction state is persisted; null keeps it in memory. */
+  /** Includes the program revision; null keeps this session in memory. */
   stateKey: string | null;
   fallback: ReactNode;
-}) {
+}
+
+export function GenUiBlock(props: GenUiBlockProps) {
+  // A replacement program owns a new store. Stream chunks share a stable key;
+  // completion switches once to the final revision and restores its snapshot.
+  return (
+    <GenUiSession key={props.stateKey ?? (props.streaming ? "stream" : props.code)} {...props} />
+  );
+}
+
+function GenUiSession({ code, streaming, stateKey, fallback }: GenUiBlockProps) {
   const [initialState] = useState(() => (stateKey ? loadBlockState(stateKey) : undefined));
-  const [rendered, setRendered] = useState<boolean | null>(null);
-  const [hasErrors, setHasErrors] = useState(false);
+  const [diagnostic, setDiagnostic] = useState<{ program: string; failed: boolean } | null>(null);
   const saveTimer = useRef<number | null>(null);
   const pending = useRef<Record<string, unknown> | null>(null);
   const program = useMemo(() => renderableProgram(code, streaming), [code, streaming]);
+  // Parse status belongs to THIS program, not an effect from the previous stream chunk.
+  const parsed = useMemo(() => {
+    if (streaming) return null;
+    try {
+      parser ??= createParser(genUiLibrary.toJSONSchema(), genUiLibrary.root);
+      return parser.parse(program);
+    } catch {
+      return null;
+    }
+  }, [program, streaming]);
+  const hasRoot = !!(parsed?.root || parsed?.rootExpression);
+  const hasErrors =
+    (parsed?.meta.errors.length ?? 0) > 0 || (diagnostic?.program === program && diagnostic.failed);
+  const onError = useCallback(
+    (errors: unknown[]) => {
+      const failed = errors.length > 0;
+      setDiagnostic((previous) =>
+        previous?.program === program && previous.failed === failed
+          ? previous
+          : { program, failed },
+      );
+    },
+    [program],
+  );
 
   const flush = useCallback(() => {
     if (saveTimer.current !== null) {
@@ -124,6 +176,7 @@ export function GenUiBlock({
   const onStateUpdate = useCallback(
     (state: Record<string, unknown>) => {
       if (!stateKey || streaming) return;
+      rememberBlockState(stateKey, state);
       pending.current = state;
       if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
       saveTimer.current = window.setTimeout(flush, SAVE_DELAY_MS);
@@ -138,7 +191,7 @@ export function GenUiBlock({
     </div>
   );
 
-  if (!streaming && rendered === false) return fallbackView;
+  if (!streaming && !hasRoot) return fallbackView;
 
   return (
     <RenderBoundary fallback={fallbackView} resetKey={program}>
@@ -153,14 +206,9 @@ export function GenUiBlock({
           initialState={initialState}
           onStateUpdate={onStateUpdate}
           onAction={runGenUiAction}
-          onParseResult={(result) => {
-            setRendered(result ? result.root !== null : false);
-            setHasErrors(
-              (result?.meta.errors.length ?? 0) > 0 ||
-                computedStateNames(result?.stateDeclarations).length > 0,
-            );
-          }}
+          onError={onError}
         />
+        {!streaming && hasErrors ? fallback : null}
       </div>
     </RenderBoundary>
   );

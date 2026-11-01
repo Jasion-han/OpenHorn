@@ -11,7 +11,7 @@ import {
 } from "@openuidev/react-lang";
 import type { LucideIcon } from "lucide-react";
 import * as lucide from "lucide-react";
-import { type ReactNode, useId, useState } from "react";
+import { type ReactNode, useEffect, useId, useState } from "react";
 import { cn } from "ui";
 import { z } from "zod";
 import { BarLineChart, PieChart } from "./charts";
@@ -415,9 +415,27 @@ export const Slider = defineComponent({
     const streaming = useIsStreaming();
     const min = Number.isFinite(props.min) ? props.min : 0;
     const max = Number.isFinite(props.max) && props.max > min ? props.max : min + 100;
-    const step = props.step && props.step > 0 ? props.step : 1;
+    const step =
+      typeof props.step === "number" && Number.isFinite(props.step) && props.step > 0
+        ? props.step
+        : 1;
     const raw = typeof field.value === "number" ? field.value : Number(field.value);
-    const value = Number.isFinite(raw) ? Math.min(max, Math.max(min, raw)) : min;
+    const clamped = Number.isFinite(raw) ? Math.min(max, Math.max(min, raw)) : min;
+    const steps = Math.min(
+      Math.floor((max - min) / step + 1e-10),
+      Math.round((clamped - min) / step),
+    );
+    const snapped = min + steps * step;
+    const value = Number.isFinite(snapped)
+      ? Math.min(max, Math.max(min, Number(snapped.toPrecision(15))))
+      : clamped;
+    useEffect(() => {
+      // Wait for Renderer to initialize the binding; then normalize the value
+      // calculations actually read, including restored values and changing bounds.
+      if (!streaming && field.value !== undefined && !Object.is(field.value, value)) {
+        field.setValue(value);
+      }
+    }, [field, value, streaming]);
     const unit = props.unit ?? "";
     const readout = /^[$€£¥₹]/.test(unit)
       ? `${unit}${numberText(value)}`

@@ -23,6 +23,9 @@ importers:
 
   apps/desktop:
     dependencies:
+      '@openuidev/lang-core':
+        specifier: 1.0.2
+        version: 1.0.2(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(zod@4.4.3)
       '@openuidev/react-lang':
         specifier: 1.0.2
         version: 1.0.2(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(zod@4.4.3)
@@ -41,6 +44,12 @@ importers:
       lucide-react:
         specifier: ^0.460.0
         version: 0.460.0(react@19.2.4)
+      micromark:
+        specifier: 4.0.2
+        version: 4.0.2
+      micromark-extension-gfm:
+        specifier: 3.0.0
+        version: 3.0.0
       pdfjs-dist:
         specifier: ^4.10.38
         version: 4.10.38

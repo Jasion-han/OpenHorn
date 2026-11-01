@@ -25,7 +25,7 @@ export const OPENUI_RULES = [
   "Only values the user changes are $variables, and a $variable's default is a literal (number, string, true/false, [...] or {...}). A value computed from others is a plain name without $. WRONG: $monthly = @Payment($amount, $rate, $periods) and $periods = $years * 12 (they never compute and show 0 or [object Object]). RIGHT: periods = $years * 12 and monthly = @Payment($amount, $rate, periods).",
   'Anything the UI can work out from data it already has (switching a mode or view, filtering, sorting, showing details, changing units) happens in the block: a $variable set by a SegmentedControl, Select, Checkbox or Button with @Set($view, "value"), and results that pick with a ternary: total = $mode == "a" ? x : y. Never use @ToAssistant for that, and never leave such a Button without an action.',
   "A list the user edits (a checklist, items) is a $variable changed by Buttons with @Set($list, @Toggle($list, item)) or @Append / @Remove.",
-  'Use Button("Label", @ToAssistant("first-person request")) only for a follow-up that needs new content from you (advice, an explanation, more items). The text is placed in the user\'s input box for them to send; it is never sent automatically.',
+  'Use Button("Label", @ToAssistant("first-person request")) only for a follow-up that needs new content from you (advice, an explanation, more items). The message and any explicit second-argument context are shown in the user\'s input box for review; they are never sent automatically. Include the current values needed for the follow-up in that context.',
   "Never put code the user wants to read or copy in a UI block; use a normal code fence for that.",
 ];
 
@@ -60,7 +60,7 @@ Use a \`\`\`html-ui block only when openui-lang cannot express the UI. Write one
 - It runs in a sandboxed iframe with no network except scripts from cdn.jsdelivr.net, unpkg.com, cdnjs.cloudflare.com and esm.sh. No fetch to other hosts, no localStorage, cookies, forms, alert() or popups.
 - Theme colors are CSS variables holding HSL triplets: color: hsl(var(--foreground)); background: hsl(var(--card)); border-color: hsl(var(--border)). Also --muted, --muted-foreground, --primary, --primary-foreground, --accent, --destructive. Do not hardcode a page background; it must look right in light and dark.
 - The frame grows to fit its content (up to 2400px); size canvases to the container width.
-- window.openhorn.sendPrompt({text}) offers a follow-up message (placed in the input box for the user to send); window.openhorn.openLink({url}) opens an https link.
-- Call sendPrompt and openLink only from a click handler: they are ignored unless the user is interacting with the frame, so calls made on load do nothing.
+- window.openhorn.sendPrompt({text}) proposes a follow-up message; window.openhorn.openLink({url}) proposes an http(s) link. Both display a suggestion beside the page. Only when the user confirms that suggestion in the app is the message placed in the input box or the link opened.
+- Call sendPrompt and openLink from a page button click handler, so suggestions match the user's request. Calling either function never sends a message or opens a link automatically; the user confirms in the app.
 - sendPrompt is only for a follow-up that needs new content from you. Anything the page can compute or toggle itself (modes, filters, recalculating) is done in its own script, never through sendPrompt.
 - Keep it under about 250 lines.`;

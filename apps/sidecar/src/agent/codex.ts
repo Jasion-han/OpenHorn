@@ -1,17 +1,18 @@
-import { type ChildProcess, spawn } from "node:child_process";
+import { type ChildProcess, type SpawnOptions, spawn } from "node:child_process";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import type { AttachmentPart } from "shared/types";
 import { appendAttachmentContext } from "./attachments";
 import { sanitizeChildEnv } from "./childEnv";
-import { HISTORY_MAX_TOKENS, truncateHistory } from "./context";
 import { type AgentEvent, buildUsageEvent, toCount } from "./events";
+import { withConversationHistory } from "./runtimePrompt";
 import { buildAgentSystemPrompt } from "./system-prompt";
 
 export type RunCodexAgentInput = {
   model: string;
   prompt: string;
+  systemPrompt?: string;
   cwd: string;
   abortController: AbortController;
   attachments?: AttachmentPart[];
@@ -146,22 +147,23 @@ export function mapCodexEvent(msg: JsonRpcMessage): AgentEvent | null {
   return null;
 }
 
-export async function runCodexAgent(input: RunCodexAgentInput): Promise<void> {
+type CodexAgentDependencies = {
+  findBinary: typeof findCodexBinary;
+  spawn: (command: string, args: string[], options: SpawnOptions) => ChildProcess;
+};
+
+export async function runCodexAgent(
+  input: RunCodexAgentInput,
+  dependencies: Partial<CodexAgentDependencies> = {},
+): Promise<void> {
   const { model, cwd, abortController, onEvent } = input;
-  let seededPrompt = input.prompt;
-  if (input.conversationHistory && input.conversationHistory.length > 0) {
-    const trimmed = truncateHistory(input.conversationHistory, HISTORY_MAX_TOKENS);
-    const historyBlock = trimmed
-      .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
-      .join("\n\n");
-    seededPrompt = `${historyBlock}\n\n---\n\nUser: ${input.prompt}`;
-  }
+  const seededPrompt = withConversationHistory(input.prompt, input.conversationHistory);
   // Inject attachment context (file text now; image placeholders until phase B).
   const prompt = appendAttachmentContext(seededPrompt, input.attachments);
   // Do not log prompt content (user data); a length marker is enough.
   console.error(`[codex-agent] starting: model=${model} cwd=${cwd} promptLen=${prompt.length}`);
 
-  const codexPath = await findCodexBinary();
+  const codexPath = await (dependencies.findBinary ?? findCodexBinary)();
   console.error(`[codex-agent] codexPath=${codexPath}`);
   if (!codexPath) {
     onEvent({ type: "error", content: "Codex CLI 未安装。请先安装：npm i -g @openai/codex" });
@@ -169,7 +171,7 @@ export async function runCodexAgent(input: RunCodexAgentInput): Promise<void> {
     return;
   }
 
-  const proc = spawn(
+  const proc = (dependencies.spawn ?? spawn)(
     codexPath,
     [
       "app-server",
@@ -373,12 +375,17 @@ export async function runCodexAgent(input: RunCodexAgentInput): Promise<void> {
           cwd,
           approvalPolicy: "never",
           sandbox: "danger-full-access",
-          developerInstructions: buildAgentSystemPrompt({
-            cwd,
-            permissionMode: "full-access",
-            extra:
-              "For simple lookups answerable by running a command or reading files (e.g. 'how many images in my Downloads'), act first — run `ls`/`find` immediately and report the result rather than listing options.",
-          }),
+          developerInstructions: [
+            buildAgentSystemPrompt({
+              cwd,
+              permissionMode: "full-access",
+              extra:
+                "For simple lookups answerable by running a command or reading files (e.g. 'how many images in my Downloads'), act first — run `ls`/`find` immediately and report the result rather than listing options.",
+            }),
+            input.systemPrompt?.trim(),
+          ]
+            .filter(Boolean)
+            .join("\n\n"),
         });
         if (threadResp.error) {
           finish({ type: "error", content: `Codex thread 创建失败: ${threadResp.error.message}` });

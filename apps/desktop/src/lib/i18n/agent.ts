@@ -1333,6 +1333,12 @@ export const genUiLabels = {
   "genui.preparing": "正在生成交互内容…",
   "genui.frameTitle": "交互内容",
   "genui.frameNavigated": "交互内容试图跳转到外部页面，已停止运行",
+  "genui.proposedPrompt": "交互内容提供了一条追问",
+  "genui.proposedLink": "交互内容提供了一个链接",
+  "genui.fillComposer": "填入输入框",
+  "genui.openLink": "打开链接",
+  "genui.dismissProposal": "忽略",
+  "genui.followupContext": "补充信息",
   "genui.toggle.on": "交互式回答：开（回答可包含可操作的界面，提示词会变长）",
   "genui.toggle.off": "交互式回答：关",
 } as const;

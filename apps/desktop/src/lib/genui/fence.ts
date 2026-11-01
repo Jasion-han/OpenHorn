@@ -1,3 +1,6 @@
+import { parse, postprocess, preprocess } from "micromark";
+import { gfm } from "micromark-extension-gfm";
+
 /**
  * Generative UI rides inside ordinary Markdown fenced code blocks, so the same
  * text stream works for every runtime (server chat, Claude / direct agents,
@@ -20,27 +23,30 @@ export function genUiKindOf(language: string | undefined): GenUiKind | null {
   return null;
 }
 
-const FENCE_LINE_RE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
-
 /**
- * Whether `content` ends inside a fenced code block that has not been closed
- * yet — i.e. the last block is still streaming. Follows CommonMark: a closing
- * fence uses the same character, is at least as long and carries no info string.
+ * Tokenize with the same CommonMark + GFM grammar as ReactMarkdown. Container
+ * prefixes, HTML blocks, footnotes and fence lengths must have one meaning in
+ * both rendering and streaming detection. A fenced token contains its opening
+ * `codeFencedFence` and, only when explicitly closed, a second fence token.
  */
 export function endsInsideOpenFence(content: string): boolean {
-  let open: { char: string; length: number } | null = null;
-  for (const line of content.split("\n")) {
-    const match = FENCE_LINE_RE.exec(line);
-    if (!match) continue;
-    const fence = match[1] ?? "";
-    const rest = (match[2] ?? "").trim();
-    if (!open) {
-      // Backtick fences may not carry a backtick in their info string.
-      if (fence[0] === "`" && rest.includes("`")) continue;
-      open = { char: fence[0] ?? "`", length: fence.length };
-    } else if (fence[0] === open.char && fence.length >= open.length && rest === "") {
-      open = null;
+  const events = postprocess(
+    parse({ extensions: [gfm()] })
+      .document()
+      .write(preprocess()(content, undefined, true)),
+  );
+  let fences = 0;
+  for (const [event, token] of events) {
+    if (event === "enter" && token.type === "codeFenced") fences = 0;
+    else if (event === "enter" && token.type === "codeFencedFence") fences += 1;
+    else if (
+      event === "exit" &&
+      token.type === "codeFenced" &&
+      token.end.offset >= content.trimEnd().length &&
+      fences === 1
+    ) {
+      return true;
     }
   }
-  return open !== null;
+  return false;
 }

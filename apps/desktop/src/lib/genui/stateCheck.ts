@@ -2,49 +2,38 @@
  * OpenUI Lang 1.0 only materializes literal `$variable` defaults. A computed
  * default (`$monthly = @Payment(...)`, `$n = $years * 12`) parses without an
  * error, but the store is seeded with the raw expression node, so the value
- * never computes and shows as 0 or `[object Object]`. The parser's
- * `stateDeclarations` keeps that node, which is how it is recognized here.
+ * never computes and shows as 0 or `[object Object]`. Read the source AST
+ * before materialization so arbitrary literal business objects stay untouched.
  */
 
-// Expression kinds of lang-core's ASTNode that can survive materialization.
-// Literals (Str, Num, Bool, Null, Arr, Obj) arrive as plain values instead.
-const EXPRESSION_KINDS = new Set([
-  "Comp",
-  "Ref",
-  "StateRef",
-  "RuntimeRef",
-  "BinOp",
-  "UnaryOp",
-  "Ternary",
-  "Member",
-  "Index",
-  "Assign",
-]);
+import { type ASTNode, parseExpression, split, tokenize } from "@openuidev/lang-core";
 
-function isExpressionNode(value: unknown): boolean {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const kind = (value as { k?: unknown }).k;
-  return typeof kind === "string" && EXPRESSION_KINDS.has(kind);
+/** Literal syntax is identified before materialization; business objects can have any keys. */
+function isLiteral(node: ASTNode): boolean {
+  switch (node.k) {
+    case "Str":
+    case "Num":
+    case "Bool":
+    case "Null":
+      return true;
+    case "Arr":
+      return node.els.every(isLiteral);
+    case "Obj":
+      return node.entries.every(([, value]) => isLiteral(value));
+    case "UnaryOp":
+      // Lang-core materializes negative numeric defaults as numbers.
+      return node.op === "-" && node.operand.k === "Num";
+    default:
+      return false;
+  }
 }
 
-/** True for an expression node, or an array / object literal holding one (`[$a * 2, 1]`). */
-function containsExpression(value: unknown, depth = 0): boolean {
-  if (!value || typeof value !== "object" || depth > 32) return false;
-  if (isExpressionNode(value)) return true;
-  const items = Array.isArray(value) ? value : Object.values(value);
-  return items.some((item) => containsExpression(item, depth + 1));
-}
-
-/**
- * Names of `$variables` whose declared default is an expression rather than a
- * literal, including array / object literals with expressions inside.
- */
-export function computedStateNames(
-  stateDeclarations: Record<string, unknown> | undefined,
-): string[] {
-  return Object.entries(stateDeclarations ?? {})
-    .filter(([, value]) => containsExpression(value))
-    .map(([name]) => name);
+/** Names of state declarations whose SOURCE contains an expression, including nested values. */
+export function computedStateNames(source: string): string[] {
+  return split(tokenize(source))
+    .filter((statement) => statement.id.startsWith("$"))
+    .filter((statement) => !isLiteral(parseExpression(statement.tokens)))
+    .map((statement) => statement.id);
 }
 
 const LITERAL_KEYWORDS = ["true", "false", "null"];
@@ -135,26 +124,38 @@ export function renameStateRefs(source: string, names: readonly string[]): strin
   return mapIdentifiers(source, (name) => renames.get(name) ?? name);
 }
 
-const MAX_REPAIR_PASSES = 3;
-
 /**
- * Turns `$x = <expression>` declarations into plain derived values
- * (`x = <expression>`) so they compute, the way the prompt asks models to
- * write them. Only names the parser reports as computed are touched; the
- * user-editable `$variables` keep their names, so saved block state still
- * applies. Returns the program unchanged when there is nothing to repair.
+ * Computed declarations become plain derived values. Source ASTs distinguish an
+ * expression from literal application data such as `{k: "Ref", name: "one"}`.
+ * Only the render copy changes; stored model output and editable defaults stay intact.
  */
-export function repairComputedState(
-  source: string,
-  parse: (source: string) => { stateDeclarations?: Record<string, unknown> } | null,
-): string {
-  let current = source;
-  for (let pass = 0; pass < MAX_REPAIR_PASSES; pass++) {
-    const computed = computedStateNames(parse(current)?.stateDeclarations);
-    if (computed.length === 0) break;
-    const next = renameStateRefs(current, computed);
-    if (next === current) break;
-    current = next;
-  }
-  return current;
+export function repairComputedState(source: string): string {
+  return renameStateRefs(source, computedStateNames(source));
+}
+
+/** OpenUI expects a single root element; a root sequence needs the library's Col. */
+export function wrapSequenceRoot(source: string): string {
+  const statements = split(tokenize(source));
+  const root = statements.find((statement) => statement.id === "root");
+  if (!root) return source;
+  const seen = new Set<string>();
+  const isSequence = (expression: ASTNode): boolean => {
+    if (expression.k === "Arr" || (expression.k === "Comp" && expression.name === "Each")) {
+      return true;
+    }
+    if (expression.k === "Ternary")
+      return isSequence(expression.then) || isSequence(expression.else);
+    if (expression.k !== "Ref" || seen.has(expression.n)) return false;
+    seen.add(expression.n);
+    const target = statements.find((statement) => statement.id === expression.n);
+    return target ? isSequence(parseExpression(target.tokens)) : false;
+  };
+  if (!isSequence(parseExpression(root.tokens))) return source;
+  const taken = declaredNames(source);
+  let name = "genUiRoot";
+  while (taken.has(name)) name += "_";
+  const renamed = mapIdentifiers(source, (identifier, end) =>
+    identifier === "root" && /^[ \t]*=(?!=)/.test(source.slice(end)) ? name : identifier,
+  );
+  return `${renamed}\nroot = Col([${name}])`;
 }

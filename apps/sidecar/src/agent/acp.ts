@@ -8,7 +8,6 @@ import { classifyBashCommandRisk } from "../shell-risk";
 import { toWorkspaceRelative } from "../workspace";
 import { appendAttachmentContext } from "./attachments";
 import { sanitizeChildEnv } from "./childEnv";
-import { HISTORY_MAX_TOKENS, truncateHistory } from "./context";
 import {
   type AgentEvent,
   type AgentToolDiff,
@@ -16,6 +15,7 @@ import {
   buildUsageEvent,
   toCount,
 } from "./events";
+import { withConversationHistory, withRunInstructions } from "./runtimePrompt";
 
 /** A model option from the ACP session's config options. */
 interface AcpModelOption {
@@ -98,6 +98,7 @@ export type AcpAgentConfig = {
 export type RunAcpAgentInput = {
   agent: AcpAgentConfig;
   prompt: string;
+  systemPrompt?: string;
   cwd: string;
   abortController: AbortController;
   checkpoint: CheckpointSession;
@@ -789,7 +790,6 @@ export async function runAcpAgent(input: RunAcpAgentInput): Promise<void> {
     }
   }
 
-  let isNewSession = false;
   if (!entry) {
     try {
       entry = await createEntry(input);
@@ -801,21 +801,17 @@ export async function runAcpAgent(input: RunAcpAgentInput): Promise<void> {
       onEvent({ type: "done" });
       return;
     }
-    isNewSession = true;
     entries.set(entry.sessionId, entry);
     input.onSessionId(entry.sessionId);
   }
 
-  // Replay conversation history into the prompt so the agent has context from
-  let promptText = input.prompt;
-  if (input.conversationHistory && input.conversationHistory.length > 0) {
-    const trimmed = truncateHistory(input.conversationHistory, HISTORY_MAX_TOKENS);
-    const historyBlock = trimmed
-      .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
-      .join("\n\n");
-    promptText = `${historyBlock}\n\n---\n\nUser: ${input.prompt}`;
-  }
-  promptText = appendAttachmentContext(promptText, input.attachments);
+  const promptText = withRunInstructions(
+    appendAttachmentContext(
+      withConversationHistory(input.prompt, input.conversationHistory),
+      input.attachments,
+    ),
+    input.systemPrompt,
+  );
 
   const turn: TurnState = {
     onEvent,

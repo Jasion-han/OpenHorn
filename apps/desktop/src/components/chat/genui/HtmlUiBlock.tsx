@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { extractCompleteStyles, processPartialHtml } from "../../../lib/genui/partialHtml";
 import {
-  acceptsUserAction,
+  type BridgeMessage,
   buildPreviewDocument,
   buildSandboxDocument,
   MESSAGE_TYPE,
@@ -54,17 +54,6 @@ function useThrottled<T>(value: T, interval: number): T {
  */
 export function HtmlUiBlock({ code, streaming }: { code: string; streaming: boolean }) {
   const theme = useThemeSnapshot();
-  const frame = useRef<HTMLIFrameElement>(null);
-  const [height, setHeight] = useState(INITIAL_HEIGHT);
-  const lastPrompt = useRef(0);
-  const lastLink = useRef(0);
-  // Load events of the running frame, per document. The srcdoc load is the
-  // first; any later one means the frame navigated itself away, and the new
-  // page is not covered by our CSP. A new runDoc (theme switch) reloads
-  // legitimately, so the count restarts for it.
-  const loads = useRef<{ doc: string; count: number }>({ doc: "", count: 0 });
-  const [navigated, setNavigated] = useState(false);
-
   const previewSource = useThrottled(streaming ? code : "", PREVIEW_INTERVAL_MS);
   const previewDoc = useMemo(
     () =>
@@ -75,49 +64,6 @@ export function HtmlUiBlock({ code, streaming }: { code: string; streaming: bool
       ),
     [previewSource, theme],
   );
-  const runDoc = useMemo(
-    () => (streaming ? "" : buildSandboxDocument(code, theme)),
-    [streaming, code, theme],
-  );
-
-  useEffect(() => {
-    if (streaming) return;
-    const onMessage = (event: MessageEvent) => {
-      // Only this block's own frame; every other window is ignored.
-      if (!frame.current || event.source !== frame.current.contentWindow) return;
-      const message = parseBridgeMessage(event.data);
-      if (!message) return;
-      // Follow-ups and links only while the user is in this frame; a script
-      // must not fill the composer or open links on its own.
-      if (!acceptsUserAction(message, document.activeElement === frame.current)) return;
-      switch (message.action) {
-        case "height":
-          setHeight(message.height);
-          return;
-        case "sendPrompt": {
-          const now = Date.now();
-          if (now - lastPrompt.current < PROMPT_INTERVAL_MS) return;
-          lastPrompt.current = now;
-          useGenUiStore.getState().requestComposerText(message.text);
-          return;
-        }
-        case "openLink": {
-          // Each link is a preview-panel webview; without a limit a looping
-          // frame could open tabs without end.
-          const now = Date.now();
-          if (now - lastLink.current < PROMPT_INTERVAL_MS) return;
-          lastLink.current = now;
-          usePreviewPanelStore.getState().openUrl(message.url);
-          return;
-        }
-      }
-    };
-    window.addEventListener("message", onMessage);
-    // The frame may have reported before this listener existed.
-    frame.current?.contentWindow?.postMessage({ type: MESSAGE_TYPE, action: "measure" }, "*");
-    return () => window.removeEventListener("message", onMessage);
-  }, [streaming]);
-
   if (streaming) {
     return (
       <div className={styles.block}>
@@ -135,6 +81,71 @@ export function HtmlUiBlock({ code, streaming }: { code: string; streaming: bool
     );
   }
 
+  const bootstrap = buildSandboxDocument(theme);
+  return <RunningHtmlUiBlock key={`${bootstrap}\0${code}`} code={code} document={bootstrap} />;
+}
+
+type ProposedAction = Exclude<BridgeMessage, { action: "height" | "navigated" }>;
+
+/** Every model message is a proposal. Only the visible parent control acts. */
+function RunningHtmlUiBlock({ code, document }: { code: string; document: string }) {
+  const frame = useRef<HTMLIFrameElement>(null);
+  const runningWindow = useRef<Window | null>(null);
+  const loaded = useRef(false);
+  const invalid = useRef(false);
+  const [height, setHeight] = useState(INITIAL_HEIGHT);
+  const [navigated, setNavigated] = useState(false);
+  const [proposals, setProposals] = useState<ProposedAction[]>([]);
+  const pending = useRef<ProposedAction[]>([]);
+  const lastProposal = useRef({ sendPrompt: 0, openLink: 0 });
+  const invalidateFrame = useCallback(() => {
+    invalid.current = true;
+    pending.current = [];
+    setProposals([]);
+    setNavigated(true);
+  }, []);
+
+  useLayoutEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      if (invalid.current || !loaded.current || event.source !== runningWindow.current) return;
+      const message = parseBridgeMessage(event.data);
+      if (!message) return;
+      if (message.action === "navigated") {
+        invalidateFrame();
+        return;
+      }
+      if (message.action === "height") {
+        setHeight(message.height);
+        return;
+      }
+      // At most one pending proposal of each kind, with bounded visible text.
+      // Frame focus, forged activation claims and nonces grant no authority.
+      const now = Date.now();
+      if (now - lastProposal.current[message.action] < PROMPT_INTERVAL_MS) return;
+      if (pending.current.some((proposal) => proposal.action === message.action)) return;
+      lastProposal.current[message.action] = now;
+      pending.current = [...pending.current, message];
+      setProposals(pending.current);
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [invalidateFrame]);
+
+  const removeProposal = (proposal: ProposedAction) => {
+    pending.current = pending.current.filter((entry) => entry !== proposal);
+    setProposals(pending.current);
+  };
+
+  const confirmProposal = (proposal: ProposedAction, trusted: boolean) => {
+    if (!trusted || invalid.current || !pending.current.includes(proposal)) return;
+    removeProposal(proposal);
+    if (proposal.action === "sendPrompt") {
+      useGenUiStore.getState().requestComposerText(proposal.text);
+    } else {
+      usePreviewPanelStore.getState().openUrl(proposal.url);
+    }
+  };
+
   if (navigated) {
     return (
       <div className={styles.block}>
@@ -144,9 +155,15 @@ export function HtmlUiBlock({ code, streaming }: { code: string; streaming: bool
   }
 
   const onFrameLoad = () => {
-    if (loads.current.doc !== runDoc) loads.current = { doc: runDoc, count: 0 };
-    loads.current.count += 1;
-    if (loads.current.count > 1) setNavigated(true);
+    if (loaded.current) {
+      invalidateFrame();
+      return;
+    }
+    // This load belongs to a trusted, empty document. Only now may model
+    // scripts execute; every subsequent load is an invalid navigation.
+    loaded.current = true;
+    runningWindow.current = frame.current?.contentWindow ?? null;
+    runningWindow.current?.postMessage({ type: MESSAGE_TYPE, action: "render", html: code }, "*");
   };
 
   return (
@@ -157,11 +174,37 @@ export function HtmlUiBlock({ code, streaming }: { code: string; streaming: bool
           className={styles.frame}
           title={getGenUiLabel("genui.frameTitle")}
           sandbox="allow-scripts"
-          srcDoc={runDoc}
+          srcDoc={document}
           referrerPolicy="no-referrer"
           onLoad={onFrameLoad}
         />
       </div>
+      {proposals.map((proposal) => (
+        <div key={proposal.action} className={styles.proposal}>
+          <div className={styles.proposalLabel}>
+            {getGenUiLabel(
+              proposal.action === "sendPrompt" ? "genui.proposedPrompt" : "genui.proposedLink",
+            )}
+          </div>
+          <p className={styles.proposalText}>
+            {proposal.action === "sendPrompt" ? proposal.text : proposal.url}
+          </p>
+          <div className={styles.proposalButtons}>
+            <button
+              type="button"
+              className={styles.proposalConfirm}
+              onClick={(event) => confirmProposal(proposal, event.nativeEvent.isTrusted)}
+            >
+              {getGenUiLabel(
+                proposal.action === "sendPrompt" ? "genui.fillComposer" : "genui.openLink",
+              )}
+            </button>
+            <button type="button" onClick={() => removeProposal(proposal)}>
+              {getGenUiLabel("genui.dismissProposal")}
+            </button>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

@@ -7,15 +7,19 @@
     "dev": "tauri dev",
     "build:ui": "vite build",
     "build": "tauri build",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:genui:browser": "node scripts/genui-runtime.browser.mjs && node scripts/genui-html.browser.mjs && node scripts/genui-state.browser.mjs"
   },
   "dependencies": {
+    "@openuidev/lang-core": "1.0.2",
     "@openuidev/react-lang": "1.0.2",
     "@tanstack/react-virtual": "^3.14.5",
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-shell": "^2.3.5",
     "better-auth": "^1.7.1",
     "lucide-react": "^0.460.0",
+    "micromark": "4.0.2",
+    "micromark-extension-gfm": "3.0.0",
     "pdfjs-dist": "^4.10.38",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

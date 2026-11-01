@@ -358,24 +358,10 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
           ws.send(JSON.stringify(buildEvent("agent.event", { runId, event })));
         };
 
-        const lastUserMessage = [...messages].reverse().find((m) => m.role === "user");
-        const prompt =
-          typeof lastUserMessage?.content === "string"
-            ? lastUserMessage.content
-            : Array.isArray(lastUserMessage?.content)
-              ? // Narrowed to the two fields this actually reads. `any[]` turned
-                // off checking on `p.type` and `p.text` as well, so a renamed
-                // field would have gone silently to an empty prompt.
-                (lastUserMessage.content as Array<{ type?: string; text?: string }>)
-                  .filter((p) => p.type === "text")
-                  .map((p) => p.text ?? "")
-                  .join("")
-              : "";
-
         if (useCodexResponses) {
           void runCodexChat({
             model,
-            prompt,
+            messages,
             abortController,
             onEvent,
           })
@@ -512,6 +498,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
             runCodexAgent({
               model,
               prompt,
+              systemPrompt,
               cwd,
               abortController,
               attachments,
@@ -538,6 +525,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
             runAcpAgent({
               agent: acpAgent,
               prompt,
+              systemPrompt,
               cwd,
               abortController,
               checkpoint,

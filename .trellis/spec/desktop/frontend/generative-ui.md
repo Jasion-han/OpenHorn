@@ -16,9 +16,11 @@ Fences, not tool calls, because Codex CLI and ACP agents have tool sets we do
 not control; the same text works for every runtime and for chat mode.
 
 The block is detected in `DesktopMarkdownMessage`'s `code` renderer
-(`lib/genui/fence.ts`). Only the block the text currently ends in is
-"streaming" (`endsInsideOpenFence`); earlier blocks are interactive as soon as
-their fence closes.
+(`lib/genui/fence.ts`). `endsInsideOpenFence` uses micromark's CommonMark + GFM
+tokens, matching ReactMarkdown, including quote/list containers and HTML blocks.
+Only an unclosed fenced block at the current text tail is "streaming"; earlier
+blocks become interactive as soon as their fences close. Do not replace this
+with a separate fence-line regex.
 
 ## Prompt contract
 
@@ -50,10 +52,13 @@ their fence closes.
   is seeded with that node, so it renders as blank / `0` / `[object Object]`.
   The prompt rule alone did not stop gpt-5.4-nano from writing it, so complete
   blocks are repaired before rendering (`lib/genui/stateCheck.ts`):
-  `computedStateNames` finds those entries, `repairComputedState` rewrites each
+  `computedStateNames(source)` inspects declaration expression ASTs using
+  lang-core's public tokenizer/parser APIs, before materialization. Literal
+  business objects such as `{k: "Ref", name: "one"}` remain literal data.
+  `repairComputedState` rewrites each computed state declaration's references
   such `$name` to a plain name (`$months` -> `months`; `months_` if `months` is
-  already a statement, another renamed name, or `true` / `false` / `null`) and
-  re-parses, up to 3 passes. A computed `$x` that is also an input binding or a
+  already a statement, another renamed name, or `true` / `false` / `null`).
+  A computed `$x` that is also an input binding or a
   `@Set` target becomes a read-only derived value; it parses cleanly, so no
   notice is shown (accepted: before the repair it never rendered a value). The rewrite is
   token-aware like lang-core's lexer: string literals (both quotes, escapes) and
@@ -61,16 +66,17 @@ their fence closes.
   never touches `$rate`). `GenUiBlock` applies it via `renderableProgram` only
   when not streaming (memoized on `code`); the stored message text is
   unchanged, user-input `$variables` keep their names so saved block state
-  still applies, and `genui.partialErrors` shows only when the repaired program
-  still has `meta.errors` or unrepaired computed state. Unsupported syntax such
+  still applies. Parse errors and Renderer evaluation/component errors show
+  `genui.partialErrors` with source fallback while retaining usable controls;
+  correcting an input can recover without replacing the program. Unsupported syntax such
   as lambdas (`$f = (k) => ...`) materializes as `null` and is not repaired.
   Fixture: `components/chat/genui/fixtures/nanoMortgage.ts`; `prompt.test.ts`
-  evaluates the repaired Stat values with lang-core's `evaluate` (resolved
-  through react-lang, which depends on it) for both modes.
-- Channels that drop the system prompt cannot use components: Codex CLI and
-  ACP ignore `systemPrompt`. The model then invents `openui-lang` syntax, which
-  only renders as the plain-code fallback. Verify a channel by asking it to
-  quote a component signature from its system prompt.
+  evaluates the repaired Stat values with lang-core's `evaluate` for both modes.
+- All runtimes must carry per-run UI instructions. Codex uses its native
+  developer-instructions transport; ACP, which has no standard system-prompt
+  field, receives explicitly separated per-run instructions in its prompt.
+  Cover both `agent.run` and the Codex `chat.stream` fallback: forwarding only
+  the last user message drops the system prompt and conversation context.
 - Claude Code OAuth channels (`sk-ant-oat…`) lost the
   whole system prompt until 2026-10-31: the billing marker was joined into the
   same `system` text as the prompt, and the API treats that block as billing
@@ -88,16 +94,23 @@ their fence closes.
 - Follow-ups (`@ToAssistant`, `openhorn.sendPrompt`) are only **placed in the
   composer** (`genUiStore.requestComposerText`), appended to any draft. Never
   send on the model's behalf.
-- `sendPrompt` and `openLink` from a frame are accepted only while that frame
-  is the parent's `document.activeElement` (`acceptsUserAction` in
-  `lib/genui/sandbox.ts`), i.e. the user clicked into it. A cross-origin frame
-  cannot focus itself without user activation, so a script calling the bridge
-  on load is ignored. `height` is unconditional. Per-frame rate limits stay.
-- A running frame that navigates itself away (`location = "https://..."`; the
-  meta CSP does not apply to the new page) is unloaded: `HtmlUiBlock` counts
-  `load` events per `runDoc` (the srcdoc load is the first), and on a second
-  one replaces the iframe with a one-line notice (`genui.frameNavigated`). A
-  new `runDoc` (theme switch) restarts the count.
+- `sendPrompt` and `openLink` are untrusted proposals, capped and rate-limited
+  to one pending proposal of each kind. The parent displays the exact message
+  or URL, and only a real click on that parent control applies it. Frame focus,
+  frame-side `isTrusted`, nonces and claimed activation confer no authority.
+  `height` only changes the clamped frame height.
+- The initial `srcDoc` contains only the trusted bootstrap. Model markup is
+  sent after that document's first load; scripts are recreated in order so
+  classic CDN scripts finish before dependent inline code. Model code therefore
+  cannot cancel the trusted initial load by immediately redirecting. Every
+  subsequent frame load invalidates its bridge and removes the frame/proposals,
+  showing `genui.frameNavigated`. A new program/theme creates a fresh session.
+- Fragment initialization replays `DOMContentLoaded` and `load` after ordered
+  scripts (and async completion for `load`). Inline module completion must
+  resolve on success, import errors, evaluation errors and rejected top-level
+  await, so a failed module cannot strand later scripts. Modern `nomodule`
+  fallbacks are not awaited because the browser ignores them without events.
+  These local readiness events never authorize host actions.
 - Tauri / WKWebView: wry runs the main window's `on_navigation` for **every
   frame**, child frames included (`src-tauri/src/lib.rs`
   `main_window_allows_navigation`). It must admit `about:srcdoc`, or every
@@ -107,16 +120,148 @@ their fence closes.
   URL-scheme handlers for it. External link clicks in the app go through the
   shell plugin (`App.tsx` click handler) instead. In the desktop app a frame
   that navigates away is therefore cancelled before it loads; the
-  second-`load` unload above is the browser-side backstop.
+  subsequent-load unload above is the browser-side backstop. Compare parsed
+  URL origins/hosts, reject userinfo, and allow only the configured debug dev
+  origin, the platform's actual app origin, and exact `about:srcdoc`.
+  Prefix tests for `localhost` admit attacker hosts and are forbidden.
 - Accepted risk: `img-src https:` lets frame script send data the user typed
   into that frame to any host via image URLs. The frame can read no app data,
   and model-written pages need remote images, so this is accepted.
 
 ## State
 
-Interaction state of `openui-lang` blocks is saved in localStorage under
-`<messageId>[:<agentStepIndex>]:<blockStartOffset>` (`lib/genui/blockState.ts`,
-capped at 300 entries / 64 KB each). Not synced to the server.
+Interaction state belongs to the raw UI program and message scope, independently
+of React mounts and localStorage debounce timing. Keys include
+`<messageId>[:<agentStepIndex>]:<blockStartOffset>:v2:<programFingerprint>`.
+Replacing a program at the same offset cannot inherit its predecessor's state;
+a canceled retry can reopen the previous revision's state.
+
+`rememberBlockState` publishes a serialized snapshot synchronously on every
+complete-block state update. Disk persistence remains debounced by 300 ms, with
+cleanup flushing the newest snapshot rather than overwriting it with stale
+component state. `migrateBlockStateScope` runs before chatStore publishes a
+persisted replacement message ID; it migrates all Agent step keys and aliases
+pending writes from the optimistic ID.
+
+Memory caches are separated by storage identity. Persistence is best effort,
+bounded at 300 entries, 64 KiB per payload and 4 MiB total; sizes use encoded
+bytes. Evict before writes and retry quota failures, including index writes.
+Memory and disk evictions use independent budgets: a disk quota failure must
+not delete another mounted block's unflushed memory snapshot.
+Blocked/corrupt storage must not break mounted controls. State is local and is
+not synced to the server.
+
+## Runtime validation
+
+Accept both `ParseResult.root` and `rootExpression`. Root sequences (including
+`@Each`, arrays, aliases and conditional sequences) are wrapped in the library's
+`Col` without rewriting literal keys/member access. A previous failed chunk
+must not latch the final program into fallback: parse status and diagnostics
+belong to the current program. Renderer `onError` is required in addition to
+the outer React error boundary because OpenUI catches evaluation/component
+errors internally.
+
+Slider bounds and step changes normalize the actual bound value, not just its
+display, so dependent calculations agree with the slider. `@ToAssistant` keeps
+explicit second-argument context in the visible composer draft; message plus
+context fit the shared 2,000-character limit and are never automatically sent.
+Preserve both in full when their combined length fits; allocate truncation
+budgets only when the combined draft exceeds that limit.
+
+## Executable lifecycle and transport contract
+
+### 1. Scope / Trigger
+
+These rules apply when streaming Markdown becomes executable UI, when React
+remounts a block, when an optimistic message ID is persisted, and when an
+external agent runtime receives the per-run system prompt.
+
+### 2. Signatures
+
+```ts
+blockStateKey(scope: string, offset: number, program?: string): string
+loadBlockState(key: string, storage?: BlockStateStorage | null): Record<string, unknown> | undefined
+rememberBlockState(key: string, state: Record<string, unknown>, storage?: BlockStateStorage | null): void
+saveBlockState(key: string, state: Record<string, unknown>, storage?: BlockStateStorage | null): void
+migrateBlockStateScope(fromScope: string, toScope: string, storage?: BlockStateStorage | null): void
+endsInsideOpenFence(content: string): boolean
+buildSandboxDocument(theme: ThemeSnapshot): string
+```
+
+### 3. Contracts
+
+- Markdown passes the raw complete `codeString` as the key's program identity;
+  disabled streaming inputs use a stable placeholder revision.
+- Publish memory before scheduling disk writes, and migrate message scope
+  before publishing its new ID to subscribers. Old-ID cleanup writes resolve
+  to the migrated scope and cannot replace a newer snapshot.
+- The parent sends `{type: "openhorn-genui", action: "render", html}` only
+  after trusted bootstrap load. Frame proposals use `sendPrompt/text` or
+  `openLink/url`, never an authorization flag. Source-window validation and
+  payload validation remain required, even though neither authorizes an action.
+- `agent.run.systemPrompt` is optional per-run input. Each runtime must
+  actually forward it through its native instruction field or clearly
+  separated context; no DB field or persistent session setting is added.
+
+### 4. Validation & Error Matrix
+
+| Input / event | Required behavior |
+|---|---|
+| Root expression or root sequence | Render supported UI |
+| Incomplete chunk followed by valid final code | Retry parsing and recover |
+| Evaluation/component failure | Notice + source fallback; keep usable controls |
+| Literal `{k: "Ref"}` in state | Preserve its name and value |
+| Changed program with same message/offset | Use its own defaults/snapshot |
+| Remount before 300 ms flush / persisted ID replacement | Restore newest memory snapshot |
+| Storage quota / blocked access / corrupt data | Bounded eviction/retry or memory-only continuity |
+| Unclosed quoted/list fence | Keep preview non-executable and controls disabled |
+| Frame focus / forged activation / unsolicited proposal | No composer edits or links opened |
+| Real parent click on displayed pending proposal | Consume that exact proposal once |
+| Subsequent frame document load | Revoke bridge, remove frame and pending proposals |
+| `localhost@attacker` or `localhost.attacker` navigation | Reject |
+
+### 5. Good / Base / Bad Cases
+
+- Good: edit a closed block while a later paragraph streams, then reconcile
+  the message ID; the edited value survives both operations.
+- Base: UI is disabled at send time; no UI instructions are appended, and
+  existing programs in history still render.
+- Bad: use frame focus as evidence of a user gesture, or use an old stored
+  value for a regenerated program merely because its block offset matches.
+
+### 6. Tests Required
+
+- `blockState.test.ts`: independent revisions/storage objects, immediate
+  snapshots, delayed cleanup, full-scope migration, quota and corrupt storage.
+- `fence.test.ts`: CommonMark/GFM container syntax and non-fence HTML contexts.
+- `prompt.test.ts`: source-based computed-state repair, literal AST-shaped data,
+  root sequence wrapping and bounded explicit follow-up context.
+- Actual-component browser regressions under `apps/desktop/scripts/`: runtime
+  diagnostics/recovery, native slider values and dependent output, Markdown
+  fence completion, stream/theme/ID remounts, host-confirmed proposals, script
+  order and redirects. Helper-only tests cannot prove lifecycle/gesture behavior.
+  Network-mocked sandbox tests explicitly wait for frame instrumentation before
+  releasing their first request: a new opaque frame can issue requests before
+  Playwright attaches its interception. Use a fixture-only readiness gate,
+  not arbitrary sleeps or production authorization checks.
+- Rust navigation tests: legitimate app/debug origins and exact `about:srcdoc`,
+  rejected userinfo, wrong ports/schemes and host lookalikes.
+- Fake Codex/ACP transports: inspect the actual submitted instruction/prompt
+  payload with UI enabled and omitted; do not call a live model for this check.
+
+### 7. Wrong vs Correct
+
+```ts
+// Wrong: mount timing and disk debounce own the latest state.
+setTimeout(() => saveBlockState(key, state), 300);
+// Correct: publish now, persist later; ID reconciliation aliases both.
+rememberBlockState(key, state);
+setTimeout(() => saveBlockState(key, state), 300);
+
+// Wrong: a generated frame can arrange its own focus.
+if (document.activeElement === iframe) requestComposerText(message.text);
+// Correct: display a bounded proposal, apply it from a real host button click.
+```
 
 ## Bundle
 

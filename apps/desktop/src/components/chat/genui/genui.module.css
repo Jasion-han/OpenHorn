@@ -399,3 +399,42 @@
   color: hsl(var(--muted-foreground));
   background: linear-gradient(to top, hsl(var(--background)), hsl(var(--background) / 0));
 }
+
+.proposal {
+  margin-top: 0.5rem;
+  padding: 0.75rem;
+  border: 1px solid hsl(var(--border));
+  border-radius: 0.5rem;
+  background: hsl(var(--card));
+}
+
+.proposalLabel {
+  font-size: 0.75rem;
+  color: hsl(var(--muted-foreground));
+}
+
+.proposalText {
+  max-height: 10rem;
+  margin: 0.375rem 0 0.625rem;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  font-size: 0.875rem;
+}
+
+.proposalButtons {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.proposalButtons button {
+  padding: 0.25rem 0.625rem;
+  border: 1px solid hsl(var(--border));
+  border-radius: 0.375rem;
+  font-size: 0.75rem;
+}
+
+.proposalButtons .proposalConfirm {
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+}
