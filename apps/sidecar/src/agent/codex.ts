@@ -17,6 +17,16 @@ export type RunCodexAgentInput = {
   abortController: AbortController;
   attachments?: AttachmentPart[];
   conversationHistory?: Array<{ role: "user" | "assistant"; content: string }>;
+  permissionMode?: "default" | "full-access";
+  requestApproval?: (
+    input: {
+      toolUseId: string;
+      toolName: string;
+      toolInput: Record<string, unknown>;
+      decisionReason?: string;
+    },
+    signal: AbortSignal,
+  ) => Promise<boolean>;
   onEvent: (event: AgentEvent) => void;
 };
 
@@ -26,7 +36,7 @@ export type RunCodexAgentInput = {
 const SIGKILL_ESCALATION_MS = 4000;
 
 type JsonRpcMessage = {
-  id?: number;
+  id?: number | string;
   method?: string;
   params?: Record<string, unknown>;
   result?: unknown;
@@ -46,9 +56,8 @@ function sendNotification(proc: ChildProcess, method: string, params?: unknown) 
 }
 
 /**
- * Builds the env for the codex child process. Codex runs with
- * `sandbox_mode="danger-full-access"` and `approval_policy="never"`, so a
- * prompt-injected codex agent has a full shell. It must NOT inherit our
+ * Builds the env for the codex child process. Explicit full access permits a
+ * full shell, so the process must NOT inherit our
  * handshake token or unrelated service credentials (a `printenv` would leak
  * them). Codex authenticates via its own `~/.codex` config (keyed off HOME),
  * so stripping these does not break it. Mirrors the env hygiene in claude.ts.
@@ -135,12 +144,16 @@ export function mapCodexEvent(msg: JsonRpcMessage): AgentEvent | null {
   }
 
   if (method === "turn/completed") {
-    const status = typeof params.status === "string" ? params.status : "";
+    // Current app-server nests status/error under turn. Keep the old flat
+    // payload working for older installed CLIs.
+    const turn = (params.turn ?? params) as Record<string, unknown>;
+    const status = typeof turn.status === "string" ? turn.status : "";
     if (status === "failed") {
-      const err = (params.error ?? {}) as Record<string, unknown>;
+      const err = (turn.error ?? {}) as Record<string, unknown>;
       const message = typeof err.message === "string" ? err.message : "Codex turn failed";
       return { type: "error", content: message };
     }
+    if (status === "interrupted") return { type: "error", content: "Codex turn interrupted" };
     return { type: "done" };
   }
 
@@ -157,20 +170,27 @@ export async function runCodexAgent(
   dependencies: Partial<CodexAgentDependencies> = {},
 ): Promise<void> {
   const { model, cwd, abortController, onEvent } = input;
+  if (abortController.signal.aborted) {
+    onEvent({ type: "done" });
+    return;
+  }
   const seededPrompt = withConversationHistory(input.prompt, input.conversationHistory);
-  // Inject attachment context (file text now; image placeholders until phase B).
   const prompt = appendAttachmentContext(seededPrompt, input.attachments);
-  // Do not log prompt content (user data); a length marker is enough.
-  console.error(`[codex-agent] starting: model=${model} cwd=${cwd} promptLen=${prompt.length}`);
-
   const codexPath = await (dependencies.findBinary ?? findCodexBinary)();
-  console.error(`[codex-agent] codexPath=${codexPath}`);
+  // Stop can arrive while discovering the binary, before a subprocess exists.
+  if (abortController.signal.aborted) {
+    onEvent({ type: "done" });
+    return;
+  }
   if (!codexPath) {
     onEvent({ type: "error", content: "Codex CLI 未安装。请先安装：npm i -g @openai/codex" });
     onEvent({ type: "done" });
     return;
   }
 
+  const fullAccess = input.permissionMode === "full-access";
+  const approvalPolicy = fullAccess ? "never" : "untrusted";
+  const sandbox = fullAccess ? "danger-full-access" : "workspace-write";
   const proc = (dependencies.spawn ?? spawn)(
     codexPath,
     [
@@ -178,102 +198,86 @@ export async function runCodexAgent(
       "--listen",
       "stdio://",
       "-c",
-      'approval_policy="never"',
+      `approval_policy=${JSON.stringify(approvalPolicy)}`,
       "-c",
-      'sandbox_mode="danger-full-access"',
+      `sandbox_mode=${JSON.stringify(sandbox)}`,
     ],
     {
       cwd,
+      detached: process.platform !== "win32",
       stdio: ["pipe", "pipe", "pipe"],
       env: buildCodexEnv(),
     },
   );
-
-  // Track child liveness so teardown can (a) escalate SIGTERM→SIGKILL for a
-  // full-access child that ignores the graceful signal, and (b) resolve only
-  // once the process has actually exited, never leaving an orphan behind.
-  let procClosed = false;
-  let killTimer: ReturnType<typeof setTimeout> | null = null;
-  let markClosed: () => void = () => {};
-  const closedPromise = new Promise<void>((res) => {
-    markClosed = res;
-  });
-  const settleClosed = () => {
-    procClosed = true;
-    if (killTimer) {
-      clearTimeout(killTimer);
-      killTimer = null;
-    }
-    markClosed();
-  };
-
-  const cleanup = () => {
-    try {
-      proc.kill("SIGTERM");
-    } catch {
-      // already dead
-    }
-    // If the child (or a shell it spawned) ignores SIGTERM, force-kill it so a
-    // full-access process can't outlive the run.
-    if (!killTimer && !procClosed) {
-      killTimer = setTimeout(() => {
-        try {
-          proc.kill("SIGKILL");
-        } catch {
-          // already dead
-        }
-      }, SIGKILL_ESCALATION_MS);
-      killTimer.unref?.();
-    }
-  };
-
-  if (abortController.signal.aborted) {
-    cleanup();
-    onEvent({ type: "error", content: "已取消" });
-    onEvent({ type: "done" });
-    return;
-  }
-
-  abortController.signal.addEventListener("abort", cleanup, { once: true });
+  // Drain diagnostics immediately; a full stderr pipe can otherwise deadlock
+  // the child while the client is waiting for its next JSON-RPC response.
+  proc.stderr?.resume();
 
   return new Promise<void>((resolve) => {
     let nextId = 0;
-    let threadId = "";
-    let threadStarted = false;
     let done = false;
-    let resolved = false;
-    // Assigned, not accumulated: codex's `total` bucket is already cumulative
-    // over the thread, so each notification supersedes the previous one.
+    let procClosed = false;
+    let killTimer: ReturnType<typeof setTimeout> | null = null;
     let usagePromptTokens = 0;
     let usageCompletionTokens = 0;
-
-    const settle = () => {
-      if (resolved) return;
-      resolved = true;
-      resolve();
+    const approvals = new AbortController();
+    const pendingResponses = new Map<number, (msg: JsonRpcMessage) => void>();
+    const pendingApprovals = new Map<string | number, () => void>();
+    let markClosed: () => void = () => {};
+    const closedPromise = new Promise<void>((res) => {
+      markClosed = res;
+    });
+    const killChild = (signal: NodeJS.Signals) => {
+      try {
+        if (proc.pid && process.platform !== "win32") process.kill(-proc.pid, signal);
+        else proc.kill(signal);
+      } catch {
+        /* Already dead. */
+      }
     };
-
+    const settleClosed = () => {
+      // The app-server can exit before descendants finish handling SIGTERM.
+      // Its process group remains owned even after the leader exits.
+      killChild("SIGKILL");
+      procClosed = true;
+      if (killTimer) clearTimeout(killTimer);
+      markClosed();
+    };
+    const cleanup = () => {
+      if (procClosed) return;
+      killChild("SIGTERM");
+      killTimer = setTimeout(() => {
+        killChild("SIGKILL");
+      }, SIGKILL_ESCALATION_MS);
+      killTimer.unref?.();
+    };
     const finish = async (event?: AgentEvent) => {
       if (done) return;
       done = true;
+      abortController.signal.removeEventListener("abort", handleAbort);
+      // Answer protocol requests before killing the transport. The same signal
+      // removes host approval entries; late UI acceptance cannot resume a run.
+      for (const cancel of pendingApprovals.values()) cancel();
+      pendingApprovals.clear();
+      approvals.abort();
+      for (const respond of pendingResponses.values()) {
+        respond({ error: { code: -32800, message: "Codex run ended" } });
+      }
+      pendingResponses.clear();
       if (event) onEvent(event);
-      // Reported for cancelled and failed runs too — those turns were still
-      // billed. `thread/tokenUsage/updated` arrives before `turn/completed`, so
-      // by here the counts are in.
       const usage = buildUsageEvent(usagePromptTokens, usageCompletionTokens);
       if (usage) onEvent(usage);
       onEvent({ type: "done" });
       cleanup();
-      // Resolve only after the child has actually exited so teardown never
-      // leaves an orphaned full-access process. `settleClosed()` (fired from the
-      // 'close'/'error' handlers) unblocks this await.
       await closedPromise;
-      settle();
+      rl?.close();
+      resolve();
     };
-
-    const pendingResponses = new Map<number, (msg: JsonRpcMessage) => void>();
-
+    const handleAbort = () => {
+      void finish();
+    };
     function sendReq(method: string, params?: unknown): Promise<JsonRpcMessage> {
+      if (done) return Promise.resolve({ error: { code: -32800, message: "Codex run ended" } });
       const id = nextId++;
       return new Promise((res) => {
         pendingResponses.set(id, res);
@@ -281,104 +285,135 @@ export async function runCodexAgent(
       });
     }
 
-    // Checked rather than asserted: if the spawn ever loses its pipe, this says
-    // so instead of throwing a TypeError from inside readline.
-    if (!proc.stdout) throw new Error("codex process was spawned without stdout");
-    const rl = createInterface({ input: proc.stdout, crlfDelay: Number.POSITIVE_INFINITY });
+    const handleServerRequest = (msg: JsonRpcMessage & { id: string | number }) => {
+      const isCommand = msg.method === "item/commandExecution/requestApproval";
+      const isFile = msg.method === "item/fileChange/requestApproval";
+      if (!isCommand && !isFile) {
+        send(proc, {
+          id: msg.id,
+          error: { code: -32601, message: `Unsupported Codex request: ${msg.method}` },
+        });
+        return;
+      }
+      if (done || abortController.signal.aborted) {
+        send(proc, { id: msg.id, result: { decision: "cancel" } });
+        return;
+      }
+      if (fullAccess) {
+        send(proc, { id: msg.id, result: { decision: "accept" } });
+        return;
+      }
+      const params = msg.params ?? {};
+      let answered = false;
+      const respond = (decision: "accept" | "decline" | "cancel") => {
+        if (answered) return;
+        answered = true;
+        pendingApprovals.delete(msg.id);
+        if (!procClosed) send(proc, { id: msg.id, result: { decision } });
+      };
+      pendingApprovals.set(msg.id, () => respond("cancel"));
+      void Promise.resolve()
+        .then(() => {
+          if (approvals.signal.aborted) return false;
+          return (
+            input.requestApproval?.(
+              {
+                toolUseId: typeof params.itemId === "string" ? params.itemId : String(msg.id),
+                toolName: isCommand ? "shell" : "file_edit",
+                toolInput: { ...params },
+                decisionReason: typeof params.reason === "string" ? params.reason : undefined,
+              },
+              approvals.signal,
+            ) ?? false
+          );
+        })
+        .then(
+          (allow) => respond(approvals.signal.aborted ? "cancel" : allow ? "accept" : "decline"),
+          () => respond("cancel"),
+        );
+    };
 
-    rl.on("line", (line) => {
-      if (!line.trim()) return;
+    const rl = proc.stdout
+      ? createInterface({ input: proc.stdout, crlfDelay: Number.POSITIVE_INFINITY })
+      : null;
+    rl?.on("line", (line) => {
+      if (!line.trim() || done) return;
       let msg: JsonRpcMessage;
       try {
         msg = JSON.parse(line);
       } catch {
         return;
       }
-
-      // One lookup instead of has-then-get-with-assertion: the map is keyed by
-      // request id, and a hit is the proof the handler exists.
+      if (!msg || typeof msg !== "object") return;
+      // Requests from the child have their own id namespace. Dispatch method
+      // requests first, including string ids, before looking up our responses.
+      if ((typeof msg.id === "number" || typeof msg.id === "string") && msg.method) {
+        handleServerRequest({ ...msg, id: msg.id });
+        return;
+      }
       if (typeof msg.id === "number") {
         const handler = pendingResponses.get(msg.id);
         if (handler) {
           pendingResponses.delete(msg.id);
           handler(msg);
-          return;
         }
-      }
-
-      if (typeof msg.id === "number" && msg.method) {
-        send(proc, { id: msg.id, result: { decision: "accept" } });
         return;
       }
-
-      if (msg.method === "turn/started") {
-        threadStarted = true;
-      }
-
       const usage = readCodexUsage(msg);
       if (usage) {
         usagePromptTokens = usage.promptTokens;
         usageCompletionTokens = usage.completionTokens;
         return;
       }
-
       const event = mapCodexEvent(msg);
-      if (event) {
-        if ((event.type === "done" || event.type === "error") && threadStarted) {
-          finish(event.type === "error" ? event : undefined);
-          return;
-        }
-        // Forward text deltas straight through: the UI appends them to the
-        // message body as they arrive. Buffering here would mean nothing
-        // reaches the UI until the turn ends.
-        if (event.type !== "done") {
-          onEvent(event);
-        }
-      }
+      if (!event) return;
+      if (event.type === "done" || event.type === "error") {
+        void finish(event.type === "error" ? event : undefined);
+      } else onEvent(event);
     });
-
     proc.on("error", (err) => {
-      // A spawn error may mean no 'close' will ever fire — unblock finish's await.
       settleClosed();
-      finish({ type: "error", content: err.message });
+      void finish({ type: "error", content: err.message });
     });
-
     proc.on("close", (code) => {
       settleClosed();
-      if (!done) {
-        if (code && code !== 0) {
-          finish({ type: "error", content: `Codex 进程退出，代码: ${code}` });
-        } else {
-          finish();
-        }
-      } else {
-        // finish already ran; its await on closedPromise is now unblocked, but
-        // settle here too in case it had already passed that point.
-        settle();
-      }
+      void finish(
+        code && code !== 0
+          ? { type: "error", content: `Codex 进程退出，代码: ${code}` }
+          : undefined,
+      );
     });
+    abortController.signal.addEventListener("abort", handleAbort, { once: true });
+    if (abortController.signal.aborted) {
+      handleAbort();
+      return;
+    }
+    if (!rl) {
+      void finish({ type: "error", content: "Codex process was spawned without stdout" });
+      return;
+    }
 
-    (async () => {
+    void (async () => {
       try {
         const initResp = await sendReq("initialize", {
           clientInfo: { name: "openhorn", title: "OpenHorn Agent", version: "1.0.0" },
           capabilities: {},
         });
+        if (done) return;
         if (initResp.error) {
-          finish({ type: "error", content: `Codex 初始化失败: ${initResp.error.message}` });
+          void finish({ type: "error", content: `Codex 初始化失败: ${initResp.error.message}` });
           return;
         }
         sendNotification(proc, "initialized");
-
         const threadResp = await sendReq("thread/start", {
           model,
           cwd,
-          approvalPolicy: "never",
-          sandbox: "danger-full-access",
+          approvalPolicy,
+          sandbox,
           developerInstructions: [
             buildAgentSystemPrompt({
               cwd,
-              permissionMode: "full-access",
+              permissionMode: input.permissionMode,
               extra:
                 "For simple lookups answerable by running a command or reading files (e.g. 'how many images in my Downloads'), act first — run `ls`/`find` immediately and report the result rather than listing options.",
             }),
@@ -387,31 +422,33 @@ export async function runCodexAgent(
             .filter(Boolean)
             .join("\n\n"),
         });
+        if (done) return;
         if (threadResp.error) {
-          finish({ type: "error", content: `Codex thread 创建失败: ${threadResp.error.message}` });
+          void finish({
+            type: "error",
+            content: `Codex thread 创建失败: ${threadResp.error.message}`,
+          });
           return;
         }
         const threadResult = threadResp.result as Record<string, unknown> | undefined;
         const thread = (threadResult?.thread ?? {}) as Record<string, unknown>;
-        threadId = typeof thread.id === "string" ? thread.id : "";
+        const threadId = typeof thread.id === "string" ? thread.id : "";
         if (!threadId) {
-          finish({ type: "error", content: "Codex 未返回 thread ID" });
+          void finish({ type: "error", content: "Codex 未返回 thread ID" });
           return;
         }
-        threadStarted = true;
-
         const turnResp = await sendReq("turn/start", {
           threadId,
           input: [{ type: "text", text: prompt }],
           model,
         });
-        if (turnResp.error) {
-          finish({ type: "error", content: `Codex turn 启动失败: ${turnResp.error.message}` });
-          return;
-        }
+        if (!done && turnResp.error)
+          void finish({ type: "error", content: `Codex turn 启动失败: ${turnResp.error.message}` });
       } catch (err) {
-        const message = err instanceof Error ? err.message : "Codex 启动失败";
-        finish({ type: "error", content: message });
+        void finish({
+          type: "error",
+          content: err instanceof Error ? err.message : "Codex 启动失败",
+        });
       }
     })();
   });

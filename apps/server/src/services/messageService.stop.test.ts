@@ -11,6 +11,7 @@ import {
   completeChatFromSidecar,
   editUserMessage,
   regenerateMessage,
+  streamMessage,
   syncSidecarMessages,
 } from "./messageService";
 
@@ -27,6 +28,7 @@ const realChannelService = { ...realChannelServiceNs };
 // What the fake provider streams before it waits to be aborted.
 let streamedChunks: string[] = [];
 let streamEnded: Promise<void> = Promise.resolve();
+let failProvider = false;
 
 beforeAll(() => {
   mock.module("./channelService", () => ({
@@ -49,6 +51,7 @@ beforeAll(() => {
         return (async function* () {
           try {
             for (const chunk of chunks) yield chunk;
+            if (failProvider) throw new Error("fixture provider disconnected");
             // Keep "generating" until the client stops the request.
             await new Promise<void>((resolve) => {
               if (options.signal?.aborted) return resolve();
@@ -261,6 +264,57 @@ test("regenerating an agent reply in place clears its earlier stop once it finis
     await sync("completed");
     expect((await read())?.finishReason).toBe(null);
   } finally {
+    await cleanup(ids.userId, ids.conversationId);
+  }
+});
+
+for (const operation of ["regenerate", "edit", "send"] as const) {
+  test(`chat ${operation} provider failure persists partial output and reports the error separately`, async () => {
+    const ids = await seed();
+    failProvider = true;
+    streamedChunks = ["partial ", '```openui\nroot = Text("fixture")'];
+    try {
+      const stream =
+        operation === "regenerate"
+          ? await regenerateMessage(ids.userId, ids.assistantMessageId)
+          : operation === "edit"
+            ? await editUserMessage(ids.userId, ids.userMessageId, "edited fixture")
+            : await streamMessage(ids.userId, {
+                conversationId: ids.conversationId,
+                content: "fixture question",
+                mode: "chat",
+              });
+      const events = (await new Response(stream).text())
+        .split("\n")
+        .filter((line) => line.startsWith("data: "))
+        .map((line) => JSON.parse(line.slice(6)));
+      const failure = events.find((event) => event.type === "error");
+      expect(failure?.message).toBe("fixture provider disconnected");
+      expect(typeof failure?.messageId).toBe("string");
+      const [row] = await db.select().from(messages).where(eq(messages.id, failure.messageId));
+      expect(row?.content).toBe(streamedChunks.join(""));
+      expect(row?.content).not.toContain("Error:");
+      expect(events.filter((event) => event.type === "done")).toHaveLength(0);
+    } finally {
+      failProvider = false;
+      await cleanup(ids.userId, ids.conversationId);
+    }
+  });
+}
+
+test("chat regenerate provider failure before output preserves the previous reply", async () => {
+  const ids = await seed();
+  failProvider = true;
+  streamedChunks = [];
+  try {
+    const raw = await new Response(
+      await regenerateMessage(ids.userId, ids.assistantMessageId),
+    ).text();
+    expect(raw).toContain("fixture provider disconnected");
+    const [row] = await db.select().from(messages).where(eq(messages.id, ids.assistantMessageId));
+    expect(row?.content).toBe("previous answer");
+  } finally {
+    failProvider = false;
     await cleanup(ids.userId, ids.conversationId);
   }
 });

@@ -55,8 +55,16 @@ export async function runCodexChat(
   input: RunCodexChatInput,
   dependencies: Partial<CodexChatDependencies> = {},
 ): Promise<void> {
+  if (input.abortController.signal.aborted) {
+    input.onEvent({ type: "done" });
+    return;
+  }
   const { prompt, systemPrompt } = codexChatContext(input.messages);
   const codexPath = await (dependencies.findBinary ?? findCodexBinary)();
+  if (input.abortController.signal.aborted) {
+    input.onEvent({ type: "done" });
+    return;
+  }
   if (!codexPath) {
     input.onEvent({
       type: "error",
@@ -73,6 +81,8 @@ export async function runCodexChat(
       "--model",
       input.model,
       "--json",
+      "--sandbox",
+      "read-only",
       "-c",
       'approval_policy="never"',
       ...(systemPrompt ? ["-c", `developer_instructions=${JSON.stringify(systemPrompt)}`] : []),
@@ -82,8 +92,7 @@ export async function runCodexChat(
       stdout: "pipe",
       stderr: "pipe",
       signal: input.abortController.signal,
-      // Codex runs with approval_policy="never" and a full shell — it must not
-      // inherit our handshake token or provider keys. Mirrors codex.ts.
+      // Keep our handshake token and provider keys out of the CLI environment.
       env: sanitizeChildEnv({ ...process.env }),
     },
   );
@@ -98,6 +107,8 @@ export async function runCodexChat(
   let buffer = "";
   let promptTokens = 0;
   let completionTokens = 0;
+  let failedTurn: string | undefined;
+  let lastError: string | undefined;
 
   const emitUsage = () => {
     const usage = buildUsageEvent(promptTokens, completionTokens);
@@ -117,6 +128,10 @@ export async function runCodexChat(
         if (!line.trim()) continue;
         try {
           const event = JSON.parse(line);
+          if (event.type === "turn.failed")
+            failedTurn = event.error?.message || "Codex turn failed";
+          if (event.type === "error" && typeof event.message === "string")
+            lastError = event.message;
           if (event.type === "item.completed" && event.item?.type === "agent_message") {
             const text = event.item.text || "";
             if (text) {
@@ -148,7 +163,11 @@ export async function runCodexChat(
 
   const exitCode = await proc.exited;
   emitUsage();
-  if (exitCode !== 0) {
+  if (input.abortController.signal.aborted) {
+    input.onEvent({ type: "done" });
+    return;
+  }
+  if (exitCode !== 0 || failedTurn) {
     const stderr = await stderrPromise;
     const errMsg = stderr
       .trim()
@@ -156,10 +175,11 @@ export async function runCodexChat(
       .filter((l) => !l.includes("ERROR rmcp"))
       .join("\n")
       .trim();
-    if (errMsg) {
-      input.onEvent({ type: "error", content: errMsg });
-      return;
-    }
+    input.onEvent({
+      type: "error",
+      content: failedTurn || lastError || errMsg || `Codex 进程退出，代码: ${exitCode}`,
+    });
+    return;
   }
 
   input.onEvent({ type: "done" });

@@ -1,0 +1,163 @@
+# Runtime Permissions and Cancellation
+
+## 1. Scope / Trigger
+
+Apply these contracts when changing `agent.run`, `chat.stream`, external CLI
+transports, the Full Access option, or Stop behavior. UI options must reach the
+runtime for the current turn. A cancelled turn must not start a later request
+or execute a command after a delayed approval.
+
+## 2. Signatures
+
+```ts
+type PermissionMode = "default" | "full-access";
+type CodexApproval = {
+  toolUseId: string;
+  toolName: string;
+  toolInput: Record<string, unknown>;
+  decisionReason?: string;
+};
+// RunCodexAgentInput:
+permissionMode?: PermissionMode;
+requestApproval?: (input: CodexApproval, signal: AbortSignal) => Promise<boolean>;
+// RunAcpAgentInput also accepts permissionMode and an optional second signal
+// argument on requestApproval, so callers without cancellation remain valid.
+
+waitForApproval(
+  pending: Map<string, (allow: boolean) => void>,
+  id: string,
+  signal: AbortSignal,
+  publish: () => void,
+): Promise<boolean>;
+```
+
+The WebSocket event remains `approval.request` with `runId`, a host-generated
+unique `toolUseId`, `toolName`, `toolInput`, and optional `decisionReason`.
+`approval.respond` resolves that host id. CLI request ids are separate protocol
+identities and must never be used as the shared connection's approval-map key.
+
+## 3. Contracts
+
+| Runtime / mode | Default or omitted permissionMode | Explicit full-access |
+|---|---|---|
+| Codex Agent | `untrusted` approval policy, `workspace-write` sandbox | `never`, `danger-full-access` |
+| Codex Chat fallback | Explicit `--sandbox read-only`, `approval_policy="never"` | No Full Access control exists in Chat |
+| ACP Agent | Classify execute requests; ask host for risky commands | Skip risk approval for this turn only |
+| Direct Agent | Risk approval for shell commands | Skip risk approval for this turn only |
+
+- Codex sets the same policy in process config and `thread/start`, and builds
+  its developer instructions with the actual per-run permission mode.
+- Codex supports `item/commandExecution/requestApproval` and
+  `item/fileChange/requestApproval`. The host response becomes single-use
+  `accept` or `decline`. A cancelled/failed approval becomes `cancel`.
+  No callback means decline. Unknown child methods receive JSON-RPC `-32601`.
+- Dispatch child requests (`id` plus `method`) before looking up outgoing RPC
+  responses. Both numeric and string child ids are valid; opposite directions
+  have independent id namespaces.
+- On Codex finish/Stop, cancel pending child approvals, abort their host signal,
+  settle outgoing RPC promises, remove listeners, and terminate/await the child.
+  Spawn it in an owned process group on POSIX and kill the group, including
+  descendants remaining after the app-server leader exits.
+  Recheck cancellation after binary discovery; do not spawn a pre-cancelled run.
+- ACP stores permissionMode on `TurnState`, never on cached session entries.
+  Its existing workspace filesystem boundaries remain active in both modes.
+  Abort during initialize/session creation kills the owned child and never
+  submits a prompt. Abort after model-config awaits must also skip the prompt.
+  Client filesystem requests require an active, non-cancelled turn. Recheck
+  turn identity/cancellation after checkpoint backup before starting a write.
+- Direct `Agent.prompt()` creates a fresh controller: calling `Agent.abort()`
+  before prompt does not cancel the future request. Check the caller signal at
+  entry and again after asynchronous setup, before prompt. Pass the pi tool's
+  signal into `executeTool`, check it after approval, and supply it to shell
+  execution. Host approval ownership ends on Stop.
+  The shell runner owns a detached POSIX process group; Stop/timeout/output
+  overflow kills the group and waits for close. Killing only the parent shell
+  leaves background descendants able to write after Stop. Direct write/edit
+  tools recheck after backup/path/read/mkdir awaits, immediately before writing.
+  Grep/find also receive cancellation signals and sanitized environments.
+- A live Chat/Agent run or pending approval owns its WebSocket regardless of
+  time since the last client input. `connectionIdle.ts` permits the five-minute
+  reaper only when both ownership maps are empty. Disable Bun's separate
+  WebSocket idle timeout (`idleTimeout: 0`) so it cannot override this rule;
+  outgoing run events also refresh the activity timestamp.
+- Per-run UI instructions and history are independent of access mode. Codex
+  uses developer instructions; ACP separates request instructions from user
+  context; Direct includes them in its system prompt. Omitted instructions
+  must not leak from a prior run on the same session.
+
+## 4. Validation & Error Matrix
+
+| Condition | Required result |
+|---|---|
+| Codex `params.turn.status === "failed"` | Forward `turn.error.message`, then one done event |
+| Codex `params.turn.status === "interrupted"` | Report interruption, then done |
+| Codex Chat JSON `turn.failed`, including empty stderr | Emit the provider failure, never a success done |
+| Codex Chat nonzero exit without a JSON failure | Emit stderr/error event or a nonempty exit-code fallback |
+| Older flat Codex completion payload | Continue accepting `params.status/error` |
+| Unknown child method, including id collision | `-32601`; do not consume our pending response |
+| Host declines command/file approval | `decline`; never blanket accept |
+| Stop while initializing / waiting for approval | No later prompt or approval acceptance; child closes |
+| Stop before Direct setup / during setup | Zero provider requests |
+| Late approval after Direct Stop | Zero shell side effects |
+| Stop during Direct write/edit checkpoint backup | Preserve original file |
+| ACP filesystem request after Stop | Reject before reading/writing |
+| Long run / approval wait past socket idle threshold | Keep socket connected |
+| ACP full-access followed by default reused session | Second turn asks again |
+| Host event publication throws | Remove approval resolver and reject the request |
+
+## 5. Good / Base / Bad Cases
+
+- Good: a default Codex run requests a file change, the user declines, and the
+  child receives exactly that decline. Stopping a later run clears its approval.
+- Base: Interactive is off; history still renders and the request carries no
+  added UI instructions. Access policy remains determined by Full Access.
+- Bad: force every Codex run to full access or return `{decision:"accept"}`
+  for every child method. Unknown protocol requests can require other payloads
+  and may represent actions unrelated to command approval.
+
+## 6. Tests Required
+
+- `runtimePermissions.test.ts` uses actual fake Codex/ACP subprocesses: check
+  omitted/default/full modes, numeric/string ids, collisions, unknown methods,
+  declined approval, nested failed completion, preabort, discovery cancellation,
+  pending approval cancellation, ACP initialization cancellation and session
+  mode reset. Local SSE verifies zero Direct requests for a pre-cancelled run;
+  a harmless temporary marker verifies no late-approved shell side effect.
+- `shell.test.ts` and the Codex descendant fixture verify a delayed background
+  child cannot write after Stop. Direct write/edit regressions cancel while a
+  real checkpoint backup is pending and assert the original file is unchanged.
+  The ACP fixture requests `fs/write_text_file` after `session/cancel`, and the
+  host rejects it. Always canonicalize temporary workspace roots; macOS `/var`
+  versus `/private/var` aliases can cause a false pass from a path-boundary error.
+- `connectionIdle.test.ts` checks expiry at the boundary, live run ownership,
+  pending approval ownership, and expiry after ownership ends.
+- `approval.test.ts` checks resolver cleanup, late replies and pre-cancelled
+  publication. `runtimePrompt.test.ts` inspects actual submitted payloads with
+  per-run instructions present and omitted on external transports, and checks
+  a real failed exec child emitting JSON with empty stderr cannot appear done.
+- `runtimeModes.test.ts` drives real Direct and Chat streams using a loopback
+  SSE provider. Verify both Interactive states, preserved prior turns, a real
+  two-step file-tool loop, accumulated usage, Stop during setup, and Stop after
+  partial output. These tests must never call a real model/provider.
+- Full Server tests use `apps/server/bunfig.toml` and an explicitly disposable
+  `OPENHORN_TEST_DATABASE_URL`; never run against the normal app's SQLite file.
+
+## 7. Wrong vs Correct
+
+```ts
+// Wrong: defaults silently bypass the visible permission control.
+sendThreadStart({ approvalPolicy: "never", sandbox: "danger-full-access" });
+// Correct: only the explicit toggle grants full access.
+const full = permissionMode === "full-access";
+sendThreadStart({
+  approvalPolicy: full ? "never" : "untrusted",
+  sandbox: full ? "danger-full-access" : "workspace-write",
+});
+
+// Wrong: abort() cannot cancel the controller a later prompt() creates.
+if (signal.aborted) agent.abort();
+await agent.prompt(prompt);
+// Correct: skip the call after setup cancellation.
+if (signal.aborted) return;
+await agent.prompt(prompt);
+```

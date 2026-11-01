@@ -43,6 +43,25 @@ async function captureFixture() {
 }
 
 describe("external runtime prompt context", () => {
+  test("Codex Chat surfaces a JSON failed turn even when stderr is empty", async () => {
+    const capture = await captureFixture();
+    const events: AgentEvent[] = [];
+    await runCodexChat(
+      {
+        model: "fixture",
+        messages: [{ role: "user", content: "fixture" }],
+        abortController: new AbortController(),
+        onEvent: (event) => events.push(event),
+      },
+      {
+        findBinary: async () => "fixture",
+        spawn: (_command, options) =>
+          Bun.spawn([process.execPath, fixture, "exec-failed", capture.file], options),
+      },
+    );
+    expect(events).toContainEqual({ type: "error", content: "fixture exec failed" });
+    expect(events.some((event) => event.type === "done")).toBe(false);
+  });
   test("omitted instructions preserve existing prompt bytes and history formatting", () => {
     const prompt = "  preserve whitespace\n";
     expect(withRunInstructions(prompt)).toBe(prompt);
@@ -92,7 +111,7 @@ describe("external runtime prompt context", () => {
       const params = thread?.params as Record<string, unknown>;
       const base = buildAgentSystemPrompt({
         cwd: capture.directory,
-        permissionMode: "full-access",
+        permissionMode: undefined,
         extra:
           "For simple lookups answerable by running a command or reading files (e.g. 'how many images in my Downloads'), act first — run `ls`/`find` immediately and report the result rather than listing options.",
       });

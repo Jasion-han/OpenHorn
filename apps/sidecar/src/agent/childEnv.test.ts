@@ -59,6 +59,7 @@ describe("sanitizeChildEnv", () => {
 describe("child env hygiene is wired into every model-facing spawn path", () => {
   const MODEL_FACING_RUNTIMES = [
     "src/agent/direct.ts",
+    "src/agent/shell.ts",
     "src/agent/codex.ts",
     "src/agent/chatCodex.ts",
     "src/agent/mcp-tools.ts",

@@ -1,4 +1,4 @@
-import { exec, execFile } from "node:child_process";
+import { execFile } from "node:child_process";
 import { lookup } from "node:dns/promises";
 import { mkdir, readdir, readFile } from "node:fs/promises";
 import path from "node:path";
@@ -56,6 +56,7 @@ import {
 import { type AgentEvent, buildUsageEvent, toCount } from "./events";
 import { buildIntentContext } from "./intent-context";
 import { capMcpTools, connectMcpTools } from "./mcp-tools";
+import { runShellCommand } from "./shell";
 import { buildSkillsPromptSection, type MaterializedSkill } from "./skills";
 import { buildAgentSystemPrompt, buildReActBehaviorSection } from "./system-prompt";
 
@@ -212,6 +213,7 @@ async function assertFetchableUrl(rawUrl: string): Promise<string | null> {
 // ---------------------------------------------------------------------------
 
 interface ExecuteToolOptions {
+  signal?: AbortSignal;
   permissionMode?: "default" | "full-access";
   tavilyApiKey?: string;
   /**
@@ -272,6 +274,7 @@ export async function executeTool(
   cwd: string,
   options?: ExecuteToolOptions,
 ): Promise<string> {
+  if (options?.signal?.aborted) return "Command cancelled";
   if (name === "bash") {
     const command = typeof input.command === "string" ? input.command.trim() : "";
     if (!command) return "Error: command is empty";
@@ -289,29 +292,12 @@ export async function executeTool(
         if (!allowed) return "Command rejected by user";
       }
     }
+    if (options?.signal?.aborted) return "Command cancelled";
 
-    return new Promise((resolve) => {
-      exec(
-        command,
-        {
-          cwd,
-          timeout: BASH_TIMEOUT_MS,
-          maxBuffer: BASH_MAX_BUFFER,
-          // Without this the command inherits OPENHORN_HANDSHAKE_TOKEN and
-          // every provider key — `printenv` would hand the model our own
-          // sidecar credentials.
-          env: sanitizeChildEnv(process.env),
-        },
-        (err, stdout, stderr) => {
-          const out = (stdout || "").trim();
-          const errOut = (stderr || "").trim();
-          if (err && !out && !errOut) {
-            resolve(`Error: ${err.message}`);
-          } else {
-            resolve([out, errOut].filter(Boolean).join("\n") || "(no output)");
-          }
-        },
-      );
+    return runShellCommand(command, cwd, {
+      signal: options?.signal,
+      timeoutMs: BASH_TIMEOUT_MS,
+      maxBuffer: BASH_MAX_BUFFER,
     });
   }
 
@@ -356,6 +342,7 @@ export async function executeTool(
       }
       const resolved = await resolveWritePathInWorkspace(cwd, filePath);
       await mkdir(path.dirname(resolved), { recursive: true });
+      if (options?.signal?.aborted) return "Command cancelled";
       await writeFileNoFollow(resolved, content);
       return `File written: ${filePath}`;
     } catch (err) {
@@ -377,6 +364,7 @@ export async function executeTool(
       const content = await readFile(resolved, "utf-8");
       if (!content.includes(oldStr)) return "Error: old_string not found in file";
       const updated = content.replace(oldStr, newStr);
+      if (options?.signal?.aborted) return "Command cancelled";
       await writeFileNoFollow(resolved, updated);
       return `File edited: ${filePath}`;
     } catch (err) {
@@ -407,7 +395,13 @@ export async function executeTool(
       execFile(
         "grep",
         args,
-        { cwd, timeout: SUBPROCESS_TIMEOUT_MS, maxBuffer: BASH_MAX_BUFFER },
+        {
+          cwd,
+          timeout: SUBPROCESS_TIMEOUT_MS,
+          maxBuffer: BASH_MAX_BUFFER,
+          signal: options?.signal,
+          env: sanitizeChildEnv(process.env),
+        },
         (_err, stdout) => {
           const out = (stdout || "").trim();
           if (!out) resolve("No matches found");
@@ -456,7 +450,13 @@ export async function executeTool(
       execFile(
         "find",
         args,
-        { cwd, timeout: SUBPROCESS_TIMEOUT_MS, maxBuffer: BASH_MAX_BUFFER },
+        {
+          cwd,
+          timeout: SUBPROCESS_TIMEOUT_MS,
+          maxBuffer: BASH_MAX_BUFFER,
+          signal: options?.signal,
+          env: sanitizeChildEnv(process.env),
+        },
         (_err, stdout) => {
           const out = (stdout || "").trim();
           if (!out) {
@@ -641,8 +641,11 @@ function makeAgentTool<T extends TSchema>(
     label,
     description,
     parameters,
-    execute: async (_toolCallId, params) => {
-      const result = await executeTool(name, params as Record<string, unknown>, cwd, options);
+    execute: async (_toolCallId, params, signal) => {
+      const result = await executeTool(name, params as Record<string, unknown>, cwd, {
+        ...options,
+        signal,
+      });
       return { content: [{ type: "text", text: result }], details: undefined };
     },
   };
@@ -875,6 +878,10 @@ export function toPiHistoryMessages(history: HistoryMessage[], model: Model<Api>
 // ---------------------------------------------------------------------------
 
 export async function runDirectAgent(input: RunDirectAgentInput): Promise<void> {
+  if (input.abortController.signal.aborted) {
+    input.onEvent({ type: "done" });
+    return;
+  }
   const images = getImageAttachments(input.attachments);
   const supportsVision = modelSupportsVision(input.model);
   const { injectable, unsupported } = supportsVision
@@ -1089,13 +1096,14 @@ export async function runDirectAgent(input: RunDirectAgentInput): Promise<void> 
 
   // Wire up external abort to the agent
   const onAbort = () => agent.abort();
-  if (input.abortController.signal.aborted) {
-    agent.abort();
-  } else {
+  if (!input.abortController.signal.aborted) {
     input.abortController.signal.addEventListener("abort", onAbort, { once: true });
   }
 
   try {
+    // Agent.prompt creates its own controller, so aborting the Agent before
+    // prompt() does not cancel that future request. Recheck after async setup.
+    if (input.abortController.signal.aborted) return;
     if (useVisionImages) {
       const piImages: ImageContent[] = injectable.map((img) => ({
         type: "image",

@@ -99,6 +99,7 @@ export type RunAcpAgentInput = {
   agent: AcpAgentConfig;
   prompt: string;
   systemPrompt?: string;
+  permissionMode?: "default" | "full-access";
   cwd: string;
   abortController: AbortController;
   checkpoint: CheckpointSession;
@@ -109,12 +110,15 @@ export type RunAcpAgentInput = {
   conversationHistory?: Array<{ role: "user" | "assistant"; content: string }>;
   attachments?: AttachmentPart[];
   mcpServers?: Record<string, Record<string, unknown>>;
-  requestApproval: (input: {
-    toolUseId: string;
-    toolName: string;
-    toolInput: Record<string, unknown>;
-    decisionReason?: string;
-  }) => Promise<boolean>;
+  requestApproval: (
+    input: {
+      toolUseId: string;
+      toolName: string;
+      toolInput: Record<string, unknown>;
+      decisionReason?: string;
+    },
+    signal?: AbortSignal,
+  ) => Promise<boolean>;
   onEvent: (event: AgentEvent) => void;
   onSessionId: (sessionId: string) => void;
   onCheckpointReady?: (runId: string) => void;
@@ -135,6 +139,8 @@ const STDERR_TAIL_LIMIT = 8 * 1024;
 type TurnState = {
   onEvent: (event: AgentEvent) => void;
   requestApproval: RunAcpAgentInput["requestApproval"];
+  permissionMode?: "default" | "full-access";
+  approvals: AbortController;
   checkpoint: CheckpointSession;
   /** Pending session/request_permission resolvers, so cancel can answer them all. */
   pendingPermissions: Set<(response: acp.RequestPermissionResponse) => void>;
@@ -457,7 +463,7 @@ async function handlePermissionRequest(
   params: acp.RequestPermissionRequest,
 ): Promise<acp.RequestPermissionResponse> {
   const turn = entry.turn;
-  if (!turn) {
+  if (!turn || turn.approvals.signal.aborted) {
     return { outcome: { outcome: "cancelled" } };
   }
   const toolCall = params.toolCall;
@@ -470,7 +476,7 @@ async function handlePermissionRequest(
   // risk-gated; everything else is auto-allowed because file access is already
   // workspace-bounded by the client fs handlers.
   let decisionReason: string | undefined;
-  if (toolCall.kind === "execute") {
+  if (toolCall.kind === "execute" && turn.permissionMode !== "full-access") {
     const command = typeof rawInput.command === "string" ? rawInput.command : "";
     const risk = classifyBashCommandRisk(command);
     if (risk.level !== "allow") {
@@ -484,12 +490,15 @@ async function handlePermissionRequest(
       return new Promise<acp.RequestPermissionResponse>((resolve) => {
         turn.pendingPermissions.add(resolve);
         turn
-          .requestApproval({
-            toolUseId: toolCall.toolCallId || crypto.randomUUID(),
-            toolName: toolCall.title || "execute",
-            toolInput: rawInput,
-            decisionReason,
-          })
+          .requestApproval(
+            {
+              toolUseId: toolCall.toolCallId || crypto.randomUUID(),
+              toolName: toolCall.title || "execute",
+              toolInput: rawInput,
+              decisionReason,
+            },
+            turn.approvals.signal,
+          )
           .then((allow) => {
             // Already answered "cancelled" by an abort — the protocol forbids a
             // second response.
@@ -516,6 +525,7 @@ async function handleReadTextFile(
   entry: AcpEntry,
   params: acp.ReadTextFileRequest,
 ): Promise<acp.ReadTextFileResponse> {
+  if (!entry.turn || entry.turn.approvals.signal.aborted) throw new Error("ACP turn cancelled");
   const { fsReadText } = await import("../fs");
   const relative = toWorkspaceRelative(entry.cwd, params.path);
   // Out-of-workspace reads (e.g. the agent's own ~/.claude session files) are
@@ -530,21 +540,20 @@ async function handleReadTextFile(
 }
 
 async function handleWriteTextFile(entry: AcpEntry, params: acp.WriteTextFileRequest) {
+  const turn = entry.turn;
+  if (!turn || turn.approvals.signal.aborted) throw new Error("ACP turn cancelled");
   const { fsWriteText } = await import("../fs");
   const relative = toWorkspaceRelative(entry.cwd, params.path);
-  const turn = entry.turn;
-  if (turn) {
-    try {
-      await ensureCheckpointBackup(turn.checkpoint, relative);
-    } catch (error) {
-      // Best-effort, same as the Claude runtime's PreToolUse hook: a checkpoint
-      // failure must not block the write, but it must be visible.
-      console.error(
-        `[acp-agent] checkpoint backup failed for ${params.path}:`,
-        error instanceof Error ? error.message : error,
-      );
-    }
+  try {
+    await ensureCheckpointBackup(turn.checkpoint, relative);
+  } catch (error) {
+    // A checkpoint failure must be visible but does not block a live write.
+    console.error(
+      `[acp-agent] checkpoint backup failed for ${params.path}:`,
+      error instanceof Error ? error.message : error,
+    );
   }
+  if (entry.turn !== turn || turn.approvals.signal.aborted) throw new Error("ACP turn cancelled");
   await fsWriteText({ workspaceRoot: entry.cwd, filePath: relative, content: params.content });
 }
 
@@ -585,9 +594,11 @@ type CreateEntryInput = {
   agent: AcpAgentConfig;
   cwd: string;
   mcpServers?: Record<string, Record<string, unknown>>;
+  abortController?: AbortController;
 };
 
 async function createEntry(input: CreateEntryInput): Promise<AcpEntry> {
+  input.abortController?.signal.throwIfAborted();
   const { agent: config, cwd } = input;
   const child = spawn(config.command, config.args ?? [], {
     cwd,
@@ -652,6 +663,14 @@ async function createEntry(input: CreateEntryInput): Promise<AcpEntry> {
       return handleWriteTextFile(entry, ctx.params);
     })
     .connect(stream);
+
+  const handleSetupAbort = () => {
+    exitedEarly(new Error("ACP run cancelled during initialization"));
+    connection.close();
+    killProcessTree(child, "SIGKILL");
+  };
+  input.abortController?.signal.addEventListener("abort", handleSetupAbort, { once: true });
+  if (input.abortController?.signal.aborted) handleSetupAbort();
 
   try {
     const init = await Promise.race([
@@ -732,6 +751,8 @@ async function createEntry(input: CreateEntryInput): Promise<AcpEntry> {
     }
     killProcessTree(child, "SIGKILL");
     throw error;
+  } finally {
+    input.abortController?.signal.removeEventListener("abort", handleSetupAbort);
   }
 }
 
@@ -794,15 +815,21 @@ export async function runAcpAgent(input: RunAcpAgentInput): Promise<void> {
     try {
       entry = await createEntry(input);
     } catch (error) {
-      onEvent({
-        type: "error",
-        content: error instanceof Error ? error.message : "ACP agent 启动失败",
-      });
+      if (!abortController.signal.aborted)
+        onEvent({
+          type: "error",
+          content: error instanceof Error ? error.message : "ACP agent 启动失败",
+        });
       onEvent({ type: "done" });
       return;
     }
     entries.set(entry.sessionId, entry);
     input.onSessionId(entry.sessionId);
+  }
+  if (abortController.signal.aborted) {
+    destroyEntry(entry);
+    onEvent({ type: "done" });
+    return;
   }
 
   const promptText = withRunInstructions(
@@ -816,6 +843,8 @@ export async function runAcpAgent(input: RunAcpAgentInput): Promise<void> {
   const turn: TurnState = {
     onEvent,
     requestApproval: input.requestApproval,
+    permissionMode: input.permissionMode,
+    approvals: new AbortController(),
     checkpoint: input.checkpoint,
     pendingPermissions: new Set(),
     usage: { promptTokens: 0, completionTokens: 0 },
@@ -826,6 +855,7 @@ export async function runAcpAgent(input: RunAcpAgentInput): Promise<void> {
   let cancelTimer: ReturnType<typeof setTimeout> | null = null;
   const activeEntry = entry;
   const handleAbort = () => {
+    turn.approvals.abort();
     // Protocol MUST: answer every pending permission request with "cancelled"
     // before/while cancelling, or the agent's await hangs forever.
     for (const resolve of turn.pendingPermissions) {
@@ -842,64 +872,65 @@ export async function runAcpAgent(input: RunAcpAgentInput): Promise<void> {
   };
   abortController.signal.addEventListener("abort", handleAbort, { once: true });
 
-  // Emit agent_info at the start of the turn so the UI can display it.
-  if (entry.agentInfo) {
-    onEvent({
-      type: "agent_info",
-      agentName: entry.agentInfo.name,
-      agentVersion: entry.agentInfo.version,
-    });
-  }
+  try {
+    // Emit agent_info at the start of the turn so the UI can display it.
+    if (entry.agentInfo) {
+      onEvent({
+        type: "agent_info",
+        agentName: entry.agentInfo.name,
+        agentVersion: entry.agentInfo.version,
+      });
+    }
 
-  // Emit available models from session config options.
-  if (entry.availableModels && entry.availableModels.length > 0) {
-    onEvent({ type: "available_models", models: entry.availableModels });
-  }
+    // Emit available models from session config options.
+    if (entry.availableModels && entry.availableModels.length > 0) {
+      onEvent({ type: "available_models", models: entry.availableModels });
+    }
 
-  // If the user selected a specific model (from the ACP model picker), apply it
-  // via session/set_config_option before the prompt. Only call when the model
-  // matches a known option to avoid spurious errors on placeholder values.
-  if (input.model && entry.modelConfigId && entry.availableModels) {
-    const isKnownModel = entry.availableModels.some((m) => m.id === input.model);
-    if (isKnownModel) {
-      try {
-        const resp = await entry.connection.agent.request(
-          acp.AGENT_METHODS.session_set_config_option,
-          {
-            sessionId: entry.sessionId,
-            configId: entry.modelConfigId,
-            value: input.model,
-          },
-        );
-        // Update the entry's available models from the response.
-        const updatedConfig = extractModelConfig(
-          (resp as { configOptions?: unknown }).configOptions as
-            | Array<{
-                id?: string;
-                name?: string;
-                category?: string | null;
-                type?: string;
-                currentValue?: unknown;
-                options?: unknown;
-              }>
-            | null
-            | undefined,
-        );
-        if (updatedConfig) {
-          entry.modelConfigId = updatedConfig.configId;
-          entry.availableModels = updatedConfig.models;
+    // If the user selected a specific model (from the ACP model picker), apply it
+    // via session/set_config_option before the prompt. Only call when the model
+    // matches a known option to avoid spurious errors on placeholder values.
+    if (input.model && entry.modelConfigId && entry.availableModels) {
+      const isKnownModel = entry.availableModels.some((m) => m.id === input.model);
+      if (isKnownModel) {
+        try {
+          const resp = await entry.connection.agent.request(
+            acp.AGENT_METHODS.session_set_config_option,
+            {
+              sessionId: entry.sessionId,
+              configId: entry.modelConfigId,
+              value: input.model,
+            },
+          );
+          // Update the entry's available models from the response.
+          const updatedConfig = extractModelConfig(
+            (resp as { configOptions?: unknown }).configOptions as
+              | Array<{
+                  id?: string;
+                  name?: string;
+                  category?: string | null;
+                  type?: string;
+                  currentValue?: unknown;
+                  options?: unknown;
+                }>
+              | null
+              | undefined,
+          );
+          if (updatedConfig) {
+            entry.modelConfigId = updatedConfig.configId;
+            entry.availableModels = updatedConfig.models;
+          }
+        } catch (error) {
+          // Best-effort: a failed set_config_option must not block the prompt.
+          console.error(
+            "[acp-agent] set_config_option failed:",
+            error instanceof Error ? error.message : error,
+          );
         }
-      } catch (error) {
-        // Best-effort: a failed set_config_option must not block the prompt.
-        console.error(
-          "[acp-agent] set_config_option failed:",
-          error instanceof Error ? error.message : error,
-        );
       }
     }
-  }
 
-  try {
+    if (abortController.signal.aborted) return;
     const promptDone = entry.session.prompt(promptText);
     // The stop message below is the real completion signal; this catch only
     // prevents an unhandled rejection when the connection dies mid-turn.
@@ -986,6 +1017,9 @@ export async function runAcpAgent(input: RunAcpAgentInput): Promise<void> {
       onEvent(usage);
     }
   } finally {
+    turn.approvals.abort();
+    for (const respond of turn.pendingPermissions) respond({ outcome: { outcome: "cancelled" } });
+    turn.pendingPermissions.clear();
     abortController.signal.removeEventListener("abort", handleAbort);
     if (cancelTimer) clearTimeout(cancelTimer);
     entry.turn = null;
@@ -998,7 +1032,6 @@ export async function runAcpAgent(input: RunAcpAgentInput): Promise<void> {
         // Best-effort, same as the Claude runtime.
       }
     }
+    onEvent({ type: "done" });
   }
-
-  onEvent({ type: "done" });
 }

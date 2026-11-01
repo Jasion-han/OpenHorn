@@ -105,6 +105,23 @@ export class AgentModeUnsupportedError extends Error {
   }
 }
 
+export class ChatModeUnsupportedError extends Error {
+  readonly code = "chat_mode_unsupported";
+  constructor() {
+    super("ACP 渠道仅支持桌面端 Agent 模式，请切换到 Agent 模式后重试。");
+    this.name = "ChatModeUnsupportedError";
+  }
+}
+
+async function resolveChatChannelForConversation(
+  userId: string,
+  conversation: Parameters<typeof getResolvedChannelForConversation>[1],
+) {
+  const resolved = await getResolvedChannelForConversation(userId, conversation);
+  if (resolved?.channel.protocol === "acp") throw new ChatModeUnsupportedError();
+  return resolved;
+}
+
 export interface SendMessageInput {
   conversationId: string;
   content: string;
@@ -435,6 +452,7 @@ export async function sendMessage(userId: string, input: SendMessageInput) {
     throw new AgentModeUnsupportedError();
   }
   const conversation = await getConversationForUser(userId, input.conversationId);
+  const resolvedChannel = await resolveChatChannelForConversation(userId, conversation);
 
   const userMessageId = generateId();
   const now = new Date();
@@ -460,7 +478,6 @@ export async function sendMessage(userId: string, input: SendMessageInput) {
     .set({ updatedAt: now })
     .where(eq(conversations.id, input.conversationId));
 
-  const resolvedChannel = await getResolvedChannelForConversation(userId, conversation);
   const settings = await getSettingValues(userId, [TAVILY_API_KEY_SETTING, TAVILY_ENABLED_SETTING]);
   const classifier = resolvedChannel
     ? (prompt: string) =>
@@ -609,9 +626,9 @@ export async function streamMessage(
   if (input.mode !== "chat") {
     throw new AgentModeUnsupportedError();
   }
+  const conversation = await getConversationForUser(userId, input.conversationId);
+  const resolvedChannel = await resolveChatChannelForConversation(userId, conversation);
   return createSseStream(async (send, ctx) => {
-    const conversation = await getConversationForUser(userId, input.conversationId);
-
     const userMessageId = generateId();
     const now = new Date();
     await db.insert(messages).values({
@@ -642,7 +659,6 @@ export async function streamMessage(
       })
       .where(eq(conversations.id, input.conversationId));
 
-    const resolvedChannel = await getResolvedChannelForConversation(userId, conversation);
     const settings = await getSettingValues(userId, [
       GLOBAL_SYSTEM_PROMPT_KEY,
       TAVILY_API_KEY_SETTING,
@@ -737,37 +753,19 @@ export async function streamMessage(
       resolvedChannel.channel.baseUrl || undefined,
     );
 
-    let responseContent = "";
-    try {
-      const stream = await adapter.chatStream({
-        model: resolvedChannel.modelId,
-        messages: chatMessages,
-        maxTokens: 4096,
-        signal: ctx.signal,
-      });
-
-      for await (const chunk of stream) {
-        if (typeof chunk !== "string" || chunk.length === 0) {
-          continue;
-        }
-        responseContent += chunk;
-        send({ type: "delta", content: chunk });
-      }
-      recordChannelSuccess(streamChannelId);
-    } catch (error) {
-      // A client disconnect aborts ctx.signal, which surfaces here as an abort
-      // error. That is a normal cancellation, not a failure — keep whatever
-      // partial content already streamed instead of overwriting it with an
-      // "Error:" message that would be persisted as the assistant's reply.
-      if (!ctx.signal.aborted) {
-        const message = error instanceof Error ? error.message : "Stream error";
-        responseContent = `Error: ${message}`;
-        const classified = classifyProviderError(message);
-        if (classified.retryable) {
-          recordChannelFailure(streamChannelId);
-        }
-      }
-    }
+    const {
+      content: responseContent,
+      stopped,
+      error: streamError,
+    } = await streamReplyUntilStopped(
+      adapter,
+      { model: resolvedChannel.modelId, messages: chatMessages, signal: ctx.signal },
+      send,
+    );
+    if (streamError) {
+      const classified = classifyProviderError(streamError);
+      if (classified.retryable) recordChannelFailure(streamChannelId);
+    } else if (!stopped) recordChannelSuccess(streamChannelId);
 
     await db
       .update(messages)
@@ -776,7 +774,7 @@ export async function streamMessage(
         model: resolvedChannel.modelId,
         liveMetadata: serializeLiveMetadata(liveContext),
         citations: serializeCitations(liveContext.citations),
-        finishReason: assistantFinishReason(ctx.signal.aborted ? "stopped" : null, null),
+        finishReason: assistantFinishReason(stopped ? "stopped" : null, null),
         updatedAt: new Date(),
       })
       .where(eq(messages.id, assistantMessageId));
@@ -794,11 +792,17 @@ export async function streamMessage(
     // Fire-and-forget: generate summary if the conversation is long enough
     void maybeSummarize(userId, input.conversationId).catch(() => {});
 
-    send({
-      type: "done",
-      messageId: assistantMessageId,
-      model: resolvedChannel.modelId,
-    });
+    send(
+      streamError
+        ? {
+            type: "error",
+            message: streamError,
+            content: streamError,
+            messageId: assistantMessageId,
+            model: resolvedChannel.modelId,
+          }
+        : { type: "done", messageId: assistantMessageId, model: resolvedChannel.modelId },
+    );
   });
 }
 
@@ -807,14 +811,16 @@ export async function streamMessage(
  * request is aborted, which aborts `signal`) is "stop generating", not a
  * failure: the text streamed so far is returned — with `stopped` set, so the
  * caller stores the reply as stopped — and persisted like any finished reply.
- * Any other provider error propagates unchanged.
+ * Provider failures retain the accumulated text and report their error separately,
+ * so every caller can persist the partial reply before emitting its terminal event.
  */
 async function streamReplyUntilStopped(
   adapter: ReturnType<typeof createAdapter>,
   input: { model: string; messages: ChatMessage[]; signal: AbortSignal },
   send: (event: { type: string; [key: string]: unknown }) => void,
-): Promise<{ content: string; stopped: boolean }> {
+): Promise<{ content: string; stopped: boolean; error?: string }> {
   let responseContent = "";
+  let streamError: string | undefined;
   try {
     const stream = await adapter.chatStream({
       model: input.model,
@@ -828,24 +834,25 @@ async function streamReplyUntilStopped(
       send({ type: "delta", content: chunk });
     }
   } catch (error) {
-    if (!input.signal.aborted) throw error;
+    if (!input.signal.aborted)
+      streamError = error instanceof Error ? error.message : "Stream error";
   }
   // Read once the stream has ended, however it ended: some adapters end the
   // iteration quietly on abort instead of throwing.
-  return { content: responseContent, stopped: input.signal.aborted };
+  return { content: responseContent, stopped: input.signal.aborted, error: streamError };
 }
 
 /**
  * Edit-and-resend replays the round as the mode of its reply (or, when the user
  * message is the conversation tail, of the user message). An agent round is
  * re-run by the sidecar, never here — reject it before the stream opens so the
- * caller gets a 4xx instead of an SSE error. Missing / foreign messages fall
- * through to the stream, which reports them as before.
+ * caller gets a 4xx instead of an SSE error. Resolve capability only after
+ * ownership, before any edit. Missing messages keep their existing SSE error.
  */
-async function assertEditTargetsChatTurn(userId: string, userMessageId: string) {
+async function prepareEditedChatTurn(userId: string, userMessageId: string) {
   const [userMsg] = await db.select().from(messages).where(eq(messages.id, userMessageId));
   if (!userMsg || userMsg.role !== "user") return;
-  await getConversationForUser(userId, userMsg.conversationId);
+  const conversation = await getConversationForUser(userId, userMsg.conversationId);
   const allMsgs = await getMessages(userMsg.conversationId);
   const idx = allMsgs.findIndex((m) => m.id === userMessageId);
   if (idx < 0) return;
@@ -853,6 +860,8 @@ async function assertEditTargetsChatTurn(userId: string, userMessageId: string) 
   if ((nextMsg?.mode ?? userMsg.mode) === "agent") {
     throw new AgentModeUnsupportedError();
   }
+  const resolvedChannel = await resolveChatChannelForConversation(userId, conversation);
+  return { userMsg, conversation, allMsgs, idx, resolvedChannel };
 }
 
 export async function editUserMessage(
@@ -864,22 +873,13 @@ export async function editUserMessage(
     appendSystemPrompt?: string;
   },
 ): Promise<ReadableStream> {
-  await assertEditTargetsChatTurn(userId, userMessageId);
+  const prepared = await prepareEditedChatTurn(userId, userMessageId);
   return createSseStream(async (send, ctx) => {
-    const [userMsg] = await db.select().from(messages).where(eq(messages.id, userMessageId));
-    if (!userMsg || userMsg.role !== "user") {
+    if (!prepared) {
       send({ type: "error", message: "Message not found" });
       return;
     }
-
-    const conversation = await getConversationForUser(userId, userMsg.conversationId);
-
-    const allMsgs = await getMessages(userMsg.conversationId);
-    const idx = allMsgs.findIndex((m) => m.id === userMessageId);
-    if (idx < 0) {
-      send({ type: "error", message: "Message not found" });
-      return;
-    }
+    const { userMsg, conversation, allMsgs, idx, resolvedChannel } = prepared;
 
     const nextMsg = idx >= 0 ? allMsgs[idx + 1] : null;
     const shouldCreateAssistantReply = !nextMsg;
@@ -900,7 +900,6 @@ export async function editUserMessage(
     const contextMsgs = allMsgs
       .slice(0, idx + 1)
       .map((m) => (m.id === userMessageId ? { ...m, content: newContent.trim() } : m));
-    const resolvedChannel = await getResolvedChannelForConversation(userId, conversation);
     const settings = await getSettingValues(userId, [
       GLOBAL_SYSTEM_PROMPT_KEY,
       TAVILY_API_KEY_SETTING,
@@ -969,7 +968,11 @@ export async function editUserMessage(
       resolvedChannel.channel.baseUrl || undefined,
     );
 
-    const { content: responseContent, stopped } = await streamReplyUntilStopped(
+    const {
+      content: responseContent,
+      stopped,
+      error: streamError,
+    } = await streamReplyUntilStopped(
       adapter,
       { model: resolvedChannel.modelId, messages: chatMessages, signal: ctx.signal },
       send,
@@ -988,7 +991,17 @@ export async function editUserMessage(
       .where(eq(messages.id, assistantMessageId));
     await ftsUpsert(assistantMessageId, userMsg.conversationId, responseContent);
 
-    send({ type: "done", messageId: assistantMessageId, model: resolvedChannel.modelId });
+    send(
+      streamError
+        ? {
+            type: "error",
+            message: streamError,
+            content: streamError,
+            messageId: assistantMessageId,
+            model: resolvedChannel.modelId,
+          }
+        : { type: "done", messageId: assistantMessageId, model: resolvedChannel.modelId },
+    );
   });
 }
 
@@ -1017,27 +1030,23 @@ export async function regenerateMessage(
     });
   }
 
+  if (!prefetchedAssistantMsg || prefetchedAssistantMsg.role !== "assistant") {
+    return createSseStream(async (send) => {
+      send({ type: "error", message: "Message not found" });
+    });
+  }
+  const assistantMsg = prefetchedAssistantMsg;
+  const conversation = await getConversationForUser(userId, assistantMsg.conversationId);
   // An agent reply is regenerated by the sidecar, never here.
-  if (prefetchedAssistantMsg?.role === "assistant" && prefetchedAssistantMsg.mode === "agent") {
-    await getConversationForUser(userId, prefetchedAssistantMsg.conversationId);
+  if (assistantMsg.mode === "agent") {
     throw new AgentModeUnsupportedError();
   }
+  const resolvedChannel = await resolveChatChannelForConversation(userId, conversation);
 
   return createSseStream(async (send, ctx) => {
-    const assistantMsg =
-      prefetchedAssistantMsg && prefetchedAssistantMsg.role === "assistant"
-        ? prefetchedAssistantMsg
-        : (await db.select().from(messages).where(eq(messages.id, assistantMessageId)))[0];
-    if (!assistantMsg || assistantMsg.role !== "assistant") {
-      send({ type: "error", message: "Message not found" });
-      return;
-    }
-
-    const conversation = await getConversationForUser(userId, assistantMsg.conversationId);
     const allMsgs = await getMessages(assistantMsg.conversationId);
     const idx = allMsgs.findIndex((m) => m.id === assistantMessageId);
     const contextMsgs = idx > 0 ? allMsgs.slice(0, idx) : allMsgs;
-    const resolvedChannel = await getResolvedChannelForConversation(userId, conversation);
     const settings = await getSettingValues(userId, [
       GLOBAL_SYSTEM_PROMPT_KEY,
       TAVILY_API_KEY_SETTING,
@@ -1090,14 +1099,28 @@ export async function regenerateMessage(
       resolvedChannel.channel.baseUrl || undefined,
     );
 
-    const { content: responseContent, stopped } = await streamReplyUntilStopped(
+    const {
+      content: responseContent,
+      stopped,
+      error: streamError,
+    } = await streamReplyUntilStopped(
       adapter,
       { model: resolvedChannel.modelId, messages: chatMessages, signal: ctx.signal },
       send,
     );
     // Stopped before anything was generated: nothing replaces the previous
     // reply, so it stays as it was (its own finish reason included).
-    if (stopped && !responseContent) return;
+    if ((stopped || streamError) && !responseContent) {
+      if (streamError)
+        send({
+          type: "error",
+          message: streamError,
+          content: streamError,
+          messageId: assistantMessageId,
+          model: resolvedChannel.modelId,
+        });
+      return;
+    }
 
     await db
       .update(messages)
@@ -1112,7 +1135,17 @@ export async function regenerateMessage(
       .where(eq(messages.id, assistantMessageId));
     await ftsUpsert(assistantMessageId, assistantMsg.conversationId, responseContent);
 
-    send({ type: "done", messageId: assistantMessageId, model: resolvedChannel.modelId });
+    send(
+      streamError
+        ? {
+            type: "error",
+            message: streamError,
+            content: streamError,
+            messageId: assistantMessageId,
+            model: resolvedChannel.modelId,
+          }
+        : { type: "done", messageId: assistantMessageId, model: resolvedChannel.modelId },
+    );
   });
 }
 
@@ -1346,6 +1379,13 @@ export async function prepareChatForSidecar(
   input: PrepareChatInput,
 ): Promise<PrepareChatResult> {
   const conversation = await getConversationForUser(userId, input.conversationId);
+  const resolvedChannel = await resolveChatChannelForConversation(userId, conversation);
+  if (!resolvedChannel) {
+    const message = conversation.channelId
+      ? "该对话选择的渠道/模型不可用（可能已被禁用或已删除）。请在对话中重新选择模型。"
+      : "未配置可用的默认渠道/默认模型。请先在设置中完成配置后再开始对话。";
+    throw new Error(message);
+  }
 
   const now = new Date();
   const userMessageId = generateId();
@@ -1372,14 +1412,6 @@ export async function prepareChatForSidecar(
     .update(conversations)
     .set({ updatedAt: now, lastMode: "chat", runStatus: null })
     .where(eq(conversations.id, input.conversationId));
-
-  const resolvedChannel = await getResolvedChannelForConversation(userId, conversation);
-  if (!resolvedChannel) {
-    const message = conversation.channelId
-      ? "该对话选择的渠道/模型不可用（可能已被禁用或已删除）。请在对话中重新选择模型。"
-      : "未配置可用的默认渠道/默认模型。请先在设置中完成配置后再开始对话。";
-    throw new Error(message);
-  }
 
   await db.insert(messages).values({
     id: assistantMessageId,

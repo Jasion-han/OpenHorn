@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { parseAppendSystemPrompt } from "../services/appendSystemPrompt";
 import {
   AgentModeUnsupportedError,
+  ChatModeUnsupportedError,
   completeChatFromSidecar,
   deleteMessage,
   editUserMessage,
@@ -39,8 +40,8 @@ function parseUsagePayload(
   return { promptTokens, completionTokens, totalTokens };
 }
 
-/** Body for a rejected agent-mode request; agent turns run only in the sidecar. */
-function agentModeUnsupportedBody(error: AgentModeUnsupportedError) {
+/** Capability errors are rejected before opening a stream or writing a turn. */
+function modeUnsupportedBody(error: AgentModeUnsupportedError | ChatModeUnsupportedError) {
   return { error: error.message, code: error.code };
 }
 
@@ -90,8 +91,8 @@ messages.post("/", async (c) => {
     const result = await sendMessage(user.id, body);
     return c.json(result);
   } catch (error) {
-    if (error instanceof AgentModeUnsupportedError) {
-      return c.json(agentModeUnsupportedBody(error), 400);
+    if (error instanceof AgentModeUnsupportedError || error instanceof ChatModeUnsupportedError) {
+      return c.json(modeUnsupportedBody(error), 400);
     }
     return c.json(
       {
@@ -127,8 +128,8 @@ messages.post("/stream", async (c) => {
       },
     });
   } catch (error) {
-    if (error instanceof AgentModeUnsupportedError) {
-      return c.json(agentModeUnsupportedBody(error), 400);
+    if (error instanceof AgentModeUnsupportedError || error instanceof ChatModeUnsupportedError) {
+      return c.json(modeUnsupportedBody(error), 400);
     }
     return c.json(
       {
@@ -171,8 +172,8 @@ messages.post("/:id/regenerate", async (c) => {
       },
     });
   } catch (error) {
-    if (error instanceof AgentModeUnsupportedError) {
-      return c.json(agentModeUnsupportedBody(error), 400);
+    if (error instanceof AgentModeUnsupportedError || error instanceof ChatModeUnsupportedError) {
+      return c.json(modeUnsupportedBody(error), 400);
     }
     return c.json({ error: error instanceof Error ? error.message : "Failed" }, 400);
   }
@@ -202,8 +203,8 @@ messages.post("/:id/edit", async (c) => {
       },
     });
   } catch (error) {
-    if (error instanceof AgentModeUnsupportedError) {
-      return c.json(agentModeUnsupportedBody(error), 400);
+    if (error instanceof AgentModeUnsupportedError || error instanceof ChatModeUnsupportedError) {
+      return c.json(modeUnsupportedBody(error), 400);
     }
     return c.json({ error: error instanceof Error ? error.message : "Failed" }, 400);
   }
@@ -228,6 +229,9 @@ messages.post("/chat/prepare", async (c) => {
     });
     return c.json(result);
   } catch (error) {
+    if (error instanceof ChatModeUnsupportedError) {
+      return c.json(modeUnsupportedBody(error), 400);
+    }
     return c.json(
       { error: error instanceof Error ? error.message : "Failed to prepare chat" },
       400,

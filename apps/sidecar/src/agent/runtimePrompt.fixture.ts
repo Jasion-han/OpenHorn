@@ -25,6 +25,11 @@ if (mode === "agent") {
       reply({ method: "turn/completed", params: { status: "completed" } });
     }
   });
+} else if (mode === "exec-failed") {
+  process.stdout.write(
+    `${JSON.stringify({ type: "turn.failed", error: { message: "fixture exec failed" } })}\n`,
+  );
+  process.exitCode = 1;
 } else if (mode === "exec") {
   record({ command: JSON.parse(commandJson ?? "[]") });
   process.stdout.write(

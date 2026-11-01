@@ -11,6 +11,7 @@ delete process.env.CLAUDE_CODE_BRIDGE_SESSION_ID;
 delete process.env.CLAUDE_CODE_SESSION_ID;
 
 import { preconnectAcpAgent, runAcpAgent } from "./agent/acp";
+import { waitForApproval } from "./agent/approval";
 import { runChatStream } from "./agent/chat";
 import { runCodexChat } from "./agent/chatCodex";
 import { runClaudeAgent } from "./agent/claude";
@@ -18,7 +19,6 @@ import { runCodexAgent } from "./agent/codex";
 import { runDirectAgent } from "./agent/direct";
 import { drainMcpPool, testMcpServer } from "./agent/mcp-tools";
 import { resolveSkills } from "./agent/skills";
-
 import { detectAllCredentials, detectCredentialForProtocol } from "./auth";
 import type { CheckpointSession } from "./checkpoints";
 import {
@@ -26,6 +26,7 @@ import {
   discardCheckpointIfEmpty,
   rollbackCheckpoint,
 } from "./checkpoints";
+import { shouldReapIdleConnection } from "./connectionIdle";
 
 function isChatGptOAuthToken(key: string): boolean {
   if (!key.startsWith("eyJ")) return false;
@@ -153,6 +154,8 @@ const server = Bun.serve({
     return new Response("OpenHorn sidecar", { status: 200 });
   },
   websocket: {
+    // Application-aware reaping below keeps active runs and approval waits alive.
+    idleTimeout: 0,
     open(ws) {
       wsStates.set(ws, {
         authed: false,
@@ -211,7 +214,7 @@ setInterval(() => {
   for (const ws of activeConnections) {
     const state = wsStates.get(ws);
     if (!state) continue;
-    if (now - state.lastActivityAt > IDLE_TIMEOUT_MS) {
+    if (shouldReapIdleConnection(state, now, IDLE_TIMEOUT_MS)) {
       try {
         ws.close(1000, "Idle timeout");
       } catch {
@@ -355,6 +358,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
         ws.send(JSON.stringify(buildOkResponse(request.requestId, { runId })));
 
         const onEvent = (event: import("./agent/events").AgentEvent) => {
+          state.lastActivityAt = Date.now();
           ws.send(JSON.stringify(buildEvent("agent.event", { runId, event })));
         };
 
@@ -461,6 +465,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
           state.ownedRunIds.add(runId);
           ws.send(JSON.stringify(buildOkResponse(request.requestId, { runId })));
           const onEvent = (event: import("./agent/events").AgentEvent) => {
+            state.lastActivityAt = Date.now();
             ws.send(JSON.stringify(buildEvent("agent.event", { runId, event })));
           };
           const guard = (label: string, promise: Promise<void>, checkpoint?: CheckpointSession) => {
@@ -492,17 +497,32 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
           usesCodex || protocol === "acp" ? [] : await resolveSkills(skills);
 
         if (protocol === "codex_cli" || forceCodexCli) {
-          const { onEvent, guard } = initRun("codex");
+          const { runId, onEvent, guard } = initRun("codex");
           guard(
             "Codex agent",
             runCodexAgent({
               model,
               prompt,
               systemPrompt,
+              permissionMode,
               cwd,
               abortController,
               attachments,
               conversationHistory,
+              requestApproval: (approvalInput, signal) => {
+                const approvalId = `approval-${runId}-${crypto.randomUUID()}`;
+                return waitForApproval(state.pendingApprovals, approvalId, signal, () => {
+                  ws.send(
+                    JSON.stringify(
+                      buildEvent("approval.request", {
+                        runId,
+                        ...approvalInput,
+                        toolUseId: approvalId,
+                      }),
+                    ),
+                  );
+                });
+              },
               onEvent,
             }),
           );
@@ -526,6 +546,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
               agent: acpAgent,
               prompt,
               systemPrompt,
+              permissionMode,
               cwd,
               abortController,
               checkpoint,
@@ -536,10 +557,9 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
               conversationHistory,
               attachments,
               mcpServers,
-              requestApproval: async (approvalInput) => {
+              requestApproval: async (approvalInput, signal = abortController.signal) => {
                 const approvalId = `approval-${runId}-${crypto.randomUUID()}`;
-                return new Promise<boolean>((resolve) => {
-                  state.pendingApprovals.set(approvalId, resolve);
+                return waitForApproval(state.pendingApprovals, approvalId, signal, () => {
                   ws.send(
                     JSON.stringify(
                       buildEvent("approval.request", {
@@ -644,20 +664,24 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
                 // state.pendingApprovals is shared, so a time-only id would let
                 // two runs collide and resume the wrong resolver.
                 const approvalId = `approval-${runId}-${crypto.randomUUID()}`;
-                return new Promise<boolean>((resolve) => {
-                  state.pendingApprovals.set(approvalId, resolve);
-                  ws.send(
-                    JSON.stringify(
-                      buildEvent("approval.request", {
-                        runId,
-                        toolUseId: approvalId,
-                        toolName: approvalInput.toolName,
-                        toolInput: approvalInput.toolInput,
-                        decisionReason: approvalInput.reason,
-                      }),
-                    ),
-                  );
-                });
+                return waitForApproval(
+                  state.pendingApprovals,
+                  approvalId,
+                  abortController.signal,
+                  () => {
+                    ws.send(
+                      JSON.stringify(
+                        buildEvent("approval.request", {
+                          runId,
+                          toolUseId: approvalId,
+                          toolName: approvalInput.toolName,
+                          toolInput: approvalInput.toolInput,
+                          decisionReason: approvalInput.reason,
+                        }),
+                      ),
+                    );
+                  },
+                );
               },
               onEvent,
               onCheckpointReady: () => {
