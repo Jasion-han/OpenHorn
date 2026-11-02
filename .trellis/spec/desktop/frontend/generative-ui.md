@@ -28,14 +28,30 @@ with a separate fence-line regex.
   `components/chat/genui/components.tsx` are what models are taught to write.
   Changing them changes the prompt; `prompt.test.ts` parses every example
   against the library and fails on unknown components or `@functions`.
-- The section is built from the library (`buildGenUiSystemPrompt`) and appended
-  only when the composer's "Interactive" chip is on, via `lib/genui/promptMerge.ts`
-  at every send site in `DesktopChatArea` (agent send / retry / edit, chat send).
-  Chat-mode retry / edit run the LLM call on the server, so the section is sent
-  as `appendSystemPrompt` in the `/messages/:id/regenerate` and `/messages/:id/edit`
-  body (server: `services/appendSystemPrompt.ts`, 32,000-char cap → 400). The
-  server appends it to that one call's system prompt and never persists it.
-  Off means the request is byte-for-byte what it was before (the field is omitted).
+- Response format is a per-machine Settings preference: Auto (default) or
+  Text only. The shared composer has no Interactive chip. Retain the existing
+  `openhorn.genUi.enabled` boolean storage: absent/invalid/blocked storage uses
+  Auto, saved `true` uses Auto, and explicit saved `false` remains Text only.
+  Do not collapse absent and false during migration or overwrite a saved opt-out.
+- Auto builds the component protocol from the library (`buildGenUiSystemPrompt`)
+  and lets the model choose text or useful interactive content in the same
+  request. Honor explicit text/Markdown/source requests. Agent file edits,
+  commands and builds must be performed with actual tools; an inline widget
+  cannot substitute for completing the user's task. Do not add a classifier
+  model call or a keyword router merely to choose answer presentation.
+- Text only sends a short explicit output policy allowing ordinary Markdown
+  and source fences while excluding new `openui-lang` / `html-ui` blocks. It
+  must not import/send the full component schema, forbid Agent tools, or disable
+  historical widget rendering. Omitting UI instructions alone is not a reliable
+  Text-only contract. The policy governs future generations, retries and edits.
+- Both policies travel through `lib/genui/promptMerge.ts` at every Chat/Agent
+  send, retry and edit site in `DesktopChatArea`. Read the current preference
+  when executing callbacks, including memoized historical bubbles. Chat retry
+  and edit pass the selected policy as `appendSystemPrompt` (server:
+  `services/appendSystemPrompt.ts`, 32,000-char cap → 400); the server appends it
+  for that one call and never persists it. Test all six paths and live changes.
+  Local prompt-string caching is not evidence of free provider input tokens;
+  measure provider context costs separately from lazy renderer bundle loading.
 - Local vs. model interactions (task `10-31-genui-local-actions`): anything
   computable from data the block already has (mode / view switch, filter,
   sort, details) is a `$variable` + `@Set` / an input + ternary inside the

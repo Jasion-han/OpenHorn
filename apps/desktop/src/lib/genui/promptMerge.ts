@@ -1,9 +1,8 @@
 /**
- * Appends the generative-UI system-prompt section to what a run already
- * carries. The section itself is built by components/chat/genui/prompt.ts,
- * which pulls in the component library, so callers load it on demand
- * (`loadGenUiSection`) and pass the text here; `null` means "off" and leaves
- * everything untouched.
+ * Appends the response-format policy to what a run already carries. Auto uses
+ * components/chat/genui/prompt.ts and its component library; Text only uses a
+ * lightweight policy. Callers load the current section on demand and pass it
+ * here; `null` means no addendum and leaves everything untouched.
  */
 
 /** Agent runs: the global system prompt with the section appended. */

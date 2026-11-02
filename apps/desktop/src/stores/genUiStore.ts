@@ -5,10 +5,10 @@ import { MAX_PROMPT_LENGTH } from "../lib/genui/sandbox";
  * Generative UI preferences and the one channel from an answer back to the
  * composer.
  *
- * `enabled` decides whether the generative-UI rules are appended to the system
- * prompt (they cost several thousand tokens, so they are opt-in). It is a
- * per-machine preference in localStorage, like the external editor choice.
- * Blocks the model writes are rendered whether or not it is on.
+ * `enabled` selects automatic response formatting (true, the default) or a
+ * short text-only instruction (false). It is a per-machine preference in
+ * localStorage, like the external editor choice. Existing blocks render in
+ * either mode; this preference only shapes future model responses.
  *
  * `composerRequest` carries text an answer asked to send (@ToAssistant in a
  * component, `openhorn.sendPrompt` in a sandbox). It is only ever placed in the
@@ -47,11 +47,12 @@ export interface GenUiState {
 }
 
 export function createGenUiStore(storage: GenUiStorage | null = defaultStorage()) {
-  let initial = false;
+  let initial = true;
   try {
-    initial = storage?.getItem(GEN_UI_STORAGE_KEY) === "true";
+    // An absent key is a new default; a saved false is a deliberate opt-out.
+    initial = storage?.getItem(GEN_UI_STORAGE_KEY) !== "false";
   } catch {
-    initial = false;
+    initial = true;
   }
   let nonce = 0;
   return create<GenUiState>((set, get) => ({

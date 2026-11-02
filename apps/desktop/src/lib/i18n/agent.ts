@@ -836,6 +836,12 @@ export const generalSettingsLabels = {
   "settings.general.account.emailLabel": "邮箱",
   "settings.general.account.emailReadonly": "邮箱暂不支持修改",
   "settings.general.account.save": "保存修改",
+  // Section: response format (per-machine, stored locally)
+  "settings.general.responseFormat.title": "回答形式",
+  "settings.general.responseFormat.rowLabel": "默认形式",
+  "settings.general.responseFormat.description": "自动根据任务选择文字或交互界面。",
+  "settings.general.responseFormat.auto": "自动（推荐）",
+  "settings.general.responseFormat.textOnly": "仅文字",
   // Section: custom instructions (system prompt)
   "settings.general.instructions.title": "自定义指令",
   "settings.general.instructions.description":

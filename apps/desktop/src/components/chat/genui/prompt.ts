@@ -7,9 +7,9 @@ import {
 import { genUiLibrary } from "./library";
 
 /**
- * The system-prompt section that teaches a model to answer with interactive
- * UI. Appended only when the user turns "Interactive" on: it costs several
- * thousand tokens. Two tiers, chosen by the model per answer:
+ * The Auto response-format section that lets the model choose interactive UI
+ * when useful. Text-only responses use a separate lightweight policy without
+ * loading this component schema. Auto offers two tiers per answer:
  *
  * 1. ```openui-lang — the component library below (constrained, themed,
  *    computes with its own $variables, no further model call).

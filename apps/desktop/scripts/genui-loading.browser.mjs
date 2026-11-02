@@ -126,6 +126,58 @@ try {
   console.log(
     "PASS rejected chunks retain source, ordinary replies remain usable and later mounts recover",
   );
+
+  const policyPage = await browser.newPage();
+  const policyErrors = [];
+  const policyChunks = [];
+  policyPage.on("pageerror", (error) => policyErrors.push(error.message));
+  policyPage.on("request", (request) => {
+    if (new URL(request.url()).pathname.startsWith("/chunks/")) {
+      policyChunks.push(request.url());
+    }
+  });
+  await policyPage.goto(url);
+  await policyPage.waitForFunction(() => !!window.genUiLoadTest);
+  assert.equal(await policyPage.evaluate(() => window.genUiLoadTest.isAuto()), true);
+  await policyPage.evaluate(() => window.genUiLoadTest.setAuto(false));
+  const initiallyLoaded = [...policyChunks];
+  const textOnly = await policyPage.evaluate(() => window.genUiLoadTest.policy());
+  assert.match(textOnly, /^## Response format: text only/);
+  assert.match(textOnly, /Normal source-code fences are allowed/);
+  assert.match(textOnly, /Do not emit openui-lang, openui, or html-ui UI fences/);
+  assert.match(textOnly, /not tool use/);
+  assert.ok(textOnly.length < 1000, "Text only should not carry the full component schema");
+  assert.deepEqual(policyChunks, initiallyLoaded, "Text only must not import any dynamic chunks");
+  await policyPage.reload();
+  await policyPage.waitForFunction(() => !!window.genUiLoadTest);
+  assert.equal(await policyPage.evaluate(() => window.genUiLoadTest.isAuto()), false);
+  const reloadedChunks = [...policyChunks];
+  assert.equal(await policyPage.evaluate(() => window.genUiLoadTest.policy()), textOnly);
+  assert.deepEqual(policyChunks, reloadedChunks, "persisted Text only stays lightweight");
+
+  // Output preference must not gate rendering an existing answer.
+  await policyPage.evaluate((program) => window.genUiLoadTest.render([program]), first);
+  await policyPage.getByText("First block", { exact: true }).waitFor();
+  assert.equal(await policyPage.evaluate(() => window.genUiLoadTest.isAuto()), false);
+  await policyPage.evaluate(() => window.genUiLoadTest.clear());
+  const policies = await policyPage.evaluate(async () => {
+    const readPolicy = window.genUiLoadTest.policy;
+    window.genUiLoadTest.setAuto(true);
+    const auto = await readPolicy();
+    window.genUiLoadTest.setAuto(false);
+    return { auto, textOnly: await readPolicy() };
+  });
+  assert.match(policies.auto, /## Interactive answers/);
+  assert.match(policies.auto, /Most answers need no UI/);
+  assert.match(policies.auto, /Honor explicit requests for plain text/);
+  assert.match(policies.auto, /never substitute an inline widget for execution/);
+  assert.ok(policies.auto.length > textOnly.length);
+  assert.equal(policies.textOnly, textOnly, "a retained reader must use the current preference");
+  assert.deepEqual(policyErrors, []);
+  await policyPage.close();
+  console.log(
+    "PASS Auto default, explicit Text-only persistence, no policy chunk loads, live preference changes and historical rendering",
+  );
 } finally {
   await browser?.close();
   if (server) await new Promise((resolve) => server.close(resolve));

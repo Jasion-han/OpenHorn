@@ -1,5 +1,6 @@
 /** Real composer/send/error/retry paths with a local DB API and fake sidecar. */
 import assert from "node:assert/strict";
+import { once } from "node:events";
 import { readFile } from "node:fs/promises";
 import http from "node:http";
 import { createRequire } from "node:module";
@@ -138,7 +139,10 @@ const server = http.createServer(async (request, response) => {
     syncedPreparations++;
     const held = holdAgentSave;
     holdAgentSave = null;
-    if (held) await held;
+    if (held) {
+      server.emit("fixture-agent-save-started", data);
+      await held;
+    }
     const userMessageId = data.userMessageId ?? `prepared-user-${syncedPreparations}`;
     const assistantMessageId =
       data.assistantMessageId ?? `prepared-assistant-${syncedPreparations}`;
@@ -931,6 +935,9 @@ try {
 
   await reset();
   let releaseAgentSave;
+  const agentSaveStarted = once(server, "fixture-agent-save-started", {
+    signal: AbortSignal.timeout(10000),
+  });
   holdAgentSave = new Promise((resolve) => {
     releaseAgentSave = resolve;
   });
@@ -945,6 +952,10 @@ try {
     window.failureChat.agentDone();
   });
   await page.waitForFunction(() => !window.failureChat.snapshot().streaming);
+  // Execution finishes before asynchronous persistence necessarily reaches the
+  // server. Observe the held request before asserting the one-save barrier.
+  const [heldAgentSave] = await agentSaveStarted;
+  assert.equal(heldAgentSave.userContent, "Agent save barrier question");
   assert.equal(syncedPreparations, 1);
   assert.equal(
     await page.getByRole("button", { name: retryLabel, exact: true }).isDisabled(),
@@ -1066,6 +1077,195 @@ try {
     await page.waitForFunction(() => !window.failureChat.snapshot().streaming);
     console.log(
       `PASS accepted Agent ${elsewhere ? "elsewhere" : "here"}${remount ? " after remount" : ""}: historical Retry and edit Enter cannot overlap or replace its turn`,
+    );
+  }
+  const assertPolicy = (section, automatic) => {
+    assert.equal(typeof section, "string", "every path must carry an explicit response policy");
+    if (automatic) {
+      assert.match(section, /## Interactive answers/);
+      assert.match(section, /Slider\(/);
+      assert.match(section, /## html-ui blocks/);
+      assert.match(section, /Honor explicit requests for plain text/);
+      assert.match(section, /never substitute an inline widget for execution/);
+    } else {
+      assert.match(section, /^## Response format: text only/);
+      assert.ok(section.length < 1000, "Text only sends a short policy rather than the UI schema");
+      assert.doesNotMatch(section, /## Interactive answers|Slider\(|## html-ui blocks/);
+    }
+  };
+  const seedPolicyRound = async (mode, id, content = closed) => {
+    rows.push(
+      ...[
+        { id: `${id}-user`, role: "user", content: "original policy question" },
+        {
+          id: `${id}-assistant`,
+          role: "assistant",
+          content,
+          ...(mode === "agent"
+            ? {
+                agentRun: {
+                  status: "completed",
+                  summary: "Done",
+                  steps: [{ type: "text", content, timestamp: 0 }],
+                },
+              }
+            : {}),
+        },
+      ].map((message) => ({
+        ...message,
+        conversationId: conversation.id,
+        mode,
+        createdAt: new Date(0).toISOString(),
+      })),
+    );
+    await page.evaluate(() => window.failureChat.reload());
+    await page.getByRole("button", { name: retryLabel, exact: true }).waitFor();
+  };
+  for (const mode of ["chat", "agent"]) {
+    for (const kind of ["send", "retry", "edit"]) {
+      for (const automatic of [true, false]) {
+        await reset();
+        // Mount the old bubble under the opposite preference, then change the
+        // live store without remounting. Its memoized callbacks must use now.
+        await page.evaluate((value) => window.failureChat.policy(!value), automatic);
+        const id = `policy-${mode}-${kind}-${automatic}`;
+        if (kind !== "send") {
+          await seedPolicyRound(mode, id);
+          await page.getByRole("button", { name: retryLabel, exact: true }).evaluate((control) => {
+            window.policyRetryControl = control;
+          });
+        }
+        await page.evaluate((value) => window.failureChat.policy(value), automatic);
+        if (kind !== "send") {
+          assert.equal(
+            await page
+              .getByRole("button", { name: retryLabel, exact: true })
+              .evaluate((control) => control === window.policyRetryControl),
+            true,
+            "a preference change keeps the existing reply action mounted",
+          );
+        }
+        const requestIndex = requests.length;
+        const path = `/messages/${id}-${kind === "edit" ? "user/edit" : "assistant/regenerate"}`;
+        const rerunRequest =
+          mode === "chat" && kind !== "send"
+            ? page.waitForRequest(
+                (request) =>
+                  request.method() === "POST" && new URL(request.url()).pathname === path,
+              )
+            : null;
+        if (kind === "send") {
+          await page.evaluate((value) => window.failureChat.mode(value), mode);
+          await page.locator("textarea").fill("policy request: make a real file and run its tests");
+          await page.locator("textarea").press("Enter");
+        } else if (kind === "retry") {
+          await page.getByRole("button", { name: retryLabel, exact: true }).click();
+        } else {
+          await page.getByRole("button", { name: editLabel, exact: true }).click();
+          await page
+            .locator("textarea")
+            .first()
+            .fill("edited policy request: return readable source");
+          await page.locator("textarea").first().press("Enter");
+        }
+        if (rerunRequest) await rerunRequest;
+        else {
+          await page.waitForFunction(
+            (value) =>
+              value === "agent" ? window.failureChat.agentReady() : window.failureChat.ready(),
+            mode,
+          );
+        }
+        const captured = await snapshot();
+        if (mode === "agent") {
+          assertPolicy(captured.agentRequest.systemPrompt, automatic);
+          assert.equal(captured.agentRequest.permissionMode, "default");
+          assert.equal(captured.agentRuns, 1, "selection adds no classifier or extra Agent run");
+          assert.equal(captured.runs, 0);
+          assert.equal(
+            captured.agentRequest.prompt,
+            kind === "send"
+              ? "policy request: make a real file and run its tests"
+              : kind === "edit"
+                ? "edited policy request: return readable source"
+                : "original policy question",
+          );
+          await page.evaluate(() => {
+            window.failureChat.agentEmit("Policy fixture complete.");
+            window.failureChat.agentDone();
+          });
+        } else if (kind === "send") {
+          const messages = captured.chatMessages;
+          assertPolicy(
+            messages
+              .filter((message) => message.role === "system")
+              .map((message) => message.content)
+              .join("\n\n"),
+            automatic,
+          );
+          assert.deepEqual(
+            messages.filter((message) => message.role === "user"),
+            [{ role: "user", content: "policy request: make a real file and run its tests" }],
+          );
+          assert.equal(captured.runs, 1, "selection adds no classifier or extra Chat run");
+          assert.equal(captured.agentRuns, 0);
+          await emit("Policy fixture complete.");
+          await page.evaluate(() => window.failureChat.done());
+        } else {
+          const request = requests
+            .slice(requestIndex)
+            .find((request) => request.method === "POST" && request.path === path);
+          assert.ok(request);
+          assertPolicy(request.data.appendSystemPrompt, automatic);
+          assert.equal(captured.runs, 0);
+          assert.equal(captured.agentRuns, 0);
+        }
+        await page.waitForFunction(
+          () => !window.failureChat.snapshot().streaming && !window.failureChat.snapshot().loading,
+        );
+        console.log(
+          `PASS current response policy ${mode}/${kind}/${automatic ? "Auto" : "Text only"}: real transport carries selected contract after a live preference change`,
+        );
+      }
+    }
+  }
+  for (const mode of ["chat", "agent"]) {
+    await reset();
+    const history =
+      '```openui-lang\nroot=Col([Input($balance,"History value","number"),Text($balance),Button("Explain history",@ToAssistant("Explain the current historical value",{amount:$balance}))])\n$balance=5\n```';
+    await seedPolicyRound(mode, `policy-history-${mode}`, history);
+    const historicalInput = page.getByRole("textbox", { name: "History value", exact: true });
+    await historicalInput.fill("19");
+    await historicalInput.evaluate((control) => {
+      window.policyHistoricalControl = control;
+    });
+    await page.locator("textarea").fill("Keep my unsent draft");
+    await page.evaluate(() => window.failureChat.policy(false));
+    assert.equal(
+      await historicalInput.evaluate((control) => control === window.policyHistoricalControl),
+      true,
+    );
+    assert.equal(await historicalInput.inputValue(), "19");
+    assert.equal(await page.locator("textarea").inputValue(), "Keep my unsent draft");
+    const before = await snapshot();
+    await page.getByRole("button", { name: "Explain history", exact: true }).click();
+    await page.waitForFunction(() =>
+      document.querySelector("textarea")?.value.includes("Explain the current historical value"),
+    );
+    const draft = await page.locator("textarea").inputValue();
+    assert.match(draft, /^Keep my unsent draft\n\nExplain the current historical value/);
+    assert.match(draft, /19/);
+    assert.equal(await historicalInput.inputValue(), "19");
+    const after = await snapshot();
+    assert.equal(after.policy, false);
+    assert.equal(after.runs, before.runs);
+    assert.equal(after.agentRuns, before.agentRuns);
+    assert.equal(prepares, 0);
+    assert.equal(syncedPreparations, 0);
+    await page.evaluate(() => window.failureChat.remount());
+    assert.equal(await historicalInput.inputValue(), "19");
+    console.log(
+      `PASS Text only historical ${mode} widget: live local state survives policy change/remount; follow-up appends to the draft without a model call`,
     );
   }
   assert.deepEqual(errors, []);

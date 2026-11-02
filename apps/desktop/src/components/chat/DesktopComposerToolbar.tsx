@@ -1,8 +1,6 @@
-import { Blocks, ChevronDown, Globe, Paperclip, ShieldOff } from "lucide-react";
+import { ChevronDown, Globe, Paperclip, ShieldOff } from "lucide-react";
 import type { ReactNode } from "react";
 import { Button, cn, Tooltip, TooltipContent, TooltipTrigger } from "ui";
-import { getGenUiLabel } from "../../lib/i18n/agent";
-import { useGenUiStore } from "../../stores/genUiStore";
 import type { ChatMode } from "../../types/chat";
 import styles from "./DesktopComposer.module.css";
 import { DesktopComposerModeChip } from "./DesktopComposerModeChip";
@@ -99,7 +97,7 @@ export function DesktopComposerToolbar({
           onClick={onOpenModelPicker}
           disabled={modelInert}
           className={cn(
-            "flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-1 text-xs transition-colors",
+            "flex min-w-0 shrink items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-1 text-xs transition-colors",
             modelTone === "warning"
               ? "text-orange-600 hover:text-orange-700 hover:bg-orange-500/10"
               : "text-muted-foreground hover:text-foreground hover:bg-accent",
@@ -140,8 +138,6 @@ export function DesktopComposerToolbar({
           </TooltipContent>
         </Tooltip>
 
-        <GenUiChip disabled={chipsDisabled} />
-
         {mode === "agent" && onToggleFullAccess && (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -176,41 +172,5 @@ export function DesktopComposerToolbar({
 
       <div className="flex shrink-0 items-center gap-1.5">{children}</div>
     </div>
-  );
-}
-
-/**
- * Turns interactive answers on or off. A per-machine preference read straight
- * from the store, so both the conversation composer and the welcome screen get
- * it without threading props.
- */
-function GenUiChip({ disabled }: { disabled: boolean }) {
-  const enabled = useGenUiStore((state) => state.enabled);
-  const toggle = useGenUiStore((state) => state.toggle);
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <button
-          type="button"
-          onClick={toggle}
-          disabled={disabled}
-          aria-pressed={enabled}
-          className={cn(
-            "flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-1 text-xs transition-colors",
-            enabled
-              ? "bg-sky-400/20 text-sky-500 hover:bg-sky-400/30"
-              : "text-muted-foreground hover:bg-accent hover:text-foreground",
-            disabled && "pointer-events-none opacity-60",
-          )}
-          aria-label="Interactive answers"
-        >
-          <Blocks className="size-3.5" />
-          <span className={cn("whitespace-nowrap", styles.chipLabel)}>Interactive</span>
-        </button>
-      </TooltipTrigger>
-      <TooltipContent side="top">
-        <p>{getGenUiLabel(enabled ? "genui.toggle.on" : "genui.toggle.off")}</p>
-      </TooltipContent>
-    </Tooltip>
   );
 }

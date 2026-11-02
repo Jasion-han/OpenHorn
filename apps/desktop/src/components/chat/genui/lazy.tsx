@@ -1,4 +1,5 @@
 import { type ComponentProps, createElement, useEffect, useState } from "react";
+import { TEXT_ONLY_RESPONSE_POLICY } from "../../../lib/genui/responsePolicy";
 import { useGenUiStore } from "../../../stores/genUiStore";
 
 // @openuidev/react-lang mounts its Inspect overlay into document.body when first
@@ -10,9 +11,8 @@ import { useGenUiStore } from "../../../stores/genUiStore";
 
 /**
  * The OpenUI runtime, the component library and the full lucide icon map are
- * several hundred KB; they load only when an answer contains a UI block or a
- * run needs the prompt section, so conversations without generative UI pay
- * nothing for it.
+ * several hundred KB; they load only when an answer contains a UI block or an
+ * Auto run needs the prompt section. Preparing a text-only response avoids them.
  */
 type GenUiBlockComponent = typeof import("./GenUiBlock")["GenUiBlock"];
 let loadedBlock: GenUiBlockComponent | null = null;
@@ -58,18 +58,18 @@ export function LazyGenUiBlock(props: ComponentProps<GenUiBlockComponent>) {
   return Block ? createElement(Block, props) : props.fallback;
 }
 
-/** The system-prompt section when interactive answers are on, otherwise null. */
+/** Auto uses the full library; text-only needs only a lightweight output policy. */
 export async function loadGenUiSection(enabled: boolean): Promise<string | null> {
-  if (!enabled) return null;
+  if (!enabled) return TEXT_ONLY_RESPONSE_POLICY;
   const { buildGenUiSystemPrompt } = await import("./prompt");
   return buildGenUiSystemPrompt();
 }
 
 /**
- * The section for the toggle's value *now*. Send / retry / edit handlers must
+ * The section for the preference's value *now*. Send / retry / edit handlers must
  * use this rather than a value captured at render: MessageBubble's memo keeps
  * the onRetry closure from the render a bubble first appeared in, so a
- * render-time `enabled` would be stale after the user flips the toggle.
+ * render-time `enabled` would be stale after the user changes the preference.
  */
 export function loadCurrentGenUiSection(): Promise<string | null> {
   return loadGenUiSection(useGenUiStore.getState().enabled);

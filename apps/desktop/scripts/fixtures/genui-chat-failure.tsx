@@ -213,6 +213,7 @@ const api = {
     }));
   },
   mode: (mode: "chat" | "agent") => useChatStore.getState().setComposerMode(mode),
+  policy: (enabled: boolean) => useGenUiStore.getState().setEnabled(enabled),
   emit(content: string) {
     void active?.onEvent({ type: "execution_event", eventType: "text", content });
   },
@@ -231,6 +232,15 @@ const api = {
     loading: useChatStore.getState().isLoading,
     streamingConversationId: useChatStore.getState().streamingConversationId,
     messages: useChatStore.getState().messages,
+    policy: useGenUiStore.getState().enabled,
+    chatMessages: active?.messages ?? null,
+    agentRequest: activeAgent
+      ? {
+          prompt: activeAgent.prompt,
+          systemPrompt: activeAgent.systemPrompt,
+          permissionMode: activeAgent.permissionMode,
+        }
+      : null,
   }),
   async reload() {
     await useChatStore.getState().loadMessages(conversation.id);

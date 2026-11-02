@@ -211,14 +211,51 @@ describe("block state", () => {
 });
 
 describe("genUi store", () => {
-  test("persists the toggle", () => {
+  for (const [saved, expected] of [
+    [null, true],
+    ["true", true],
+    ["false", false],
+    ["invalid", true],
+    ["FALSE", true],
+  ] as const) {
+    test(`initial preference ${String(saved)} resolves to ${expected ? "Auto" : "Text only"} without rewriting storage`, () => {
+      const storage = memoryStorage();
+      if (saved !== null) storage.setItem(GEN_UI_STORAGE_KEY, saved);
+      expect(createGenUiStore(storage).getState().enabled).toBe(expected);
+      expect(storage.getItem(GEN_UI_STORAGE_KEY)).toBe(saved);
+    });
+  }
+
+  test("preserves an explicit text-only choice across reloads and later changes", () => {
     const storage = memoryStorage();
     const store = createGenUiStore(storage);
+    expect(store.getState().enabled).toBe(true);
+    store.getState().setEnabled(false);
+    expect(store.getState().enabled).toBe(false);
+    expect(storage.getItem(GEN_UI_STORAGE_KEY)).toBe("false");
+    const reloaded = createGenUiStore(storage);
+    expect(reloaded.getState().enabled).toBe(false);
+    reloaded.getState().toggle();
+    expect(reloaded.getState().enabled).toBe(true);
+    expect(storage.getItem(GEN_UI_STORAGE_KEY)).toBe("true");
+    expect(createGenUiStore(storage).getState().enabled).toBe(true);
+  });
+
+  test("unavailable storage defaults to Auto and blocked writes keep the session choice", () => {
+    expect(createGenUiStore(null).getState().enabled).toBe(true);
+    const store = createGenUiStore({
+      getItem: () => {
+        throw new Error("blocked read");
+      },
+      setItem: () => {
+        throw new Error("blocked write");
+      },
+    });
+    expect(store.getState().enabled).toBe(true);
+    store.getState().setEnabled(false);
     expect(store.getState().enabled).toBe(false);
     store.getState().toggle();
     expect(store.getState().enabled).toBe(true);
-    expect(storage.getItem(GEN_UI_STORAGE_KEY)).toBe("true");
-    expect(createGenUiStore(storage).getState().enabled).toBe(true);
   });
 
   test("composer requests carry a fresh nonce and clear only their own", () => {

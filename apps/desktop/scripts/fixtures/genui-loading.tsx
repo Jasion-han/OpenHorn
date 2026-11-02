@@ -1,9 +1,13 @@
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
-import { LazyGenUiBlock } from "../../src/components/chat/genui/lazy";
+import { LazyGenUiBlock, loadCurrentGenUiSection } from "../../src/components/chat/genui/lazy";
+import { useGenUiStore } from "../../src/stores/genUiStore";
 
 const root = createRoot(document.getElementById("root") as HTMLElement);
 const api = {
+  policy: loadCurrentGenUiSection,
+  isAuto: () => useGenUiStore.getState().enabled,
+  setAuto: (enabled: boolean) => useGenUiStore.getState().setEnabled(enabled),
   render(programs: string[]) {
     flushSync(() =>
       root.render(

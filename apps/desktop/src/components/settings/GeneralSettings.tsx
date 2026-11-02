@@ -23,6 +23,7 @@ import { createServerApi } from "../../lib/serverApi";
 import { isDesktopRuntime, pickEditorApp } from "../../lib/tauriBridge";
 import { useAuthStore } from "../../stores/authStore";
 import { editorNameFromAppPath, useExternalEditorStore } from "../../stores/externalEditorStore";
+import { useGenUiStore } from "../../stores/genUiStore";
 
 const api = createServerApi();
 const SYSTEM_PROMPT_KEY = "chat.systemPrompt";
@@ -45,6 +46,8 @@ export function GeneralSettings() {
   const detectedEditors = useExternalEditorStore((state) => state.detected);
   const setEditorPreference = useExternalEditorStore((state) => state.setPreference);
   const detectEditors = useExternalEditorStore((state) => state.detect);
+  const genUiEnabled = useGenUiStore((state) => state.enabled);
+  const setGenUiEnabled = useGenUiStore((state) => state.setEnabled);
   const desktop = isDesktopRuntime();
 
   useEffect(() => {
@@ -156,6 +159,35 @@ export function GeneralSettings() {
               </Button>
             </div>
           </div>
+        </SettingsCard>
+      </SettingsSection>
+
+      <SettingsSection title={getGeneralSettingsLabel("settings.general.responseFormat.title")}>
+        <SettingsCard>
+          <SettingsRow
+            label={getGeneralSettingsLabel("settings.general.responseFormat.rowLabel")}
+            description={getGeneralSettingsLabel("settings.general.responseFormat.description")}
+          >
+            <Select
+              value={genUiEnabled ? "auto" : "text"}
+              onValueChange={(value) => setGenUiEnabled(value === "auto")}
+            >
+              <SelectTrigger
+                className="w-40"
+                aria-label={getGeneralSettingsLabel("settings.general.responseFormat.title")}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="auto">
+                  {getGeneralSettingsLabel("settings.general.responseFormat.auto")}
+                </SelectItem>
+                <SelectItem value="text">
+                  {getGeneralSettingsLabel("settings.general.responseFormat.textOnly")}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </SettingsRow>
         </SettingsCard>
       </SettingsSection>
 

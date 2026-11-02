@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { createParser } from "@openuidev/react-lang";
 import { withGenUiMessages, withGenUiPrompt } from "../../../lib/genui/promptMerge";
 import { OPENUI_EXAMPLES, OPENUI_RULES } from "../../../lib/genui/promptText";
+import { TEXT_ONLY_RESPONSE_POLICY } from "../../../lib/genui/responsePolicy";
 import { MAX_PROMPT_LENGTH } from "../../../lib/genui/sandbox";
 import {
   computedStateNames,
@@ -12,6 +13,7 @@ import { useGenUiStore } from "../../../stores/genUiStore";
 import { iconFor, numberText } from "./components";
 import { NANO_MORTGAGE } from "./fixtures/nanoMortgage";
 import { followUpDraft, renderableProgram, runGenUiAction } from "./GenUiBlock";
+import { loadCurrentGenUiSection, loadGenUiSection } from "./lazy";
 import { genUiLibrary } from "./library";
 import { buildGenUiSystemPrompt } from "./prompt";
 
@@ -273,10 +275,70 @@ describe("buildGenUiSystemPrompt", () => {
       expect(prompt.includes(`@${name}(`)).toBe(true);
     }
   });
+
+  test("Auto honors explicit text/source requests and requires real Agent work", () => {
+    expect(
+      prompt.includes(
+        "Honor explicit requests for plain text, Markdown, or readable/copyable source code",
+      ),
+    ).toBe(true);
+    expect(prompt.includes("ordinary Markdown/code fences rather than interactive blocks")).toBe(
+      true,
+    );
+    expect(prompt.includes("create or modify project files, build an app, or run tests")).toBe(
+      true,
+    );
+    expect(prompt.includes("use the available tools to complete that real work")).toBe(true);
+    expect(prompt.includes("never substitute an inline widget for execution")).toBe(true);
+  });
+});
+
+describe("response format policy", () => {
+  test("Text only explicitly forbids interactive fences while permitting source and tools", async () => {
+    const policy = await loadGenUiSection(false);
+    expect(policy).toBe(TEXT_ONLY_RESPONSE_POLICY);
+    expect(policy?.includes("Use ordinary Markdown")).toBe(true);
+    expect(policy?.includes("Normal source-code fences are allowed")).toBe(true);
+    expect(policy?.includes("Do not emit openui-lang, openui, or html-ui UI fences")).toBe(true);
+    expect(policy?.includes("Text-only applies to the reply format, not tool use")).toBe(true);
+    expect(policy?.includes("use the available tools to complete the real task")).toBe(true);
+    expect((policy?.length ?? Number.POSITIVE_INFINITY) < 1000).toBe(true);
+  });
+
+  test("Text only uses the same Agent and Chat system-prompt transports", async () => {
+    const section = await loadGenUiSection(false);
+    expect(withGenUiPrompt("Agent instructions", section)).toBe(
+      `Agent instructions\n\n${TEXT_ONLY_RESPONSE_POLICY}`,
+    );
+    const messages = [
+      { role: "system", content: "Chat instructions" },
+      { role: "user", content: "Edit the project" },
+    ];
+    expect(withGenUiMessages(messages, section)).toEqual([
+      { role: "system", content: `Chat instructions\n\n${TEXT_ONLY_RESPONSE_POLICY}` },
+      messages[1],
+    ]);
+    expect(messages[0]?.content).toBe("Chat instructions");
+  });
+
+  test("a retained policy reader uses the live preference after either change", async () => {
+    const previous = useGenUiStore.getState().enabled;
+    const readPolicy = loadCurrentGenUiSection;
+    try {
+      useGenUiStore.setState({ enabled: false });
+      expect(await readPolicy()).toBe(TEXT_ONLY_RESPONSE_POLICY);
+      useGenUiStore.setState({ enabled: true });
+      expect(await readPolicy()).toBe(buildGenUiSystemPrompt());
+      useGenUiStore.setState({ enabled: false });
+      expect(await readPolicy()).toBe(TEXT_ONLY_RESPONSE_POLICY);
+    } finally {
+      useGenUiStore.setState({ enabled: previous });
+    }
+  });
 });
 
 describe("withGenUiPrompt", () => {
-  test("leaves the prompt untouched when disabled", () => {
+  test("leaves the prompt untouched without a policy section", () => {
     expect(withGenUiPrompt("base", null)).toBe("base");
     expect(withGenUiPrompt(undefined, null)).toBe(undefined);
   });
@@ -310,7 +372,7 @@ describe("withGenUiMessages", () => {
     expect(merged[0]?.role).toBe("system");
   });
 
-  test("returns the same array when disabled", () => {
+  test("returns the same array without a policy section", () => {
     const messages = [{ role: "user", content: "hi" }];
     expect(withGenUiMessages(messages, null) === messages).toBe(true);
   });

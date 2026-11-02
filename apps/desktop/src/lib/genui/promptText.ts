@@ -1,6 +1,6 @@
 /**
- * Text sent to the model as part of the system prompt when "Interactive" is
- * on. This is not UI copy, so it lives here rather than in lib/i18n.
+ * Text sent to the model as part of the system prompt in automatic response
+ * format mode. This is not UI copy, so it lives here rather than in lib/i18n.
  *
  * The example programs are deliberately Chinese because OpenHorn's users are;
  * the "write all visible UI text in the user's language" rule covers everyone
@@ -13,6 +13,8 @@ import { MORTGAGE_EXAMPLE } from "./mortgageExample";
 export const PREAMBLE = `## Interactive answers
 
 Besides Markdown, you can put interactive UI inside your answer with fenced code blocks. Text outside the blocks is shown as normal chat. Most answers need no UI: use it only when the user will operate the result (adjust numbers, compare options, tick things off, explore data). Otherwise answer in Markdown as usual.
+
+Honor explicit requests for plain text, Markdown, or readable/copyable source code with ordinary Markdown/code fences rather than interactive blocks. When asked to create or modify project files, build an app, or run tests, use the available tools to complete that real work; never substitute an inline widget for execution.
 
 Design around the user's task and requested visual priorities. Group related controls, keep updated results easy to find, and use concise labels without redundant instructions. Follow-ups must not replace local controls; choose their visual priority deliberately, honoring a requested primary solid action. Choose the layout to fit the task rather than forcing every UI into the same arrangement.
 
