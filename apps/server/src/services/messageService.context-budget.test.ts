@@ -1,4 +1,8 @@
-import { expect, test } from "bun:test";
+import { expect, mock, test } from "bun:test";
+import * as attachmentNamespace from "./attachmentService";
+
+const realAttachmentService = { ...attachmentNamespace };
+
 import { buildChatMessages } from "./messageService";
 
 test("a current request exceeding the Chat budget is explicitly rejected", async () => {
@@ -57,4 +61,48 @@ test("a coarse cap cannot remove a current user before many empty assistant plac
     { role: "system", content: "stored system" },
     { role: "user", content: "current request" },
   ]);
+});
+
+test("large history stops attachment expansion after the first non-fitting whole turn", async () => {
+  const fetched: string[] = [];
+  mock.module("./attachmentService", () => ({
+    ...realAttachmentService,
+    buildAttachmentPayloadFromIds: async (ids: string[]) => {
+      fetched.push(...ids);
+      return {
+        textContext: ids[0] === "newest" ? "x".repeat(3_500_000) : "CURRENT-ATTACHMENT",
+        images: [],
+        files: [],
+      };
+    },
+  }));
+  try {
+    const history = Array.from({ length: 5000 }, (_, index) => [
+      {
+        role: "user",
+        content: `question ${index}`,
+        attachments: JSON.stringify([index === 4999 ? "newest" : `old-${index}`]),
+      },
+      { role: "assistant", content: `answer ${index}` },
+    ]).flat();
+    const result = await buildChatMessages(
+      "context-budget-no-provider",
+      [
+        { role: "system", content: "STORED-SYSTEM" },
+        ...history,
+        { role: "user", content: "CURRENT-QUESTION", attachments: JSON.stringify(["current"]) },
+      ],
+      "GLOBAL-SYSTEM",
+      undefined,
+      { maxTokens: 922_000, maxMessages: 10_000 },
+    );
+    expect(fetched).toEqual(["current", "newest"]);
+    expect(String(result[0]?.content).includes("GLOBAL-SYSTEM")).toBe(true);
+    expect(String(result[0]?.content).includes("STORED-SYSTEM")).toBe(true);
+    expect(String(result[0]?.content).includes("[10000 earlier messages omitted]")).toBe(true);
+    expect(String(result.at(-1)?.content).includes("CURRENT-QUESTION")).toBe(true);
+    expect(String(result.at(-1)?.content).includes("CURRENT-ATTACHMENT")).toBe(true);
+  } finally {
+    mock.module("./attachmentService", () => realAttachmentService);
+  }
 });

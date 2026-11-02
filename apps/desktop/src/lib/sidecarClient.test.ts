@@ -207,6 +207,7 @@ describe("SidecarClient", () => {
       apiKey: "fixture-key",
       protocol: "openai",
       model: "fixture",
+      contextWindow: 1_000_000,
       messages: [{ role: "user", content: "hi" }],
       onEvent: (event) => {
         events.push(event);
@@ -217,6 +218,7 @@ describe("SidecarClient", () => {
       },
     });
     await Promise.resolve();
+    expect((lastSent(socket).params as { contextWindow?: number }).contextWindow).toBe(1_000_000);
     socket.receive(
       JSON.stringify({
         type: "response",
@@ -345,6 +347,7 @@ describe("SidecarClient", () => {
       prompt: "do the thing",
       apiKey: "sk-test",
       model: "claude-3-5-sonnet",
+      contextWindow: 128_000,
       workspaceRoot: "/fixture/per-run-workspace",
       onEvent: (event) => {
         events.push(event);
@@ -363,6 +366,7 @@ describe("SidecarClient", () => {
     await Promise.resolve();
     const request = lastSent(socket);
     expect(request.method).toBe("agent.run");
+    expect((request.params as { contextWindow?: number }).contextWindow).toBe(128_000);
     expect((request.params as { workspaceRoot?: string }).workspaceRoot).toBe(
       "/fixture/per-run-workspace",
     );

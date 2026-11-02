@@ -16,6 +16,7 @@ import {
   type TSchema,
   Type,
 } from "@earendil-works/pi-ai";
+import { resolveContextPolicy } from "shared/context-policy";
 import {
   buildTavilyPayload,
   isNewsQuery,
@@ -47,12 +48,8 @@ import {
   partitionImagesByFormat,
 } from "./attachments";
 import { sanitizeChildEnv } from "./childEnv";
-import {
-  buildHistoryMessages,
-  HISTORY_MAX_TOKENS,
-  type HistoryMessage,
-  truncateHistory,
-} from "./context";
+import { buildHistoryMessages, type HistoryMessage } from "./context";
+import { assertAgentContext, boundAgentHistory } from "./contextPolicy";
 import { type AgentEvent, buildUsageEvent, toCount } from "./events";
 import { buildIntentContext } from "./intent-context";
 import { capMcpTools, connectMcpTools } from "./mcp-tools";
@@ -71,6 +68,7 @@ export type RunDirectAgentInput = {
    */
   protocol?: string;
   model: string;
+  contextWindow?: number | null;
   prompt: string;
   cwd: string;
   abortController: AbortController;
@@ -794,6 +792,7 @@ function isChatGptOAuthToken(key: string): boolean {
 export function buildModel(input: RunDirectAgentInput, supportsVision: boolean): Model<Api> {
   // Only advertise image input when the model is vision-capable; otherwise the
   // provider may reject the request or mis-handle the image modality.
+  const policy = resolveContextPolicy({ ...input, mode: "agent" });
   const modelInput: ("text" | "image")[] = supportsVision ? ["text", "image"] : ["text"];
   const useCodexResponses = isChatGptOAuthToken(input.apiKey);
   if (useCodexResponses) {
@@ -806,8 +805,8 @@ export function buildModel(input: RunDirectAgentInput, supportsVision: boolean):
       reasoning: false,
       input: modelInput,
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-      contextWindow: 128_000,
-      maxTokens: 16_384,
+      contextWindow: policy.contextWindow,
+      maxTokens: policy.maxOutputTokens,
     };
   }
   if (input.protocol === "google") {
@@ -823,8 +822,8 @@ export function buildModel(input: RunDirectAgentInput, supportsVision: boolean):
       reasoning: false,
       input: modelInput,
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-      contextWindow: 1_000_000,
-      maxTokens: 8_192,
+      contextWindow: policy.contextWindow,
+      maxTokens: policy.maxOutputTokens,
     };
   }
   const baseUrl = (input.baseUrl || "https://api.openai.com/v1").replace(/\/$/, "");
@@ -837,8 +836,8 @@ export function buildModel(input: RunDirectAgentInput, supportsVision: boolean):
     reasoning: false,
     input: modelInput,
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: 128_000,
-    maxTokens: 16_384,
+    contextWindow: policy.contextWindow,
+    maxTokens: policy.maxOutputTokens,
   };
 }
 
@@ -916,11 +915,7 @@ export async function runDirectAgent(input: RunDirectAgentInput): Promise<void> 
   // History is seeded into the agent transcript as real user/assistant
   // messages (see `toPiHistoryMessages`); the current prompt plus attachments
   // stays the final user message sent via `agent.prompt`.
-  const history = buildHistoryMessages(
-    truncateHistory(input.conversationHistory ?? [], HISTORY_MAX_TOKENS),
-    input.prompt,
-  );
-  let effectivePrompt = history.prompt;
+  let effectivePrompt = input.prompt;
   // Inject file attachment text (works for every model regardless of vision).
   const fileContext = buildFileContext(input.attachments);
   if (fileContext) effectivePrompt += fileContext;
@@ -955,6 +950,33 @@ export async function runDirectAgent(input: RunDirectAgentInput): Promise<void> 
     .filter(Boolean)
     .join("\n\n");
 
+  const toolDefinitions = tools.map(({ name, description, parameters }) => ({
+    name,
+    description,
+    parameters,
+  }));
+  let history: ReturnType<typeof buildHistoryMessages>;
+  try {
+    history = buildHistoryMessages(
+      boundAgentHistory(input, {
+        prompt: effectivePrompt,
+        systemPrompt: finalSystemPrompt,
+        tools: toolDefinitions,
+        imageCount: injectable.length,
+      }),
+      effectivePrompt,
+    );
+    effectivePrompt = history.prompt;
+  } catch (error) {
+    await mcpCleanup?.();
+    input.onEvent({
+      type: "error",
+      content: error instanceof Error ? error.message : String(error),
+    });
+    input.onEvent({ type: "done" });
+    return;
+  }
+
   let turnCount = 0;
   // Summed across turns, not read off the last one. An agent loop is many model
   // calls, and pi reports each turn's own counts — reporting only the final turn
@@ -968,7 +990,14 @@ export async function runDirectAgent(input: RunDirectAgentInput): Promise<void> 
       systemPrompt: finalSystemPrompt,
       messages: toPiHistoryMessages(history.messages, model),
     },
-    streamFn: streamSimple,
+    streamFn: (activeModel, context, options) => {
+      assertAgentContext(
+        input,
+        { systemPrompt: context.systemPrompt, tools: toolDefinitions },
+        context.messages,
+      );
+      return streamSimple(activeModel, context, options);
+    },
     getApiKey: () => apiKey,
     toolExecution: "parallel",
   });

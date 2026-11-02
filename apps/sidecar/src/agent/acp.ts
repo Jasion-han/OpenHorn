@@ -107,6 +107,7 @@ export type RunAcpAgentInput = {
   acpSessionId?: string;
   /** User-selected model id from the channel model list (informational). */
   model?: string;
+  contextWindow?: number | null;
   conversationHistory?: Array<{ role: "user" | "assistant"; content: string }>;
   attachments?: AttachmentPart[];
   mcpServers?: Record<string, Record<string, unknown>>;
@@ -800,6 +801,15 @@ export async function runAcpAgent(input: RunAcpAgentInput): Promise<void> {
     return;
   }
 
+  const promptText = withRunInstructions(
+    withConversationHistory(
+      appendAttachmentContext(input.prompt, input.attachments),
+      input.conversationHistory,
+      { ...input, protocol: "acp" },
+    ),
+    input.systemPrompt,
+  );
+
   // Reuse the conversation's live agent process when the desktop passed the
   // session id back (the same slot the Claude runtime uses for SDK resume).
   const configKey = configKeyOf(input.agent, input.cwd);
@@ -831,14 +841,6 @@ export async function runAcpAgent(input: RunAcpAgentInput): Promise<void> {
     onEvent({ type: "done" });
     return;
   }
-
-  const promptText = withRunInstructions(
-    appendAttachmentContext(
-      withConversationHistory(input.prompt, input.conversationHistory),
-      input.attachments,
-    ),
-    input.systemPrompt,
-  );
 
   const turn: TurnState = {
     onEvent,

@@ -1,12 +1,6 @@
 import type { AttachmentPart } from "shared/types";
 
 /**
- * Maximum number of characters injected per file attachment. Large files are
- * truncated so a single attachment cannot blow past the model context window.
- */
-export const MAX_FILE_TEXT_CHARS = 12_000;
-
-/**
  * Normalized image attachment ready for per-runtime vision injection.
  */
 export type ImageAttachment = {
@@ -33,11 +27,8 @@ export function buildFileContext(attachments?: AttachmentPart[]): string {
   const blocks: string[] = [];
   for (const part of attachments) {
     if (part.kind !== "file") continue;
-    const text =
-      part.text.length > MAX_FILE_TEXT_CHARS
-        ? `${part.text.slice(0, MAX_FILE_TEXT_CHARS)}\n…[内容过长，已截断]`
-        : part.text;
-    blocks.push(`\n\n[附件文件] ${part.fileName}:\n${text}`);
+    // The final per-model request budget decides whether the complete file fits.
+    blocks.push(`\n\n[附件文件] ${part.fileName}:\n${part.text}`);
   }
   return blocks.join("");
 }

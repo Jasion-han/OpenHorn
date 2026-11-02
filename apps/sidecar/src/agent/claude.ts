@@ -1,6 +1,7 @@
 import path from "node:path";
 import Anthropic from "@anthropic-ai/sdk";
 import { buildAnthropicSystem, isAnthropicOAuthToken, normalizeAnthropicModelId } from "adapters";
+import { resolveContextPolicy } from "shared/context-policy";
 import type { AttachmentPart } from "shared/types";
 import { modelSupportsVision } from "shared/vision";
 import { type CheckpointSession, ensureCheckpointBackup, finalizeCheckpoint } from "../checkpoints";
@@ -19,12 +20,8 @@ import {
   imageUnsupportedFormatText,
   partitionImagesByFormat,
 } from "./attachments";
-import {
-  buildHistoryMessages,
-  HISTORY_MAX_TOKENS,
-  type HistoryMessage,
-  truncateHistory,
-} from "./context";
+import { buildHistoryMessages, type HistoryMessage } from "./context";
+import { assertAgentContext, boundAgentHistory } from "./contextPolicy";
 import { executeTool } from "./direct";
 import { type AgentEvent, buildUsageEvent, toCount } from "./events";
 import { buildIntentContext } from "./intent-context";
@@ -39,6 +36,7 @@ export type RunClaudeAgentInput = {
   apiKey: string;
   baseUrl?: string;
   model: string;
+  contextWindow?: number | null;
   prompt: string;
   cwd: string;
   abortController: AbortController;
@@ -184,9 +182,6 @@ export function buildNetworkAllowedDomains(baseUrl: string | undefined): string[
 
 /** Maximum number of agent turns before forced stop (prevents infinite loops). */
 const MAX_TURNS = 30;
-
-/** Default max output tokens per API call. */
-const DEFAULT_MAX_TOKENS = 16384;
 
 // ---------------------------------------------------------------------------
 // Tool definitions for the Anthropic Messages API
@@ -472,11 +467,7 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
 
   // History goes out as real alternating user/assistant messages; the current
   // prompt (plus attachments) is the final user message.
-  const history = buildHistoryMessages(
-    truncateHistory(input.conversationHistory ?? [], HISTORY_MAX_TOKENS),
-    input.prompt,
-  );
-  let effectivePrompt = history.prompt;
+  let effectivePrompt = input.prompt;
   // Inject file attachment text (works for every model regardless of vision).
   const fileContext = buildFileContext(input.attachments);
   if (fileContext) effectivePrompt += fileContext;
@@ -495,7 +486,29 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
     effectivePrompt += imageUnsupportedFormatText(unsupported);
   }
 
-  // Messages array for the API loop — grows as the agent interacts
+  const contextInput = { ...input, protocol: "anthropic", mode: "agent" as const };
+  const policy = resolveContextPolicy(contextInput);
+  const contextParts = { systemPrompt: JSON.stringify(finalSystem), tools: anthropicTools };
+  let history: ReturnType<typeof buildHistoryMessages>;
+  try {
+    history = buildHistoryMessages(
+      boundAgentHistory(contextInput, {
+        ...contextParts,
+        prompt: effectivePrompt,
+        imageCount: injectable.length,
+      }),
+      effectivePrompt,
+    );
+    effectivePrompt = history.prompt;
+  } catch (error) {
+    input.onEvent({
+      type: "error",
+      content: error instanceof Error ? error.message : String(error),
+    });
+    input.onEvent({ type: "done" });
+    return;
+  }
+  // Messages array for the API loop — grows as the agent interacts.
   const messages = buildClaudeInitialMessages(history.messages, effectivePrompt, injectable);
 
   let turnCount = 0;
@@ -504,11 +517,12 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
 
   try {
     while (turnCount < MAX_TURNS) {
+      assertAgentContext(contextInput, contextParts, messages);
       // Create a streaming request to the Anthropic Messages API
       const stream = anthropic.messages.stream(
         {
           model,
-          max_tokens: DEFAULT_MAX_TOKENS,
+          max_tokens: policy.maxOutputTokens,
           system: finalSystem,
           messages: messages as Anthropic.MessageParam[],
           tools: anthropicTools as unknown as Anthropic.Tool[],

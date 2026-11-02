@@ -91,6 +91,8 @@ export const channelModels = sqliteTable(
       .references(() => channels.id, { onDelete: "cascade" }),
     modelId: text("model_id").notNull(),
     displayName: text("display_name").notNull(),
+    /** Null selects verified model metadata or the conservative fallback. */
+    contextWindow: integer("context_window"),
     enabled: integer("enabled", { mode: "boolean" }).default(true),
     isDefault: integer("is_default", { mode: "boolean" }).default(false),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),

@@ -98,6 +98,7 @@ const SCHEMA_DDL: string[] = [
     channel_id TEXT NOT NULL,
     model_id TEXT NOT NULL,
     display_name TEXT NOT NULL,
+    context_window INTEGER,
     enabled INTEGER DEFAULT 1,
     is_default INTEGER DEFAULT 0,
     created_at INTEGER NOT NULL,
@@ -724,6 +725,13 @@ async function ensureConversationModelIdColumn(): Promise<void> {
   const hasColumn = hasColumnNamed(rows, "model_id");
   if (!hasColumn) {
     await client.execute(`ALTER TABLE conversations ADD COLUMN model_id TEXT;`);
+  }
+}
+
+async function ensureChannelModelContextWindowColumn(): Promise<void> {
+  const columns = await client.execute("PRAGMA table_info(channel_models)");
+  if (!columns.rows.some((row) => row.name === "context_window")) {
+    await client.execute("ALTER TABLE channel_models ADD COLUMN context_window INTEGER");
   }
 }
 
@@ -1532,6 +1540,7 @@ export async function bootstrapDatabase(options: BootstrapOptions = {}): Promise
   // Backward compatible alter for databases created before model_id existed.
   await ensureUserTokenVersionColumn();
   await ensureChannelProtocolColumn();
+  await ensureChannelModelContextWindowColumn();
   await ensureConversationModelIdColumn();
   await ensureConversationDefaultModeColumn();
   await ensureConversationLastModeColumn();

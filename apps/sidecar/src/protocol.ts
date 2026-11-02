@@ -1,3 +1,4 @@
+import { MAX_CONTEXT_WINDOW, MIN_CONTEXT_WINDOW } from "shared/context-policy";
 import { z } from "zod";
 
 export const WsRequestSchema = z.object({
@@ -85,10 +86,19 @@ export const SkillMetaSchema = z.object({
   path: z.string().min(1),
 });
 
+const ContextWindowSchema = z
+  .number()
+  .int()
+  .min(MIN_CONTEXT_WINDOW)
+  .max(MAX_CONTEXT_WINDOW)
+  .nullable()
+  .optional();
+
 export const AgentRunParamsSchema = z.object({
   prompt: z.string().min(1),
   apiKey: z.string().default(""),
   model: z.string().min(1),
+  contextWindow: ContextWindowSchema,
   // Omitted preserves old clients; an explicit invalid root must never fall back.
   workspaceRoot: z
     .string()
@@ -149,6 +159,7 @@ export const ChatStreamParamsSchema = z.object({
   baseUrl: z.string().optional(),
   protocol: z.string().min(1),
   model: z.string().min(1),
+  contextWindow: ContextWindowSchema,
   messages: z.array(z.object({ role: z.string(), content: z.unknown() })),
 });
 

@@ -67,14 +67,25 @@ channels.get("/:id/credentials", async (c) => {
       user.id,
       channelId,
     );
-    const resolved = await getResolvedChannelById(user.id, channelId);
-    const modelId = resolved?.modelId ?? null;
+    const requestedModelId = c.req.query("modelId");
+    const resolved = await getResolvedChannelById(user.id, channelId, requestedModelId);
+    // ACP advertises live session models that need not exist in channel_models.
+    // Their capacity must not inherit the persisted launch/default model's override.
+    const dynamicAcpModel = channel.protocol === "acp" && requestedModelId;
+    if (requestedModelId && !resolved && !dynamicAcpModel) {
+      return c.json({ error: "Model not found" }, 400);
+    }
+    const modelId = dynamicAcpModel || resolved?.modelId || null;
+    const contextWindow = dynamicAcpModel
+      ? (channel.models.find((model) => model.modelId === dynamicAcpModel)?.contextWindow ?? null)
+      : (resolved?.contextWindow ?? null);
 
     return c.json({
       credentials: {
         apiKey,
         baseUrl: channel.baseUrl ?? null,
         modelId,
+        contextWindow,
         protocol: channel.protocol,
         isCliOAuth,
       },

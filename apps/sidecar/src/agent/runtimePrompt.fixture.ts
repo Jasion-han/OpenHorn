@@ -31,7 +31,7 @@ if (mode === "agent") {
   );
   process.exitCode = 1;
 } else if (mode === "exec") {
-  record({ command: JSON.parse(commandJson ?? "[]") });
+  record({ command: JSON.parse(commandJson ?? "[]"), stdin: await new Response(Bun.stdin).text() });
   process.stdout.write(
     `${JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "fixture response" } })}\n`,
   );

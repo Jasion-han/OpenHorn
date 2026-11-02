@@ -5,6 +5,7 @@ import {
   isAnthropicOAuthToken,
 } from "adapters";
 import { boundChatContext, ChatContextBudgetError } from "shared/context-budget";
+import { resolveContextPolicy } from "shared/context-policy";
 import { resolveClaudeBillingMarker } from "./anthropic-billing";
 import type { AgentEvent } from "./events";
 
@@ -13,17 +14,22 @@ export type RunChatStreamInput = {
   baseUrl?: string;
   protocol: string;
   model: string;
+  contextWindow?: number | null;
   messages: ChatMessage[];
   abortController: AbortController;
   onEvent: (event: AgentEvent) => void;
 };
 
 export async function runChatStream(input: RunChatStreamInput): Promise<void> {
+  const policy = resolveContextPolicy(input);
   let messages: ChatMessage[];
   try {
     // The desktop appends its response-format schema after server preparation.
     // Recheck the final payload so those instructions also consume the budget.
-    messages = boundChatContext(input.messages);
+    messages = boundChatContext(input.messages, {
+      maxTokens: policy.maxInputTokens,
+      maxMessages: policy.maxMessages,
+    });
   } catch (error) {
     input.onEvent({
       type: "error",
@@ -45,7 +51,7 @@ export async function runChatStream(input: RunChatStreamInput): Promise<void> {
     const stream = adapter.chatStream({
       model: input.model,
       messages,
-      maxTokens: 4096,
+      maxTokens: policy.maxOutputTokens,
       signal: input.abortController.signal,
     });
 

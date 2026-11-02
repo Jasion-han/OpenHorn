@@ -7,6 +7,18 @@ const IMAGE_ESTIMATE_TOKENS = 1_024;
 type ContextMessage = { role: "system" | "user" | "assistant"; content: unknown };
 type OmissionMessage = { role: "system"; content: string };
 
+/** Conservative text estimate; CJK/emoji must not use the ASCII chars ratio. */
+export function estimateContextTextTokens(text: string): number {
+  if (!/[^\p{ASCII}]/u.test(text)) return Math.ceil(text.length / 3.5);
+  let ascii = 0;
+  let other = 0;
+  for (const character of text) {
+    if (character.charCodeAt(0) < 128) ascii++;
+    else other += character.length === 2 ? 4 : 2;
+  }
+  return Math.ceil(ascii / 3.5) + other;
+}
+
 export class ChatContextBudgetError extends Error {
   readonly code = "chat_context_budget_exceeded";
 
@@ -19,7 +31,7 @@ export class ChatContextBudgetError extends Error {
 }
 
 export function estimateContextMessageTokens(message: ContextMessage): number {
-  const estimateText = (text: string) => Math.ceil(text.length / 3.5);
+  const estimateText = estimateContextTextTokens;
   let tokens = MESSAGE_OVERHEAD_TOKENS;
   if (typeof message.content === "string") return tokens + estimateText(message.content);
   if (!Array.isArray(message.content)) return tokens;
@@ -73,7 +85,7 @@ export function boundChatContext<T extends ContextMessage>(
     else groups.at(-1)?.push(message);
   }
 
-  const kept: T[] = [];
+  let firstKeptGroup = groups.length;
   let omitted = history.length + (limits.omittedMessages ?? 0);
   const notice = (count: number): OmissionMessage => ({
     role: "system",
@@ -94,11 +106,13 @@ export function boundChatContext<T extends ContextMessage>(
     ) {
       break;
     }
-    kept.unshift(...group);
+    firstKeptGroup = i;
     tokenCount += groupTokens;
     messageCount += group.length;
     omitted = remaining;
   }
+  // Flatten once: repeated unshift becomes quadratic on million-token histories.
+  const kept = groups.slice(firstKeptGroup).flat();
   if (omitted > 0) {
     const marker = notice(omitted);
     if (

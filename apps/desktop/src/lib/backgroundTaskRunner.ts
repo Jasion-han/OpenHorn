@@ -340,10 +340,11 @@ async function executeRun(run: ScheduledTaskRun, task: ScheduledTask) {
     apiKey: string;
     baseUrl: string | null;
     modelId: string;
+    contextWindow?: number | null;
     protocol: "openai" | "anthropic" | "google" | "acp";
   };
   try {
-    credentials = (await api.channels.getCredentials(channelId)).credentials;
+    credentials = (await api.channels.getCredentials(channelId, modelId)).credentials;
   } catch (error) {
     await failRun(
       error instanceof Error
@@ -428,6 +429,7 @@ async function executeRun(run: ScheduledTaskRun, task: ScheduledTask) {
         prompt: task.prompt,
         apiKey: credentials.protocol === "acp" ? "" : credentials.apiKey,
         model,
+        contextWindow: credentials.contextWindow,
         baseUrl: credentials.baseUrl ?? undefined,
         protocol: credentials.protocol,
         acpAgent,

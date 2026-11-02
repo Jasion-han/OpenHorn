@@ -7,7 +7,6 @@ import {
   imageFallbackText,
   imageUnsupportedFormatText,
   isVisionSupportedImageType,
-  MAX_FILE_TEXT_CHARS,
   normalizeImageMediaType,
   partitionImagesByFormat,
 } from "./attachments";
@@ -26,14 +25,13 @@ describe("buildFileContext", () => {
     expect(ctx).toBe("\n\n[附件文件] notes.md:\nhello world");
   });
 
-  test("truncates oversized file text", () => {
-    const big = "a".repeat(MAX_FILE_TEXT_CHARS + 500);
+  test("keeps complete large files for the final model-aware budget", () => {
+    const big = `${"a".repeat(120_000)}FILE-END`;
     const parts: AttachmentPart[] = [
       { kind: "file", fileName: "big.txt", mediaType: "text/plain", text: big },
     ];
     const ctx = buildFileContext(parts);
-    expect(ctx.includes("[内容过长，已截断]")).toBe(true);
-    expect(ctx.includes("a".repeat(MAX_FILE_TEXT_CHARS))).toBe(true);
+    expect(ctx).toBe(`\n\n[附件文件] big.txt:\n${big}`);
   });
 
   test("ignores image attachments (no bytes leak into file context)", () => {

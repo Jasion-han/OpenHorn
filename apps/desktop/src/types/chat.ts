@@ -1,4 +1,9 @@
-import type { ChatStreamErrorCode, ImportRecord, MessageFinishReason } from "shared/types";
+import type {
+  ChatStreamErrorCode,
+  ImportRecord,
+  MessageFinishReason,
+  ModelContextConfig,
+} from "shared/types";
 
 export type ChatMode = "chat" | "agent";
 
@@ -23,7 +28,7 @@ export type ApiProviderErrorKind =
   | "network_failed"
   | "unknown";
 
-export interface ApiChannelModel {
+export interface ApiChannelModel extends ModelContextConfig {
   id: string;
   channelId: string;
   modelId: string;
@@ -204,7 +209,7 @@ export interface ApiAgentCheckResult {
 
 export type ApiSettingsMap = Record<string, string>;
 
-export interface ChannelModel {
+export interface ChannelModel extends ModelContextConfig {
   id: string;
   channelId: string;
   modelId: string;

@@ -93,6 +93,7 @@ describe("external runtime prompt context", () => {
       await runCodexAgent(
         {
           model: "fixture",
+          contextWindow: 1_000_000,
           prompt: "current question",
           systemPrompt: extra,
           cwd: capture.directory,
@@ -116,6 +117,7 @@ describe("external runtime prompt context", () => {
           "For simple lookups answerable by running a command or reading files (e.g. 'how many images in my Downloads'), act first — run `ls`/`find` immediately and report the result rather than listing options.",
       });
       expect(params.developerInstructions).toBe(extra ? `${base}\n\n${extra}` : base);
+      expect(params.config).toMatchObject({ model_context_window: 1_000_000 });
       const turn = messages.find((message) => message.method === "turn/start");
       expect((turn?.params as Record<string, unknown>).input).toEqual([
         { type: "text", text: "Assistant: earlier answer\n\n---\n\nUser: current question" },
@@ -153,7 +155,9 @@ describe("external runtime prompt context", () => {
       );
       const command = (await capture.read()).find((entry) => Array.isArray(entry.command))
         ?.command as string[];
-      expect(command[2]).toBe(
+      expect(command[2]).toBe("-");
+      const stdin = (await capture.read()).find((entry) => typeof entry.stdin === "string")?.stdin;
+      expect(stdin).toBe(
         "User: earlier question\n\nAssistant: earlier answer\n\n---\n\nUser: current question",
       );
       expect(command.filter((argument) => argument.startsWith("developer_instructions="))).toEqual(
@@ -257,4 +261,63 @@ describe("external runtime prompt context", () => {
       }
     }
   }, 15000);
+});
+
+test("Codex exec sends large user/history bytes through stdin with per-run capacity metadata", async () => {
+  const capture = await captureFixture();
+  const history = [
+    { role: "user" as const, content: `HISTORY-BEGIN${"h".repeat(90_000)}HISTORY-END` },
+    { role: "assistant" as const, content: "previous reply" },
+  ];
+  const current = `CURRENT-BEGIN${"c".repeat(300_000)}CURRENT-END`;
+  await runCodexChat(
+    {
+      model: "gpt-6-astra",
+      messages: [...history, { role: "user", content: current }],
+      abortController: new AbortController(),
+      onEvent: () => {},
+    },
+    {
+      findBinary: async () => "fixture-codex",
+      spawn: (command, options) =>
+        Bun.spawn(
+          [process.execPath, fixture, "exec", capture.file, JSON.stringify(command)],
+          options,
+        ),
+    },
+  );
+  const record = (await capture.read()).find((entry) => typeof entry.stdin === "string");
+  const command = record?.command as string[];
+  expect(command[2]).toBe("-");
+  expect(command).toContain("model_context_window=1050000");
+  expect(command.join(" ").length < 1000).toBe(true);
+  expect(record?.stdin).toBe(
+    `User: ${history[0].content}\n\nAssistant: previous reply\n\n---\n\nUser: ${current}`,
+  );
+});
+
+test("Codex exec refuses oversized encoded developer instructions before binary discovery", async () => {
+  const events: AgentEvent[] = [];
+  let discovered = false;
+  await runCodexChat(
+    {
+      model: "gpt-6-astra",
+      messages: [
+        { role: "system", content: "x".repeat(70_000) },
+        { role: "user", content: "q" },
+      ],
+      abortController: new AbortController(),
+      onEvent: (event) => events.push(event),
+    },
+    {
+      findBinary: async () => {
+        discovered = true;
+        return null;
+      },
+    },
+  );
+  expect(discovered).toBe(false);
+  expect(events).toHaveLength(1);
+  expect(events[0]).toMatchObject({ type: "error" });
+  expect(JSON.stringify(events)).toContain("64 KiB");
 });

@@ -1,13 +1,19 @@
 import type { ChatMessage } from "adapters";
-import { HISTORY_MAX_TOKENS, truncateHistory } from "./context";
+import { type AgentContextInput, boundAgentHistory } from "./contextPolicy";
 
 /** External runtimes accept one user string; retain the history as explicitly labeled context. */
 export function withConversationHistory(
   prompt: string,
   history?: Array<{ role: "user" | "assistant"; content: string }>,
+  context?: AgentContextInput & { systemPrompt?: string },
 ): string {
-  if (!history?.length) return prompt;
-  const kept = truncateHistory(history, HISTORY_MAX_TOKENS);
+  const kept = context
+    ? boundAgentHistory(
+        { ...context, conversationHistory: history },
+        { prompt, systemPrompt: context.systemPrompt },
+      )
+    : (history ?? []);
+  if (!kept.length) return prompt;
   return `${kept.map((message) => `${message.role === "user" ? "User" : "Assistant"}: ${message.content}`).join("\n\n")}\n\n---\n\nUser: ${prompt}`;
 }
 

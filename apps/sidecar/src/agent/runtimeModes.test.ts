@@ -239,3 +239,48 @@ describe("local provider mode matrix", () => {
     ).toBe(true);
   });
 });
+
+test("Direct Agent submits complete above16K history and above12K file under selected 1M policy", async () => {
+  const s = await setup();
+  const requests: Array<{ messages: Array<{ role: string; content: unknown }> }> = [];
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch: async (request) => {
+      requests.push((await request.json()) as (typeof requests)[number]);
+      return new Response(
+        chunk({ content: "ok" }) +
+          chunk({}, "stop", { prompt_tokens: 20, completion_tokens: 1, total_tokens: 21 }) +
+          "data: [DONE]\n\n",
+        { headers: { "content-type": "text/event-stream" } },
+      );
+    },
+  });
+  servers.push(server);
+  const history = [
+    { role: "user" as const, content: `HISTORY-BEGIN${"h".repeat(90_000)}HISTORY-END` },
+    { role: "assistant" as const, content: "previous reply" },
+  ];
+  const fileText = `FILE-BEGIN${"f".repeat(180_000)}FILE-END`;
+  const events: AgentEvent[] = [];
+  await runDirectAgent({
+    ...s,
+    model: "gpt-6-astra",
+    protocol: "openai",
+    apiKey: "fixture",
+    baseUrl: `http://127.0.0.1:${server.port}/v1`,
+    prompt: "CURRENT",
+    conversationHistory: history,
+    attachments: [{ kind: "file", fileName: "large.txt", mediaType: "text/plain", text: fileText }],
+    webSearchEnabled: false,
+    abortController: new AbortController(),
+    onEvent: (event) => events.push(event),
+  });
+  expect(requests).toHaveLength(1);
+  const serialized = JSON.stringify(requests[0].messages);
+  expect(serialized).toContain(history[0].content);
+  expect(serialized).toContain(fileText);
+  expect(serialized).toContain("CURRENT");
+  expect(events.some((event) => event.type === "error")).toBe(false);
+  expect(events.at(-1)?.type).toBe("done");
+});

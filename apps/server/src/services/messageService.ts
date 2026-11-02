@@ -4,8 +4,11 @@ import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import {
   boundChatContext,
   CHAT_MAX_CONTEXT_MESSAGES,
+  CHAT_MAX_CONTEXT_TOKENS,
   ChatContextBudgetError,
+  estimateContextMessageTokens,
 } from "shared/context-budget";
+import { resolveContextPolicy } from "shared/context-policy";
 import {
   assistantFinishReason,
   assistantMessageContent,
@@ -131,10 +134,21 @@ async function buildChatMessagesForTurn(
     model: string | null;
     createdAt?: Date;
     keepPrevious?: boolean;
+    contextWindow?: number | null;
+    protocol?: string;
   },
 ) {
   try {
-    return await buildChatMessages(userId, context, systemPrompt, conversationId);
+    const policy = resolveContextPolicy({
+      model: turn.model ?? "",
+      protocol: turn.protocol,
+      contextWindow: turn.contextWindow,
+      mode: "chat",
+    });
+    return await buildChatMessages(userId, context, systemPrompt, conversationId, {
+      maxTokens: policy.maxInputTokens,
+      maxMessages: policy.maxMessages,
+    });
   } catch (error) {
     const failure = new ChatTurnPreparationError(
       error,
@@ -367,6 +381,7 @@ export async function buildChatMessages(
   conversationMessages: Array<{ role: string; content: string; attachments?: string | null }>,
   systemPrompt?: string | null,
   conversationId?: string | null,
+  limits: { maxTokens?: number; maxMessages?: number } = {},
 ): Promise<ChatMessage[]> {
   const chatMessages: ChatMessage[] = [];
 
@@ -425,15 +440,16 @@ export async function buildChatMessages(
     currentUserIndex--;
   }
   const startIndex = Math.min(
-    Math.max(0, conversationMessages.length - CHAT_MAX_CONTEXT_MESSAGES),
+    Math.max(0, conversationMessages.length - (limits.maxMessages ?? CHAT_MAX_CONTEXT_MESSAGES)),
     Math.max(0, currentUserIndex),
   );
   const coarseMessages = conversationMessages.filter(
     (message, index) => index >= startIndex || message.role === "system",
   );
-  for (const message of coarseMessages) {
+  type StoredMessage = (typeof coarseMessages)[number];
+  const expandMessage = async (message: StoredMessage): Promise<ChatMessage | null> => {
     if (message.role !== "user" && message.role !== "assistant" && message.role !== "system") {
-      continue;
+      return null;
     }
     if (message.role === "user" && message.attachments) {
       let attachmentIds: string[] = [];
@@ -442,20 +458,74 @@ export async function buildChatMessages(
       } catch {
         attachmentIds = [];
       }
-
       const content = await buildUserContentWithAttachments(userId, message.content, attachmentIds);
       const normalized = normalizeChatContent(content);
-      if (normalized) chatMessages.push({ role: "user", content: normalized });
-      continue;
+      return normalized ? { role: "user", content: normalized } : null;
     }
-
     const normalized = normalizeChatContent(message.content);
-    if (normalized) chatMessages.push({ role: message.role, content: normalized });
-  }
+    return normalized ? { role: message.role, content: normalized } : null;
+  };
 
+  // Instructions and the current turn are protected before old attachments are
+  // fetched. Expand older question/answer groups newest-first; once a group no
+  // longer fits, no earlier attachment can belong to the contiguous suffix.
+  for (const message of coarseMessages.filter((message) => message.role === "system")) {
+    const expanded = await expandMessage(message);
+    if (expanded) chatMessages.push(expanded);
+  }
+  const turns = coarseMessages.filter(
+    (message) => message.role === "user" || message.role === "assistant",
+  );
+  let currentTurnIndex = turns.length - 1;
+  while (currentTurnIndex >= 0 && turns[currentTurnIndex]?.role !== "user") currentTurnIndex--;
+  const current: ChatMessage[] = [];
+  for (const message of turns.slice(Math.max(0, currentTurnIndex))) {
+    const expanded = await expandMessage(message);
+    if (expanded) current.push(expanded);
+  }
+  const protectedMessages = [...chatMessages, ...current];
+  boundChatContext(protectedMessages, limits);
+  let tokenCount = protectedMessages.reduce(
+    (sum, message) => sum + estimateContextMessageTokens(message),
+    0,
+  );
+  let messageCount = protectedMessages.length;
+  const historicalRows = turns.slice(0, Math.max(0, currentTurnIndex));
+  const groups: StoredMessage[][] = [];
+  for (const message of historicalRows) {
+    if (message.role === "user") groups.push([message]);
+    else groups.at(-1)?.push(message);
+  }
+  const expandedGroups: ChatMessage[][] = [];
+  let expandedHistoryRows = 0;
+  for (let index = groups.length - 1; index >= 0; index--) {
+    const group = groups[index];
+    if (!group) continue;
+    const expanded: ChatMessage[] = [];
+    for (const message of group) {
+      const normalized = await expandMessage(message);
+      if (normalized) expanded.push(normalized);
+    }
+    expandedHistoryRows += group.length;
+    expandedGroups.push(expanded);
+    tokenCount += expanded.reduce((sum, message) => sum + estimateContextMessageTokens(message), 0);
+    messageCount += expanded.length;
+    if (
+      tokenCount > (limits.maxTokens ?? CHAT_MAX_CONTEXT_TOKENS) ||
+      messageCount > (limits.maxMessages ?? CHAT_MAX_CONTEXT_MESSAGES)
+    ) {
+      break;
+    }
+  }
+  const expandedMessages = [...chatMessages, ...expandedGroups.reverse().flat(), ...current];
   const bounded: ChatMessage[] = [];
-  for (const message of boundChatContext(chatMessages, {
-    omittedMessages: conversationMessages.length - coarseMessages.length,
+  for (const message of boundChatContext(expandedMessages, {
+    ...limits,
+    omittedMessages:
+      conversationMessages.length -
+      coarseMessages.length +
+      historicalRows.length -
+      expandedHistoryRows,
   })) {
     appendChatMessage(bounded, message.role, message.content);
   }
@@ -594,7 +664,13 @@ export async function sendMessage(userId: string, input: SendMessageInput) {
     conversationMessages,
     buildEffectiveSystemPrompt(conversation.systemPrompt, liveContext),
     input.conversationId,
-    { userMessageId, assistantMessageId, model: resolvedChannel?.modelId ?? null },
+    {
+      userMessageId,
+      assistantMessageId,
+      model: resolvedChannel?.modelId ?? null,
+      contextWindow: resolvedChannel?.contextWindow,
+      protocol: resolvedChannel?.channel.protocol,
+    },
   );
 
   let responseContent = "";
@@ -618,7 +694,12 @@ export async function sendMessage(userId: string, input: SendMessageInput) {
       const stream = await adapter.chatStream({
         model: resolvedChannel.modelId,
         messages: chatMessages,
-        maxTokens: 4096,
+        maxTokens: resolveContextPolicy({
+          model: resolvedChannel.modelId,
+          protocol: resolvedChannel.channel.protocol,
+          contextWindow: resolvedChannel.contextWindow,
+          mode: "chat",
+        }).maxOutputTokens,
       });
 
       for await (const chunk of stream) {
@@ -807,6 +888,8 @@ export async function streamMessage(
         userMessageId,
         assistantMessageId,
         model: resolvedChannel?.modelId ?? null,
+        contextWindow: resolvedChannel?.contextWindow,
+        protocol: resolvedChannel?.channel.protocol,
         createdAt: assistantCreatedAt,
       },
     );
@@ -874,7 +957,13 @@ export async function streamMessage(
       usage,
     } = await streamReplyUntilStopped(
       adapter,
-      { model: resolvedChannel.modelId, messages: chatMessages, signal: ctx.signal },
+      {
+        model: resolvedChannel.modelId,
+        messages: chatMessages,
+        signal: ctx.signal,
+        contextWindow: resolvedChannel.contextWindow,
+        protocol: resolvedChannel.channel.protocol,
+      },
       send,
     );
     if (streamError) {
@@ -942,7 +1031,13 @@ export async function streamMessage(
  */
 async function streamReplyUntilStopped(
   adapter: ReturnType<typeof createAdapter>,
-  input: { model: string; messages: ChatMessage[]; signal: AbortSignal },
+  input: {
+    model: string;
+    messages: ChatMessage[];
+    signal: AbortSignal;
+    contextWindow?: number | null;
+    protocol?: string;
+  },
   send: (event: { type: string; [key: string]: unknown }) => void,
 ): Promise<{
   content: string;
@@ -959,7 +1054,12 @@ async function streamReplyUntilStopped(
     const stream = await adapter.chatStream({
       model: input.model,
       messages: input.messages,
-      maxTokens: 4096,
+      maxTokens: resolveContextPolicy({
+        model: input.model,
+        protocol: input.protocol,
+        contextWindow: input.contextWindow,
+        mode: "chat",
+      }).maxOutputTokens,
       signal: input.signal,
     });
     while (true) {
@@ -1090,7 +1190,13 @@ export async function editUserMessage(
       contextMsgs,
       effectiveSystemPrompt,
       userMsg.conversationId,
-      { userMessageId, assistantMessageId, model: resolvedChannel?.modelId ?? null },
+      {
+        userMessageId,
+        assistantMessageId,
+        model: resolvedChannel?.modelId ?? null,
+        contextWindow: resolvedChannel?.contextWindow,
+        protocol: resolvedChannel?.channel.protocol,
+      },
     );
 
     if (!resolvedChannel) {
@@ -1128,7 +1234,13 @@ export async function editUserMessage(
       usage,
     } = await streamReplyUntilStopped(
       adapter,
-      { model: resolvedChannel.modelId, messages: chatMessages, signal: ctx.signal },
+      {
+        model: resolvedChannel.modelId,
+        messages: chatMessages,
+        signal: ctx.signal,
+        contextWindow: resolvedChannel.contextWindow,
+        protocol: resolvedChannel.channel.protocol,
+      },
       send,
     );
 
@@ -1255,6 +1367,8 @@ export async function regenerateMessage(
         userMessageId: lastUserMessage?.id ?? "",
         assistantMessageId,
         model: resolvedChannel?.modelId ?? null,
+        contextWindow: resolvedChannel?.contextWindow,
+        protocol: resolvedChannel?.channel.protocol,
         keepPrevious: true,
       },
     );
@@ -1278,7 +1392,13 @@ export async function regenerateMessage(
       usage,
     } = await streamReplyUntilStopped(
       adapter,
-      { model: resolvedChannel.modelId, messages: chatMessages, signal: ctx.signal },
+      {
+        model: resolvedChannel.modelId,
+        messages: chatMessages,
+        signal: ctx.signal,
+        contextWindow: resolvedChannel.contextWindow,
+        protocol: resolvedChannel.channel.protocol,
+      },
       send,
     );
     // Stopped before anything was generated: nothing replaces the previous
@@ -1592,6 +1712,7 @@ export interface PrepareChatInput {
 }
 
 export interface PrepareChatResult {
+  contextWindow: number;
   apiKey: string;
   baseUrl: string | null;
   protocol: string;
@@ -1671,11 +1792,19 @@ export async function prepareChatForSidecar(
       userMessageId,
       assistantMessageId,
       model: resolvedChannel.modelId,
+      contextWindow: resolvedChannel.contextWindow,
+      protocol: resolvedChannel.channel.protocol,
       createdAt: assistantCreatedAt,
     },
   );
 
   return {
+    contextWindow: resolveContextPolicy({
+      model: resolvedChannel.modelId,
+      protocol: resolvedChannel.channel.protocol,
+      contextWindow: resolvedChannel.contextWindow,
+      mode: "chat",
+    }).contextWindow,
     apiKey: resolvedChannel.apiKey,
     baseUrl: resolvedChannel.channel.baseUrl || null,
     protocol: resolvedChannel.channel.protocol,

@@ -301,11 +301,12 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
         return;
       }
       case "chat.stream": {
-        const { apiKey, baseUrl, protocol, model, messages } = params as {
+        const { apiKey, baseUrl, protocol, model, contextWindow, messages } = params as {
           apiKey: string;
           baseUrl?: string;
           protocol: string;
           model: string;
+          contextWindow?: number | null;
           // Asserted straight to the shape runChatStream needs. The wire payload
           // is already being asserted here, so widening it to
           // `{ role: string; content: unknown }` bought no safety — it only
@@ -366,6 +367,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
         if (useCodexResponses) {
           void runCodexChat({
             model,
+            contextWindow,
             messages,
             abortController,
             onEvent,
@@ -383,6 +385,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
             baseUrl,
             protocol,
             model,
+            contextWindow,
             messages,
             abortController,
             onEvent,
@@ -417,6 +420,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
           prompt,
           apiKey,
           model,
+          contextWindow,
           baseUrl,
           protocol,
           sdkSessionId,
@@ -434,6 +438,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
           prompt: string;
           apiKey: string;
           model: string;
+          contextWindow?: number | null;
           baseUrl?: string;
           protocol?: string;
           sdkSessionId?: string;
@@ -512,6 +517,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
             "Codex agent",
             runCodexAgent({
               model,
+              contextWindow,
               prompt,
               systemPrompt,
               permissionMode,
@@ -564,6 +570,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
               // slot the Claude runtime uses for SDK resume.
               acpSessionId: sdkSessionId,
               model,
+              contextWindow,
               conversationHistory,
               attachments,
               mcpServers,
@@ -608,6 +615,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
               apiKey: resolvedApiKey,
               baseUrl,
               model,
+              contextWindow,
               prompt,
               cwd,
               abortController,
@@ -656,6 +664,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
               baseUrl,
               protocol,
               model,
+              contextWindow,
               prompt,
               cwd,
               abortController,

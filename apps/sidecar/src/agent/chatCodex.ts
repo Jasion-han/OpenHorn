@@ -1,5 +1,6 @@
 import type { ChatMessage } from "adapters";
 import { boundChatContext, ChatContextBudgetError } from "shared/context-budget";
+import { resolveContextPolicy } from "shared/context-policy";
 import { sanitizeChildEnv } from "./childEnv";
 import { type AgentEvent, buildUsageEvent, toCount } from "./events";
 import { codexChatContext } from "./runtimePrompt";
@@ -33,6 +34,7 @@ export function readCodexExecUsage(
 
 export type RunCodexChatInput = {
   model: string;
+  contextWindow?: number | null;
   messages: ChatMessage[];
   abortController: AbortController;
   onEvent: (event: AgentEvent) => void;
@@ -60,9 +62,13 @@ export async function runCodexChat(
     input.onEvent({ type: "done" });
     return;
   }
+  const policy = resolveContextPolicy(input);
   let messages: ChatMessage[];
   try {
-    messages = boundChatContext(input.messages);
+    messages = boundChatContext(input.messages, {
+      maxTokens: policy.maxInputTokens,
+      maxMessages: policy.maxMessages,
+    });
   } catch (error) {
     input.onEvent({
       type: "error",
@@ -72,6 +78,21 @@ export async function runCodexChat(
     return;
   }
   const { prompt, systemPrompt } = codexChatContext(messages);
+  // The exec transport accepts developer instructions only as one TOML config
+  // argument. Bound encoded argv bytes separately from the model context; large
+  // user/history content travels on stdin and is not subject to this limit.
+  if (
+    systemPrompt &&
+    new TextEncoder().encode(`developer_instructions=${JSON.stringify(systemPrompt)}`).byteLength >
+      65_536
+  ) {
+    input.onEvent({
+      type: "error",
+      content:
+        "Codex Chat system instructions exceed the exec transport limit (64 KiB). Shorten system instructions and try again.",
+    });
+    return;
+  }
   const codexPath = await (dependencies.findBinary ?? findCodexBinary)();
   if (input.abortController.signal.aborted) {
     input.onEvent({ type: "done" });
@@ -89,7 +110,7 @@ export async function runCodexChat(
     [
       codexPath,
       "exec",
-      prompt,
+      "-",
       "--model",
       input.model,
       "--json",
@@ -97,10 +118,14 @@ export async function runCodexChat(
       "read-only",
       "-c",
       'approval_policy="never"',
+      "-c",
+      `model_context_window=${policy.contextWindow}`,
+      "-c",
+      `model_auto_compact_token_limit=${policy.maxInputTokens}`,
       ...(systemPrompt ? ["-c", `developer_instructions=${JSON.stringify(systemPrompt)}`] : []),
     ],
     {
-      stdin: new Blob([""]),
+      stdin: new Blob([prompt]),
       stdout: "pipe",
       stderr: "pipe",
       signal: input.abortController.signal,

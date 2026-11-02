@@ -50,6 +50,7 @@ function mapChannelModel(model: {
   channelId: string;
   modelId: string;
   displayName: string;
+  contextWindow?: number | null;
   enabled: boolean;
   isDefault: boolean;
   createdAt: string;
@@ -60,6 +61,7 @@ function mapChannelModel(model: {
     channelId: model.channelId,
     modelId: model.modelId,
     displayName: model.displayName,
+    contextWindow: model.contextWindow,
     enabled: model.enabled,
     isDefault: model.isDefault,
     createdAt: new Date(model.createdAt),
@@ -163,6 +165,7 @@ function mapChannel(channel: {
     channelId: string;
     modelId: string;
     displayName: string;
+    contextWindow?: number | null;
     enabled: boolean;
     isDefault: boolean;
     createdAt: string;

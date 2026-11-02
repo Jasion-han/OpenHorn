@@ -65,6 +65,7 @@ export interface SidecarChatStreamInput {
   baseUrl?: string;
   protocol: string;
   model: string;
+  contextWindow?: number | null;
   messages: Array<{ role: string; content: unknown }>;
   onEvent: (event: AgentTaskStreamEvent) => void | Promise<void>;
   onError: (message: string, errorCode?: ChatStreamErrorCode) => void;
@@ -75,6 +76,7 @@ export interface SidecarRunAgentInput {
   prompt: string;
   apiKey: string;
   model: string;
+  contextWindow?: number | null;
   /** This turn's resolved workspace; independent of other workspace RPCs. */
   workspaceRoot?: string;
   baseUrl?: string;
@@ -476,6 +478,7 @@ export class SidecarClient {
       prompt,
       apiKey,
       model,
+      contextWindow,
       workspaceRoot,
       baseUrl,
       protocol,
@@ -501,6 +504,7 @@ export class SidecarClient {
       prompt,
       apiKey,
       model,
+      ...(contextWindow != null ? { contextWindow } : {}),
       ...(workspaceRoot !== undefined ? { workspaceRoot } : {}),
       ...(baseUrl ? { baseUrl } : {}),
       ...(protocol ? { protocol } : {}),
@@ -529,11 +533,13 @@ export class SidecarClient {
   }
 
   async chatStream(input: SidecarChatStreamInput): Promise<string> {
-    const { apiKey, baseUrl, protocol, model, messages, onEvent, onError, onDone } = input;
+    const { apiKey, baseUrl, protocol, model, contextWindow, messages, onEvent, onError, onDone } =
+      input;
     const result = (await this.request("chat.stream", {
       apiKey,
       protocol,
       model,
+      ...(contextWindow != null ? { contextWindow } : {}),
       messages,
       ...(baseUrl ? { baseUrl } : {}),
     })) as { runId: string };

@@ -2,6 +2,7 @@ import { type ChildProcess, type SpawnOptions, spawn } from "node:child_process"
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
+import { resolveContextPolicy } from "shared/context-policy";
 import type { AttachmentPart } from "shared/types";
 import { appendAttachmentContext } from "./attachments";
 import { sanitizeChildEnv } from "./childEnv";
@@ -11,6 +12,7 @@ import { buildAgentSystemPrompt } from "./system-prompt";
 
 export type RunCodexAgentInput = {
   model: string;
+  contextWindow?: number | null;
   prompt: string;
   systemPrompt?: string;
   cwd: string;
@@ -174,8 +176,23 @@ export async function runCodexAgent(
     onEvent({ type: "done" });
     return;
   }
-  const seededPrompt = withConversationHistory(input.prompt, input.conversationHistory);
-  const prompt = appendAttachmentContext(seededPrompt, input.attachments);
+  const policy = resolveContextPolicy({ ...input, protocol: "codex_cli", mode: "agent" });
+  const developerInstructions = [
+    buildAgentSystemPrompt({
+      cwd,
+      permissionMode: input.permissionMode,
+      extra:
+        "For simple lookups answerable by running a command or reading files (e.g. 'how many images in my Downloads'), act first — run `ls`/`find` immediately and report the result rather than listing options.",
+    }),
+    input.systemPrompt?.trim(),
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+  const prompt = withConversationHistory(
+    appendAttachmentContext(input.prompt, input.attachments),
+    input.conversationHistory,
+    { ...input, protocol: "codex_cli", systemPrompt: developerInstructions },
+  );
   const codexPath = await (dependencies.findBinary ?? findCodexBinary)();
   // Stop can arrive while discovering the binary, before a subprocess exists.
   if (abortController.signal.aborted) {
@@ -201,6 +218,10 @@ export async function runCodexAgent(
       `approval_policy=${JSON.stringify(approvalPolicy)}`,
       "-c",
       `sandbox_mode=${JSON.stringify(sandbox)}`,
+      "-c",
+      `model_context_window=${policy.contextWindow}`,
+      "-c",
+      `model_auto_compact_token_limit=${policy.maxInputTokens}`,
     ],
     {
       cwd,
@@ -410,17 +431,11 @@ export async function runCodexAgent(
           cwd,
           approvalPolicy,
           sandbox,
-          developerInstructions: [
-            buildAgentSystemPrompt({
-              cwd,
-              permissionMode: input.permissionMode,
-              extra:
-                "For simple lookups answerable by running a command or reading files (e.g. 'how many images in my Downloads'), act first — run `ls`/`find` immediately and report the result rather than listing options.",
-            }),
-            input.systemPrompt?.trim(),
-          ]
-            .filter(Boolean)
-            .join("\n\n"),
+          developerInstructions,
+          config: {
+            model_context_window: policy.contextWindow,
+            model_auto_compact_token_limit: policy.maxInputTokens,
+          },
         });
         if (done) return;
         if (threadResp.error) {

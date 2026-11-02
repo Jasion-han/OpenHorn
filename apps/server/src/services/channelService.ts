@@ -1,5 +1,6 @@
 import { agentSessions, agentTasks, channelModels, channels, conversations } from "db";
 import { and, eq, inArray } from "drizzle-orm";
+import { isValidContextWindow } from "shared/context-policy";
 import { db } from "../db";
 import { decrypt, encrypt, generateId } from "../utils";
 import { probeAnthropicModel } from "./anthropicProbe";
@@ -14,6 +15,7 @@ export interface ChannelModelItem {
   channelId: string;
   modelId: string;
   displayName: string;
+  contextWindow?: number | null;
   enabled: boolean;
   isDefault: boolean;
   createdAt: Date;
@@ -61,6 +63,7 @@ export interface UpdateChannelModelsInput {
   models: Array<{
     modelId: string;
     displayName?: string;
+    contextWindow?: number | null;
     enabled?: boolean;
     isDefault?: boolean;
   }>;
@@ -81,6 +84,7 @@ export interface ResolvedChannel {
   channel: ChannelItem;
   apiKey: string;
   modelId: string;
+  contextWindow?: number | null;
 }
 
 const PROTOCOL_DEFAULT_BASE_URLS: Record<ChannelProtocol, string> = {
@@ -291,6 +295,7 @@ async function listModelsByChannelIds(channelRows: ChannelRow[]) {
       channelId: row.channelId,
       modelId: row.modelId,
       displayName: row.displayName,
+      contextWindow: row.contextWindow ?? null,
       enabled: Boolean(row.enabled),
       isDefault: Boolean(row.isDefault),
       createdAt: row.createdAt,
@@ -789,9 +794,20 @@ export async function updateChannelModels(
         displayName: (model.displayName || model.modelId).trim(),
         enabled: model.enabled ?? true,
         isDefault: model.isDefault ?? false,
+        contextWindow: model.contextWindow,
       }))
       .filter((model) => model.modelId.length > 0),
   );
+
+  for (const model of normalizedModels) {
+    if (
+      model.contextWindow !== undefined &&
+      model.contextWindow !== null &&
+      !isValidContextWindow(model.contextWindow)
+    ) {
+      throw new Error("Context window must be an integer between 8192 and 2000000 tokens");
+    }
+  }
 
   const defaults = normalizedModels.filter((m) => m.isDefault);
   if (defaults.some((m) => !m.enabled)) {
@@ -831,6 +847,7 @@ export async function updateChannelModels(
           .update(channelModels)
           .set({
             displayName: model.displayName,
+            ...(model.contextWindow !== undefined ? { contextWindow: model.contextWindow } : {}),
             enabled: model.enabled,
             isDefault: model.isDefault,
             updatedAt: now,
@@ -844,6 +861,7 @@ export async function updateChannelModels(
         channelId,
         modelId: model.modelId,
         displayName: model.displayName,
+        contextWindow: model.contextWindow ?? null,
         enabled: model.enabled,
         isDefault: model.isDefault,
         createdAt: now,
@@ -1174,6 +1192,7 @@ export async function testChannel(userId: string, channelId: string): Promise<Ch
 export async function getResolvedChannelForUser(
   userId: string,
   requestedChannelId?: string | null,
+  requestedModelId?: string | null,
 ): Promise<ResolvedChannel | null> {
   // Fetch the requested channel's row + built item together to avoid a
   // duplicate SELECT of the same channel row below.
@@ -1192,7 +1211,7 @@ export async function getResolvedChannelForUser(
     requested?.item.id === targetChannel.id
       ? requested.row
       : await getOwnedChannelRow(userId, targetChannel.id);
-  const modelId = resolveModelIdFromChannelItem(targetChannel, null);
+  const modelId = resolveModelIdFromChannelItem(targetChannel, requestedModelId);
   if (!modelId) {
     return null;
   }
@@ -1214,6 +1233,8 @@ export async function getResolvedChannelForUser(
     channel: channelWithRuntimeBaseUrl,
     apiKey,
     modelId,
+    contextWindow:
+      targetChannel.models.find((model) => model.modelId === modelId)?.contextWindow ?? null,
   };
 }
 
@@ -1316,6 +1337,8 @@ export async function getResolvedChannelForConversation(
       channel: channelWithRuntimeBaseUrl,
       apiKey: apiKey2,
       modelId,
+      contextWindow:
+        targetChannel.models.find((model) => model.modelId === modelId)?.contextWindow ?? null,
     });
   }
 
@@ -1324,8 +1347,12 @@ export async function getResolvedChannelForConversation(
   return applyCircuitBreakerFallback(userId, resolved);
 }
 
-export async function getResolvedChannelById(userId: string, channelId: string) {
-  return getResolvedChannelForUser(userId, channelId);
+export async function getResolvedChannelById(
+  userId: string,
+  channelId: string,
+  requestedModelId?: string | null,
+) {
+  return getResolvedChannelForUser(userId, channelId, requestedModelId);
 }
 
 function scoreVisionModelId(modelId: string) {

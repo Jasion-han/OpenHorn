@@ -50,6 +50,7 @@ export interface ChatPrepareResult {
   baseUrl: string | null;
   protocol: string;
   model: string;
+  contextWindow?: number;
   messages: Array<{ role: string; content: unknown }>;
   userMessageId: string;
   assistantMessageId: string;
@@ -161,6 +162,7 @@ export interface ServerApi {
         models: Array<{
           modelId: string;
           displayName?: string;
+          contextWindow?: number | null;
           enabled?: boolean;
           isDefault?: boolean;
         }>;
@@ -174,11 +176,15 @@ export interface ServerApi {
      * owns. Used by the sidecar runtime bootstrapping path to hand the
      * apiKey to the local Claude Agent SDK.
      */
-    getCredentials: (id: string) => Promise<{
+    getCredentials: (
+      id: string,
+      modelId?: string,
+    ) => Promise<{
       credentials: {
         apiKey: string;
         baseUrl: string | null;
         modelId: string;
+        contextWindow?: number | null;
         protocol: "openai" | "anthropic" | "google" | "acp";
         isCliOAuth?: boolean;
       };
@@ -557,8 +563,12 @@ export function createServerApi(options?: { baseUrl?: string; fetch?: FetchLike 
           method: "POST",
           body: JSON.stringify(data),
         }),
-      getCredentials: (id) =>
-        fetchJson(fetchImpl, baseUrl, `/channels/${encodeURIComponent(id)}/credentials`),
+      getCredentials: (id, modelId) =>
+        fetchJson(
+          fetchImpl,
+          baseUrl,
+          `/channels/${encodeURIComponent(id)}/credentials${modelId ? `?modelId=${encodeURIComponent(modelId)}` : ""}`,
+        ),
     },
 
     settings: {

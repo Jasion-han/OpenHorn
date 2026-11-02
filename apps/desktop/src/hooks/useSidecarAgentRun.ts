@@ -475,10 +475,11 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
       apiKey: string;
       baseUrl: string | null;
       modelId: string;
+      contextWindow?: number | null;
       protocol: "openai" | "anthropic" | "google" | "acp";
     };
     try {
-      const result = await api.channels.getCredentials(input.channelId);
+      const result = await api.channels.getCredentials(input.channelId, input.modelId);
       credentials = result.credentials;
       if (!isLive()) return;
     } catch (error) {
@@ -619,6 +620,7 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
         // raw JSON in the apiKey slot.
         apiKey: credentials.protocol === "acp" ? "" : credentials.apiKey,
         model: input.modelId || credentials.modelId,
+        contextWindow: credentials.contextWindow,
         baseUrl: credentials.baseUrl ?? undefined,
         protocol: credentials.protocol,
         acpAgent,

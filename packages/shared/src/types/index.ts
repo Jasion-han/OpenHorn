@@ -4,6 +4,11 @@
 export type ChannelProtocol = "openai" | "anthropic" | "google" | "acp";
 export type Provider = string;
 
+/** Per-channel model override. Null/absent selects documented model metadata. */
+export interface ModelContextConfig {
+  contextWindow?: number | null;
+}
+
 export interface Channel {
   id: string;
   userId: string;
