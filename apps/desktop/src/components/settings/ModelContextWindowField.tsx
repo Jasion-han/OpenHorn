@@ -1,19 +1,22 @@
 import { useEffect, useId, useState } from "react";
-import { resolveContextPolicy } from "shared/context-policy";
+import type { ModelContextMetadata } from "shared/types";
 import { Button, Input } from "ui";
 import { parseContextWindowDraft } from "../../lib/contextWindowDraft";
+import { contextWindowPresentation } from "../../lib/contextWindowPresentation";
 import { formatChannelLabel, getChannelLabel } from "../../lib/i18n/agent";
 
 export function ModelContextWindowField({
   modelId,
   protocol,
   contextWindow,
+  contextMetadata,
   disabled,
   onSave,
 }: {
   modelId: string;
   protocol: string;
   contextWindow?: number | null;
+  contextMetadata?: ModelContextMetadata | null;
   disabled: boolean;
   onSave: (value: number | null) => Promise<void>;
 }) {
@@ -24,7 +27,30 @@ export function ModelContextWindowField({
   }, [contextWindow]);
   const parsed = parseContextWindowDraft(draft);
   const changed = parsed.valid && parsed.value !== (contextWindow ?? null);
-  const policy = resolveContextPolicy({ model: modelId, protocol, contextWindow });
+  const presentation = contextWindowPresentation({
+    model: modelId,
+    protocol,
+    contextWindow,
+    contextMetadata,
+  });
+  const tokens = presentation.contextWindow.toLocaleString("en-US");
+  const sourceLabels = {
+    configured: "settings.channel.context.source.configured",
+    channel: "settings.channel.context.source.channel",
+    catalog: "settings.channel.context.source.catalog",
+    runtime: "settings.channel.context.source.runtime",
+    model: "settings.channel.context.source.model",
+  } as const;
+  const details = [
+    presentation.checkedAt
+      ? formatChannelLabel("settings.channel.context.checkedAt", {
+          time: presentation.checkedAt.toLocaleString(),
+        })
+      : null,
+    presentation.inputLimitOnly ? getChannelLabel("settings.channel.context.inputOnly") : null,
+  ]
+    .filter(Boolean)
+    .join("\n");
 
   return (
     <form
@@ -61,10 +87,17 @@ export function ModelContextWindowField({
         >
           {getChannelLabel("settings.channel.context.save")}
         </Button>
-        <span id={`${inputId}-capacity`} className="text-xs text-muted-foreground">
-          {formatChannelLabel("settings.channel.context.effective", {
-            tokens: policy.contextWindow.toLocaleString("en-US"),
-          })}
+        <span
+          id={`${inputId}-capacity`}
+          className="text-xs text-muted-foreground"
+          title={details || undefined}
+        >
+          {presentation.source === "fallback"
+            ? formatChannelLabel("settings.channel.context.unknown", { tokens })
+            : formatChannelLabel("settings.channel.context.known", {
+                source: getChannelLabel(sourceLabels[presentation.source]),
+                tokens,
+              })}
         </span>
       </div>
       {!parsed.valid && (

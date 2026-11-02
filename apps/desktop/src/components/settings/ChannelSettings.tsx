@@ -209,6 +209,7 @@ export function ChannelSettings() {
   };
 
   const runChannelAction = async (key: string, action: () => Promise<void>) => {
+    if (busyKey) return;
     setBusyKey(key);
     try {
       await action();
@@ -334,6 +335,30 @@ export function ChannelSettings() {
         getChannelLabel("settings.channel.notify.syncSuccessTitle"),
         getChannelLabel("settings.channel.notify.syncSuccessBody"),
       );
+    });
+  };
+
+  const handleRefreshContext = async (channelId: string) => {
+    await runChannelAction(`context-refresh:${channelId}`, async () => {
+      const result = await api.channels.refreshContext(channelId);
+      if (!result.success) {
+        notifyError(
+          getChannelLabel("settings.channel.context.refreshFailedTitle"),
+          result.error || getChannelLabel("settings.channel.context.refreshFailedBody"),
+        );
+        return;
+      }
+      await loadChannelList();
+      const title = getChannelLabel("settings.channel.context.refreshSuccessTitle");
+      const body = formatChannelLabel("settings.channel.context.refreshSuccessBody", {
+        count: result.updated,
+      });
+      if (result.error)
+        notifyWarning(
+          getChannelLabel("settings.channel.context.cachedTitle"),
+          getChannelLabel("settings.channel.context.cachedBody"),
+        );
+      else notifySuccess(title, body);
     });
   };
 
@@ -764,16 +789,27 @@ export function ChannelSettings() {
                 {isExpanded && channel.protocol !== "acp" && (
                   <div className="flex flex-col gap-2">
                     <div className="flex flex-col gap-2 rounded-lg border border-dashed border-border/60 p-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <div>
-                          <p className="text-sm font-medium">
-                            {getChannelLabel("settings.channel.models.heading")}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            {formatChannelLabel("settings.channel.models.syncedCount", {
-                              count: channel.models.length,
-                            })}
-                          </p>
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <div>
+                            <p className="text-sm font-medium">
+                              {getChannelLabel("settings.channel.models.heading")}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {formatChannelLabel("settings.channel.models.syncedCount", {
+                                count: channel.models.length,
+                              })}
+                            </p>
+                          </div>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => void handleRefreshContext(channel.id)}
+                            disabled={Boolean(busyKey)}
+                          >
+                            <RefreshCw size={14} />
+                            {getChannelLabel("settings.channel.context.refresh")}
+                          </Button>
                         </div>
                         <div className="flex w-full max-w-md items-center gap-2">
                           <Input
@@ -796,7 +832,7 @@ export function ChannelSettings() {
                             size="sm"
                             variant="outline"
                             onClick={() => void handleAddModel(channel)}
-                            disabled={busyKey === `add-model:${channel.id}`}
+                            disabled={Boolean(busyKey)}
                           >
                             {getChannelLabel("settings.channel.models.addButton")}
                           </Button>
@@ -878,6 +914,7 @@ export function ChannelSettings() {
                                 modelId={model.modelId}
                                 protocol={channel.protocol}
                                 contextWindow={model.contextWindow}
+                                contextMetadata={model.contextMetadata}
                                 disabled={Boolean(busyKey)}
                                 onSave={(value) =>
                                   handleSaveContextWindow(channel, model.modelId, value)

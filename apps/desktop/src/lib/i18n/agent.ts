@@ -229,6 +229,22 @@ export function getMcpLabel(key: McpLabelKey): string {
  * placeholders resolved via `formatChannelLabel`.
  */
 export const channelLabels = {
+  "settings.channel.context.refresh": "刷新窗口",
+  "settings.channel.context.refreshSuccessTitle": "窗口信息已刷新",
+  "settings.channel.context.refreshSuccessBody": "已更新 {count} 个模型的容量信息。",
+  "settings.channel.context.refreshFailedTitle": "窗口信息刷新失败",
+  "settings.channel.context.refreshFailedBody": "暂时无法获取容量信息，请稍后重试。",
+  "settings.channel.context.cachedTitle": "已保留窗口信息",
+  "settings.channel.context.cachedBody": "暂未获得新的容量信息，已保留缓存和手动配置。",
+  "settings.channel.context.known": "{source} · {tokens} tokens",
+  "settings.channel.context.unknown": "容量未知 · 保守预算 {tokens} tokens",
+  "settings.channel.context.source.configured": "手动配置",
+  "settings.channel.context.source.channel": "渠道报告",
+  "settings.channel.context.source.catalog": "模型目录",
+  "settings.channel.context.source.runtime": "运行时报告",
+  "settings.channel.context.source.model": "内置资料",
+  "settings.channel.context.checkedAt": "核对时间：{time}",
+  "settings.channel.context.inputOnly": "仅获知输入上限，已为回复和运行开销预留空间。",
   "settings.channel.context.label": "上下文窗口",
   "settings.channel.context.autoPlaceholder": "自动",
   "settings.channel.context.save": "保存",
