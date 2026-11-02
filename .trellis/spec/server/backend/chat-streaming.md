@@ -165,20 +165,21 @@ boundChatContext<T extends { role: "system" | "user" | "assistant"; content: unk
   messages: readonly T[],
   limits?: { maxTokens?: number; maxMessages?: number; omittedMessages?: number },
 ): Array<T | { role: "system"; content: string }>;
-// Defaults: CHAT_MAX_CONTEXT_TOKENS = 32_000; CHAT_MAX_CONTEXT_MESSAGES = 200.
+// Legacy helper defaults: 32_000 tokens / 200 messages. Runtime callers pass model policy.
 class ChatContextBudgetError extends Error {
   readonly code = "chat_context_budget_exceeded";
 }
-// Sidecar Agent history has a separate 16,000-token allocation.
+// Legacy helper only; production Agent entries use boundAgentHistory and model policy.
 truncateHistory(history: HistoryMessage[], maxTokens: number): HistoryMessage[];
 ```
 
 ### 3. Contracts
 
-- Token counts are app estimates, not model tokenizer output: text uses
-  `ceil(chars / 3.5)`, each message adds 10, and each image adds an estimated
-  1,024. Provider context limits still apply. Do not change model/context options
-  or claim these estimates are exact token counts.
+- Token counts are app estimates, not model tokenizer output: ASCII uses
+  `ceil(chars / 3.5)`, BMP non-ASCII adds2 per code point, supplementary characters
+  add4; each message adds10 and each image an estimated1024. Model-aware runtime
+  limits come from shared/context-policy, including output/tool/safety reserves.
+  Provider tokenization and native compaction remain authoritative.
 - Reserve all actual system sections and the complete last user turn before
   choosing older turns. Chat history is grouped by a question and its following
   answers; omit groups from the front, preserving their order and pairing.
@@ -195,11 +196,11 @@ truncateHistory(history: HistoryMessage[], maxTokens: number): HistoryMessage[];
   tokens and message overhead consume budget. Reject clearly when the complete
   current request, system sections and necessary notice cannot fit. Never clip
   the current user text or silently return only system messages.
-- Agent's 16,000-token history allocation excludes its current prompt. Preserve
-  that prompt in full and let the runtime/provider surface its own context
-  refusal. History notices consume that allocation. `buildHistoryMessages`
-  still produces user-first alternating turns, merging a trailing notice/user
-  into the final prompt rather than dropping it.
+- Agent reserves full current text/files, effective system instructions, tool
+  definitions and images before choosing older whole turns with the same model
+  policy. No active16K history allocation remains. `buildHistoryMessages` still
+  produces user-first alternating turns. Growing self-managed tool transcripts
+  fail intact rather than splitting tool-call/result pairs.
 
 ### 4. Validation & Error Matrix
 
@@ -321,3 +322,78 @@ content: partial || error.message
 // Correct: exact model text and a bounded termination category travel separately.
 content: partial, finishReason: chatFailureFinishReason(errorCode)
 ```
+
+
+## Scenario: Model-Aware Context Capacity
+
+### 1. Scope / Trigger
+All Chat send/edit/retry/prepare and sidecar Chat/Agent entries, channel model
+configuration, Codex exec/app-server, ACP dynamic model credentials and DB upgrades.
+
+### 2. Signatures
+`ModelContextConfig = {contextWindow?: number | null}` in shared/types.
+`resolveContextPolicy({model,protocol?,contextWindow?,mode?})` returns
+`{contextWindow,maxInputTokens,maxOutputTokens,maxMessages,reserveTokens,source}`.
+`channel_models.context_window INTEGER NULL` exists in both schema definitions;
+bootstrap adds it idempotently before FK rebuilding. `PUT /channels/:id/models`
+accepts the optional field; `GET /channels/:id/credentials?modelId=...` resolves
+that exact model. Chat prepare returns resolved contextWindow; desktop forwards
+it through validated chat.stream/agent.run RPCs, including background Agent runs.
+
+### 3. Contracts
+- Null means automatic; omission in legacy update payloads preserves overrides.
+  Sync, backup and import retain explicit values. Integer8192..2000000 required.
+- Exact verified model IDs/snapshots use documented capacities; unknown IDs fall
+  back to32000 and may receive a channel-specific override. Overrides cannot
+  increase known maxima. Old conversation.contextLength4096 is not an override.
+- Astra window1050000 has a distinct922000 input ceiling. Reserve output4096
+  (Chat) /16384 (Agent), capped at window/4; safety max(1024,ceil(window*5%));
+  Agent tool reserve min(32768,floor(window/8)). Input also obeys documented
+  model input maxima. Message cap scales with input/64, bounded200..10000.
+- Expand current attachments/instructions before old turns. Expand old groups
+  newest-first and stop after the first non-fitting group, counting unfetched
+  rows in omission metadata. Do not read10000 obsolete attachments first.
+- Codex Chat uses stdin via exec '-' for user/history and no second16K crop;
+  developer instructions retain their role, with a separate64KiB encoded argv
+  ceiling checked before spawning. Capacity/compaction overrides are per run,
+  never writes to user CLI configuration. Native Agent uses JSON-RPC.
+- ACP live model IDs need not exist in persisted models; only an exact persisted
+  match can supply its override. External resumed native history/compaction is
+  owned by the external runtime; app estimates cover the incoming seeded request.
+
+### 4. Validation & Error Matrix
+| Input | Result |
+|---|---|
+| Known Astra plus >32K current estimate | Accepted if protected input fits922000 and reserves |
+| Unknown gateway alias with1000000 override | Budget from override; do not infer provider support |
+| Zero/string/fraction/NaN/over2M override | Reject writes/RPC; invalid resolver input uses automatic fallback |
+| Exact known model with too-large override | Clamp documented maximum |
+| Explicit null / omitted update field | Reset to automatic / retain prior setting |
+| Unknown HTTP model / live ACP model | Reject selection / allow without inheriting default override |
+| Current request or required notice cannot fit | Explicit durable Chat failure, no final completion |
+
+### 5. Good / Base / Bad Cases
+Good: Astra large file with random first/last markers retains both, including
+Agent file text beyond12000 characters. Base: small requests unchanged.
+Bad: update32K constant while Codex16K history or attachment clipping remains.
+
+### 6. Tests Required
+Shared exact IDs/ceilings/overrides/Unicode/count scaling; server selected model,
+all Chat paths and10000-row attachment fetch bounds; old missing-column schema
+migration preserves every old row and repeated overrides. Desktop mapping/query,
+explicit-save input validation and manual/background transport parity. Sidecar
+actual loopback JSON contains complete files/history; fake Codex process receives
+390K stdin and per-thread metadata, oversized system argv fails before spawn.
+Retain native real-GPT evidence separately from deterministic protocol coverage.
+
+### 7. Wrong vs Correct
+Wrong: model.contextWindow=128000 while truncateHistory(history,16000).
+Correct: selected model/channel resolves one policy used in preparation, final
+wire payload and runtime metadata; native provider limits remain authoritative.
+
+Official model sources (verified2026-11-02):
+https://developers.openai.com/api/docs/models/gpt-6-astra.md
+https://developers.openai.com/api/docs/models/gpt-5.5.md
+https://developers.openai.com/api/docs/models/gpt-5.4.md
+https://developers.openai.com/api/docs/models/gpt-4.1.md
+https://platform.claude.com/docs/en/about-claude/models/overview

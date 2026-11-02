@@ -222,3 +222,17 @@ user-only replies, transaction rollback and invalid role/ownership/ID shapes.
 读取端一律直接读 `content`；`DesktopMessageBubble` 对含 text 步骤的消息只渲染时间线，不再渲染
 content 块。sidecar 的 Claude / 直连运行时把历史作为真实的 user / assistant 消息发送
 （`agent/context.ts` `buildHistoryMessages`），Codex / ACP 只收单段文本，仍是拼接
+
+
+## Model Context Configuration
+
+Channel model records carry nullable contextWindow; null is automatic model
+metadata, not zero. Preserve the field in every model-list update and map it
+through chatAdapter. Settings uses explicit save with integer8192..2000000
+validation; blank explicitly resets to automatic. Show effective saved capacity.
+Credential requests include the actual selected modelId (URL-encoded), so manual
+and background Agent runs never inherit the default model's override. Forward
+prepared Chat contextWindow after adding the live output-policy instructions;
+sidecar rechecks final input. Legacy conversation.contextLength=4096 must not be
+silently interpreted as an intentional new context override. See server
+chat-streaming.md for policy, migration and transport-boundary regressions.
