@@ -30,6 +30,10 @@ export function genUiKindOf(language: string | undefined): GenUiKind | null {
  * `codeFencedFence` and, only when explicitly closed, a second fence token.
  */
 export function endsInsideOpenFence(content: string): boolean {
+  // Every fenced block needs at least three identical backticks or tildes.
+  // Ordinary streamed prose can skip a second full Markdown parse; candidate
+  // markers still use the renderer's grammar, including containers and HTML.
+  if (!content.includes("```") && !content.includes("~~~")) return false;
   const events = postprocess(
     parse({ extensions: [gfm()] })
       .document()
