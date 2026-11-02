@@ -517,7 +517,8 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
             conversations,
             currentConversation,
             selectedChannelId: currentConversation?.channelId || state.selectedChannelId,
-            composerMode: currentConversation?.lastMode || state.composerMode,
+            // Refresh metadata without changing the user's current draft mode.
+            // Only selecting/creating a conversation restores its saved mode.
             ...(!background ? { isLoading: false } : {}),
           };
         });

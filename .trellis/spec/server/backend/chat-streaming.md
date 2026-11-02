@@ -47,6 +47,15 @@ class ChatModeUnsupportedError extends Error {
   completion adapter and discover the capability error after storing a question.
 - Sidecar Chat prepare also validates that a resolved channel exists before
   inserting the question; failed preparation cannot leave a dangling turn.
+- Persist `conversations.lastMode` when a Chat question is prepared or an Agent
+  turn is synchronized. Update it only when that request's user message is the
+  conversation's latest user row by SQLite `rowid`; perform this test in the
+  same SQL update with `modeForLatestUserRequest`. Timestamps can tie and a
+  separate read can race with a newer request. Apply the guard to new Agent
+  pairs and both existing-message synchronization branches.
+- Chat completion persists its reply without rewriting `lastMode`: a delayed
+  completion or retry of an older question cannot replace a newer request's
+  saved mode. Conversation ownership validation precedes any mutation.
 
 ## 4. Validation & Error Matrix
 
@@ -61,6 +70,8 @@ class ChatModeUnsupportedError extends Error {
 | Database persistence fails | Surface the storage failure; do not claim done |
 | ACP Chat via any creation/edit/retry path | Typed HTTP 400; messages and conversation unchanged |
 | Foreign conversation on an ACP channel | Ownership error before resolving/disclosing channel capability |
+| Older Agent sync or Chat prepare overlaps a newer user request | Preserve the newer request's lastMode, including equal timestamps |
+| Chat completion arrives after a newer Agent request | Persist the reply without changing the saved Agent mode |
 
 ## 5. Good / Base / Bad Cases
 
@@ -80,6 +91,9 @@ Retain all Stop, empty-regenerate and agent synchronization tests.
 `messageService.acp-chat.test.ts` checks all six service paths with real DB
 snapshots, ownership ordering, and five actual HTTP route responses. Existing
 ACP Agent runtime tests must keep passing.
+`messageService.sidecar-mode.test.ts` uses a real temporary SQLite DB to cover
+new/existing Agent sync branches, Chat prepare/complete, same-timestamp user
+ordering, older retries, trigger-injected interleavings, and foreign ownership.
 
 ## 7. Wrong vs Correct
 

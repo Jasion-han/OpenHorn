@@ -454,6 +454,61 @@ describe("desktop chat store", () => {
     expect(store.getState().composerMode).toBe("chat");
   });
 
+  for (const background of [false, true]) {
+    for (const savedMode of ["agent", "chat"] as const) {
+      test(`conversation refresh preserves the current composer choice (${savedMode}, background=${background})`, async () => {
+        const { adapter } = createStubAdapter();
+        const [conversation] = await adapter.listConversations();
+        let title = "before refresh";
+        const store = createDesktopChatStore({
+          ...adapter,
+          listConversations: async () => [{ ...conversation, title, lastMode: savedMode }],
+        });
+        await store.getState().loadConversations();
+        await store.getState().selectConversation(conversation.id);
+        expect(store.getState().composerMode).toBe(savedMode);
+
+        const chosenMode = savedMode === "agent" ? "chat" : "agent";
+        store.getState().setComposerMode(chosenMode);
+        title = "fresh metadata";
+        await store.getState().loadConversations({ background });
+
+        expect(store.getState().currentConversation?.title).toBe(title);
+        expect(store.getState().currentConversation?.lastMode).toBe(savedMode);
+        expect(store.getState().composerMode).toBe(chosenMode);
+        // Explicit conversation selection still restores the persisted mode.
+        await store.getState().selectConversation(conversation.id);
+        expect(store.getState().composerMode).toBe(savedMode);
+      });
+    }
+  }
+
+  test("a pending metadata refresh preserves a mode selected after it started", async () => {
+    const { adapter } = createStubAdapter();
+    const conversations = await adapter.listConversations();
+    let resolveRefresh!: (value: Conversation[]) => void;
+    let calls = 0;
+    const store = createDesktopChatStore({
+      ...adapter,
+      listConversations: async () => {
+        if (calls++ === 0) return conversations;
+        return new Promise<Conversation[]>((resolve) => {
+          resolveRefresh = resolve;
+        });
+      },
+    });
+    await store.getState().loadConversations();
+    await store.getState().selectConversation(conversations[0].id);
+
+    const pendingRefresh = store.getState().loadConversations({ background: true });
+    store.getState().setComposerMode("chat");
+    resolveRefresh(conversations);
+    await pendingRefresh;
+
+    expect(store.getState().composerMode).toBe("chat");
+    expect(store.getState().currentConversation?.id).toBe(conversations[0].id);
+  });
+
   test("stops active streaming via adapter", () => {
     let aborted = false;
     const { adapter } = createStubAdapter();

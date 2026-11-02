@@ -1,5 +1,5 @@
 import { attachments, conversations, messages } from "db";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { assistantFinishReason, assistantMessageContent } from "shared/message-text";
 import { type ChatContentPart, type ChatMessage, createAdapter } from "../agent-adapters";
 import { client, db } from "../db";
@@ -1180,6 +1180,37 @@ async function insertSidecarAttachmentMeta(
   await db.insert(attachments).values(rows);
 }
 
+function modeForLatestUserRequest(
+  conversationId: string,
+  userMessageId: string,
+  mode: "chat" | "agent",
+) {
+  // Retrying an older round must not replace the mode of a later request.
+  // Check at UPDATE time so a request accepted during persistence also wins.
+  // SQLite timestamps have second precision; rowid preserves insertion order
+  // even when two user requests have the same timestamp.
+  return sql`CASE WHEN ${userMessageId} = (
+    SELECT id FROM messages
+    WHERE conversation_id = ${conversationId} AND role = 'user'
+    ORDER BY rowid DESC LIMIT 1
+  ) THEN ${mode} ELSE ${conversations.lastMode} END`;
+}
+
+async function syncSidecarConversationMetadata(
+  userId: string,
+  conversationId: string,
+  userMessageId: string,
+  mode: "chat" | "agent",
+) {
+  await db
+    .update(conversations)
+    .set({
+      updatedAt: new Date(),
+      lastMode: modeForLatestUserRequest(conversationId, userMessageId, mode),
+    })
+    .where(and(eq(conversations.id, conversationId), eq(conversations.userId, userId)));
+}
+
 export async function syncSidecarMessages(
   userId: string,
   input: {
@@ -1215,6 +1246,7 @@ export async function syncSidecarMessages(
   if (!conversation) throw new Error("Conversation not found");
 
   const now = new Date();
+  const mode = input.mode === "chat" ? "chat" : "agent";
   // The reply text of an agent run lives in its text steps; `content` must equal
   // it no matter what the client sent (older builds sent "" or the error text).
   // A run without text steps stores "" — its failure, if any, is agentRun.error.
@@ -1269,6 +1301,12 @@ export async function syncSidecarMessages(
           now,
         );
       }
+      await syncSidecarConversationMetadata(
+        userId,
+        input.conversationId,
+        input.userMessageId,
+        mode,
+      );
       return {
         userMessageId: input.userMessageId,
         assistantMessageId: input.assistantMessageId,
@@ -1314,7 +1352,7 @@ export async function syncSidecarMessages(
       conversationId: input.conversationId,
       role: "user",
       content: input.userContent,
-      mode: input.mode || "agent",
+      mode,
       attachments: null,
       agentRun: null,
       createdAt: now,
@@ -1337,7 +1375,7 @@ export async function syncSidecarMessages(
     role: "assistant",
     content: assistantContent,
     model: input.model || null,
-    mode: input.mode || "agent",
+    mode,
     attachments: null,
     agentRun: input.agentRun ? JSON.stringify(input.agentRun) : null,
     usage: input.usage ? JSON.stringify(input.usage) : null,
@@ -1351,6 +1389,7 @@ export async function syncSidecarMessages(
       : new Date(now.getTime() + 1),
   });
   await ftsUpsert(assistantMessageId, input.conversationId, assistantContent);
+  await syncSidecarConversationMetadata(userId, input.conversationId, userMessageId, mode);
 
   // Fire-and-forget: generate summary if the conversation is long enough
   void maybeSummarize(userId, input.conversationId).catch(() => {});
@@ -1410,7 +1449,11 @@ export async function prepareChatForSidecar(
 
   await db
     .update(conversations)
-    .set({ updatedAt: now, lastMode: "chat", runStatus: null })
+    .set({
+      updatedAt: now,
+      lastMode: modeForLatestUserRequest(input.conversationId, userMessageId, "chat"),
+      runStatus: null,
+    })
     .where(eq(conversations.id, input.conversationId));
 
   await db.insert(messages).values({
@@ -1486,7 +1529,9 @@ export async function completeChatFromSidecar(
 
   await db
     .update(conversations)
-    .set({ updatedAt: new Date(), lastMode: "chat", runStatus: null })
+    // Preparation saved the request's mode. Completion can arrive after a
+    // newer Agent request and must not replace that later user choice.
+    .set({ updatedAt: new Date(), runStatus: null })
     .where(eq(conversations.id, conversation.id));
 
   // Fire-and-forget: generate summary if the conversation is long enough

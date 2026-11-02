@@ -38,9 +38,17 @@ Questions to answer:
 
 ## Server State
 
-<!-- How server data is cached and synchronized -->
-
-(To be filled by the team)
+- `chatStore.loadConversations` refreshes server-owned conversation metadata,
+  including persisted `lastMode`, without changing the current local
+  `composerMode`. The composer holds the user's choice for the next request;
+  an ordinary foreground/background refresh must preserve it, including when
+  that choice changes while the refresh is pending.
+- Explicit conversation selection and creation restore the selected
+  conversation's saved mode. A metadata refresh is not a selection event.
+- Keep the `chatStore.test.ts` regressions for both saved modes, foreground and
+  background refreshes, and a deferred refresh resolved after a local mode
+  change. Assert that metadata is refreshed and explicit selection still
+  restores the saved mode.
 
 ---
 
