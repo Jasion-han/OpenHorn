@@ -102,10 +102,12 @@ try {
   const failureErrors = [];
   failed.on("pageerror", (error) => failureErrors.push(error.message));
   let rejectChunk;
+  let failedRequests = 0;
   const rejection = new Promise((resolve) => {
     rejectChunk = resolve;
   });
   await failed.route("**/chunks/GenUiBlock-*.js", async (route) => {
+    failedRequests += 1;
     await route.abort("failed");
     rejectChunk();
   });
@@ -115,16 +117,24 @@ try {
   await rejection;
   await failed.getByTestId("source").waitFor();
   assert.match(await failed.getByTestId("source").innerText(), /First block/);
-  await failed.evaluate(() => window.genUiLoadTest.clear());
-  await failed.getByText("Ordinary reply.", { exact: true }).waitFor();
+  await failed.evaluate((program) => window.genUiLoadTest.render([program]), first);
+  assert.equal(failedRequests, 1, "retained failed consumers must not busy-retry imports");
   assert.deepEqual(failureErrors, [], "a missing chunk must retain readable source, not crash");
   await failed.unroute("**/chunks/GenUiBlock-*.js");
-  await failed.evaluate((program) => window.genUiLoadTest.render([program]), first);
+  // Keep the original failed consumer mounted; a new consumer retries the import.
+  await failed.evaluate((programs) => window.genUiLoadTest.render(programs), [first, second]);
+  await failed.getByText("Second block", { exact: true }).waitFor();
+  assert.equal(
+    await failed.getByTestId("source").count(),
+    0,
+    "a successful shared retry must also recover the retained failed consumer",
+  );
   await failed.getByText("First block", { exact: true }).waitFor();
-  assert.equal(await failed.getByTestId("source").count(), 0);
+  await failed.evaluate(() => window.genUiLoadTest.clear());
+  await failed.getByText("Ordinary reply.", { exact: true }).waitFor();
   assert.deepEqual(failureErrors, []);
   console.log(
-    "PASS rejected chunks retain source, ordinary replies remain usable and later mounts recover",
+    "PASS rejected chunks retain source without polling; a shared retry recovers retained and new consumers",
   );
 
   const policyPage = await browser.newPage();

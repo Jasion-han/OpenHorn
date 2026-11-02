@@ -1,4 +1,4 @@
-import { type ComponentProps, createElement, useEffect, useState } from "react";
+import { type ComponentProps, createElement, useEffect, useSyncExternalStore } from "react";
 import { TEXT_ONLY_RESPONSE_POLICY } from "../../../lib/genui/responsePolicy";
 import { useGenUiStore } from "../../../stores/genUiStore";
 
@@ -17,12 +17,23 @@ import { useGenUiStore } from "../../../stores/genUiStore";
 type GenUiBlockComponent = typeof import("./GenUiBlock")["GenUiBlock"];
 let loadedBlock: GenUiBlockComponent | null = null;
 let blockLoad: Promise<GenUiBlockComponent> | null = null;
+const blockListeners = new Set<() => void>();
+
+function subscribeBlock(listener: () => void): () => void {
+  blockListeners.add(listener);
+  return () => {
+    blockListeners.delete(listener);
+  };
+}
+
+const blockSnapshot = () => loadedBlock;
 
 function loadBlock(): Promise<GenUiBlockComponent> {
   if (!blockLoad) {
     blockLoad = import("./GenUiBlock").then(
       ({ GenUiBlock }) => {
         loadedBlock = GenUiBlock;
+        for (const listener of blockListeners) listener();
         return GenUiBlock;
       },
       (error: unknown) => {
@@ -35,25 +46,16 @@ function loadBlock(): Promise<GenUiBlockComponent> {
 }
 
 export function LazyGenUiBlock(props: ComponentProps<GenUiBlockComponent>) {
-  const [Block, setBlock] = useState<GenUiBlockComponent | null>(() => loadedBlock);
+  const Block = useSyncExternalStore(subscribeBlock, blockSnapshot, blockSnapshot);
   useEffect(() => {
     if (Block) return;
-    let mounted = true;
-    void loadBlock().then(
-      (component) => {
-        if (mounted) setBlock(() => component);
-      },
-      () => {
-        // Keep readable source on a chunk failure; a later mount can retry.
-      },
-    );
-    return () => {
-      mounted = false;
-    };
+    void loadBlock().catch(() => {
+      // A later mount can retry; retained consumers share its successful load.
+    });
   }, [Block]);
 
   // React 19 holds the first suspended render for about 300ms even when the
-  // import has finished. Ordinary state publishes it as soon as it is ready.
+  // import has finished. A shared snapshot publishes it as soon as it is ready.
   // Once loaded, the cached component also preserves immediate remounts.
   return Block ? createElement(Block, props) : props.fallback;
 }

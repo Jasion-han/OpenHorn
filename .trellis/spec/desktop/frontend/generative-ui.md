@@ -504,13 +504,17 @@ node native-seed-fixtures.mjs --base http://127.0.0.1:3302
 modules; the OpenUI runtime plus the lucide namespace is ~950 KB.
 
 The block loader caches one dynamic import and publishes its resolved component
-through ordinary React state. React 19's first Suspense commit added a reproduced
+through a shared stable snapshot subscribed with `useSyncExternalStore`. React
+19's first Suspense commit added a reproduced
 ~300 ms delay even after that module was already evaluated; do not reintroduce
 `React.lazy` for this path without measuring production first-use latency. Keep
-readable source while the chunk loads or fails, ignore completion after a
-consumer unmounts, and reuse the cached component type after loading so controls
-retain their identity. Plain Markdown must not request the OpenUI chunk. The
-production split-chunk regression is `scripts/genui-loading.browser.mjs`.
+readable source while the chunk loads or fails and unsubscribe on unmount. A
+later demand-triggered successful retry must notify all retained consumers,
+including ones showing source from the earlier failure; failure itself must
+not trigger polling or repeated imports. Reuse the cached component type after
+loading so controls retain their identity. Plain Markdown must not request the
+OpenUI chunk. The production split-chunk regression is
+`scripts/genui-loading.browser.mjs`.
 
 ## Common mistakes
 
