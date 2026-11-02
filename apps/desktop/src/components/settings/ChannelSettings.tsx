@@ -34,6 +34,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "ui";
+import { channelModelUpdates } from "../../lib/contextWindowDraft";
 import { formatChannelLabel, getChannelLabel } from "../../lib/i18n/agent";
 import { notifyError, notifySuccess, notifyWarning } from "../../lib/notify";
 import { createServerApi } from "../../lib/serverApi";
@@ -42,6 +43,7 @@ import { useSidecarStore } from "../../stores/sidecarStore";
 import type { ApiAgentCheckResult, Channel, ChannelModel } from "../../types/chat";
 import { DesktopProviderLogo } from "../chat/DesktopProviderLogo";
 import { ChannelEditorModal, type SettingsNotice } from "./ChannelEditorModal";
+import { ModelContextWindowField } from "./ModelContextWindowField";
 
 const api = createServerApi();
 const NEW_CHANNEL_KEY = "__new__";
@@ -387,15 +389,29 @@ export function ChannelSettings() {
 
   const updateModels = async (channel: Channel, models: ChannelModel[]) => {
     await api.channels.updateModels(channel.id, {
-      models: models.map((model) => ({
-        modelId: model.modelId,
-        displayName: model.displayName,
-        enabled: model.enabled,
-        isDefault: model.isDefault,
-      })),
+      models: channelModelUpdates(models),
     });
     await loadChannelList();
     setExpandedChannelId(channel.id);
+  };
+
+  const handleSaveContextWindow = async (
+    channel: Channel,
+    modelId: string,
+    contextWindow: number | null,
+  ) => {
+    await runChannelAction(`context:${channel.id}:${modelId}`, async () => {
+      await updateModels(
+        channel,
+        channel.models.map((model) =>
+          model.modelId === modelId ? { ...model, contextWindow } : model,
+        ),
+      );
+      notifySuccess(
+        getChannelLabel("settings.channel.context.savedTitle"),
+        formatChannelLabel("settings.channel.context.savedBody", { modelId }),
+      );
+    });
   };
 
   const handleToggleModelEnabled = async (channel: Channel, modelId: string) => {
@@ -803,61 +819,70 @@ export function ChannelSettings() {
                           {channel.models.map((model) => (
                             <div
                               key={model.id}
-                              className="flex items-center justify-between gap-3 rounded-lg border border-border/60 px-3 py-2"
+                              className="flex flex-col gap-2 rounded-lg border border-border/60 px-3 py-2"
                             >
-                              <div className="flex min-w-0 items-center gap-3">
-                                <Checkbox
-                                  checked={model.enabled}
-                                  onCheckedChange={() =>
-                                    void handleToggleModelEnabled(channel, model.modelId)
-                                  }
-                                  disabled={busyKey === `toggle:${channel.id}:${model.modelId}`}
-                                />
-                                <div className="min-w-0">
-                                  <p className="truncate text-sm font-medium">
-                                    {model.displayName || model.modelId}
-                                  </p>
-                                  <p className="truncate text-xs text-muted-foreground">
-                                    {model.modelId}
-                                  </p>
+                              <div className="flex flex-wrap items-center justify-between gap-3">
+                                <div className="flex min-w-0 items-center gap-3">
+                                  <Checkbox
+                                    checked={model.enabled}
+                                    onCheckedChange={() =>
+                                      void handleToggleModelEnabled(channel, model.modelId)
+                                    }
+                                    disabled={Boolean(busyKey)}
+                                  />
+                                  <div className="min-w-0">
+                                    <p className="truncate text-sm font-medium">
+                                      {model.displayName || model.modelId}
+                                    </p>
+                                    <p className="truncate text-xs text-muted-foreground">
+                                      {model.modelId}
+                                    </p>
+                                  </div>
+                                </div>
+
+                                <div className="flex shrink-0 items-center gap-2">
+                                  {model.isDefault && (
+                                    <Badge variant="secondary">
+                                      {getChannelLabel("settings.channel.badge.default")}
+                                    </Badge>
+                                  )}
+                                  {!model.enabled && (
+                                    <Badge variant="outline">
+                                      {getChannelLabel("settings.channel.badge.disabled")}
+                                    </Badge>
+                                  )}
+                                  <Button
+                                    size="sm"
+                                    variant={model.isDefault ? "default" : "outline"}
+                                    onClick={() =>
+                                      void handleSetDefaultModel(channel, model.modelId)
+                                    }
+                                    disabled={Boolean(busyKey)}
+                                  >
+                                    {model.isDefault
+                                      ? getChannelLabel("settings.channel.badge.default")
+                                      : getChannelLabel("settings.channel.action.setDefault")}
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className="text-destructive"
+                                    onClick={() => void handleRemoveModel(channel, model.modelId)}
+                                    disabled={Boolean(busyKey)}
+                                  >
+                                    {getChannelLabel("settings.channel.model.remove")}
+                                  </Button>
                                 </div>
                               </div>
-
-                              <div className="flex shrink-0 items-center gap-2">
-                                {model.isDefault && (
-                                  <Badge variant="secondary">
-                                    {getChannelLabel("settings.channel.badge.default")}
-                                  </Badge>
-                                )}
-                                {!model.enabled && (
-                                  <Badge variant="outline">
-                                    {getChannelLabel("settings.channel.badge.disabled")}
-                                  </Badge>
-                                )}
-                                <Button
-                                  size="sm"
-                                  variant={model.isDefault ? "default" : "outline"}
-                                  onClick={() => void handleSetDefaultModel(channel, model.modelId)}
-                                  disabled={
-                                    busyKey === `default-model:${channel.id}:${model.modelId}`
-                                  }
-                                >
-                                  {model.isDefault
-                                    ? getChannelLabel("settings.channel.badge.default")
-                                    : getChannelLabel("settings.channel.action.setDefault")}
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  className="text-destructive"
-                                  onClick={() => void handleRemoveModel(channel, model.modelId)}
-                                  disabled={
-                                    busyKey === `remove-model:${channel.id}:${model.modelId}`
-                                  }
-                                >
-                                  {getChannelLabel("settings.channel.model.remove")}
-                                </Button>
-                              </div>
+                              <ModelContextWindowField
+                                modelId={model.modelId}
+                                protocol={channel.protocol}
+                                contextWindow={model.contextWindow}
+                                disabled={Boolean(busyKey)}
+                                onSave={(value) =>
+                                  handleSaveContextWindow(channel, model.modelId, value)
+                                }
+                              />
                             </div>
                           ))}
                         </div>

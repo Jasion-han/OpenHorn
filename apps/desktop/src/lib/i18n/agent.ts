@@ -229,6 +229,15 @@ export function getMcpLabel(key: McpLabelKey): string {
  * placeholders resolved via `formatChannelLabel`.
  */
 export const channelLabels = {
+  "settings.channel.context.label": "上下文窗口",
+  "settings.channel.context.autoPlaceholder": "自动",
+  "settings.channel.context.save": "保存",
+  "settings.channel.context.invalid": "请输入 8192 至 2000000 之间的整数，或留空使用自动配置。",
+  "settings.channel.context.savedTitle": "上下文窗口已更新",
+  "settings.channel.context.effective": "有效窗口 {tokens} tokens",
+  "settings.channel.context.inputLabel": "{modelId}：上下文窗口",
+  "settings.channel.context.saveLabel": "{modelId}：保存上下文窗口",
+  "settings.channel.context.savedBody": "{modelId} 的上下文设置已保存。",
   // Section
   "settings.channel.title": "渠道配置",
   "settings.channel.description": "全局用户级配置，对话与 Agent 共用。",
