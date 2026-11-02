@@ -328,16 +328,17 @@ content: partial, finishReason: chatFailureFinishReason(errorCode)
 
 ### 1. Scope / Trigger
 All Chat send/edit/retry/prepare and sidecar Chat/Agent entries, channel model
-configuration, Codex exec/app-server, ACP dynamic model credentials and DB upgrades.
+configuration, metadata discovery, Codex exec/app-server, ACP dynamic model credentials and DB upgrades.
 
 ### 2. Signatures
-`ModelContextConfig = {contextWindow?: number | null}` in shared/types.
+`ModelContextConfig = {contextWindow?: number | null, contextMetadata?: ModelContextMetadata | null}` in shared/types.
 `resolveContextPolicy({model,protocol?,contextWindow?,mode?})` returns
 `{contextWindow,maxInputTokens,maxOutputTokens,maxMessages,reserveTokens,source}`.
 `channel_models.context_window INTEGER NULL` exists in both schema definitions;
 bootstrap adds it idempotently before FK rebuilding. `PUT /channels/:id/models`
 accepts the optional field; `GET /channels/:id/credentials?modelId=...` resolves
-that exact model. Chat prepare returns resolved contextWindow; desktop forwards
+that exact model. Chat prepare returns the raw manual contextWindow override
+and contextMetadata; desktop forwards
 it through validated chat.stream/agent.run RPCs, including background Agent runs.
 
 ### 3. Contracts
@@ -397,3 +398,121 @@ https://developers.openai.com/api/docs/models/gpt-5.5.md
 https://developers.openai.com/api/docs/models/gpt-5.4.md
 https://developers.openai.com/api/docs/models/gpt-4.1.md
 https://platform.claude.com/docs/en/about-claude/models/overview
+
+
+## Scenario: Automatic Capability Discovery Across Providers
+
+### 1. Scope / Trigger
+Model sync, metadata-only refresh, first/stale selected-model resolution and all
+Chat/Agent final payloads. Capacity is provider/channel-specific; never guess1M
+from a model name or protocol, and never use inference to probe a limit.
+
+### 2. Signatures
+`ModelContextMetadata = {contextWindow:number,maxInputTokens?:number,
+maxOutputTokens?:number,source:'channel'|'catalog'|'runtime',fetchedAt:number,
+inputLimitOnly?:boolean}`. Shared normalizer validates4096..16777216 context,
+positive independent token ceilings, numeric safe timestamp and source enum.
+`channel_models.context_metadata TEXT NULL` is additive, mirrored in Drizzle and
+bootstrap, and read through the normalizer. It is server-owned: manual model
+update payloads do not write it. `POST /channels/:id/context-capabilities`
+returns `{success,models,updated,error?}` and changes metadata only.
+
+### 3. Contracts
+- Manual budget choice is bounded by discovered hard limits. Automatic priority:
+  configured channel report, exact maintained public catalog match, verified
+  built-in snapshot, explicit conservative32K fallback. Current metadata can
+  supersede old built-in context; independent input/output ceilings still apply.
+- OpenRouter context_length/top_provider and endpoint max_prompt_tokens /
+  max_completion_tokens remain distinct. Endpoint detail is fetched for the
+  selected model only. Google inputTokenLimit/outputTokenLimit and Anthropic
+  max_input_tokens/max_tokens are not summed into an invented total window;
+  input-only reports are labelled and budgeted conservatively. Output alone
+  cannot establish a context window.
+- Preserve exact serving IDs and namespaces. Only Google's models/ transport
+  prefix is stripped. Catalog matches exact serving/canonical IDs; ambiguity
+  stays unknown. Public catalog downloads receive no credentials, conversation
+  content or private aliases. Provider auth stays on its configured origin;
+  pagination cannot redirect credentials to another origin.
+- Bound network work:12s cold directory deadline,16MiB body,20pages,20000models;
+  catalog single-flight/cache24h with60s failure backoff. Channel metadata
+  refresh is single-flight/scoped to channel identity and cached24h. Future
+  timestamps are not fresh. First/stale resolution can refresh once; failures
+  retain valid scoped metadata and preserve manual choices.
+- Partial new reports retain missing last-good input/output ceilings before
+  catalog supplementation. Provider key/endpoint/protocol changes clear old
+  metadata; both model sync and metadata-only writes recheck channel identity
+  inside the write transaction. Model roster additions invalidate channel
+  refresh cache; numeric override edits do not trigger needless network work.
+- Metadata-only refresh never deletes/adds models or changes enabled/default /
+  manual overrides. Normal sync still reconciles its model list and also stores
+  capacity reports. Display source and timestamp; unknown32K is a conservative
+  app budget, never presented as measured model capacity.
+- Prepare and credentials return raw manual contextWindow|null plus validated
+  contextMetadata. Do not put effective discovered16M into the manual8192..2M
+  RPC field. Desktop/manual/background runs and every sidecar entry propagate
+  metadata, so final bounds and requested output retain independent limits.
+
+### 4. Validation & Error Matrix
+| Trigger | Required behavior |
+|---|---|
+| Namespaced OpenRouter Claude/Gemini/other model reports capacity | Use that exact model's report; no GPT registry required |
+| Directory has IDs only | Exact public catalog fallback, then builtin/unknown |
+| Output limit only | Unknown context, never treat output as context |
+| Directory later omits valid input/output fields | Keep last scoped ceilings |
+| HTTP/timeout/malformed/catalog outage | Preserve cached data/manual override; bounded retries |
+| Concurrent channel edit while sync/refresh runs | Discard obsolete write inside transaction |
+| New model after warm cache | Invalidate roster-dependent cache; resolve new model immediately |
+| Auto discovered4096 or2097152/16M | Valid metadata with manualnull, no RPC range rejection |
+
+### 5. Good / Base / Bad Cases
+Good: OpenRouter reports Gemini/Claude/Qwen capacities with sourcechannel, while
+an unidentifiable private alias explicitly shows unknown/conservative budget.
+Base: manualoverride and old successful conversations remain intact.
+Bad: a static list grants GPT1M while other valid models remain silently32K;
+or a partial refresh loses a1024output ceiling and starts requesting16384.
+
+### 6. Tests Required
+Directory parser/protocol fields/pagination/redirect/byte+deadline bounds;
+catalog cache/single-flight/backoff/exact namespaced lookup; selected OpenRouter
+endpoint details; DB migration/read-only metadata+manual preservation; partial
+reports and deferred network/channel edits; roster cache invalidation;2M+auto
+prepare-to-sidecar transport. Non-GPT262144context/200000input/1024output must
+reach real loopback OpenAI/Google/Anthropic Chat and Direct Agent requests;
+Codex native transport receives metadata without invented output config keys.
+UI source/unknown projection, refresh route and per-model mapping have regressions.
+
+### 7. Wrong vs Correct
+Wrong: `/models` mapped only to{id,displayName}, then a hardcoded model registry.
+Correct: retain validated limits/source/time, refresh/cache per channel identity,
+resolve one policy and carry its raw manual+metadata inputs to the final runtime.
+
+Sources: https://openrouter.ai/docs/guides/overview/models ;
+https://openrouter.ai/docs/api/api-reference/endpoints/list-all-endpoints-for-a-model ;
+https://ai.google.dev/api/models ;
+https://raw.githubusercontent.com/anthropics/anthropic-sdk-typescript/main/src/resources/models.ts ;
+https://models.dev/models.json .
+
+
+Metadata network requests respect explicit HTTP(S)/ALL_PROXY and NO_PROXY. On
+macOS, absent environment routing, read existing scutil settings (500ms read,
+30s cache/single-flight), honoring exceptions/loopback/CIDRs without changing
+system settings. PAC is not fetched/evaluated; explicit environment routing
+remains authoritative. Only read-only metadata requests use this helper, not
+all inference transports. Native cold OpenRouter fetch took6.4s, motivating the
+12s bounded concurrent directory/catalog/selected-detail phase; warm reads use
+caches. Public OpenRouter directory calls send no inference credentials. Explicit
+refresh bypasses catalog TTL, and cache-only outage returns a warning without
+claiming newly fetched facts or erasing valid limits.
+
+
+### Server Test Database Boundary
+
+Bun's per-package preload is directory-dependent. Server tests must pin isolated
+DATABASE_URL/OPENHORN_TEST_DATABASE_URL and load apps/server/bunfig.toml setup.
+As a second boundary, db/index calls assertIsolatedTestDatabase before createClient
+when NODE_ENV=test. Selecting the default workspace data/openhorn.db, including
+relative/encoded/query URLs and symlink/hardlink aliases, throws
+UnsafeTestDatabaseError(code=unsafe_test_database) without opening SQLite.
+Temporary databases, :memory: and normal development/production behavior remain
+unchanged. Regression subprocesses copy the real entry/helper into an owned
+synthetic workspace: even a broken guard cannot target the user's normal DB.

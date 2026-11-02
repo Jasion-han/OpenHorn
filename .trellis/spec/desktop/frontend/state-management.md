@@ -236,3 +236,17 @@ prepared Chat contextWindow after adding the live output-policy instructions;
 sidecar rechecks final input. Legacy conversation.contextLength=4096 must not be
 silently interpreted as an intentional new context override. See server
 chat-streaming.md for policy, migration and transport-boundary regressions.
+
+
+## Discovered Context Provenance
+
+Map contextMetadata through channel models, credentials, prepared Chat and both
+manual/background sidecar run paths. It is server-owned and excluded from manual
+model update payloads; resetting the manual field to null preserves discovery.
+Settings has one metadata-only refresh action per channel. Capacity lines label
+channel/catalog/runtime/builtin/manual origin; unknown fallback is visibly a
+conservative app budget. A timestamp/input-only note can be placed in a tooltip.
+Never present fallback32K as a provider's true window. Effective auto windows can
+exceed the manual editor range, so transport raw manualnull+metadata instead of
+coercing effective capacity into the manual RPC field. See server discovery
+contract for source priority, cache invalidation and non-destructive refresh.
