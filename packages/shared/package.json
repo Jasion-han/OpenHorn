@@ -15,7 +15,8 @@
     "./vision": "./src/vision/index.ts",
     "./shell-risk": "./src/shell-risk.ts",
     "./child-env": "./src/child-env.ts",
-    "./message-text": "./src/message-text.ts"
+    "./message-text": "./src/message-text.ts",
+    "./context-budget": "./src/context-budget.ts"
   },
   "devDependencies": {
     "typescript": "^5.0.0"

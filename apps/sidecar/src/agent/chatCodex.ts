@@ -1,4 +1,5 @@
 import type { ChatMessage } from "adapters";
+import { boundChatContext } from "shared/context-budget";
 import { sanitizeChildEnv } from "./childEnv";
 import { type AgentEvent, buildUsageEvent, toCount } from "./events";
 import { codexChatContext } from "./runtimePrompt";
@@ -59,7 +60,17 @@ export async function runCodexChat(
     input.onEvent({ type: "done" });
     return;
   }
-  const { prompt, systemPrompt } = codexChatContext(input.messages);
+  let messages: ChatMessage[];
+  try {
+    messages = boundChatContext(input.messages);
+  } catch (error) {
+    input.onEvent({
+      type: "error",
+      content: error instanceof Error ? error.message : String(error),
+    });
+    return;
+  }
+  const { prompt, systemPrompt } = codexChatContext(messages);
   const codexPath = await (dependencies.findBinary ?? findCodexBinary)();
   if (input.abortController.signal.aborted) {
     input.onEvent({ type: "done" });

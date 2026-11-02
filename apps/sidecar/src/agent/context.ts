@@ -8,22 +8,35 @@ export function truncateHistory(
   history: Array<{ role: "user" | "assistant"; content: string }>,
   maxTokens: number,
 ): Array<{ role: "user" | "assistant"; content: string }> {
+  if (history.length === 0) return [];
+  const messageTokens = (message: { content: string }) => estimateTokens(message.content) + 10;
+  if (history.reduce((sum, message) => sum + messageTokens(message), 0) <= maxTokens) {
+    return [...history];
+  }
+  const omission = (count: number) => ({
+    role: "user" as const,
+    content: `[${count} earlier messages omitted]`,
+  });
+  // The notice is part of the history budget, including when no old message
+  // fits. Never silently return an empty history after dropping prior turns.
   let totalTokens = 0;
   const kept: typeof history = [];
   for (let i = history.length - 1; i >= 0; i--) {
     const msg = history[i];
     if (!msg) continue;
-    const tokens = estimateTokens(msg.content) + 10;
-    if (totalTokens + tokens > maxTokens) break;
+    const tokens = messageTokens(msg);
+    const requiredNotice = i > 0 ? messageTokens(omission(i)) : 0;
+    if (totalTokens + tokens + requiredNotice > maxTokens) break;
     totalTokens += tokens;
     kept.unshift(msg);
   }
-  if (kept.length < history.length && kept.length > 0) {
+  if (kept.length < history.length) {
     const skipped = history.length - kept.length;
-    kept.unshift({
-      role: "user" as const,
-      content: `[${skipped} earlier messages omitted]`,
-    });
+    const noticeTokens = messageTokens(omission(skipped));
+    if (totalTokens + noticeTokens > maxTokens) {
+      throw new Error("History context budget is too small for an omission notice");
+    }
+    kept.unshift(omission(skipped));
   }
   return kept;
 }

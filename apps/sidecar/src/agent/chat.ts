@@ -1,4 +1,5 @@
 import { type ChatMessage, createAdapter, isAnthropicOAuthToken } from "adapters";
+import { boundChatContext } from "shared/context-budget";
 import { resolveClaudeBillingMarker } from "./anthropic-billing";
 import type { AgentEvent } from "./events";
 
@@ -13,6 +14,18 @@ export type RunChatStreamInput = {
 };
 
 export async function runChatStream(input: RunChatStreamInput): Promise<void> {
+  let messages: ChatMessage[];
+  try {
+    // The desktop appends its response-format schema after server preparation.
+    // Recheck the final payload so those instructions also consume the budget.
+    messages = boundChatContext(input.messages);
+  } catch (error) {
+    input.onEvent({
+      type: "error",
+      content: error instanceof Error ? error.message : String(error),
+    });
+    return;
+  }
   // Claude Code OAuth tokens: the adapter applies the OAuth request rules
   // itself; the sidecar only supplies the billing marker for the local CLI.
   const billingMarker = isAnthropicOAuthToken(input.apiKey)
@@ -25,7 +38,7 @@ export async function runChatStream(input: RunChatStreamInput): Promise<void> {
   try {
     const stream = adapter.chatStream({
       model: input.model,
-      messages: input.messages,
+      messages,
       maxTokens: 4096,
       signal: input.abortController.signal,
     });

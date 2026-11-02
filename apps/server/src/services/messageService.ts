@@ -1,5 +1,6 @@
 import { attachments, conversations, messages } from "db";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { boundChatContext, CHAT_MAX_CONTEXT_MESSAGES } from "shared/context-budget";
 import { assistantFinishReason, assistantMessageContent } from "shared/message-text";
 import { type ChatContentPart, type ChatMessage, createAdapter } from "../agent-adapters";
 import { client, db } from "../db";
@@ -29,18 +30,6 @@ import { getSettingValues } from "./settingsService";
 import { getRecentSummaries, maybeSummarize } from "./summaryService";
 
 const GLOBAL_SYSTEM_PROMPT_KEY = "chat.systemPrompt";
-// Hard safety backstop for chat-mode model context. `getMessages` intentionally
-// stays unbounded (it also feeds the UI message list), and the per-conversation
-// `contextLength` column is a token budget (default 4096), not a message count —
-// so it is not a clean message-count bound. This cap only trims pathologically
-// long conversations; normal conversations stay well under it and are unchanged.
-const CHAT_MAX_CONTEXT_MESSAGES = 200;
-const CHAT_MAX_CONTEXT_TOKENS = 32_000;
-
-function estimateChatTokens(text: string): number {
-  return Math.ceil(text.length / 3.5);
-}
-
 // ---------------------------------------------------------------------------
 // FTS5 sync helpers — best-effort; the virtual table may not exist in test
 // environments that skip bootstrapDatabase().
@@ -274,7 +263,7 @@ async function buildUserContentWithAttachments(
   return parts;
 }
 
-async function buildChatMessages(
+export async function buildChatMessages(
   userId: string,
   conversationMessages: Array<{ role: string; content: string; attachments?: string | null }>,
   systemPrompt?: string | null,
@@ -329,30 +318,24 @@ async function buildChatMessages(
     appendChatMessage(chatMessages, "system", effectiveSystemPrompt);
   }
 
-  // Two-stage truncation: first a message-count cap, then a token-budget cap.
-  // The message-count cap is a coarse backstop; the token cap is the real limit.
-  let boundedMessages =
-    conversationMessages.length > CHAT_MAX_CONTEXT_MESSAGES
-      ? conversationMessages.slice(-CHAT_MAX_CONTEXT_MESSAGES)
-      : conversationMessages;
-
-  let tokenBudget = CHAT_MAX_CONTEXT_TOKENS;
-  if (systemPrompt) tokenBudget -= estimateChatTokens(systemPrompt);
-  let totalTokens = 0;
-  let startIdx = boundedMessages.length;
-  for (let i = boundedMessages.length - 1; i >= 0; i--) {
-    const message = boundedMessages[i];
-    if (!message) continue;
-    const tokens = estimateChatTokens(message.content) + 10;
-    if (totalTokens + tokens > tokenBudget) break;
-    totalTokens += tokens;
-    startIdx = i;
+  // Bound attachment expansion work before fetching old files. Retain the
+  // current request even when pathological trailing rows exceed the coarse
+  // cap; the final budget below always validates the actual expanded payload.
+  let currentUserIndex = conversationMessages.length - 1;
+  while (currentUserIndex >= 0 && conversationMessages[currentUserIndex]?.role !== "user") {
+    currentUserIndex--;
   }
-  if (startIdx > 0) {
-    boundedMessages = boundedMessages.slice(startIdx);
-  }
-
-  for (const message of boundedMessages) {
+  const startIndex = Math.min(
+    Math.max(0, conversationMessages.length - CHAT_MAX_CONTEXT_MESSAGES),
+    Math.max(0, currentUserIndex),
+  );
+  const coarseMessages = conversationMessages.filter(
+    (message, index) => index >= startIndex || message.role === "system",
+  );
+  for (const message of coarseMessages) {
+    if (message.role !== "user" && message.role !== "assistant" && message.role !== "system") {
+      continue;
+    }
     if (message.role === "user" && message.attachments) {
       let attachmentIds: string[] = [];
       try {
@@ -362,14 +345,22 @@ async function buildChatMessages(
       }
 
       const content = await buildUserContentWithAttachments(userId, message.content, attachmentIds);
-      appendChatMessage(chatMessages, "user", content);
+      const normalized = normalizeChatContent(content);
+      if (normalized) chatMessages.push({ role: "user", content: normalized });
       continue;
     }
 
-    appendChatMessage(chatMessages, message.role as ChatMessage["role"], message.content);
+    const normalized = normalizeChatContent(message.content);
+    if (normalized) chatMessages.push({ role: message.role, content: normalized });
   }
 
-  return chatMessages;
+  const bounded: ChatMessage[] = [];
+  for (const message of boundChatContext(chatMessages, {
+    omittedMessages: conversationMessages.length - coarseMessages.length,
+  })) {
+    appendChatMessage(bounded, message.role, message.content);
+  }
+  return bounded;
 }
 
 async function getConversationForUser(userId: string, conversationId: string) {

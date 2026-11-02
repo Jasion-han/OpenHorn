@@ -104,3 +104,105 @@ catch (error) { if (!signal.aborted) throw error; }
 catch (error) { if (!signal.aborted) streamError = String(error); }
 return { content: accumulated, stopped: signal.aborted, error: streamError };
 ```
+
+## Scenario: Preserve the Current Request Under Context Budgets
+
+### 1. Scope / Trigger
+
+Apply to Chat send/edit/regenerate preparation, sidecar Chat transport entry
+points, and Agent history seeding. A context budget must never turn a user's
+request into a system-only provider request.
+
+### 2. Signatures
+
+```ts
+// shared/context-budget
+boundChatContext<T extends { role: "system" | "user" | "assistant"; content: unknown }>(
+  messages: readonly T[],
+  limits?: { maxTokens?: number; maxMessages?: number; omittedMessages?: number },
+): Array<T | { role: "system"; content: string }>;
+// Defaults: CHAT_MAX_CONTEXT_TOKENS = 32_000; CHAT_MAX_CONTEXT_MESSAGES = 200.
+class ChatContextBudgetError extends Error {
+  readonly code = "chat_context_budget_exceeded";
+}
+// Sidecar Agent history has a separate 16,000-token allocation.
+truncateHistory(history: HistoryMessage[], maxTokens: number): HistoryMessage[];
+```
+
+### 3. Contracts
+
+- Token counts are app estimates, not model tokenizer output: text uses
+  `ceil(chars / 3.5)`, each message adds 10, and each image adds an estimated
+  1,024. Provider context limits still apply. Do not change model/context options
+  or claim these estimates are exact token counts.
+- Reserve all actual system sections and the complete last user turn before
+  choosing older turns. Chat history is grouped by a question and its following
+  answers; omit groups from the front, preserving their order and pairing.
+  This utility is for Chat messages, not tool-call/result transcripts.
+- Count expanded attachment text and the effective system prompt, including
+  memory/RAG. A coarse expansion cap preserves stored system messages and the
+  current user even when empty assistant placeholders trail it. Normalize and
+  merge adjacent roles after budgeting, so an older unanswered question cannot
+  consume the current question's protected reservation.
+- The desktop appends Auto/UI instructions after server preparation. Reapply
+  the shared policy in `runChatStream` and `runCodexChat` before provider/CLI
+  startup; count the final schema and retain it in full.
+- Any omitted history requires a notice, including complete omission; notice
+  tokens and message overhead consume budget. Reject clearly when the complete
+  current request, system sections and necessary notice cannot fit. Never clip
+  the current user text or silently return only system messages.
+- Agent's 16,000-token history allocation excludes its current prompt. Preserve
+  that prompt in full and let the runtime/provider surface its own context
+  refusal. History notices consume that allocation. `buildHistoryMessages`
+  still produces user-first alternating turns, merging a trailing notice/user
+  into the final prompt rather than dropping it.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required behavior |
+|---|---|
+| Current Chat request exceeds local estimate | Clear budget error; no final Chat completion or CLI call |
+| Latest historical answer alone exceeds history allocation | Omission notice plus complete current request |
+| Auto schema makes prepared history too large | Re-budget at the final sidecar entry; omit whole old turns |
+| Current question plus final schema cannot fit | Error before provider request or CLI discovery |
+| Count cap would remove stored system/current user | Retain them; enforce the final count and estimate explicitly |
+| All history fits exactly without notice | Keep it unchanged; reserve no unnecessary notice |
+| History allocation cannot fit even the omission notice | Explicit history-budget failure |
+
+The server's existing live-route classification and RAG embedding work can run
+before Chat message construction. This policy gates the final Chat completion
+or CLI startup; it does not prevent those earlier optional requests.
+
+### 5. Good / Base / Bad Cases
+
+- Good: omit a large previous generated program, explain the missing history,
+  and submit the complete new question with the current Auto schema.
+- Base: a small conversation reaches the provider unchanged.
+- Bad: break the backwards scan on a large current question and send only
+  system instructions; increase budgets to hide the lost-request bug.
+
+### 6. Tests Required
+
+- Shared pure tests assert current-request rejection, all system sections,
+  whole-turn history selection, notice cost, 200-message behavior, multipart
+  attachments, exact-fit preservation and immutable input.
+- `messageService.context-budget.test.ts` calls the real builder without module
+  mocks or providers. Cover the 113,000-character request, oversized historical
+  answer, adjacent unanswered user turns, stored system retention and more than
+  200 trailing empty assistant placeholders. Use a disposable test DB.
+- Sidecar `context-budget.test.ts` calls the actual Chat adapter against a
+  loopback SSE server: append UI schema after preparation, inspect the submitted
+  body, and assert a rejected payload causes zero additional requests. Codex
+  rejects before binary discovery. Agent history tests assert the full-omission
+  notice, budget compliance, exact fit and normalized alternation.
+
+### 7. Wrong vs Correct
+
+```ts
+// Wrong: the latest question can disappear, and the notice is unbudgeted.
+if (tokens > remaining) break;
+return [system, ...kept];
+// Correct: protect the current request, then recheck the final transport body.
+const prepared = boundChatContext(expandedMessages);
+const submitted = boundChatContext(withCurrentOutputInstructions(prepared));
+```
