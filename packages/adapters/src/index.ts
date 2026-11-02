@@ -5,6 +5,7 @@ export type {
   ChatMessage,
   ChatOptions,
   ChatResponse,
+  ChatUsage,
   CreateAdapterOptions,
   ProviderAdapter,
   StreamingToolCallingAdapter,
@@ -31,6 +32,7 @@ export {
   normalizeAnthropicModelId,
   VERIFIED_CLAUDE_CODE_VERSION,
 } from "./anthropic-oauth";
+export { ChatStreamTruncatedError } from "./chatStreamError";
 export type {
   AgentCapabilityMode,
   GenericAgentConversationMessage,

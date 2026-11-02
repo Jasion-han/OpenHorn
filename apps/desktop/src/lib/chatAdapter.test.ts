@@ -448,6 +448,25 @@ describe("chatAdapter", () => {
   });
 });
 
+test("loading a Chat reply preserves persisted truncation and usage after refresh", async () => {
+  const { api } = createStubServerApi();
+  const originalList = api.messages.list;
+  api.messages.list = async (...args) => {
+    const result = await originalList(...args);
+    return {
+      messages: result.messages.map((message) => ({
+        ...message,
+        mode: "chat",
+        agentRun: null,
+        finishReason: "length",
+      })),
+    };
+  };
+  const [message] = await createChatAdapter(api).loadMessages("conv-1");
+  expect(message?.finishReason).toBe("length");
+  expect(message?.usage).toEqual({ promptTokens: 12, completionTokens: 8, totalTokens: 20 });
+});
+
 describe("chatAdapter appendSystemPrompt over the real server api", () => {
   function createRecordingAdapter() {
     const requests: Array<{ url: string; body: unknown }> = [];

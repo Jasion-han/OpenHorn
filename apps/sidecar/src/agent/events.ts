@@ -1,3 +1,5 @@
+import type { ChatStreamErrorCode } from "shared/types";
+
 /** A file location referenced by a tool call (ACP `locations[]`). */
 export interface AgentToolLocation {
   path: string;
@@ -32,7 +34,7 @@ export type AgentEvent =
       cost?: { amount: number; currency: string };
     }
   | { type: "done" }
-  | { type: "error"; content: string }
+  | { type: "error"; content: string; errorCode?: ChatStreamErrorCode }
   /** ACP-specific: rich tool call with lifecycle status, kind, locations, diff. */
   | {
       type: "tool_call_detail";

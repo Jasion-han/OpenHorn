@@ -1,4 +1,4 @@
-import type { ImportRecord, MessageFinishReason } from "shared/types";
+import type { ChatStreamErrorCode, ImportRecord, MessageFinishReason } from "shared/types";
 
 export type ChatMode = "chat" | "agent";
 
@@ -186,7 +186,7 @@ export interface ApiMessage {
   citations: string | null;
   /** JSON blob of ApiMessageUsage, or null when the provider reported none. */
   usage: string | null;
-  /** "stopped" when the user stopped the reply; null otherwise or for older rows. */
+  /** Explicit Stop or Chat output-limit state; absent on older rows. */
   finishReason?: MessageFinishReason | null;
   attachmentsMeta?: ApiMessageAttachmentMeta[];
   createdAt: string;
@@ -281,6 +281,7 @@ export interface Message {
    * "stopped": the user stopped this reply and it was kept as far as it got.
    * The persisted counterpart of an agent run's "cancelled" status, and the
    * only record of the stop for a chat reply (which has no run).
+   * "length": Chat reached the provider's output limit with partial/empty text.
    */
   finishReason?: MessageFinishReason;
   streamTail?: string;
@@ -299,7 +300,13 @@ export type ChatStreamEvent =
   | { type: "citations"; citations: ApiCitation[] }
   | { type: "delta"; content: string }
   | { type: "clear_streaming_text" }
-  | { type: "done"; messageId?: string; model?: string; agentRun?: ApiAgentRun }
+  | {
+      type: "done";
+      messageId?: string;
+      model?: string;
+      agentRun?: ApiAgentRun;
+      usage?: ApiMessageUsage;
+    }
   | {
       type: "agent_event";
       event: {
@@ -310,7 +317,14 @@ export type ChatStreamEvent =
         toolCallId?: string;
       };
     }
-  | { type: "error"; message: string; messageId?: string; model?: string };
+  | {
+      type: "error";
+      message: string;
+      messageId?: string;
+      model?: string;
+      errorCode?: ChatStreamErrorCode;
+      usage?: ApiMessageUsage;
+    };
 
 export interface CreateConversationInput {
   title: string;

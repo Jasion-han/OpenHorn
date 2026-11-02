@@ -72,6 +72,18 @@ describe("assistantFinishReason", () => {
     expect(assistantFinishReason("stopped", undefined)).toBe("stopped");
   });
 
+  test("keeps explicit Chat truncation without applying it to Agent runs", () => {
+    expect(assistantFinishReason("length", undefined)).toBe("length");
+    expect(assistantFinishReason("length", null)).toBe("length");
+    expect(assistantFinishReason("length", "null")).toBe("length");
+    expect(assistantFinishReason("length", { status: "completed", steps: [] })).toBe(null);
+    expect(assistantFinishReason("length", JSON.stringify({ status: "failed", steps: [] }))).toBe(
+      null,
+    );
+    expect(assistantFinishReason("length", { status: "cancelled", steps: [] })).toBe("stopped");
+    expect(assistantFinishReason(undefined, null)).toBe(null);
+  });
+
   test("a cancelled agent run is a stopped reply, parsed or stored as JSON", () => {
     expect(assistantFinishReason(undefined, { status: "cancelled", steps: [] })).toBe("stopped");
     expect(assistantFinishReason(null, JSON.stringify({ status: "cancelled", steps: [] }))).toBe(

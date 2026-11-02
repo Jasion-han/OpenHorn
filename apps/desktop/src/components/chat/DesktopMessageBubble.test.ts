@@ -69,4 +69,16 @@ describe("resolveBubbleEndLabel", () => {
     expect(label({ agentRun: { status: "cancelled", summary: "", steps: [] } })).toBe(null);
     expect(label({ role: "user" })).toBe(null);
   });
+
+  test("persisted Chat truncation stays visible for partial and empty replies", () => {
+    expect(label({ content: "```openui\nroot = Card(", finishReason: "length" })).toBe(
+      "chat.reply.truncated",
+    );
+    expect(label({ finishReason: "length" })).toBe("chat.reply.truncated");
+    expect(label({ finishReason: "length" }, true)).toBe(null);
+    expect(label({ role: "user", finishReason: "length" })).toBe(null);
+    expect(
+      label({ finishReason: "length", agentRun: { status: "completed", summary: "", steps: [] } }),
+    ).toBe(null);
+  });
 });

@@ -22,6 +22,7 @@ let holdSettings = null;
 let holdAgentSave = null;
 let syncedPreparations = 0;
 let retryMode = "success";
+let truncationEdit = false;
 let protocol = "openai";
 const conversation = {
   id: "failure-conversation",
@@ -40,6 +41,8 @@ const retryText =
   '```openui-lang\nroot=Input($amount,"Retry amount","number")\n$amount=11\n```\n\nRetry complete.';
 const retryPartial =
   '```openui-lang\nroot=Input($amount,"Partial retry","number")\n$amount=9\n```\n\nRetry partial.';
+const truncationPartial = '```openui-lang\nroot=Input($value,"Truncated UI")\n$value="unfinished"';
+const truncationUsage = { promptTokens: 11, completionTokens: 7, totalTokens: 18 };
 const json = (response, value, status = 200) => {
   response.writeHead(status, { "Content-Type": "application/json" });
   response.end(JSON.stringify(value));
@@ -132,7 +135,12 @@ const server = http.createServer(async (request, response) => {
     }
     const row = rows.find((row) => row.id === data.assistantMessageId);
     assert.ok(row, "completion must use the persisted assistant ID");
-    Object.assign(row, { content: data.content, updatedAt: new Date().toISOString() });
+    Object.assign(row, {
+      content: data.content,
+      finishReason: data.finishReason ?? null,
+      usage: data.usage ? JSON.stringify(data.usage) : null,
+      updatedAt: new Date().toISOString(),
+    });
     return json(response, { success: true });
   }
   if (path === "/messages/sync-sidecar") {
@@ -172,12 +180,34 @@ const server = http.createServer(async (request, response) => {
     const id = decodeURIComponent(path.split("/")[2]);
     const row = rows.find((row) => row.id === id);
     assert.ok(row, "retry must use the persisted assistant ID");
+    const truncated = retryMode.startsWith("truncated-");
     const generated =
-      retryMode === "success" ? retryText : retryMode === "partial-error" ? retryPartial : "";
-    if (generated) row.content = generated;
+      retryMode === "truncated-partial"
+        ? truncationPartial
+        : retryMode === "success"
+          ? retryText
+          : retryMode === "partial-error"
+            ? retryPartial
+            : "";
+    if (generated) {
+      Object.assign(row, {
+        content: generated,
+        finishReason: truncated ? "length" : null,
+        usage: truncated ? JSON.stringify(truncationUsage) : null,
+      });
+    }
     response.writeHead(200, { "Content-Type": "text/event-stream" });
-    const terminal =
-      retryMode === "success"
+    const terminal = truncated
+      ? {
+          type: "error",
+          message: "fixture raw retry output limit",
+          content: generated,
+          errorCode: "response_truncated",
+          usage: truncationUsage,
+          messageId: id,
+          model: "fixture-model",
+        }
+      : retryMode === "success"
         ? { type: "done", messageId: id, model: "fixture-model" }
         : {
             type: "error",
@@ -197,21 +227,24 @@ const server = http.createServer(async (request, response) => {
     assert.ok(user);
     user.content = data.content;
     const id = "saved-edited-tail";
+    const generated = truncationEdit ? truncationPartial : retryPartial;
     rows.push({
       id,
       conversationId: conversation.id,
       role: "assistant",
-      content: retryPartial,
+      content: generated,
+      ...(truncationEdit ? { finishReason: "length", usage: JSON.stringify(truncationUsage) } : {}),
       mode: "chat",
       createdAt: new Date().toISOString(),
     });
     response.writeHead(200, { "Content-Type": "text/event-stream" });
     response.end(
       [
-        { type: "delta", content: retryPartial },
+        { type: "delta", content: generated },
         {
           type: "error",
-          message: "fixture edit interrupted",
+          message: truncationEdit ? "fixture raw edit output limit" : "fixture edit interrupted",
+          ...(truncationEdit ? { errorCode: "response_truncated", usage: truncationUsage } : {}),
           messageId: id,
           model: "fixture-model",
         },
@@ -269,6 +302,7 @@ try {
     completes = 0;
     retries = 0;
     retryMode = "success";
+    truncationEdit = false;
     syncedPreparations = 0;
     protocol = "openai";
     // A finished HTTP request can still have application continuations queued.
@@ -1268,6 +1302,236 @@ try {
       `PASS Text only historical ${mode} widget: live local state survives policy change/remount; follow-up appends to the draft without a model call`,
     );
   }
+  // Output-limit scenarios use the real ChatArea and persisted Bubble mapping.
+  const truncationLabels = await page.evaluate(() => ({
+    label: window.failureChat.labels.truncation,
+    error: window.failureChat.labels.truncationError,
+  }));
+  const truncationLabel = () =>
+    page.getByText(truncationLabels.label, { exact: true }).and(page.locator("span"));
+  const waitForTruncation = () =>
+    page.waitForFunction(
+      () =>
+        !window.failureChat.snapshot().streaming &&
+        window.failureChat.snapshot().error === window.failureChat.labels.truncationError,
+    );
+  for (const empty of [false, true]) {
+    await reset();
+    await send();
+    await page.evaluate(() => window.failureChat.truncationCapture());
+    if (!empty) await emit(truncationPartial);
+    await page.evaluate(() => {
+      window.failureChat.truncationUsage();
+      window.failureChat.truncationFail();
+    });
+    await waitForTruncation();
+    const current = (await snapshot()).messages.find((message) => message.role === "assistant");
+    assert.equal(current.content, empty ? "" : truncationPartial);
+    assert.equal(current.finishReason, "length");
+    assert.deepEqual(current.usage, truncationUsage);
+    const persisted = rows.find((row) => row.id === current.id);
+    assert.equal(persisted.content, current.content);
+    assert.equal(persisted.finishReason, "length");
+    assert.deepEqual(JSON.parse(persisted.usage), truncationUsage);
+    assert.equal(completes, 1, "an explicit output limit persists the Chat result once");
+    await truncationLabel().waitFor();
+    await page.getByRole("alert").filter({ hasText: truncationLabels.error }).waitFor();
+    assert.equal(
+      (await page.locator("body").innerText()).includes("fixture raw output limit"),
+      false,
+    );
+    if (!empty) {
+      assert.equal(
+        await page.getByRole("textbox", { name: "Truncated UI", exact: true }).isDisabled(),
+        true,
+        "an unfinished output-limit program remains inert",
+      );
+    }
+    await page.evaluate(async () => {
+      await window.failureChat.reload();
+      window.failureChat.remount();
+    });
+    await truncationLabel().waitFor();
+    const reloaded = (await snapshot()).messages.find((message) => message.id === current.id);
+    assert.equal(reloaded.content, current.content);
+    assert.equal(reloaded.finishReason, "length");
+    assert.deepEqual(reloaded.usage, truncationUsage);
+    if (!empty) {
+      assert.equal(
+        await page.getByRole("textbox", { name: "Truncated UI", exact: true }).isDisabled(),
+        true,
+      );
+      await page.locator("textarea").fill("new question after output limit");
+      await page.locator("textarea").press("Enter");
+      await page.waitForFunction(() => window.failureChat.snapshot().runs === 2);
+      await emit("new answer remains owned by its own turn");
+      await page.evaluate(() => window.failureChat.truncationLate());
+      const afterLate = await snapshot();
+      assert.equal(afterLate.streaming, true, "a late old error cannot finish a newer request");
+      assert.equal(afterLate.error, null);
+      assert.equal(afterLate.messages.at(-1).content, "new answer remains owned by its own turn");
+      assert.equal(afterLate.messages.at(-1).finishReason, undefined);
+      await page.evaluate(() => window.failureChat.done());
+      await page.waitForFunction(() => !window.failureChat.snapshot().streaming);
+      assert.equal(rows.at(-1).finishReason, null);
+    }
+    console.log(
+      `PASS sidecar ${empty ? "empty" : "partial"} output limit: exact content/usage, structured notice, reload label${empty ? "" : ", inert program and ignored late error"}`,
+    );
+  }
+
+  for (const kind of ["retry", "edit"]) {
+    await reset();
+    await send();
+    await emit(closed);
+    await fail();
+    retryMode = "truncated-partial";
+    truncationEdit = true;
+    await page.evaluate((kind) => {
+      window.failureChat.deferRerun(kind, false);
+      window.failureChat.remount();
+    }, kind);
+    if (kind === "retry") {
+      await page.getByRole("button", { name: retryLabel, exact: true }).click();
+    } else {
+      await page.getByRole("button", { name: editLabel, exact: true }).click();
+      await page.locator("textarea").first().fill("deferred output-limit edit");
+      await page.locator("textarea").first().press("Enter");
+    }
+    await page.waitForFunction(() => window.failureChat.snapshot().heldRerun);
+    await page.getByRole("button", { name: "Stop", exact: true }).click();
+    await page.locator("textarea").fill("new turn before old output-limit response");
+    await page.locator("textarea").press("Enter");
+    await page.waitForFunction(() => window.failureChat.snapshot().runs === 2);
+    await emit('```openui-lang\nroot=Input($next,"New turn")\n$next="active"\n```\nNew partial');
+    const newControl = page.getByRole("textbox", { name: "New turn", exact: true });
+    await newControl.fill("keep newer truncation state");
+    const loadsBefore = requests.filter(
+      (request) => request.method === "GET" && request.path.startsWith("/messages"),
+    ).length;
+    await page.evaluate(() => window.failureChat.releaseRerun());
+    await page.waitForFunction(() => window.failureChat.snapshot().settledRerun);
+    await page.evaluate(
+      () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+    );
+    const current = await snapshot();
+    assert.equal(current.streaming, true, "old SSE output limits cannot finish newer streams");
+    assert.equal(current.loading, true, "old SSE output limits cannot clear newer loading");
+    assert.equal(current.error, null, "old structured errors cannot replace the newer status");
+    assert.equal(current.messages.length, 4);
+    assert.equal(current.messages.at(-1).finishReason, undefined);
+    assert.equal(current.messages.at(-1).usage, undefined);
+    assert.equal(await newControl.inputValue(), "keep newer truncation state");
+    assert.equal(
+      requests.filter((request) => request.method === "GET" && request.path.startsWith("/messages"))
+        .length,
+      loadsBefore,
+      "an old truncated response must not reload over the newer answer",
+    );
+    const saved = page.waitForResponse((response) =>
+      response.url().endsWith("/messages/chat/complete"),
+    );
+    await page.evaluate(() => window.failureChat.done());
+    await saved;
+    await page.waitForFunction(() => !window.failureChat.snapshot().streaming);
+    console.log(
+      `PASS delayed truncated SSE ${kind}: old error/usage/content do not mutate the newer turn`,
+    );
+  }
+
+  await reset();
+  await seedPolicyRound("chat", "limit-retry");
+  retryMode = "truncated-partial";
+  await page.getByRole("button", { name: retryLabel, exact: true }).click();
+  await waitForTruncation();
+  let truncatedReply = (await snapshot()).messages.find((message) => message.role === "assistant");
+  assert.equal(truncatedReply.id, "limit-retry-assistant");
+  assert.equal(truncatedReply.content, truncationPartial);
+  assert.equal(truncatedReply.finishReason, "length");
+  assert.deepEqual(truncatedReply.usage, truncationUsage);
+  await truncationLabel().waitFor();
+  assert.equal(
+    await page.getByRole("textbox", { name: "Truncated UI", exact: true }).isDisabled(),
+    true,
+  );
+  await page.evaluate(() => window.failureChat.reload());
+  await truncationLabel().waitFor();
+  assert.equal((await snapshot()).messages.at(-1).finishReason, "length");
+  assert.deepEqual((await snapshot()).messages.at(-1).usage, truncationUsage);
+  console.log(
+    "PASS SSE truncated retry: structured error/usage reach the actual bubble and survive reload",
+  );
+
+  await reset();
+  await seedPolicyRound("chat", "limit-empty-retry");
+  const previousUsage = { promptTokens: 1, completionTokens: 2, totalTokens: 3 };
+  Object.assign(
+    rows.find((row) => row.id === "limit-empty-retry-assistant"),
+    {
+      finishReason: "stopped",
+      usage: JSON.stringify(previousUsage),
+    },
+  );
+  await page.evaluate(() => window.failureChat.reload());
+  retryMode = "truncated-empty";
+  await page.getByRole("button", { name: retryLabel, exact: true }).click();
+  await waitForTruncation();
+  const restored = (await snapshot()).messages.find((message) => message.role === "assistant");
+  assert.equal(restored.content, closed);
+  assert.equal(
+    restored.finishReason,
+    "stopped",
+    "a zero-output retry keeps the old reply's status",
+  );
+  assert.deepEqual(
+    restored.usage,
+    previousUsage,
+    "a zero-output retry keeps the old reply's usage",
+  );
+  assert.equal(await truncationLabel().count(), 0);
+  assert.equal(rows.find((row) => row.id === restored.id).finishReason, "stopped");
+  console.log(
+    "PASS zero-output truncated SSE retry: prior reply/content/usage/end state remain intact",
+  );
+
+  await reset();
+  rows.push({
+    id: "limit-edit-user",
+    conversationId: conversation.id,
+    role: "user",
+    content: "original question before edit limit",
+    mode: "chat",
+    createdAt: new Date(0).toISOString(),
+  });
+  await page.evaluate(() => window.failureChat.reload());
+  truncationEdit = true;
+  await page.getByRole("button", { name: editLabel, exact: true }).click();
+  await page.locator("textarea").first().fill("edited question reaching output limit");
+  await page.locator("textarea").first().press("Enter");
+  await waitForTruncation();
+  truncatedReply = (await snapshot()).messages.find((message) => message.role === "assistant");
+  assert.equal(truncatedReply.id, "saved-edited-tail");
+  assert.equal(truncatedReply.content, truncationPartial);
+  assert.equal(truncatedReply.finishReason, "length");
+  assert.deepEqual(truncatedReply.usage, truncationUsage);
+  assert.equal(
+    rows.find((row) => row.role === "user").content,
+    "edited question reaching output limit",
+  );
+  await page.evaluate(async () => {
+    await window.failureChat.reload();
+    window.failureChat.remount();
+  });
+  await truncationLabel().waitFor();
+  assert.equal(
+    await page.getByRole("textbox", { name: "Truncated UI", exact: true }).isDisabled(),
+    true,
+  );
+  assert.deepEqual((await snapshot()).messages.at(-1).usage, truncationUsage);
+  console.log(
+    "PASS truncated SSE tail edit: persisted reply identity/usage/label and edited question survive reload",
+  );
+
   assert.deepEqual(errors, []);
   console.log("GenUI actual Chat failure browser regressions passed.");
 } finally {

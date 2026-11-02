@@ -15,9 +15,17 @@ streamReplyUntilStopped(adapter, { model, messages, signal }, send): Promise<{
   content: string;
   stopped: boolean;
   error?: string;
+  errorCode?: "response_truncated";
+  usage?: ChatUsage;
 }>;
 // Terminal SSE failure, emitted after persistence:
-{ type: "error", message: string, content: string, messageId: string, model: string }
+{ type: "error", message: string, content: string, messageId: string, model: string,
+  errorCode?: "response_truncated", usage?: ChatUsage }
+class ChatStreamTruncatedError extends Error {
+  readonly code = "response_truncated";
+  readonly finishReason: string;
+  readonly usage?: ChatUsage;
+}
 class ChatModeUnsupportedError extends Error {
   readonly code = "chat_mode_unsupported";
 }
@@ -39,7 +47,29 @@ class ChatModeUnsupportedError extends Error {
   as success; a rejected local stream cannot skip persistence.
 - Error text is transmitted separately in the terminal event. No schema change
   is introduced by this contract; the existing message content column retains
-  only generated text, and finish_reason retains its existing Stop semantics.
+  only generated text. The existing TEXT `finish_reason` stores `stopped` for
+  Stop and `length` for explicit Chat output truncation, otherwise null.
+- OpenAI `length`, Anthropic `max_tokens`, and Google `MAX_TOKENS` become
+  `ChatStreamTruncatedError` only in Chat adapters, after yielding generated
+  text and collecting final usage. Missing finish reasons retain gateway
+  compatibility. Do not classify generic Agent/tool-call results as this error.
+- A truncated Chat turn preserves exact partial/empty content and optional
+  provider usage, emits `errorCode: response_truncated`, and stores `length` in
+  non-streaming send, streaming send/edit/retry, and sidecar Chat completion.
+  SSE terminal metadata includes reported usage so the current bubble and
+  reload show consistent counts. Empty truncated content stays empty; the
+  localized end label displays the reason outside generated Markdown.
+- Stop/cancel takes priority over provider length metadata. A zero-output retry
+  keeps the previous content, usage and finish reason; a successful replacement
+  clears earlier termination state. No automatic provider retry is introduced.
+- Shared `assistantFinishReason(reason, agentRun)` recognizes Chat `length` only
+  without a parsed Agent run; a cancelled run produces `stopped` and other
+  Agent runs discard Chat length metadata. Agent-mode synchronization must also
+  reject `length` when a caller omits its run. This helper owns normalized values
+  written to the existing column; it does not require a migration.
+- A sidecar Chat error is terminal and unregisters its stream handler. Ignore
+  late/duplicate terminal events before mutating the settled turn's metadata.
+  Generic Agent error/done lifecycle remains governed by its Agent run.
 - Resolve the channel after conversation ownership validation but before writes
   or opening an SSE stream. An ACP Chat request throws ChatModeUnsupportedError;
   routes return JSON HTTP 400 with that code. Apply to send, stream, prepare,
@@ -64,6 +94,11 @@ class ChatModeUnsupportedError extends Error {
 | Provider yields partial, then throws | Persist partial; terminal error has actual id |
 | Provider throws before regenerate output | Keep previous reply; emit error |
 | Provider throws before edited-question reply output | Keep edited question and empty reply; emit error |
+| Provider explicitly reaches Chat output limit | Preserve text/usage, emit structured error, persist length |
+| Truncated empty Chat answer | Empty content with visible termination label, never injected error prose |
+| Provider reports length after Stop | Store stopped; never relabel as truncated |
+| Zero-output truncated retry | Keep previous content/usage/finish reason |
+| Late error after Chat completion | Ignore it; never rewrite completed metadata |
 | Client cancels after partial | Persist partial with finish_reason=stopped |
 | Client cancels empty regenerate | Keep prior reply and its finish reason |
 | Normal replacement succeeds | Persist new text and clear old stop state |
@@ -88,6 +123,13 @@ that yields an unfinished UI fence and then throws immediately. Assert send,
 edit and regenerate preserve exact partial text, emit a separate error with id,
 and emit no done event. Check zero-output failure keeps the previous reply.
 Retain all Stop, empty-regenerate and agent synchronization tests.
+`messageService.truncation.test.ts` covers explicit output limits with a typed
+mock generator and real isolated DB: non-streaming send, SSE send/edit/tail edit/
+retry, no-output retry, normal replacement, and sidecar complete/reload state.
+`packages/adapters/src/chatStreamError.test.ts` replays all three provider wire
+protocols using mocked fetch; no real model request is allowed. Sidecar and
+desktop focused tests verify event ordering, optional usage, structured codes,
+handler cleanup, refresh labels, empty content, and Agent/Stop boundaries.
 `messageService.acp-chat.test.ts` checks all six service paths with real DB
 snapshots, ownership ordering, and five actual HTTP route responses. Existing
 ACP Agent runtime tests must keep passing.

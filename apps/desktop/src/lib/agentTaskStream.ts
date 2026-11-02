@@ -1,3 +1,5 @@
+import type { ChatStreamErrorCode } from "shared/types";
+
 export type AgentTaskStreamEvent =
   | {
       type: "execution_event";
@@ -14,6 +16,7 @@ export type AgentTaskStreamEvent =
       taskId?: string;
       runId?: string;
       content: string;
+      errorCode?: ChatStreamErrorCode;
       metadata?: unknown;
     }
   | { type: "done"; taskId: string; runId: string };

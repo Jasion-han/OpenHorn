@@ -22,7 +22,7 @@
  *    (the sidecar is blocking the run waiting for `approvals.respond`).
  */
 
-import type { AttachmentPart } from "shared/types";
+import type { AttachmentPart, ChatStreamErrorCode } from "shared/types";
 import type { AgentTaskStreamEvent } from "./agentTaskStream";
 
 /**
@@ -67,7 +67,7 @@ export interface SidecarChatStreamInput {
   model: string;
   messages: Array<{ role: string; content: unknown }>;
   onEvent: (event: AgentTaskStreamEvent) => void | Promise<void>;
-  onError: (message: string) => void;
+  onError: (message: string, errorCode?: ChatStreamErrorCode) => void;
   onDone: (runId: string) => void;
 }
 
@@ -101,7 +101,7 @@ export interface SidecarRunAgentInput {
   tokenBudgetPerRun?: number;
   onEvent: (event: AgentTaskStreamEvent) => void | Promise<void>;
   onApproval: (request: SidecarApprovalRequest) => void | Promise<void>;
-  onError: (message: string) => void;
+  onError: (message: string, errorCode?: ChatStreamErrorCode) => void;
   onDone: (runId: string) => void;
   onSdkSessionId?: (sessionId: string) => void;
   /**
@@ -159,6 +159,7 @@ interface SidecarAgentEvent {
     | "agent_info"
     | "available_models";
   content?: string;
+  errorCode?: ChatStreamErrorCode;
   toolName?: string;
   toolInput?: unknown;
   userMessageId?: string;
@@ -339,6 +340,7 @@ export function projectSidecarAgentEvent(runId: string, raw: unknown): AgentTask
         taskId: runId,
         runId,
         content: typeof event.content === "string" ? event.content : "Agent error",
+        ...(event.errorCode === "response_truncated" ? { errorCode: event.errorCode } : {}),
       };
     case "user_message":
       // The desktop renderer has no use for this; swallow it.
@@ -378,7 +380,7 @@ export class SidecarClient {
     {
       onEvent: (event: AgentTaskStreamEvent) => void | Promise<void>;
       onApproval: (request: SidecarApprovalRequest) => void | Promise<void>;
-      onError: (message: string) => void;
+      onError: (message: string, errorCode?: ChatStreamErrorCode) => void;
       onDone: (runId: string) => void;
       onSdkSessionId?: (sessionId: string) => void;
       onCheckpointReady?: (runId: string) => void;
@@ -536,7 +538,11 @@ export class SidecarClient {
     this.runHandlers.set(runId, {
       onEvent,
       onApproval: () => {},
-      onError,
+      onError: (message, errorCode) => {
+        // Chat error is terminal; it does not emit a subsequent done event.
+        this.runHandlers.delete(runId);
+        onError(message, errorCode);
+      },
       onDone,
     });
     return runId;
@@ -675,7 +681,7 @@ export class SidecarClient {
         return;
       }
       if (projected.type === "error") {
-        handlers.onError(projected.content);
+        handlers.onError(projected.content, projected.errorCode);
         // Still surface the error into the event stream so the UI can
         // show it alongside whatever process rows have already landed.
         void handlers.onEvent(projected);

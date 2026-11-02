@@ -13,6 +13,7 @@ import type { Message } from "../../src/types/chat";
 type ChatInput = Parameters<SidecarClient["chatStream"]>[0];
 type AgentInput = Parameters<SidecarClient["runAgent"]>[0];
 let active: ChatInput | null = null;
+let capturedTruncationRun: ChatInput | null = null;
 let activeAgent: AgentInput | null = null;
 let agentRuns = 0;
 const agentWorkspaceRoots: Array<string | undefined> = [];
@@ -70,10 +71,13 @@ const api = {
     stop: "Stop",
     workspaceUnavailable: getChatLabel("chat.run.workspaceUnavailable"),
     sidecarNotReady: getChatLabel("chat.error.sidecarNotReady"),
+    truncation: getChatLabel("chat.reply.truncated"),
+    truncationError: getChatLabel("chat.error.responseTruncated"),
   },
   start(protocol: "openai" | "acp" = "openai", welcome = false) {
     flushSync(() => root.render(null));
     active = null;
+    capturedTruncationRun = null;
     activeAgent = null;
     agentRuns = 0;
     agentWorkspaceRoots.length = 0;
@@ -218,6 +222,26 @@ const api = {
     void active?.onEvent({ type: "execution_event", eventType: "text", content });
   },
   fail: () => active?.onError("fixture stream interrupted"),
+  truncationCapture() {
+    capturedTruncationRun = active;
+  },
+  truncationUsage() {
+    void active?.onEvent({
+      type: "execution_event",
+      eventType: "usage",
+      metadata: { promptTokens: 11, completionTokens: 7, totalTokens: 18 },
+    });
+  },
+  truncationFail: () => active?.onError("fixture raw output limit", "response_truncated"),
+  truncationLate() {
+    void capturedTruncationRun?.onEvent({
+      type: "execution_event",
+      eventType: "text",
+      content: "late old truncated answer",
+    });
+    capturedTruncationRun?.onError("late old output limit", "response_truncated");
+    capturedTruncationRun?.onDone("old-truncated-run");
+  },
   done: () => active?.onDone("fixture"),
   snapshot: () => ({
     runs,

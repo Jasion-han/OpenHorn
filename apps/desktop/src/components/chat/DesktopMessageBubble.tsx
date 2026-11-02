@@ -49,9 +49,15 @@ export function resolveAgentLiveIndicator(input: {
 export function resolveBubbleEndLabel(input: {
   message: Pick<Message, "role" | "content" | "agentRun" | "finishReason">;
   isStreaming: boolean;
-}): "chat.agent.stopped" | "chat.agent.cancelled" | "chat.reply.empty" | null {
+}):
+  | "chat.agent.stopped"
+  | "chat.agent.cancelled"
+  | "chat.reply.empty"
+  | "chat.reply.truncated"
+  | null {
   const { message } = input;
   if (message.role !== "assistant" || input.isStreaming || message.agentRun) return null;
+  if (message.finishReason === "length") return "chat.reply.truncated";
   const state = resolvePlainReplyEndState(message);
   if (state === "stopped") return "chat.agent.stopped";
   if (state === "cancelled") return "chat.agent.cancelled";

@@ -1,4 +1,9 @@
-import { type ChatMessage, createAdapter, isAnthropicOAuthToken } from "adapters";
+import {
+  type ChatMessage,
+  ChatStreamTruncatedError,
+  createAdapter,
+  isAnthropicOAuthToken,
+} from "adapters";
 import { boundChatContext } from "shared/context-budget";
 import { resolveClaudeBillingMarker } from "./anthropic-billing";
 import type { AgentEvent } from "./events";
@@ -66,6 +71,11 @@ export async function runChatStream(input: RunChatStreamInput): Promise<void> {
   } catch (error) {
     if (input.abortController.signal.aborted) {
       input.onEvent({ type: "done" });
+      return;
+    }
+    if (error instanceof ChatStreamTruncatedError) {
+      if (error.usage) input.onEvent({ type: "usage", ...error.usage });
+      input.onEvent({ type: "error", content: error.message, errorCode: error.code });
       return;
     }
     const message = error instanceof Error ? error.message : "Stream error";

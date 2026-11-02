@@ -42,15 +42,18 @@ export function assistantMessageContent(content: string, agentRun: unknown): str
  * every writer. "stopped" when the writer says so, or when the message carries
  * an agent run the user cancelled — the run status is the agent's own record of
  * the stop, so the column can never disagree with it (and older clients that
- * only send the run still get the column right). Anything else is null: a
- * re-produced reply that finished clears an earlier "stopped".
+ * only send the run still get the column right). Chat output-limit termination
+ * is "length". Other replies clear an earlier end reason; an Agent run cannot
+ * acquire Chat's output-limit state from an arbitrary caller value.
  */
 export function assistantFinishReason(
   finishReason: unknown,
   agentRun: unknown,
 ): MessageFinishReason | null {
   if (finishReason === "stopped") return "stopped";
-  return parseAgentRun(agentRun)?.status === "cancelled" ? "stopped" : null;
+  const run = parseAgentRun(agentRun);
+  if (run?.status === "cancelled") return "stopped";
+  return finishReason === "length" && !run ? "length" : null;
 }
 
 function parseAgentRun(agentRun: unknown): Record<string, unknown> | null {

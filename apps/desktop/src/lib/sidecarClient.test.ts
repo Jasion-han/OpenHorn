@@ -97,6 +97,22 @@ async function connectClient() {
 }
 
 describe("projectSidecarAgentEvent", () => {
+  test("projects only recognized structured output-limit codes", () => {
+    expect(
+      projectSidecarAgentEvent("run-limit", {
+        type: "error",
+        content: "limit",
+        errorCode: "response_truncated",
+      }),
+    ).toMatchObject({ type: "error", content: "limit", errorCode: "response_truncated" });
+    expect(
+      projectSidecarAgentEvent("run-other", {
+        type: "error",
+        content: "failure",
+        errorCode: "forged",
+      }),
+    ).toEqual({ type: "error", taskId: "run-other", runId: "run-other", content: "failure" });
+  });
   test("projects text events as execution_event:text", () => {
     const result = projectSidecarAgentEvent("run-1", { type: "text", content: "hello" });
     expect(result).toEqual({
@@ -182,6 +198,51 @@ describe("projectSidecarAgentEvent", () => {
 });
 
 describe("SidecarClient", () => {
+  test("Chat truncation delivers its structured code once and removes the completed handler", async () => {
+    const { client, socket } = await connectClient();
+    const failures: Array<{ message: string; code?: string }> = [];
+    const events: AgentTaskStreamEvent[] = [];
+    let done = 0;
+    const start = client.chatStream({
+      apiKey: "fixture-key",
+      protocol: "openai",
+      model: "fixture",
+      messages: [{ role: "user", content: "hi" }],
+      onEvent: (event) => {
+        events.push(event);
+      },
+      onError: (message, code) => failures.push({ message, code }),
+      onDone: () => {
+        done++;
+      },
+    });
+    await Promise.resolve();
+    socket.receive(
+      JSON.stringify({
+        type: "response",
+        requestId: lastSent(socket).requestId,
+        ok: true,
+        result: { runId: "chat-limit" },
+      }),
+    );
+    await start;
+    const deliver = (event: unknown) =>
+      socket.receive(
+        JSON.stringify({
+          type: "event",
+          event: "agent.event",
+          data: { runId: "chat-limit", event },
+        }),
+      );
+    deliver({ type: "error", content: "limit", errorCode: "response_truncated" });
+    deliver({ type: "error", content: "late failure", errorCode: "response_truncated" });
+    deliver({ type: "done" });
+    await Promise.resolve();
+    expect(failures).toEqual([{ message: "limit", code: "response_truncated" }]);
+    expect(events).toHaveLength(1);
+    expect(done).toBe(0);
+    await client.close();
+  });
   test("connect sends auth.handshake with the injected token", async () => {
     const { socket } = await connectClient();
     const parsed = JSON.parse(socket.sent[0] ?? "{}") as {

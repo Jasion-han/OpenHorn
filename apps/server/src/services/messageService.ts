@@ -1,3 +1,4 @@
+import { ChatStreamTruncatedError, type ChatUsage } from "adapters";
 import { attachments, conversations, messages } from "db";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { boundChatContext, CHAT_MAX_CONTEXT_MESSAGES } from "shared/context-budget";
@@ -497,6 +498,8 @@ export async function sendMessage(userId: string, input: SendMessageInput) {
   );
 
   let responseContent = "";
+  let responseUsage: ChatUsage | undefined;
+  let responseErrorCode: "response_truncated" | undefined;
   let responseModel: string | null = null;
 
   if (resolvedChannel) {
@@ -508,9 +511,8 @@ export async function sendMessage(userId: string, input: SendMessageInput) {
     );
     responseModel = resolvedChannel.modelId;
 
-    // Mirror the streaming path (streamMessage): if the provider throws mid-turn,
-    // persist an "Error:" assistant reply below instead of throwing and leaving a
-    // dangling user message with no assistant row for this turn.
+    // A length limit keeps useful generated content and usage. Other failures
+    // retain the existing non-streaming error response behavior.
     try {
       const stream = await adapter.chatStream({
         model: resolvedChannel.modelId,
@@ -527,7 +529,12 @@ export async function sendMessage(userId: string, input: SendMessageInput) {
       recordChannelSuccess(channelId);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Stream error";
-      responseContent = `Error: ${message}`;
+      if (error instanceof ChatStreamTruncatedError) {
+        responseErrorCode = error.code;
+        responseUsage = error.usage;
+      } else {
+        responseContent = `Error: ${message}`;
+      }
       const classified = classifyProviderError(message);
       if (classified.retryable) {
         recordChannelFailure(channelId);
@@ -546,6 +553,8 @@ export async function sendMessage(userId: string, input: SendMessageInput) {
     conversationId: input.conversationId,
     role: "assistant",
     content: responseContent,
+    usage: responseUsage ? JSON.stringify(responseUsage) : null,
+    finishReason: responseErrorCode ? "length" : null,
     model: responseModel,
     mode: "chat",
     agentRun: null,
@@ -559,6 +568,7 @@ export async function sendMessage(userId: string, input: SendMessageInput) {
   void maybeSummarize(userId, input.conversationId).catch(() => {});
 
   return {
+    ...(responseErrorCode ? { errorCode: responseErrorCode } : {}),
     userMessage: {
       id: userMessageId,
       role: "user",
@@ -569,6 +579,8 @@ export async function sendMessage(userId: string, input: SendMessageInput) {
       id: assistantMessageId,
       role: "assistant",
       content: responseContent,
+      finishReason: responseErrorCode ? ("length" as const) : null,
+      ...(responseUsage ? { usage: responseUsage } : {}),
       createdAt: new Date(),
     },
   };
@@ -748,6 +760,8 @@ export async function streamMessage(
       content: responseContent,
       stopped,
       error: streamError,
+      errorCode,
+      usage,
     } = await streamReplyUntilStopped(
       adapter,
       { model: resolvedChannel.modelId, messages: chatMessages, signal: ctx.signal },
@@ -765,7 +779,11 @@ export async function streamMessage(
         model: resolvedChannel.modelId,
         liveMetadata: serializeLiveMetadata(liveContext),
         citations: serializeCitations(liveContext.citations),
-        finishReason: assistantFinishReason(stopped ? "stopped" : null, null),
+        finishReason: assistantFinishReason(
+          stopped ? "stopped" : errorCode ? "length" : null,
+          null,
+        ),
+        usage: usage ? JSON.stringify(usage) : null,
         updatedAt: new Date(),
       })
       .where(eq(messages.id, assistantMessageId));
@@ -788,11 +806,18 @@ export async function streamMessage(
         ? {
             type: "error",
             message: streamError,
-            content: streamError,
+            content: responseContent,
+            ...(errorCode ? { errorCode } : {}),
+            ...(usage ? { usage } : {}),
             messageId: assistantMessageId,
             model: resolvedChannel.modelId,
           }
-        : { type: "done", messageId: assistantMessageId, model: resolvedChannel.modelId },
+        : {
+            type: "done",
+            messageId: assistantMessageId,
+            model: resolvedChannel.modelId,
+            ...(usage ? { usage } : {}),
+          },
     );
   });
 }
@@ -809,9 +834,17 @@ async function streamReplyUntilStopped(
   adapter: ReturnType<typeof createAdapter>,
   input: { model: string; messages: ChatMessage[]; signal: AbortSignal },
   send: (event: { type: string; [key: string]: unknown }) => void,
-): Promise<{ content: string; stopped: boolean; error?: string }> {
+): Promise<{
+  content: string;
+  stopped: boolean;
+  error?: string;
+  errorCode?: "response_truncated";
+  usage?: ChatUsage;
+}> {
   let responseContent = "";
   let streamError: string | undefined;
+  let errorCode: "response_truncated" | undefined;
+  let usage: ChatUsage | undefined;
   try {
     const stream = await adapter.chatStream({
       model: input.model,
@@ -819,18 +852,35 @@ async function streamReplyUntilStopped(
       maxTokens: 4096,
       signal: input.signal,
     });
-    for await (const chunk of stream) {
+    while (true) {
+      const step = await stream.next();
+      if (step.done) {
+        usage = step.value;
+        break;
+      }
+      const chunk = step.value;
       if (typeof chunk !== "string" || chunk.length === 0) continue;
       responseContent += chunk;
       send({ type: "delta", content: chunk });
     }
   } catch (error) {
-    if (!input.signal.aborted)
+    if (!input.signal.aborted) {
       streamError = error instanceof Error ? error.message : "Stream error";
+      if (error instanceof ChatStreamTruncatedError) {
+        errorCode = error.code;
+        usage = error.usage;
+      }
+    }
   }
   // Read once the stream has ended, however it ended: some adapters end the
   // iteration quietly on abort instead of throwing.
-  return { content: responseContent, stopped: input.signal.aborted, error: streamError };
+  return {
+    content: responseContent,
+    stopped: input.signal.aborted,
+    error: streamError,
+    errorCode,
+    usage,
+  };
 }
 
 /**
@@ -963,6 +1013,8 @@ export async function editUserMessage(
       content: responseContent,
       stopped,
       error: streamError,
+      errorCode,
+      usage,
     } = await streamReplyUntilStopped(
       adapter,
       { model: resolvedChannel.modelId, messages: chatMessages, signal: ctx.signal },
@@ -976,7 +1028,11 @@ export async function editUserMessage(
         model: resolvedChannel.modelId,
         liveMetadata: serializeLiveMetadata(liveContext),
         citations: serializeCitations(liveContext.citations),
-        finishReason: assistantFinishReason(stopped ? "stopped" : null, null),
+        finishReason: assistantFinishReason(
+          stopped ? "stopped" : errorCode ? "length" : null,
+          null,
+        ),
+        usage: usage ? JSON.stringify(usage) : null,
         updatedAt: new Date(),
       })
       .where(eq(messages.id, assistantMessageId));
@@ -987,11 +1043,18 @@ export async function editUserMessage(
         ? {
             type: "error",
             message: streamError,
-            content: streamError,
+            content: responseContent,
+            ...(errorCode ? { errorCode } : {}),
+            ...(usage ? { usage } : {}),
             messageId: assistantMessageId,
             model: resolvedChannel.modelId,
           }
-        : { type: "done", messageId: assistantMessageId, model: resolvedChannel.modelId },
+        : {
+            type: "done",
+            messageId: assistantMessageId,
+            model: resolvedChannel.modelId,
+            ...(usage ? { usage } : {}),
+          },
     );
   });
 }
@@ -1094,6 +1157,8 @@ export async function regenerateMessage(
       content: responseContent,
       stopped,
       error: streamError,
+      errorCode,
+      usage,
     } = await streamReplyUntilStopped(
       adapter,
       { model: resolvedChannel.modelId, messages: chatMessages, signal: ctx.signal },
@@ -1106,7 +1171,9 @@ export async function regenerateMessage(
         send({
           type: "error",
           message: streamError,
-          content: streamError,
+          content: responseContent,
+          ...(errorCode ? { errorCode } : {}),
+          ...(usage ? { usage } : {}),
           messageId: assistantMessageId,
           model: resolvedChannel.modelId,
         });
@@ -1120,7 +1187,11 @@ export async function regenerateMessage(
         model: resolvedChannel.modelId,
         liveMetadata: serializeLiveMetadata(liveContext),
         citations: serializeCitations(liveContext.citations),
-        finishReason: assistantFinishReason(stopped ? "stopped" : null, null),
+        finishReason: assistantFinishReason(
+          stopped ? "stopped" : errorCode ? "length" : null,
+          null,
+        ),
+        usage: usage ? JSON.stringify(usage) : null,
         updatedAt: new Date(),
       })
       .where(eq(messages.id, assistantMessageId));
@@ -1131,11 +1202,18 @@ export async function regenerateMessage(
         ? {
             type: "error",
             message: streamError,
-            content: streamError,
+            content: responseContent,
+            ...(errorCode ? { errorCode } : {}),
+            ...(usage ? { usage } : {}),
             messageId: assistantMessageId,
             model: resolvedChannel.modelId,
           }
-        : { type: "done", messageId: assistantMessageId, model: resolvedChannel.modelId },
+        : {
+            type: "done",
+            messageId: assistantMessageId,
+            model: resolvedChannel.modelId,
+            ...(usage ? { usage } : {}),
+          },
     );
   });
 }
@@ -1242,7 +1320,10 @@ export async function syncSidecarMessages(
   // it no matter what the client sent (older builds sent "" or the error text).
   // A run without text steps stores "" — its failure, if any, is agentRun.error.
   const assistantContent = assistantMessageContent(input.assistantContent ?? "", input.agentRun);
-  const finishReason = assistantFinishReason(input.finishReason, input.agentRun);
+  const finishReason = assistantFinishReason(
+    mode === "agent" && input.finishReason === "length" ? null : input.finishReason,
+    input.agentRun,
+  );
 
   if (input.userMessageId && input.assistantMessageId) {
     const [existingUser, existingAssistant] = await Promise.all([
@@ -1494,7 +1575,7 @@ export interface CompleteChatInput {
     completionTokens: number;
     totalTokens: number;
   };
-  /** "stopped" when the user stopped the reply; anything else stores null. */
+  /** Chat accepts "stopped" or explicit output-limit "length"; otherwise null. */
   finishReason?: unknown;
 }
 

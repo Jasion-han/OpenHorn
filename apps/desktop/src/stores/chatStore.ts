@@ -1008,7 +1008,7 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
       updateAgentMessage({ get, set }, messageId, (msg) =>
         msg.agentRun
           ? { ...msg, agentRun: { ...msg.agentRun, status: "failed", summary: "Error", error } }
-          : { ...msg, content: msg.content || error },
+          : { ...msg, content: msg.finishReason === "length" ? msg.content : msg.content || error },
       );
     },
 

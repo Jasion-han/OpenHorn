@@ -1,3 +1,5 @@
+import { finishChatStream } from "./chatStreamError";
+
 export type ChatContentPart =
   | { type: "text"; text: string }
   | { type: "image"; mediaType: string; dataBase64: string; fileName?: string };
@@ -43,6 +45,8 @@ export interface ProviderAdapter {
    * stream so `for await (const chunk of stream)` keeps seeing plain strings.
    * Callers that want the counts must drive the iterator by hand and read
    * `value` from the `done: true` result.
+   * Explicit output-limit termination throws ChatStreamTruncatedError after
+   * yielded text; the error carries final usage when reported by the provider.
    */
   chatStream(options: ChatOptions): AsyncGenerator<string, ChatUsage | undefined>;
 }
@@ -635,6 +639,7 @@ export class OpenAIAdapter implements ProviderAdapter {
 
   async *chatStream(options: ChatOptions): AsyncGenerator<string, ChatUsage | undefined> {
     let streamUsage: ChatUsage | undefined;
+    let finishReason: string | undefined;
     const url = `${this.baseUrl}/chat/completions`;
     const body = JSON.stringify({
       model: options.model,
@@ -764,17 +769,31 @@ export class OpenAIAdapter implements ProviderAdapter {
         }
         const raw = buffer.trim();
         if (!raw) return streamUsage;
+        let data: unknown;
         try {
-          const data = JSON.parse(raw);
-          const content =
-            data?.choices?.[0]?.message?.content ?? data?.choices?.[0]?.delta?.content ?? "";
-          if (typeof content === "string" && content.length > 0) {
-            yield content;
-          }
+          data = JSON.parse(raw);
         } catch {
           yield raw;
+          return streamUsage;
         }
-        return streamUsage;
+        const choice =
+          isRecord(data) && Array.isArray(data.choices) && isRecord(data.choices[0])
+            ? data.choices[0]
+            : null;
+        const message = choice && isRecord(choice.message) ? choice.message : null;
+        const delta = choice && isRecord(choice.delta) ? choice.delta : null;
+        const content = message?.content ?? delta?.content ?? "";
+        finishReason = typeof choice?.finish_reason === "string" ? choice.finish_reason : undefined;
+        const u = isRecord(data) && isRecord(data.usage) ? data.usage : null;
+        streamUsage = u
+          ? (buildChatUsage(
+              toFiniteNumber(u.prompt_tokens),
+              toFiniteNumber(u.completion_tokens),
+              toFiniteNumber(u.total_tokens),
+            ) ?? streamUsage)
+          : streamUsage;
+        if (typeof content === "string" && content.length > 0) yield content;
+        return finishChatStream(finishReason, streamUsage, options.signal);
       }
 
       const emitPayload = function* (data: string): Generator<string> {
@@ -805,6 +824,7 @@ export class OpenAIAdapter implements ProviderAdapter {
         if (!isRecord(parsed)) return;
         const choices = Array.isArray(parsed.choices) ? parsed.choices : [];
         const first = isRecord(choices[0]) ? (choices[0] as Record<string, unknown>) : null;
+        if (typeof first?.finish_reason === "string") finishReason = first.finish_reason;
         const delta = first && isRecord(first.delta) ? first.delta : null;
         const content = delta?.content;
         if (typeof content === "string" && content.length > 0) {
@@ -817,7 +837,7 @@ export class OpenAIAdapter implements ProviderAdapter {
         for (const data of payloads) {
           yield* emitPayload(data);
         }
-        if (sseDone) return streamUsage;
+        if (sseDone) return finishChatStream(finishReason, streamUsage, options.signal);
 
         const { done: streamDone, value } = await reader.read();
         if (streamDone) {
@@ -825,7 +845,7 @@ export class OpenAIAdapter implements ProviderAdapter {
           for (const data of remaining.payloads) {
             yield* emitPayload(data);
           }
-          if (remaining.done) return streamUsage;
+          if (remaining.done) return finishChatStream(finishReason, streamUsage, options.signal);
           break;
         }
         timeout.markChunk();
@@ -836,7 +856,7 @@ export class OpenAIAdapter implements ProviderAdapter {
     } finally {
       timeout.cleanup();
     }
-    return streamUsage;
+    return finishChatStream(finishReason, streamUsage, options.signal);
   }
 
   async runToolCallingTurn(options: ToolCallingOptions): Promise<GenericAgentTurnResult> {
@@ -1369,6 +1389,7 @@ export class AnthropicAdapter implements ProviderAdapter {
   async *chatStream(options: ChatOptions): AsyncGenerator<string, ChatUsage | undefined> {
     let promptTokens: number | null = null;
     let completionTokens: number | null = null;
+    let finishReason: string | undefined;
     const split = splitSystem(options.messages);
     const url = `${this.baseUrl}/v1/messages`;
     const body = JSON.stringify({
@@ -1467,6 +1488,10 @@ export class AnthropicAdapter implements ProviderAdapter {
           completionTokens = toFiniteNumber(u.output_tokens) ?? completionTokens;
         }
       }
+      if (parsed.type === "message_delta" && isRecord(parsed.delta)) {
+        const reason = parsed.delta.stop_reason;
+        if (typeof reason === "string") finishReason = reason;
+      }
       if (parsed.type === "message_delta" && isRecord(parsed.usage)) {
         const u = parsed.usage;
         promptTokens = toFiniteNumber(u.input_tokens) ?? promptTokens;
@@ -1507,7 +1532,11 @@ export class AnthropicAdapter implements ProviderAdapter {
     } finally {
       timeout.cleanup();
     }
-    return buildChatUsage(promptTokens, completionTokens, null) ?? undefined;
+    return finishChatStream(
+      finishReason,
+      buildChatUsage(promptTokens, completionTokens, null) ?? undefined,
+      options.signal,
+    );
   }
 
   async runToolCallingTurn(options: ToolCallingOptions): Promise<GenericAgentTurnResult> {
@@ -2029,7 +2058,7 @@ export class GoogleAdapter implements ToolCallingAdapter {
         throw new Error(formatProviderApiError(response.status, detail));
       }
     }
-    return streamUsage;
+    return finishChatStream(finishReason, streamUsage, options.signal);
   }
 
   async runToolCallingTurn(options: ToolCallingOptions): Promise<GenericAgentTurnResult> {

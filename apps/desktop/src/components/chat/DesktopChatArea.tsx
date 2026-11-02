@@ -1,6 +1,7 @@
 import { defaultRangeExtractor, type Range, useVirtualizer } from "@tanstack/react-virtual";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { fileKey } from "shared/format";
+import type { ChatStreamErrorCode } from "shared/types";
 import {
   Button,
   cn,
@@ -106,6 +107,7 @@ class ChatStreamFailure extends Error {
   constructor(
     message: string,
     readonly messageId: string,
+    readonly errorCode?: ChatStreamErrorCode,
   ) {
     super(message);
   }
@@ -684,17 +686,29 @@ export function DesktopChatArea() {
     }
     const terminalEvent = received.terminal;
     if (terminalEvent) {
+      if (terminalEvent.usage) {
+        useChatStore.getState().updateMessage(messageId, { usage: terminalEvent.usage });
+      }
       if (terminalEvent.type === "error") {
         const failedMessageId = terminalEvent.messageId || messageId;
-        if (failedMessageId !== messageId || terminalEvent.model) {
+        if (failedMessageId !== messageId || terminalEvent.model || terminalEvent.errorCode) {
           useChatStore.getState().updateMessage(messageId, {
             id: failedMessageId,
             ...(terminalEvent.model ? { model: terminalEvent.model } : {}),
+            ...(terminalEvent.errorCode === "response_truncated"
+              ? { finishReason: "length" as const }
+              : {}),
           });
         }
         // The caller owns the visible failure and previous-reply restoration.
         // A terminal error must not fall through into a stale snapshot reload.
-        throw new ChatStreamFailure(terminalEvent.message || "Stream error", failedMessageId);
+        throw new ChatStreamFailure(
+          terminalEvent.errorCode === "response_truncated"
+            ? getChatLabel("chat.error.responseTruncated")
+            : terminalEvent.message || "Stream error",
+          failedMessageId,
+          terminalEvent.errorCode,
+        );
       }
       applyStreamEvent(messageId, terminalEvent);
     }
@@ -1206,6 +1220,7 @@ export function DesktopChatArea() {
 
       let chatContent = "";
       let streamFailure: Error | null = null;
+      let chatTruncated = false;
       let chatUsage: {
         promptTokens: number;
         completionTokens: number;
@@ -1265,11 +1280,18 @@ export function DesktopChatArea() {
                   }
                 }
               },
-              onError: (message) => {
-                if (turn.stopped) return;
+              onError: (message, errorCode) => {
+                if (turn.stopped || settled) return;
                 // An error ends generation, not ownership of the reply. Keep
                 // its exact Markdown and persist it before surfacing failure.
-                settle(new Error(message));
+                chatTruncated = errorCode === "response_truncated";
+                settle(
+                  new ChatStreamFailure(
+                    chatTruncated ? getChatLabel("chat.error.responseTruncated") : message,
+                    prepared.assistantMessageId,
+                    errorCode,
+                  ),
+                );
               },
               onDone: () => settle(),
             })
@@ -1289,10 +1311,16 @@ export function DesktopChatArea() {
         content: chatContent,
         model: prepared.model,
         usage: chatUsage ?? undefined,
-        // The chat reply's only record of the stop — it has no run to mark.
-        finishReason: turn.stopped ? "stopped" : undefined,
+        // Chat keeps its terminal state here because it has no Agent run.
+        finishReason: turn.stopped ? "stopped" : chatTruncated ? "length" : undefined,
       });
 
+      if (chatTruncated && !turn.stopped) {
+        updateMessage(prepared.assistantMessageId, {
+          finishReason: "length",
+          ...(chatUsage ? { usage: chatUsage } : {}),
+        });
+      }
       if (streamFailure) throw streamFailure;
 
       if (turn.stopped) {
@@ -1605,7 +1633,10 @@ export function DesktopChatArea() {
       const failedReply = useChatStore.getState().findMessageAnywhere(failedMessageId);
       if (failedReply && !replyHasOutput(failedReply)) {
         const { id: _id, conversationId: _conversationId, ...previous } = previousReply;
-        useChatStore.getState().updateMessage(failedMessageId, previous);
+        useChatStore.getState().updateMessage(failedMessageId, {
+          ...previous,
+          finishReason: previousReply.finishReason,
+        });
       }
       useChatStore
         .getState()

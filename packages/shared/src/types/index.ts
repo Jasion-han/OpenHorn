@@ -53,11 +53,12 @@ export interface Project {
 /**
  * Why an assistant reply ended before the model finished it. Stored in
  * `messages.finish_reason`; null / absent means it ran to completion (or the
- * row predates the column). Only "stopped" exists today: the user pressed Stop
- * and the reply was kept as far as it got. Mode-independent — a chat reply has
- * no run record, so this is the only place its stopped state survives a reload.
+ * row predates the column). "stopped" means the user pressed Stop and the reply
+ * was kept as far as it got. "length" records explicit Chat output truncation.
+ * Chat has no run record, so this column preserves its end state after reload.
  */
-export type MessageFinishReason = "stopped";
+export type MessageFinishReason = "stopped" | "length";
+export type ChatStreamErrorCode = "response_truncated";
 
 export interface Message {
   id: string;
