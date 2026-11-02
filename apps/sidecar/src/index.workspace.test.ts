@@ -35,6 +35,10 @@ test("agent.run owns its validated workspace after a stopped setup RPC finishes 
     expect(await errors).toBe("");
     expect(code).toBe(0);
     expect(JSON.parse((await output).trim())).toEqual({
+      defaultWorkspaceResolved: true,
+      defaultRunUsesResolvedRoot: true,
+      rejectedWorkspaceParams: 6,
+      invalidWorkspaceParamsStartedNoRuns: true,
       selectedB: true,
       explicitRuntimes: ["codex", "direct", "acp"],
       explicitRootsAreB: true,

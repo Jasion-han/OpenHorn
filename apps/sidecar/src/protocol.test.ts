@@ -40,6 +40,16 @@ describe("protocol", () => {
     expect(() => validateMethodParams("mcp.test", { config: {} })).toThrow();
   });
 
+  test("workspace.setCurrent accepts the empty default sentinel but requires a string root", () => {
+    expect(validateMethodParams("workspace.setCurrent", { root: "" })).toEqual({ root: "" });
+    expect(validateMethodParams("workspace.setCurrent", { root: "/fixture/project" })).toEqual({
+      root: "/fixture/project",
+    });
+    for (const params of [undefined, {}, { root: null }, { root: 123 }, { root: [] }]) {
+      expect(() => validateMethodParams("workspace.setCurrent", params)).toThrow();
+    }
+  });
+
   test("agent.run preserves an optional per-run workspace and rejects explicit empty roots", () => {
     const base = { prompt: "fixture", model: "fixture" };
     expect(validateMethodParams("agent.run", base)).not.toHaveProperty("workspaceRoot");

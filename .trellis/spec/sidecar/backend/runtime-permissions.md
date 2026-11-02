@@ -3,14 +3,17 @@
 ## 1. Scope / Trigger
 
 Apply these contracts when changing `agent.run`, `chat.stream`, external CLI
-transports, the Full Access option, or Stop behavior. UI options must reach the
-runtime for the current turn. A cancelled turn must not start a later request
-or execute a command after a delayed approval.
+transports, default workspace preparation, the Full Access option, or Stop
+behavior. UI options must reach the runtime for the current turn. A cancelled
+turn must not start a later request or execute a command after a delayed approval.
 
 ## 2. Signatures
 
 ```ts
 type PermissionMode = "default" | "full-access";
+// workspace.setCurrent: required string; "" requests the validated default.
+type WorkspaceSetCurrentParams = { root: string };
+type WorkspaceSetCurrentResult = { workspaceRoot: string };
 // AgentRunParams / SidecarRunAgentInput:
 workspaceRoot?: string;
 type CodexApproval = {
@@ -86,6 +89,16 @@ identities and must never be used as the shared connection's approval-map key.
   uses developer instructions; ACP separates request instructions from user
   context; Direct includes them in its system prompt. Omitted instructions
   must not leak from a prior run on the same session.
+- `workspace.setCurrent` requires a string `root`, and `""` is the desktop's
+  default-workspace sentinel. The protocol must let it reach the router's
+  `resolveDefaultWorkspaceRoot`, which creates the dedicated
+  `<home>/OpenHorn Workspace` directory and canonicalizes/validates it. A root
+  with non-whitespace characters goes through `canonicalizeWorkspaceRoot`;
+  invalid explicit paths reject without falling back. Return the canonical
+  `workspaceRoot` to the caller. Do not reject the sentinel with `.min(1)`, or
+  fresh Agent conversations fail before runtime/model startup. This preparation
+  contract differs from `agent.run.workspaceRoot`: an explicit empty or
+  whitespace run root remains invalid; pass the resolved preparation result.
 - Workspace selection belongs to the run as well. The desktop carries the
   root returned by its successful workspace preparation in `agent.run`'s
   `workspaceRoot`; failure must stop preparation. The sidecar canonicalizes
@@ -118,6 +131,8 @@ identities and must never be used as the shared connection's approval-map key.
 | Long run / approval wait past socket idle threshold | Keep socket connected |
 | ACP full-access followed by default reused session | Second turn asks again |
 | Host event publication throws | Remove approval resolver and reject the request |
+| `workspace.setCurrent` with `root: ""` | Return a canonical validated dedicated default; pass that result to the run |
+| Missing/non-string preparation root or forbidden/nonexistent/NUL path | Reject; do not return a fallback or start a runtime |
 | Old stopped workspace RPC completes after the new project was selected | Explicit per-run workspace remains the new project |
 | Explicit empty/nonexistent/file/forbidden run root | Reject before runtime acceptance; no fallback |
 | ACP preconnected session belongs to another workspace | Start a new session in this run's canonical cwd |
@@ -126,11 +141,13 @@ identities and must never be used as the shared connection's approval-map key.
 
 - Good: a default Codex run requests a file change, the user declines, and the
   child receives exactly that decline. Stopping a later run clears its approval.
-- Base: Interactive is off; history still renders and the request carries no
-  added UI instructions. Access policy remains determined by Full Access.
+- Base: a fresh conversation has no saved/project root; `workspace.setCurrent`
+  resolves its empty sentinel, and `agent.run` uses that canonical directory.
 - Bad: force every Codex run to full access or return `{decision:"accept"}`
   for every child method. Unknown protocol requests can require other payloads
   and may represent actions unrelated to command approval.
+- Bad: reject an empty preparation sentinel, or relax the run-root check to
+  hide that failure and silently launch in another directory.
 
 ## 6. Tests Required
 
@@ -160,6 +177,11 @@ identities and must never be used as the shared connection's approval-map key.
   `OPENHORN_TEST_DATABASE_URL`; never run against the normal app's SQLite file.
 - `index.workspace.test.ts` starts the actual RPC router in an owned child,
   gates only the old root's canonicalization, and mocks runtime entry points.
+  Send the serialized empty preparation sentinel through the actual protocol;
+  use the real default resolver with a disposable home and assert that its
+  canonical result reaches the runtime. Snapshot the resolver before mocking
+  its module, so the wrapper cannot recurse into its replacement. Retain
+  missing/non-string/invalid preparation refusals and strict empty run refusal.
   Check late stopped setup, canonical symlink roots across Direct/Codex/ACP,
   explicit invalid-root refusal and omitted-root compatibility. Its token,
   TMPDIR, workspaces and checkpoint home must all be disposable. The ACP
@@ -169,6 +191,13 @@ identities and must never be used as the shared connection's approval-map key.
 ## 7. Wrong vs Correct
 
 ```ts
+// Wrong: the router never receives the desktop's default sentinel.
+const preparation = z.object({ root: z.string().min(1) });
+// Correct: keep the required string and resolve/validate it in the router.
+const preparation = z.object({ root: z.string() });
+const { workspaceRoot } = await rpc("workspace.setCurrent", { root: "" });
+await rpc("agent.run", { ...run, workspaceRoot });
+
 // Wrong: defaults silently bypass the visible permission control.
 sendThreadStart({ approvalPolicy: "never", sandbox: "danger-full-access" });
 // Correct: only the explicit toggle grants full access.

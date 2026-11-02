@@ -40,7 +40,9 @@ export const AuthHandshakeParamsSchema = z.object({
 });
 
 export const WorkspaceSetCurrentParamsSchema = z.object({
-  root: z.string().min(1),
+  // Empty string asks the router to resolve its validated default workspace.
+  // agent.run.workspaceRoot remains strict: it must name an explicit directory.
+  root: z.string(),
 });
 
 export const FsListParamsSchema = z.object({

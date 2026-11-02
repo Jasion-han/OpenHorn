@@ -7,6 +7,7 @@ const owned = process.argv[2];
 if (!owned) throw new Error("Owned fixture directory required");
 const rootA = path.join(owned, "project-a");
 const rootB = path.join(owned, "project-b");
+const fixtureHome = path.join(owned, "fixture-home");
 await Promise.all([mkdir(rootA), mkdir(rootB)]);
 const canonicalA = await realpath(rootA);
 const canonicalB = await realpath(rootB);
@@ -27,8 +28,12 @@ let holdA = true;
 const workspaceModule = new URL("./workspace.ts", import.meta.url).pathname;
 const workspace = await import(workspaceModule);
 const canonicalize = workspace.canonicalizeWorkspaceRoot;
+const resolveDefault = workspace.resolveDefaultWorkspaceRoot;
 mock.module(workspaceModule, () => ({
   ...workspace,
+  // Keep the real resolver and canonicalization, but create the default only
+  // beneath this fixture's disposable directory, never the normal user's home.
+  resolveDefaultWorkspaceRoot: () => resolveDefault(fixtureHome),
   async canonicalizeWorkspaceRoot(root: string) {
     if (root === rootA && holdA) {
       announceHeld();
@@ -127,6 +132,32 @@ const run = async (protocol: string, workspaceRoot?: string) => {
 
 try {
   await rpc("auth.handshake", { token: process.env.OPENHORN_HANDSHAKE_TOKEN });
+  const defaultWorkspace = (await rpc("workspace.setCurrent", { root: "" })) as {
+    workspaceRoot: string;
+  };
+  const expectedDefault = await realpath(
+    path.join(fixtureHome, workspace.DEFAULT_WORKSPACE_DIR_NAME),
+  );
+  await run("codex_cli", defaultWorkspace.workspaceRoot);
+  const defaultRunUsesResolvedRoot = captures.at(-1)?.cwd === expectedDefault;
+  const beforeWorkspaceFailures = captures.length;
+  let rejectedWorkspaceParams = 0;
+  for (const params of [
+    {},
+    { root: null },
+    { root: 123 },
+    { root: "/" },
+    { root: path.join(owned, "missing") },
+    { root: "bad\0root" },
+  ]) {
+    try {
+      await rpc("workspace.setCurrent", params);
+    } catch {
+      rejectedWorkspaceParams++;
+    }
+  }
+  const invalidWorkspaceParamsStartedNoRuns = captures.length === beforeWorkspaceFailures;
+  captures.length = 0;
   const oldPreparation = rpc("workspace.setCurrent", { root: rootA });
   await held;
   const selected = (await rpc("workspace.setCurrent", { root: rootB })) as {
@@ -163,6 +194,10 @@ try {
   }
   await run("codex_cli");
   const result = {
+    defaultWorkspaceResolved: defaultWorkspace.workspaceRoot === expectedDefault,
+    defaultRunUsesResolvedRoot,
+    rejectedWorkspaceParams,
+    invalidWorkspaceParamsStartedNoRuns,
     selectedB: selected.workspaceRoot === canonicalB,
     explicitRuntimes: explicitCaptures.map((entry) => entry.runtime),
     explicitRootsAreB: explicitCaptures.every((entry) => entry.cwd === canonicalB),
