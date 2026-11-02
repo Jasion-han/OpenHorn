@@ -21,6 +21,7 @@ let holdComplete = null;
 let holdSettings = null;
 let holdAgentSave = null;
 let syncedPreparations = 0;
+let failAgentSaveOnce = false;
 let retryMode = "success";
 let truncationEdit = false;
 let protocol = "openai";
@@ -145,6 +146,10 @@ const server = http.createServer(async (request, response) => {
   }
   if (path === "/messages/sync-sidecar") {
     syncedPreparations++;
+    if (failAgentSaveOnce) {
+      failAgentSaveOnce = false;
+      return json(response, { error: "fixture save is unavailable" }, 500);
+    }
     const held = holdAgentSave;
     holdAgentSave = null;
     if (held) {
@@ -153,7 +158,9 @@ const server = http.createServer(async (request, response) => {
     }
     const userMessageId = data.userMessageId ?? `prepared-user-${syncedPreparations}`;
     const assistantMessageId =
-      data.assistantMessageId ?? `prepared-assistant-${syncedPreparations}`;
+      data.assistantMessageId ??
+      data.newAssistantMessageId ??
+      `prepared-assistant-${syncedPreparations}`;
     for (const [id, role, content] of [
       [userMessageId, "user", data.userContent],
       [assistantMessageId, "assistant", data.assistantContent],
@@ -304,6 +311,7 @@ try {
     retryMode = "success";
     truncationEdit = false;
     syncedPreparations = 0;
+    failAgentSaveOnce = false;
     protocol = "openai";
     // A finished HTTP request can still have application continuations queued.
     // Reusing the realm and the same message IDs would let a previous case's
@@ -895,11 +903,22 @@ try {
     window.failureChat.mode("agent");
   });
   await page.locator("textarea").fill("refuse a run without its workspace");
+  const workspaceRequestStart = requests.length;
+  const workspaceSave = page.waitForResponse((response) =>
+    response.url().endsWith("/messages/sync-sidecar"),
+  );
   await page.locator("textarea").press("Enter");
   const workspaceError = await page.evaluate(() => window.failureChat.labels.workspaceUnavailable);
   await page.getByRole("alert").filter({ hasText: workspaceError }).waitFor();
-  await page.waitForFunction(() =>
-    window.failureChat.snapshot().messages.some((message) => message.id === "prepared-assistant-1"),
+  await page.waitForFunction(() => !window.failureChat.snapshot().streaming);
+  await workspaceSave;
+  const failedWorkspaceSave = requests
+    .slice(workspaceRequestStart)
+    .find((request) => request.path === "/messages/sync-sidecar").data;
+  assert.match(failedWorkspaceSave.assistantMessageId, /^[a-f0-9-]{36}$/);
+  assert.equal(
+    (await snapshot()).messages.find((message) => message.role === "assistant").id,
+    failedWorkspaceSave.assistantMessageId,
   );
   assert.equal((await snapshot()).agentRuns, 0);
   assert.equal(rows.length, 2);
@@ -969,6 +988,7 @@ try {
 
   await reset();
   let releaseAgentSave;
+  const barrierRequestStart = requests.length;
   const agentSaveStarted = once(server, "fixture-agent-save-started", {
     signal: AbortSignal.timeout(10000),
   });
@@ -1000,31 +1020,105 @@ try {
     await page.getByRole("button", { name: retryLabel, exact: true }).isDisabled(),
     true,
   );
-  releaseAgentSave();
-  await page.waitForFunction(() =>
-    window.failureChat.snapshot().messages.some((message) => message.id === "prepared-assistant-1"),
+  const firstAgentSaved = page.waitForResponse((response) =>
+    response.url().endsWith("/messages/sync-sidecar"),
   );
+  releaseAgentSave();
+  await firstAgentSaved;
+  const stableAgentId = heldAgentSave.assistantMessageId;
+  assert.match(stableAgentId, /^[a-f0-9-]{36}$/);
+  await page.waitForFunction(
+    (id) => window.failureChat.snapshot().messages.some((message) => message.id === id),
+    stableAgentId,
+  );
+  await page.waitForFunction(() => window.failureChat.snapshot().activeMessages.length === 0);
+  assert.equal(rows.length, 2);
+  assert.equal(rows.find((row) => row.role === "assistant").id, stableAgentId);
   await page.getByRole("button", { name: retryLabel, exact: true }).click();
   await page.waitForFunction(() => window.failureChat.snapshot().agentRuns === 2);
   await page.evaluate(() => {
     window.failureChat.agentEmit("second saved Agent answer");
     window.failureChat.agentDone(true);
   });
-  await page.waitForFunction(() =>
-    window.failureChat
-      .snapshot()
-      .messages.some(
-        (message) =>
-          message.id === "prepared-assistant-1" &&
-          message.content === "second saved Agent answer" &&
-          message.agentRun?.status === "completed",
-      ),
+  await page.waitForFunction(
+    (id) =>
+      window.failureChat
+        .snapshot()
+        .messages.some(
+          (message) =>
+            message.id === id &&
+            message.content === "second saved Agent answer" &&
+            message.agentRun?.status === "completed",
+        ),
+    stableAgentId,
   );
   await page.waitForFunction(() => !window.failureChat.snapshot().streaming);
   assert.equal(rows.length, 2);
   assert.equal(rows.find((row) => row.role === "assistant").content, "second saved Agent answer");
+  const agentSaves = requests
+    .slice(barrierRequestStart)
+    .filter((request) => request.path === "/messages/sync-sidecar");
+  assert.equal(agentSaves.length, 2);
+  assert.equal(agentSaves[1].data.assistantMessageId, stableAgentId);
+  assert.equal(agentSaves[1].data.userMessageId, heldAgentSave.userMessageId);
+  await page.waitForFunction(() => window.failureChat.snapshot().activeMessages.length === 0);
   console.log(
     "PASS Agent terminal save barrier: both callback orders persist once, remount cannot retry before ID reconciliation, subsequent same-ID retry finishes",
+  );
+
+  await reset();
+  failAgentSaveOnce = true;
+  const recoveryRequestStart = requests.length;
+  await page.evaluate(() => window.failureChat.mode("agent"));
+  await page.locator("textarea").fill("retain my generated result when saving fails");
+  await page.locator("textarea").press("Enter");
+  await page.waitForFunction(() => window.failureChat.agentReady());
+  await page.evaluate((content) => {
+    window.failureChat.agentEmit(content);
+    window.failureChat.agentDone();
+  }, closed);
+  const recoveryLabels = await page.evaluate(() => ({
+    failed: window.failureChat.labels.saveFailed,
+    retry: window.failureChat.labels.retrySave,
+  }));
+  const saveToast = page.locator("[data-sonner-toast]").filter({ hasText: recoveryLabels.failed });
+  await saveToast.waitFor();
+  await page.waitForFunction(() => window.failureChat.snapshot().activeMessages.length === 0);
+  const unsavedReply = (await snapshot()).messages.find((message) => message.role === "assistant");
+  assert.equal(unsavedReply.agentRun.status, "completed");
+  assert.equal(unsavedReply.content, closed);
+  assert.equal(rows.length, 0);
+  const recoveryControl = page.getByRole("textbox", { name: "Persist amount", exact: true });
+  await recoveryControl.fill("42");
+  await page.evaluate(async () => {
+    await window.failureChat.navigateConversation("other-conversation");
+    await window.failureChat.navigateConversation("failure-conversation");
+  });
+  assert.equal(await recoveryControl.inputValue(), "42");
+  assert.equal(
+    (await snapshot()).messages.find((message) => message.role === "assistant").id,
+    unsavedReply.id,
+  );
+  await saveToast.getByRole("button", { name: recoveryLabels.retry, exact: true }).click();
+  await page.waitForFunction(() =>
+    window.failureChat
+      .snapshot()
+      .messages.every(
+        (message) => !window.failureChat.snapshot().activeMessages.includes(message.id),
+      ),
+  );
+  await saveToast.waitFor({ state: "detached" });
+  const recoverySaves = requests
+    .slice(recoveryRequestStart)
+    .filter((request) => request.path === "/messages/sync-sidecar");
+  assert.equal(recoverySaves.length, 2);
+  assert.deepEqual(recoverySaves[1].data, recoverySaves[0].data);
+  assert.equal(rows.length, 2);
+  assert.equal(rows.find((row) => row.role === "assistant").id, unsavedReply.id);
+  assert.equal((await snapshot()).agentRuns, 1, "Retry save must never run the model again");
+  assert.equal(await recoveryControl.inputValue(), "42");
+  console.log(
+    "PASS Agent save failure: persistent real toast, navigation retains reply/control state, Retry save reuses exact IDs/payload and never regenerates",
   );
 
   for (const { elsewhere, remount } of [

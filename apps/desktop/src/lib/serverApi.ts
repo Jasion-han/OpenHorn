@@ -89,11 +89,15 @@ export interface ServerApi {
       // Local-run attachments never reach the server as files; this metadata is
       // stored so the user's bubble keeps its attachment chips across reloads.
       attachmentsMeta?: Array<{ fileName: string; fileType?: string; fileSize?: number }>;
-      // When both are provided, the existing round is updated in place instead of
-      // inserting a new pair (edit-and-resend), preventing duplicate rounds. With
-      // only `userMessageId`, that message is updated and the reply inserted.
+      // A complete stable pair updates existing rows or creates both atomically.
+      // Retrying the same IDs cannot duplicate the round. With only an existing
+      // userMessageId, the user is updated and its reply is inserted.
       userMessageId?: string;
       assistantMessageId?: string;
+      /** Stable reply id for an existing user message with no reply yet. */
+      newAssistantMessageId?: string;
+      /** Same desktop session only; retries reuse the original revision. */
+      syncRevision?: { sessionId: string; sequence: number };
     }) => Promise<{ userMessageId: string; assistantMessageId: string }>;
     chatPrepare: (data: {
       conversationId: string;

@@ -83,7 +83,7 @@ sidecar 本地运行（Agent 模式）的落库唯一路径，五段链路缺一
 - `fileName` 非字符串 → 该项被过滤，不入库
 - `fileType` 非字符串/空 → 回落 `application/octet-stream`；`fileSize` 非有限数 → 回落 0
 - `attachmentsMeta` 非数组的畸形 body → 跳过附件写入，不抛 TypeError
-- 落库失败 → best-effort，不影响 UI（`persistOnce` catch 吞掉）
+- 落库失败 → 保留生成结果与运行终态，独立提示保存失败并提供仅重试保存的操作（见下方 Agent save recovery 契约）；不得静默丢弃或把保存错误写入回复。
 
 ### 5. Good/Base/Bad Cases
 
@@ -115,6 +115,60 @@ await api.messages.syncSidecar({ ..., myNewField: stripEphemeral(msg.myNewField)
 ```
 
 补充：`chatStore.reconcileSidecarMessageIds` 用对象展开只换 `id`，其余字段保留——改它时保持这一行为，否则落库前的内存字段会在 id 对齐时丢失。
+
+---
+
+## Agent Save Recovery
+
+Generation and saving are separate operations. A failed HTTP save must not change
+an Agent run's terminal status, reply text, steps, or `agentRun.error`.
+`sidecarPersistence` owns the immutable final payload and a persistent notification
+with a **Retry save** action. Retrying calls only `messages.syncSidecar`; it must
+never invoke the model, repeat tools, or create another foreground turn.
+
+- Retain both local messages with an explicit token before saving. These snapshots
+  survive navigation, stale database reads, and eviction from the 20-conversation
+  navigation cache, independently of `temp-` / `draft-` naming conventions. Preserve
+  prompt-before-reply order and existing render identities when IDs change.
+- Assign stable UUIDs before the first HTTP request and reuse the same IDs and
+  payload on retry, including after an ACK is lost. For a persisted unanswered
+  user, send its existing `userMessageId` and an explicit `newAssistantMessageId`.
+  Existing imported message IDs may be opaque strings; validate their ownership,
+  conversation and role rather than imposing a new UUID format on historical rows.
+- The server transaction validates the owned conversation and message roles, then
+  inserts or updates both messages and attachment metadata atomically. A supplied
+  pair must either exist in full or be entirely new; partial pairs and ID collisions
+  reject. Legacy calls without stable IDs remain supported.
+- Each application session supplies a UUID `syncRevision.sessionId` and a positive
+  safe-integer sequence. The server privately records `_syncRevision` in the run
+  JSON and ignores duplicate or older saves from the same session. This orders
+  requests within one running desktop session; it is not cross-client conflict
+  detection or a global revision protocol.
+- Release retained snapshots only for the matching successful save. A late ACK
+  cannot clear a newer token or a currently active replacement run. Markers for
+  active generation must be cleared for the stable IDs too; they are independent
+  of unsaved-result protection. A read started before the successful ACK must
+  reload rather than install its stale result after protection is released.
+- Deleting a conversation or resetting the store invalidates its pending actions.
+  Deleting one message cancels that pair's save retry and removes only the chosen
+  row from live state/cache; retain any other unsaved message for this session.
+  A stale retry action must not recreate deleted messages.
+- While an HTTP save is in flight, track a separate per-message, per-attempt token
+  lock. Disable single-message deletion in the UI and reject it in the store too;
+  an earlier save must not commit after a successful deletion and recreate a row.
+  Each request releases only its own lock, including after reset or a newer save.
+  A settled failure releases this lock so retained messages can be deleted. The
+  server treats an absent message as already deleted; it still checks ownership
+  of every existing row and never converts a network failure into local success.
+
+Recovery is held only in the current application session's memory. This does not
+provide an offline credential queue, durable restart recovery, or automatic model
+retries. Keep this limit explicit in user-facing save-failure copy and tests.
+
+Required regressions cover fresh streaming IDs, persisted edits against stale DB
+rows, more than 20 nonempty conversations, lost ACK retries, duplicate clicks,
+older ACKs/revisions, deletion/reset, stale pending reads, opaque historical IDs,
+user-only replies, transaction rollback and invalid role/ownership/ID shapes.
 
 ---
 

@@ -2,6 +2,7 @@ import { assistantMessageContent } from "shared/message-text";
 import { create } from "zustand";
 import { type ChatAdapter, createChatAdapter } from "../lib/chatAdapter";
 import { migrateBlockStateScope } from "../lib/genui/blockState";
+import { getChatLabel } from "../lib/i18n/agent";
 import type {
   ApiAgentRun,
   ApiAgentRunStep,
@@ -313,6 +314,7 @@ export interface ChatState {
   /** The reply that owns composer streaming state, including while viewed elsewhere. */
   streamingMessageId: string | null;
   error: string | null;
+  savingMessageIds: ReadonlySet<string>;
 
   loadChannels: () => Promise<void>;
   loadConversations: (options?: { background?: boolean }) => Promise<void>;
@@ -381,6 +383,14 @@ export interface ChatState {
   // the run completes and persists.
   markMessagesActive: (ids: string[]) => void;
   unmarkMessagesActive: (ids: string[]) => void;
+  retainSidecarTurn: (
+    assistantId: string,
+    token: symbol,
+  ) => { userMessageId: string; assistantMessageId: string } | null;
+  isSidecarTurnRetained: (assistantId: string, token: symbol) => boolean;
+  releaseSidecarTurn: (assistantId: string, token: symbol) => void;
+  isMessageActive: (messageId: string) => boolean;
+  setSidecarSavePending: (ids: string[], token: symbol, pending: boolean) => void;
   reconcileSidecarMessageIds: (input: {
     conversationId: string;
     assistantDraftId: string;
@@ -412,6 +422,7 @@ const INITIAL_STATE = {
   streamingConversationId: null as string | null,
   streamingMessageId: null as string | null,
   error: null as string | null,
+  savingMessageIds: new Set<string>() as ReadonlySet<string>,
 };
 
 export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter()) {
@@ -428,14 +439,42 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
   const messageCache = new Map<string, Message[]>();
   // Message ids currently being written by an active run (assistant + its user).
   const activeRunMessageIds = new Set<string>();
+  // Unsaved results outlive the bounded navigation cache, until their own ACK.
+  const unsaved = new Map<string, { token: symbol; message: Message }>();
+  const pendingSaves = new Map<string, Set<symbol>>();
+  let persistenceEpoch = 0;
+  function trackUnsaved(message: Message): Message {
+    const retained = unsaved.get(message.id);
+    if (retained) unsaved.set(message.id, { ...retained, message });
+    return message;
+  }
+  function mergeUnsaved(conversationId: string, rows: Message[]): Message[] {
+    const merged = rows.map((message) => unsaved.get(message.id)?.message ?? message);
+    const ids = new Set(merged.map((message) => message.id));
+    for (const { message } of unsaved.values()) {
+      if (message.conversationId === conversationId && !ids.has(message.id)) merged.push(message);
+    }
+    return merged;
+  }
+  async function readMessages(conversationId: string) {
+    let epoch: number;
+    let rows: Message[];
+    do {
+      epoch = persistenceEpoch;
+      rows = await adapter.loadMessages(conversationId);
+    } while (epoch !== persistenceEpoch);
+    return rows;
+  }
 
   function cacheSet(conversationId: string, msgs: Message[]) {
     if (messageCache.has(conversationId)) messageCache.delete(conversationId);
-    messageCache.set(conversationId, msgs);
+    messageCache.set(conversationId, msgs.map(trackUnsaved));
     while (messageCache.size > MAX_CACHED_CONVERSATIONS) {
-      const oldest = messageCache.keys().next().value;
-      if (oldest === undefined) break;
-      messageCache.delete(oldest);
+      const victim = [...messageCache].find(
+        ([, rows]) => !rows.some((m) => activeRunMessageIds.has(m.id)),
+      );
+      if (!victim) break;
+      messageCache.delete(victim[0]);
     }
   }
 
@@ -458,6 +497,11 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
         return true;
       }
     }
+    const retained = unsaved.get(messageId);
+    if (retained) {
+      trackUnsaved(updater(retained.message));
+      return true;
+    }
     return false;
   }
 
@@ -469,7 +513,7 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
     updater: (msg: Message) => Message,
   ) {
     const apply = (msg: Message) =>
-      withMessageRenderIdentity(msg, withDerivedContent(updater(msg)));
+      trackUnsaved(withMessageRenderIdentity(msg, withDerivedContent(updater(msg))));
     if (store.get().messages.some((m) => m.id === messageId)) {
       store.set((state) => ({
         messages: state.messages.map((m) => (m.id === messageId ? apply(m) : m)),
@@ -548,7 +592,8 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
         return;
       }
 
-      const cached = cacheGet(conversationId);
+      const retained = mergeUnsaved(conversationId, cacheGet(conversationId) ?? []);
+      const cached = retained.length > 0 ? retained : undefined;
 
       const requestId = ++selectConversationRequestId;
       set((state) => ({
@@ -561,7 +606,7 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
       }));
 
       try {
-        const dbMessages = await adapter.loadMessages(conversation.id);
+        const dbMessages = await readMessages(conversation.id);
         if (requestId !== selectConversationRequestId) return;
 
         const current = get().messages;
@@ -593,7 +638,10 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
             !dbIds.has(m.id) &&
             !dbSignatures.has(`${m.role}\u0000${(m.content || "").trim()}`),
         );
-        const merged = drafts.length > 0 ? [...dbMerged, ...drafts] : dbMerged;
+        const merged = mergeUnsaved(
+          conversationId,
+          drafts.length > 0 ? [...dbMerged, ...drafts] : dbMerged,
+        );
 
         set({
           messages: merged,
@@ -732,6 +780,11 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
 
     async deleteConversation(conversationId) {
       await adapter.deleteConversation(conversationId);
+      messageCache.delete(conversationId);
+      for (const [id, entry] of unsaved) {
+        if (entry.message.conversationId === conversationId) unsaved.delete(id);
+      }
+      persistenceEpoch += 1;
       set((state) => ({
         conversations: state.conversations.filter(
           (conversation) => conversation.id !== conversationId,
@@ -771,15 +824,18 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
     async loadMessages(conversationId) {
       set({ isLoading: true, error: null });
       try {
-        const messages = await adapter.loadMessages(conversationId);
+        const messages = await readMessages(conversationId);
         // The user may have switched conversations while this awaited. Only
         // apply the result (and clear the loading flag) if it's still current,
         // otherwise we'd clobber the newly selected conversation's state/cache.
         if (get().currentConversation?.id !== conversationId) return;
         const currentById = new Map(get().messages.map((message) => [message.id, message]));
         set({
-          messages: messages.map((message) =>
-            withMessageRenderIdentity(currentById.get(message.id), message),
+          messages: mergeUnsaved(
+            conversationId,
+            messages.map((message) =>
+              withMessageRenderIdentity(currentById.get(message.id), message),
+            ),
           ),
           isLoading: false,
         });
@@ -875,7 +931,27 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
     },
 
     async deleteMessage(messageId) {
+      if (get().isMessageActive(messageId) || pendingSaves.has(messageId)) {
+        throw new Error(getChatLabel("chat.save.inProgress"));
+      }
       await adapter.deleteMessage(messageId);
+      const token = unsaved.get(messageId)?.token;
+      if (token) {
+        const remainingToken = Symbol("retained-after-message-deletion");
+        for (const [id, entry] of unsaved) {
+          if (entry.token !== token) continue;
+          if (id === messageId) unsaved.delete(id);
+          else unsaved.set(id, { ...entry, token: remainingToken });
+        }
+        persistenceEpoch += 1;
+      }
+      for (const [conversationId, rows] of messageCache) {
+        messageCache.set(
+          conversationId,
+          rows.filter((message) => message.id !== messageId),
+        );
+      }
+      activeRunMessageIds.delete(messageId);
       set((state) => ({
         messages: state.messages.filter((message) => message.id !== messageId),
       }));
@@ -1014,7 +1090,7 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
 
     updateMessage(messageId, updates) {
       const apply = (message: Message) =>
-        withMessageRenderIdentity(message, { ...message, ...updates });
+        trackUnsaved(withMessageRenderIdentity(message, { ...message, ...updates }));
       const found = get().messages.some((m) => m.id === messageId);
       if (found) {
         set((state) => ({
@@ -1035,7 +1111,7 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
 
     appendMessageDelta(messageId, delta, updates) {
       const apply = (message: Message) =>
-        withMessageRenderIdentity(message, applyStreamDelta(message, delta, updates));
+        trackUnsaved(withMessageRenderIdentity(message, applyStreamDelta(message, delta, updates)));
       const found = get().messages.some((m) => m.id === messageId);
       if (found) {
         set((state) => ({
@@ -1055,7 +1131,62 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
         const found = msgs.find((m) => m.id === messageId);
         if (found) return found;
       }
-      return undefined;
+      return unsaved.get(messageId)?.message;
+    },
+
+    retainSidecarTurn(assistantId, token) {
+      const sources = [
+        get().messages,
+        ...messageCache.values(),
+        [...unsaved.values()].map((entry) => entry.message),
+      ];
+      for (const rows of sources) {
+        const index = rows.findIndex((message) => message.id === assistantId);
+        if (index < 0) continue;
+        const assistant = rows[index];
+        const user = rows
+          .slice(0, index)
+          .reverse()
+          .find(
+            (message) =>
+              message.role === "user" && message.conversationId === assistant.conversationId,
+          );
+        if (!user) continue;
+        for (const message of [user, assistant]) unsaved.set(message.id, { token, message });
+        return { userMessageId: user.id, assistantMessageId: assistant.id };
+      }
+      return null;
+    },
+
+    isSidecarTurnRetained(assistantId, token) {
+      return unsaved.get(assistantId)?.token === token;
+    },
+
+    releaseSidecarTurn(assistantId, token) {
+      if (unsaved.get(assistantId)?.token !== token) return;
+      for (const [id, entry] of unsaved) if (entry.token === token) unsaved.delete(id);
+      persistenceEpoch += 1;
+    },
+
+    isMessageActive(messageId) {
+      return activeRunMessageIds.has(messageId) || get().streamingMessageId === messageId;
+    },
+
+    setSidecarSavePending(ids, token, pending) {
+      let changed = false;
+      for (const id of ids) {
+        if (pending) {
+          const tokens = pendingSaves.get(id) ?? new Set<symbol>();
+          changed ||= !tokens.has(token);
+          tokens.add(token);
+          pendingSaves.set(id, tokens);
+        } else {
+          const tokens = pendingSaves.get(id);
+          if (tokens?.delete(token)) changed = true;
+          if (tokens?.size === 0) pendingSaves.delete(id);
+        }
+      }
+      if (changed) set({ savingMessageIds: new Set(pendingSaves.keys()) });
     },
 
     markMessagesActive(ids) {
@@ -1081,18 +1212,32 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
       // selectConversation() sees the draft ids as "not in the DB" and renders
       // the exchange twice. Remap the assistant message and its prompt (the
       // nearest preceding user message) in both the live state and the cache.
+      const rename = (message: Message, id: string): Message => {
+        const next = withMessageRenderIdentity(message, { ...message, id });
+        const retained = unsaved.get(message.id);
+        if (retained) {
+          // Preserve prompt-before-reply ordering if an empty DB and an evicted
+          // navigation cache later have to be rebuilt from retained snapshots.
+          const entries = [...unsaved].map(([key, entry]) =>
+            key === message.id
+              ? ([id, { ...retained, message: next }] as const)
+              : ([key, entry] as const),
+          );
+          unsaved.clear();
+          for (const [key, entry] of entries) unsaved.set(key, entry);
+        }
+        if (activeRunMessageIds.delete(message.id)) activeRunMessageIds.add(id);
+        return next;
+      };
       const remap = (msgs: Message[]): Message[] | null => {
         const assistantIdx = msgs.findIndex((m) => m.id === assistantDraftId);
         if (assistantIdx === -1) return null;
         const next = [...msgs];
-        next[assistantIdx] = withMessageRenderIdentity(next[assistantIdx], {
-          ...next[assistantIdx],
-          id: assistantMessageId,
-        });
+        next[assistantIdx] = rename(next[assistantIdx], assistantMessageId);
         for (let i = assistantIdx - 1; i >= 0; i--) {
           if (next[i].role === "user") {
             if (next[i].id !== userMessageId) {
-              next[i] = withMessageRenderIdentity(next[i], { ...next[i], id: userMessageId });
+              next[i] = rename(next[i], userMessageId);
             }
             break;
           }
@@ -1114,6 +1259,8 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
       if (cached) {
         const remappedCache = remap(cached);
         if (remappedCache) cacheSet(conversationId, remappedCache);
+      } else {
+        remap([...unsaved.values()].map((entry) => entry.message));
       }
     },
 
@@ -1149,6 +1296,10 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
 
     reset() {
       messageCache.clear();
+      unsaved.clear();
+      pendingSaves.clear();
+      activeRunMessageIds.clear();
+      persistenceEpoch += 1;
       set({ ...INITIAL_STATE });
     },
   }));

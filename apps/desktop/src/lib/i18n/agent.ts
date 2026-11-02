@@ -676,6 +676,10 @@ export const chatLabels = {
   // A finished reply that holds nothing at all (no text, steps or error) — e.g. a
   // legacy agent task that ended without a final result, or an empty chat reply
   "chat.reply.empty": "没有生成回复内容",
+  "chat.save.failedTitle": "回复尚未保存",
+  "chat.save.failedBody": "生成结果已保留在当前应用中。请重试保存，重试不会重新生成回复。",
+  "chat.save.retry": "重试保存",
+  "chat.save.inProgress": "回复正在生成或保存，请稍后再删除。",
   "chat.reply.truncated": "回答达到长度上限，已保留内容。可重试或要求缩小回答范围。",
   "chat.error.responseTruncated": "回答达到长度上限，已保留内容。可重试或要求缩小回答范围。",
   "chat.agent.thinking": "思考",

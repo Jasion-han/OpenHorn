@@ -45,6 +45,7 @@ import {
 } from "../../lib/messageGroups";
 import { notifyWarning } from "../../lib/notify";
 import { createServerApi, readErrorMessage } from "../../lib/serverApi";
+import { sidecarPersistence } from "../../lib/sidecarPersistence";
 import { resolveRunSettings } from "../../lib/sidecarRunSupport";
 import {
   findKnownSlashToken,
@@ -115,6 +116,7 @@ class ChatStreamFailure extends Error {
 
 /** Persist a Stop during caller-side preparation without taking over the run hook. */
 async function persistStoppedAgentPreparation(input: {
+  ownsTurn: () => boolean;
   conversationId: string;
   assistantMessageId: string;
   userContent: string;
@@ -133,8 +135,9 @@ async function persistStoppedAgentPreparation(input: {
     agentRun: outcome.agentRun,
     finishReason: "stopped",
   });
-  try {
-    const result = await chatAreaApi.messages.syncSidecar({
+  const save = sidecarPersistence.save(
+    input.assistantMessageId,
+    {
       conversationId: input.conversationId,
       userContent: input.userContent,
       assistantContent: outcome.assistantContent,
@@ -143,15 +146,10 @@ async function persistStoppedAgentPreparation(input: {
       finishReason: "stopped",
       attachmentsMeta: input.attachmentsMeta,
       ...resolveSidecarSyncIds(input),
-    });
-    store.reconcileSidecarMessageIds({
-      conversationId: input.conversationId,
-      assistantDraftId: input.assistantMessageId,
-      ...result,
-    });
-  } catch {
-    // Like the run hook's stop path, keep the local reply if persistence fails.
-  }
+    },
+    input.ownsTurn,
+  );
+  await save?.completion;
 }
 
 // Meta persisted with a local (sidecar) run's user message. Only durable fields
@@ -170,6 +168,7 @@ export function DesktopChatArea() {
   const streamingMessageId = useChatStore((state) => state.streamingMessageId);
   const channels = useChatStore((state) => state.channels);
   const messages = useChatStore((state) => state.messages);
+  const savingMessageIds = useChatStore((state) => state.savingMessageIds);
   const isLoading = useChatStore((state) => state.isLoading);
   const error = useChatStore((state) => state.error);
   const isStreaming = useChatStore((state) => state.isStreaming);
@@ -1119,6 +1118,7 @@ export function DesktopChatArea() {
       if (mode === "agent") {
         turn.abort = () =>
           persistStoppedAgentPreparation({
+            ownsTurn: () => activeTurnRef.current === turn,
             conversationId,
             assistantMessageId,
             userContent: displayContent,
@@ -1743,6 +1743,7 @@ export function DesktopChatArea() {
       if (route.kind === "sidecar") {
         turn.abort = () =>
           persistStoppedAgentPreparation({
+            ownsTurn: () => activeTurnRef.current === turn,
             conversationId: currentConversation.id,
             assistantMessageId,
             userContent: editDisplayContent,
@@ -1928,7 +1929,12 @@ export function DesktopChatArea() {
               !isMessageStreaming &&
               !isUploading
             }
-            canDelete={!message.id.startsWith("draft-")}
+            canDelete={
+              !message.id.startsWith("draft-") &&
+              !message.id.startsWith("temp-") &&
+              !savingMessageIds.has(message.id) &&
+              !useChatStore.getState().isMessageActive(message.id)
+            }
             onEdit={() => handleStartEdit(message)}
             onRetry={() => void handleRetryMessage(message.id)}
             onDelete={() => setPendingDeleteId(message.id)}

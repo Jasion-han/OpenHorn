@@ -1,6 +1,6 @@
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
-import { TooltipProvider } from "ui";
+import { Toaster, TooltipProvider } from "ui";
 import { DesktopChatArea } from "../../src/components/chat/DesktopChatArea";
 import { getChatLabel } from "../../src/lib/i18n/agent";
 import type { SidecarClient } from "../../src/lib/sidecarClient";
@@ -73,6 +73,8 @@ const api = {
     sidecarNotReady: getChatLabel("chat.error.sidecarNotReady"),
     truncation: getChatLabel("chat.reply.truncated"),
     truncationError: getChatLabel("chat.error.responseTruncated"),
+    saveFailed: getChatLabel("chat.save.failedTitle"),
+    retrySave: getChatLabel("chat.save.retry"),
   },
   start(protocol: "openai" | "acp" = "openai", welcome = false) {
     flushSync(() => root.render(null));
@@ -135,6 +137,7 @@ const api = {
       root.render(
         <TooltipProvider>
           <DesktopChatArea />
+          <Toaster />
         </TooltipProvider>,
       ),
     );
@@ -256,6 +259,10 @@ const api = {
     loading: useChatStore.getState().isLoading,
     streamingConversationId: useChatStore.getState().streamingConversationId,
     messages: useChatStore.getState().messages,
+    activeMessages: useChatStore
+      .getState()
+      .messages.filter((message) => useChatStore.getState().isMessageActive(message.id))
+      .map((message) => message.id),
     policy: useGenUiStore.getState().enabled,
     chatMessages: active?.messages ?? null,
     agentRequest: activeAgent
@@ -269,12 +276,17 @@ const api = {
   async reload() {
     await useChatStore.getState().loadMessages(conversation.id);
   },
+  async navigateConversation(id: string) {
+    await useChatStore.getState().loadConversations({ background: true });
+    await useChatStore.getState().selectConversation(id);
+  },
   remount() {
     flushSync(() => root.render(null));
     flushSync(() =>
       root.render(
         <TooltipProvider>
           <DesktopChatArea />
+          <Toaster />
         </TooltipProvider>,
       ),
     );

@@ -3,6 +3,7 @@ import { create } from "zustand";
 import { formatChatLabel, getChatLabel } from "../lib/i18n/agent";
 import { createServerApi } from "../lib/serverApi";
 import type { SidecarApprovalRequest, SidecarClient } from "../lib/sidecarClient";
+import { sidecarPersistence } from "../lib/sidecarPersistence";
 import {
   type AcpAvailableModel,
   applySidecarEventToChat,
@@ -282,47 +283,40 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
       finishReason?: MessageFinishReason,
     ) => {
       if (!shouldPersist()) return;
-      // Reconciliation below may rename the optimistic id to the persisted one,
-      // so track which id the finally-block should stamp.
       let stampId = input.assistantMessageId;
+      let savedUserId: string | undefined;
       try {
-        const res = await api.messages.syncSidecar({
-          conversationId: input.conversationId,
-          userContent: input.displayContent ?? input.prompt,
-          assistantContent,
-          model,
-          agentRun: agentRun ?? undefined,
-          usage: runUsage ?? undefined,
-          finishReason,
-          attachmentsMeta: input.attachmentsMeta,
-          ...resolveSidecarSyncIds(input),
-        });
-        if (!ownsMessage()) return;
-        // Align the optimistic draft ids with the persisted ids so revisiting
-        // the conversation doesn't duplicate the round.
-        if (res?.userMessageId && res?.assistantMessageId) {
-          useChatStore.getState().reconcileSidecarMessageIds({
+        const save = sidecarPersistence.save(
+          input.assistantMessageId,
+          {
             conversationId: input.conversationId,
-            assistantDraftId: input.assistantMessageId,
-            userMessageId: res.userMessageId,
-            assistantMessageId: res.assistantMessageId,
-          });
-          stampId = res.assistantMessageId;
-          streamingMessageId = res.assistantMessageId;
-        }
-      } catch {
-        // Best-effort: a persistence failure must not affect the UI.
+            userContent: input.displayContent ?? input.prompt,
+            assistantContent,
+            model,
+            agentRun: agentRun ?? undefined,
+            usage: runUsage ?? undefined,
+            finishReason,
+            attachmentsMeta: input.attachmentsMeta,
+            ...resolveSidecarSyncIds(input),
+          },
+          () => ownsMessage() && controlRef.current === control,
+        );
+        if (!save) return;
+        stampId = save.assistantMessageId;
+        savedUserId = save.userMessageId;
+        streamingMessageId = stampId;
+        await save.completion;
       } finally {
-        if (ownsMessage()) {
-          // Server row is now fresh (or we tried) — the stale-DB guard is no longer
-          // needed for these ids.
-          useChatStore.getState().unmarkMessagesActive(activeRunIds);
-          // The bubble only shows a timestamp once the answer is finished; stamp it
-          // now rather than waiting for the next reload to carry the server value.
-          // Token counts ride along for the same reason: they were just written to
-          // the row, but the in-memory message is still the optimistic object the
-          // run built, so without this the count only appears after navigating
-          // away and back.
+        if (ownsMessage() && controlRef.current === control) {
+          // Run activity ends independently of saving. Failed results retain their
+          // own unsaved snapshots until a confirmed, matching save succeeds.
+          useChatStore
+            .getState()
+            .unmarkMessagesActive([
+              ...activeRunIds,
+              stampId,
+              ...(savedUserId ? [savedUserId] : []),
+            ]);
           useChatStore.getState().updateMessage(stampId, {
             updatedAt: new Date(),
             ...(runUsage ? { usage: runUsage } : {}),

@@ -590,7 +590,8 @@ export async function deleteMessage(userId: string, messageId: string) {
   const message = await db.select().from(messages).where(eq(messages.id, messageId)).limit(1);
 
   if (message.length === 0) {
-    throw new Error("Message not found");
+    // DELETE is idempotent, including a local result whose first save failed.
+    return { success: true };
   }
 
   const conversation = await db
@@ -1227,6 +1228,7 @@ async function insertSidecarAttachmentMeta(
   userMessageId: string,
   meta: Array<{ fileName: string; fileType?: string; fileSize?: number }>,
   createdAt: Date,
+  writer: Pick<typeof db, "insert"> = db,
 ) {
   const rows = meta
     .filter((item) => typeof item?.fileName === "string" && item.fileName.length > 0)
@@ -1246,7 +1248,7 @@ async function insertSidecarAttachmentMeta(
       createdAt,
     }));
   if (rows.length === 0) return;
-  await db.insert(attachments).values(rows);
+  await writer.insert(attachments).values(rows);
 }
 
 function modeForLatestUserRequest(
@@ -1265,21 +1267,6 @@ function modeForLatestUserRequest(
   ) THEN ${mode} ELSE ${conversations.lastMode} END`;
 }
 
-async function syncSidecarConversationMetadata(
-  userId: string,
-  conversationId: string,
-  userMessageId: string,
-  mode: "chat" | "agent",
-) {
-  await db
-    .update(conversations)
-    .set({
-      updatedAt: new Date(),
-      lastMode: modeForLatestUserRequest(conversationId, userMessageId, mode),
-    })
-    .where(and(eq(conversations.id, conversationId), eq(conversations.userId, userId)));
-}
-
 export async function syncSidecarMessages(
   userId: string,
   input: {
@@ -1289,184 +1276,197 @@ export async function syncSidecarMessages(
     model?: string;
     mode?: string;
     agentRun?: unknown;
-    /**
-     * Token counts for the turn. Optional throughout: not every runtime reports
-     * them, and an older desktop build won't send them at all — so a missing
-     * value means "not reported", never "zero".
-     */
     usage?: { promptTokens: number; completionTokens: number; totalTokens: number };
-    /** "stopped" when the user stopped the run; normalized by assistantFinishReason. */
     finishReason?: unknown;
-    // Metadata-only attachment info for local (sidecar) runs — see
-    // insertSidecarAttachmentMeta. When provided on an in-place update, it
-    // replaces the user message's existing attachment rows.
     attachmentsMeta?: Array<{ fileName: string; fileType?: string; fileSize?: number }>;
-    // When both ids are provided and belong to this conversation, the existing
-    // round is UPDATED in place (used by edit-and-resend) instead of inserting a
-    // new pair — otherwise editing would duplicate the round on reload. With only
-    // `userMessageId`, that user message is updated and a reply inserted.
     userMessageId?: string;
     assistantMessageId?: string;
+    /** Idempotent reply creation for a previously persisted, unanswered user. */
+    newAssistantMessageId?: string;
+    /** Orders saves from one running desktop session; not a cross-client CAS. */
+    syncRevision?: { sessionId: string; sequence: number };
   },
 ) {
-  const conversation = await db.query.conversations.findFirst({
-    where: and(eq(conversations.id, input.conversationId), eq(conversations.userId, userId)),
-  });
-  if (!conversation) throw new Error("Conversation not found");
-
-  const now = new Date();
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const revision = input.syncRevision;
+  if (
+    revision !== undefined &&
+    (!revision ||
+      typeof revision !== "object" ||
+      Array.isArray(revision) ||
+      typeof revision.sessionId !== "string" ||
+      !uuid.test(revision.sessionId) ||
+      !Number.isSafeInteger(revision.sequence) ||
+      revision.sequence < 1)
+  ) {
+    throw new Error("Invalid sidecar sync revision");
+  }
+  if (input.assistantMessageId && !input.userMessageId)
+    throw new Error("Both message ids are required");
+  if (input.newAssistantMessageId && (!input.userMessageId || input.assistantMessageId)) {
+    throw new Error("New assistant id requires only an existing user id");
+  }
+  for (const id of [input.userMessageId, input.assistantMessageId, input.newAssistantMessageId]) {
+    if (id !== undefined && (typeof id !== "string" || id.length === 0))
+      throw new Error("Invalid message id");
+  }
   const mode = input.mode === "chat" ? "chat" : "agent";
-  // The reply text of an agent run lives in its text steps; `content` must equal
-  // it no matter what the client sent (older builds sent "" or the error text).
-  // A run without text steps stores "" — its failure, if any, is agentRun.error.
   const assistantContent = assistantMessageContent(input.assistantContent ?? "", input.agentRun);
   const finishReason = assistantFinishReason(
     mode === "agent" && input.finishReason === "length" ? null : input.finishReason,
     input.agentRun,
   );
-
-  if (input.userMessageId && input.assistantMessageId) {
-    const [existingUser, existingAssistant] = await Promise.all([
-      db.query.messages.findFirst({
-        where: and(
-          eq(messages.id, input.userMessageId),
-          eq(messages.conversationId, input.conversationId),
-        ),
-      }),
-      db.query.messages.findFirst({
-        where: and(
-          eq(messages.id, input.assistantMessageId),
-          eq(messages.conversationId, input.conversationId),
-        ),
-      }),
-    ]);
-    if (existingUser && existingAssistant) {
-      await db
+  if (
+    revision &&
+    (!input.agentRun || typeof input.agentRun !== "object" || Array.isArray(input.agentRun))
+  ) {
+    throw new Error("A sync revision requires an Agent run");
+  }
+  const storedRun = revision
+    ? { ...(input.agentRun as object), _syncRevision: revision }
+    : input.agentRun;
+  const now = new Date();
+  const result = await db.transaction(async (tx) => {
+    const conversation = await tx.query.conversations.findFirst({
+      where: and(eq(conversations.id, input.conversationId), eq(conversations.userId, userId)),
+    });
+    if (!conversation) throw new Error("Conversation not found");
+    const existingUser = input.userMessageId
+      ? await tx.query.messages.findFirst({ where: eq(messages.id, input.userMessageId) })
+      : undefined;
+    const requestedAssistant = input.assistantMessageId ?? input.newAssistantMessageId;
+    const existingAssistant = requestedAssistant
+      ? await tx.query.messages.findFirst({ where: eq(messages.id, requestedAssistant) })
+      : undefined;
+    for (const [message, role] of [
+      [existingUser, "user"],
+      [existingAssistant, "assistant"],
+    ] as const) {
+      if (message && (message.conversationId !== input.conversationId || message.role !== role)) {
+        throw new Error("Message identity does not belong to this conversation and role");
+      }
+    }
+    if (input.assistantMessageId && Boolean(existingUser) !== Boolean(existingAssistant)) {
+      throw new Error("The message pair is incomplete");
+    }
+    if (input.newAssistantMessageId && !existingUser) throw new Error("User message not found");
+    // Imported/legacy rows may have opaque TEXT identifiers. Only newly created
+    // client-selected IDs need UUIDs; existing IDs are validated by role and owner.
+    if (
+      (!existingUser && input.assistantMessageId && !uuid.test(input.userMessageId ?? "")) ||
+      (!existingAssistant && requestedAssistant && !uuid.test(requestedAssistant))
+    ) {
+      throw new Error("New message ids must be UUIDs");
+    }
+    const userMessageId =
+      existingUser?.id ??
+      (input.assistantMessageId ? input.userMessageId : undefined) ??
+      generateId();
+    const assistantMessageId = requestedAssistant ?? generateId();
+    if (userMessageId === assistantMessageId) throw new Error("Message ids must be distinct");
+    if (revision && existingAssistant?.agentRun) {
+      let previous: unknown;
+      try {
+        previous = JSON.parse(existingAssistant.agentRun)?._syncRevision;
+      } catch {
+        /* legacy run */
+      }
+      if (
+        previous &&
+        typeof previous === "object" &&
+        "sessionId" in previous &&
+        "sequence" in previous &&
+        previous.sessionId === revision.sessionId &&
+        typeof previous.sequence === "number" &&
+        previous.sequence >= revision.sequence
+      ) {
+        // ACK loss may repeat the same save; an older request cannot overwrite a newer run.
+        return { userMessageId, assistantMessageId, changed: false, inserted: false };
+      }
+    }
+    if (existingUser) {
+      await tx
         .update(messages)
         .set({ content: input.userContent })
-        .where(eq(messages.id, input.userMessageId));
-      await ftsUpsert(input.userMessageId, input.conversationId, input.userContent);
-      await db
-        .update(messages)
-        .set({
-          content: assistantContent,
-          model: input.model || null,
-          agentRun: input.agentRun ? JSON.stringify(input.agentRun) : null,
-          // Regenerate re-runs the turn, so the previous count is stale — clear
-          // it when the new run reported nothing rather than leaving the old one.
-          usage: input.usage ? JSON.stringify(input.usage) : null,
-          // Same as usage: a re-run that finished clears an earlier stop.
-          finishReason,
-          liveMetadata: null,
-          citations: null,
-          updatedAt: new Date(),
-        })
-        .where(eq(messages.id, input.assistantMessageId));
-      await ftsUpsert(input.assistantMessageId, input.conversationId, assistantContent);
-      if (Array.isArray(input.attachmentsMeta)) {
-        // Replace, not append: the edit's meta is authoritative for this message.
-        await db.delete(attachments).where(eq(attachments.messageId, input.userMessageId));
-        await insertSidecarAttachmentMeta(
-          input.conversationId,
-          input.userMessageId,
-          input.attachmentsMeta,
-          now,
-        );
-      }
-      await syncSidecarConversationMetadata(
-        userId,
-        input.conversationId,
-        input.userMessageId,
+        .where(eq(messages.id, userMessageId));
+    } else {
+      await tx.insert(messages).values({
+        id: userMessageId,
+        conversationId: input.conversationId,
+        role: "user",
+        content: input.userContent,
         mode,
-      );
-      return {
-        userMessageId: input.userMessageId,
-        assistantMessageId: input.assistantMessageId,
-      };
+        attachments: null,
+        agentRun: null,
+        createdAt: now,
+      });
     }
-  }
-
-  // Only the user id: edit-and-resend of a user message that never got a reply.
-  // The user message is updated in place and the reply is inserted after it —
-  // inserting a fresh pair would duplicate the question on reload.
-  const existingUserOnly =
-    input.userMessageId && !input.assistantMessageId
-      ? await db.query.messages.findFirst({
-          where: and(
-            eq(messages.id, input.userMessageId),
-            eq(messages.conversationId, input.conversationId),
-            eq(messages.role, "user"),
-          ),
-        })
-      : undefined;
-
-  const userMessageId = existingUserOnly?.id ?? generateId();
-  const assistantMessageId = generateId();
-
-  if (existingUserOnly) {
-    await db
-      .update(messages)
-      .set({ content: input.userContent })
-      .where(eq(messages.id, userMessageId));
-    await ftsUpsert(userMessageId, input.conversationId, input.userContent);
-    if (Array.isArray(input.attachmentsMeta)) {
-      await db.delete(attachments).where(eq(attachments.messageId, userMessageId));
-      await insertSidecarAttachmentMeta(
-        input.conversationId,
-        userMessageId,
-        input.attachmentsMeta,
-        now,
-      );
-    }
-  } else {
-    await db.insert(messages).values({
-      id: userMessageId,
-      conversationId: input.conversationId,
-      role: "user",
-      content: input.userContent,
+    const values = {
+      content: assistantContent,
+      model: input.model || null,
       mode,
-      attachments: null,
-      agentRun: null,
-      createdAt: now,
-    });
-    await ftsUpsert(userMessageId, input.conversationId, input.userContent);
-
-    if (Array.isArray(input.attachmentsMeta) && input.attachmentsMeta.length > 0) {
+      agentRun: storedRun ? JSON.stringify(storedRun) : null,
+      usage: input.usage ? JSON.stringify(input.usage) : null,
+      finishReason,
+      liveMetadata: null,
+      citations: null,
+    };
+    if (existingAssistant) {
+      await tx
+        .update(messages)
+        .set({ ...values, updatedAt: now })
+        .where(eq(messages.id, assistantMessageId));
+    } else {
+      await tx.insert(messages).values({
+        ...values,
+        id: assistantMessageId,
+        conversationId: input.conversationId,
+        role: "assistant",
+        attachments: null,
+        createdAt: existingUser
+          ? new Date(Math.max(now.getTime(), existingUser.createdAt.getTime() + 1000))
+          : new Date(now.getTime() + 1),
+      });
+    }
+    if (Array.isArray(input.attachmentsMeta)) {
+      await tx.delete(attachments).where(eq(attachments.messageId, userMessageId));
       await insertSidecarAttachmentMeta(
         input.conversationId,
         userMessageId,
         input.attachmentsMeta,
         now,
+        tx,
       );
     }
-  }
-
-  await db.insert(messages).values({
-    id: assistantMessageId,
-    conversationId: input.conversationId,
-    role: "assistant",
-    content: assistantContent,
-    model: input.model || null,
-    mode,
-    attachments: null,
-    agentRun: input.agentRun ? JSON.stringify(input.agentRun) : null,
-    usage: input.usage ? JSON.stringify(input.usage) : null,
-    finishReason,
-    liveMetadata: null,
-    citations: null,
-    // createdAt is stored in whole seconds; a reply to an existing user message
-    // must still sort after it.
-    createdAt: existingUserOnly
-      ? new Date(Math.max(now.getTime(), existingUserOnly.createdAt.getTime() + 1000))
-      : new Date(now.getTime() + 1),
+    await tx
+      .update(conversations)
+      .set({
+        updatedAt: now,
+        lastMode: modeForLatestUserRequest(input.conversationId, userMessageId, mode),
+      })
+      .where(and(eq(conversations.id, input.conversationId), eq(conversations.userId, userId)));
+    // Keep search in the same save order as the primary rows. Post-commit FTS
+    // writes from an older request could otherwise overtake a newer revision.
+    try {
+      for (const [id, content] of [
+        [userMessageId, input.userContent],
+        [assistantMessageId, assistantContent],
+      ]) {
+        await tx.run(sql`DELETE FROM messages_fts WHERE message_id = ${id}`);
+        if (content)
+          await tx.run(
+            sql`INSERT INTO messages_fts(message_id, conversation_id, content) VALUES (${id}, ${input.conversationId}, ${content.substring(0, 5000)})`,
+          );
+      }
+    } catch {
+      // FTS is optional in databases that have not bootstrapped its virtual table.
+    }
+    return { userMessageId, assistantMessageId, changed: true, inserted: !existingAssistant };
   });
-  await ftsUpsert(assistantMessageId, input.conversationId, assistantContent);
-  await syncSidecarConversationMetadata(userId, input.conversationId, userMessageId, mode);
-
-  // Fire-and-forget: generate summary if the conversation is long enough
-  void maybeSummarize(userId, input.conversationId).catch(() => {});
-
-  return { userMessageId, assistantMessageId };
+  if (result.changed) {
+    if (result.inserted) void maybeSummarize(userId, input.conversationId).catch(() => {});
+  }
+  return { userMessageId: result.userMessageId, assistantMessageId: result.assistantMessageId };
 }
 
 export interface PrepareChatInput {
