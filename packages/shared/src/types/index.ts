@@ -55,10 +55,12 @@ export interface Project {
  * `messages.finish_reason`; null / absent means it ran to completion (or the
  * row predates the column). "stopped" means the user pressed Stop and the reply
  * was kept as far as it got. "length" records explicit Chat output truncation.
+ * "context_budget_exceeded" and "error" retain safe Chat failure categories;
+ * raw error messages are never stored as generated reply text.
  * Chat has no run record, so this column preserves its end state after reload.
  */
-export type MessageFinishReason = "stopped" | "length";
-export type ChatStreamErrorCode = "response_truncated";
+export type MessageFinishReason = "stopped" | "length" | "context_budget_exceeded" | "error";
+export type ChatStreamErrorCode = "response_truncated" | "chat_context_budget_exceeded";
 
 export interface Message {
   id: string;

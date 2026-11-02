@@ -1,4 +1,4 @@
-import { assistantMessageContent } from "shared/message-text";
+import { assistantMessageContent, chatFailureFinishReason } from "shared/message-text";
 import { create } from "zustand";
 import { type ChatAdapter, createChatAdapter } from "../lib/chatAdapter";
 import { migrateBlockStateScope } from "../lib/genui/blockState";
@@ -1065,7 +1065,16 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
       }
 
       if (event.type === "error") {
-        get().failStreamingMessage(messageId, event.message || "Stream error");
+        const current = get().findMessageAnywhere(messageId);
+        get().updateMessage(messageId, {
+          ...(event.messageId ? { id: event.messageId } : {}),
+          ...(event.model ? { model: event.model } : {}),
+          ...(event.usage ? { usage: event.usage } : {}),
+          ...(!current?.agentRun && current?.mode === "chat"
+            ? { finishReason: chatFailureFinishReason(event.errorCode) }
+            : {}),
+        });
+        get().failStreamingMessage(event.messageId || messageId, event.message || "Stream error");
       }
     },
 
@@ -1078,13 +1087,22 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
       if (get().streamingMessageId === messageId) {
         set({ isStreaming: false, streamingConversationId: null, streamingMessageId: null, error });
       }
-      // An agent run keeps the error in `agentRun.error` (the run panel renders
-      // it); its `content` stays the reply text. A message without a run has no
-      // other place to show the failure, so the error becomes its content.
+      // Failure is metadata, never generated Markdown. In particular, an empty
+      // reply must stay empty and an unfinished UI fence must remain exact.
       updateAgentMessage({ get, set }, messageId, (msg) =>
         msg.agentRun
           ? { ...msg, agentRun: { ...msg.agentRun, status: "failed", summary: "Error", error } }
-          : { ...msg, content: msg.finishReason === "length" ? msg.content : msg.content || error },
+          : msg.mode === "chat"
+            ? { ...msg, finishReason: msg.finishReason ?? "error" }
+            : {
+                ...msg,
+                agentRun: {
+                  status: "failed",
+                  summary: "Error",
+                  error,
+                  steps: msg.content ? [{ type: "text", content: msg.content }] : [],
+                },
+              },
       );
     },
 

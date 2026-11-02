@@ -282,6 +282,7 @@ export interface Message {
    * The persisted counterpart of an agent run's "cancelled" status, and the
    * only record of the stop for a chat reply (which has no run).
    * "length": Chat reached the provider's output limit with partial/empty text.
+   * "context_budget_exceeded" / "error": safe persisted Chat failure categories.
    */
   finishReason?: MessageFinishReason;
   streamTail?: string;

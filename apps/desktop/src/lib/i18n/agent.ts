@@ -676,6 +676,8 @@ export const chatLabels = {
   // A finished reply that holds nothing at all (no text, steps or error) — e.g. a
   // legacy agent task that ended without a final result, or an empty chat reply
   "chat.reply.empty": "没有生成回复内容",
+  "chat.reply.contextBudgetExceeded": "本次内容超出上下文预算，请缩短问题、附件或系统提示后重试。",
+  "chat.reply.failed": "回答未能完成，已保留收到的内容。请重试。",
   "chat.save.failedTitle": "回复尚未保存",
   "chat.save.failedBody": "生成结果已保留在当前应用中。请重试保存，重试不会重新生成回复。",
   "chat.save.retry": "重试保存",

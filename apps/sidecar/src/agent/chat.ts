@@ -4,7 +4,7 @@ import {
   createAdapter,
   isAnthropicOAuthToken,
 } from "adapters";
-import { boundChatContext } from "shared/context-budget";
+import { boundChatContext, ChatContextBudgetError } from "shared/context-budget";
 import { resolveClaudeBillingMarker } from "./anthropic-billing";
 import type { AgentEvent } from "./events";
 
@@ -28,6 +28,7 @@ export async function runChatStream(input: RunChatStreamInput): Promise<void> {
     input.onEvent({
       type: "error",
       content: error instanceof Error ? error.message : String(error),
+      ...(error instanceof ChatContextBudgetError ? { errorCode: error.code } : {}),
     });
     return;
   }

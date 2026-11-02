@@ -52,6 +52,15 @@ describe("resolveBubbleEndLabel", () => {
   const label = (message: Partial<ReplyInput>, isStreaming = false) =>
     resolveBubbleEndLabel({ message: { ...reply, ...message }, isStreaming });
 
+  test("persisted safe errors render outside both empty and partial replies", () => {
+    for (const content of ["", "```openui-lang\nroot = Card("]) {
+      expect(label({ content, finishReason: "context_budget_exceeded" })).toBe(
+        "chat.reply.contextBudgetExceeded",
+      );
+      expect(label({ content, finishReason: "error" })).toBe("chat.reply.failed");
+    }
+  });
+
   test("a finished empty reply without a run says so instead of rendering blank", () => {
     expect(label({})).toBe("chat.reply.empty");
   });

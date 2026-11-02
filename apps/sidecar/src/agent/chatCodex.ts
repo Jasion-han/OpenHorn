@@ -1,5 +1,5 @@
 import type { ChatMessage } from "adapters";
-import { boundChatContext } from "shared/context-budget";
+import { boundChatContext, ChatContextBudgetError } from "shared/context-budget";
 import { sanitizeChildEnv } from "./childEnv";
 import { type AgentEvent, buildUsageEvent, toCount } from "./events";
 import { codexChatContext } from "./runtimePrompt";
@@ -67,6 +67,7 @@ export async function runCodexChat(
     input.onEvent({
       type: "error",
       content: error instanceof Error ? error.message : String(error),
+      ...(error instanceof ChatContextBudgetError ? { errorCode: error.code } : {}),
     });
     return;
   }

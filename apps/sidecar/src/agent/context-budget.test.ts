@@ -113,7 +113,7 @@ test("the final Chat entry counts UI instructions before a real local adapter re
     });
     expect(requests).toHaveLength(1);
     expect(events).toHaveLength(1);
-    expect(events[0]?.type).toBe("error");
+    expect(events[0]).toMatchObject({ type: "error", errorCode: "chat_context_budget_exceeded" });
     expect(JSON.stringify(events)).toContain("estimated context budget");
   } finally {
     await server.stop(true);
@@ -142,5 +142,6 @@ test("Codex Chat rejects an over-budget final payload before discovering or spaw
   );
   expect(discovered).toBe(false);
   expect(events).toHaveLength(1);
+  expect(events[0]).toMatchObject({ type: "error", errorCode: "chat_context_budget_exceeded" });
   expect(JSON.stringify(events)).toContain("estimated context budget");
 });

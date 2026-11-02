@@ -68,6 +68,14 @@ describe("assistantMessageContent", () => {
 });
 
 describe("assistantFinishReason", () => {
+  test("safe Chat failure reasons never become Agent termination state", () => {
+    for (const reason of ["context_budget_exceeded", "error"]) {
+      expect(assistantFinishReason(reason, null)).toBe(reason);
+      expect(assistantFinishReason(reason, { status: "failed", steps: [] })).toBe(null);
+      expect(assistantFinishReason(reason, { status: "cancelled", steps: [] })).toBe("stopped");
+    }
+  });
+
   test("keeps an explicit stop", () => {
     expect(assistantFinishReason("stopped", undefined)).toBe("stopped");
   });

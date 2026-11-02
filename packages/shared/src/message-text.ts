@@ -43,8 +43,9 @@ export function assistantMessageContent(content: string, agentRun: unknown): str
  * an agent run the user cancelled — the run status is the agent's own record of
  * the stop, so the column can never disagree with it (and older clients that
  * only send the run still get the column right). Chat output-limit termination
- * is "length". Other replies clear an earlier end reason; an Agent run cannot
- * acquire Chat's output-limit state from an arbitrary caller value.
+ * is "length". Safe Chat failures use "context_budget_exceeded" or "error".
+ * Successful replies clear earlier end reasons; an Agent run cannot acquire
+ * Chat-only termination state from an arbitrary caller value.
  */
 export function assistantFinishReason(
   finishReason: unknown,
@@ -53,7 +54,12 @@ export function assistantFinishReason(
   if (finishReason === "stopped") return "stopped";
   const run = parseAgentRun(agentRun);
   if (run?.status === "cancelled") return "stopped";
-  return finishReason === "length" && !run ? "length" : null;
+  if (run) return null;
+  return finishReason === "length" ||
+    finishReason === "context_budget_exceeded" ||
+    finishReason === "error"
+    ? finishReason
+    : null;
 }
 
 function parseAgentRun(agentRun: unknown): Record<string, unknown> | null {
@@ -80,4 +86,11 @@ function textSteps(agentRun: unknown): string[] {
     if (type === "text" && typeof content === "string") texts.push(content);
   }
   return texts;
+}
+
+/** Safe persisted termination state; raw provider errors never become reply text. */
+export function chatFailureFinishReason(errorCode: unknown): MessageFinishReason {
+  if (errorCode === "response_truncated") return "length";
+  if (errorCode === "chat_context_budget_exceeded") return "context_budget_exceeded";
+  return "error";
 }

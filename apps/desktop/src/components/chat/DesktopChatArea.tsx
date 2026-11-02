@@ -1,6 +1,7 @@
 import { defaultRangeExtractor, type Range, useVirtualizer } from "@tanstack/react-virtual";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { fileKey } from "shared/format";
+import { chatFailureFinishReason } from "shared/message-text";
 import type { ChatStreamErrorCode } from "shared/types";
 import {
   Button,
@@ -44,7 +45,7 @@ import {
   type MessageRoundGroup,
 } from "../../lib/messageGroups";
 import { notifyWarning } from "../../lib/notify";
-import { createServerApi, readErrorMessage } from "../../lib/serverApi";
+import { ChatPreparationFailure, createServerApi, readErrorMessage } from "../../lib/serverApi";
 import { sidecarPersistence } from "../../lib/sidecarPersistence";
 import { resolveRunSettings } from "../../lib/sidecarRunSupport";
 import {
@@ -690,15 +691,11 @@ export function DesktopChatArea() {
       }
       if (terminalEvent.type === "error") {
         const failedMessageId = terminalEvent.messageId || messageId;
-        if (failedMessageId !== messageId || terminalEvent.model || terminalEvent.errorCode) {
-          useChatStore.getState().updateMessage(messageId, {
-            id: failedMessageId,
-            ...(terminalEvent.model ? { model: terminalEvent.model } : {}),
-            ...(terminalEvent.errorCode === "response_truncated"
-              ? { finishReason: "length" as const }
-              : {}),
-          });
-        }
+        useChatStore.getState().updateMessage(messageId, {
+          id: failedMessageId,
+          ...(terminalEvent.model ? { model: terminalEvent.model } : {}),
+          finishReason: chatFailureFinishReason(terminalEvent.errorCode),
+        });
         // The caller owns the visible failure and previous-reply restoration.
         // A terminal error must not fall through into a stale snapshot reload.
         throw new ChatStreamFailure(
@@ -1220,6 +1217,7 @@ export function DesktopChatArea() {
 
       let chatContent = "";
       let streamFailure: Error | null = null;
+      let chatErrorCode: ChatStreamErrorCode | undefined;
       let chatTruncated = false;
       let chatUsage: {
         promptTokens: number;
@@ -1284,6 +1282,7 @@ export function DesktopChatArea() {
                 if (turn.stopped || settled) return;
                 // An error ends generation, not ownership of the reply. Keep
                 // its exact Markdown and persist it before surfacing failure.
+                chatErrorCode = errorCode;
                 chatTruncated = errorCode === "response_truncated";
                 settle(
                   new ChatStreamFailure(
@@ -1312,12 +1311,16 @@ export function DesktopChatArea() {
         model: prepared.model,
         usage: chatUsage ?? undefined,
         // Chat keeps its terminal state here because it has no Agent run.
-        finishReason: turn.stopped ? "stopped" : chatTruncated ? "length" : undefined,
+        finishReason: turn.stopped
+          ? "stopped"
+          : streamFailure
+            ? chatFailureFinishReason(chatErrorCode)
+            : undefined,
       });
 
-      if (chatTruncated && !turn.stopped) {
+      if (streamFailure && !turn.stopped) {
         updateMessage(prepared.assistantMessageId, {
-          finishReason: "length",
+          finishReason: chatFailureFinishReason(chatErrorCode),
           ...(chatUsage ? { usage: chatUsage } : {}),
         });
       }
@@ -1373,7 +1376,20 @@ export function DesktopChatArea() {
       if (isAbortError(error)) {
         return;
       }
-      const message = error instanceof Error ? error.message : "Stream error";
+      if (error instanceof ChatPreparationFailure) {
+        updateMessage(userMessageId, { id: error.userMessageId });
+        updateMessage(assistantMessageId, {
+          id: error.assistantMessageId,
+          finishReason: chatFailureFinishReason(error.code),
+        });
+        liveAssistantMessageId = error.assistantMessageId;
+      }
+      const message =
+        error instanceof ChatPreparationFailure && error.code === "chat_context_budget_exceeded"
+          ? getChatLabel("chat.reply.contextBudgetExceeded")
+          : error instanceof Error
+            ? error.message
+            : "Stream error";
       useChatStore.getState().failStreamingMessage(liveAssistantMessageId, message);
       setError(message);
     } finally {
@@ -1637,6 +1653,7 @@ export function DesktopChatArea() {
           ...previous,
           finishReason: previousReply.finishReason,
         });
+        return;
       }
       useChatStore
         .getState()

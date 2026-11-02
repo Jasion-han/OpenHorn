@@ -1,3 +1,4 @@
+import { assistantFinishReason } from "shared/message-text";
 import type {
   ApiAgentRun,
   ApiCitation,
@@ -140,10 +141,7 @@ function mapMessage(message: ApiMessage): Message {
     liveLabel: liveMetadata?.label,
     citations,
     usage,
-    finishReason:
-      message.finishReason === "stopped" || message.finishReason === "length"
-        ? message.finishReason
-        : undefined,
+    finishReason: assistantFinishReason(message.finishReason, agentRun) ?? undefined,
     createdAt: new Date(message.createdAt),
     updatedAt: message.updatedAt ? new Date(message.updatedAt) : undefined,
   };

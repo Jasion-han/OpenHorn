@@ -340,7 +340,10 @@ export function projectSidecarAgentEvent(runId: string, raw: unknown): AgentTask
         taskId: runId,
         runId,
         content: typeof event.content === "string" ? event.content : "Agent error",
-        ...(event.errorCode === "response_truncated" ? { errorCode: event.errorCode } : {}),
+        ...(event.errorCode === "response_truncated" ||
+        event.errorCode === "chat_context_budget_exceeded"
+          ? { errorCode: event.errorCode }
+          : {}),
       };
     case "user_message":
       // The desktop renderer has no use for this; swallow it.

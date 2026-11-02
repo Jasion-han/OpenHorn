@@ -1,12 +1,20 @@
 import { ChatStreamTruncatedError, type ChatUsage } from "adapters";
 import { attachments, conversations, messages } from "db";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
-import { boundChatContext, CHAT_MAX_CONTEXT_MESSAGES } from "shared/context-budget";
-import { assistantFinishReason, assistantMessageContent } from "shared/message-text";
+import {
+  boundChatContext,
+  CHAT_MAX_CONTEXT_MESSAGES,
+  ChatContextBudgetError,
+} from "shared/context-budget";
+import {
+  assistantFinishReason,
+  assistantMessageContent,
+  chatFailureFinishReason,
+} from "shared/message-text";
 import { type ChatContentPart, type ChatMessage, createAdapter } from "../agent-adapters";
 import { client, db } from "../db";
 import { generateId } from "../utils";
-import { createSseStream } from "../utils/sse";
+import { createSseStream, type SseContext, type SseEvent } from "../utils/sse";
 import { withAppendedSystemPrompt } from "./appendSystemPrompt";
 import {
   buildAttachmentPayloadFromIds,
@@ -93,6 +101,96 @@ export class AgentModeUnsupportedError extends Error {
     );
     this.name = "AgentModeUnsupportedError";
   }
+}
+
+/** Preparation failed after creating a turn; retain its identity and safe end state. */
+export class ChatTurnPreparationError extends Error {
+  readonly finishReason: "context_budget_exceeded" | "error";
+  readonly code: "chat_context_budget_exceeded" | "chat_preparation_failed";
+  constructor(
+    error: unknown,
+    readonly userMessageId: string,
+    readonly assistantMessageId: string,
+  ) {
+    super(error instanceof Error ? error.message : "Failed to prepare chat");
+    this.name = "ChatTurnPreparationError";
+    const budget = error instanceof ChatContextBudgetError;
+    this.finishReason = budget ? "context_budget_exceeded" : "error";
+    this.code = budget ? "chat_context_budget_exceeded" : "chat_preparation_failed";
+  }
+}
+
+async function buildChatMessagesForTurn(
+  userId: string,
+  context: Parameters<typeof buildChatMessages>[1],
+  systemPrompt: string | null,
+  conversationId: string,
+  turn: {
+    userMessageId: string;
+    assistantMessageId: string;
+    model: string | null;
+    createdAt?: Date;
+    keepPrevious?: boolean;
+  },
+) {
+  try {
+    return await buildChatMessages(userId, context, systemPrompt, conversationId);
+  } catch (error) {
+    const failure = new ChatTurnPreparationError(
+      error,
+      turn.userMessageId,
+      turn.assistantMessageId,
+    );
+    // A failed zero-output retry keeps the previous answer and all its metadata.
+    if (!turn.keepPrevious) {
+      await db
+        .insert(messages)
+        .values({
+          id: turn.assistantMessageId,
+          conversationId,
+          role: "assistant",
+          content: "",
+          model: turn.model,
+          mode: "chat",
+          finishReason: failure.finishReason,
+          createdAt: turn.createdAt ?? new Date(),
+          updatedAt: new Date(),
+        })
+        .onConflictDoUpdate({
+          target: messages.id,
+          set: {
+            content: "",
+            model: turn.model,
+            finishReason: failure.finishReason,
+            usage: null,
+            liveMetadata: null,
+            citations: null,
+            updatedAt: new Date(),
+          },
+        });
+      await ftsDeleteMessage(turn.assistantMessageId);
+    }
+    throw failure;
+  }
+}
+
+function createChatSseStream(
+  handler: (send: (event: SseEvent) => void, ctx: SseContext) => Promise<void>,
+) {
+  return createSseStream(async (send, ctx) => {
+    try {
+      await handler(send, ctx);
+    } catch (error) {
+      if (!(error instanceof ChatTurnPreparationError)) throw error;
+      send({
+        type: "error",
+        message: error.message,
+        content: "",
+        messageId: error.assistantMessageId,
+        ...(error.code === "chat_context_budget_exceeded" ? { errorCode: error.code } : {}),
+      });
+    }
+  });
 }
 
 export class ChatModeUnsupportedError extends Error {
@@ -490,16 +588,19 @@ export async function sendMessage(userId: string, input: SendMessageInput) {
     forceWebSearch: Boolean(conversation.forceWebSearch),
     classifier,
   });
-  const chatMessages = await buildChatMessages(
+  const assistantMessageId = generateId();
+  const chatMessages = await buildChatMessagesForTurn(
     userId,
     conversationMessages,
     buildEffectiveSystemPrompt(conversation.systemPrompt, liveContext),
     input.conversationId,
+    { userMessageId, assistantMessageId, model: resolvedChannel?.modelId ?? null },
   );
 
   let responseContent = "";
   let responseUsage: ChatUsage | undefined;
   let responseErrorCode: "response_truncated" | undefined;
+  let responseFailed = false;
   let responseModel: string | null = null;
 
   if (resolvedChannel) {
@@ -511,8 +612,8 @@ export async function sendMessage(userId: string, input: SendMessageInput) {
     );
     responseModel = resolvedChannel.modelId;
 
-    // A length limit keeps useful generated content and usage. Other failures
-    // retain the existing non-streaming error response behavior.
+    // Failure metadata stays separate from exact accumulated model text,
+    // including empty output and unfinished UI programs.
     try {
       const stream = await adapter.chatStream({
         model: resolvedChannel.modelId,
@@ -533,7 +634,7 @@ export async function sendMessage(userId: string, input: SendMessageInput) {
         responseErrorCode = error.code;
         responseUsage = error.usage;
       } else {
-        responseContent = `Error: ${message}`;
+        responseFailed = true;
       }
       const classified = classifyProviderError(message);
       if (classified.retryable) {
@@ -546,15 +647,13 @@ export async function sendMessage(userId: string, input: SendMessageInput) {
       : "未配置可用的默认渠道/默认模型。请先在设置中完成配置后再开始对话。";
   }
 
-  const assistantMessageId = generateId();
-
   await db.insert(messages).values({
     id: assistantMessageId,
     conversationId: input.conversationId,
     role: "assistant",
     content: responseContent,
     usage: responseUsage ? JSON.stringify(responseUsage) : null,
-    finishReason: responseErrorCode ? "length" : null,
+    finishReason: responseErrorCode ? "length" : responseFailed ? "error" : null,
     model: responseModel,
     mode: "chat",
     agentRun: null,
@@ -579,7 +678,11 @@ export async function sendMessage(userId: string, input: SendMessageInput) {
       id: assistantMessageId,
       role: "assistant",
       content: responseContent,
-      finishReason: responseErrorCode ? ("length" as const) : null,
+      finishReason: responseErrorCode
+        ? ("length" as const)
+        : responseFailed
+          ? ("error" as const)
+          : null,
       ...(responseUsage ? { usage: responseUsage } : {}),
       createdAt: new Date(),
     },
@@ -632,7 +735,7 @@ export async function streamMessage(
   }
   const conversation = await getConversationForUser(userId, input.conversationId);
   const resolvedChannel = await resolveChatChannelForConversation(userId, conversation);
-  return createSseStream(async (send, ctx) => {
+  return createChatSseStream(async (send, ctx) => {
     const userMessageId = generateId();
     const now = new Date();
     await db.insert(messages).values({
@@ -695,11 +798,17 @@ export async function streamMessage(
     }
 
     const conversationMessages = await getMessages(input.conversationId);
-    const chatMessages = await buildChatMessages(
+    const chatMessages = await buildChatMessagesForTurn(
       userId,
       conversationMessages,
       effectiveSystemPrompt,
       input.conversationId,
+      {
+        userMessageId,
+        assistantMessageId,
+        model: resolvedChannel?.modelId ?? null,
+        createdAt: assistantCreatedAt,
+      },
     );
 
     if (!resolvedChannel) {
@@ -781,7 +890,7 @@ export async function streamMessage(
         liveMetadata: serializeLiveMetadata(liveContext),
         citations: serializeCitations(liveContext.citations),
         finishReason: assistantFinishReason(
-          stopped ? "stopped" : errorCode ? "length" : null,
+          stopped ? "stopped" : streamError ? chatFailureFinishReason(errorCode) : null,
           null,
         ),
         usage: usage ? JSON.stringify(usage) : null,
@@ -916,7 +1025,7 @@ export async function editUserMessage(
   },
 ): Promise<ReadableStream> {
   const prepared = await prepareEditedChatTurn(userId, userMessageId);
-  return createSseStream(async (send, ctx) => {
+  return createChatSseStream(async (send, ctx) => {
     if (!prepared) {
       send({ type: "error", message: "Message not found" });
       return;
@@ -976,11 +1085,12 @@ export async function editUserMessage(
       send(citationsPayload);
     }
 
-    const chatMessages = await buildChatMessages(
+    const chatMessages = await buildChatMessagesForTurn(
       userId,
       contextMsgs,
       effectiveSystemPrompt,
       userMsg.conversationId,
+      { userMessageId, assistantMessageId, model: resolvedChannel?.modelId ?? null },
     );
 
     if (!resolvedChannel) {
@@ -1030,7 +1140,7 @@ export async function editUserMessage(
         liveMetadata: serializeLiveMetadata(liveContext),
         citations: serializeCitations(liveContext.citations),
         finishReason: assistantFinishReason(
-          stopped ? "stopped" : errorCode ? "length" : null,
+          stopped ? "stopped" : streamError ? chatFailureFinishReason(errorCode) : null,
           null,
         ),
         usage: usage ? JSON.stringify(usage) : null,
@@ -1086,7 +1196,7 @@ export async function regenerateMessage(
   }
 
   if (!prefetchedAssistantMsg || prefetchedAssistantMsg.role !== "assistant") {
-    return createSseStream(async (send) => {
+    return createChatSseStream(async (send) => {
       send({ type: "error", message: "Message not found" });
     });
   }
@@ -1098,7 +1208,7 @@ export async function regenerateMessage(
   }
   const resolvedChannel = await resolveChatChannelForConversation(userId, conversation);
 
-  return createSseStream(async (send, ctx) => {
+  return createChatSseStream(async (send, ctx) => {
     const allMsgs = await getMessages(assistantMsg.conversationId);
     const idx = allMsgs.findIndex((m) => m.id === assistantMessageId);
     const contextMsgs = idx > 0 ? allMsgs.slice(0, idx) : allMsgs;
@@ -1136,11 +1246,17 @@ export async function regenerateMessage(
     if (citationsPayload) {
       send(citationsPayload);
     }
-    const chatMessages = await buildChatMessages(
+    const chatMessages = await buildChatMessagesForTurn(
       userId,
       contextMsgs,
       effectiveSystemPrompt,
       assistantMsg.conversationId,
+      {
+        userMessageId: lastUserMessage?.id ?? "",
+        assistantMessageId,
+        model: resolvedChannel?.modelId ?? null,
+        keepPrevious: true,
+      },
     );
 
     if (!resolvedChannel) {
@@ -1189,7 +1305,7 @@ export async function regenerateMessage(
         liveMetadata: serializeLiveMetadata(liveContext),
         citations: serializeCitations(liveContext.citations),
         finishReason: assistantFinishReason(
-          stopped ? "stopped" : errorCode ? "length" : null,
+          stopped ? "stopped" : streamError ? chatFailureFinishReason(errorCode) : null,
           null,
         ),
         usage: usage ? JSON.stringify(usage) : null,
@@ -1313,7 +1429,7 @@ export async function syncSidecarMessages(
   const mode = input.mode === "chat" ? "chat" : "agent";
   const assistantContent = assistantMessageContent(input.assistantContent ?? "", input.agentRun);
   const finishReason = assistantFinishReason(
-    mode === "agent" && input.finishReason === "length" ? null : input.finishReason,
+    mode === "agent" && input.finishReason !== "stopped" ? null : input.finishReason,
     input.agentRun,
   );
   if (
@@ -1546,11 +1662,17 @@ export async function prepareChatForSidecar(
   const baseSystemPrompt = conversation.systemPrompt || settings[GLOBAL_SYSTEM_PROMPT_KEY] || null;
 
   const conversationMessages = await getMessages(input.conversationId);
-  const chatMessages = await buildChatMessages(
+  const chatMessages = await buildChatMessagesForTurn(
     userId,
     conversationMessages,
     baseSystemPrompt,
     input.conversationId,
+    {
+      userMessageId,
+      assistantMessageId,
+      model: resolvedChannel.modelId,
+      createdAt: assistantCreatedAt,
+    },
   );
 
   return {

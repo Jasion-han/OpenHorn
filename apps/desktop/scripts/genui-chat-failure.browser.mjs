@@ -24,6 +24,7 @@ let syncedPreparations = 0;
 let failAgentSaveOnce = false;
 let retryMode = "success";
 let truncationEdit = false;
+let budgetPrepare = false;
 let protocol = "openai";
 const conversation = {
   id: "failure-conversation",
@@ -116,6 +117,19 @@ const server = http.createServer(async (request, response) => {
         createdAt: new Date().toISOString(),
       })),
     );
+    if (budgetPrepare) {
+      rows.at(-1).finishReason = "context_budget_exceeded";
+      return json(
+        response,
+        {
+          error: "fixture estimated context budget",
+          code: "chat_context_budget_exceeded",
+          userMessageId,
+          assistantMessageId,
+        },
+        400,
+      );
+    }
     return json(response, {
       userMessageId,
       assistantMessageId,
@@ -199,7 +213,7 @@ const server = http.createServer(async (request, response) => {
     if (generated) {
       Object.assign(row, {
         content: generated,
-        finishReason: truncated ? "length" : null,
+        finishReason: truncated ? "length" : retryMode === "partial-error" ? "error" : null,
         usage: truncated ? JSON.stringify(truncationUsage) : null,
       });
     }
@@ -240,7 +254,9 @@ const server = http.createServer(async (request, response) => {
       conversationId: conversation.id,
       role: "assistant",
       content: generated,
-      ...(truncationEdit ? { finishReason: "length", usage: JSON.stringify(truncationUsage) } : {}),
+      ...(truncationEdit
+        ? { finishReason: "length", usage: JSON.stringify(truncationUsage) }
+        : { finishReason: "error" }),
       mode: "chat",
       createdAt: new Date().toISOString(),
     });
@@ -310,6 +326,7 @@ try {
     retries = 0;
     retryMode = "success";
     truncationEdit = false;
+    budgetPrepare = false;
     syncedPreparations = 0;
     failAgentSaveOnce = false;
     protocol = "openai";
@@ -1624,6 +1641,53 @@ try {
   assert.deepEqual((await snapshot()).messages.at(-1).usage, truncationUsage);
   console.log(
     "PASS truncated SSE tail edit: persisted reply identity/usage/label and edited question survive reload",
+  );
+
+  await reset();
+  budgetPrepare = true;
+  await page.locator("textarea").fill("over-budget fixture request");
+  await page.locator("textarea").press("Enter");
+  const budgetLabel = await page.evaluate(() => window.failureChat.labels.budget);
+  const failedLabel = await page.evaluate(() => window.failureChat.labels.failed);
+  const emptyLabel = await page.evaluate(() => window.failureChat.labels.empty);
+  await page.waitForFunction(
+    () =>
+      !window.failureChat.snapshot().streaming &&
+      window.failureChat.snapshot().messages.length === 2,
+  );
+  assert.equal((await snapshot()).messages.at(-1).id, "saved-assistant-1");
+  assert.equal((await snapshot()).messages.at(-1).content, "");
+  assert.equal((await snapshot()).messages.at(-1).finishReason, "context_budget_exceeded");
+  assert.equal((await snapshot()).runs, 0, "budget rejection never starts a sidecar completion");
+  await page.getByText(budgetLabel, { exact: true }).first().waitFor();
+  budgetPrepare = false;
+  await send();
+  await emit("short follow-up succeeded");
+  await page.evaluate(() => window.failureChat.done());
+  await page.waitForFunction(() => !window.failureChat.snapshot().streaming);
+  await page.evaluate(() => window.failureChat.reload());
+  await page.getByText(budgetLabel, { exact: true }).waitFor();
+  assert.equal(await page.getByText(emptyLabel, { exact: true }).count(), 0);
+  assert.equal((await snapshot()).messages[1].finishReason, "context_budget_exceeded");
+  console.log(
+    "PASS prepare budget rejection: saved identity, no model run, localized reason survives next send and reload",
+  );
+
+  for (const partial of ["", "```openui-lang\nroot = Card("]) {
+    await reset();
+    await send();
+    if (partial) await emit(partial);
+    await fail();
+    assert.equal(rows.at(-1).content, partial);
+    assert.equal(rows.at(-1).finishReason, "error");
+    await page.evaluate(() => window.failureChat.reload());
+    await page.getByText(failedLabel, { exact: true }).waitFor();
+    assert.equal(await page.getByText(emptyLabel, { exact: true }).count(), 0);
+    assert.equal((await snapshot()).messages.at(-1).content, partial);
+    assert.equal((await snapshot()).messages.at(-1).finishReason, "error");
+  }
+  console.log(
+    "PASS empty and partial provider failures: exact Markdown plus localized durable reason after reload",
   );
 
   assert.deepEqual(errors, []);

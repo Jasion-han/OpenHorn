@@ -115,7 +115,7 @@ describe("agent reply content invariant", () => {
     expect(store.getState().findMessageAnywhere("draft-assistant-2")?.content).toBe("");
   });
 
-  test("a chat message without a run still shows the error as content", async () => {
+  test("a chat message without a run retains a safe failure reason outside content", async () => {
     const { store } = await setup();
     store.getState().addMessage({
       id: "draft-chat-1",
@@ -126,7 +126,27 @@ describe("agent reply content invariant", () => {
       createdAt: new Date("2026-10-31T10:02:00.000Z"),
     });
     store.getState().applyStreamEvent("draft-chat-1", { type: "error", message: "boom" });
-    expect(store.getState().findMessageAnywhere("draft-chat-1")?.content).toBe("boom");
+    const failed = store.getState().findMessageAnywhere("draft-chat-1");
+    expect(failed?.content).toBe("");
+    expect(failed?.finishReason).toBe("error");
+    expect(failed?.agentRun).toBe(undefined);
+  });
+
+  test("an Agent reply without a run records failure in a run, never Chat metadata", async () => {
+    const { store } = await setup();
+    const draft = agentDraft("no-run", "conv-a");
+    delete draft.agentRun;
+    draft.content = "partial Agent answer";
+    store.getState().addMessage(draft);
+    store.getState().applyStreamEvent("no-run", {
+      type: "error",
+      message: "boom",
+      errorCode: "chat_context_budget_exceeded",
+    });
+    const failed = store.getState().findMessageAnywhere("no-run");
+    expect(failed?.content).toBe("partial Agent answer");
+    expect(failed?.agentRun).toMatchObject({ status: "failed", error: "boom" });
+    expect(failed?.finishReason).toBe(undefined);
   });
 
   test("background (cached) messages keep content in sync too", async () => {

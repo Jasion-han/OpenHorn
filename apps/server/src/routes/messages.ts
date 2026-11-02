@@ -3,6 +3,7 @@ import { parseAppendSystemPrompt } from "../services/appendSystemPrompt";
 import {
   AgentModeUnsupportedError,
   ChatModeUnsupportedError,
+  ChatTurnPreparationError,
   completeChatFromSidecar,
   deleteMessage,
   editUserMessage,
@@ -231,6 +232,17 @@ messages.post("/chat/prepare", async (c) => {
   } catch (error) {
     if (error instanceof ChatModeUnsupportedError) {
       return c.json(modeUnsupportedBody(error), 400);
+    }
+    if (error instanceof ChatTurnPreparationError) {
+      return c.json(
+        {
+          error: error.message,
+          code: error.code,
+          userMessageId: error.userMessageId,
+          assistantMessageId: error.assistantMessageId,
+        },
+        400,
+      );
     }
     return c.json(
       { error: error instanceof Error ? error.message : "Failed to prepare chat" },

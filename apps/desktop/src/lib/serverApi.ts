@@ -30,6 +30,17 @@ import type {
 } from "../types/chat";
 import { getDesktopBackendBase } from "./backendBase";
 
+export class ChatPreparationFailure extends Error {
+  constructor(
+    message: string,
+    readonly userMessageId: string,
+    readonly assistantMessageId: string,
+    readonly code: "chat_context_budget_exceeded" | "chat_preparation_failed",
+  ) {
+    super(message);
+  }
+}
+
 export const UNAUTHORIZED_EVENT = "openhorn:unauthorized";
 
 type FetchLike = typeof fetch;
@@ -110,7 +121,7 @@ export interface ServerApi {
       content: string;
       model?: string;
       usage?: { promptTokens: number; completionTokens: number; totalTokens: number };
-      /** "stopped" when the user stopped the reply; absent = it ran to completion. */
+      /** Chat terminal state; absent clears an earlier stop, limit or failure. */
       finishReason?: MessageFinishReason;
     }) => Promise<{ success: boolean }>;
   };
@@ -351,6 +362,27 @@ async function fetchJson<T>(
   });
 
   if (!response.ok) {
+    // Only the prepare endpoint owns this saved pair. Do not interpret arbitrary
+    // response bodies as permission to rename messages in another operation.
+    if (path === "/messages/chat/prepare") {
+      const body = await response
+        .clone()
+        .json()
+        .catch(() => null);
+      if (
+        body &&
+        typeof body.userMessageId === "string" &&
+        typeof body.assistantMessageId === "string" &&
+        (body.code === "chat_context_budget_exceeded" || body.code === "chat_preparation_failed")
+      ) {
+        throw new ChatPreparationFailure(
+          extractErrorMessage(body, "Failed to prepare chat"),
+          body.userMessageId,
+          body.assistantMessageId,
+          body.code,
+        );
+      }
+    }
     throw new Error(await readErrorMessage(response, "Request failed"));
   }
 
