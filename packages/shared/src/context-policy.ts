@@ -1,8 +1,9 @@
-import type { ModelContextConfig } from "./types";
+import type { ModelContextConfig, ModelContextMetadata } from "./types";
 
 export const MIN_CONTEXT_WINDOW = 8_192;
 export const MAX_CONTEXT_WINDOW = 2_000_000;
 export const FALLBACK_CONTEXT_WINDOW = 32_000;
+export const MAX_DISCOVERED_CONTEXT_WINDOW = 16_777_216;
 
 type Capability = { contextWindow: number; maxInputTokens?: number };
 
@@ -27,7 +28,44 @@ export interface ContextPolicy {
   maxOutputTokens: number;
   maxMessages: number;
   reserveTokens: number;
-  source: "configured" | "model" | "fallback";
+  source: "configured" | "model" | "fallback" | ModelContextMetadata["source"];
+}
+
+/** Validate cached/remote metadata at every trust boundary; retain no raw fields. */
+export function normalizeModelContextMetadata(value: unknown): ModelContextMetadata | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const positiveLimit = (limit: unknown): limit is number =>
+    typeof limit === "number" &&
+    Number.isSafeInteger(limit) &&
+    limit >= 1 &&
+    limit <= MAX_DISCOVERED_CONTEXT_WINDOW;
+  if (
+    !positiveLimit(record.contextWindow) ||
+    record.contextWindow < 4096 ||
+    (record.source !== "channel" && record.source !== "catalog" && record.source !== "runtime") ||
+    typeof record.fetchedAt !== "number" ||
+    !Number.isSafeInteger(record.fetchedAt) ||
+    record.fetchedAt < 0 ||
+    (record.maxInputTokens !== undefined && !positiveLimit(record.maxInputTokens)) ||
+    (record.maxOutputTokens !== undefined && !positiveLimit(record.maxOutputTokens)) ||
+    (record.inputLimitOnly !== undefined && typeof record.inputLimitOnly !== "boolean")
+  )
+    return null;
+  return {
+    contextWindow: record.contextWindow,
+    source: record.source,
+    fetchedAt: record.fetchedAt,
+    ...(record.maxInputTokens !== undefined
+      ? { maxInputTokens: record.maxInputTokens as number }
+      : {}),
+    ...(record.maxOutputTokens !== undefined
+      ? { maxOutputTokens: record.maxOutputTokens as number }
+      : {}),
+    ...(record.inputLimitOnly !== undefined
+      ? { inputLimitOnly: record.inputLimitOnly as boolean }
+      : {}),
+  };
 }
 
 export function isValidContextWindow(value: unknown): value is number {
@@ -47,21 +85,30 @@ export function resolveContextPolicy(
   const capability = Object.hasOwn(MODEL_CAPABILITIES, model)
     ? MODEL_CAPABILITIES[model]
     : undefined;
+  const metadata = normalizeModelContextMetadata(input.contextMetadata);
   const configuredWindow = input.contextWindow;
   const configured = isValidContextWindow(configuredWindow);
   const requested = configured
     ? configuredWindow
-    : (capability?.contextWindow ?? FALLBACK_CONTEXT_WINDOW);
-  // A gateway override can lower a documented maximum, never increase it.
-  const contextWindow = Math.min(requested, capability?.contextWindow ?? MAX_CONTEXT_WINDOW);
+    : (metadata?.contextWindow ?? capability?.contextWindow ?? FALLBACK_CONTEXT_WINDOW);
+  // Current channel reports supersede the built-in snapshot. Manual settings
+  // can lower a reported ceiling, but cannot bypass its input/output limits.
+  const contextWindow = Math.min(
+    requested,
+    metadata?.contextWindow ?? capability?.contextWindow ?? MAX_DISCOVERED_CONTEXT_WINDOW,
+  );
   const agent = input.mode === "agent";
-  const maxOutputTokens = Math.min(agent ? 16_384 : 4_096, Math.floor(contextWindow / 4));
+  const maxOutputTokens = Math.min(
+    agent ? 16_384 : 4_096,
+    Math.floor(contextWindow / 4),
+    metadata?.maxOutputTokens ?? Number.POSITIVE_INFINITY,
+  );
   const reserveTokens =
     Math.max(1_024, Math.ceil(contextWindow * 0.05)) +
     (agent ? Math.min(32_768, Math.floor(contextWindow / 8)) : 0);
   const maxInputTokens = Math.min(
     contextWindow - maxOutputTokens - reserveTokens,
-    capability?.maxInputTokens ?? Number.POSITIVE_INFINITY,
+    metadata?.maxInputTokens ?? capability?.maxInputTokens ?? Number.POSITIVE_INFINITY,
   );
   return {
     contextWindow,
@@ -69,6 +116,12 @@ export function resolveContextPolicy(
     maxOutputTokens,
     reserveTokens,
     maxMessages: Math.min(10_000, Math.max(200, Math.floor(maxInputTokens / 64))),
-    source: configured ? "configured" : capability ? "model" : "fallback",
+    source: configured
+      ? "configured"
+      : metadata
+        ? metadata.source
+        : capability
+          ? "model"
+          : "fallback",
   };
 }

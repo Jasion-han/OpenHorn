@@ -234,6 +234,7 @@ function createStubServerApi() {
       delete: async () => ({ success: true }),
       test: async () => ({ success: true }),
       fetchModels: async () => ({ success: true, models: [] }),
+      refreshContext: async () => ({ success: true, models: [], updated: 0 }),
       listModels: async () => ({ models: [] }),
       updateModels: async () => ({ models: [] }),
       setDefault: async () => ({ success: true }),

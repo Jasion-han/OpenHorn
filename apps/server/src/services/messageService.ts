@@ -14,6 +14,7 @@ import {
   assistantMessageContent,
   chatFailureFinishReason,
 } from "shared/message-text";
+import type { ModelContextMetadata } from "shared/types";
 import { type ChatContentPart, type ChatMessage, createAdapter } from "../agent-adapters";
 import { client, db } from "../db";
 import { generateId } from "../utils";
@@ -135,6 +136,7 @@ async function buildChatMessagesForTurn(
     createdAt?: Date;
     keepPrevious?: boolean;
     contextWindow?: number | null;
+    contextMetadata?: ModelContextMetadata | null;
     protocol?: string;
   },
 ) {
@@ -143,6 +145,7 @@ async function buildChatMessagesForTurn(
       model: turn.model ?? "",
       protocol: turn.protocol,
       contextWindow: turn.contextWindow,
+      contextMetadata: turn.contextMetadata,
       mode: "chat",
     });
     return await buildChatMessages(userId, context, systemPrompt, conversationId, {
@@ -669,6 +672,7 @@ export async function sendMessage(userId: string, input: SendMessageInput) {
       assistantMessageId,
       model: resolvedChannel?.modelId ?? null,
       contextWindow: resolvedChannel?.contextWindow,
+      contextMetadata: resolvedChannel?.contextMetadata,
       protocol: resolvedChannel?.channel.protocol,
     },
   );
@@ -698,6 +702,7 @@ export async function sendMessage(userId: string, input: SendMessageInput) {
           model: resolvedChannel.modelId,
           protocol: resolvedChannel.channel.protocol,
           contextWindow: resolvedChannel.contextWindow,
+          contextMetadata: resolvedChannel.contextMetadata,
           mode: "chat",
         }).maxOutputTokens,
       });
@@ -889,6 +894,7 @@ export async function streamMessage(
         assistantMessageId,
         model: resolvedChannel?.modelId ?? null,
         contextWindow: resolvedChannel?.contextWindow,
+        contextMetadata: resolvedChannel?.contextMetadata,
         protocol: resolvedChannel?.channel.protocol,
         createdAt: assistantCreatedAt,
       },
@@ -962,6 +968,7 @@ export async function streamMessage(
         messages: chatMessages,
         signal: ctx.signal,
         contextWindow: resolvedChannel.contextWindow,
+        contextMetadata: resolvedChannel.contextMetadata,
         protocol: resolvedChannel.channel.protocol,
       },
       send,
@@ -1036,6 +1043,7 @@ async function streamReplyUntilStopped(
     messages: ChatMessage[];
     signal: AbortSignal;
     contextWindow?: number | null;
+    contextMetadata?: ModelContextMetadata | null;
     protocol?: string;
   },
   send: (event: { type: string; [key: string]: unknown }) => void,
@@ -1058,6 +1066,7 @@ async function streamReplyUntilStopped(
         model: input.model,
         protocol: input.protocol,
         contextWindow: input.contextWindow,
+        contextMetadata: input.contextMetadata,
         mode: "chat",
       }).maxOutputTokens,
       signal: input.signal,
@@ -1195,6 +1204,7 @@ export async function editUserMessage(
         assistantMessageId,
         model: resolvedChannel?.modelId ?? null,
         contextWindow: resolvedChannel?.contextWindow,
+        contextMetadata: resolvedChannel?.contextMetadata,
         protocol: resolvedChannel?.channel.protocol,
       },
     );
@@ -1239,6 +1249,7 @@ export async function editUserMessage(
         messages: chatMessages,
         signal: ctx.signal,
         contextWindow: resolvedChannel.contextWindow,
+        contextMetadata: resolvedChannel.contextMetadata,
         protocol: resolvedChannel.channel.protocol,
       },
       send,
@@ -1368,6 +1379,7 @@ export async function regenerateMessage(
         assistantMessageId,
         model: resolvedChannel?.modelId ?? null,
         contextWindow: resolvedChannel?.contextWindow,
+        contextMetadata: resolvedChannel?.contextMetadata,
         protocol: resolvedChannel?.channel.protocol,
         keepPrevious: true,
       },
@@ -1397,6 +1409,7 @@ export async function regenerateMessage(
         messages: chatMessages,
         signal: ctx.signal,
         contextWindow: resolvedChannel.contextWindow,
+        contextMetadata: resolvedChannel.contextMetadata,
         protocol: resolvedChannel.channel.protocol,
       },
       send,
@@ -1712,7 +1725,8 @@ export interface PrepareChatInput {
 }
 
 export interface PrepareChatResult {
-  contextWindow: number;
+  contextWindow: number | null;
+  contextMetadata?: ModelContextMetadata | null;
   apiKey: string;
   baseUrl: string | null;
   protocol: string;
@@ -1793,18 +1807,15 @@ export async function prepareChatForSidecar(
       assistantMessageId,
       model: resolvedChannel.modelId,
       contextWindow: resolvedChannel.contextWindow,
+      contextMetadata: resolvedChannel.contextMetadata,
       protocol: resolvedChannel.channel.protocol,
       createdAt: assistantCreatedAt,
     },
   );
 
   return {
-    contextWindow: resolveContextPolicy({
-      model: resolvedChannel.modelId,
-      protocol: resolvedChannel.channel.protocol,
-      contextWindow: resolvedChannel.contextWindow,
-      mode: "chat",
-    }).contextWindow,
+    contextWindow: resolvedChannel.contextWindow ?? null,
+    contextMetadata: resolvedChannel.contextMetadata ?? null,
     apiKey: resolvedChannel.apiKey,
     baseUrl: resolvedChannel.channel.baseUrl || null,
     protocol: resolvedChannel.channel.protocol,

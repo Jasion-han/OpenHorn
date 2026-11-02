@@ -99,6 +99,7 @@ const SCHEMA_DDL: string[] = [
     model_id TEXT NOT NULL,
     display_name TEXT NOT NULL,
     context_window INTEGER,
+    context_metadata TEXT,
     enabled INTEGER DEFAULT 1,
     is_default INTEGER DEFAULT 0,
     created_at INTEGER NOT NULL,
@@ -732,6 +733,13 @@ async function ensureChannelModelContextWindowColumn(): Promise<void> {
   const columns = await client.execute("PRAGMA table_info(channel_models)");
   if (!columns.rows.some((row) => row.name === "context_window")) {
     await client.execute("ALTER TABLE channel_models ADD COLUMN context_window INTEGER");
+  }
+}
+
+async function ensureChannelModelContextMetadataColumn(): Promise<void> {
+  const result = await client.execute("PRAGMA table_info(channel_models)");
+  if (!result.rows.some((row) => row.name === "context_metadata")) {
+    await client.execute("ALTER TABLE channel_models ADD COLUMN context_metadata TEXT");
   }
 }
 
@@ -1541,6 +1549,7 @@ export async function bootstrapDatabase(options: BootstrapOptions = {}): Promise
   await ensureUserTokenVersionColumn();
   await ensureChannelProtocolColumn();
   await ensureChannelModelContextWindowColumn();
+  await ensureChannelModelContextMetadataColumn();
   await ensureConversationModelIdColumn();
   await ensureConversationDefaultModeColumn();
   await ensureConversationLastModeColumn();

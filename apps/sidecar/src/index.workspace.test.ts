@@ -42,6 +42,8 @@ test("agent.run owns its validated workspace after a stopped setup RPC finishes 
       selectedB: true,
       explicitRuntimes: ["codex", "direct", "acp"],
       explicitRootsAreB: true,
+      runtimeMetadataPreserved: true,
+      chatMetadataPreserved: true,
       rejectedRoots: 7,
       invalidRootsStartedNoRuns: true,
       legacyOmittedRootIsCurrentA: true,

@@ -4,12 +4,14 @@ import {
   estimateContextMessageTokens,
 } from "shared/context-budget";
 import { resolveContextPolicy } from "shared/context-policy";
+import type { ModelContextMetadata } from "shared/types";
 import type { HistoryMessage } from "./context";
 
 export interface AgentContextInput {
   model?: string;
   protocol?: string;
   contextWindow?: number | null;
+  contextMetadata?: ModelContextMetadata | null;
   conversationHistory?: HistoryMessage[];
 }
 

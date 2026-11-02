@@ -6,6 +6,7 @@ import {
 } from "adapters";
 import { boundChatContext, ChatContextBudgetError } from "shared/context-budget";
 import { resolveContextPolicy } from "shared/context-policy";
+import type { ModelContextMetadata } from "shared/types";
 import { resolveClaudeBillingMarker } from "./anthropic-billing";
 import type { AgentEvent } from "./events";
 
@@ -15,6 +16,7 @@ export type RunChatStreamInput = {
   protocol: string;
   model: string;
   contextWindow?: number | null;
+  contextMetadata?: ModelContextMetadata | null;
   messages: ChatMessage[];
   abortController: AbortController;
   onEvent: (event: AgentEvent) => void;

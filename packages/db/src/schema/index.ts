@@ -93,6 +93,8 @@ export const channelModels = sqliteTable(
     displayName: text("display_name").notNull(),
     /** Null selects verified model metadata or the conservative fallback. */
     contextWindow: integer("context_window"),
+    /** Server-discovered model limits and provenance, normalized at runtime. */
+    contextMetadata: text("context_metadata"),
     enabled: integer("enabled", { mode: "boolean" }).default(true),
     isDefault: integer("is_default", { mode: "boolean" }).default(false),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),

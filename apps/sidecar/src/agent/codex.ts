@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { resolveContextPolicy } from "shared/context-policy";
-import type { AttachmentPart } from "shared/types";
+import type { AttachmentPart, ModelContextMetadata } from "shared/types";
 import { appendAttachmentContext } from "./attachments";
 import { sanitizeChildEnv } from "./childEnv";
 import { type AgentEvent, buildUsageEvent, toCount } from "./events";
@@ -13,6 +13,7 @@ import { buildAgentSystemPrompt } from "./system-prompt";
 export type RunCodexAgentInput = {
   model: string;
   contextWindow?: number | null;
+  contextMetadata?: ModelContextMetadata | null;
   prompt: string;
   systemPrompt?: string;
   cwd: string;

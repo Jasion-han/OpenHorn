@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import type { ModelContextMetadata } from "shared/types";
 import type { AgentTaskStreamEvent } from "./agentTaskStream";
 import {
   projectSidecarAgentEvent,
@@ -8,6 +9,13 @@ import {
 } from "./sidecarClient";
 
 type Listener = (event: unknown) => void;
+const contextMetadata: ModelContextMetadata = {
+  contextWindow: 262_144,
+  maxInputTokens: 200_000,
+  maxOutputTokens: 1024,
+  source: "channel",
+  fetchedAt: 1000,
+};
 
 /**
  * In-memory WebSocket stand-in. The server side of the fake socket
@@ -208,6 +216,7 @@ describe("SidecarClient", () => {
       protocol: "openai",
       model: "fixture",
       contextWindow: 1_000_000,
+      contextMetadata,
       messages: [{ role: "user", content: "hi" }],
       onEvent: (event) => {
         events.push(event);
@@ -219,6 +228,9 @@ describe("SidecarClient", () => {
     });
     await Promise.resolve();
     expect((lastSent(socket).params as { contextWindow?: number }).contextWindow).toBe(1_000_000);
+    expect((lastSent(socket).params as { contextMetadata?: unknown }).contextMetadata).toEqual(
+      contextMetadata,
+    );
     socket.receive(
       JSON.stringify({
         type: "response",
@@ -348,6 +360,7 @@ describe("SidecarClient", () => {
       apiKey: "sk-test",
       model: "claude-3-5-sonnet",
       contextWindow: 128_000,
+      contextMetadata,
       workspaceRoot: "/fixture/per-run-workspace",
       onEvent: (event) => {
         events.push(event);
@@ -366,6 +379,9 @@ describe("SidecarClient", () => {
     await Promise.resolve();
     const request = lastSent(socket);
     expect(request.method).toBe("agent.run");
+    expect((request.params as { contextMetadata?: unknown }).contextMetadata).toEqual(
+      contextMetadata,
+    );
     expect((request.params as { contextWindow?: number }).contextWindow).toBe(128_000);
     expect((request.params as { workspaceRoot?: string }).workspaceRoot).toBe(
       "/fixture/per-run-workspace",

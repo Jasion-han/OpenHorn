@@ -1,6 +1,7 @@
 import type { ChatMessage } from "adapters";
 import { boundChatContext, ChatContextBudgetError } from "shared/context-budget";
 import { resolveContextPolicy } from "shared/context-policy";
+import type { ModelContextMetadata } from "shared/types";
 import { sanitizeChildEnv } from "./childEnv";
 import { type AgentEvent, buildUsageEvent, toCount } from "./events";
 import { codexChatContext } from "./runtimePrompt";
@@ -35,6 +36,7 @@ export function readCodexExecUsage(
 export type RunCodexChatInput = {
   model: string;
   contextWindow?: number | null;
+  contextMetadata?: ModelContextMetadata | null;
   messages: ChatMessage[];
   abortController: AbortController;
   onEvent: (event: AgentEvent) => void;

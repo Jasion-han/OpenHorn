@@ -7,6 +7,18 @@ export type Provider = string;
 /** Per-channel model override. Null/absent selects documented model metadata. */
 export interface ModelContextConfig {
   contextWindow?: number | null;
+  contextMetadata?: ModelContextMetadata | null;
+}
+
+/** Read-only discovered limits; output limits must never be mistaken for context. */
+export interface ModelContextMetadata {
+  contextWindow: number;
+  maxInputTokens?: number;
+  maxOutputTokens?: number;
+  source: "channel" | "catalog" | "runtime";
+  fetchedAt: number;
+  /** An input-only report is used as a conservative total budgeting ceiling. */
+  inputLimitOnly?: boolean;
 }
 
 export interface Channel {

@@ -2,7 +2,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { homedir } from "node:os";
 import { Readable, Writable } from "node:stream";
 import * as acp from "@agentclientprotocol/sdk";
-import type { AttachmentPart } from "shared/types";
+import type { AttachmentPart, ModelContextMetadata } from "shared/types";
 import { type CheckpointSession, ensureCheckpointBackup, finalizeCheckpoint } from "../checkpoints";
 import { classifyBashCommandRisk } from "../shell-risk";
 import { toWorkspaceRelative } from "../workspace";
@@ -108,6 +108,7 @@ export type RunAcpAgentInput = {
   /** User-selected model id from the channel model list (informational). */
   model?: string;
   contextWindow?: number | null;
+  contextMetadata?: ModelContextMetadata | null;
   conversationHistory?: Array<{ role: "user" | "assistant"; content: string }>;
   attachments?: AttachmentPart[];
   mcpServers?: Record<string, Record<string, unknown>>;

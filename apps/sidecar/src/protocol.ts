@@ -1,4 +1,8 @@
-import { MAX_CONTEXT_WINDOW, MIN_CONTEXT_WINDOW } from "shared/context-policy";
+import {
+  MAX_CONTEXT_WINDOW,
+  MIN_CONTEXT_WINDOW,
+  normalizeModelContextMetadata,
+} from "shared/context-policy";
 import { z } from "zod";
 
 export const WsRequestSchema = z.object({
@@ -94,11 +98,28 @@ const ContextWindowSchema = z
   .nullable()
   .optional();
 
+// Capability reports cross the same untrusted RPC boundary as user input.
+// Normalize to known fields and reject malformed limits rather than dropping
+// their ceilings and silently falling back to a larger model allowance.
+const ContextMetadataSchema = z
+  .unknown()
+  .transform((value, ctx) => {
+    const normalized = normalizeModelContextMetadata(value);
+    if (!normalized) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Invalid model context metadata" });
+      return z.NEVER;
+    }
+    return normalized;
+  })
+  .nullable()
+  .optional();
+
 export const AgentRunParamsSchema = z.object({
   prompt: z.string().min(1),
   apiKey: z.string().default(""),
   model: z.string().min(1),
   contextWindow: ContextWindowSchema,
+  contextMetadata: ContextMetadataSchema,
   // Omitted preserves old clients; an explicit invalid root must never fall back.
   workspaceRoot: z
     .string()
@@ -160,6 +181,7 @@ export const ChatStreamParamsSchema = z.object({
   protocol: z.string().min(1),
   model: z.string().min(1),
   contextWindow: ContextWindowSchema,
+  contextMetadata: ContextMetadataSchema,
   messages: z.array(z.object({ role: z.string(), content: z.unknown() })),
 });
 

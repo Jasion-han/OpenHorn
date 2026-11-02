@@ -1,3 +1,5 @@
+import type { ModelContextMetadata } from "shared/types";
+
 // The SDK's embedded Claude CLI refuses to launch inside a Claude Code session
 // (CLAUDECODE=1, AI_AGENT). When pnpm dev is started from a Claude Code
 // terminal, the sidecar binary inherits these variables. Strip them at process
@@ -301,19 +303,21 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
         return;
       }
       case "chat.stream": {
-        const { apiKey, baseUrl, protocol, model, contextWindow, messages } = params as {
-          apiKey: string;
-          baseUrl?: string;
-          protocol: string;
-          model: string;
-          contextWindow?: number | null;
-          // Asserted straight to the shape runChatStream needs. The wire payload
-          // is already being asserted here, so widening it to
-          // `{ role: string; content: unknown }` bought no safety — it only
-          // forced an `as any` at the call site, which switched checking off for
-          // every field rather than just the two that are genuinely unverified.
-          messages: ChatMessage[];
-        };
+        const { apiKey, baseUrl, protocol, model, contextWindow, contextMetadata, messages } =
+          params as {
+            apiKey: string;
+            baseUrl?: string;
+            protocol: string;
+            model: string;
+            contextWindow?: number | null;
+            contextMetadata?: ModelContextMetadata | null;
+            // Asserted straight to the shape runChatStream needs. The wire payload
+            // is already being asserted here, so widening it to
+            // `{ role: string; content: unknown }` bought no safety — it only
+            // forced an `as any` at the call site, which switched checking off for
+            // every field rather than just the two that are genuinely unverified.
+            messages: ChatMessage[];
+          };
 
         let resolvedApiKey = apiKey;
         let useCodexResponses = false;
@@ -368,6 +372,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
           void runCodexChat({
             model,
             contextWindow,
+            contextMetadata,
             messages,
             abortController,
             onEvent,
@@ -386,6 +391,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
             protocol,
             model,
             contextWindow,
+            contextMetadata,
             messages,
             abortController,
             onEvent,
@@ -421,6 +427,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
           apiKey,
           model,
           contextWindow,
+          contextMetadata,
           baseUrl,
           protocol,
           sdkSessionId,
@@ -439,6 +446,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
           apiKey: string;
           model: string;
           contextWindow?: number | null;
+          contextMetadata?: ModelContextMetadata | null;
           baseUrl?: string;
           protocol?: string;
           sdkSessionId?: string;
@@ -518,6 +526,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
             runCodexAgent({
               model,
               contextWindow,
+              contextMetadata,
               prompt,
               systemPrompt,
               permissionMode,
@@ -571,6 +580,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
               acpSessionId: sdkSessionId,
               model,
               contextWindow,
+              contextMetadata,
               conversationHistory,
               attachments,
               mcpServers,
@@ -616,6 +626,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
               baseUrl,
               model,
               contextWindow,
+              contextMetadata,
               prompt,
               cwd,
               abortController,
@@ -665,6 +676,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
               protocol,
               model,
               contextWindow,
+              contextMetadata,
               prompt,
               cwd,
               abortController,

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-test("legacy channel models acquire a nullable capacity without changing existing records", async () => {
+test("legacy channel models acquire nullable context fields without changing existing records", async () => {
   const scratch = mkdtempSync(join(tmpdir(), "openhorn-legacy-context-window-"));
   const databaseUrl = `file:${join(scratch, "legacy.db")}`;
   const bootstrapModule = new URL("./bootstrap.ts", import.meta.url).href;
@@ -19,8 +19,10 @@ test("legacy channel models acquire a nullable capacity without changing existin
     assert.equal(databaseUrl, process.env.DATABASE_URL);
     await bootstrapDatabase();
     await client.execute("ALTER TABLE channel_models DROP COLUMN context_window");
+    await client.execute("ALTER TABLE channel_models DROP COLUMN context_metadata");
     const oldColumns = (await client.execute("PRAGMA table_info(channel_models)")).rows;
     assert.equal(oldColumns.some((row) => row.name === "context_window"), false);
+    assert.equal(oldColumns.some((row) => row.name === "context_metadata"), false);
     await client.batch([
       "INSERT INTO users (id,email,username,password_hash,created_at,updated_at) VALUES ('legacy-u','legacy-context@test.local','legacy','opaque-password',111,222)",
       "INSERT INTO channels (id,user_id,name,provider,protocol,api_key,model,enabled,is_default,created_at,updated_at) VALUES ('legacy-c','legacy-u','Keep channel','openai','openai','opaque-key','legacy-model',1,1,111,222)",
@@ -35,7 +37,7 @@ test("legacy channel models acquire a nullable capacity without changing existin
       for (const table of tables) {
         const rows = await client.execute("SELECT * FROM " + table + " ORDER BY id");
         result[table] = rows.rows.map((row) => Object.fromEntries(
-          rows.columns.filter((column) => column !== "context_window").map((column) => [column, row[column]])
+          rows.columns.filter((column) => column !== "context_window" && column !== "context_metadata").map((column) => [column, row[column]])
         ));
       }
       return result;
@@ -47,11 +49,18 @@ test("legacy channel models acquire a nullable capacity without changing existin
     assert.equal(added.length, 1);
     assert.equal(added[0].notnull, 0);
     assert.equal((await client.execute("SELECT context_window FROM channel_models WHERE id='legacy-m'")).rows[0].context_window, null);
-    await client.execute("UPDATE channel_models SET context_window=1000000 WHERE id='legacy-m'");
+    const metadataColumns = (await client.execute("PRAGMA table_info(channel_models)")).rows.filter((row) => row.name === "context_metadata");
+    assert.equal(metadataColumns.length, 1);
+    assert.equal(metadataColumns[0].notnull, 0);
+    assert.equal((await client.execute("SELECT context_metadata FROM channel_models WHERE id='legacy-m'")).rows[0].context_metadata, null);
+    const metadata = JSON.stringify({ contextWindow: 1050000, maxInputTokens: 922000, maxOutputTokens: 128000, source: "channel", fetchedAt: 7 });
+    await client.execute({ sql: "UPDATE channel_models SET context_window=1000000,context_metadata=? WHERE id='legacy-m'", args: [metadata] });
     await bootstrapDatabase();
     assert.deepEqual(await snapshot(), before);
     assert.equal((await client.execute("SELECT context_window FROM channel_models WHERE id='legacy-m'")).rows[0].context_window, 1000000);
     assert.equal((await client.execute("PRAGMA table_info(channel_models)")).rows.filter((row) => row.name === "context_window").length, 1);
+    assert.equal((await client.execute("PRAGMA table_info(channel_models)")).rows.filter((row) => row.name === "context_metadata").length, 1);
+    assert.equal((await client.execute("SELECT context_metadata FROM channel_models WHERE id='legacy-m'")).rows[0].context_metadata, metadata);
     client.close();
     console.log(JSON.stringify({ legacyColumnAdded: true, priorRecordsUnchanged: true, overrideSurvivesRepeat: true }));
   `;

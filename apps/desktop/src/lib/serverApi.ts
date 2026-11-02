@@ -7,6 +7,7 @@ import type {
   LocalImportScanResult,
   LocalImportServerSource,
   MessageFinishReason,
+  ModelContextMetadata,
   PromptTemplate,
 } from "shared/types";
 import { useBackendStatusStore } from "../stores/backendStatusStore";
@@ -50,7 +51,8 @@ export interface ChatPrepareResult {
   baseUrl: string | null;
   protocol: string;
   model: string;
-  contextWindow?: number;
+  contextWindow?: number | null;
+  contextMetadata?: ModelContextMetadata | null;
   messages: Array<{ role: string; content: unknown }>;
   userMessageId: string;
   assistantMessageId: string;
@@ -155,6 +157,12 @@ export interface ServerApi {
     fetchModels: (
       id: string,
     ) => Promise<{ success: boolean; error?: string; models: ApiChannelModel[] }>;
+    refreshContext: (id: string) => Promise<{
+      success: boolean;
+      models: ApiChannelModel[];
+      updated: number;
+      error?: string;
+    }>;
     listModels: (id: string) => Promise<{ models: ApiChannelModel[] }>;
     updateModels: (
       id: string,
@@ -185,6 +193,7 @@ export interface ServerApi {
         baseUrl: string | null;
         modelId: string;
         contextWindow?: number | null;
+        contextMetadata?: ModelContextMetadata | null;
         protocol: "openai" | "anthropic" | "google" | "acp";
         isCliOAuth?: boolean;
       };
@@ -536,6 +545,10 @@ export function createServerApi(options?: { baseUrl?: string; fetch?: FetchLike 
         }),
       fetchModels: (id) =>
         fetchJson(fetchImpl, baseUrl, `/channels/${encodeURIComponent(id)}/fetch-models`, {
+          method: "POST",
+        }),
+      refreshContext: (id) =>
+        fetchJson(fetchImpl, baseUrl, `/channels/${encodeURIComponent(id)}/context-capabilities`, {
           method: "POST",
         }),
       listModels: (id) =>

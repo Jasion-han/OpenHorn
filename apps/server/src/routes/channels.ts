@@ -4,11 +4,13 @@ import {
   createChannel,
   deleteChannel,
   fetchChannelModels,
+  getCatalogContextMetadata,
   getChannelById,
   getChannelRuntimeCredentialsById,
   getChannels,
   getResolvedChannelById,
   listChannelModels,
+  refreshChannelContextCapabilities,
   setDefaultChannel,
   setDefaultChannelModel,
   testChannel,
@@ -80,12 +82,17 @@ channels.get("/:id/credentials", async (c) => {
       ? (channel.models.find((model) => model.modelId === dynamicAcpModel)?.contextWindow ?? null)
       : (resolved?.contextWindow ?? null);
 
+    const contextMetadata = dynamicAcpModel
+      ? (channel.models.find((model) => model.modelId === dynamicAcpModel)?.contextMetadata ??
+        (await getCatalogContextMetadata(dynamicAcpModel, channel.provider)))
+      : (resolved?.contextMetadata ?? null);
     return c.json({
       credentials: {
         apiKey,
         baseUrl: channel.baseUrl ?? null,
         modelId,
         contextWindow,
+        contextMetadata,
         protocol: channel.protocol,
         isCliOAuth,
       },
@@ -164,6 +171,17 @@ channels.post("/:id/fetch-models", async (c) => {
   // Treat "sync models" as an operation result, not an exception.
   // Always return 200 so the UI can render inline diagnostics from { success, error }.
   return c.json(result);
+});
+
+channels.post("/:id/context-capabilities", async (c) => {
+  const user = c.get("user");
+  try {
+    return c.json(
+      await refreshChannelContextCapabilities(user.id, c.req.param("id"), { force: true }),
+    );
+  } catch {
+    return c.json({ success: false, models: [], updated: 0, error: "Channel not found" }, 404);
+  }
 });
 
 channels.get("/:id/models", async (c) => {

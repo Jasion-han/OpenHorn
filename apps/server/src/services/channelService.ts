@@ -1,10 +1,18 @@
 import { agentSessions, agentTasks, channelModels, channels, conversations } from "db";
 import { and, eq, inArray } from "drizzle-orm";
-import { isValidContextWindow } from "shared/context-policy";
+import { isValidContextWindow, normalizeModelContextMetadata } from "shared/context-policy";
+import type { ModelContextMetadata } from "shared/types";
 import { db } from "../db";
 import { decrypt, encrypt, generateId } from "../utils";
 import { probeAnthropicModel } from "./anthropicProbe";
 import { isChannelAvailable } from "./circuitBreaker";
+import {
+  CONTEXT_METADATA_TTL_MS,
+  fetchModelDirectory,
+  loadContextCatalog,
+  loadOpenRouterModelContext,
+  matchContextCatalog,
+} from "./modelContextDiscovery";
 import { summarizeProviderError } from "./providerErrorSummary";
 
 type ChannelRow = typeof channels.$inferSelect;
@@ -16,6 +24,7 @@ export interface ChannelModelItem {
   modelId: string;
   displayName: string;
   contextWindow?: number | null;
+  contextMetadata?: ModelContextMetadata | null;
   enabled: boolean;
   isDefault: boolean;
   createdAt: Date;
@@ -85,6 +94,7 @@ export interface ResolvedChannel {
   apiKey: string;
   modelId: string;
   contextWindow?: number | null;
+  contextMetadata?: ModelContextMetadata | null;
 }
 
 const PROTOCOL_DEFAULT_BASE_URLS: Record<ChannelProtocol, string> = {
@@ -296,6 +306,7 @@ async function listModelsByChannelIds(channelRows: ChannelRow[]) {
       modelId: row.modelId,
       displayName: row.displayName,
       contextWindow: row.contextWindow ?? null,
+      contextMetadata: parseStoredContextMetadata(row.contextMetadata),
       enabled: Boolean(row.enabled),
       isDefault: Boolean(row.isDefault),
       createdAt: row.createdAt,
@@ -419,108 +430,321 @@ function getRuntimeBaseUrl(protocol: ChannelProtocol, baseUrl: string | null) {
   return normalizeOpenAICompatibleApiBaseUrl(url) || undefined;
 }
 
-async function fetchOpenAICompatibleModels(baseUrl: string, apiKey: string) {
-  const response = await fetch(`${normalizeOpenAICompatibleApiBaseUrl(baseUrl)}/models`, {
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-    },
-  });
-
-  if (response.status === 404 && isDashScopeCodingBaseUrl(baseUrl)) {
-    return [];
+export function parseStoredContextMetadata(
+  value: string | null | undefined,
+): ModelContextMetadata | null {
+  if (!value) return null;
+  try {
+    return normalizeModelContextMetadata(JSON.parse(value));
+  } catch {
+    return null;
   }
-
-  if (!response.ok) {
-    const text = await response.text().catch(() => "");
-    throw new Error(
-      summarizeProviderError(text, {
-        status: response.status,
-        fallback: `Failed to fetch models (${response.status})`,
-      }),
-    );
-  }
-
-  const data = (await response.json()) as { data?: Array<{ id: string }> };
-  return (data.data || []).map((item) => ({
-    modelId: item.id,
-    displayName: item.id,
-  }));
 }
 
-async function fetchAnthropicModels(baseUrl: string, apiKey: string) {
-  const response = await fetch(`${normalizeAnthropicApiBaseUrl(baseUrl)}/models`, {
-    headers: {
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-    },
-  });
-
-  if (response.status === 404 && isDashScopeCodingBaseUrl(baseUrl)) {
-    return [];
-  }
-
-  if (!response.ok) {
-    const text = await response.text().catch(() => "");
-    throw new Error(
-      summarizeProviderError(text, {
-        status: response.status,
-        fallback: `Failed to fetch models (${response.status})`,
-      }),
-    );
-  }
-
-  const data = (await response.json()) as {
-    data?: Array<{ id: string; display_name?: string }>;
+function chooseRefreshedMetadata(
+  previous: ModelContextMetadata | null | undefined,
+  channel: ModelContextMetadata | null | undefined,
+  catalog: ModelContextMetadata | null | undefined,
+): ModelContextMetadata | null {
+  const selected =
+    channel ?? (previous?.source === "channel" ? previous : (catalog ?? previous ?? null));
+  if (!selected || selected.source !== "channel") return selected;
+  const earlier = previous?.source === "channel" ? previous : undefined;
+  const input = selected.maxInputTokens ?? earlier?.maxInputTokens ?? catalog?.maxInputTokens;
+  const output = selected.maxOutputTokens ?? earlier?.maxOutputTokens ?? catalog?.maxOutputTokens;
+  // Missing fields do not prove an existing endpoint limit disappeared.
+  return {
+    ...selected,
+    ...(input !== undefined ? { maxInputTokens: input } : {}),
+    ...(output !== undefined ? { maxOutputTokens: output } : {}),
   };
-
-  return (data.data || []).map((item) => ({
-    modelId: item.id,
-    displayName: item.display_name || item.id,
-  }));
 }
 
-async function fetchGoogleModels(baseUrl: string, apiKey: string) {
-  const response = await fetch(`${normalizeBaseUrl(baseUrl)}/v1beta/models?key=${apiKey}`);
+function mergeEndpointMetadata(
+  listed: ModelContextMetadata | null | undefined,
+  detail: ModelContextMetadata | null,
+): ModelContextMetadata | null {
+  if (!listed || !detail) return detail ?? listed ?? null;
+  const minLimit = (a?: number, b?: number) =>
+    a === undefined ? b : b === undefined ? a : Math.min(a, b);
+  return normalizeModelContextMetadata({
+    contextWindow: Math.min(listed.contextWindow, detail.contextWindow),
+    maxInputTokens: minLimit(listed.maxInputTokens, detail.maxInputTokens),
+    maxOutputTokens: minLimit(listed.maxOutputTokens, detail.maxOutputTokens),
+    fetchedAt: detail.fetchedAt,
+    source: "channel",
+  });
+}
 
-  if (!response.ok) {
-    const text = await response.text().catch(() => "");
-    throw new Error(
-      summarizeProviderError(text, {
-        status: response.status,
-        fallback: `Failed to fetch models (${response.status})`,
-      }),
-    );
+type ContextRefreshState = {
+  fingerprint: string;
+  nextAttempt: number;
+  pending?: Promise<ContextCapabilitiesResult>;
+};
+const contextRefreshStates = new Map<string, ContextRefreshState>();
+export interface ContextCapabilitiesResult {
+  success: boolean;
+  models: ChannelModelItem[];
+  updated: number;
+  error?: string;
+}
+function contextFingerprint(channel: ChannelRow): string {
+  return JSON.stringify([
+    channel.userId,
+    channel.protocol,
+    channel.provider,
+    channel.baseUrl,
+    channel.apiKey,
+  ]);
+}
+function isOpenRouterChannel(channel: ChannelRow): boolean {
+  try {
+    return new URL(channel.baseUrl ?? "").origin === "https://openrouter.ai";
+  } catch {
+    return false;
   }
+}
 
-  const data = (await response.json()) as {
-    models?: Array<{
-      name: string;
-      displayName?: string;
-      supportedGenerationMethods?: string[];
-    }>;
-  };
-
-  return (data.models || [])
-    .filter((item) => item.supportedGenerationMethods?.includes("generateContent"))
-    .map((item) => {
-      const modelId = item.name.replace(/^models\//, "");
+/** Refresh capacities only. Never reconcile or delete the channel's model list. */
+export async function refreshChannelContextCapabilities(
+  userId: string,
+  channelId: string,
+  options: { force?: boolean; selectedModelId?: string } = {},
+): Promise<ContextCapabilitiesResult> {
+  const row = await getOwnedChannelRow(userId, channelId);
+  const initialModels = await listChannelModels(userId, channelId);
+  const fingerprint = contextFingerprint(row);
+  const previousState = contextRefreshStates.get(channelId);
+  const state =
+    previousState?.fingerprint === fingerprint ? previousState : { fingerprint, nextAttempt: 0 };
+  if (state.pending) return state.pending;
+  if (!options.force && state.nextAttempt > Date.now()) {
+    return { success: true, models: initialModels, updated: 0 };
+  }
+  contextRefreshStates.set(channelId, state);
+  if (contextRefreshStates.size > 256) {
+    const oldest = contextRefreshStates.keys().next().value;
+    if (oldest) contextRefreshStates.delete(oldest);
+  }
+  state.pending = (async () => {
+    const protocol = normalizeProtocol(row.protocol, row.provider);
+    const publicOpenRouter = isOpenRouterChannel(row);
+    // OpenRouter's directory is public and independent of inference auth.
+    // A missing, expired or unusable stored token cannot hide public limits.
+    const rawKey = publicOpenRouter ? "" : decrypt(row.apiKey);
+    const skipDirectory =
+      protocol === "acp" ||
+      !rawKey ||
+      rawKey.startsWith("__cli_oauth__") ||
+      rawKey.startsWith("__sidecar_auto__");
+    // Independent fixed public metadata fetch carries no channel credentials.
+    const catalogPromise = loadContextCatalog({ force: options.force });
+    const directoryPromise = publicOpenRouter
+      ? fetchModelDirectory({
+          protocol: "openai",
+          url: "https://openrouter.ai/api/v1/models",
+          headers: {},
+        }).catch(() => null)
+      : skipDirectory
+        ? Promise.resolve(null)
+        : fetchProviderModels(protocol, row.baseUrl || getDefaultBaseUrl(protocol), rawKey).catch(
+            () => null,
+          );
+    const detailPromise =
+      options.selectedModelId && isOpenRouterChannel(row)
+        ? loadOpenRouterModelContext(options.selectedModelId)
+        : Promise.resolve(null);
+    const [directory, catalog, detail] = await Promise.all([
+      directoryPromise,
+      catalogPromise,
+      detailPromise,
+    ]);
+    // An endpoint or key edit racing an old request cannot repopulate obsolete metadata.
+    const latestRow = await getOwnedChannelRow(userId, channelId);
+    if (contextFingerprint(latestRow) !== fingerprint) {
       return {
-        modelId,
-        displayName: item.displayName || modelId,
+        success: false,
+        models: await listChannelModels(userId, channelId),
+        updated: 0,
+        error: "Channel changed during capability refresh",
       };
+    }
+    const freshModels = await listChannelModels(userId, channelId);
+    const found = new Map<string, ModelContextMetadata | null>(
+      (directory ?? []).map((model) => [model.modelId, model.contextMetadata]),
+    );
+    let updated = 0;
+    let obsolete = false;
+    await db.transaction(async (tx) => {
+      const locked = (
+        await tx.select().from(channels).where(eq(channels.id, channelId)).limit(1)
+      )[0];
+      if (!locked || contextFingerprint(locked) !== fingerprint) {
+        obsolete = true;
+        return;
+      }
+      for (const model of freshModels) {
+        const own =
+          model.modelId === options.selectedModelId && detail
+            ? mergeEndpointMetadata(
+                chooseRefreshedMetadata(
+                  model.contextMetadata,
+                  found.get(model.modelId),
+                  matchContextCatalog(catalog, model.modelId, row.provider),
+                ),
+                detail,
+              )
+            : found.get(model.modelId);
+        const next = chooseRefreshedMetadata(
+          model.contextMetadata,
+          own,
+          matchContextCatalog(catalog, model.modelId, row.provider),
+        );
+        if (!next || JSON.stringify(next) === JSON.stringify(model.contextMetadata)) continue;
+        await tx
+          .update(channelModels)
+          .set({ contextMetadata: JSON.stringify(next) })
+          .where(and(eq(channelModels.id, model.id), eq(channelModels.channelId, channelId)));
+        updated++;
+      }
     });
+    const models = await listChannelModels(userId, channelId);
+    const fresh = models.some((model) => {
+      const age = model.contextMetadata ? Date.now() - model.contextMetadata.fetchedAt : -1;
+      return age >= 0 && age < CONTEXT_METADATA_TTL_MS;
+    });
+    const success = !obsolete && (directory !== null || fresh);
+    state.nextAttempt =
+      Date.now() +
+      (success && (directory !== null || updated > 0) ? CONTEXT_METADATA_TTL_MS : 60_000);
+    const cacheOnly =
+      directory === null && updated === 0 && models.some((model) => model.contextMetadata);
+    return {
+      success,
+      models,
+      updated,
+      ...(!success || cacheOnly
+        ? {
+            error:
+              "Model context metadata could not be refreshed; previously known limits remain active",
+          }
+        : {}),
+    };
+  })()
+    .catch(async () => {
+      state.nextAttempt = Date.now() + 60_000;
+      return {
+        success: false,
+        models: await listChannelModels(userId, channelId),
+        updated: 0,
+        error: "Model context metadata could not be refreshed",
+      };
+    })
+    .finally(() => {
+      state.pending = undefined;
+    });
+  return state.pending;
+}
+
+export async function getCatalogContextMetadata(
+  modelId: string,
+  provider?: string,
+): Promise<ModelContextMetadata | null> {
+  return matchContextCatalog(await loadContextCatalog(), modelId, provider);
+}
+
+async function hydrateResolvedContext(
+  resolved: ResolvedChannel,
+  scope: ChannelRow,
+): Promise<ResolvedChannel> {
+  try {
+    let metadata = resolved.contextMetadata;
+    let router = false;
+    try {
+      router = new URL(resolved.channel.baseUrl ?? "").origin === "https://openrouter.ai";
+    } catch {
+      /* unknown/local channel */
+    }
+    const initialAge = metadata ? Date.now() - metadata.fetchedAt : -1;
+    const initiallyFresh = initialAge >= 0 && initialAge < CONTEXT_METADATA_TTL_MS;
+    const refreshState = contextRefreshStates.get(resolved.channel.id);
+    const channelWarm =
+      refreshState?.fingerprint === contextFingerprint(scope) &&
+      (refreshState.nextAttempt > Date.now() || Boolean(refreshState.pending));
+    // An earlier whole-channel refresh may not list every retained alias. A
+    // selected alias still gets its own cached detail lookup; cold discovery
+    // continues to start directory/catalog/detail together in refresh below.
+    if (router && (initiallyFresh || channelWarm) && !metadata?.maxInputTokens) {
+      const detail = await loadOpenRouterModelContext(resolved.modelId);
+      if (detail) {
+        const next = mergeEndpointMetadata(metadata, detail);
+        let applied = false;
+        await db.transaction(async (tx) => {
+          const row = (
+            await tx
+              .select()
+              .from(channels)
+              .where(
+                and(
+                  eq(channels.id, resolved.channel.id),
+                  eq(channels.userId, resolved.channel.userId),
+                ),
+              )
+              .limit(1)
+          )[0];
+          if (!row || contextFingerprint(row) !== contextFingerprint(scope)) return;
+          const result = await tx
+            .update(channelModels)
+            .set({ contextMetadata: JSON.stringify(next) })
+            .where(
+              and(
+                eq(channelModels.channelId, resolved.channel.id),
+                eq(channelModels.modelId, resolved.modelId),
+              ),
+            );
+          applied = Number(result.rowsAffected) > 0;
+        });
+        if (!applied) return resolved;
+        metadata = next;
+        resolved = { ...resolved, contextMetadata: metadata };
+      }
+    }
+    const age = metadata ? Date.now() - metadata.fetchedAt : -1;
+    if (age >= 0 && age < CONTEXT_METADATA_TTL_MS) return resolved;
+    const result = await refreshChannelContextCapabilities(
+      resolved.channel.userId,
+      resolved.channel.id,
+      { selectedModelId: resolved.modelId },
+    );
+    const latestScope = await getOwnedChannelRow(resolved.channel.userId, resolved.channel.id);
+    if (contextFingerprint(latestScope) !== contextFingerprint(scope)) return resolved;
+    const model = result.models.find((item) => item.modelId === resolved.modelId);
+    return model
+      ? {
+          ...resolved,
+          contextMetadata: model.contextMetadata ?? null,
+          channel: { ...resolved.channel, models: result.models },
+        }
+      : resolved;
+  } catch {
+    return resolved;
+  }
 }
 
 async function fetchProviderModels(protocol: ChannelProtocol, baseUrl: string, apiKey: string) {
-  if (protocol === "anthropic") {
-    return fetchAnthropicModels(baseUrl, apiKey);
-  }
-
-  if (protocol === "google") {
-    return fetchGoogleModels(baseUrl, apiKey);
-  }
-
-  return fetchOpenAICompatibleModels(baseUrl, apiKey);
+  const url =
+    protocol === "google"
+      ? `${normalizeBaseUrl(baseUrl).replace(/\/v1beta$/, "")}/v1beta/models`
+      : protocol === "anthropic"
+        ? `${normalizeAnthropicApiBaseUrl(baseUrl)}/models`
+        : `${normalizeOpenAICompatibleApiBaseUrl(baseUrl)}/models`;
+  const headers: Record<string, string> =
+    protocol === "anthropic"
+      ? { "x-api-key": apiKey, "anthropic-version": "2023-06-01" }
+      : protocol === "google"
+        ? { "x-goog-api-key": apiKey }
+        : { Authorization: `Bearer ${apiKey}` };
+  return fetchModelDirectory({ protocol, url, headers });
 }
 
 async function testOpenAICompatibleChannel(baseUrl: string, apiKey: string) {
@@ -714,6 +938,14 @@ export async function updateChannel(userId: string, channelId: string, input: Up
       .set(updates)
       .where(and(eq(channels.id, channelId), eq(channels.userId, userId)));
 
+    if (protocolChanged || input.baseUrl !== undefined || Boolean(input.apiKey?.trim())) {
+      await tx
+        .update(channelModels)
+        .set({ contextMetadata: null })
+        .where(eq(channelModels.channelId, channelId));
+      contextRefreshStates.delete(channelId);
+    }
+
     if (protocolChanged) {
       // Protocol-bearing changes invalidate the cached model list and legacy model field.
       await tx.delete(channelModels).where(eq(channelModels.channelId, channelId));
@@ -878,6 +1110,12 @@ export async function updateChannelModels(
       .where(eq(channels.id, channelId));
   });
 
+  if (
+    existingModels.length !== nextModelIds.size ||
+    existingModels.some((model) => !nextModelIds.has(model.modelId))
+  ) {
+    contextRefreshStates.delete(channelId);
+  }
   return listChannelModels(userId, channelId);
 }
 
@@ -974,7 +1212,10 @@ export async function fetchChannelModels(
     }
     // Network fetch stays OUTSIDE the transaction below — only DB writes are
     // wrapped so a slow/hanging provider can't hold a write transaction open.
-    const models = await fetchProviderModels(protocol, baseUrl, apiKey);
+    const [models, catalog] = await Promise.all([
+      fetchProviderModels(protocol, baseUrl, apiKey),
+      loadContextCatalog(),
+    ]);
     const existingModels = await listChannelModels(userId, channelId);
     const existingByModelId = new Map(existingModels.map((model) => [model.modelId, model]));
     const nextModelIds = new Set(models.map((m) => m.modelId));
@@ -996,16 +1237,24 @@ export async function fetchChannelModels(
 
     const insertRows = models
       .filter((model) => !existingByModelId.has(model.modelId))
-      .map((model) => ({
-        id: generateId(),
-        channelId,
-        modelId: model.modelId,
-        displayName: model.displayName,
-        enabled: true,
-        isDefault: false,
-        createdAt: now,
-        updatedAt: now,
-      }));
+      .map((model) => {
+        const metadata = chooseRefreshedMetadata(
+          null,
+          model.contextMetadata,
+          matchContextCatalog(catalog, model.modelId, channel.provider),
+        );
+        return {
+          id: generateId(),
+          channelId,
+          modelId: model.modelId,
+          displayName: model.displayName,
+          contextMetadata: metadata ? JSON.stringify(metadata) : null,
+          enabled: true,
+          isDefault: false,
+          createdAt: now,
+          updatedAt: now,
+        };
+      });
 
     // The channel's default pointer must reflect the post-sync set: if the
     // provider dropped the model that was default, clear the pointer. Computed
@@ -1020,15 +1269,32 @@ export async function fetchChannelModels(
     // pointer must all commit together, otherwise a mid-loop failure leaves the
     // channel's model set inconsistent (e.g. deleted rows but stale default).
     await db.transaction(async (tx) => {
+      const latest = (
+        await tx
+          .select()
+          .from(channels)
+          .where(and(eq(channels.id, channelId), eq(channels.userId, userId)))
+          .limit(1)
+      )[0];
+      if (!latest || contextFingerprint(latest) !== contextFingerprint(channel)) {
+        throw new Error("Channel changed during model synchronization");
+      }
+
       if (removedIds.length > 0) {
         await tx.delete(channelModels).where(inArray(channelModels.id, removedIds));
       }
 
       for (const { model, existing } of modelsToUpdate) {
+        const metadata = chooseRefreshedMetadata(
+          existing.contextMetadata,
+          model.contextMetadata,
+          matchContextCatalog(catalog, model.modelId, channel.provider),
+        );
         await tx
           .update(channelModels)
           .set({
             displayName: model.displayName,
+            ...(metadata ? { contextMetadata: JSON.stringify(metadata) } : {}),
             updatedAt: now,
           })
           .where(eq(channelModels.id, existing.id));
@@ -1229,13 +1495,18 @@ export async function getResolvedChannelForUser(
     if (resolved) apiKey = resolved;
   }
 
-  return {
-    channel: channelWithRuntimeBaseUrl,
-    apiKey,
-    modelId,
-    contextWindow:
-      targetChannel.models.find((model) => model.modelId === modelId)?.contextWindow ?? null,
-  };
+  return hydrateResolvedContext(
+    {
+      channel: channelWithRuntimeBaseUrl,
+      apiKey,
+      modelId,
+      contextWindow:
+        targetChannel.models.find((model) => model.modelId === modelId)?.contextWindow ?? null,
+      contextMetadata:
+        targetChannel.models.find((model) => model.modelId === modelId)?.contextMetadata ?? null,
+    },
+    row,
+  );
 }
 
 export function resolveModelIdFromChannelItem(
@@ -1333,13 +1604,22 @@ export async function getResolvedChannelForConversation(
       if (resolved2) apiKey2 = resolved2;
     }
 
-    return applyCircuitBreakerFallback(userId, {
-      channel: channelWithRuntimeBaseUrl,
-      apiKey: apiKey2,
-      modelId,
-      contextWindow:
-        targetChannel.models.find((model) => model.modelId === modelId)?.contextWindow ?? null,
-    });
+    return applyCircuitBreakerFallback(
+      userId,
+      await hydrateResolvedContext(
+        {
+          channel: channelWithRuntimeBaseUrl,
+          apiKey: apiKey2,
+          modelId,
+          contextWindow:
+            targetChannel.models.find((model) => model.modelId === modelId)?.contextWindow ?? null,
+          contextMetadata:
+            targetChannel.models.find((model) => model.modelId === modelId)?.contextMetadata ??
+            null,
+        },
+        row,
+      ),
+    );
   }
 
   const resolved = await getResolvedChannelForUser(userId, null);

@@ -43,15 +43,40 @@ mock.module(workspaceModule, () => ({
   },
 }));
 
-type Capture = { runtime: string; cwd: string };
+const contextMetadata = {
+  contextWindow: 262_144,
+  maxInputTokens: 200_000,
+  maxOutputTokens: 1_024,
+  source: "channel",
+  fetchedAt: 1_793_600_000_000,
+};
+const metadataMatches = (value: unknown) =>
+  typeof value === "object" &&
+  value !== null &&
+  Object.keys(value).length === Object.keys(contextMetadata).length &&
+  Object.entries(contextMetadata).every(
+    ([key, expected]) => (value as Record<string, unknown>)[key] === expected,
+  );
+type Capture = { runtime: string; cwd: string; contextMetadata?: unknown };
 const captures: Capture[] = [];
 let captured: (() => void) | undefined;
 const runtime =
-  (name: string) => async (input: { cwd: string; onEvent: (event: unknown) => void }) => {
-    captures.push({ runtime: name, cwd: input.cwd });
+  (name: string) =>
+  async (input: { cwd: string; contextMetadata?: unknown; onEvent: (event: unknown) => void }) => {
+    captures.push({ runtime: name, cwd: input.cwd, contextMetadata: input.contextMetadata });
     captured?.();
     input.onEvent({ type: "done" });
   };
+let chatMetadata: unknown;
+mock.module(new URL("./agent/chat.ts", import.meta.url).pathname, () => ({
+  runChatStream: async (input: {
+    contextMetadata?: unknown;
+    onEvent: (event: unknown) => void;
+  }) => {
+    chatMetadata = input.contextMetadata;
+    input.onEvent({ type: "done" });
+  },
+}));
 mock.module(new URL("./agent/codex.ts", import.meta.url).pathname, () => ({
   runCodexAgent: runtime("codex"),
 }));
@@ -123,6 +148,7 @@ const run = async (protocol: string, workspaceRoot?: string) => {
     prompt: "Local workspace fixture",
     apiKey: "fixture-only",
     model: "fixture",
+    contextMetadata: { ...contextMetadata, unknown: "must-strip" },
     protocol,
     ...(workspaceRoot !== undefined ? { workspaceRoot } : {}),
     ...(protocol === "acp" ? { acpAgent: { command: "fixture-only-not-spawned" } } : {}),
@@ -169,6 +195,13 @@ try {
   await oldPreparation;
   for (const protocol of ["codex_cli", "openai", "acp"]) await run(protocol, aliasB);
   const explicitCaptures = captures.slice();
+  await rpc("chat.stream", {
+    model: "fixture",
+    apiKey: "fixture-only",
+    protocol: "openai",
+    messages: [{ role: "user", content: "q" }],
+    contextMetadata: { ...contextMetadata, unknown: "must-strip" },
+  });
   const beforeInvalid = captures.length;
   let rejected = 0;
   for (const workspaceRoot of [
@@ -201,6 +234,10 @@ try {
     selectedB: selected.workspaceRoot === canonicalB,
     explicitRuntimes: explicitCaptures.map((entry) => entry.runtime),
     explicitRootsAreB: explicitCaptures.every((entry) => entry.cwd === canonicalB),
+    runtimeMetadataPreserved: explicitCaptures.every((entry) =>
+      metadataMatches(entry.contextMetadata),
+    ),
+    chatMetadataPreserved: metadataMatches(chatMetadata),
     rejectedRoots: rejected,
     invalidRootsStartedNoRuns: captures.length === beforeInvalid + 1,
     legacyOmittedRootIsCurrentA: captures.at(-1)?.cwd === canonicalA,

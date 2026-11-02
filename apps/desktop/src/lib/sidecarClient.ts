@@ -22,7 +22,7 @@
  *    (the sidecar is blocking the run waiting for `approvals.respond`).
  */
 
-import type { AttachmentPart, ChatStreamErrorCode } from "shared/types";
+import type { AttachmentPart, ChatStreamErrorCode, ModelContextMetadata } from "shared/types";
 import type { AgentTaskStreamEvent } from "./agentTaskStream";
 
 /**
@@ -66,6 +66,7 @@ export interface SidecarChatStreamInput {
   protocol: string;
   model: string;
   contextWindow?: number | null;
+  contextMetadata?: ModelContextMetadata | null;
   messages: Array<{ role: string; content: unknown }>;
   onEvent: (event: AgentTaskStreamEvent) => void | Promise<void>;
   onError: (message: string, errorCode?: ChatStreamErrorCode) => void;
@@ -77,6 +78,7 @@ export interface SidecarRunAgentInput {
   apiKey: string;
   model: string;
   contextWindow?: number | null;
+  contextMetadata?: ModelContextMetadata | null;
   /** This turn's resolved workspace; independent of other workspace RPCs. */
   workspaceRoot?: string;
   baseUrl?: string;
@@ -479,6 +481,7 @@ export class SidecarClient {
       apiKey,
       model,
       contextWindow,
+      contextMetadata,
       workspaceRoot,
       baseUrl,
       protocol,
@@ -505,6 +508,7 @@ export class SidecarClient {
       apiKey,
       model,
       ...(contextWindow != null ? { contextWindow } : {}),
+      ...(contextMetadata ? { contextMetadata } : {}),
       ...(workspaceRoot !== undefined ? { workspaceRoot } : {}),
       ...(baseUrl ? { baseUrl } : {}),
       ...(protocol ? { protocol } : {}),
@@ -533,13 +537,24 @@ export class SidecarClient {
   }
 
   async chatStream(input: SidecarChatStreamInput): Promise<string> {
-    const { apiKey, baseUrl, protocol, model, contextWindow, messages, onEvent, onError, onDone } =
-      input;
+    const {
+      apiKey,
+      baseUrl,
+      protocol,
+      model,
+      contextWindow,
+      contextMetadata,
+      messages,
+      onEvent,
+      onError,
+      onDone,
+    } = input;
     const result = (await this.request("chat.stream", {
       apiKey,
       protocol,
       model,
       ...(contextWindow != null ? { contextWindow } : {}),
+      ...(contextMetadata ? { contextMetadata } : {}),
       messages,
       ...(baseUrl ? { baseUrl } : {}),
     })) as { runId: string };

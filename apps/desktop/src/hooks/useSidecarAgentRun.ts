@@ -1,4 +1,4 @@
-import type { AttachmentPart, MessageFinishReason } from "shared/types";
+import type { AttachmentPart, MessageFinishReason, ModelContextMetadata } from "shared/types";
 import { create } from "zustand";
 import { formatChatLabel, getChatLabel } from "../lib/i18n/agent";
 import { createServerApi } from "../lib/serverApi";
@@ -476,6 +476,7 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
       baseUrl: string | null;
       modelId: string;
       contextWindow?: number | null;
+      contextMetadata?: ModelContextMetadata | null;
       protocol: "openai" | "anthropic" | "google" | "acp";
     };
     try {
@@ -621,6 +622,7 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
         apiKey: credentials.protocol === "acp" ? "" : credentials.apiKey,
         model: input.modelId || credentials.modelId,
         contextWindow: credentials.contextWindow,
+        contextMetadata: credentials.contextMetadata,
         baseUrl: credentials.baseUrl ?? undefined,
         protocol: credentials.protocol,
         acpAgent,

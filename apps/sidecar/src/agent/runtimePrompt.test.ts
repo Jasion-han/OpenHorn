@@ -321,3 +321,72 @@ test("Codex exec refuses oversized encoded developer instructions before binary 
   expect(events[0]).toMatchObject({ type: "error" });
   expect(JSON.stringify(events)).toContain("64 KiB");
 });
+
+test("discovered non-GPT capacity and input ceilings reach native Codex process/thread config", async () => {
+  const capture = await captureFixture();
+  const contextMetadata = {
+    contextWindow: 262_144,
+    maxInputTokens: 200_000,
+    maxOutputTokens: 1_024,
+    source: "runtime" as const,
+    fetchedAt: 1_793_600_000_000,
+  };
+  let processArgs: string[] = [];
+  await runCodexAgent(
+    {
+      model: "dynamic-non-gpt",
+      contextMetadata,
+      prompt: "current",
+      cwd: capture.directory,
+      abortController: new AbortController(),
+      onEvent: () => {},
+    },
+    {
+      findBinary: async () => "fixture-codex",
+      spawn: (_command, args, options) => {
+        processArgs = args;
+        return spawn(process.execPath, [fixture, "agent", capture.file], options);
+      },
+    },
+  );
+  expect(processArgs).toContain("model_context_window=262144");
+  expect(processArgs).toContain("model_auto_compact_token_limit=200000");
+  const thread = (await capture.read()).find((record) => record.method === "thread/start");
+  expect((thread?.params as Record<string, unknown>).config).toEqual({
+    model_context_window: 262_144,
+    model_auto_compact_token_limit: 200_000,
+  });
+});
+
+test("discovered non-GPT capacity reaches native Codex Chat exec config without fallback clipping", async () => {
+  const capture = await captureFixture();
+  const contextMetadata = {
+    contextWindow: 262_144,
+    maxInputTokens: 200_000,
+    maxOutputTokens: 1_024,
+    source: "channel" as const,
+    fetchedAt: 1_793_600_000_000,
+  };
+  const prompt = `BEGIN${"x".repeat(200_000)}END`;
+  await runCodexChat(
+    {
+      model: "dynamic-non-gpt",
+      contextMetadata,
+      messages: [{ role: "user", content: prompt }],
+      abortController: new AbortController(),
+      onEvent: () => {},
+    },
+    {
+      findBinary: async () => "fixture-codex",
+      spawn: (command, options) =>
+        Bun.spawn(
+          [process.execPath, fixture, "exec", capture.file, JSON.stringify(command)],
+          options,
+        ),
+    },
+  );
+  const record = (await capture.read()).find((entry) => typeof entry.stdin === "string");
+  expect(record?.command as string[]).toContain("model_context_window=262144");
+  expect(record?.command as string[]).toContain("model_auto_compact_token_limit=200000");
+  expect(record?.stdin).toBe(prompt);
+});

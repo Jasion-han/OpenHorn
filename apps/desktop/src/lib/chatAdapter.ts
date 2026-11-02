@@ -1,4 +1,5 @@
 import { assistantFinishReason } from "shared/message-text";
+import type { ModelContextMetadata } from "shared/types";
 import type {
   ApiAgentRun,
   ApiCitation,
@@ -51,6 +52,7 @@ function mapChannelModel(model: {
   modelId: string;
   displayName: string;
   contextWindow?: number | null;
+  contextMetadata?: ModelContextMetadata | null;
   enabled: boolean;
   isDefault: boolean;
   createdAt: string;
@@ -62,6 +64,7 @@ function mapChannelModel(model: {
     modelId: model.modelId,
     displayName: model.displayName,
     contextWindow: model.contextWindow,
+    contextMetadata: model.contextMetadata,
     enabled: model.enabled,
     isDefault: model.isDefault,
     createdAt: new Date(model.createdAt),
@@ -166,6 +169,7 @@ function mapChannel(channel: {
     modelId: string;
     displayName: string;
     contextWindow?: number | null;
+    contextMetadata?: ModelContextMetadata | null;
     enabled: boolean;
     isDefault: boolean;
     createdAt: string;

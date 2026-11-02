@@ -1254,6 +1254,7 @@ export function DesktopChatArea() {
               protocol: prepared.protocol,
               model: prepared.model,
               contextWindow: prepared.contextWindow,
+              contextMetadata: prepared.contextMetadata,
               messages: withGenUiMessages(prepared.messages, genUiSection),
               onEvent: (event) => {
                 // Late chunks after Stop are dropped: the reply is what was on

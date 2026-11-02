@@ -2,7 +2,7 @@ import path from "node:path";
 import Anthropic from "@anthropic-ai/sdk";
 import { buildAnthropicSystem, isAnthropicOAuthToken, normalizeAnthropicModelId } from "adapters";
 import { resolveContextPolicy } from "shared/context-policy";
-import type { AttachmentPart } from "shared/types";
+import type { AttachmentPart, ModelContextMetadata } from "shared/types";
 import { modelSupportsVision } from "shared/vision";
 import { type CheckpointSession, ensureCheckpointBackup, finalizeCheckpoint } from "../checkpoints";
 import { classifyBashCommandRisk } from "../shell-risk";
@@ -37,6 +37,7 @@ export type RunClaudeAgentInput = {
   baseUrl?: string;
   model: string;
   contextWindow?: number | null;
+  contextMetadata?: ModelContextMetadata | null;
   prompt: string;
   cwd: string;
   abortController: AbortController;

@@ -1,6 +1,106 @@
 import { expect, test } from "bun:test";
 import { boundChatContext, estimateContextMessageTokens } from "./context-budget";
-import { isValidContextWindow, resolveContextPolicy } from "./context-policy";
+import {
+  isValidContextWindow,
+  normalizeModelContextMetadata,
+  resolveContextPolicy,
+} from "./context-policy";
+import type { ModelContextMetadata } from "./types";
+
+const discovered: ModelContextMetadata = {
+  contextWindow: 262_144,
+  maxInputTokens: 200_000,
+  maxOutputTokens: 1024,
+  source: "channel",
+  fetchedAt: 1_793_620_000_000,
+};
+
+test("reported limits work for other providers and exact namespaced channel model IDs", () => {
+  for (const model of [
+    "google/gemini-2.5-pro",
+    "anthropic/claude-opus-5.5",
+    "qwen/custom-alias",
+    "deepseek-v4",
+  ]) {
+    for (const mode of ["chat", "agent"] as const) {
+      const policy = resolveContextPolicy({ model, mode, contextMetadata: discovered });
+      expect(policy.contextWindow).toBe(262_144);
+      expect(policy.maxInputTokens).toBe(200_000);
+      expect(policy.maxOutputTokens).toBe(1024);
+      expect(policy.source).toBe("channel");
+    }
+  }
+});
+
+test("manual settings cannot bypass reported input/output limits and blank restores discovery", () => {
+  const large = resolveContextPolicy({
+    model: "alias",
+    contextWindow: 1_000_000,
+    contextMetadata: discovered,
+  });
+  expect(large.contextWindow).toBe(262_144);
+  expect(large.maxInputTokens).toBe(200_000);
+  expect(large.maxOutputTokens).toBe(1024);
+  expect(large.source).toBe("configured");
+  const small = resolveContextPolicy({
+    model: "alias",
+    contextWindow: 16_384,
+    contextMetadata: discovered,
+  });
+  expect(small.contextWindow).toBe(16_384);
+  expect(small.maxInputTokens < 16_384).toBe(true);
+  expect(
+    resolveContextPolicy({ model: "alias", contextWindow: null, contextMetadata: discovered })
+      .source,
+  ).toBe("channel");
+});
+
+test("current reports supersede old built-in context while keeping independent input ceilings", () => {
+  const policy = resolveContextPolicy({
+    model: "gpt-6-astra",
+    contextMetadata: { ...discovered, contextWindow: 2_097_152, maxInputTokens: 1_800_000 },
+  });
+  expect(policy.contextWindow).toBe(2_097_152);
+  expect(policy.maxInputTokens).toBe(1_800_000);
+  const partial = { contextWindow: 1_050_000, source: "channel" as const, fetchedAt: 0 };
+  expect(
+    resolveContextPolicy({ model: "gpt-6-astra", contextMetadata: partial }).maxInputTokens,
+  ).toBe(922_000);
+});
+
+test("cached catalog/runtime provenance survives without assuming every alias has 1M", () => {
+  for (const source of ["catalog", "runtime"] as const) {
+    expect(
+      resolveContextPolicy({ model: "not-in-registry", contextMetadata: { ...discovered, source } })
+        .source,
+    ).toBe(source);
+  }
+  expect(resolveContextPolicy({ model: "not-in-registry" }).source).toBe("fallback");
+});
+
+test("malformed remote metadata cannot create an unbounded budget", () => {
+  for (const value of [
+    null,
+    [],
+    {},
+    { ...discovered, contextWindow: "262144" },
+    { ...discovered, contextWindow: 16_777_217 },
+    { ...discovered, contextWindow: 1024 },
+    { ...discovered, maxInputTokens: NaN },
+    { ...discovered, maxOutputTokens: 0 },
+    { ...discovered, fetchedAt: -1 },
+    { ...discovered, source: "guess" },
+    { ...discovered, inputLimitOnly: "yes" },
+  ]) {
+    expect(normalizeModelContextMetadata(value)).toBe(null);
+  }
+  expect(
+    normalizeModelContextMetadata({ ...discovered, rawProviderSecret: "do-not-retain" }),
+  ).toEqual(discovered);
+  expect(
+    normalizeModelContextMetadata({ ...discovered, inputLimitOnly: true })?.inputLimitOnly,
+  ).toBe(true);
+});
 
 test("verified model windows respect distinct input ceilings and output reserves", () => {
   const chat = resolveContextPolicy({ model: "gpt-6-astra" });

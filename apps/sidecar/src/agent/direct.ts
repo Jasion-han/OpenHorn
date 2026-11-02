@@ -27,7 +27,7 @@ import {
   searchDuckDuckGo,
   type TavilyResult,
 } from "shared/search";
-import type { AttachmentPart } from "shared/types";
+import type { AttachmentPart, ModelContextMetadata } from "shared/types";
 import { modelSupportsVision } from "shared/vision";
 import {
   createCheckpointSession,
@@ -69,6 +69,7 @@ export type RunDirectAgentInput = {
   protocol?: string;
   model: string;
   contextWindow?: number | null;
+  contextMetadata?: ModelContextMetadata | null;
   prompt: string;
   cwd: string;
   abortController: AbortController;

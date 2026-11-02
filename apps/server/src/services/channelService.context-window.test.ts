@@ -161,7 +161,7 @@ test("real sidecar preparation accepts a large selected-model request and retain
     await db.insert(messages).values(prior);
     const content = `CURRENT-BEGIN\n${"x".repeat(140_000)}\nCURRENT-END`;
     const prepared = await prepareChatForSidecar(userId, { conversationId, content });
-    expect(prepared.contextWindow).toBe(1_050_000);
+    expect(prepared.contextWindow).toBe(null);
     expect(prepared.model).toBe("gpt-6-astra");
     expect(prepared.messages.some((message) => message.content === "OLDEST-CONTEXT-SENTINEL")).toBe(
       true,
@@ -230,6 +230,7 @@ test("real Chat send, SSE, edit and retry submit selected large-model context to
     hostname: "127.0.0.1",
     port: 0,
     async fetch(request) {
+      if (request.method === "GET") return Response.json({ data: [] });
       const body = (await request.json()) as (typeof requests)[number];
       requests.push(body);
       if (!body.stream)

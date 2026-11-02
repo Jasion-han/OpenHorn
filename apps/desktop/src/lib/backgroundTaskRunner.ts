@@ -1,4 +1,4 @@
-import type { ScheduledTask, ScheduledTaskRun } from "shared/types";
+import type { ModelContextMetadata, ScheduledTask, ScheduledTaskRun } from "shared/types";
 import { claimRunOwnership, createRunPersistGuard, isRunOwner } from "../hooks/sidecarRunOwnership";
 import { useChatStore } from "../stores/chatStore";
 import { useScheduledTaskStore } from "../stores/scheduledTaskStore";
@@ -341,6 +341,7 @@ async function executeRun(run: ScheduledTaskRun, task: ScheduledTask) {
     baseUrl: string | null;
     modelId: string;
     contextWindow?: number | null;
+    contextMetadata?: ModelContextMetadata | null;
     protocol: "openai" | "anthropic" | "google" | "acp";
   };
   try {
@@ -430,6 +431,7 @@ async function executeRun(run: ScheduledTaskRun, task: ScheduledTask) {
         apiKey: credentials.protocol === "acp" ? "" : credentials.apiKey,
         model,
         contextWindow: credentials.contextWindow,
+        contextMetadata: credentials.contextMetadata,
         baseUrl: credentials.baseUrl ?? undefined,
         protocol: credentials.protocol,
         acpAgent,
