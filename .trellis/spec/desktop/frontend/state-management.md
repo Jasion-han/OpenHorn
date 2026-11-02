@@ -118,6 +118,18 @@ await api.messages.syncSidecar({ ..., myNewField: stripEphemeral(msg.myNewField)
 
 ---
 
+## Chat Failure Metadata
+
+Chat `content` contains generated text only, even when empty. `finishReason`
+round-trips the safe `error` / `context_budget_exceeded` categories in addition
+to Stop and output truncation. `chatAdapter` validates through the shared
+normalizer; `DesktopMessageBubble` localizes the reason outside Markdown.
+Preparation HTTP failures carry the actual saved user/assistant IDs, so reconcile
+both optimistic rows before surfacing the failure. A failed zero-output retry
+restores the complete previous snapshot and does not subsequently mark that
+restored answer failed. See server `chat-streaming.md` for signatures and the
+required service/browser regression matrix.
+
 ## Agent Save Recovery
 
 Generation and saving are separate operations. A failed HTTP save must not change

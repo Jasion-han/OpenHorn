@@ -48,7 +48,9 @@ class ChatModeUnsupportedError extends Error {
 - Error text is transmitted separately in the terminal event. No schema change
   is introduced by this contract; the existing message content column retains
   only generated text. The existing TEXT `finish_reason` stores `stopped` for
-  Stop and `length` for explicit Chat output truncation, otherwise null.
+  Stop, `length` for explicit Chat output truncation, `context_budget_exceeded`
+  for a typed local budget rejection, and `error` for other Chat failures.
+  Successful replacement clears it; unknown values normalize to null.
 - OpenAI `length`, Anthropic `max_tokens`, and Google `MAX_TOKENS` become
   `ChatStreamTruncatedError` only in Chat adapters, after yielding generated
   text and collecting final usage. Missing finish reasons retain gateway
@@ -247,4 +249,75 @@ return [system, ...kept];
 // Correct: protect the current request, then recheck the final transport body.
 const prepared = boundChatContext(expandedMessages);
 const submitted = boundChatContext(withCurrentOutputInstructions(prepared));
+```
+
+## Scenario: Durable Safe Chat Failure State
+
+### 1. Scope / Trigger
+
+A failure may occur after a question and empty assistant row are stored but
+before provider startup. Preserve its reason across the next send and reload.
+
+### 2. Signatures
+
+`MessageFinishReason = "stopped" | "length" | "context_budget_exceeded" | "error"`.
+The existing TEXT `messages.finish_reason` stores these values; no migration is
+needed. A failed `POST /messages/chat/prepare` returns HTTP 400 with
+`{error, code, userMessageId, assistantMessageId}`; `code` is
+`chat_context_budget_exceeded` or `chat_preparation_failed`. No credentials or
+prepared model context belong in this error response.
+
+### 3. Contracts
+
+- `buildChatMessagesForTurn` catches context-builder failures. New/send/edited
+  questions retain an empty assistant row with safe failure state. An edit clears
+  the previous question's reply/usage/FTS text; a zero-output retry keeps the
+  preceding answer and all its metadata.
+- Desktop reconciles both saved IDs before displaying preparation failure. The
+  failure is rendered as localized metadata outside the exact generated Markdown;
+  never copy raw errors into empty or partial `content`.
+- Generic provider errors preserve accumulated text and store `error` in both
+  non-streaming and streaming Chat. Sidecar complete receives the same enum.
+- Provider output limits and Stop retain their existing precedence; retry success
+  clears prior termination state. Agent synchronization accepts `stopped` only
+  from this column, and otherwise derives status from its run.
+- Both direct and Codex sidecar Chat budget guards emit the structured
+  `chat_context_budget_exceeded` code before provider/CLI startup.
+- This contract records context-builder and model-stream failures; it does not
+  claim every database/network/setup fault has been durably saved.
+
+### 4. Validation & Error Matrix
+
+| Trigger | Stored result |
+|---|---|
+| Oversized current question at prepare/send/SSE | Empty reply, safe budget state |
+| Oversized edited question, including tail edit | Edited question plus empty failed replacement |
+| Budget/zero-output error during retry | Previous reply/content/usage/end reason unchanged |
+| Provider throws after an unfinished UI fence | Exact partial source plus safe `error` |
+| Success after earlier failure | New text and null finish reason |
+| Malformed/arbitrary finish reason | Null; raw input is never persisted |
+| Agent sync supplies Chat-only failure enum | Discard Chat enum; preserve Agent run semantics |
+
+### 5. Good / Base / Bad Cases
+
+Good: attach oversized synthetic text, see a budget reason, send a short question,
+and still see that reason after restart. Base: successful Chat remains unchanged.
+Bad: save the error as model prose or rely only on a transient composer banner.
+
+### 6. Tests Required
+
+`messageService.failure-state.test.ts` uses the real isolated DB for prepare,
+non-streaming send, SSE send/edit/tail/retry, HTTP saved identities, credentials
+exclusion, generic partial failures, completion normalization and successful
+clearing. The production browser fixture must send a rejected prepare request,
+continue with a short request, reload, and render the localized budget label;
+empty and partial generic failure cases keep exact text and a localized label.
+
+### 7. Wrong vs Correct
+
+```ts
+// Wrong: a reload turns the failure into a generic empty answer.
+content: partial || error.message
+// Correct: exact model text and a bounded termination category travel separately.
+content: partial, finishReason: chatFailureFinishReason(errorCode)
 ```
