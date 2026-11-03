@@ -3,6 +3,9 @@
  * storage to enable retrieval-augmented generation over attached documents.
  */
 
+import { attachments, conversations } from "db";
+import { and, eq, inArray } from "drizzle-orm";
+import { db } from "../db";
 import { chunkText } from "./chunkingService";
 import { generateEmbeddings } from "./embeddingService";
 import {
@@ -15,6 +18,23 @@ import {
 } from "./vectorStore";
 
 const EMBEDDING_BATCH_SIZE = 100;
+
+/** SQL source rows, not best-effort vectors, own document visibility. */
+async function liveSources(userId: string, attachmentIds?: string[]) {
+  if (attachmentIds?.length === 0) return new Map<string, string>();
+  const rows = await db
+    .select({ id: attachments.id, conversationId: conversations.id })
+    .from(attachments)
+    .innerJoin(conversations, eq(conversations.id, attachments.conversationId))
+    .where(
+      and(
+        eq(conversations.userId, userId),
+        ...(attachmentIds ? [inArray(attachments.id, [...new Set(attachmentIds)])] : []),
+      ),
+    )
+    .limit(attachmentIds ? attachmentIds.length : 1);
+  return new Map(rows.map((row) => [row.id, row.conversationId]));
+}
 
 /**
  * Index an attachment's text content into the vector store.
@@ -29,6 +49,9 @@ export async function indexAttachment(
   apiKey: string,
   baseUrl?: string,
 ): Promise<void> {
+  const exists = async () =>
+    (await liveSources(userId, [attachmentId])).get(attachmentId) === conversationId;
+  if (!(await exists())) return;
   const chunks = chunkText(textContent, fileName);
   if (chunks.length === 0) return;
 
@@ -39,6 +62,8 @@ export async function indexAttachment(
   for (let i = 0; i < texts.length; i += EMBEDDING_BATCH_SIZE) {
     const batch = texts.slice(i, i + EMBEDDING_BATCH_SIZE);
     const batchVectors = await generateEmbeddings(batch, apiKey, baseUrl);
+    // Stop subsequent paid batches if deletion won this embedding await.
+    if (!(await exists())) return;
     vectors.push(...batchVectors);
   }
 
@@ -55,6 +80,9 @@ export async function indexAttachment(
   }));
 
   await addChunks(records);
+  // Vector writes cannot share SQL's transaction. Remove a late write when
+  // deletion won the write await; retrieval independently checks live sources.
+  if (!(await exists())) await deleteChunksByAttachment(attachmentId);
 }
 
 /**
@@ -71,14 +99,20 @@ export async function retrieveContext(
   // Skip the (paid) embedding API call when the user has no indexed documents.
   const hasDocuments = await hasChunksForUser(userId);
   if (!hasDocuments) return "";
+  if ((await liveSources(userId)).size === 0) return "";
 
   const [queryVector] = await generateEmbeddings([query], apiKey, baseUrl);
   if (!queryVector) return "";
 
   const results = await searchChunks(queryVector, userId, limit);
   if (results.length === 0) return "";
+  const live = await liveSources(
+    userId,
+    results.map((row) => row.attachmentId),
+  );
 
   return results
+    .filter((row) => row.userId === userId && live.get(row.attachmentId) === row.conversationId)
     .map(
       (r, i) =>
         `[${i + 1}] From "${r.fileName}" (chunk ${r.chunkIndex + 1}): ${r.text.slice(0, 800)}`,

@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { agentSessions, attachments, channels, conversations } from "db";
+import { agentSessions, attachments, channels, conversations, messages } from "db";
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "../db";
 import { decrypt, generateId } from "../utils";
@@ -236,17 +236,77 @@ async function selectOwnedAttachments(attachmentIds: string[], userId: string) {
     .map((row) => row.attachment);
 }
 
+export type AttachmentLinkWriter = Pick<typeof db, "select" | "update">;
+
 export async function linkAttachmentsToMessage(
   attachmentIds: string[],
   messageId: string,
   userId: string,
-) {
-  if (attachmentIds.length === 0) return;
+  writer?: AttachmentLinkWriter,
+): Promise<string[]> {
+  const bind = async (tx: AttachmentLinkWriter) => {
+    const target = (
+      await tx
+        .select({ conversationId: messages.conversationId })
+        .from(messages)
+        .innerJoin(conversations, eq(conversations.id, messages.conversationId))
+        .where(
+          and(
+            eq(messages.id, messageId),
+            eq(messages.role, "user"),
+            eq(conversations.userId, userId),
+          ),
+        )
+        .limit(1)
+    )[0];
+    if (!target) throw new Error("User message not found");
 
-  const ownedIds = (await selectOwnedAttachments(attachmentIds, userId)).map((row) => row.id);
-  if (ownedIds.length === 0) return;
+    const candidates = attachmentIds.length
+      ? await tx
+          .select({
+            attachment: attachments,
+            sessionConversationId: agentSessions.conversationId,
+            sessionUserId: agentSessions.userId,
+          })
+          .from(attachments)
+          .leftJoin(agentSessions, eq(agentSessions.id, attachments.sessionId))
+          .where(inArray(attachments.id, [...new Set(attachmentIds)]))
+      : [];
+    const sameScope = (row: (typeof candidates)[number]) =>
+      row.attachment.conversationId === target.conversationId ||
+      (row.attachment.conversationId === null &&
+        row.sessionConversationId === target.conversationId &&
+        row.sessionUserId === userId);
+    const eligible = candidates
+      .filter(
+        (row) =>
+          sameScope(row) &&
+          (row.attachment.messageId === null || row.attachment.messageId === messageId),
+      )
+      .map((row) => row.attachment.id);
+    if (eligible.length) {
+      await tx.update(attachments).set({ messageId }).where(inArray(attachments.id, eligible));
+    }
 
-  await db.update(attachments).set({ messageId }).where(inArray(attachments.id, ownedIds));
+    // The stored ID list and attachment chips describe the same real bindings.
+    // Linking is additive/idempotent; never steal another message's upload.
+    const bound = await tx
+      .select({
+        attachment: attachments,
+        sessionConversationId: agentSessions.conversationId,
+        sessionUserId: agentSessions.userId,
+      })
+      .from(attachments)
+      .leftJoin(agentSessions, eq(agentSessions.id, attachments.sessionId))
+      .where(eq(attachments.messageId, messageId));
+    const actual = bound.filter(sameScope).map((row) => row.attachment.id);
+    await tx
+      .update(messages)
+      .set({ attachments: actual.length ? JSON.stringify(actual) : null })
+      .where(eq(messages.id, messageId));
+    return actual;
+  };
+  return writer ? bind(writer) : db.transaction(bind);
 }
 
 export async function getAttachmentsByIds(attachmentIds: string[], userId: string) {
