@@ -612,3 +612,69 @@ Use isolated server databases and deterministic metadata transports.
 Wrong: `if (!metadata.maxInputTokens) fetchDetail()`; read ACP metadata from the
 pre-hydration channel snapshot. Correct: endpoint cache owns discovery state;
 the resolved exact model owns the credential response's capacity fields.
+
+## Conversation Ownership, Search Replacement and Usage
+
+### 1. Scope / Trigger
+
+Chat request acceptance/completion, sidecar completion of an assistant row,
+full-text replacement, and normal non-streaming Chat usage accounting.
+
+### 2. Signatures
+
+Existing `sendMessage`, `streamMessage`, `completeChatFromSidecar` and
+`searchMessages` public shapes remain unchanged. Reuse
+`modeForLatestUserRequest(conversationId, userMessageId, mode)` for request-time
+mode writes. Adapter async generators return optional `ChatUsage` on completion.
+
+### 3. Contracts
+
+Request acceptance owns conversation mode, subject to the latest-user SQL guard;
+completion of an older Chat answer never changes a newer request's mode. Cover
+both streamed and non-streamed Chat and equal-timestamp request ordering.
+
+Sidecar Chat completion validates and writes only the requested conversation's
+actual Chat assistant row, with compatible legacy null-mode rows allowed. It
+must not rewrite a user row, an Agent run or another conversation's message.
+Invalid IDs produce no message/index mutation. Full-text replacement deletes
+old indexed content even when the replacement body is empty. Search joins both
+message ID and conversation ID, so inconsistent index rows cannot supply
+unrelated message metadata. Keep the existing optional-index compatibility.
+
+Consume the async generator's terminal return to preserve real optional usage.
+A reported zero-token usage object is valid; an absent report stays absent.
+Truncation/partial-text/error behavior remains covered by its existing contract.
+
+### 4. Validation & Error Matrix
+
+| Trigger | Expected behavior |
+|---|---|
+| Old Chat finishes after a newer Agent request | Keep the newer Agent mode |
+| Non-stream Chat begins in an Agent-history conversation | Save Chat only if this user request is latest |
+| Reply text becomes empty | Retain empty reply and remove old search matches |
+| Complete target is missing, foreign, user or Agent | Reject without message/index writes |
+| FTS message and conversation IDs disagree | Exclude the row from search |
+| Generator returns usage, including zeros | Store and return that exact usage |
+| Generator returns no usage | Do not fabricate a report |
+
+### 5. Good / Base / Bad Cases
+
+Good: completion updates the exact prepared Chat answer while a newer user
+choice remains intact. Base: normal replies and search results retain their
+existing payloads. Bad: indexing an arbitrary ID after an UPDATE affected no
+rows, or using `for await` while expecting its discarded return value to contain
+usage.
+
+### 6. Tests Required
+
+Gate old Chat provider completion and request-start mode writes against newer
+Agent users, including equal timestamps. Verify actual empty/replaced text search,
+invalid-target immutability, mismatched FTS exclusion, legacy Chat compatibility,
+and real adapter terminal usage with normal/zero/missing reports. Use an isolated
+DB and synthetic local provider; never run against the normal app database.
+
+### 7. Wrong vs Correct
+
+Wrong: set `lastMode: "chat"` when the provider finishes; skip FTS work when the
+replacement is empty. Correct: guard mode at request acceptance and always clear
+the old index entry before optionally inserting the replacement text.

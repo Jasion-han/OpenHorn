@@ -85,6 +85,17 @@ identities and must never be used as the shared connection's approval-map key.
   reaper only when both ownership maps are empty. Disable Bun's separate
   WebSocket idle timeout (`idleTimeout: 0`) so it cannot override this rule;
   outgoing run events also refresh the activity timestamp.
+- Connection closure ends asynchronous setup ownership too. Check a closed
+  connection after credential/workspace/skill awaits before registering or
+  starting Chat/Agent work. A run accepted before checkpoint creation must
+  release its map entry if setup fails or Stop/close wins that await. Missing
+  ACP launch configuration also releases ownership after its terminal events.
+- Anthropic-protocol Agents use the same abort-owned `waitForApproval` helper
+  and unique host approval IDs as the other runtimes. Recheck cancellation after
+  filesystem validation, approval, checkpoint backup and tool execution; pass
+  the run signal to `executeTool` so Stop reaches an already-running command.
+  A delayed Allow must never start a tool after Stop. Test this protocol only
+  with local synthetic responses when real Claude calls are prohibited.
 - Per-run UI instructions and history are independent of access mode. Codex
   uses developer instructions; ACP separates request instructions from user
   context; Direct includes them in its system prompt. Omitted instructions
@@ -129,6 +140,10 @@ identities and must never be used as the shared connection's approval-map key.
 | Stop during Direct write/edit checkpoint backup | Preserve original file |
 | ACP filesystem request after Stop | Reject before reading/writing |
 | Long run / approval wait past socket idle threshold | Keep socket connected |
+| Socket closes during Chat credential or Agent workspace setup | Start no orphan runtime |
+| Stop or close while checkpoint preparation awaits | Release run ownership; skip runtime |
+| ACP launch command is missing | One failure terminal path; release run ownership |
+| Anthropic approval or tool execution is stopped | Settle approval, prevent late execution and cancel the tool |
 | ACP full-access followed by default reused session | Second turn asks again |
 | Host event publication throws | Remove approval resolver and reject the request |
 | `workspace.setCurrent` with `root: ""` | Return a canonical validated dedicated default; pass that result to the run |
