@@ -1,6 +1,6 @@
 import { ChatStreamTruncatedError, type ChatUsage } from "adapters";
 import { attachments, conversations, messages } from "db";
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import {
   boundChatContext,
   CHAT_MAX_CONTEXT_MESSAGES,
@@ -52,18 +52,15 @@ async function ftsUpsert(
   messageId: string,
   conversationId: string,
   content: string,
+  writer: Pick<typeof db, "run"> = db,
 ): Promise<void> {
-  if (!content) return;
   try {
+    await writer.run(sql`DELETE FROM messages_fts WHERE message_id = ${messageId}`);
+    if (!content) return;
     const truncated = content.substring(0, 5000);
-    await client.execute({
-      sql: `DELETE FROM messages_fts WHERE message_id = ?`,
-      args: [messageId],
-    });
-    await client.execute({
-      sql: `INSERT INTO messages_fts(message_id, conversation_id, content) VALUES (?, ?, ?)`,
-      args: [messageId, conversationId, truncated],
-    });
+    await writer.run(
+      sql`INSERT INTO messages_fts(message_id, conversation_id, content) VALUES (${messageId}, ${conversationId}, ${truncated})`,
+    );
   } catch {
     // FTS table may not exist yet (tests, pre-migration DBs)
   }
@@ -638,7 +635,10 @@ export async function sendMessage(userId: string, input: SendMessageInput) {
 
   await db
     .update(conversations)
-    .set({ updatedAt: now })
+    .set({
+      updatedAt: now,
+      lastMode: modeForLatestUserRequest(input.conversationId, userMessageId, "chat"),
+    })
     .where(eq(conversations.id, input.conversationId));
 
   const settings = await getSettingValues(userId, [TAVILY_API_KEY_SETTING, TAVILY_ENABLED_SETTING]);
@@ -707,7 +707,13 @@ export async function sendMessage(userId: string, input: SendMessageInput) {
         }).maxOutputTokens,
       });
 
-      for await (const chunk of stream) {
+      while (true) {
+        const next = await stream.next();
+        if (next.done) {
+          responseUsage = next.value;
+          break;
+        }
+        const chunk = next.value;
         if (typeof chunk !== "string" || chunk.length === 0) {
           continue;
         }
@@ -847,7 +853,7 @@ export async function streamMessage(
       .update(conversations)
       .set({
         updatedAt: now,
-        lastMode: "chat",
+        lastMode: modeForLatestUserRequest(input.conversationId, userMessageId, "chat"),
         runStatus: null,
       })
       .where(eq(conversations.id, input.conversationId));
@@ -924,7 +930,6 @@ export async function streamMessage(
         .update(conversations)
         .set({
           updatedAt: new Date(),
-          lastMode: "chat",
           runStatus: null,
         })
         .where(eq(conversations.id, input.conversationId));
@@ -999,7 +1004,6 @@ export async function streamMessage(
       .update(conversations)
       .set({
         updatedAt: new Date(),
-        lastMode: "chat",
         runStatus: null,
       })
       .where(eq(conversations.id, input.conversationId));
@@ -1847,26 +1851,37 @@ export async function completeChatFromSidecar(
 ): Promise<void> {
   const conversation = await getConversationForUser(userId, input.conversationId);
 
-  await db
-    .update(messages)
-    .set({
-      content: input.content,
-      model: input.model || null,
-      usage: input.usage ? JSON.stringify(input.usage) : null,
-      finishReason: assistantFinishReason(input.finishReason, null),
-      updatedAt: new Date(),
-    })
-    .where(
-      and(eq(messages.id, input.assistantMessageId), eq(messages.conversationId, conversation.id)),
-    );
-  await ftsUpsert(input.assistantMessageId, input.conversationId, input.content);
+  await db.transaction(async (tx) => {
+    // Validate and update the exact assistant identity atomically. An unmatched
+    // completion must not delete or forge another message's search entry.
+    const updated = await tx
+      .update(messages)
+      .set({
+        content: input.content,
+        model: input.model || null,
+        usage: input.usage ? JSON.stringify(input.usage) : null,
+        finishReason: assistantFinishReason(input.finishReason, null),
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(messages.id, input.assistantMessageId),
+          eq(messages.conversationId, conversation.id),
+          eq(messages.role, "assistant"),
+          or(eq(messages.mode, "chat"), isNull(messages.mode)),
+          or(isNull(messages.agentRun), eq(messages.agentRun, "")),
+        ),
+      );
+    if (Number(updated.rowsAffected) !== 1) throw new Error("Assistant message not found");
+    await ftsUpsert(input.assistantMessageId, conversation.id, input.content, tx);
 
-  await db
-    .update(conversations)
-    // Preparation saved the request's mode. Completion can arrive after a
-    // newer Agent request and must not replace that later user choice.
-    .set({ updatedAt: new Date(), runStatus: null })
-    .where(eq(conversations.id, conversation.id));
+    await tx
+      .update(conversations)
+      // Preparation saved the request's mode. Completion can arrive after a
+      // newer Agent request and must not replace that later user choice.
+      .set({ updatedAt: new Date(), runStatus: null })
+      .where(eq(conversations.id, conversation.id));
+  });
 
   // Fire-and-forget: generate summary if the conversation is long enough
   void maybeSummarize(userId, input.conversationId).catch(() => {});
@@ -1912,7 +1927,7 @@ export async function searchMessages(
                    c.title AS conversation_title, m.role, m.created_at
             FROM messages_fts f
             JOIN conversations c ON c.id = f.conversation_id AND c.user_id = ?
-            JOIN messages m ON m.id = f.message_id
+            JOIN messages m ON m.id = f.message_id AND m.conversation_id = f.conversation_id
             WHERE messages_fts MATCH ?
             ORDER BY rank
             LIMIT ?`,
