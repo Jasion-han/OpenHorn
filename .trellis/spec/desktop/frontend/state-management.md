@@ -315,3 +315,54 @@ partial/empty EOF, split UTF8, callback failure and reader lock cleanup.
 Wrong: install every awaited client or reconnect only from onDisconnect.
 Correct: require current ownership at each continuation and schedule recovery
 from failed reconnect attempts too, under the same bounded lifecycle.
+
+## Background Scheduled-Run Identity and Workspace
+
+### 1. Scope / Trigger
+
+Concurrent scheduled Agent runs and their per-conversation workspace preparation.
+
+### 2. Signatures
+
+Keep scheduled task APIs unchanged. Each optimistic turn uses a fresh UUID pair;
+`runAgent` receives the exact successful `ensureWorkspace` result as workspaceRoot.
+
+### 3. Contracts
+
+Date.now is a timestamp, not a unique message identity. Independent tasks starting
+in the same millisecond must not share ownership, events or persistence guards.
+Resolve a conversation's project root before starting the task; if project metadata
+is absent, await project loading once and resolve again. A genuinely missing or
+unavailable project/default workspace fails that task before any Agent call.
+Capture the returned canonical root and pass it explicitly, so another run's later
+connection-level workspace selection cannot redirect this one. Never fall back to
+whatever cwd the Sidecar happened to retain after preparation failed.
+
+### 4. Validation & Error Matrix
+
+| Trigger | Required result |
+|---|---|
+| Two due tasks start under a fixed identical clock | Distinct draft identities and both results saved |
+| Workspace preparation throws/returns null | Failed task, zero Agent starts |
+| Project metadata is slow but valid | Await loading, then start in its canonical project root |
+| Project remains missing | Refuse; do not use default/old cwd |
+| Another task changes shared workspace after preparation | This run keeps its captured root |
+
+### 5. Good / Base / Bad Cases
+
+Good: simultaneous due tasks retain independent replies and their own directories.
+Base: a normal default-workspace task uses the existing saved/default resolver.
+Bad: use millisecond IDs or ignore a failed workspace result for unattended work.
+
+### 6. Tests Required
+
+Isolated child fixtures drive the real runner/store/ownership with a fixed clock,
+synthetic tasks/API/client and gated project/workspace preparation. Assert both
+results persist, invalid preparation starts no runtime, cold metadata loads before
+use, and later global root changes do not alter submitted cwd. Unknown fake-fetch
+URLs reject; no test may call the normal server, real model or user task list.
+
+### 7. Wrong vs Correct
+
+Wrong: create `temp-${Date.now()}` and submit without workspaceRoot.
+Correct: allocate a UUID turn and submit only after resolving its explicit root.

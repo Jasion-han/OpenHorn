@@ -229,3 +229,91 @@ await agent.prompt(prompt);
 if (signal.aborted) return;
 await agent.prompt(prompt);
 ```
+
+## Native Startup, Checkpoint Boundaries and Test Storage
+
+### 1. Scope / Trigger
+
+Native Sidecar start/stop, diagnostic endpoint publication, snapshot backup,
+rollback/pruning and tests that exercise any snapshot I/O.
+
+### 2. Signatures
+
+Keep public IPC endpoint fields `host`, `port`, `token` unchanged. Native startup
+runs off the UI thread. A private permit/epoch is captured before queuing blocking
+work; Stop invalidates older permits. Checkpoint RPC ownership records the run's
+captured canonical workspace. Manifests include `runId`, `workspaceRoot`,
+`createdAt` and validated file entries. `OPENHORN_HOME` remains the state override.
+
+### 3. Contracts
+
+- Handshake uses one20second deadline, including chatter and partial readiness.
+  Concurrent starts share an owned child; Stop can cancel a Starting child and
+  queued older requests. Every failed/cancelled startup attempts child cleanup;
+  cleanup failures are returned, including a child arriving after cancellation.
+  Exit monitors compare unique spawn identity, never only a reusable port.
+- Endpoint diagnostics use private create-new temporary files and atomic leaf
+  replacement, coordinated with identity-aware cleanup. Files are0600 on Unix;
+  leaf symlinks/reparse points are not followed, and special files such as FIFOs
+  cannot block a read before type validation. Cooperative file-lock acquisition
+  has an80ms bound. Diagnostic failure must not be mistaken for successful model
+  execution or expose the token in logs.
+- Snapshot buckets combine a UTF8-byte-bounded readable prefix with a hash of
+  canonical workspace identity. Validate run IDs, manifest identity, relative
+  paths and all backups/targets before modifying the first target. Read only
+  regular terminal files without following replacement symlinks or waiting on
+  FIFOs. Revalidate around awaits; restore via atomic leaf replacement, protecting
+  outside hardlinked inodes and preserving existing executable permissions.
+- Rollback uses its run's captured root even after another project becomes current.
+  These checks are not an OS sandbox or an atomic whole-workspace transaction;
+  concurrent parent-directory renames still require filesystem coordination.
+- Legacy project-local snapshots have a read-only recovery path. A legacy home
+  snapshot requires positive matching workspace identity; ambiguous unscoped
+  lossy buckets are retained and rejected. Never infer ownership from a colliding
+  old slug. Prune only positively identified completed snapshots for that root,
+  excluding active snapshots; do not silently migrate/delete normal old data.
+- Bun tests must set an owned `OPENHORN_HOME`. Actual snapshot I/O has a second
+  test-mode guard before accessing storage, rejecting unset/default/protected
+  state and aliases, including derived `snapshots` symlinks and dangling aliases.
+  Pure path-resolution functions may still be tested without doing I/O. Guard
+  regressions use a fake user/default tree verified before calls, so a broken
+  guard cannot target the real user. Pin test mode for Bun tests and production
+  mode for binary builds; do not compile a test-only guard into normal behavior.
+
+### 4. Validation & Error Matrix
+
+| Trigger | Required result |
+|---|---|
+| Silent/chatty child never announces ready | Deadline failure and owned-child cleanup |
+| Stop while spawn/wait/queued start is pending | No late publication or replacement child |
+| Old child exits after a new spawn reuses its port | Preserve the new endpoint |
+| Diagnostic symlink/FIFO or another instance's endpoint | No target corruption/blocking/foreign removal |
+| Snapshot/target file or parent escapes through a symlink | Reject before unsafe I/O |
+| Two roots share an old readable slug | Separate new buckets; refuse mismatched legacy data |
+| Long valid Chinese workspace path | Valid bucket byte length and successful undo |
+| Test storage reaches real default through a derived alias | Reject before any snapshot mutation |
+
+### 5. Good / Base / Bad Cases
+
+Good: a stopped startup cannot win later, and project A's undo restores A after
+the user switches to B. Base: normal child readiness and regular-file undo remain
+usable. Bad: block the UI on an unbounded receive, use current cwd for any old
+run, or let a test fixture fall through to the user's default snapshot store.
+
+### 6. Tests Required
+
+Use fake child controls and owned channels/paths for readiness, shared startup,
+Stop/queued permits, late exit identity, failed cleanup, diagnostic permissions,
+symlinks/FIFOs and identity cleanup. Force a fresh Cargo build after restoring
+red-test source variants; copied old mtimes can otherwise reuse stale artifacts.
+Checkpoint tests cover file/parent/snapshot symlinks, hardlinks, preflight failure,
+FIFO readers, binary content, executable mode, UTF8 bucket lengths, active pruning,
+concurrent backup, scoped/unscoped legacy recovery and real local RPC root binding.
+Guard tests exercise actual entry points against an owned fake default home.
+
+### 7. Wrong vs Correct
+
+Wrong: trust a snapshot path because its string starts inside the workspace, or
+clear a native slot whenever an old event has the same port. Correct: validate
+physical boundaries and manifest identity, use atomic leaf replacement, and bind
+all lifecycle continuations to their exact owner.

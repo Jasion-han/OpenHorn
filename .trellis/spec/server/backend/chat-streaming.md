@@ -756,3 +756,61 @@ Never access normal SQL/vector databases or real embedding/model services.
 Wrong: save every late stream by assistant ID, or append every returned vector
 chunk to a prompt. Correct: guard writes with the active mutation and live rows;
 filter retrieval through current relational source ownership.
+
+## Provider Response Body Ownership
+
+### 1. Scope / Trigger
+
+OpenAI-compatible stream sniffing and every provider Chat/tool response body,
+including non2xx diagnostics and non-streaming JSON.
+
+### 2. Signatures
+
+Public adapter Chat, tool, usage and truncation shapes remain unchanged. Private
+response helpers own incremental decoding, cancellation-aware reads and cleanup.
+
+### 3. Contracts
+
+Network chunks can split any SSE field prefix, comment, BOM or UTF8 sequence.
+Do not classify from one chunk or force SSE solely from a mislabelled header;
+retain compatible JSON/plain fallback when actual body format is clear. Release
+and cancel acquired readers on completion, DONE, consumer return and failure,
+without waiting forever on a broken cancel hook or masking the original result.
+
+Keep caller cancellation and the original request deadline through body reading.
+Error diagnostics additionally cap at64KiB and5seconds; successful JSON has only
+its original request limits. All provider Chat/tool paths use the same lifetime
+rule. Preserve Anthropic tool-choice compatibility retry, optional usage and the
+accepted missing-finish-reason gateway behavior; do not retry generated partial
+output as if it were an empty failed request.
+
+### 4. Validation & Error Matrix
+
+| Trigger | Required result |
+|---|---|
+| First chunks are whitespace or `d`/`da` | Continue format detection; emit no raw SSE frame |
+| SSE header with actual JSON body, or JSON header with SSE body | Preserve compatible body interpretation |
+| DONE or consumer stops early | Cancel/release body reader |
+| Error body stalls after headers, then Stop/timeout | Settle cancellation/deadline and clean reader |
+| Oversize error detail | Retain only bounded diagnostic prefix |
+| Valid large successful JSON | Do not apply the diagnostic byte/time cap |
+
+### 5. Good / Base / Bad Cases
+
+Good: arbitrarily split `data:` still yields normal Chat text and tool calls.
+Base: existing usage/truncation and ordinary JSON responses remain unchanged.
+Bad: remove abort/deadline listeners after headers, then await an unbounded body.
+
+### 6. Tests Required
+
+Use synthetic Response streams or owned loopback providers for split prefixes,
+BOM/UTF8, wrong headers, Chat/tool JSON fallback, DONE/return/error cleanup,
+never-ending diagnostic bodies, caller abort, request deadline and byte limits.
+Retain all existing usage, OAuth, explicit truncation and tool-choice regressions.
+Never invoke a real provider to test protocol framing or cleanup.
+
+### 7. Wrong vs Correct
+
+Wrong: decide from the first TCP chunk, or clean timeout ownership before reading
+an error. Correct: classify an incremental prefix and own the entire response body
+under the original request's cancellation/deadline.
