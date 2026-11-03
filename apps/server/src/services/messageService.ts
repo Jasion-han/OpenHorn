@@ -28,11 +28,19 @@ import {
   removeAttachmentFiles,
 } from "./attachmentService";
 import { getResolvedChannelForConversation } from "./channelService";
+import {
+  beginChatMutation,
+  bindChatMutation,
+  type ChatMutationOwner,
+  invalidateChatMutation,
+  ownsChatMutation,
+  releaseChatMutation,
+} from "./chatMutationOwnership";
 import { recordChannelFailure, recordChannelSuccess } from "./circuitBreaker";
 import { buildLiveContext, type LiveContextResult, toStoredLiveMetadata } from "./liveCapabilities";
 import { classifyLiveRouteWithModel } from "./liveRouteClassifier";
 import { classifyProviderError } from "./providerErrorSummary";
-import { retrieveContext } from "./ragService";
+import { deleteChunksByAttachment, retrieveContext } from "./ragService";
 import { mergeSystemPromptParts, RESPONSE_STYLE_GUARDRAILS } from "./responseStyle";
 import {
   type SearchCitation,
@@ -43,6 +51,59 @@ import { getSettingValues } from "./settingsService";
 import { getRecentSummaries, maybeSummarize } from "./summaryService";
 
 const GLOBAL_SYSTEM_PROMPT_KEY = "chat.systemPrompt";
+
+class ChatMutationSupersededError extends Error {}
+
+function requireChatMutation(owner: ChatMutationOwner) {
+  if (!ownsChatMutation(owner)) throw new ChatMutationSupersededError();
+}
+
+async function hasMutationQuestion(
+  owner: ChatMutationOwner,
+  writer: Pick<typeof db, "select"> = db,
+) {
+  if (!ownsChatMutation(owner) || !owner.userMessageId || !owner.conversationId) return false;
+  const [question] = await writer
+    .select({ id: messages.id })
+    .from(messages)
+    .where(
+      and(
+        eq(messages.id, owner.userMessageId),
+        eq(messages.conversationId, owner.conversationId),
+        eq(messages.role, "user"),
+      ),
+    )
+    .limit(1);
+  return Boolean(question) && ownsChatMutation(owner);
+}
+
+async function persistMutationReply(
+  owner: ChatMutationOwner,
+  assistantMessageId: string,
+  values: Partial<typeof messages.$inferInsert> & { content: string },
+) {
+  let applied = false;
+  await db.transaction(async (tx) => {
+    if (!(await hasMutationQuestion(owner, tx))) return;
+    const result = await tx
+      .update(messages)
+      .set(values)
+      .where(
+        and(
+          eq(messages.id, assistantMessageId),
+          eq(messages.conversationId, owner.conversationId ?? ""),
+          eq(messages.role, "assistant"),
+          or(eq(messages.mode, "chat"), isNull(messages.mode)),
+          or(isNull(messages.agentRun), eq(messages.agentRun, "")),
+        ),
+      );
+    if (Number(result.rowsAffected) !== 1) return;
+    await ftsUpsert(assistantMessageId, owner.conversationId ?? "", values.content, tx);
+    requireChatMutation(owner);
+    applied = true;
+  });
+  return applied;
+}
 // ---------------------------------------------------------------------------
 // FTS5 sync helpers — best-effort; the virtual table may not exist in test
 // environments that skip bootstrapDatabase().
@@ -135,6 +196,7 @@ async function buildChatMessagesForTurn(
     contextWindow?: number | null;
     contextMetadata?: ModelContextMetadata | null;
     protocol?: string;
+    mutation?: ChatMutationOwner;
   },
 ) {
   try {
@@ -150,6 +212,7 @@ async function buildChatMessagesForTurn(
       maxMessages: policy.maxMessages,
     });
   } catch (error) {
+    if (turn.mutation) requireChatMutation(turn.mutation);
     const failure = new ChatTurnPreparationError(
       error,
       turn.userMessageId,
@@ -157,32 +220,58 @@ async function buildChatMessagesForTurn(
     );
     // A failed zero-output retry keeps the previous answer and all its metadata.
     if (!turn.keepPrevious) {
-      await db
-        .insert(messages)
-        .values({
-          id: turn.assistantMessageId,
-          conversationId,
-          role: "assistant",
-          content: "",
-          model: turn.model,
-          mode: "chat",
-          finishReason: failure.finishReason,
-          createdAt: turn.createdAt ?? new Date(),
-          updatedAt: new Date(),
-        })
-        .onConflictDoUpdate({
-          target: messages.id,
-          set: {
+      const persistFailure = async (writer: Pick<typeof db, "select" | "insert" | "run">) => {
+        if (turn.mutation) {
+          if (!(await hasMutationQuestion(turn.mutation, writer))) {
+            invalidateChatMutation(turn.mutation.userId, turn.userMessageId);
+            requireChatMutation(turn.mutation);
+          }
+          const [previous] = await writer
+            .select()
+            .from(messages)
+            .where(eq(messages.id, turn.assistantMessageId))
+            .limit(1);
+          if (
+            previous &&
+            (previous.conversationId !== conversationId ||
+              previous.role !== "assistant" ||
+              previous.mode === "agent" ||
+              previous.agentRun)
+          ) {
+            invalidateChatMutation(turn.mutation.userId, turn.userMessageId);
+            requireChatMutation(turn.mutation);
+          }
+        }
+        await writer
+          .insert(messages)
+          .values({
+            id: turn.assistantMessageId,
+            conversationId,
+            role: "assistant",
             content: "",
             model: turn.model,
+            mode: "chat",
             finishReason: failure.finishReason,
-            usage: null,
-            liveMetadata: null,
-            citations: null,
+            createdAt: turn.createdAt ?? new Date(),
             updatedAt: new Date(),
-          },
-        });
-      await ftsDeleteMessage(turn.assistantMessageId);
+          })
+          .onConflictDoUpdate({
+            target: messages.id,
+            set: {
+              content: "",
+              model: turn.model,
+              finishReason: failure.finishReason,
+              usage: null,
+              liveMetadata: null,
+              citations: null,
+              updatedAt: new Date(),
+            },
+          });
+        await ftsUpsert(turn.assistantMessageId, conversationId, "", writer);
+        if (turn.mutation) requireChatMutation(turn.mutation);
+      };
+      if (turn.mutation) await db.transaction(persistFailure);
+      else await persistFailure(db);
     }
     throw failure;
   }
@@ -190,19 +279,38 @@ async function buildChatMessagesForTurn(
 
 function createChatSseStream(
   handler: (send: (event: SseEvent) => void, ctx: SseContext) => Promise<void>,
+  mutation?: ChatMutationOwner,
 ) {
   return createSseStream(async (send, ctx) => {
+    const forwardAbort = () => mutation?.abortController.abort(ctx.signal.reason);
+    if (ctx.signal.aborted) forwardAbort();
+    else if (mutation) ctx.signal.addEventListener("abort", forwardAbort, { once: true });
+    const ownedSend = (event: SseEvent) => {
+      if (!mutation || ownsChatMutation(mutation)) send(event);
+    };
     try {
-      await handler(send, ctx);
+      if (mutation) requireChatMutation(mutation);
+      await handler(
+        ownedSend,
+        mutation
+          ? { abortController: mutation.abortController, signal: mutation.abortController.signal }
+          : ctx,
+      );
     } catch (error) {
+      if (mutation && !ownsChatMutation(mutation)) return;
       if (!(error instanceof ChatTurnPreparationError)) throw error;
-      send({
+      ownedSend({
         type: "error",
         message: error.message,
         content: "",
         messageId: error.assistantMessageId,
         ...(error.code === "chat_context_budget_exceeded" ? { errorCode: error.code } : {}),
       });
+    } finally {
+      if (mutation) {
+        ctx.signal.removeEventListener("abort", forwardAbort);
+        releaseChatMutation(mutation);
+      }
     }
   });
 }
@@ -799,19 +907,41 @@ export async function deleteMessage(userId: string, messageId: string) {
     throw new Error("Conversation not found");
   }
 
-  // Read the blob paths before the rows go away; unlink only after commit.
-  const attachmentFileRows = await db
-    .select({ filePath: attachments.filePath })
-    .from(attachments)
-    .where(eq(attachments.messageId, messageId));
-
+  // Capture the actual rows under the delete transaction; unlink after commit.
+  let attachmentFileRows: Array<{ id: string; filePath: string }> = [];
+  const mutation = invalidateChatMutation(userId, messageId);
   await db.transaction(async (tx) => {
+    attachmentFileRows = await tx
+      .select({ id: attachments.id, filePath: attachments.filePath })
+      .from(attachments)
+      .where(eq(attachments.messageId, messageId));
     await tx.delete(attachments).where(eq(attachments.messageId, messageId));
     await tx.delete(messages).where(eq(messages.id, messageId));
+    // A tail edit reserves an empty reply before contacting the provider. It
+    // belongs to that still-active question, not to a completed historical pair.
+    if (mutation?.userMessageId === messageId && mutation.reservedAssistantId) {
+      const removed = await tx
+        .delete(messages)
+        .where(
+          and(
+            eq(messages.id, mutation.reservedAssistantId),
+            eq(messages.conversationId, message[0].conversationId),
+            eq(messages.role, "assistant"),
+            eq(messages.content, ""),
+            or(eq(messages.mode, "chat"), isNull(messages.mode)),
+            or(isNull(messages.agentRun), eq(messages.agentRun, "")),
+          ),
+        );
+      if (Number(removed.rowsAffected) > 0)
+        await ftsUpsert(mutation.reservedAssistantId, message[0].conversationId, "", tx);
+    }
   });
 
   await ftsDeleteMessage(messageId);
   await removeAttachmentFiles(attachmentFileRows.map((row) => row.filePath).filter(Boolean));
+  await Promise.all(
+    attachmentFileRows.map((row) => deleteChunksByAttachment(row.id).catch(() => {})),
+  );
 
   return { success: true };
 }
@@ -1113,7 +1243,11 @@ async function streamReplyUntilStopped(
  * caller gets a 4xx instead of an SSE error. Resolve capability only after
  * ownership, before any edit. Missing messages keep their existing SSE error.
  */
-async function prepareEditedChatTurn(userId: string, userMessageId: string) {
+async function prepareEditedChatTurn(
+  userId: string,
+  userMessageId: string,
+  mutation: ChatMutationOwner,
+) {
   const [userMsg] = await db.select().from(messages).where(eq(messages.id, userMessageId));
   if (!userMsg || userMsg.role !== "user") return;
   const conversation = await getConversationForUser(userId, userMsg.conversationId);
@@ -1124,7 +1258,17 @@ async function prepareEditedChatTurn(userId: string, userMessageId: string) {
   if ((nextMsg?.mode ?? userMsg.mode) === "agent") {
     throw new AgentModeUnsupportedError();
   }
+  mutation.conversationId = conversation.id;
+  mutation.userMessageId = userMessageId;
+  mutation.assistantMessageId = nextMsg?.role === "assistant" ? nextMsg.id : undefined;
+  bindChatMutation(
+    mutation,
+    userMessageId,
+    ...(mutation.assistantMessageId ? [mutation.assistantMessageId] : []),
+  );
+  requireChatMutation(mutation);
   const resolvedChannel = await resolveChatChannelForConversation(userId, conversation);
+  requireChatMutation(mutation);
   return { userMsg, conversation, allMsgs, idx, resolvedChannel };
 }
 
@@ -1137,7 +1281,32 @@ export async function editUserMessage(
     appendSystemPrompt?: string;
   },
 ): Promise<ReadableStream> {
-  const prepared = await prepareEditedChatTurn(userId, userMessageId);
+  return editUserMessageWithMutation(
+    userId,
+    userMessageId,
+    newContent,
+    options,
+    beginChatMutation(userId, userMessageId),
+  );
+}
+
+async function editUserMessageWithMutation(
+  userId: string,
+  userMessageId: string,
+  newContent: string,
+  options: { appendSystemPrompt?: string } | undefined,
+  mutation: ChatMutationOwner,
+): Promise<ReadableStream> {
+  let prepared: Awaited<ReturnType<typeof prepareEditedChatTurn>>;
+  try {
+    bindChatMutation(mutation, userMessageId);
+    requireChatMutation(mutation);
+    prepared = await prepareEditedChatTurn(userId, userMessageId, mutation);
+  } catch (error) {
+    releaseChatMutation(mutation);
+    if (error instanceof ChatMutationSupersededError) return createChatSseStream(async () => {});
+    throw error;
+  }
   return createChatSseStream(async (send, ctx) => {
     if (!prepared) {
       send({ type: "error", message: "Message not found" });
@@ -1152,13 +1321,29 @@ export async function editUserMessage(
       return;
     }
     const assistantMessageId = nextMsg?.id ?? generateId();
+    mutation.assistantMessageId = assistantMessageId;
+    bindChatMutation(mutation, assistantMessageId);
+    requireChatMutation(mutation);
 
-    // Update the user message content
-    await db
-      .update(messages)
-      .set({ content: newContent.trim() })
-      .where(eq(messages.id, userMessageId));
-    await ftsUpsert(userMessageId, userMsg.conversationId, newContent.trim());
+    let questionUpdated = false;
+    await db.transaction(async (tx) => {
+      if (!(await hasMutationQuestion(mutation, tx))) return;
+      const updated = await tx
+        .update(messages)
+        .set({ content: newContent.trim() })
+        .where(
+          and(
+            eq(messages.id, userMessageId),
+            eq(messages.conversationId, userMsg.conversationId),
+            eq(messages.role, "user"),
+          ),
+        );
+      if (Number(updated.rowsAffected) !== 1) return;
+      await ftsUpsert(userMessageId, userMsg.conversationId, newContent.trim(), tx);
+      requireChatMutation(mutation);
+      questionUpdated = true;
+    });
+    if (!questionUpdated || ctx.signal.aborted) return;
 
     // Build context up to (not including) the assistant message, with updated user content
     const contextMsgs = allMsgs
@@ -1169,6 +1354,8 @@ export async function editUserMessage(
       TAVILY_API_KEY_SETTING,
       TAVILY_ENABLED_SETTING,
     ]);
+    requireChatMutation(mutation);
+    if (ctx.signal.aborted) return;
     const baseSystemPrompt =
       conversation.systemPrompt || settings[GLOBAL_SYSTEM_PROMPT_KEY] || null;
     const classifier = resolvedChannel
@@ -1188,6 +1375,8 @@ export async function editUserMessage(
       forceWebSearch: Boolean(conversation.forceWebSearch),
       classifier,
     });
+    requireChatMutation(mutation);
+    if (ctx.signal.aborted) return;
     const effectiveSystemPrompt = withAppendedSystemPrompt(
       buildEffectiveSystemPrompt(baseSystemPrompt, liveContext),
       options?.appendSystemPrompt,
@@ -1210,8 +1399,11 @@ export async function editUserMessage(
         contextWindow: resolvedChannel?.contextWindow,
         contextMetadata: resolvedChannel?.contextMetadata,
         protocol: resolvedChannel?.channel.protocol,
+        mutation,
       },
     );
+    requireChatMutation(mutation);
+    if (ctx.signal.aborted) return;
 
     if (!resolvedChannel) {
       send({ type: "error", message: "未配置可用的默认渠道/默认模型。" });
@@ -1219,20 +1411,29 @@ export async function editUserMessage(
     }
 
     if (shouldCreateAssistantReply) {
-      await db.insert(messages).values({
-        id: assistantMessageId,
-        conversationId: userMsg.conversationId,
-        role: "assistant",
-        content: "",
-        model: resolvedChannel.modelId,
-        mode: "chat",
-        attachments: null,
-        agentRun: null,
-        liveMetadata: null,
-        citations: null,
-        createdAt: new Date(),
+      let reserved = false;
+      await db.transaction(async (tx) => {
+        if (!(await hasMutationQuestion(mutation, tx))) return;
+        await tx.insert(messages).values({
+          id: assistantMessageId,
+          conversationId: userMsg.conversationId,
+          role: "assistant",
+          content: "",
+          model: resolvedChannel.modelId,
+          mode: "chat",
+          attachments: null,
+          agentRun: null,
+          liveMetadata: null,
+          citations: null,
+          createdAt: new Date(),
+        });
+        mutation.reservedAssistantId = assistantMessageId;
+        requireChatMutation(mutation);
+        reserved = true;
       });
+      if (!reserved) return;
     }
+    if (ctx.signal.aborted || !(await hasMutationQuestion(mutation))) return;
 
     const adapter = createAdapter(
       resolvedChannel.channel.protocol,
@@ -1259,22 +1460,20 @@ export async function editUserMessage(
       send,
     );
 
-    await db
-      .update(messages)
-      .set({
-        content: responseContent,
-        model: resolvedChannel.modelId,
-        liveMetadata: serializeLiveMetadata(liveContext),
-        citations: serializeCitations(liveContext.citations),
-        finishReason: assistantFinishReason(
-          stopped ? "stopped" : streamError ? chatFailureFinishReason(errorCode) : null,
-          null,
-        ),
-        usage: usage ? JSON.stringify(usage) : null,
-        updatedAt: new Date(),
-      })
-      .where(eq(messages.id, assistantMessageId));
-    await ftsUpsert(assistantMessageId, userMsg.conversationId, responseContent);
+    if (!ownsChatMutation(mutation)) return;
+    const applied = await persistMutationReply(mutation, assistantMessageId, {
+      content: responseContent,
+      model: resolvedChannel.modelId,
+      liveMetadata: serializeLiveMetadata(liveContext),
+      citations: serializeCitations(liveContext.citations),
+      finishReason: assistantFinishReason(
+        stopped ? "stopped" : streamError ? chatFailureFinishReason(errorCode) : null,
+        null,
+      ),
+      usage: usage ? JSON.stringify(usage) : null,
+      updatedAt: new Date(),
+    });
+    if (!applied) return;
 
     send(
       streamError
@@ -1294,7 +1493,7 @@ export async function editUserMessage(
             ...(usage ? { usage } : {}),
           },
     );
-  });
+  }, mutation);
 }
 
 export async function regenerateMessage(
@@ -1307,6 +1506,22 @@ export async function regenerateMessage(
     appendSystemPrompt?: string;
   },
 ): Promise<ReadableStream> {
+  const mutation = beginChatMutation(userId, assistantMessageId);
+  try {
+    return await regenerateMessageWithMutation(userId, assistantMessageId, fallback, mutation);
+  } catch (error) {
+    releaseChatMutation(mutation);
+    if (error instanceof ChatMutationSupersededError) return createChatSseStream(async () => {});
+    throw error;
+  }
+}
+
+async function regenerateMessageWithMutation(
+  userId: string,
+  assistantMessageId: string,
+  fallback: Parameters<typeof regenerateMessage>[2],
+  mutation: ChatMutationOwner,
+): Promise<ReadableStream> {
   const [prefetchedAssistantMsg] = await db
     .select()
     .from(messages)
@@ -1317,15 +1532,21 @@ export async function regenerateMessage(
     fallback?.fallbackUserMessageId &&
     fallback.fallbackUserContent
   ) {
-    return editUserMessage(userId, fallback.fallbackUserMessageId, fallback.fallbackUserContent, {
-      appendSystemPrompt: fallback.appendSystemPrompt,
-    });
+    return editUserMessageWithMutation(
+      userId,
+      fallback.fallbackUserMessageId,
+      fallback.fallbackUserContent,
+      {
+        appendSystemPrompt: fallback.appendSystemPrompt,
+      },
+      mutation,
+    );
   }
 
   if (!prefetchedAssistantMsg || prefetchedAssistantMsg.role !== "assistant") {
     return createChatSseStream(async (send) => {
       send({ type: "error", message: "Message not found" });
-    });
+    }, mutation);
   }
   const assistantMsg = prefetchedAssistantMsg;
   const conversation = await getConversationForUser(userId, assistantMsg.conversationId);
@@ -1333,7 +1554,10 @@ export async function regenerateMessage(
   if (assistantMsg.mode === "agent") {
     throw new AgentModeUnsupportedError();
   }
+  mutation.conversationId = conversation.id;
+  mutation.assistantMessageId = assistantMessageId;
   const resolvedChannel = await resolveChatChannelForConversation(userId, conversation);
+  requireChatMutation(mutation);
 
   return createChatSseStream(async (send, ctx) => {
     const allMsgs = await getMessages(assistantMsg.conversationId);
@@ -1347,6 +1571,11 @@ export async function regenerateMessage(
     const baseSystemPrompt =
       conversation.systemPrompt || settings[GLOBAL_SYSTEM_PROMPT_KEY] || null;
     const lastUserMessage = [...contextMsgs].reverse().find((message) => message.role === "user");
+    if (idx < 0 || !lastUserMessage) return;
+    mutation.userMessageId = lastUserMessage.id;
+    bindChatMutation(mutation, lastUserMessage.id, assistantMessageId);
+    requireChatMutation(mutation);
+    if (ctx.signal.aborted) return;
     const classifier = resolvedChannel
       ? (prompt: string) =>
           classifyLiveRouteWithModel({
@@ -1364,6 +1593,8 @@ export async function regenerateMessage(
       forceWebSearch: Boolean(conversation.forceWebSearch),
       classifier,
     });
+    requireChatMutation(mutation);
+    if (ctx.signal.aborted) return;
     const effectiveSystemPrompt = withAppendedSystemPrompt(
       buildEffectiveSystemPrompt(baseSystemPrompt, liveContext),
       fallback?.appendSystemPrompt,
@@ -1386,8 +1617,11 @@ export async function regenerateMessage(
         contextMetadata: resolvedChannel?.contextMetadata,
         protocol: resolvedChannel?.channel.protocol,
         keepPrevious: true,
+        mutation,
       },
     );
+    requireChatMutation(mutation);
+    if (ctx.signal.aborted || !(await hasMutationQuestion(mutation))) return;
 
     if (!resolvedChannel) {
       send({ type: "error", message: "未配置可用的默认渠道/默认模型。" });
@@ -1434,22 +1668,20 @@ export async function regenerateMessage(
       return;
     }
 
-    await db
-      .update(messages)
-      .set({
-        content: responseContent,
-        model: resolvedChannel.modelId,
-        liveMetadata: serializeLiveMetadata(liveContext),
-        citations: serializeCitations(liveContext.citations),
-        finishReason: assistantFinishReason(
-          stopped ? "stopped" : streamError ? chatFailureFinishReason(errorCode) : null,
-          null,
-        ),
-        usage: usage ? JSON.stringify(usage) : null,
-        updatedAt: new Date(),
-      })
-      .where(eq(messages.id, assistantMessageId));
-    await ftsUpsert(assistantMessageId, assistantMsg.conversationId, responseContent);
+    if (!ownsChatMutation(mutation)) return;
+    const applied = await persistMutationReply(mutation, assistantMessageId, {
+      content: responseContent,
+      model: resolvedChannel.modelId,
+      liveMetadata: serializeLiveMetadata(liveContext),
+      citations: serializeCitations(liveContext.citations),
+      finishReason: assistantFinishReason(
+        stopped ? "stopped" : streamError ? chatFailureFinishReason(errorCode) : null,
+        null,
+      ),
+      usage: usage ? JSON.stringify(usage) : null,
+      updatedAt: new Date(),
+    });
+    if (!applied) return;
 
     send(
       streamError
@@ -1469,7 +1701,7 @@ export async function regenerateMessage(
             ...(usage ? { usage } : {}),
           },
     );
-  });
+  }, mutation);
 }
 
 // Sidecar (local) runs never upload attachment files to the server; only their

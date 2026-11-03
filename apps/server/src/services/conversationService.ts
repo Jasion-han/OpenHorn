@@ -15,6 +15,7 @@ import { and, desc, eq, inArray, isNull, ne, notExists, or, sql } from "drizzle-
 import { db } from "../db";
 import { generateId } from "../utils";
 import { removeAttachmentFiles } from "./attachmentService";
+import { invalidateConversationChatMutations } from "./chatMutationOwnership";
 import { ftsDeleteConversation } from "./messageService";
 import { deleteChunksByConversation } from "./ragService";
 
@@ -398,6 +399,7 @@ export async function applyConversationDeletion(
  * file unlink cannot be rolled back, and rag chunk cleanup is best-effort.
  */
 export async function finishConversationDeletion(plan: ConversationDeletionPlan): Promise<void> {
+  invalidateConversationChatMutations(plan.userId, plan.conversationId, plan.messageIds);
   await ftsDeleteConversation(plan.conversationId);
   await removeAttachmentFiles(plan.attachmentFilePaths);
   await deleteChunksByConversation(plan.conversationId).catch(() => {});

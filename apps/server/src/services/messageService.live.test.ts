@@ -304,6 +304,9 @@ test("regenerate falls back to the previous user message when assistant id is mi
 
   mock.module("../db", () => ({
     db: {
+      transaction(callback: (writer: unknown) => Promise<unknown>) {
+        return callback(this);
+      },
       select: () => ({
         from: (table: unknown) => {
           if (table === messageTable) {
@@ -320,6 +323,7 @@ test("regenerate falls back to the previous user message when assistant id is mi
               where: () =>
                 Object.assign(Promise.resolve([userMsg]), {
                   orderBy: async () => [userMsg],
+                  limit: async () => [userMsg],
                 }),
             };
           }
@@ -507,6 +511,9 @@ test("edit user message creates a new assistant reply when the user message is t
 
   mock.module("../db", () => ({
     db: {
+      transaction(callback: (writer: unknown) => Promise<unknown>) {
+        return callback(this);
+      },
       select: () => ({
         from: (table: unknown) => {
           if (table === messageTable) {
@@ -525,6 +532,7 @@ test("edit user message creates a new assistant reply when the user message is t
               where: () =>
                 Object.assign(Promise.resolve([userMsg]), {
                   orderBy: async () => [userMsg],
+                  limit: async () => [userMsg],
                 }),
             };
           }
