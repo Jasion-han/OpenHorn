@@ -1,4 +1,11 @@
 import { finishChatStream } from "./chatStreamError";
+import {
+  disposeResponseReader,
+  readErrorResponseText,
+  readResponseChunk,
+  readResponseText,
+  sniffOpenAIStream,
+} from "./responseLifecycle";
 
 export type ChatContentPart =
   | { type: "text"; text: string }
@@ -99,8 +106,22 @@ function toFiniteNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
-function sleep(ms: number) {
-  return new Promise((r) => setTimeout(r, ms));
+function sleep(ms: number, signal?: AbortSignal) {
+  signal?.throwIfAborted();
+  return new Promise<void>((resolve, reject) => {
+    const finish = () => {
+      signal?.removeEventListener("abort", abort);
+      resolve();
+    };
+    const timer = setTimeout(finish, ms);
+    const abort = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", abort);
+      reject(signal?.reason);
+    };
+    signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted) abort();
+  });
 }
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 45_000;
@@ -133,9 +154,15 @@ async function fetchWithRetry(
   signal?: AbortSignal,
 ): Promise<Response> {
   for (let attempt = 0; attempt <= MAX_RETRY_ATTEMPTS; attempt++) {
+    signal?.throwIfAborted();
     const response = await fetch(url, { ...init, signal });
     if (response.ok) return response;
     if (!shouldRetryStatus(response.status) || attempt === MAX_RETRY_ATTEMPTS) return response;
+    // This response is being discarded; it must not keep a pooled connection
+    // alive after the retry moves on. A stalled cancellation cannot block retry.
+    try {
+      void response.body?.cancel().catch(() => {});
+    } catch {}
 
     let delayMs: number;
     if (response.status === 429) {
@@ -149,7 +176,7 @@ async function fetchWithRetry(
       delayMs = RETRY_BASE_DELAY_MS * 2 ** attempt;
     }
     const jitter = Math.random() * delayMs * 0.25;
-    await sleep(Math.min(delayMs + jitter, RETRY_MAX_DELAY_MS));
+    await sleep(Math.min(delayMs + jitter, RETRY_MAX_DELAY_MS), signal);
   }
   throw new Error("Retry attempts exhausted without a response");
 }
@@ -325,40 +352,77 @@ function rethrowAbortReason(signal: AbortSignal, error: unknown): never {
   throw error instanceof Error ? error : new Error(String(error));
 }
 
-async function readErrorDetail(response: Response): Promise<string> {
-  const contentType = response.headers.get("content-type") || "";
-  const extractJsonErrorMessage = (data: unknown) => {
-    if (!isRecord(data)) return null;
-    const err = data.error;
-    if (isRecord(err) && typeof err.message === "string") return err.message;
-    if (typeof data.message === "string") return data.message;
-    if (typeof data.error === "string") return data.error;
-    if (typeof data.detail === "string") return data.detail;
-    return null;
-  };
+async function readErrorDetail(response: Response, signal?: AbortSignal): Promise<string> {
+  let text: string;
   try {
-    if (contentType.includes("application/json")) {
-      const data = (await response.json().catch(() => null)) as unknown;
-      const msg = extractJsonErrorMessage(data);
-      if (typeof msg === "string" && msg.trim()) return msg.trim().slice(0, 800);
-      return JSON.stringify(data).slice(0, 800);
-    }
-  } catch {
-    // ignore
+    text = await readErrorResponseText(response, signal);
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    return response.statusText || "Request failed";
   }
-  const text = await response.text().catch(() => "");
-  const normalizedText = text.trim();
-  if (normalizedText.startsWith("{") || normalizedText.startsWith("[")) {
+  const normalized = text.trim();
+  if (normalized.startsWith("{") || normalized.startsWith("[")) {
     try {
-      const parsed = JSON.parse(normalizedText) as unknown;
-      const msg = extractJsonErrorMessage(parsed);
-      if (typeof msg === "string" && msg.trim()) return msg.trim().slice(0, 800);
-      return JSON.stringify(parsed).slice(0, 800);
+      const data: unknown = JSON.parse(normalized);
+      if (isRecord(data)) {
+        const error = data.error;
+        const message =
+          isRecord(error) && typeof error.message === "string"
+            ? error.message
+            : typeof data.message === "string"
+              ? data.message
+              : typeof error === "string"
+                ? error
+                : typeof data.detail === "string"
+                  ? data.detail
+                  : null;
+        if (message?.trim()) return message.trim().slice(0, 800);
+      }
+      return JSON.stringify(data).slice(0, 800);
     } catch {
-      // ignore invalid JSON-like text
+      // An oversized diagnostic may end mid-JSON; retain only its bounded prefix.
     }
   }
-  return (text || response.statusText || "Request failed").toString().slice(0, 800);
+  return (text || response.statusText || "Request failed").slice(0, 800);
+}
+
+type ResponseTimeout = { signal: AbortSignal; cleanup: () => void };
+class ProviderResponseError extends Error {
+  constructor(
+    readonly status: number,
+    readonly detail: string,
+  ) {
+    super(formatProviderApiError(status, detail));
+  }
+}
+
+async function rejectProviderResponse(
+  response: Response,
+  timeout: ResponseTimeout,
+): Promise<never> {
+  try {
+    timeout.signal.throwIfAborted();
+    throw new ProviderResponseError(
+      response.status,
+      await readErrorDetail(response, timeout.signal),
+    );
+  } catch (error) {
+    rethrowAbortReason(timeout.signal, error);
+  } finally {
+    timeout.cleanup();
+  }
+}
+
+async function consumeJsonResponse(response: Response, timeout: ResponseTimeout): Promise<unknown> {
+  try {
+    timeout.signal.throwIfAborted();
+    if (!response.ok) await rejectProviderResponse(response, timeout);
+    return JSON.parse(await readResponseText(response, timeout.signal));
+  } catch (error) {
+    rethrowAbortReason(timeout.signal, error);
+  } finally {
+    timeout.cleanup();
+  }
 }
 
 function formatProviderApiError(status: number | undefined, detail: string) {
@@ -597,18 +661,7 @@ export class OpenAIAdapter implements ProviderAdapter {
       timeout.cleanup();
       rethrowAbortReason(timeout.signal, error);
     }
-    timeout.cleanup();
-
-    if (timeout.signal.aborted && timeout.signal.reason instanceof Error) {
-      throw timeout.signal.reason;
-    }
-
-    if (!response.ok) {
-      const detail = await readErrorDetail(response);
-      throw new Error(formatProviderApiError(response.status, detail));
-    }
-
-    const data = (await response.json()) as unknown;
+    const data = await consumeJsonResponse(response, timeout);
     if (!isRecord(data)) {
       throw new Error(formatProviderApiError(undefined, "Invalid JSON response"));
     }
@@ -698,9 +751,7 @@ export class OpenAIAdapter implements ProviderAdapter {
     }
 
     if (!response.ok) {
-      timeout.cleanup();
-      const detail = await readErrorDetail(response);
-      throw new Error(formatProviderApiError(response.status, detail));
+      await rejectProviderResponse(response, timeout);
     }
 
     const reader = response.body?.getReader();
@@ -711,21 +762,6 @@ export class OpenAIAdapter implements ProviderAdapter {
 
     const decoder = new TextDecoder();
     let buffer = "";
-
-    const looksLikeSsePayload = (text: string) => {
-      for (const rawLine of text.split(/\r?\n/)) {
-        const line = rawLine.trim();
-        if (!line) continue;
-        return (
-          line.startsWith(":") ||
-          line.startsWith("data:") ||
-          line.startsWith("event:") ||
-          line.startsWith("id:") ||
-          line.startsWith("retry:")
-        );
-      }
-      return false;
-    };
 
     const consumeSseBuffer = (flush = false) => {
       const working = flush && buffer.length > 0 ? `${buffer}\n` : buffer;
@@ -751,22 +787,16 @@ export class OpenAIAdapter implements ProviderAdapter {
     // Some proxies incorrectly label streaming responses as application/json.
     // Sniff the first chunk: if it looks like SSE ("data:" lines), parse as stream.
     try {
-      const firstRead = await reader.read();
-      if (firstRead.done) return streamUsage;
-
-      timeout.markChunk();
-      const firstChunkText = decoder.decode(firstRead.value, { stream: true });
-      buffer += firstChunkText;
-
-      const looksLikeSse = looksLikeSsePayload(buffer);
-
-      if (!looksLikeSse) {
+      const initial = await sniffOpenAIStream(reader, decoder, timeout.signal, timeout.markChunk);
+      buffer = initial.buffer;
+      if (!initial.sse) {
         while (true) {
-          const { done, value } = await reader.read();
+          const { done, value } = await readResponseChunk(reader, timeout.signal);
           if (done) break;
           timeout.markChunk();
           buffer += decoder.decode(value, { stream: true });
         }
+        buffer += decoder.decode();
         const raw = buffer.trim();
         if (!raw) return streamUsage;
         let data: unknown;
@@ -839,8 +869,9 @@ export class OpenAIAdapter implements ProviderAdapter {
         }
         if (sseDone) return finishChatStream(finishReason, streamUsage, options.signal);
 
-        const { done: streamDone, value } = await reader.read();
+        const { done: streamDone, value } = await readResponseChunk(reader, timeout.signal);
         if (streamDone) {
+          buffer += decoder.decode();
           const remaining = consumeSseBuffer(true);
           for (const data of remaining.payloads) {
             yield* emitPayload(data);
@@ -854,6 +885,7 @@ export class OpenAIAdapter implements ProviderAdapter {
     } catch (error) {
       rethrowAbortReason(timeout.signal, error);
     } finally {
+      disposeResponseReader(reader);
       timeout.cleanup();
     }
     return finishChatStream(finishReason, streamUsage, options.signal);
@@ -939,18 +971,7 @@ export class OpenAIAdapter implements ProviderAdapter {
       timeout.cleanup();
       rethrowAbortReason(timeout.signal, error);
     }
-    timeout.cleanup();
-
-    if (timeout.signal.aborted && timeout.signal.reason instanceof Error) {
-      throw timeout.signal.reason;
-    }
-
-    if (!response.ok) {
-      const detail = await readErrorDetail(response);
-      throw new Error(formatProviderApiError(response.status, detail));
-    }
-
-    const data = (await response.json()) as unknown;
+    const data = await consumeJsonResponse(response, timeout);
     return parseOpenAIToolCallingResult(data, options.tools);
   }
 
@@ -1046,9 +1067,7 @@ export class OpenAIAdapter implements ProviderAdapter {
     }
 
     if (!response.ok) {
-      timeout.cleanup();
-      const detail = await readErrorDetail(response);
-      throw new Error(formatProviderApiError(response.status, detail));
+      await rejectProviderResponse(response, timeout);
     }
 
     const reader = response.body?.getReader();
@@ -1156,21 +1175,6 @@ export class OpenAIAdapter implements ProviderAdapter {
       return { text, toolCalls, finishReason };
     };
 
-    const looksLikeSsePayload = (input: string) => {
-      for (const rawLine of input.split(/\r?\n/)) {
-        const line = rawLine.trim();
-        if (!line) continue;
-        return (
-          line.startsWith(":") ||
-          line.startsWith("data:") ||
-          line.startsWith("event:") ||
-          line.startsWith("id:") ||
-          line.startsWith("retry:")
-        );
-      }
-      return false;
-    };
-
     const consumeSseBuffer = (flush = false) => {
       const working = flush && buffer.length > 0 ? `${buffer}\n` : buffer;
       const lines = working.split("\n");
@@ -1193,22 +1197,16 @@ export class OpenAIAdapter implements ProviderAdapter {
     };
 
     try {
-      const firstRead = await reader.read();
-      if (firstRead.done) {
-        yield { type: "done", result: buildResult() };
-        return;
-      }
-
-      timeout.markChunk();
-      buffer += decoder.decode(firstRead.value, { stream: true });
-
-      if (!looksLikeSsePayload(buffer)) {
+      const initial = await sniffOpenAIStream(reader, decoder, timeout.signal, timeout.markChunk);
+      buffer = initial.buffer;
+      if (!initial.sse) {
         while (true) {
-          const { done, value } = await reader.read();
+          const { done, value } = await readResponseChunk(reader, timeout.signal);
           if (done) break;
           timeout.markChunk();
           buffer += decoder.decode(value, { stream: true });
         }
+        buffer += decoder.decode();
         const raw = buffer.trim();
         if (!raw) {
           yield { type: "done", result: buildResult() };
@@ -1233,8 +1231,9 @@ export class OpenAIAdapter implements ProviderAdapter {
           return;
         }
 
-        const next = await reader.read();
+        const next = await readResponseChunk(reader, timeout.signal);
         if (next.done) {
+          buffer += decoder.decode();
           const remaining = consumeSseBuffer(true);
           for (const payload of remaining.payloads) {
             for (const event of emitParsedPayload(payload)) {
@@ -1250,6 +1249,7 @@ export class OpenAIAdapter implements ProviderAdapter {
     } catch (error) {
       rethrowAbortReason(timeout.signal, error);
     } finally {
+      disposeResponseReader(reader);
       timeout.cleanup();
     }
   }
@@ -1338,18 +1338,7 @@ export class AnthropicAdapter implements ProviderAdapter {
       timeout.cleanup();
       rethrowAbortReason(timeout.signal, error);
     }
-    timeout.cleanup();
-
-    if (timeout.signal.aborted && timeout.signal.reason instanceof Error) {
-      throw timeout.signal.reason;
-    }
-
-    if (!response.ok) {
-      const detail = await readErrorDetail(response);
-      throw new Error(formatProviderApiError(response.status, detail));
-    }
-
-    const data = (await response.json()) as unknown;
+    const data = await consumeJsonResponse(response, timeout);
     if (!isRecord(data)) {
       throw new Error("Provider API error: Invalid JSON response");
     }
@@ -1448,9 +1437,7 @@ export class AnthropicAdapter implements ProviderAdapter {
     }
 
     if (!response.ok) {
-      timeout.cleanup();
-      const detail = await readErrorDetail(response);
-      throw new Error(formatProviderApiError(response.status, detail));
+      await rejectProviderResponse(response, timeout);
     }
 
     const reader = response.body?.getReader();
@@ -1508,7 +1495,7 @@ export class AnthropicAdapter implements ProviderAdapter {
 
     try {
       while (true) {
-        const { done, value } = await reader.read();
+        const { done, value } = await readResponseChunk(reader, timeout.signal);
         if (done) break;
 
         timeout.markChunk();
@@ -1530,6 +1517,7 @@ export class AnthropicAdapter implements ProviderAdapter {
     } catch (error) {
       rethrowAbortReason(timeout.signal, error);
     } finally {
+      disposeResponseReader(reader);
       timeout.cleanup();
     }
     return finishChatStream(
@@ -1641,28 +1629,20 @@ export class AnthropicAdapter implements ProviderAdapter {
       timeout.cleanup();
       rethrowAbortReason(timeout.signal, error);
     }
-    timeout.cleanup();
-
-    if (timeout.signal.aborted && timeout.signal.reason instanceof Error) {
-      throw timeout.signal.reason;
-    }
-
-    if (!response.ok) {
-      const detail = await readErrorDetail(response);
+    let data: unknown;
+    try {
+      data = await consumeJsonResponse(response, timeout);
+    } catch (error) {
       if (
+        error instanceof ProviderResponseError &&
         options.toolChoice &&
         options.toolChoice !== "auto" &&
-        shouldRetryWithoutForcedToolChoice(detail)
+        shouldRetryWithoutForcedToolChoice(error.detail)
       ) {
-        return this.runToolCallingTurn({
-          ...options,
-          toolChoice: "auto",
-        });
+        return this.runToolCallingTurn({ ...options, toolChoice: "auto" });
       }
-      throw new Error(formatProviderApiError(response.status, detail));
+      throw error;
     }
-
-    const data = (await response.json()) as unknown;
     if (!isRecord(data)) {
       throw new Error("Provider API error: Invalid JSON response");
     }
@@ -1875,14 +1855,7 @@ export class GoogleAdapter implements ToolCallingAdapter {
       timeout.cleanup();
       rethrowAbortReason(timeout.signal, error);
     }
-    timeout.cleanup();
-
-    if (!response.ok) {
-      const detail = await readErrorDetail(response);
-      throw new Error(formatProviderApiError(response.status, detail));
-    }
-
-    const data = (await response.json()) as unknown;
+    const data = await consumeJsonResponse(response, timeout);
     if (!isRecord(data)) {
       throw new Error("Gemini API error: Invalid JSON response");
     }
@@ -1963,9 +1936,7 @@ export class GoogleAdapter implements ToolCallingAdapter {
     }
 
     if (!response.ok) {
-      timeout.cleanup();
-      const detail = await readErrorDetail(response);
-      throw new Error(formatProviderApiError(response.status, detail));
+      await rejectProviderResponse(response, timeout);
     }
 
     const reader = response.body?.getReader();
@@ -2027,7 +1998,7 @@ export class GoogleAdapter implements ToolCallingAdapter {
 
     try {
       while (true) {
-        const { done, value } = await reader.read();
+        const { done, value } = await readResponseChunk(reader, timeout.signal);
         if (done) break;
 
         timeout.markChunk();
@@ -2049,6 +2020,7 @@ export class GoogleAdapter implements ToolCallingAdapter {
     } catch (error) {
       rethrowAbortReason(timeout.signal, error);
     } finally {
+      disposeResponseReader(reader);
       timeout.cleanup();
     }
 
@@ -2108,14 +2080,7 @@ export class GoogleAdapter implements ToolCallingAdapter {
       timeout.cleanup();
       rethrowAbortReason(timeout.signal, error);
     }
-    timeout.cleanup();
-
-    if (!response.ok) {
-      const detail = await readErrorDetail(response);
-      throw new Error(formatProviderApiError(response.status, detail));
-    }
-
-    const data = (await response.json()) as unknown;
+    const data = await consumeJsonResponse(response, timeout);
     if (!isRecord(data)) {
       throw new Error("Gemini API error: Invalid JSON response");
     }
