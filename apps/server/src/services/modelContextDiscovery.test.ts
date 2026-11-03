@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import {
   CONTEXT_METADATA_TTL_MS,
   fetchModelDirectory,
+  invalidateOpenRouterModelContexts,
   loadContextCatalog,
   loadOpenRouterModelContext,
   matchContextCatalog,
@@ -336,6 +337,119 @@ test("selected OpenRouter endpoint limits are cached and conservative across het
       expect(metadata?.maxOutputTokens).toBe(65_536);
       await loadOpenRouterModelContext("openai/gpt-6-astra");
       expect(calls).toBe(1);
+    },
+  );
+});
+
+test("selected endpoint aggregation keeps independent input-only limits separate from real totals", async () => {
+  for (const includeTotal of [false, true]) {
+    await withFetch(
+      () =>
+        Response.json({
+          data: {
+            endpoints: [
+              { max_prompt_tokens: 64_000, max_completion_tokens: 1024 },
+              ...(includeTotal
+                ? [{ context_length: 128_000, max_prompt_tokens: 96_000 }]
+                : [{ max_prompt_tokens: 96_000 }]),
+            ],
+          },
+        }),
+      async () => {
+        const metadata = await loadOpenRouterModelContext("vendor/input-only");
+        expect(metadata?.contextWindow).toBe(includeTotal ? 128_000 : 64_000);
+        expect(metadata?.maxInputTokens).toBe(64_000);
+        expect(metadata?.maxOutputTokens).toBe(1024);
+        expect(metadata?.inputLimitOnly).toBe(includeTotal ? undefined : true);
+      },
+    );
+  }
+});
+
+test("output-only endpoint reports constrain output without establishing a total window", async () => {
+  for (const total of [128_000, null]) {
+    await withFetch(
+      () =>
+        Response.json({
+          data: {
+            endpoints: [
+              ...(total ? [{ context_length: total, max_completion_tokens: 8192 }] : []),
+              { max_completion_tokens: 1024 },
+              { max_completion_tokens: "1" },
+            ],
+          },
+        }),
+      async () => {
+        const metadata = await loadOpenRouterModelContext("vendor/output-only");
+        if (total) {
+          expect(metadata?.contextWindow).toBe(total);
+          expect(metadata?.maxOutputTokens).toBe(1024);
+        } else {
+          expect(metadata).toBe(null);
+        }
+      },
+    );
+  }
+});
+
+test("explicit endpoint refresh bypasses success and failure caches while remaining single-flight", async () => {
+  let calls = 0;
+  let context = 128_000;
+  let fail = false;
+  await withFetch(
+    () => {
+      calls++;
+      return fail
+        ? new Response("unavailable", { status: 503 })
+        : Response.json({ data: { endpoints: [{ context_length: context }] } });
+    },
+    async () => {
+      expect((await loadOpenRouterModelContext("vendor/changing"))?.contextWindow).toBe(128_000);
+      context = 64_000;
+      const refreshed = await Promise.all([
+        loadOpenRouterModelContext("vendor/changing", { force: true }),
+        loadOpenRouterModelContext("vendor/changing", { force: true }),
+      ]);
+      expect(refreshed.map((metadata) => metadata?.contextWindow)).toEqual([64_000, 64_000]);
+      expect(calls).toBe(2);
+      await loadOpenRouterModelContext("vendor/changing");
+      expect(calls).toBe(2);
+      fail = true;
+      expect(
+        (await loadOpenRouterModelContext("vendor/changing", { force: true }))?.contextWindow,
+      ).toBe(64_000);
+      expect(calls).toBe(3);
+      await loadOpenRouterModelContext("vendor/changing");
+      expect(calls).toBe(3);
+      fail = false;
+      context = 32_000;
+      expect(
+        (await loadOpenRouterModelContext("vendor/changing", { force: true }))?.contextWindow,
+      ).toBe(32_000);
+      expect(calls).toBe(4);
+    },
+  );
+});
+
+test("endpoint invalidation expires only named models and retains last-good limits after failure", async () => {
+  const calls = new Map<string, number>();
+  let fail = false;
+  await withFetch(
+    (url) => {
+      calls.set(url.pathname, (calls.get(url.pathname) ?? 0) + 1);
+      return fail
+        ? new Response("unavailable", { status: 503 })
+        : Response.json({ data: { endpoints: [{ context_length: 128_000 }] } });
+    },
+    async () => {
+      await loadOpenRouterModelContext("vendor/refreshed");
+      await loadOpenRouterModelContext("vendor/unrelated");
+      invalidateOpenRouterModelContexts(["vendor/refreshed", "vendor/not-cached"]);
+      fail = true;
+      expect((await loadOpenRouterModelContext("vendor/refreshed"))?.contextWindow).toBe(128_000);
+      expect((await loadOpenRouterModelContext("vendor/unrelated"))?.contextWindow).toBe(128_000);
+      await loadOpenRouterModelContext("vendor/refreshed");
+      expect([...calls.values()]).toEqual([2, 1]);
     },
   );
 });

@@ -9,6 +9,7 @@ import { isChannelAvailable } from "./circuitBreaker";
 import {
   CONTEXT_METADATA_TTL_MS,
   fetchModelDirectory,
+  invalidateOpenRouterModelContexts,
   loadContextCatalog,
   loadOpenRouterModelContext,
   matchContextCatalog,
@@ -445,13 +446,20 @@ function chooseRefreshedMetadata(
   previous: ModelContextMetadata | null | undefined,
   channel: ModelContextMetadata | null | undefined,
   catalog: ModelContextMetadata | null | undefined,
+  preserveIndependentCeilings = false,
 ): ModelContextMetadata | null {
   const selected =
     channel ?? (previous?.source === "channel" ? previous : (catalog ?? previous ?? null));
   if (!selected || selected.source !== "channel") return selected;
   const earlier = previous?.source === "channel" ? previous : undefined;
-  const input = selected.maxInputTokens ?? earlier?.maxInputTokens ?? catalog?.maxInputTokens;
-  const output = selected.maxOutputTokens ?? earlier?.maxOutputTokens ?? catalog?.maxOutputTokens;
+  let input = selected.maxInputTokens ?? earlier?.maxInputTokens ?? catalog?.maxInputTokens;
+  let output = selected.maxOutputTokens ?? earlier?.maxOutputTokens ?? catalog?.maxOutputTokens;
+  if (preserveIndependentCeilings && earlier) {
+    if (earlier.maxInputTokens !== undefined)
+      input = Math.min(input ?? earlier.maxInputTokens, earlier.maxInputTokens);
+    if (earlier.maxOutputTokens !== undefined)
+      output = Math.min(output ?? earlier.maxOutputTokens, earlier.maxOutputTokens);
+  }
   // Missing fields do not prove an existing endpoint limit disappeared.
   return {
     ...selected,
@@ -465,13 +473,26 @@ function mergeEndpointMetadata(
   detail: ModelContextMetadata | null,
 ): ModelContextMetadata | null {
   if (!listed || !detail) return detail ?? listed ?? null;
-  const minLimit = (a?: number, b?: number) =>
-    a === undefined ? b : b === undefined ? a : Math.min(a, b);
+  const reports = [listed, detail];
+  const smallest = (values: Array<number | undefined>) => {
+    const limits = values.filter((value): value is number => value !== undefined);
+    return limits.length ? Math.min(...limits) : undefined;
+  };
+  const total = smallest(
+    reports.filter((value) => !value.inputLimitOnly).map((value) => value.contextWindow),
+  );
+  const input = smallest(
+    reports.flatMap((value) => [
+      value.maxInputTokens,
+      value.inputLimitOnly ? value.contextWindow : undefined,
+    ]),
+  );
   return normalizeModelContextMetadata({
-    contextWindow: Math.min(listed.contextWindow, detail.contextWindow),
-    maxInputTokens: minLimit(listed.maxInputTokens, detail.maxInputTokens),
-    maxOutputTokens: minLimit(listed.maxOutputTokens, detail.maxOutputTokens),
-    fetchedAt: detail.fetchedAt,
+    contextWindow: total ?? input,
+    maxInputTokens: input,
+    maxOutputTokens: smallest(reports.map((value) => value.maxOutputTokens)),
+    ...(!total ? { inputLimitOnly: true } : {}),
+    fetchedAt: Math.max(listed.fetchedAt, detail.fetchedAt),
     source: "channel",
   });
 }
@@ -514,6 +535,12 @@ export async function refreshChannelContextCapabilities(
   const row = await getOwnedChannelRow(userId, channelId);
   const initialModels = await listChannelModels(userId, channelId);
   const fingerprint = contextFingerprint(row);
+  if (options.force && isOpenRouterChannel(row)) {
+    invalidateOpenRouterModelContexts([
+      ...initialModels.map((model) => model.modelId),
+      ...(options.selectedModelId ? [options.selectedModelId] : []),
+    ]);
+  }
   const previousState = contextRefreshStates.get(channelId);
   const state =
     previousState?.fingerprint === fingerprint ? previousState : { fingerprint, nextAttempt: 0 };
@@ -552,7 +579,7 @@ export async function refreshChannelContextCapabilities(
           );
     const detailPromise =
       options.selectedModelId && isOpenRouterChannel(row)
-        ? loadOpenRouterModelContext(options.selectedModelId)
+        ? loadOpenRouterModelContext(options.selectedModelId, { force: options.force })
         : Promise.resolve(null);
     const [directory, catalog, detail] = await Promise.all([
       directoryPromise,
@@ -569,7 +596,6 @@ export async function refreshChannelContextCapabilities(
         error: "Channel changed during capability refresh",
       };
     }
-    const freshModels = await listChannelModels(userId, channelId);
     const found = new Map<string, ModelContextMetadata | null>(
       (directory ?? []).map((model) => [model.modelId, model.contextMetadata]),
     );
@@ -583,7 +609,17 @@ export async function refreshChannelContextCapabilities(
         obsolete = true;
         return;
       }
-      for (const model of freshModels) {
+      // Re-read after acquiring the write transaction: another metadata refresh
+      // may have committed stricter limits since the network response arrived.
+      const lockedModels = await tx
+        .select()
+        .from(channelModels)
+        .where(eq(channelModels.channelId, channelId));
+      for (const stored of lockedModels) {
+        const model = {
+          ...stored,
+          contextMetadata: parseStoredContextMetadata(stored.contextMetadata),
+        };
         const own =
           model.modelId === options.selectedModelId && detail
             ? mergeEndpointMetadata(
@@ -591,6 +627,7 @@ export async function refreshChannelContextCapabilities(
                   model.contextMetadata,
                   found.get(model.modelId),
                   matchContextCatalog(catalog, model.modelId, row.provider),
+                  publicOpenRouter,
                 ),
                 detail,
               )
@@ -599,6 +636,7 @@ export async function refreshChannelContextCapabilities(
           model.contextMetadata,
           own,
           matchContextCatalog(catalog, model.modelId, row.provider),
+          publicOpenRouter,
         );
         if (!next || JSON.stringify(next) === JSON.stringify(model.contextMetadata)) continue;
         await tx
@@ -658,72 +696,79 @@ async function hydrateResolvedContext(
   scope: ChannelRow,
 ): Promise<ResolvedChannel> {
   try {
-    let metadata = resolved.contextMetadata;
-    let router = false;
-    try {
-      router = new URL(resolved.channel.baseUrl ?? "").origin === "https://openrouter.ai";
-    } catch {
-      /* unknown/local channel */
-    }
-    const initialAge = metadata ? Date.now() - metadata.fetchedAt : -1;
-    const initiallyFresh = initialAge >= 0 && initialAge < CONTEXT_METADATA_TTL_MS;
-    const refreshState = contextRefreshStates.get(resolved.channel.id);
-    const channelWarm =
-      refreshState?.fingerprint === contextFingerprint(scope) &&
-      (refreshState.nextAttempt > Date.now() || Boolean(refreshState.pending));
-    // An earlier whole-channel refresh may not list every retained alias. A
-    // selected alias still gets its own cached detail lookup; cold discovery
-    // continues to start directory/catalog/detail together in refresh below.
-    if (router && (initiallyFresh || channelWarm) && !metadata?.maxInputTokens) {
-      const detail = await loadOpenRouterModelContext(resolved.modelId);
-      if (detail) {
-        const next = mergeEndpointMetadata(metadata, detail);
-        let applied = false;
-        await db.transaction(async (tx) => {
-          const row = (
-            await tx
-              .select()
-              .from(channels)
-              .where(
-                and(
-                  eq(channels.id, resolved.channel.id),
-                  eq(channels.userId, resolved.channel.userId),
-                ),
-              )
-              .limit(1)
-          )[0];
-          if (!row || contextFingerprint(row) !== contextFingerprint(scope)) return;
-          const result = await tx
-            .update(channelModels)
-            .set({ contextMetadata: JSON.stringify(next) })
-            .where(
-              and(
-                eq(channelModels.channelId, resolved.channel.id),
-                eq(channelModels.modelId, resolved.modelId),
-              ),
-            );
-          applied = Number(result.rowsAffected) > 0;
-        });
-        if (!applied) return resolved;
-        metadata = next;
-        resolved = { ...resolved, contextMetadata: metadata };
-      }
-    }
-    const age = metadata ? Date.now() - metadata.fetchedAt : -1;
-    if (age >= 0 && age < CONTEXT_METADATA_TTL_MS) return resolved;
-    const result = await refreshChannelContextCapabilities(
-      resolved.channel.userId,
-      resolved.channel.id,
-      { selectedModelId: resolved.modelId },
-    );
-    const latestScope = await getOwnedChannelRow(resolved.channel.userId, resolved.channel.id);
-    if (contextFingerprint(latestScope) !== contextFingerprint(scope)) return resolved;
-    const model = result.models.find((item) => item.modelId === resolved.modelId);
-    return model
-      ? {
+    const initialAge = resolved.contextMetadata
+      ? Date.now() - resolved.contextMetadata.fetchedAt
+      : -1;
+    if (initialAge < 0 || initialAge >= CONTEXT_METADATA_TTL_MS) {
+      const result = await refreshChannelContextCapabilities(
+        resolved.channel.userId,
+        resolved.channel.id,
+        { selectedModelId: resolved.modelId },
+      );
+      const latestScope = await getOwnedChannelRow(resolved.channel.userId, resolved.channel.id);
+      if (contextFingerprint(latestScope) !== contextFingerprint(scope)) return resolved;
+      const model = result.models.find((item) => item.modelId === resolved.modelId);
+      if (model) {
+        resolved = {
           ...resolved,
           contextMetadata: model.contextMetadata ?? null,
           channel: { ...resolved.channel, models: result.models },
+        };
+      }
+    }
+    if (!isOpenRouterChannel(scope)) return resolved;
+    // Input ceilings can originate in the directory/catalog. Only this model's
+    // endpoint cache knows if its routing limits were checked. This also handles
+    // a cold refresh joining another model's in-flight whole-channel refresh.
+    const detail = await loadOpenRouterModelContext(resolved.modelId);
+    if (!detail) return resolved;
+    const projected = mergeEndpointMetadata(resolved.contextMetadata, detail);
+    if (JSON.stringify(projected) === JSON.stringify(resolved.contextMetadata)) return resolved;
+    let applied: ModelContextMetadata | null = null;
+    await db.transaction(async (tx) => {
+      const row = (
+        await tx
+          .select()
+          .from(channels)
+          .where(
+            and(eq(channels.id, resolved.channel.id), eq(channels.userId, resolved.channel.userId)),
+          )
+          .limit(1)
+      )[0];
+      if (!row || contextFingerprint(row) !== contextFingerprint(scope)) return;
+      const model = (
+        await tx
+          .select()
+          .from(channelModels)
+          .where(
+            and(
+              eq(channelModels.channelId, resolved.channel.id),
+              eq(channelModels.modelId, resolved.modelId),
+            ),
+          )
+          .limit(1)
+      )[0];
+      if (!model) return;
+      const current = parseStoredContextMetadata(model.contextMetadata);
+      const next = mergeEndpointMetadata(current, detail);
+      if (!next) return;
+      applied = next;
+      if (JSON.stringify(current) === JSON.stringify(next)) return;
+      await tx
+        .update(channelModels)
+        .set({ contextMetadata: JSON.stringify(next) })
+        .where(eq(channelModels.id, model.id));
+    });
+    return applied
+      ? {
+          ...resolved,
+          contextMetadata: applied,
+          channel: {
+            ...resolved.channel,
+            models: resolved.channel.models.map((model) =>
+              model.modelId === resolved.modelId ? { ...model, contextMetadata: applied } : model,
+            ),
+          },
         }
       : resolved;
   } catch {
@@ -1296,15 +1341,24 @@ export async function fetchChannelModels(
         throw new Error("Channel changed during model synchronization");
       }
 
+      const currentMetadata = new Map(
+        (
+          await tx
+            .select({ id: channelModels.id, contextMetadata: channelModels.contextMetadata })
+            .from(channelModels)
+            .where(eq(channelModels.channelId, channelId))
+        ).map((model) => [model.id, parseStoredContextMetadata(model.contextMetadata)]),
+      );
       if (removedIds.length > 0) {
         await tx.delete(channelModels).where(inArray(channelModels.id, removedIds));
       }
 
       for (const { model, existing } of modelsToUpdate) {
         const metadata = chooseRefreshedMetadata(
-          existing.contextMetadata,
+          currentMetadata.get(existing.id),
           model.contextMetadata,
           matchContextCatalog(catalog, model.modelId, channel.provider),
+          isOpenRouterChannel(channel),
         );
         await tx
           .update(channelModels)

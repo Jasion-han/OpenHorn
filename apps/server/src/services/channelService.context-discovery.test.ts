@@ -916,3 +916,366 @@ test("a warm OpenRouter channel still discovers a selected unlisted alias and ba
     });
   }
 });
+
+test("warm OpenRouter selection verifies endpoint limits even when directory or catalog reports input", async () => {
+  for (const inputSource of ["directory", "catalog"] as const) {
+    await fixture(async ({ userId, channelId }) => {
+      await db
+        .update(channels)
+        .set({ baseUrl: "https://openrouter.ai/api/v1" })
+        .where(eq(channels.id, channelId));
+      let details = 0;
+      await withFetch(
+        (url) => {
+          if (url.hostname === "models.dev")
+            return Response.json(
+              inputSource === "catalog"
+                ? {
+                    "vendor/alias-limit": {
+                      id: "alias-limit",
+                      limit: { context: 128000, input: 100000, output: 4096 },
+                    },
+                  }
+                : {},
+            );
+          if (url.pathname.endsWith("/endpoints")) {
+            details++;
+            return Response.json({
+              data: {
+                endpoints: [
+                  { context_length: 128000, max_prompt_tokens: 32768, max_completion_tokens: 1024 },
+                ],
+              },
+            });
+          }
+          return Response.json({
+            data: [
+              {
+                id: "vendor/alias-limit",
+                context_length: 128000,
+                ...(inputSource === "directory"
+                  ? { max_input_tokens: 100000, max_output_tokens: 4096 }
+                  : {}),
+              },
+            ],
+          });
+        },
+        async () => {
+          await refreshChannelContextCapabilities(userId, channelId, { force: true });
+          const selected = await getResolvedChannelById(userId, channelId, "vendor/alias-limit");
+          expect(selected?.contextMetadata?.maxInputTokens).toBe(32768);
+          expect(selected?.contextMetadata?.maxOutputTokens).toBe(1024);
+          expect(
+            resolveContextPolicy({ model: "vendor/alias-limit", ...selected }).maxInputTokens,
+          ).toBe(32768);
+          expect(
+            (await listChannelModels(userId, channelId)).find(
+              (model) => model.modelId === "vendor/alias-limit",
+            )?.contextMetadata,
+          ).toEqual(selected?.contextMetadata);
+          await getResolvedChannelById(userId, channelId, "vendor/alias-limit");
+          expect(details).toBe(1);
+        },
+      );
+    });
+  }
+});
+
+test("explicit channel refresh invalidates selected endpoint cache without scanning the roster", async () => {
+  await fixture(async ({ userId, channelId }) => {
+    await db
+      .update(channels)
+      .set({ baseUrl: "https://openrouter.ai/api/v1" })
+      .where(eq(channels.id, channelId));
+    let details = 0;
+    let input = 32768;
+    await withFetch(
+      (url) => {
+        if (url.hostname === "models.dev") return Response.json({});
+        if (url.pathname.endsWith("/endpoints")) {
+          details++;
+          return Response.json({
+            data: { endpoints: [{ context_length: 128000, max_prompt_tokens: input }] },
+          });
+        }
+        return Response.json({
+          data: [
+            {
+              id: "vendor/alias-limit",
+              context_length: 128000,
+              max_input_tokens: 100000,
+              max_output_tokens: 4096,
+            },
+          ],
+        });
+      },
+      async () => {
+        expect(
+          (await getResolvedChannelById(userId, channelId, "vendor/alias-limit"))?.contextMetadata
+            ?.maxInputTokens,
+        ).toBe(32768);
+        expect(details).toBe(1);
+        input = 16000;
+        const refreshed = await refreshChannelContextCapabilities(userId, channelId, {
+          force: true,
+        });
+        expect(details).toBe(1);
+        expect(
+          refreshed.models.find((model) => model.modelId === "vendor/alias-limit")?.contextMetadata
+            ?.maxInputTokens,
+        ).toBe(32768);
+        const selected = await getResolvedChannelById(userId, channelId, "vendor/alias-limit");
+        expect(selected?.contextMetadata?.maxInputTokens).toBe(16000);
+        expect(details).toBe(2);
+        const repeated = await getResolvedChannelById(userId, channelId, "vendor/alias-limit");
+        expect(repeated?.contextMetadata).toEqual(selected?.contextMetadata);
+        expect(details).toBe(2);
+      },
+    );
+  });
+});
+
+test("delayed endpoint enrichment merges the current model row instead of overwriting stricter metadata", async () => {
+  await fixture(async ({ userId, channelId }) => {
+    await db
+      .update(channels)
+      .set({ baseUrl: "https://openrouter.ai/api/v1" })
+      .where(eq(channels.id, channelId));
+    let release!: (response: Response) => void;
+    let started!: () => void;
+    const waiting = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const response = new Promise<Response>((resolve) => {
+      release = resolve;
+    });
+    let directoryContext = 128000;
+    await withFetch(
+      (url) => {
+        if (url.hostname === "models.dev") return Response.json({});
+        if (url.pathname.endsWith("/endpoints")) {
+          started();
+          return response;
+        }
+        return Response.json({
+          data: [
+            {
+              id: "vendor/alias-limit",
+              context_length: directoryContext,
+              ...(directoryContext === 65536 ? { max_output_tokens: 512 } : {}),
+            },
+          ],
+        });
+      },
+      async () => {
+        await refreshChannelContextCapabilities(userId, channelId, { force: true });
+        const selecting = getResolvedChannelById(userId, channelId, "vendor/alias-limit");
+        await waiting;
+        directoryContext = 65536;
+        await refreshChannelContextCapabilities(userId, channelId, { force: true });
+        release(
+          Response.json({
+            data: {
+              endpoints: [
+                { context_length: 128000, max_prompt_tokens: 100000, max_completion_tokens: 4096 },
+              ],
+            },
+          }),
+        );
+        const selected = await selecting;
+        expect(selected?.contextMetadata?.contextWindow).toBe(65536);
+        expect(selected?.contextMetadata?.maxOutputTokens).toBe(512);
+        expect(
+          (await listChannelModels(userId, channelId)).find(
+            (model) => model.modelId === "vendor/alias-limit",
+          )?.contextMetadata,
+        ).toEqual(selected?.contextMetadata);
+      },
+    );
+  });
+});
+
+test("endpoint merging keeps total context independent from input-only reports", async () => {
+  for (const kind of ["directory-total", "endpoint-total", "input-only"] as const) {
+    await fixture(async ({ userId, channelId }) => {
+      await db
+        .update(channels)
+        .set({ baseUrl: "https://openrouter.ai/api/v1" })
+        .where(eq(channels.id, channelId));
+      await withFetch(
+        (url) => {
+          if (url.hostname === "models.dev") return Response.json({});
+          if (url.pathname.endsWith("/endpoints"))
+            return Response.json({
+              data: {
+                endpoints: [
+                  kind === "endpoint-total"
+                    ? { context_length: 128000, max_prompt_tokens: 100000 }
+                    : { max_prompt_tokens: 32768 },
+                ],
+              },
+            });
+          return Response.json({
+            data: [
+              {
+                id: "vendor/alias-limit",
+                ...(kind === "directory-total"
+                  ? { context_length: 128000 }
+                  : { max_input_tokens: 64000 }),
+              },
+            ],
+          });
+        },
+        async () => {
+          const selected = await getResolvedChannelById(userId, channelId, "vendor/alias-limit");
+          expect(selected?.contextMetadata?.contextWindow).toBe(
+            kind === "input-only" ? 32768 : 128000,
+          );
+          expect(selected?.contextMetadata?.maxInputTokens).toBe(
+            kind === "endpoint-total" ? 64000 : 32768,
+          );
+          expect(selected?.contextMetadata?.inputLimitOnly ?? false).toBe(kind === "input-only");
+        },
+      );
+    });
+  }
+});
+
+test("a selected OpenRouter model joining another refresh still receives its own endpoint limits", async () => {
+  await fixture(async ({ userId, channelId }) => {
+    await db
+      .update(channels)
+      .set({ baseUrl: "https://openrouter.ai/api/v1" })
+      .where(eq(channels.id, channelId));
+    let release!: (response: Response) => void;
+    let started!: () => void;
+    const waiting = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const directory = new Promise<Response>((resolve) => {
+      release = resolve;
+    });
+    const detailIds: string[] = [];
+    await withFetch(
+      (url) => {
+        if (url.hostname === "models.dev") return Response.json({});
+        if (url.pathname.endsWith("/endpoints")) {
+          detailIds.push(url.pathname);
+          return Response.json({
+            data: {
+              endpoints: [
+                { context_length: 128000, max_prompt_tokens: 32768, max_completion_tokens: 1024 },
+              ],
+            },
+          });
+        }
+        started();
+        return directory;
+      },
+      async () => {
+        const pending = refreshChannelContextCapabilities(userId, channelId, {
+          selectedModelId: "vendor/other-model",
+        });
+        await waiting;
+        const selecting = getResolvedChannelById(userId, channelId, "vendor/alias-limit");
+        release(
+          Response.json({
+            data: [{ id: "vendor/alias-limit", context_length: 128000, max_input_tokens: 100000 }],
+          }),
+        );
+        await pending;
+        const selected = await selecting;
+        expect(selected?.contextMetadata?.maxInputTokens).toBe(32768);
+        expect(selected?.contextMetadata?.maxOutputTokens).toBe(1024);
+        expect(detailIds.sort()).toEqual([
+          "/api/v1/models/vendor/alias-limit/endpoints",
+          "/api/v1/models/vendor/other-model/endpoints",
+        ]);
+        expect(
+          (await listChannelModels(userId, channelId)).find(
+            (model) => model.modelId === "vendor/alias-limit",
+          )?.contextMetadata,
+        ).toEqual(selected?.contextMetadata);
+      },
+    );
+  });
+});
+
+test("directory synchronization re-reads endpoint ceilings committed while its transaction was waiting", async () => {
+  await fixture(async ({ userId, channelId }) => {
+    await db
+      .update(channels)
+      .set({ baseUrl: "https://openrouter.ai/api/v1" })
+      .where(eq(channels.id, channelId));
+    await withFetch(
+      (url) => {
+        if (url.hostname === "models.dev") return Response.json({});
+        if (url.pathname.endsWith("/endpoints"))
+          return Response.json({
+            data: {
+              endpoints: [
+                { context_length: 128000, max_prompt_tokens: 32768, max_completion_tokens: 1024 },
+              ],
+            },
+          });
+        return Response.json({
+          data: [
+            {
+              id: "vendor/alias-limit",
+              context_length: 128000,
+              max_input_tokens: 100000,
+              max_output_tokens: 4096,
+            },
+          ],
+        });
+      },
+      async () => {
+        await refreshChannelContextCapabilities(userId, channelId, { force: true });
+        const originalTransaction = db.transaction;
+        const runTransaction = originalTransaction.bind(db);
+        let release!: () => void;
+        let started!: () => void;
+        const gate = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        const waiting = new Promise<void>((resolve) => {
+          started = resolve;
+        });
+        let held = false;
+        // Control scheduling only: execute both operations against the actual
+        // isolated database, pausing sync after it read its roster snapshot.
+        db.transaction = ((...args: Parameters<typeof db.transaction>) => {
+          if (!held) {
+            held = true;
+            started();
+            return gate.then(() => runTransaction(...args));
+          }
+          return runTransaction(...args);
+        }) as typeof db.transaction;
+        let syncing: ReturnType<typeof fetchChannelModels> | undefined;
+        try {
+          syncing = fetchChannelModels(userId, channelId);
+          await waiting;
+          const selected = await getResolvedChannelById(userId, channelId, "vendor/alias-limit");
+          expect(selected?.contextMetadata?.maxInputTokens).toBe(32768);
+          expect(selected?.contextMetadata?.maxOutputTokens).toBe(1024);
+          release();
+          const result = await syncing;
+          expect(result.success).toBe(true);
+          const synced = result.models.find((model) => model.modelId === "vendor/alias-limit");
+          expect(synced?.contextMetadata?.maxInputTokens).toBe(32768);
+          expect(synced?.contextMetadata?.maxOutputTokens).toBe(1024);
+          expect(
+            (await listChannelModels(userId, channelId)).find(
+              (model) => model.modelId === "vendor/alias-limit",
+            )?.contextMetadata,
+          ).toEqual(synced?.contextMetadata);
+        } finally {
+          release();
+          await syncing;
+          db.transaction = originalTransaction;
+        }
+      },
+    );
+  });
+});

@@ -24,12 +24,13 @@ function smallest(...values: unknown[]): number | undefined {
   return valid.length ? Math.min(...valid) : undefined;
 }
 
-/** Provider directories are optional, untrusted capability reports. Never infer from a name. */
-export function parseDirectoryContext(
-  value: unknown,
-  protocol: string,
-  fetchedAt = Date.now(),
-): ModelContextMetadata | null {
+type DirectoryLimits = {
+  contextWindow?: number;
+  maxInputTokens?: number;
+  maxOutputTokens?: number;
+};
+
+function parseDirectoryLimits(value: unknown, protocol: string): DirectoryLimits | null {
   const item = record(value);
   if (!item) return null;
   const top = record(item.top_provider);
@@ -72,9 +73,22 @@ export function parseDirectoryContext(
     )
   )
     return null;
-  const contextWindow = smallest(...contextValues);
-  const maxInputTokens = smallest(...inputValues);
-  const maxOutputTokens = smallest(...outputValues);
+  return {
+    contextWindow: smallest(...contextValues),
+    maxInputTokens: smallest(...inputValues),
+    maxOutputTokens: smallest(...outputValues),
+  };
+}
+
+/** Provider directories are optional, untrusted capability reports. Never infer from a name. */
+export function parseDirectoryContext(
+  value: unknown,
+  protocol: string,
+  fetchedAt = Date.now(),
+): ModelContextMetadata | null {
+  const limits = parseDirectoryLimits(value, protocol);
+  if (!limits) return null;
+  const { contextWindow, maxInputTokens, maxOutputTokens } = limits;
   if (!contextWindow && !maxInputTokens) return null;
   return normalizeModelContextMetadata({
     contextWindow: contextWindow ?? maxInputTokens,
@@ -319,10 +333,14 @@ const endpointCache = new Map<
 >();
 
 /** Selected model only, never an N-request probe of the entire OpenRouter list. */
-export function loadOpenRouterModelContext(modelId: string): Promise<ModelContextMetadata | null> {
+export function loadOpenRouterModelContext(
+  modelId: string,
+  options: { force?: boolean } = {},
+): Promise<ModelContextMetadata | null> {
   const cached = endpointCache.get(modelId);
   if (cached?.pending) return cached.pending;
-  if (cached && cached.expires > Date.now()) return Promise.resolve(cached.metadata);
+  if (!options.force && cached && cached.expires > Date.now())
+    return Promise.resolve(cached.metadata);
   const state = {
     expires: 0,
     metadata: cached?.metadata ?? null,
@@ -345,12 +363,15 @@ export function loadOpenRouterModelContext(modelId: string): Promise<ModelContex
       if (!Array.isArray(data?.endpoints) || !data.endpoints.length)
         throw new Error("No endpoint metadata");
       const candidates = data.endpoints
-        .map((value) => parseDirectoryContext(value, "openai"))
-        .filter((value): value is ModelContextMetadata => Boolean(value));
+        .map((value) => parseDirectoryLimits(value, "openai"))
+        .filter((value): value is DirectoryLimits => Boolean(value));
+      const contextWindow = smallest(...candidates.map((value) => value.contextWindow));
+      const maxInputTokens = smallest(...candidates.map((value) => value.maxInputTokens));
       const metadata = normalizeModelContextMetadata({
-        contextWindow: smallest(...candidates.map((value) => value.contextWindow)),
-        maxInputTokens: smallest(...candidates.map((value) => value.maxInputTokens)),
+        contextWindow: contextWindow ?? maxInputTokens,
+        maxInputTokens,
         maxOutputTokens: smallest(...candidates.map((value) => value.maxOutputTokens)),
+        ...(!contextWindow && maxInputTokens ? { inputLimitOnly: true } : {}),
         source: "channel",
         fetchedAt: Date.now(),
       });
@@ -370,6 +391,15 @@ export function loadOpenRouterModelContext(modelId: string): Promise<ModelContex
     if (oldest) endpointCache.delete(oldest);
   }
   return state.pending;
+}
+
+/** Expire only these public model reports, retaining last-good limits on failure. */
+export function invalidateOpenRouterModelContexts(modelIds: readonly string[]): void {
+  for (const modelId of modelIds) {
+    const cached = endpointCache.get(modelId);
+    if (cached) cached.expires = 0;
+  }
+  // In-flight reads remain shared, including forced reads; they are not canceled.
 }
 
 export function resetContextDiscoveryCaches(): void {
