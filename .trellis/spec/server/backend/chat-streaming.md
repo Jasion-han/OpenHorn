@@ -678,3 +678,81 @@ DB and synthetic local provider; never run against the normal app database.
 Wrong: set `lastMode: "chat"` when the provider finishes; skip FTS work when the
 replacement is empty. Correct: guard mode at request acceptance and always clear
 the old index entry before optionally inserting the replacement text.
+
+## Active Mutation Ownership and Attachment Visibility
+
+### 1. Scope / Trigger
+
+Overlapping Chat retry/edit requests, deletion during preparation/generation,
+attachment binding, document indexing and RAG retrieval.
+
+### 2. Signatures
+
+Public Chat request/response shapes remain unchanged. Active mutation ownership
+is internal to this server process's asynchronous work, not a distributed revision
+protocol. `linkAttachmentsToMessage(ids, messageId, userId, writer?)` returns the
+actual bound IDs; an optional transaction writer reuses its caller's transaction.
+
+### 3. Contracts
+
+Retry and edit share request ownership for their question/answer identities.
+Allocate request order before asynchronous preparation; delayed older setup must
+not steal a newer owner. Superseded/deleted work cannot publish or persist late
+text, usage, finish state, preparation errors or index changes. A normal client
+Stop remains distinct: the current owner may persist partial output, and a
+zero-output retry retains its previous answer. Finally releases only that exact
+owner. Conversation deletion invalidates matching active work only after its SQL
+transaction commits; a rollback must leave the active request intact. An empty
+reserved reply is removable only while it remains a Chat placeholder without an
+Agent run; do not delete a tool-only Agent reply whose derived text is empty.
+Validate live owned rows in the transaction before reserving a tail reply
+or saving a terminal result; deleted questions must not produce new replies.
+
+An attachment can bind only to an owned user message in its own conversation,
+or an explicitly matching legacy session scope, and cannot move from another
+message. Exact-target retries are idempotent. Mixed foreign/conflicting IDs are
+ignored compatibly, and the stored message ID list reflects actual bindings.
+
+SQL attachment/conversation ownership is authoritative for RAG visibility; vector
+rows are a derived index. Validate indexing sources before/after asynchronous
+embedding and vector writes. Stop later embedding batches after deletion and
+clean late vector writes. Revalidate retrieved sources after vector search so
+stale/deleted/foreign/mismatched chunks cannot enter the prompt. Post-commit
+message deletion also cleans its attachment vectors; retrieval remains safe even
+if that best-effort cleanup fails or loses a race. Never delete user-local files
+represented by `local:` metadata markers.
+
+### 4. Validation & Error Matrix
+
+| Trigger | Expected behavior |
+|---|---|
+| Old retry completes after new retry/edit | Keep the newer answer and index |
+| Stopped old retry returns partial text after replacement | Do not overwrite the new owner |
+| Older preparation resumes after a newer request | Do not call its provider or persist its failure |
+| Edited tail question is deleted during setup | No orphan reply or provider call |
+| Source deleted during embedding/vector commit/search | No deleted text in later retrieval |
+| Another message already owns an attachment | Do not move its binding or advertise a false binding |
+| No live document source remains | Skip paid query embedding |
+
+### 5. Good / Base / Bad Cases
+
+Good: a new retry owns the answer while the old request winds down; stale vector
+rows remain invisible after their SQL source is deleted. Base: one normal Chat
+request and a fresh same-conversation upload retain their existing behavior.
+Bad: treat abort delivery as write ownership, or trust vector row existence as
+proof that a document is still available to the user.
+
+### 6. Tests Required
+
+Use deterministic provider/preparation gates for retry/retry, retry/edit, Stop and
+deletion ordering, including failure/empty-output preservation. Real isolated SQL
+fixtures plus synthetic vector/embedding modules cover binding ownership,
+message-ID projection, deletion before/during/after indexing, multi-batch stop,
+retrieval races, foreign/mismatched sources and failed-cleanup visibility.
+Never access normal SQL/vector databases or real embedding/model services.
+
+### 7. Wrong vs Correct
+
+Wrong: save every late stream by assistant ID, or append every returned vector
+chunk to a prompt. Correct: guard writes with the active mutation and live rows;
+filter retrieval through current relational source ownership.

@@ -250,3 +250,68 @@ Never present fallback32K as a provider's true window. Effective auto windows ca
 exceed the manual editor range, so transport raw manualnull+metadata instead of
 coercing effective capacity into the manual RPC field. See server discovery
 contract for source priority, cache invalidation and non-destructive refresh.
+
+## Sidecar Lifecycle Ownership and Chat Transport Completion
+
+### 1. Scope / Trigger
+
+Sidecar startup/shutdown, reconnect attempts, asynchronous workspace resolution,
+and Chat SSE response consumption.
+
+### 2. Signatures
+
+Keep SidecarState's public actions and start/stop promises. Lifecycle generation,
+captured platform/client identities, pending startup and stop barriers are private.
+`readSseStream` requires Chat done/error; `readTypedSseStream` stays protocol-neutral.
+
+### 3. Contracts
+
+Only the current lifecycle/client may publish ready/error/workspace state or
+schedule reconnects. Stop/reset/unsupported/platform replacement invalidate old
+continuations and dispose connecting/stale clients. A retained old disconnect
+callback cannot erase a new connection. Stop clears local ownership immediately;
+coordinate already-issued host startup and a later start so a delayed spawn or
+old stop cannot resurrect or kill a replacement. Reset does not silently expand
+its authority into stopping a shared platform process.
+
+Automatic reconnect is a bounded recovery session: startup and handshake failures
+continue exponential backoff up to the existing ten-attempt cap. Success and
+explicit lifecycle cancellation reset the session. Late workspace responses cannot
+rewrite the new lifecycle's root, error or saved default.
+
+A Chat SSE body's clean EOF is insufficient proof of completion. Require a valid
+done/error event; preserve partial text and surface localized interruption when
+it is missing. Keep provider error events available to the existing consumer.
+Always release the reader; cancel on callback/read failure. UTF8 boundary chunks
+and normal final unterminated lines retain their existing decoding behavior.
+
+### 4. Validation & Error Matrix
+
+| Trigger | Expected behavior |
+|---|---|
+| Stop/reset while host startup or handshake awaits | No late ready/client restoration |
+| Old client disconnects after replacement | Preserve the new client |
+| Automatic reconnect fails once | Continue bounded backoff |
+| Late workspace response after lifecycle changes | No stale state/storage write |
+| Partial/empty Chat body ends without terminal | Report interruption, not success |
+| Callback or reader throws | Cancel/release reader and preserve the failure |
+
+### 5. Good / Base / Bad Cases
+
+Good: a delayed host response is cleaned up under its original lifecycle.
+Base: normal startup and a Chat stream with done/error retain their behavior.
+Bad: check only status=ready in an old callback, or reload a partial answer as if
+EOF implied successful generation.
+
+### 6. Tests Required
+
+Use fake platform/client promises and restored deterministic timers for startup,
+Stop barriers, stale disconnect/workspace callbacks, failed host/handshake retries,
+retry cap and cancellation. Pure ReadableStream regressions cover done/error,
+partial/empty EOF, split UTF8, callback failure and reader lock cleanup.
+
+### 7. Wrong vs Correct
+
+Wrong: install every awaited client or reconnect only from onDisconnect.
+Correct: require current ownership at each continuation and schedule recovery
+from failed reconnect attempts too, under the same bounded lifecycle.
