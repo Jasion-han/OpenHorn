@@ -1,13 +1,14 @@
 import type { ModelContextMetadata, ScheduledTask, ScheduledTaskRun } from "shared/types";
 import { claimRunOwnership, createRunPersistGuard, isRunOwner } from "../hooks/sidecarRunOwnership";
 import { useChatStore } from "../stores/chatStore";
+import { resolveProjectRootForConversation, useProjectStore } from "../stores/projectStore";
 import { useScheduledTaskStore } from "../stores/scheduledTaskStore";
 import { useSidecarStore } from "../stores/sidecarStore";
 import type { Message } from "../types/chat";
 import { getDesktopBackendBase } from "./backendBase";
 import { buildConversationHistory } from "./conversationHistory";
 import { getEffectiveModelForConversation } from "./effectiveModel";
-import { getScheduledTaskLabel } from "./i18n/agent";
+import { getChatLabel, getScheduledTaskLabel } from "./i18n/agent";
 import { notifyError, notifySuccess } from "./notify";
 import { createServerApi } from "./serverApi";
 import type { SidecarClient } from "./sidecarClient";
@@ -258,9 +259,9 @@ async function executeRun(run: ScheduledTaskRun, task: ScheduledTask) {
 
   // Optimistic round, exactly as handleSend seeds it — but into whichever
   // conversation the task owns, without touching the one on screen.
-  const now = Date.now();
-  const userMessageId = `temp-${now}`;
-  const assistantMessageId = `temp-assistant-${now}`;
+  const turnId = crypto.randomUUID();
+  const userMessageId = `temp-${turnId}`;
+  const assistantMessageId = `temp-assistant-${turnId}`;
   const drafts: Message[] = [
     {
       id: userMessageId,
@@ -387,19 +388,38 @@ async function executeRun(run: ScheduledTaskRun, task: ScheduledTask) {
     }
   }
 
-  // Additive inputs, each best-effort exactly like the composer: MCP roster,
-  // workspace re-sync, enabled skills, global system prompt + Tavily key.
+  // MCP/skills/settings are additive. Workspace resolution is mandatory and
+  // belongs to this run, independently of another turn's later workspace RPC.
   let mcpServers: Record<string, Record<string, unknown>> | undefined;
   try {
     mcpServers = await resolveEnabledMcpServers(api);
   } catch {
     mcpServers = undefined;
   }
-  try {
-    await useSidecarStore.getState().ensureWorkspace();
-  } catch {
-    // the sidecar keeps whatever workspace it already has
+  let projectRoot = resolveProjectRootForConversation(conversation);
+  if (conversation.projectId && !projectRoot) {
+    // Startup can claim due tasks before the sidebar's project load finishes.
+    await useProjectStore
+      .getState()
+      .loadProjects()
+      .catch(() => {});
+    projectRoot = resolveProjectRootForConversation(conversation);
   }
+  if (conversation.projectId && !projectRoot) {
+    await failRun(getChatLabel("chat.run.workspaceUnavailable"), model);
+    return;
+  }
+  let preparedWorkspaceRoot: string | null = null;
+  try {
+    preparedWorkspaceRoot = await useSidecarStore.getState().ensureWorkspace(projectRoot);
+  } catch {
+    // A failed preparation cannot reuse a previous turn's workspace.
+  }
+  if (!preparedWorkspaceRoot) {
+    await failRun(getChatLabel("chat.run.workspaceUnavailable"), model);
+    return;
+  }
+  const workspaceRoot = preparedWorkspaceRoot;
   let skills: Awaited<ReturnType<typeof resolveEnabledSkills>> | undefined;
   if (credentials.protocol === "anthropic" || credentials.protocol === "openai") {
     try {
@@ -428,6 +448,7 @@ async function executeRun(run: ScheduledTaskRun, task: ScheduledTask) {
     client
       .runAgent({
         prompt: task.prompt,
+        workspaceRoot,
         apiKey: credentials.protocol === "acp" ? "" : credentials.apiKey,
         model,
         contextWindow: credentials.contextWindow,
