@@ -243,7 +243,9 @@ Keep public IPC endpoint fields `host`, `port`, `token` unchanged. Native startu
 runs off the UI thread. A private permit/epoch is captured before queuing blocking
 work; Stop invalidates older permits. Checkpoint RPC ownership records the run's
 captured canonical workspace. Manifests include `runId`, `workspaceRoot`,
-`createdAt` and validated file entries. `OPENHORN_HOME` remains the state override.
+`createdAt` and validated file entries (`path`, `existed`, `backupRelPath` and
+optional original rwx `mode`, a safe integer in0000..0777). `OPENHORN_HOME` remains
+the state override.
 
 ### 3. Contracts
 
@@ -264,6 +266,9 @@ captured canonical workspace. Manifests include `runId`, `workspaceRoot`,
   regular terminal files without following replacement symlinks or waiting on
   FIFOs. Revalidate around awaits; restore via atomic leaf replacement, protecting
   outside hardlinked inodes and preserving existing executable permissions.
+  Missing targets use trusted recorded mode; legacy missing mode falls back to
+  `0600 & ~umask`. Rootless legacy metadata cannot claim a more permissive mode.
+  Never chmod a missing private file to0666 merely because it no longer exists.
 - Rollback uses its run's captured root even after another project becomes current.
   These checks are not an OS sandbox or an atomic whole-workspace transaction;
   concurrent parent-directory renames still require filesystem coordination.
