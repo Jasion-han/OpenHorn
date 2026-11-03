@@ -60,6 +60,7 @@ import { canonicalizeWorkspaceRoot, resolveDefaultWorkspaceRoot } from "./worksp
 
 type ConnectionState = {
   authed: boolean;
+  closed: boolean;
   workspaceRoot: string | null;
   pendingApprovals: Map<string, (allow: boolean) => void>;
   agentRuns: Map<string, { abortController: AbortController }>;
@@ -162,6 +163,7 @@ const server = Bun.serve({
     open(ws) {
       wsStates.set(ws, {
         authed: false,
+        closed: false,
         workspaceRoot: null,
         pendingApprovals: new Map(),
         agentRuns: new Map(),
@@ -174,6 +176,7 @@ const server = Bun.serve({
     close(ws) {
       const state = wsStates.get(ws);
       if (state) {
+        state.closed = true;
         for (const run of state.agentRuns.values()) {
           run.abortController.abort();
         }
@@ -357,6 +360,8 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
           }
         }
 
+        // Credential discovery can finish after the owning socket closes.
+        if (state.closed) return;
         const abortController = new AbortController();
         const runId = `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         state.agentRuns.set(runId, { abortController });
@@ -364,6 +369,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
         ws.send(JSON.stringify(buildOkResponse(request.requestId, { runId })));
 
         const onEvent = (event: import("./agent/events").AgentEvent) => {
+          if (state.closed) return;
           state.lastActivityAt = Date.now();
           ws.send(JSON.stringify(buildEvent("agent.event", { runId, event })));
         };
@@ -488,6 +494,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
           state.ownedRunIds.add(runId);
           ws.send(JSON.stringify(buildOkResponse(request.requestId, { runId })));
           const onEvent = (event: import("./agent/events").AgentEvent) => {
+            if (state.closed) return;
             state.lastActivityAt = Date.now();
             ws.send(JSON.stringify(buildEvent("agent.event", { runId, event })));
           };
@@ -508,7 +515,24 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
                 }
               });
           };
-          return { runId, onEvent, guard };
+          const prepareCheckpoint = async () => {
+            try {
+              const checkpoint = await createCheckpointSession(cwd, runId);
+              if (!abortController.signal.aborted && !state.closed) return checkpoint;
+              void discardCheckpointIfEmpty(checkpoint);
+            } catch (error) {
+              if (!abortController.signal.aborted) {
+                onEvent({
+                  type: "error",
+                  content: error instanceof Error ? error.message : "Checkpoint preparation failed",
+                });
+              }
+            }
+            state.agentRuns.delete(runId);
+            onEvent({ type: "done" });
+            return null;
+          };
+          return { runId, onEvent, guard, prepareCheckpoint };
         };
 
         // Skills are read IN PLACE from their real folders (Claude-style): the
@@ -518,6 +542,8 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
         const usesCodex = protocol === "codex_cli" || forceCodexCli;
         const materializedSkills =
           usesCodex || protocol === "acp" ? [] : await resolveSkills(skills);
+        // Workspace/credential/skill preparation is owned by this connection.
+        if (state.closed) return;
 
         if (protocol === "codex_cli" || forceCodexCli) {
           const { runId, onEvent, guard } = initRun("codex");
@@ -555,16 +581,18 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
         }
 
         if (protocol === "acp") {
-          const { runId, onEvent, guard } = initRun("acp");
+          const { runId, onEvent, guard, prepareCheckpoint } = initRun("acp");
           if (!acpAgent?.command) {
             onEvent({ type: "error", content: "ACP 渠道缺少 agent 启动命令，请检查渠道配置" });
             onEvent({ type: "done" });
+            state.agentRuns.delete(runId);
             return;
           }
           // Same rationale as the Claude branch: key the snapshot dir by the
           // SAME runId the client receives so checkpoint.rollback resolves the
           // directory that was actually written.
-          const checkpoint = await createCheckpointSession(cwd, runId);
+          const checkpoint = await prepareCheckpoint();
+          if (!checkpoint) return;
           guard(
             "ACP agent",
             runAcpAgent({
@@ -614,11 +642,12 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
         }
 
         if (protocol === "anthropic") {
-          const { runId, onEvent, guard } = initRun("claude");
+          const { runId, onEvent, guard, prepareCheckpoint } = initRun("claude");
           // Key the snapshot dir by the SAME runId the client receives, so
           // checkpoint.rollback (which looks up snapshots/<runId>) resolves the
           // directory that was actually written.
-          const checkpoint = await createCheckpointSession(cwd, runId);
+          const checkpoint = await prepareCheckpoint();
+          if (!checkpoint) return;
           guard(
             "Claude agent",
             runClaudeAgent({
@@ -641,13 +670,23 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
               skills: materializedSkills,
               tokenBudgetPerRun,
               requestApproval: async (approvalInput) => {
-                const { toolUseId } = approvalInput;
-                return new Promise<boolean>((resolve) => {
-                  state.pendingApprovals.set(toolUseId, resolve);
-                  ws.send(
-                    JSON.stringify(buildEvent("approval.request", { runId, ...approvalInput })),
-                  );
-                });
+                const approvalId = `approval-${runId}-${crypto.randomUUID()}`;
+                return waitForApproval(
+                  state.pendingApprovals,
+                  approvalId,
+                  abortController.signal,
+                  () => {
+                    ws.send(
+                      JSON.stringify(
+                        buildEvent("approval.request", {
+                          runId,
+                          ...approvalInput,
+                          toolUseId: approvalId,
+                        }),
+                      ),
+                    );
+                  },
+                );
               },
               onEvent,
               // Only fires when the run actually backed up files (manifest
@@ -666,8 +705,9 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
         }
 
         {
-          const { runId, onEvent, guard } = initRun("direct");
-          const checkpoint = await createCheckpointSession(cwd, runId);
+          const { runId, onEvent, guard, prepareCheckpoint } = initRun("direct");
+          const checkpoint = await prepareCheckpoint();
+          if (!checkpoint) return;
           guard(
             "Direct agent",
             runDirectAgent({
@@ -790,6 +830,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
         );
     }
   } catch (error) {
+    if (state.closed) return;
     ws.send(
       JSON.stringify(
         buildErrorResponse(request.requestId, error instanceof Error ? error.message : "Error"),

@@ -13,6 +13,7 @@ import path from "node:path";
 describe("runClaudeAgent checkpoint finalize on abort", () => {
   test("aborted run still leaves a readable manifest that rollback can restore", async () => {
     const abortErr = Object.assign(new Error("Aborted"), { name: "AbortError" });
+    const abortController = new AbortController();
     mock.module("@anthropic-ai/sdk", () => ({
       default: class MockAnthropic {
         messages = {
@@ -21,7 +22,10 @@ describe("runClaudeAgent checkpoint finalize on abort", () => {
               on(_event: string, _callback: unknown) {
                 return obj;
               },
-              finalMessage: () => Promise.reject(abortErr),
+              finalMessage: () => {
+                abortController.abort();
+                return Promise.reject(abortErr);
+              },
               controller: new AbortController(),
             };
             return obj;
@@ -49,8 +53,6 @@ describe("runClaudeAgent checkpoint finalize on abort", () => {
     // The tool already edited the file before the run was aborted.
     writeFileSync(filePath, "v2", "utf8");
 
-    const abortController = new AbortController();
-    abortController.abort();
     let checkpointReadyRunId = "";
 
     let threw = false;

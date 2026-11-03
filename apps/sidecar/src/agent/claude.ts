@@ -434,6 +434,21 @@ export function buildClaudeInitialMessages(
  * path.
  */
 export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> {
+  const finalizeRunCheckpoint = async () => {
+    if (input.checkpoint.files.size > 0) {
+      try {
+        await finalizeCheckpoint(input.checkpoint);
+        input.onCheckpointReady(input.checkpoint.runId);
+      } catch {
+        // Preserve the original completion/abort/error outcome.
+      }
+    }
+  };
+  if (input.abortController.signal.aborted) {
+    await finalizeRunCheckpoint();
+    input.onEvent({ type: "done" });
+    return;
+  }
   // Claude Code OAuth request rules (Bearer auth, model id, billing marker as
   // its own system[0] block) are defined once in `adapters` (anthropic-oauth).
   const isOAuth = isAnthropicOAuthToken(input.apiKey);
@@ -518,6 +533,7 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
 
   try {
     while (turnCount < MAX_TURNS) {
+      input.abortController.signal.throwIfAborted();
       assertAgentContext(contextInput, contextParts, messages);
       // Create a streaming request to the Anthropic Messages API
       const stream = anthropic.messages.stream(
@@ -633,6 +649,7 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
       }> = [];
 
       for (const block of toolUseBlocks) {
+        input.abortController.signal.throwIfAborted();
         const toolInput = (block.input || {}) as Record<string, unknown>;
 
         // Emit tool_start so the UI shows the tool being invoked
@@ -645,6 +662,7 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
 
         // --- Workspace boundary check for fs tools (Read/Write/Edit) ---
         const fsDeny = await checkSdkFsToolPath(block.name, toolInput, input.cwd, skillRoots);
+        input.abortController.signal.throwIfAborted();
         if (fsDeny !== null) {
           input.onEvent({
             type: "tool_result",
@@ -676,6 +694,7 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
               toolInput,
               decisionReason: risk.reason,
             });
+            input.abortController.signal.throwIfAborted();
             if (!allowed) {
               const denyMsg = "User denied command";
               input.onEvent({
@@ -712,12 +731,15 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
         }
 
         // --- Map tool name/params and execute ---
+        input.abortController.signal.throwIfAborted();
         const mapped = mapToolForExecution(block.name, toolInput);
         const result = await executeTool(mapped.executorName, mapped.executorInput, input.cwd, {
           permissionMode: "full-access",
           checkpoint: input.checkpoint,
           readAllowRoots: skillRoots,
+          signal: input.abortController.signal,
         });
+        input.abortController.signal.throwIfAborted();
 
         input.onEvent({
           type: "tool_result",
@@ -745,14 +767,7 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
     // Always finalize the checkpoint when this run actually backed up files,
     // even on abort or a mid-stream throw. Otherwise manifest.json is never
     // written and rollbackCheckpoint() fails with ENOENT.
-    if (input.checkpoint.files.size > 0) {
-      try {
-        await finalizeCheckpoint(input.checkpoint);
-        input.onCheckpointReady(input.checkpoint.runId);
-      } catch {
-        // swallow — preserve the original completion/abort/error outcome
-      }
-    }
+    await finalizeRunCheckpoint();
   }
 
   // Emit final usage + done events. If the function threw (e.g. abort),
