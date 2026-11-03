@@ -1,7 +1,7 @@
 use std::env;
 use std::fs;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::time::Duration;
 
 use rand::rngs::OsRng;
 use rand::RngCore;
@@ -11,36 +11,16 @@ use tauri_plugin_shell::process::CommandChild;
 use tauri_plugin_shell::ShellExt;
 
 mod preview;
+mod sidecar_lifecycle;
 mod workspace_open;
 
-/// Description of a running sidecar child process, surfaced to the
-/// webview once it has announced its port. `token` is a 32-byte random
-/// value injected into the sidecar's env on spawn; the webview uses it
-/// for the `auth.handshake` RPC.
-#[derive(Clone, Debug, Serialize)]
-struct SidecarEndpoint {
-    host: String,
-    port: u16,
-    token: String,
-}
+use sidecar_lifecycle::{ChildControl, ReadyPoll, SidecarEndpoint, SidecarLifecycle};
 
-/// Holds the currently-running sidecar handle plus the endpoint we
-/// announced to the webview. `CommandChild` is not `Clone`, so we keep
-/// it inside a `Mutex` so multiple Tauri commands can reach it.
-struct SidecarState {
-    inner: Mutex<Option<RunningSidecar>>,
-}
+type SidecarState = SidecarLifecycle<CommandChild>;
 
-struct RunningSidecar {
-    child: CommandChild,
-    endpoint: SidecarEndpoint,
-}
-
-impl Default for SidecarState {
-    fn default() -> Self {
-        Self {
-            inner: Mutex::new(None),
-        }
+impl ChildControl for CommandChild {
+    fn terminate(self) -> Result<(), String> {
+        self.kill().map_err(|error| error.to_string())
     }
 }
 
@@ -56,14 +36,12 @@ fn generate_handshake_token() -> String {
 
 #[derive(Debug)]
 enum SidecarError {
-    Spawn(String),
     Handshake(String),
 }
 
 impl std::fmt::Display for SidecarError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            SidecarError::Spawn(msg) => write!(f, "sidecar spawn failed: {msg}"),
             SidecarError::Handshake(msg) => write!(f, "sidecar handshake failed: {msg}"),
         }
     }
@@ -90,40 +68,18 @@ fn endpoint_file_path() -> PathBuf {
 }
 
 fn write_endpoint_file(endpoint: &SidecarEndpoint) {
-    let path = endpoint_file_path();
-    // Intentionally use a simple JSON object rather than pulling in
-    // serde_json::to_string(&endpoint) since we also want to embed the
-    // current process pid for easy lookup.
-    let body = format!(
-        r#"{{"host":"{}","port":{},"token":"{}","pid":{}}}"#,
-        endpoint.host,
-        endpoint.port,
-        endpoint.token,
-        std::process::id(),
-    );
-    if let Err(e) = fs::write(&path, body) {
-        log::warn!("failed to write sidecar endpoint file at {path:?}: {e}");
-    } else {
-        // Lock down permissions: owner read/write only. On unix this
-        // matters because /tmp is world-readable. On windows fs::set_permissions
-        // cannot drop read access for "other" with the std API so we
-        // just rely on the TMPDIR being per-user.
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
-        }
+    if let Err(error) =
+        sidecar_lifecycle::write_endpoint(&endpoint_file_path(), endpoint, std::process::id())
+    {
+        log::warn!("failed to publish sidecar endpoint diagnostic: {error}");
     }
 }
 
-fn remove_endpoint_file() {
-    let path = endpoint_file_path();
-    match fs::remove_file(&path) {
-        Ok(_) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => {
-            log::warn!("failed to remove sidecar endpoint file at {path:?}: {e}");
-        }
+fn remove_endpoint_file(token: Option<&str>) {
+    if let Err(error) =
+        sidecar_lifecycle::remove_endpoint(&endpoint_file_path(), std::process::id(), token)
+    {
+        log::warn!("failed to remove owned sidecar endpoint diagnostic: {error}");
     }
 }
 
@@ -139,137 +95,79 @@ fn remove_endpoint_file() {
 fn start_sidecar_internal<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     state: &SidecarState,
+    permit: u64,
 ) -> Result<SidecarEndpoint, SidecarError> {
-    let mut guard = state.inner.lock().unwrap();
-    if let Some(existing) = guard.as_ref() {
-        // Return the existing endpoint — the webview can reconnect
-        // without us respawning the child.
-        return Ok(existing.endpoint.clone());
-    }
-
+    use tauri_plugin_shell::process::CommandEvent;
     let token = generate_handshake_token();
+    let spawn_token = token.clone();
+    let (endpoint, events) = state
+        .start(
+            permit,
+            token,
+            || {
+                app.shell()
+                    .sidecar("openhorn-sidecar")
+                    .map_err(|error| format!("spawn failed: {error}"))?
+                    .env("OPENHORN_HANDSHAKE_TOKEN", &spawn_token)
+                    .env("OPENHORN_HOST", "127.0.0.1")
+                    .env("OPENHORN_PORT", "0")
+                    .env("OPENHORN_PARENT_WATCH", "1")
+                    .spawn()
+                    .map(|(events, child)| (child, events))
+                    .map_err(|error| format!("spawn failed: {error}"))
+            },
+            |events, cancelled| {
+                sidecar_lifecycle::wait_for_ready(
+                    Duration::from_secs(20),
+                    cancelled,
+                    || match events.try_recv() {
+                        Ok(CommandEvent::Stdout(bytes)) => {
+                            ReadyPoll::Output(String::from_utf8_lossy(&bytes).into_owned())
+                        }
+                        Ok(CommandEvent::Stderr(bytes)) => {
+                            log::warn!("sidecar stderr: {}", String::from_utf8_lossy(&bytes));
+                            ReadyPoll::Pending
+                        }
+                        Ok(CommandEvent::Error(error)) => ReadyPoll::Failed(error),
+                        Ok(CommandEvent::Terminated(status)) => ReadyPoll::Failed(format!(
+                            "sidecar exited before announcing port: {status:?}"
+                        )),
+                        Ok(_) => ReadyPoll::Pending,
+                        Err(_) if events.is_closed() => ReadyPoll::Closed,
+                        Err(_) => ReadyPoll::Pending,
+                    },
+                    parse_ready_port,
+                )
+            },
+            write_endpoint_file,
+        )
+        .map_err(SidecarError::Handshake)?;
 
-    let shell = app.shell();
-    let sidecar = shell
-        .sidecar("openhorn-sidecar")
-        .map_err(|e| SidecarError::Spawn(e.to_string()))?
-        .env("OPENHORN_HANDSHAKE_TOKEN", &token)
-        .env("OPENHORN_HOST", "127.0.0.1")
-        .env("OPENHORN_PORT", "0")
-        // Opt the sidecar into its parent watchdog: if this process dies
-        // without running shutdown_sidecar (crash, kill -9, `tauri dev`
-        // restart), the sidecar notices it was reparented and exits.
-        .env("OPENHORN_PARENT_WATCH", "1");
-
-    let (mut rx, child) = sidecar
-        .spawn()
-        .map_err(|e| SidecarError::Spawn(e.to_string()))?;
-
-    // Block until the sidecar prints its "ready" line so we can hand the
-    // real port back to the webview. This matches the sidecar's
-    // announcement format in apps/sidecar/src/index.ts:
-    //     console.log(JSON.stringify({ type: "ready", host, port }))
-    //
-    // tauri-plugin-shell gives us an async channel for the child's
-    // stdout events; we drain it synchronously here because we only
-    // need the first message.
-    let port = {
-        use tauri_plugin_shell::process::CommandEvent;
-
-        let mut found: Option<u16> = None;
-        // Tauri 2's process events are delivered on a tokio channel.
-        // We block-recv with a sync bridge via futures-executor because
-        // we're still in a command that returns Result<_, String>.
-        while let Some(event) = tauri::async_runtime::block_on(rx.recv()) {
-            match event {
-                CommandEvent::Stdout(bytes) => {
-                    let line = String::from_utf8_lossy(&bytes);
-                    if let Some(p) = parse_ready_port(&line) {
-                        found = Some(p);
-                        break;
-                    }
-                }
-                CommandEvent::Stderr(bytes) => {
-                    let line = String::from_utf8_lossy(&bytes);
-                    log::warn!("sidecar stderr: {line}");
-                }
-                CommandEvent::Error(err) => {
-                    return Err(SidecarError::Handshake(err));
-                }
-                CommandEvent::Terminated(status) => {
-                    return Err(SidecarError::Handshake(format!(
-                        "sidecar exited before announcing port: {:?}",
-                        status
-                    )));
-                }
-                _ => {}
-            }
-        }
-        match found {
-            Some(p) => p,
-            None => {
-                return Err(SidecarError::Handshake(
-                    "sidecar closed stdout before announcing port".to_string(),
-                ))
-            }
-        }
-    };
-
-    let endpoint = SidecarEndpoint {
-        host: "127.0.0.1".to_string(),
-        port,
-        token,
-    };
-
-    // Persist the endpoint to TMPDIR so out-of-band diagnostic tooling
-    // (the sidecar E2E smoke script, agents iterating on the code,
-    // `curl` debugging sessions) can discover host/port/token without
-    // needing to drive the Tauri webview. The file is chmod 600 on
-    // unix; it's cleaned up on stop_sidecar and on window-close.
-    write_endpoint_file(&endpoint);
-
-    *guard = Some(RunningSidecar {
-        child,
-        endpoint: endpoint.clone(),
-    });
-
-    // Keep draining the child's event stream after startup. Previously `rx` was
-    // dropped here, so we never learned that the sidecar had died: the handle
-    // stayed in `state` forever, the early-return at the top of this function
-    // kept handing out a dead endpoint, and every webview reconnect attempt hit
-    // a closed port. The only way out was restarting the whole app.
-    //
-    // Clearing the slot on Terminated makes the webview's existing reconnect
-    // path (which calls start_sidecar again) respawn the child instead.
-    {
-        use tauri_plugin_shell::process::CommandEvent;
+    if let Some(mut events) = events {
         let app_handle = app.clone();
+        let token = endpoint.token.clone();
         tauri::async_runtime::spawn(async move {
-            while let Some(event) = rx.recv().await {
+            while let Some(event) = events.recv().await {
                 match event {
                     CommandEvent::Stderr(bytes) => {
-                        log::warn!("sidecar stderr: {}", String::from_utf8_lossy(&bytes));
+                        log::warn!("sidecar stderr: {}", String::from_utf8_lossy(&bytes))
                     }
                     CommandEvent::Terminated(status) => {
-                        log::warn!("sidecar terminated unexpectedly: {status:?}");
-                        if let Some(state) = app_handle.try_state::<SidecarState>() {
-                            let mut guard = state.inner.lock().unwrap();
-                            // Only clear when the stored entry is still this
-                            // child; a concurrent restart may already have
-                            // replaced it with a healthy one.
-                            if guard.as_ref().map(|r| r.endpoint.port) == Some(port) {
-                                *guard = None;
-                                remove_endpoint_file();
-                            }
-                        }
+                        log::warn!("sidecar terminated: {status:?}");
+                        break;
+                    }
+                    CommandEvent::Error(error) => {
+                        log::warn!("sidecar event stream failed: {error}");
                         break;
                     }
                     _ => {}
                 }
             }
+            if let Some(state) = app_handle.try_state::<SidecarState>() {
+                state.exited(&token, |identity| remove_endpoint_file(Some(identity)));
+            }
         });
     }
-
     Ok(endpoint)
 }
 
@@ -294,59 +192,41 @@ fn parse_ready_port(line: &str) -> Option<u16> {
 }
 
 #[tauri::command]
-fn start_sidecar(
-    app: tauri::AppHandle,
-    state: State<'_, SidecarState>,
-) -> Result<SidecarEndpoint, String> {
-    start_sidecar_internal(&app, &state).map_err(String::from)
+async fn start_sidecar(app: tauri::AppHandle) -> Result<SidecarEndpoint, String> {
+    // Startup waits run off the native UI thread. Stop only takes the short
+    // state lock and can cancel a child that has not announced readiness yet.
+    let permit = app.state::<SidecarState>().permit();
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<SidecarState>();
+        start_sidecar_internal(&app, &state, permit).map_err(String::from)
+    })
+    .await
+    .map_err(|error| format!("sidecar startup task failed: {error}"))?
 }
 
-/// Kills the running sidecar child (if any) and removes the endpoint file.
-/// Shared by window close and app exit so every shutdown path cleans up the
-/// same way. Never panics: a poisoned lock still gets the endpoint file removed.
 fn shutdown_sidecar(state: &SidecarState) {
-    if let Ok(mut guard) = state.inner.lock() {
-        if let Some(running) = guard.take() {
-            if let Err(e) = running.child.kill() {
-                log::warn!("sidecar kill failed during shutdown: {e}");
-            }
-        }
+    if let Err(error) = state.stop(remove_endpoint_file) {
+        log::warn!("sidecar kill failed during shutdown: {error}");
     }
-    remove_endpoint_file();
 }
 
-/// Runs `shutdown_sidecar` if the app manages a `SidecarState`.
 fn shutdown_sidecar_for_app<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     match app.try_state::<SidecarState>() {
         Some(state) => shutdown_sidecar(&state),
-        None => remove_endpoint_file(),
+        None => remove_endpoint_file(None),
     }
 }
 
 #[tauri::command]
 fn stop_sidecar(state: State<'_, SidecarState>) -> Result<(), String> {
-    let mut guard = state.inner.lock().unwrap();
-    if let Some(running) = guard.take() {
-        running
-            .child
-            .kill()
-            .map_err(|e| format!("sidecar kill failed: {e}"))?;
-    }
-    // Drop the endpoint file after the child is gone, whether or not
-    // anything was actually running — a stale file is worse than a
-    // missing one.
-    remove_endpoint_file();
-    Ok(())
+    state
+        .stop(remove_endpoint_file)
+        .map_err(|error| format!("sidecar kill failed: {error}"))
 }
 
 #[tauri::command]
 fn get_sidecar_endpoint(state: State<'_, SidecarState>) -> Option<SidecarEndpoint> {
-    state
-        .inner
-        .lock()
-        .unwrap()
-        .as_ref()
-        .map(|s| s.endpoint.clone())
+    state.endpoint()
 }
 
 /// Opens the platform directory picker and returns the chosen absolute
@@ -1380,7 +1260,12 @@ mod tests {
         let mut out = Vec::new();
         scan_skills_dir(root, "Continue", &mut out);
 
-        assert_eq!(out.len(), 2, "got {:?}", out.iter().map(|s| &s.name).collect::<Vec<_>>());
+        assert_eq!(
+            out.len(),
+            2,
+            "got {:?}",
+            out.iter().map(|s| &s.name).collect::<Vec<_>>()
+        );
         let mut names: Vec<&str> = out.iter().map(|s| s.name.as_str()).collect();
         names.sort();
         assert_eq!(names, vec!["Alpha Skill", "beta"]);

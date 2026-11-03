@@ -58,3 +58,7 @@ objc2-web-kit = { version = "0.3", default-features = false, features = [
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSImage", "NSImageRep", "NSBitmapImageRep"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSData", "NSDictionary", "NSError"] }
 block2 = { version = "0.6", default-features = false, features = ["std"] }
+
+[target.'cfg(unix)'.dependencies]
+# Safe native diagnostic locking/no-follow creation; already in the dependency graph.
+libc = "0.2"
