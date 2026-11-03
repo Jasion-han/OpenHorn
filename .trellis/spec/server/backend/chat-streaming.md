@@ -516,3 +516,27 @@ UnsafeTestDatabaseError(code=unsafe_test_database) without opening SQLite.
 Temporary databases, :memory: and normal development/production behavior remain
 unchanged. Regression subprocesses copy the real entry/helper into an owned
 synthetic workspace: even a broken guard cannot target the user's normal DB.
+
+
+### Automatic Discovery When Adding Models
+
+The normal new-channel editor creates a channel and immediately synchronizes its
+model directory, including capability metadata. Manual roster updates must also
+resolve new models before returning: updateChannelModels computes new IDs, commits
+its transaction, invalidates the roster-dependent cache and awaits one bounded
+best-effort metadata-only refresh. The existing UI reload then displays returned
+limits without a manual refresh or first inference request. A single added
+OpenRouter routing alias gets selected-endpoint lookup; bulk additions share one
+directory/catalog phase and leave unavailable endpoint details to normal per-run
+resolution. Never use authoritative fetchChannelModels for manual Add, because
+its reconciliation can remove manually configured aliases.
+
+Include disabled new IDs, preserve manual overrides/defaults/enabled settings,
+and do not repeat discovery for numeric edits, toggles or removals. Network work
+stays outside the write transaction. A discovery failure never rolls back a
+successfully saved model; it remains visibly unknown and normal resolution retries
+under existing backoff. Tests seed pre-existing rows directly so fixture setup
+does not accidentally invoke the Add workflow before mock transports are installed.
+Required regressions: immediate returned/persisted provider limits, IDs-only catalog
+fallback, new-channel create+sync, unlisted OpenRouter detail, offline preservation,
+disabled new models and zero extra network work for existing-model edits/removal.

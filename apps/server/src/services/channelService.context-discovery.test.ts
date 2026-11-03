@@ -6,6 +6,7 @@ import { db } from "../db";
 import { encrypt } from "../utils";
 import * as requestUserNamespace from "../utils/requestUser";
 import {
+  createChannel,
   fetchChannelModels,
   getResolvedChannelById,
   listChannelModels,
@@ -49,13 +50,24 @@ async function fixture(
       createdAt: now,
       updatedAt: now,
     });
-    await updateChannelModels(userId, channelId, {
-      models: [
+    // Construct the pre-existing roster directly; calling Add here would run
+    // discovery before each test installs its controlled metadata transport.
+    await db.insert(channelModels).values(
+      [
         { modelId: "small-fixture", isDefault: true, contextWindow: 16384 },
         { modelId: "catalog-model" },
         { modelId: "vendor/alias-limit" },
-      ],
-    });
+      ].map((model) => ({
+        ...model,
+        id: crypto.randomUUID(),
+        channelId,
+        displayName: model.modelId,
+        enabled: true,
+        createdAt: now,
+        updatedAt: now,
+      })),
+    );
+    await db.update(channels).set({ model: "small-fixture" }).where(eq(channels.id, channelId));
     await db.insert(conversations).values({
       id: conversationId,
       userId,
@@ -98,6 +110,223 @@ async function withFetch(
 }
 const withoutMetadata = (models: Awaited<ReturnType<typeof listChannelModels>>) =>
   models.map(({ contextMetadata: _metadata, ...model }) => model);
+
+test("manual additions return persisted channel capacities without a refresh or first run", async () => {
+  await fixture(async ({ userId, channelId }) => {
+    await withFetch(
+      (url) =>
+        url.hostname === "models.dev"
+          ? Response.json({})
+          : Response.json({
+              data: [
+                {
+                  id: "future-vendor-model",
+                  context_length: 524288,
+                  max_input_tokens: 450000,
+                  max_output_tokens: 8192,
+                },
+              ],
+            }),
+      async () => {
+        const before = await listChannelModels(userId, channelId);
+        const added = await updateChannelModels(userId, channelId, {
+          models: [...before, { modelId: "future-vendor-model", contextWindow: 128000 }],
+        });
+        const model = added.find((item) => item.modelId === "future-vendor-model");
+        expect(model?.contextMetadata).toMatchObject({
+          contextWindow: 524288,
+          maxInputTokens: 450000,
+          maxOutputTokens: 8192,
+          source: "channel",
+        });
+        expect(model?.contextWindow).toBe(128000);
+        expect(model?.isDefault).toBe(false);
+        expect(
+          added
+            .filter((item) => item.modelId !== "future-vendor-model")
+            .map((item) => item.modelId),
+        ).toEqual(before.map((item) => item.modelId));
+        expect(
+          (await listChannelModels(userId, channelId)).find(
+            (item) => item.modelId === "future-vendor-model",
+          )?.contextMetadata,
+        ).toEqual(model?.contextMetadata);
+      },
+    );
+  });
+});
+
+test("manual additions use the exact catalog when the channel lists IDs only", async () => {
+  await fixture(async ({ userId, channelId }) => {
+    await withFetch(
+      (url) =>
+        url.hostname === "models.dev"
+          ? Response.json({
+              "vendor/new-catalog-model": {
+                id: "new-catalog-model",
+                limit: { context: 1048576, input: 900000, output: 32768 },
+              },
+            })
+          : Response.json({ data: [{ id: "new-catalog-model" }] }),
+      async () => {
+        const added = await updateChannelModels(userId, channelId, {
+          models: [
+            ...(await listChannelModels(userId, channelId)),
+            { modelId: "new-catalog-model" },
+          ],
+        });
+        expect(
+          added.find((item) => item.modelId === "new-catalog-model")?.contextMetadata,
+        ).toMatchObject({ contextWindow: 1048576, maxInputTokens: 900000, source: "catalog" });
+      },
+    );
+  });
+});
+
+test("metadata outage cannot undo a newly saved manual model or invent its capacity", async () => {
+  await fixture(async ({ userId, channelId }) => {
+    await withFetch(
+      () => {
+        throw new Error("offline fixture");
+      },
+      async () => {
+        const models = await updateChannelModels(userId, channelId, {
+          models: [
+            ...(await listChannelModels(userId, channelId)),
+            { modelId: "unpublished-alias", contextWindow: 1000000 },
+          ],
+        });
+        const added = models.find((item) => item.modelId === "unpublished-alias");
+        expect(added?.contextMetadata).toBe(null);
+        expect(added?.contextWindow).toBe(1000000);
+        expect(added?.enabled).toBe(true);
+      },
+    );
+  });
+});
+
+test("a new channel's automatic model synchronization includes independent input and output reports", async () => {
+  await fixture(async ({ userId }) => {
+    let createdId: string | undefined;
+    try {
+      await withFetch(
+        (url) =>
+          url.hostname === "models.dev"
+            ? Response.json({})
+            : Response.json({
+                models: [
+                  {
+                    name: "models/future-google-model",
+                    inputTokenLimit: 2097152,
+                    outputTokenLimit: 65536,
+                    supportedGenerationMethods: ["generateContent"],
+                  },
+                ],
+              }),
+        async () => {
+          const created = await createChannel(userId, {
+            name: "Onboarding fixture",
+            provider: "google",
+            protocol: "google",
+            apiKey: "fixture",
+            baseUrl: "https://new-channel.models",
+            isDefault: false,
+          });
+          createdId = created.id;
+          const synced = await fetchChannelModels(userId, created.id);
+          expect(synced.success).toBe(true);
+          expect(synced.models[0]?.modelId).toBe("future-google-model");
+          expect(synced.models[0]?.contextMetadata).toMatchObject({
+            contextWindow: 2097152,
+            maxInputTokens: 2097152,
+            maxOutputTokens: 65536,
+            inputLimitOnly: true,
+            source: "channel",
+          });
+        },
+      );
+    } finally {
+      if (createdId) {
+        await db.delete(channelModels).where(eq(channelModels.channelId, createdId));
+        await db.delete(channels).where(eq(channels.id, createdId));
+      }
+    }
+  });
+});
+
+test("a manually added OpenRouter alias is queried before returning without reconciling the model list", async () => {
+  await fixture(async ({ userId, channelId }) => {
+    await updateChannel(userId, channelId, { baseUrl: "https://openrouter.ai/api/v1" });
+    let details = 0;
+    await withFetch(
+      (url) => {
+        if (url.hostname === "models.dev") return Response.json({});
+        if (url.pathname.endsWith("/endpoints")) {
+          details++;
+          return Response.json({
+            data: {
+              endpoints: [
+                {
+                  context_length: 1000000,
+                  max_prompt_tokens: 850000,
+                  max_completion_tokens: 16384,
+                },
+              ],
+            },
+          });
+        }
+        return Response.json({ data: [] });
+      },
+      async () => {
+        const before = await listChannelModels(userId, channelId);
+        const added = await updateChannelModels(userId, channelId, {
+          models: [...before, { modelId: "vendor/onboarding-alias" }],
+        });
+        expect(details).toBe(1);
+        expect(added).toHaveLength(before.length + 1);
+        expect(
+          added.find((model) => model.modelId === "vendor/onboarding-alias")?.contextMetadata,
+        ).toMatchObject({ contextWindow: 1000000, maxInputTokens: 850000, source: "channel" });
+      },
+    );
+  });
+});
+
+test("disabled new models are discovered, while toggles, manual limits and removals do not repeat discovery", async () => {
+  await fixture(async ({ userId, channelId }) => {
+    let requests = 0;
+    await withFetch(
+      (url) => {
+        requests++;
+        return url.hostname === "models.dev"
+          ? Response.json({})
+          : Response.json({ data: [{ id: "disabled-future-model", context_length: 65536 }] });
+      },
+      async () => {
+        const before = await listChannelModels(userId, channelId);
+        const added = await updateChannelModels(userId, channelId, {
+          models: [...before, { modelId: "disabled-future-model", enabled: false }],
+        });
+        expect(added.find((model) => model.modelId === "disabled-future-model")).toMatchObject({
+          enabled: false,
+          contextMetadata: { contextWindow: 65536, source: "channel" },
+        });
+        const once = requests;
+        await updateChannelModels(userId, channelId, {
+          models: added.map((model) =>
+            model.modelId === "disabled-future-model"
+              ? { ...model, enabled: true, contextWindow: 32768 }
+              : model,
+          ),
+        });
+        expect(requests).toBe(once);
+        const removed = await updateChannelModels(userId, channelId, { models: before });
+        expect(requests).toBe(once);
+        expect(removed).toHaveLength(before.length);
+      },
+    );
+  });
+});
 
 test("metadata-only refresh never reconciles models, defaults, enabled flags or manual overrides", async () => {
   await fixture(async ({ userId, channelId }) => {

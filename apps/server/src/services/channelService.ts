@@ -1058,6 +1058,9 @@ export async function updateChannelModels(
 
   const existingByModelId = new Map(existingModels.map((model) => [model.modelId, model]));
   const nextModelIds = new Set(normalizedModels.map((model) => model.modelId));
+  const addedModelIds = normalizedModels
+    .filter((model) => !existingByModelId.has(model.modelId))
+    .map((model) => model.modelId);
   const defaultModel = normalizedModels.find((model) => model.isDefault);
 
   // Atomic: the delete/update/insert reconciliation plus the channel's default
@@ -1115,6 +1118,19 @@ export async function updateChannelModels(
     existingModels.some((model) => !nextModelIds.has(model.modelId))
   ) {
     contextRefreshStates.delete(channelId);
+  }
+  if (addedModelIds.length > 0) {
+    try {
+      // Discovery is outside the write transaction and never reconciles the
+      // saved roster. Return available limits immediately after manual Add,
+      // including a selected endpoint for one new OpenRouter routing alias.
+      await refreshChannelContextCapabilities(userId, channelId, {
+        selectedModelId: addedModelIds.length === 1 ? addedModelIds[0] : undefined,
+      });
+    } catch {
+      // Saving succeeded. Unknown limits remain explicit and normal first-use
+      // resolution retries discovery; a metadata outage must not undo Add.
+    }
   }
   return listChannelModels(userId, channelId);
 }

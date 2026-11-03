@@ -54,13 +54,23 @@ async function withFixture(
       createdAt: now,
       updatedAt: now,
     });
-    await updateChannelModels(userId, channelId, {
-      models: [
+    // Seed an existing roster without invoking the Add/discovery workflow.
+    await db.insert(channelModels).values(
+      [
         { modelId: "small-fixture", isDefault: true, contextWindow: 16_384 },
         { modelId: "gpt-6-astra" },
         { modelId: "gateway-large", contextWindow: 1_000_000 },
-      ],
-    });
+      ].map((model) => ({
+        ...model,
+        id: crypto.randomUUID(),
+        channelId,
+        displayName: model.modelId,
+        enabled: true,
+        createdAt: now,
+        updatedAt: now,
+      })),
+    );
+    await db.update(channels).set({ model: "small-fixture" }).where(eq(channels.id, channelId));
     await db.insert(conversations).values({
       id: conversationId,
       userId,
