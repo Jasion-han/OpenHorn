@@ -540,3 +540,75 @@ does not accidentally invoke the Add workflow before mock transports are install
 Required regressions: immediate returned/persisted provider limits, IDs-only catalog
 fallback, new-channel create+sync, unlisted OpenRouter detail, offline preservation,
 disabled new models and zero extra network work for existing-model edits/removal.
+
+### Selected Endpoint Cache and Fresh Credential Snapshots
+
+#### 1. Scope / Trigger
+
+OpenRouter model selection after directory/catalog discovery, explicit capacity
+refresh, delayed metadata writes, and ACP runtime credential delivery.
+
+#### 2. Signatures
+
+- `loadOpenRouterModelContext(modelId, { force?: boolean })`.
+- `invalidateOpenRouterModelContexts(modelIds: readonly string[])`.
+- Existing `POST /channels/:id/context-capabilities` and
+  `GET /channels/:id/credentials?modelId=...` keep their public payloads.
+
+#### 3. Contracts
+
+Directory/catalog `maxInputTokens` does not prove selected endpoint validation.
+Use the endpoint cache for every selected OpenRouter model, including after
+joining another channel refresh. Ordinary hot reads issue no new request;
+failed reads back off and keep last-good limits. Explicit channel refresh expires
+only its roster's endpoint entries; selected detail can bypass TTL/backoff.
+Do not query every model endpoint during a channel refresh. In-flight requests
+remain shared, including forced calls; invalidation does not cancel them.
+
+A report marked `inputLimitOnly` supplies an input ceiling, not a measured total
+window. Aggregate true totals separately from input ceilings; an output-only
+endpoint can constrain output when another report establishes context, but cannot
+establish context by itself. Keep the marker
+only when no true total exists. Merge a delayed detail response with the current
+model row inside the identity-guarded transaction, preserving independently
+stricter limits. Normal model synchronization also re-reads current metadata in
+its write transaction. Avoid rewriting unchanged metadata on hot reads.
+
+Persisted enabled ACP model IDs use the freshly resolved model's manual window
+and metadata. Only IDs absent from the persisted roster qualify as live-only;
+they use exact catalog fallback and never inherit the launch model's override.
+A persisted disabled model cannot bypass validation through that fallback.
+
+#### 4. Validation & Error Matrix
+
+| Trigger | Required behavior |
+|---|---|
+| Directory input100K, endpoint input32K/output1K | Selected run uses endpoint ceilings |
+| Explicit refresh with warm endpoint cache | Next selected read revalidates that model |
+| Endpoint outage after a valid report | Preserve known limits and bounded backoff |
+| Total128K plus input-only64K | Retain total128K and input64K separately |
+| Total128K/output8K plus output-only1K | Retain total128K and output1K |
+| Delayed detail races a stricter saved report | Retain stricter current limits |
+| Persisted ACP metadata refreshed during credentials request | Return new metadata on that same request |
+| Disabled persisted ACP ID requested | Reject; do not treat as live-only |
+
+#### 5. Good / Base / Bad Cases
+
+Good: lazy selected-detail enrichment tightens input/output without scanning the
+whole roster. Base: repeated selection uses cached metadata without network I/O.
+Bad: treat an input field as endpoint provenance, or return credentials from a
+snapshot read before capability hydration.
+
+#### 6. Tests Required
+
+Cover directory and catalog input fields with tighter endpoint limits, explicit
+force/invalidation and unrelated-cache preservation, single-flight/backoff,
+input-only and mixed-total endpoint aggregation, delayed-response merge, and ACP
+first-request refreshed credentials/live-only/disabled/ownership behavior.
+Use isolated server databases and deterministic metadata transports.
+
+#### 7. Wrong vs Correct
+
+Wrong: `if (!metadata.maxInputTokens) fetchDetail()`; read ACP metadata from the
+pre-hydration channel snapshot. Correct: endpoint cache owns discovery state;
+the resolved exact model owns the credential response's capacity fields.
