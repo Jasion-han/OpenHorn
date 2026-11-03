@@ -709,6 +709,7 @@ export const chatLabels = {
   "chat.save.inProgress": "回复正在生成或保存，请稍后再删除。",
   "chat.reply.truncated": "回答达到长度上限，已保留内容。可重试或要求缩小回答范围。",
   "chat.error.responseTruncated": "回答达到长度上限，已保留内容。可重试或要求缩小回答范围。",
+  "chat.error.streamInterrupted": "连接中断，回答未完成。已保留收到的内容，请重试。",
   "chat.agent.thinking": "思考",
   // ACP diff
   "chat.agent.diff.newFile": "New file",

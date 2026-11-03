@@ -118,6 +118,12 @@ export function createDesktopSidecarStore(options: CreateSidecarStoreOptions) {
   const MAX_RECONNECT_ATTEMPTS = 10;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let reconnectAttempts = 0;
+  let recovering = false;
+  let generation = 0;
+  let managedClient: SidecarClient | null = null;
+  let stopPromise: Promise<void> | null = null;
+  let stopOwner = 0;
+  const hostStarts = new Set<Promise<SidecarEndpoint>>();
 
   const clearReconnectTimer = () => {
     if (reconnectTimer !== null) {
@@ -126,225 +132,268 @@ export function createDesktopSidecarStore(options: CreateSidecarStoreOptions) {
     }
   };
 
-  return create<SidecarState>((set, get) => ({
-    ...INITIAL_STATE,
-
-    attachPlatform(nextPlatform, reason) {
-      platform = nextPlatform;
-      if (reason) unsupportedReason = reason;
-      // If we previously flipped to "unsupported" because no platform
-      // was attached, give the caller an "idle" slot back when they
-      // attach a real platform.
-      if (nextPlatform !== null && get().status === "unsupported") {
-        set({ status: "idle", lastError: null });
+  return create<SidecarState>((set, get) => {
+    const disposeClient = (client: SidecarClient) => {
+      client.onDisconnect = null;
+      void client.close().catch(() => {});
+    };
+    const invalidate = () => {
+      generation++;
+      clearReconnectTimer();
+      reconnectAttempts = 0;
+      recovering = false;
+      for (const client of new Set([managedClient, get().client])) {
+        if (client) disposeClient(client);
       }
-      if (nextPlatform === null && get().status !== "unsupported") {
-        set({ status: "unsupported", lastError: unsupportedReason });
-      }
-    },
-
-    async start() {
-      const current = get().status;
-      // Idempotent: if the sidecar is already ready, do nothing.
-      if (current === "ready") return;
-      // Refuse to race two start calls.
-      if (current === "starting" || current === "connecting") return;
-      // Refuse to start when the host doesn't support the sidecar.
-      if (current === "unsupported") return;
-      if (platform === null) {
-        set({ status: "unsupported", lastError: unsupportedReason });
+      managedClient = null;
+      return generation;
+    };
+    const scheduleReconnect = (owner: number, capturedPlatform: SidecarPlatform) => {
+      if (!recovering || generation !== owner || platform !== capturedPlatform) return;
+      clearReconnectTimer();
+      if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+        recovering = false;
+        set({ status: "error", client: null, lastError: "sidecar 连接断开，重连失败" });
         return;
       }
+      const delay = Math.min(
+        BASE_RECONNECT_DELAY_MS * 2 ** reconnectAttempts,
+        MAX_RECONNECT_DELAY_MS,
+      );
+      reconnectAttempts++;
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+        if (
+          generation === owner &&
+          platform === capturedPlatform &&
+          recovering &&
+          get().status === "error"
+        ) {
+          void get().start();
+        }
+      }, delay);
+    };
+    const ownsClient = (owner: number, client: SidecarClient) =>
+      generation === owner && get().client === client && get().status === "ready";
 
-      set({ status: "starting", lastError: null });
+    return {
+      ...INITIAL_STATE,
 
-      let endpoint: SidecarEndpoint;
-      try {
-        endpoint = await platform.startSidecar();
-      } catch (error) {
-        set({ status: "error", lastError: toErrorMessage(error) });
-        return;
-      }
+      attachPlatform(nextPlatform, reason) {
+        if (reason) unsupportedReason = reason;
+        if (platform !== nextPlatform) {
+          invalidate();
+          platform = nextPlatform;
+          set({
+            ...INITIAL_STATE,
+            status: nextPlatform ? "idle" : "unsupported",
+            lastError: nextPlatform ? null : unsupportedReason,
+          });
+        } else if (nextPlatform === null) {
+          invalidate();
+          set({ ...INITIAL_STATE, status: "unsupported", lastError: unsupportedReason });
+        } else if (get().status === "unsupported") {
+          set({ status: "idle", lastError: null });
+        }
+      },
 
-      set({ status: "connecting", endpoint });
-      const client = createClient(endpoint);
-      try {
-        await client.connect();
-      } catch (error) {
-        // Spawned but could not handshake: leave the child alone and
-        // surface the error. A follow-up start() call will try again.
-        set({
-          status: "error",
-          lastError: toErrorMessage(error),
-          endpoint,
-          client: null,
-        });
-        return;
-      }
-
-      client.onDisconnect = () => {
+      async start() {
         const current = get().status;
-        if (current !== "ready") return;
-        clearReconnectTimer();
-        if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-          set({ status: "error", client: null, lastError: "sidecar 连接断开，重连失败" });
+        if (
+          current === "ready" ||
+          current === "starting" ||
+          current === "connecting" ||
+          current === "unsupported"
+        )
+          return;
+        const capturedPlatform = platform;
+        if (!capturedPlatform) {
+          set({ status: "unsupported", lastError: unsupportedReason });
           return;
         }
-        // Exponential backoff (1s, 2s, 4s … capped at 30s) instead of a fixed
-        // 1s hammer, with a hard attempt cap so an unavailable sidecar doesn't
-        // spin forever.
-        const delay = Math.min(
-          BASE_RECONNECT_DELAY_MS * 2 ** reconnectAttempts,
-          MAX_RECONNECT_DELAY_MS,
-        );
-        reconnectAttempts += 1;
-        set({ status: "error", client: null, lastError: "sidecar 连接断开，正在重连..." });
-        reconnectTimer = setTimeout(() => {
-          reconnectTimer = null;
-          if (get().status === "error") {
-            void get().start();
+        const owner = ++generation;
+        const ownsAttempt = () => generation === owner && platform === capturedPlatform;
+        clearReconnectTimer();
+        set({ status: "starting", lastError: null });
+        // Do not let a previous stop terminate the child created by this start.
+        if (stopPromise) await stopPromise;
+        if (!ownsAttempt()) return;
+        let endpoint: SidecarEndpoint;
+        try {
+          const starting = capturedPlatform.startSidecar();
+          hostStarts.add(starting);
+          try {
+            endpoint = await starting;
+          } finally {
+            hostStarts.delete(starting);
           }
-        }, delay);
-      };
-
-      // Connected successfully — reset the backoff counter and cancel any
-      // pending reconnect from a previous drop.
-      clearReconnectTimer();
-      reconnectAttempts = 0;
-      set({ status: "ready", client });
-
-      // Read the saved root separately: an unavailable localStorage must not be
-      // mistaken for "setting the workspace failed".
-      let saved: string | null = null;
-      try {
-        saved = localStorage.getItem(WORKSPACE_STORAGE_KEY);
-      } catch {}
-      try {
-        // Empty string = "sidecar picks its default workspace". Hard-coding
-        // /tmp here used to guarantee failure: /tmp is on the sidecar's
-        // forbidden-roots list, so this call always threw, the error was
-        // swallowed, and workspaceRoot stayed null.
-        const result = await client.setWorkspace(saved || "");
-        set({ workspaceRoot: result.workspaceRoot });
-      } catch (error) {
-        // Surface it: a workspace that never gets set disables Agent Skills and
-        // file tools, and used to do so with no visible symptom.
-        set({ lastError: error instanceof Error ? error.message : String(error) });
-      }
-    },
-
-    async stop() {
-      // Cancel any pending auto-reconnect so a queued timer can't resurrect the
-      // sidecar after an explicit stop.
-      clearReconnectTimer();
-      reconnectAttempts = 0;
-      const { client } = get();
-      if (client) {
-        try {
-          await client.close();
-        } catch {
-          // best effort
-        }
-      }
-      if (platform === null) {
-        // Nothing to stop at the platform level; just drop local state.
-        set({ ...INITIAL_STATE });
-        return;
-      }
-      try {
-        await platform.stopSidecar();
-      } catch (error) {
-        // Even if stop IPC fails, drop the local handle so the next
-        // start() builds a fresh one.
-        set({
-          ...INITIAL_STATE,
-          status: "error",
-          lastError: toErrorMessage(error),
-        });
-        return;
-      }
-      set({ ...INITIAL_STATE });
-    },
-
-    async pickAndSetWorkspace() {
-      if (platform === null) {
-        set({ lastError: unsupportedReason });
-        return null;
-      }
-      let root: string | null;
-      try {
-        root = await platform.pickWorkspaceDir();
-      } catch (error) {
-        set({ lastError: toErrorMessage(error) });
-        return null;
-      }
-      if (!root) return null;
-      await get().setWorkspace(root);
-      return root;
-    },
-
-    async setWorkspace(root) {
-      const { client, status } = get();
-      if (status !== "ready" || !client) {
-        set({ lastError: "sidecar not ready" });
-        return;
-      }
-      try {
-        const result = await client.setWorkspace(root);
-        set({ workspaceRoot: result.workspaceRoot, lastError: null });
-        try {
-          localStorage.setItem(WORKSPACE_STORAGE_KEY, result.workspaceRoot);
-        } catch {}
-      } catch (error) {
-        set({ lastError: toErrorMessage(error) });
-      }
-    },
-
-    async ensureWorkspace(rootOverride) {
-      const { client, status } = get();
-      const override = rootOverride?.trim() || null;
-      // Pick the target: the per-conversation override, else the saved default,
-      // else let the sidecar resolve its default (empty string). The store's
-      // current value is deliberately not consulted: it may hold a previous
-      // run's project override, which must not leak into a plain conversation.
-      let target = override;
-      if (!target) {
-        try {
-          target = localStorage.getItem(WORKSPACE_STORAGE_KEY);
-        } catch {}
-        target = target || "";
-      }
-      // Resolve through the sidecar before every run. A restart can invalidate
-      // the remembered root, and the store may hold another project's override.
-      // Only this request's successful result may become the new run's cwd.
-      if (status === "ready" && client) {
-        try {
-          const result = await client.setWorkspace(target);
-          set({ workspaceRoot: result.workspaceRoot, lastError: null });
-          if (!override) {
-            try {
-              localStorage.setItem(WORKSPACE_STORAGE_KEY, result.workspaceRoot);
-            } catch {}
-          }
-          return result.workspaceRoot;
         } catch (error) {
-          // Neither a project nor the default may reuse an older successful
-          // root after this resolution failed: each run needs its own result.
-          set({ lastError: toErrorMessage(error) });
+          if (!ownsAttempt()) return;
+          set({ status: "error", lastError: toErrorMessage(error) });
+          scheduleReconnect(owner, capturedPlatform);
+          return;
+        }
+        if (!ownsAttempt()) return;
+        set({ status: "connecting", endpoint });
+        const client = createClient(endpoint);
+        managedClient = client;
+        try {
+          await client.connect();
+        } catch (error) {
+          if (!ownsAttempt() || managedClient !== client) return;
+          managedClient = null;
+          disposeClient(client);
+          set({ status: "error", lastError: toErrorMessage(error), endpoint, client: null });
+          scheduleReconnect(owner, capturedPlatform);
+          return;
+        }
+        if (!ownsAttempt() || managedClient !== client) return;
+        client.onDisconnect = () => {
+          if (!ownsClient(owner, client) || platform !== capturedPlatform) return;
+          managedClient = null;
+          disposeClient(client);
+          recovering = true;
+          set({
+            status: "error",
+            client: null,
+            workspaceRoot: null,
+            lastError: "sidecar 连接断开，正在重连...",
+          });
+          scheduleReconnect(owner, capturedPlatform);
+        };
+        clearReconnectTimer();
+        reconnectAttempts = 0;
+        recovering = false;
+        set({ status: "ready", client });
+        let saved: string | null = null;
+        try {
+          saved = localStorage.getItem(WORKSPACE_STORAGE_KEY);
+        } catch {}
+        try {
+          const result = await client.setWorkspace(saved || "");
+          if (ownsClient(owner, client)) set({ workspaceRoot: result.workspaceRoot });
+        } catch (error) {
+          if (ownsClient(owner, client)) set({ lastError: toErrorMessage(error) });
+        }
+      },
+
+      async stop() {
+        const capturedPlatform = platform;
+        const pendingStarts = [...hostStarts];
+        stopOwner = invalidate();
+        set({ ...INITIAL_STATE });
+        // Every Stop invalidates queued replacement starts, even when the host
+        // shutdown itself is already in flight and can be shared.
+        if (stopPromise) return stopPromise;
+        const stopping = (async () => {
+          // An already-issued IPC can still spawn after local cancellation.
+          // Stop that captured host only after all such requests have settled.
+          await Promise.allSettled(pendingStarts);
+          if (!capturedPlatform) return;
+          try {
+            await capturedPlatform.stopSidecar();
+          } catch (error) {
+            if (generation === stopOwner && platform === capturedPlatform) {
+              set({ ...INITIAL_STATE, status: "error", lastError: toErrorMessage(error) });
+            }
+          }
+        })();
+        const completion = stopping.finally(() => {
+          if (stopPromise === completion) stopPromise = null;
+        });
+        stopPromise = completion;
+        return completion;
+      },
+
+      async pickAndSetWorkspace() {
+        if (platform === null) {
+          set({ lastError: unsupportedReason });
           return null;
         }
-      }
-      return null;
-    },
+        const capturedPlatform = platform;
+        const owner = generation;
+        let root: string | null;
+        try {
+          root = await capturedPlatform.pickWorkspaceDir();
+        } catch (error) {
+          if (generation === owner && platform === capturedPlatform)
+            set({ lastError: toErrorMessage(error) });
+          return null;
+        }
+        if (!root || generation !== owner || platform !== capturedPlatform) return null;
+        await get().setWorkspace(root);
+        return generation === owner && platform === capturedPlatform ? root : null;
+      },
 
-    markUnsupported(reason) {
-      set({ status: "unsupported", lastError: reason });
-    },
+      async setWorkspace(root) {
+        const { client, status } = get();
+        const owner = generation;
+        if (status !== "ready" || !client) {
+          set({ lastError: "sidecar not ready" });
+          return;
+        }
+        try {
+          const result = await client.setWorkspace(root);
+          if (!ownsClient(owner, client)) return;
+          set({ workspaceRoot: result.workspaceRoot, lastError: null });
+          try {
+            localStorage.setItem(WORKSPACE_STORAGE_KEY, result.workspaceRoot);
+          } catch {}
+        } catch (error) {
+          if (ownsClient(owner, client)) set({ lastError: toErrorMessage(error) });
+        }
+      },
 
-    reset() {
-      set({ ...INITIAL_STATE });
-    },
-  }));
+      async ensureWorkspace(rootOverride) {
+        const { client, status } = get();
+        const owner = generation;
+        const override = rootOverride?.trim() || null;
+        // Pick the target: the per-conversation override, else the saved default,
+        // else let the sidecar resolve its default (empty string). The store's
+        // current value is deliberately not consulted: it may hold a previous
+        // run's project override, which must not leak into a plain conversation.
+        let target = override;
+        if (!target) {
+          try {
+            target = localStorage.getItem(WORKSPACE_STORAGE_KEY);
+          } catch {}
+          target = target || "";
+        }
+        // Resolve through the sidecar before every run. A restart can invalidate
+        // the remembered root, and the store may hold another project's override.
+        // Only this request's successful result may become the new run's cwd.
+        if (status === "ready" && client) {
+          try {
+            const result = await client.setWorkspace(target);
+            if (!ownsClient(owner, client)) return null;
+            set({ workspaceRoot: result.workspaceRoot, lastError: null });
+            if (!override) {
+              try {
+                localStorage.setItem(WORKSPACE_STORAGE_KEY, result.workspaceRoot);
+              } catch {}
+            }
+            return result.workspaceRoot;
+          } catch (error) {
+            // Neither a project nor the default may reuse an older successful
+            // root after this resolution failed: each run needs its own result.
+            if (ownsClient(owner, client)) set({ lastError: toErrorMessage(error) });
+            return null;
+          }
+        }
+        return null;
+      },
+
+      markUnsupported(reason) {
+        invalidate();
+        set({ ...INITIAL_STATE, status: "unsupported", lastError: reason });
+      },
+
+      reset() {
+        invalidate();
+        set({ ...INITIAL_STATE });
+      },
+    };
+  });
 }
 
 /**
