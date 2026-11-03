@@ -3,6 +3,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { access, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { createCheckpointSession } from "../checkpoints";
 import { runAcpAgent } from "./acp";
 import { runCodexChat } from "./chatCodex";
 import { runCodexAgent } from "./codex";
@@ -380,27 +381,29 @@ describe("runtime permission and cancellation boundaries", () => {
     test(`Direct ${tool} Stop during checkpoint backup preserves the original file`, async () => {
       const s = await setup();
       await writeFile(path.join(s.directory, "original.txt"), "original");
-      const checkpoint = {
-        runId: "fixture",
-        workspaceRoot: s.directory,
-        checkpointDir: path.join(s.directory, "checkpoint"),
-        files: new Map(),
-      };
-      const run = executeTool(
-        tool,
-        {
-          path: "original.txt",
-          content: "replaced",
-          old_string: "original",
-          new_string: "replaced",
-        },
-        s.directory,
-        { signal: s.abortController.signal, checkpoint },
-      );
-      s.abortController.abort();
-      await run;
-      expect(checkpoint.files.has("original.txt")).toBe(true);
-      expect(await readFile(path.join(s.directory, "original.txt"), "utf8")).toBe("original");
+      const previousHome = process.env.OPENHORN_HOME;
+      process.env.OPENHORN_HOME = path.join(s.directory, "state");
+      try {
+        const checkpoint = await createCheckpointSession(s.directory);
+        const run = executeTool(
+          tool,
+          {
+            path: "original.txt",
+            content: "replaced",
+            old_string: "original",
+            new_string: "replaced",
+          },
+          s.directory,
+          { signal: s.abortController.signal, checkpoint },
+        );
+        s.abortController.abort();
+        await run;
+        expect(checkpoint.files.has("original.txt")).toBe(true);
+        expect(await readFile(path.join(s.directory, "original.txt"), "utf8")).toBe("original");
+      } finally {
+        if (previousHome === undefined) delete process.env.OPENHORN_HOME;
+        else process.env.OPENHORN_HOME = previousHome;
+      }
     });
   }
 });

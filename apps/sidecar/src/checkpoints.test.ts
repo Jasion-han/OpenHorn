@@ -2,9 +2,10 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   existsSync,
   mkdirSync,
-  mkdtempSync,
+  mkdtempSync as nodeMkdtempSync,
   readdirSync,
   readFileSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { utimes } from "node:fs/promises";
@@ -23,6 +24,12 @@ import {
 import { canonicalizeWorkspaceRoot, toWorkspaceRelative } from "./workspace";
 
 let savedHome: string | undefined;
+const ownedPaths: string[] = [];
+function mkdtempSync(prefix: string) {
+  const owned = nodeMkdtempSync(prefix);
+  ownedPaths.push(owned);
+  return owned;
+}
 
 beforeEach(() => {
   savedHome = process.env.OPENHORN_HOME;
@@ -30,6 +37,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  for (const owned of ownedPaths.splice(0)) rmSync(owned, { recursive: true, force: true });
   if (savedHome === undefined) {
     delete process.env.OPENHORN_HOME;
   } else {
@@ -109,11 +117,15 @@ describe("checkpoints", () => {
 
 describe("workspaceSlug", () => {
   test("posix path", () => {
-    expect(workspaceSlug("/Users/han/Project/Vorla")).toBe("-Users-han-Project-Vorla");
+    expect(workspaceSlug("/Users/han/Project/Vorla").startsWith("-Users-han-Project-Vorla-")).toBe(
+      true,
+    );
+    expect(workspaceSlug("/Users/han/Project/Vorla")).toHaveLength(89);
   });
 
   test("windows path", () => {
-    expect(workspaceSlug("C:\\work\\x")).toBe("C-work-x");
+    expect(workspaceSlug("C:\\work\\x").startsWith("C-work-x-")).toBe(true);
+    expect(workspaceSlug("C:\\work\\x")).toHaveLength(73);
   });
 });
 
@@ -127,7 +139,7 @@ describe("snapshot location", () => {
 
     // Snapshot dir must be under OPENHORN_HOME
     const home = process.env.OPENHORN_HOME as string;
-    expect(session.checkpointDir.startsWith(home)).toBe(true);
+    expect(session.checkpointDir.startsWith(await canonicalizeWorkspaceRoot(home))).toBe(true);
 
     // Nothing must be created under <workspace>/.openhorn/snapshots
     expect(existsSync(path.join(root, ".openhorn", "snapshots"))).toBe(false);
@@ -187,6 +199,15 @@ describe("pruneSnapshots", () => {
       names.push(name);
       const dir = path.join(base, name);
       mkdirSync(dir);
+      writeFileSync(
+        path.join(dir, "manifest.json"),
+        JSON.stringify({
+          runId: name,
+          workspaceRoot: root,
+          createdAt: new Date().toISOString(),
+          files: [],
+        }),
+      );
       // Older dirs get earlier mtime
       const t = new Date(now - (22 - i) * 60_000);
       await utimes(dir, t, t);
@@ -205,8 +226,8 @@ describe("pruneSnapshots", () => {
   });
 });
 
-describe("legacy migration", () => {
-  test("migrates legacy snapshots and rollback works from new location", async () => {
+describe("legacy checkpoint compatibility", () => {
+  test("preserves legacy project snapshots and restores them without migration", async () => {
     const root = await canonicalizeWorkspaceRoot(
       mkdtempSync(path.join(os.tmpdir(), "openhorn-ws-")),
     );
@@ -228,21 +249,22 @@ describe("legacy migration", () => {
     // Current file in workspace
     writeFileSync(path.join(root, "a.txt"), "v2", "utf8");
 
-    // createCheckpointSession triggers migration
+    // New sessions leave legacy snapshots in place for read-only fallback.
     await createCheckpointSession(root);
 
-    // Legacy dir should be gone (or .openhorn itself if empty)
-    expect(existsSync(path.join(root, ".openhorn", "snapshots"))).toBe(false);
+    // Legacy files are retained; no project data is moved or deleted.
+    expect(existsSync(path.join(root, ".openhorn", "snapshots"))).toBe(true);
 
-    // Manifest should exist at new location
+    // No legacy manifest is silently copied into the new hashed bucket.
     const home = process.env.OPENHORN_HOME as string;
     const slug = workspaceSlug(root);
     const newManifest = path.join(home, "snapshots", slug, "claude-1", "manifest.json");
-    expect(existsSync(newManifest)).toBe(true);
+    expect(existsSync(newManifest)).toBe(false);
 
-    // Rollback should restore the file from the migrated backup
+    // Valid project-scoped legacy rollback still restores the original file.
     await rollbackCheckpoint(root, "claude-1");
     expect(readFileSync(path.join(root, "a.txt"), "utf8")).toBe("backup-v1");
+    expect(existsSync(path.join(legacyDir, "manifest.json"))).toBe(true);
   });
 });
 

@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from "bun:test";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -12,75 +12,84 @@ import path from "node:path";
 // on `finalMessage()` — simulating an AbortError partway through the stream.
 describe("runClaudeAgent checkpoint finalize on abort", () => {
   test("aborted run still leaves a readable manifest that rollback can restore", async () => {
-    const abortErr = Object.assign(new Error("Aborted"), { name: "AbortError" });
-    const abortController = new AbortController();
-    mock.module("@anthropic-ai/sdk", () => ({
-      default: class MockAnthropic {
-        messages = {
-          stream: () => {
-            const obj = {
-              on(_event: string, _callback: unknown) {
-                return obj;
-              },
-              finalMessage: () => {
-                abortController.abort();
-                return Promise.reject(abortErr);
-              },
-              controller: new AbortController(),
-            };
-            return obj;
-          },
-        };
-      },
-    }));
-
-    const { runClaudeAgent } = await import("./claude");
-    const { createCheckpointSession, ensureCheckpointBackup, rollbackCheckpoint } = await import(
-      "../checkpoints"
-    );
-    const { canonicalizeWorkspaceRoot } = await import("../workspace");
-
-    const root = await canonicalizeWorkspaceRoot(
-      mkdtempSync(path.join(os.tmpdir(), "openhorn-abort-")),
-    );
-    const filePath = path.join(root, "a.txt");
-    writeFileSync(filePath, "v1", "utf8");
-
-    // A checkpoint backup was recorded for this run (as the PreToolUse hook would).
-    const checkpoint = await createCheckpointSession(root);
-    await ensureCheckpointBackup(checkpoint, "a.txt");
-
-    // The tool already edited the file before the run was aborted.
-    writeFileSync(filePath, "v2", "utf8");
-
-    let checkpointReadyRunId = "";
-
-    let threw = false;
+    const owned = mkdtempSync(path.join(os.tmpdir(), "openhorn-abort-owned-"));
+    const previousHome = process.env.OPENHORN_HOME;
+    process.env.OPENHORN_HOME = owned;
     try {
-      await runClaudeAgent({
-        apiKey: "test-key",
-        model: "claude-sonnet-4",
-        prompt: "hello",
-        cwd: root,
-        abortController,
-        checkpoint,
-        webSearchEnabled: false,
-        requestApproval: async () => true,
-        onEvent: () => {},
-        onCheckpointReady: (runId) => {
-          checkpointReadyRunId = runId;
+      const abortErr = Object.assign(new Error("Aborted"), { name: "AbortError" });
+      const abortController = new AbortController();
+      mock.module("@anthropic-ai/sdk", () => ({
+        default: class MockAnthropic {
+          messages = {
+            stream: () => {
+              const obj = {
+                on(_event: string, _callback: unknown) {
+                  return obj;
+                },
+                finalMessage: () => {
+                  abortController.abort();
+                  return Promise.reject(abortErr);
+                },
+                controller: new AbortController(),
+              };
+              return obj;
+            },
+          };
         },
-        onSdkSessionId: () => {},
-      });
-    } catch {
-      threw = true;
+      }));
+
+      const { runClaudeAgent } = await import("./claude");
+      const { createCheckpointSession, ensureCheckpointBackup, rollbackCheckpoint } = await import(
+        "../checkpoints"
+      );
+      const { canonicalizeWorkspaceRoot } = await import("../workspace");
+
+      const rootPath = path.join(owned, "workspace");
+      mkdirSync(rootPath);
+      const root = await canonicalizeWorkspaceRoot(rootPath);
+      const filePath = path.join(root, "a.txt");
+      writeFileSync(filePath, "v1", "utf8");
+
+      // A checkpoint backup was recorded for this run (as the PreToolUse hook would).
+      const checkpoint = await createCheckpointSession(root);
+      await ensureCheckpointBackup(checkpoint, "a.txt");
+
+      // The tool already edited the file before the run was aborted.
+      writeFileSync(filePath, "v2", "utf8");
+
+      let checkpointReadyRunId = "";
+
+      let threw = false;
+      try {
+        await runClaudeAgent({
+          apiKey: "test-key",
+          model: "claude-sonnet-4",
+          prompt: "hello",
+          cwd: root,
+          abortController,
+          checkpoint,
+          webSearchEnabled: false,
+          requestApproval: async () => true,
+          onEvent: () => {},
+          onCheckpointReady: (runId) => {
+            checkpointReadyRunId = runId;
+          },
+          onSdkSessionId: () => {},
+        });
+      } catch {
+        threw = true;
+      }
+
+      expect(threw).toBe(true);
+      expect(checkpointReadyRunId).toBe(checkpoint.runId);
+
+      // The manifest was written despite the abort, so rollback works.
+      await rollbackCheckpoint(root, checkpoint.runId);
+      expect(readFileSync(filePath, "utf8")).toBe("v1");
+    } finally {
+      if (previousHome === undefined) delete process.env.OPENHORN_HOME;
+      else process.env.OPENHORN_HOME = previousHome;
+      rmSync(owned, { recursive: true, force: true });
     }
-
-    expect(threw).toBe(true);
-    expect(checkpointReadyRunId).toBe(checkpoint.runId);
-
-    // The manifest was written despite the abort, so rollback works.
-    await rollbackCheckpoint(root, checkpoint.runId);
-    expect(readFileSync(filePath, "utf8")).toBe("v1");
   });
 });

@@ -66,11 +66,12 @@ type ConnectionState = {
   agentRuns: Map<string, { abortController: AbortController }>;
   /**
    * Run IDs that this connection has executed (whether currently running
-   * or already finalized). checkpoint.rollback is gated on this set so
+   * or already finalized). checkpoint.rollback is gated on this map so
    * one connection can't roll back another connection's runs even if it
-   * happens to know the runId.
+   * happens to know the runId. Capture each Agent run's canonical cwd so a
+   * later workspace selection cannot redirect its rollback. Chat owns no checkpoint.
    */
-  ownedRunIds: Set<string>;
+  ownedRunIds: Map<string, string | null>;
   lastActivityAt: number;
 };
 
@@ -167,7 +168,7 @@ const server = Bun.serve({
         workspaceRoot: null,
         pendingApprovals: new Map(),
         agentRuns: new Map(),
-        ownedRunIds: new Set(),
+        ownedRunIds: new Map(),
         lastActivityAt: Date.now(),
       });
       activeConnections.add(ws);
@@ -365,7 +366,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
         const abortController = new AbortController();
         const runId = `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         state.agentRuns.set(runId, { abortController });
-        state.ownedRunIds.add(runId);
+        state.ownedRunIds.set(runId, null);
         ws.send(JSON.stringify(buildOkResponse(request.requestId, { runId })));
 
         const onEvent = (event: import("./agent/events").AgentEvent) => {
@@ -491,7 +492,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
         const initRun = (prefix: string) => {
           const runId = `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
           state.agentRuns.set(runId, { abortController });
-          state.ownedRunIds.add(runId);
+          state.ownedRunIds.set(runId, cwd);
           ws.send(JSON.stringify(buildOkResponse(request.requestId, { runId })));
           const onEvent = (event: import("./agent/events").AgentEvent) => {
             if (state.closed) return;
@@ -800,19 +801,19 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
         return;
       }
       case "checkpoint.rollback": {
-        if (!state.workspaceRoot) throw new Error("Workspace not set");
         const { runId } = params as { runId: string };
         // Authorization: this connection must have actually executed the
         // run it's trying to roll back. Without this check any authed
         // connection that guesses or learns a runId could revert another
         // session's work.
-        if (!state.ownedRunIds.has(runId)) {
+        const checkpointRoot = state.ownedRunIds.get(runId);
+        if (!checkpointRoot) {
           ws.send(
             JSON.stringify(buildErrorResponse(request.requestId, "Unknown runId for this session")),
           );
           return;
         }
-        const result = await rollbackCheckpoint(state.workspaceRoot, runId);
+        const result = await rollbackCheckpoint(checkpointRoot, runId);
         ws.send(JSON.stringify(buildOkResponse(request.requestId, result)));
         return;
       }
