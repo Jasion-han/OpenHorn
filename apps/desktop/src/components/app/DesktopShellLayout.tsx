@@ -73,7 +73,7 @@ export function DesktopShellLayout({
 
       <div className="relative flex min-w-0 flex-1 flex-col">
         {sidebarCollapsed && (
-          <div className="absolute left-2 top-2 z-10 titlebar-traffic-light-inset">
+          <div className="absolute left-0 top-0 z-10 px-2 py-2 titlebar-traffic-light-inset">
             <Button
               variant="ghost"
               size="icon-sm"
