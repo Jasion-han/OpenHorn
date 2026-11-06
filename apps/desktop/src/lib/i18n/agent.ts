@@ -652,7 +652,43 @@ export const chatLabels = {
   // Model unavailable notice
   "chat.model.unavailableTitle": "当前会话模型不可用",
   "chat.model.fixHint": "在下方输入框的 Model 里修复即可。",
-  // Image attachment lightbox (DesktopMessageAttachments) — sr-only dialog description
+  // Attachment viewer and composer actions
+  "chat.attachment.searching": "正在搜索…",
+  "chat.attachment.matchPages": "命中页数",
+  "chat.attachment.close": "关闭附件预览",
+  "chat.attachment.expand": "放大查看",
+  "chat.attachment.preview": "查看附件",
+  "chat.attachment.remove": "移除附件",
+  "chat.attachment.previous": "上一项",
+  "chat.attachment.next": "下一项",
+  "chat.attachment.zoom": "缩放",
+  "chat.attachment.zoomIn": "放大",
+  "chat.attachment.zoomOut": "缩小",
+  "chat.attachment.pdfPage": "PDF 页面",
+  "chat.attachment.loading": "正在读取附件…",
+  "chat.attachment.search": "搜索文件内容",
+  "chat.attachment.source": "查看原文",
+  "chat.attachment.rendered": "排版预览",
+  "chat.attachment.copy": "复制内容",
+  "chat.attachment.copied": "已复制",
+  "chat.attachment.empty": "文件内容为空",
+  "chat.attachment.truncated":
+    "当前仅预览前 2 MB 内容，复制仅包含已显示部分。保存可获取完整原文件。",
+  "chat.attachment.largeMarkdown": "文件较大，已使用原文模式查看。",
+  "chat.attachment.open": "用默认应用打开",
+  "chat.attachment.more": "更多操作",
+  "chat.attachment.save": "另存为",
+  "chat.attachment.saving": "正在保存…",
+  "chat.attachment.unknownType": "未知文件类型",
+  "chat.attachment.actionFailed": "操作未完成，请重试；也可以手动选择并复制文本。",
+  "chat.attachment.unavailable":
+    "附件原文件已不可用，或此历史记录仅保存了文件信息。请重新附加原文件后查看。",
+  "chat.attachment.auth": "当前无权读取此附件，请登录后重试。",
+  "chat.attachment.network": "附件读取失败，请检查连接后重试。",
+  "chat.attachment.retry": "重新加载",
+  "chat.attachment.mediaFailed": "当前文件无法预览。你仍可保存原文件，再使用其他应用查看。",
+  "chat.attachment.unsupported":
+    "暂不支持此格式的内置预览。你可以保存原文件，或使用系统默认应用查看。",
   "chat.attachment.lightboxDescription": "预览当前消息中的图片附件，可切换查看上一张或下一张图片。",
   // Sidecar runtime panel busy state (DesktopSidecarRuntimePanel). "Agent" stays English.
   "chat.runtime.executing": "本地 Agent 正在执行...",
@@ -1308,6 +1344,17 @@ export function getImportPartLabel(part: string): string {
  * browser) opened from links inside assistant replies.
  */
 const previewLabels = {
+  "preview.local.close": "关闭文件预览",
+  "preview.local.description": "查看本机路径的当前文件内容。",
+  "preview.local.actions": "路径操作",
+  "preview.local.copyPath": "复制路径",
+  "preview.local.notFound": "文件或文件夹不存在，可能已被删除或移动。",
+  "preview.local.permissionDenied": "当前无法访问此路径。",
+  "preview.local.notAbsolute": "无法识别此电脑上的文件路径。",
+  "preview.local.notFile": "此路径不是可预览的普通文件。",
+  "preview.local.largeFile": "文件较大，暂不在应用内预览。可用默认应用打开原文件。",
+  "preview.local.unsupportedOpen": "此类型不支持直接打开，请在 Finder 中查看或选择合适的编辑器。",
+  "preview.local.unavailable": "无法读取或打开此路径，请检查文件状态后重试。",
   "preview.panel.title": "预览",
   "preview.panel.close": "关闭预览面板",
   "preview.panel.collapse": "收起预览",

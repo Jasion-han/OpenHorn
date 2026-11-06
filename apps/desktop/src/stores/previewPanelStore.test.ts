@@ -216,3 +216,82 @@ describe("preview panel store", () => {
     expect(/^[A-Za-z0-9_-]+$/.test(id)).toBe(true);
   });
 });
+
+describe("attachment sidebar", () => {
+  test("replaces the one attachment tab without closing existing file/web tabs", () => {
+    const store = createPreviewPanelStore();
+    store.getState().openFile({ path: "src/a.ts" });
+    store.getState().openUrl("https://example.com/");
+    const file = new File(["original"], "first.txt");
+    store.getState().openAttachment({ attachments: [{ fileName: file.name }], index: 0, file });
+    const firstId = store.getState().activeTabId;
+    expect(store.getState().tabs).toHaveLength(3);
+    store.getState().collapsePanel();
+    store.getState().openAttachment({ attachments: [{ fileName: "second.pdf" }], index: 5 });
+    expect(store.getState().tabs).toHaveLength(3);
+    expect(store.getState().activeTabId).toBe(firstId);
+    expect(store.getState().collapsed).toBe(false);
+    expect(store.getState().tabs[2]).toMatchObject({
+      kind: "attachment",
+      index: 0,
+      attachments: [{ fileName: "second.pdf" }],
+      file: undefined,
+    });
+    store.getState().closeTab(firstId ?? "");
+    expect(store.getState().tabs).toHaveLength(2);
+    expect(store.getState().tabs[1]).toMatchObject({ kind: "web", url: "https://example.com/" });
+  });
+  test("ignores empty attachment collections and normalizes invalid selections", () => {
+    const store = createPreviewPanelStore();
+    store.getState().openAttachment({ attachments: [], index: 0 });
+    expect(store.getState().isOpen).toBe(false);
+    store.getState().openAttachment({
+      attachments: [{ fileName: "one" }, { fileName: "two" }],
+      index: Number.NaN,
+    });
+    expect(store.getState().tabs[0]).toMatchObject({ index: 0 });
+    store.getState().closePanel();
+    expect(store.getState().tabs).toHaveLength(0);
+  });
+});
+
+test("web tabs follow the most recent user-link origin and unanchored callers clear stale origins", () => {
+  const store = createPreviewPanelStore();
+  const first = {
+    conversationId: "conversation",
+    messageKey: "message-one",
+    roundKey: "round-one",
+    linkIndex: 0,
+    viewportOffset: 240,
+  };
+  const second = {
+    ...first,
+    messageKey: "message-two",
+    roundKey: "round-two",
+    viewportOffset: 300,
+  };
+  store.getState().openUrl("https://example.org/", first);
+  const id = store.getState().activeTabId;
+  store.getState().openFile({ path: "README.md" });
+  store.getState().openUrl("https://example.org/", second);
+  expect(store.getState().tabs).toHaveLength(2);
+  expect(store.getState().activeTabId).toBe(id);
+  expect(store.getState().tabs[0]).toMatchObject({ returnAnchor: second });
+  store.getState().openUrl("https://example.org/");
+  expect(store.getState().tabs[0]).toMatchObject({ returnAnchor: undefined });
+});
+
+test("opening an existing local path revalidates the file and updates its click origin", () => {
+  const store = createPreviewPanelStore();
+  store.getState().openLocalPath({ path: "/tmp/notes.txt" });
+  const id = store.getState().activeTabId;
+  store.getState().openUrl("https://example.org/");
+  store.getState().openLocalPath({ path: "/tmp/notes.txt" });
+  expect(store.getState().tabs).toHaveLength(2);
+  expect(store.getState().activeTabId).toBe(id);
+  expect(store.getState().tabs[0]).toMatchObject({
+    kind: "local",
+    path: "/tmp/notes.txt",
+    revision: 2,
+  });
+});

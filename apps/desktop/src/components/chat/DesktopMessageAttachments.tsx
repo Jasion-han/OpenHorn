@@ -1,25 +1,13 @@
-import { ChevronLeft, ChevronRight, Paperclip, X } from "lucide-react";
-import { type KeyboardEvent, useState } from "react";
+import { Paperclip } from "lucide-react";
+import { useRef } from "react";
 import { truncateName } from "shared/format";
-import { cn, Dialog, DialogClose, DialogContent, DialogDescription } from "ui";
+import { cn } from "ui";
+import { attachmentKind } from "../../lib/attachmentPreview";
 import { getAttachmentUrl } from "../../lib/attachmentUrl";
+import { type ChatScrollAnchor, captureAttachmentScrollAnchor } from "../../lib/chatScrollAnchor";
 import { getChatLabel } from "../../lib/i18n/agent";
+import { usePreviewPanelStore } from "../../stores/previewPanelStore";
 import type { MessageAttachmentMeta } from "../../types/chat";
-
-function isImageType(fileType?: string) {
-  return Boolean(fileType?.startsWith("image/"));
-}
-
-function getImageSrc(att: MessageAttachmentMeta): string | null {
-  if (att.previewUrl) return att.previewUrl;
-  if (att.id) return getAttachmentUrl(att.id);
-  return null;
-}
-
-function getFileHref(att: MessageAttachmentMeta): string | null {
-  if (att.id) return getAttachmentUrl(att.id);
-  return null;
-}
 
 export function DesktopMessageAttachments({
   attachments,
@@ -28,165 +16,75 @@ export function DesktopMessageAttachments({
   attachments: MessageAttachmentMeta[];
   className?: string;
 }) {
-  // Above the early return, not next to their first use: a render that bails out
-  // must still call the same hooks in the same order as one that does not. The
-  // only call site currently guards on a non-empty list, so the component is
-  // unmounted rather than re-rendered when attachments go away — which is what
-  // keeps this from crashing today. That is the caller's shape, not a guarantee
-  // this component makes, and a second call site without the guard would break it.
-  const [lightboxOpen, setLightboxOpen] = useState(false);
-  const [activeIndex, setActiveIndex] = useState(0);
-
-  if (!attachments || attachments.length === 0) return null;
-
-  const imageAttachments = attachments.filter((att) => isImageType(att.fileType));
-  const fileAttachments = attachments.filter((att) => !isImageType(att.fileType));
-  const isSingleImage = imageAttachments.length === 1 && fileAttachments.length === 0;
-  const imagesForPreview = imageAttachments
-    .map((att) => ({ att, src: getImageSrc(att) }))
-    .filter((x): x is { att: MessageAttachmentMeta; src: string } => Boolean(x.src));
-
-  const openAt = (idx: number) => {
-    setActiveIndex(Math.max(0, Math.min(idx, Math.max(0, imagesForPreview.length - 1))));
-    setLightboxOpen(true);
-  };
-
-  const canPrev = activeIndex > 0;
-  const canNext = activeIndex < imagesForPreview.length - 1;
-
-  // Radix DialogContent takes focus when opened, so key events land here
-  // without a global listener. Does not wrap at either end, matching the
-  // disabled state of the arrow buttons.
-  const handleLightboxKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (imagesForPreview.length <= 1) return;
-    if (event.key === "ArrowLeft" && canPrev) {
-      event.preventDefault();
-      setActiveIndex((idx) => Math.max(0, idx - 1));
-    } else if (event.key === "ArrowRight" && canNext) {
-      event.preventDefault();
-      setActiveIndex((idx) => Math.min(imagesForPreview.length - 1, idx + 1));
-    }
-  };
-
+  const pointerAnchor = useRef<{ index: number; anchor?: ChatScrollAnchor } | null>(null);
+  const openAttachment = usePreviewPanelStore((state) => state.openAttachment);
+  if (!attachments?.length) return null;
+  const imageCount = attachments.filter((att) => attachmentKind(att) === "image").length;
   return (
-    <div className={cn("mb-2 flex flex-col gap-2", className)}>
-      {imagesForPreview.length > 0 && (
-        <div className="flex flex-wrap gap-2.5">
-          {imagesForPreview.map(({ att, src }, idx) => (
-            <button
-              key={att.id || `${att.fileName}-${idx}`}
-              type="button"
-              className={cn(
-                "group/image relative shrink-0 overflow-hidden rounded-lg",
-                isSingleImage ? "h-[200px] w-[280px]" : "size-[280px]",
-              )}
-              onClick={() => openAt(idx)}
-              title={att.fileName}
-              aria-label="Preview image"
-            >
+    <div className={cn("mb-2 flex flex-wrap items-start gap-2", className)}>
+      {attachments.map((att, index) => {
+        const image = attachmentKind(att) === "image";
+        const src = att.previewUrl || (att.id ? getAttachmentUrl(att.id) : null);
+        return (
+          <button
+            key={att.id || `${att.fileName}-${index}`}
+            type="button"
+            onPointerDown={(event) => {
+              if (event.button === 0)
+                pointerAnchor.current = {
+                  index,
+                  anchor: captureAttachmentScrollAnchor(event.currentTarget, index),
+                };
+            }}
+            onPointerCancel={() => {
+              pointerAnchor.current = null;
+            }}
+            onClick={(event) => {
+              // Capture before the browser's default focus scroll can move a long round.
+              const captured = pointerAnchor.current;
+              pointerAnchor.current = null;
+              openAttachment({
+                attachments,
+                index,
+                returnAnchor:
+                  event.detail > 0 && captured?.index === index
+                    ? captured.anchor
+                    : captureAttachmentScrollAnchor(event.currentTarget, index),
+              });
+            }}
+            data-chat-attachment-index={index}
+            title={att.fileName}
+            aria-label={`${getChatLabel("chat.attachment.preview")}: ${att.fileName}`}
+            className={cn(
+              "cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+              image && src
+                ? cn(
+                    "relative shrink-0 overflow-hidden rounded-lg transition-opacity hover:opacity-90",
+                    imageCount === 1 && attachments.length === 1
+                      ? "h-[200px] w-[min(280px,100%)]"
+                      : "size-[min(280px,70vw)]",
+                  )
+                : "flex max-w-full items-center gap-2 rounded-lg border border-[#37a5aa]/20 bg-[#37a5aa]/10 px-3 py-1.5 text-[13px] text-[#37a5aa] transition-colors hover:bg-[#37a5aa]/15",
+            )}
+          >
+            {image && src ? (
               <img
                 src={src}
                 alt={att.fileName}
                 className={cn(
-                  "size-full",
-                  isSingleImage ? "bg-muted/10 object-contain" : "object-cover",
+                  "size-full bg-muted/10",
+                  imageCount === 1 ? "object-contain" : "object-cover",
                 )}
               />
-            </button>
-          ))}
-        </div>
-      )}
-
-      {fileAttachments.length > 0 && (
-        <div className="flex flex-wrap gap-2">
-          {fileAttachments.map((att, idx) => {
-            const href = getFileHref(att);
-            const label = truncateName(att.fileName);
-            return href ? (
-              <a
-                key={att.id || `${att.fileName}-${idx}`}
-                href={href}
-                target="_blank"
-                rel="noreferrer"
-                className="flex shrink-0 items-center gap-2 rounded-lg border border-[#37a5aa]/20 bg-[#37a5aa]/10 px-3 py-1.5 text-[13px] text-[#37a5aa] transition-colors hover:bg-[#37a5aa]/15"
-                title={att.fileName}
-              >
-                <Paperclip className="size-4" />
-                <span>{label}</span>
-              </a>
             ) : (
-              <div
-                key={att.id || `${att.fileName}-${idx}`}
-                className="flex shrink-0 items-center gap-2 rounded-lg border border-[#37a5aa]/20 bg-[#37a5aa]/10 px-3 py-1.5 text-[13px] text-[#37a5aa] opacity-70"
-                title={att.fileName}
-              >
-                <Paperclip className="size-4" />
-                <span>{label}</span>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      <Dialog open={lightboxOpen} onOpenChange={setLightboxOpen}>
-        <DialogContent
-          className="max-w-[min(980px,94vw)] overflow-hidden p-0"
-          onKeyDown={handleLightboxKeyDown}
-        >
-          <DialogDescription className="sr-only">
-            {getChatLabel("chat.attachment.lightboxDescription")}
-          </DialogDescription>
-          <div className="relative bg-background">
-            <DialogClose className="absolute right-3 top-3 z-10 rounded-full bg-background/80 p-1.5 text-foreground/70 shadow-sm backdrop-blur hover:text-foreground">
-              <X className="size-5" />
-            </DialogClose>
-
-            {imagesForPreview[activeIndex] && (
-              <div className="flex items-center justify-center p-4">
-                <img
-                  src={imagesForPreview[activeIndex].src}
-                  alt={imagesForPreview[activeIndex].att.fileName}
-                  className="max-h-[80vh] w-auto max-w-full rounded-lg object-contain"
-                />
-              </div>
-            )}
-
-            {imagesForPreview.length > 1 && (
               <>
-                <button
-                  type="button"
-                  onClick={() => setActiveIndex((idx) => Math.max(0, idx - 1))}
-                  disabled={!canPrev}
-                  className={cn(
-                    "absolute left-3 top-1/2 z-10 -translate-y-1/2 rounded-full bg-background/80 p-2 text-foreground/70 shadow-sm backdrop-blur",
-                    "hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40",
-                  )}
-                  aria-label="Previous image"
-                >
-                  <ChevronLeft className="size-5" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setActiveIndex((idx) => Math.min(imagesForPreview.length - 1, idx + 1))
-                  }
-                  disabled={!canNext}
-                  className={cn(
-                    "absolute right-3 top-1/2 z-10 -translate-y-1/2 rounded-full bg-background/80 p-2 text-foreground/70 shadow-sm backdrop-blur",
-                    "hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40",
-                  )}
-                  aria-label="Next image"
-                >
-                  <ChevronRight className="size-5" />
-                </button>
-                <div className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-background/80 px-3 py-1 text-xs text-muted-foreground shadow-sm backdrop-blur">
-                  {activeIndex + 1} / {imagesForPreview.length}
-                </div>
+                <Paperclip aria-hidden="true" className="size-4 shrink-0" />
+                <span className="truncate">{truncateName(att.fileName)}</span>
               </>
             )}
-          </div>
-        </DialogContent>
-      </Dialog>
+          </button>
+        );
+      })}
     </div>
   );
 }

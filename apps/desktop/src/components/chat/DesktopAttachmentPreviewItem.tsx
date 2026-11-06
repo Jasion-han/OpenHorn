@@ -1,11 +1,10 @@
 import { Paperclip, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { truncateName } from "shared/format";
 import { cn } from "ui";
-
-function isImage(mediaType: string): boolean {
-  return mediaType.startsWith("image/");
-}
+import { attachmentKind } from "../../lib/attachmentPreview";
+import { getChatLabel } from "../../lib/i18n/agent";
+import { usePreviewPanelStore } from "../../stores/previewPanelStore";
 
 export function DesktopAttachmentPreviewItem({
   file,
@@ -17,72 +16,54 @@ export function DesktopAttachmentPreviewItem({
   className?: string;
 }) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-
+  const openAttachment = usePreviewPanelStore((state) => state.openAttachment);
+  const attachments = useMemo(
+    () => [{ fileName: file.name, fileType: file.type, fileSize: file.size }],
+    [file],
+  );
+  const image = attachmentKind(attachments[0]) === "image";
   useEffect(() => {
-    if (!isImage(file.type)) {
-      setPreviewUrl(null);
-      return;
-    }
-
-    const nextUrl = URL.createObjectURL(file);
-    setPreviewUrl(nextUrl);
-
-    return () => {
-      URL.revokeObjectURL(nextUrl);
-    };
-  }, [file]);
-
-  if (isImage(file.type) && previewUrl) {
-    return (
-      <div
+    if (!image) return;
+    const url = URL.createObjectURL(file);
+    setPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file, image]);
+  return (
+    <div className={cn("group/attachment relative inline-flex shrink-0", className)}>
+      <button
+        type="button"
+        onClick={() => openAttachment({ attachments, index: 0, file })}
+        title={file.name}
+        aria-label={`${getChatLabel("chat.attachment.preview")}: ${file.name}`}
         className={cn(
-          "group/attachment relative size-[72px] shrink-0 overflow-hidden rounded-lg",
-          className,
+          "cursor-pointer rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          image && previewUrl
+            ? "block size-[72px] overflow-hidden"
+            : "flex max-w-[240px] items-center gap-2 border border-[#37a5aa]/20 bg-[#37a5aa]/10 py-2 pl-2.5 pr-8 text-[13px] text-[#37a5aa] hover:bg-[#37a5aa]/15",
         )}
       >
-        <img src={previewUrl} alt={file.name} className="size-full object-cover" />
-        <button
-          type="button"
-          onClick={onRemove}
-          className={cn(
-            "absolute right-1 top-1 size-[18px] rounded-full",
-            "bg-black/50 text-white backdrop-blur-sm",
-            "flex items-center justify-center",
-            "opacity-0 transition-opacity duration-200 group-hover/attachment:opacity-100",
-            "hover:bg-black/70",
-          )}
-          aria-label="Remove attachment"
-          title="Remove"
-        >
-          <X className="size-3" />
-        </button>
-      </div>
-    );
-  }
-
-  return (
-    <div
-      className={cn(
-        "group/attachment relative flex shrink-0 items-center gap-2 rounded-lg border border-[#37a5aa]/20 bg-[#37a5aa]/10 py-1.5 pl-2.5 pr-7 text-[13px] text-[#37a5aa]",
-        "transition-colors hover:bg-[#37a5aa]/15",
-        className,
-      )}
-    >
-      <Paperclip className="size-4 shrink-0" />
-      <span className="max-w-[160px] truncate">{truncateName(file.name)}</span>
+        {image && previewUrl ? (
+          <img src={previewUrl} alt={file.name} className="size-full object-cover" />
+        ) : (
+          <>
+            <Paperclip aria-hidden="true" className="size-4 shrink-0" />
+            <span className="truncate">{truncateName(file.name)}</span>
+          </>
+        )}
+      </button>
       <button
         type="button"
         onClick={onRemove}
+        aria-label={getChatLabel("chat.attachment.remove")}
+        title={getChatLabel("chat.attachment.remove")}
         className={cn(
-          "absolute right-1.5 top-1/2 -translate-y-1/2 size-[18px] rounded-full",
-          "flex items-center justify-center",
-          "text-[#37a5aa]/60 hover:text-[#37a5aa] hover:bg-[#37a5aa]/20",
-          "opacity-0 transition-all duration-200 group-hover/attachment:opacity-100",
+          "absolute right-0.5 top-0.5 flex size-6 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          image
+            ? "bg-black/60 text-white hover:bg-black/80"
+            : "text-[#37a5aa] hover:bg-[#37a5aa]/20",
         )}
-        aria-label="Remove attachment"
-        title="Remove"
       >
-        <X className="size-3" />
+        <X aria-hidden="true" className="size-3.5" />
       </button>
     </div>
   );

@@ -136,6 +136,8 @@ function MessageBubbleImpl({
 
   return (
     <div
+      data-chat-message-key={message.renderKey ?? message.id}
+      data-chat-conversation-id={message.conversationId}
       className={cn(
         "group flex min-w-0 flex-col",
         isAssistant && "w-full",

@@ -1,4 +1,9 @@
-import { defaultRangeExtractor, type Range, useVirtualizer } from "@tanstack/react-virtual";
+import {
+  defaultRangeExtractor,
+  type Range,
+  useVirtualizer,
+  type Virtualizer,
+} from "@tanstack/react-virtual";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { fileKey } from "shared/format";
 import { chatFailureFinishReason } from "shared/message-text";
@@ -14,6 +19,7 @@ import {
   DialogTitle,
   Textarea,
 } from "ui";
+import { useChatPreviewScrollAnchor } from "../../hooks/useChatPreviewScrollAnchor";
 import { useSidecarAgentRun } from "../../hooks/useSidecarAgentRun";
 import {
   chatModeUnavailableReason,
@@ -308,6 +314,18 @@ export function DesktopChatArea() {
     [messages, currentConversationId],
   );
 
+  const previewVirtualizerRef = useRef<Virtualizer<HTMLDivElement, Element> | null>(null);
+  const previewScrollAnchor = useChatPreviewScrollAnchor({
+    viewportRef,
+    virtualizerRef: previewVirtualizerRef,
+    conversationId: currentConversationId,
+    findRoundIndex: (key) => groupedMessages.findIndex((group) => group.key === key),
+    onCapture: () => {
+      pendingScrollTargetRef.current = null;
+    },
+    canRestore: () => pendingScrollTargetRef.current === null,
+  });
+
   // Group indexes that MUST always stay mounted regardless of the scroll window:
   //  - the group carrying the currently streaming assistant (keeps the
   //    `DesktopStreamingMarkdownMessage` smoother alive so it never resets),
@@ -319,6 +337,10 @@ export function DesktopChatArea() {
   // target rendered for the re-pin layout effect below.
   const forcedGroupIndexes = useMemo(() => {
     const indexes: number[] = [];
+    const previewIndex = groupedMessages.findIndex(
+      (group) => group.key === previewScrollAnchor.pinnedRoundKey,
+    );
+    if (previewIndex >= 0) indexes.push(previewIndex);
     if (streamingAssistantId) {
       const idx = groupedMessages.findIndex(
         (g) =>
@@ -336,7 +358,7 @@ export function DesktopChatArea() {
       if (idx >= 0) indexes.push(idx);
     }
     return indexes;
-  }, [groupedMessages, streamingAssistantId, editingMessageId]);
+  }, [groupedMessages, streamingAssistantId, editingMessageId, previewScrollAnchor.pinnedRoundKey]);
 
   const getItemKey = useCallback(
     (index: number) => groupedMessages[index]?.key ?? index,
@@ -367,6 +389,7 @@ export function DesktopChatArea() {
     useFlushSync: false,
     rangeExtractor,
   });
+  previewVirtualizerRef.current = virtualizer;
   // The default compensates any resize of a row whose *top* is above the
   // viewport by scrolling the same amount — so expanding a step group inside a
   // long round (its start off-screen, the chevron on-screen) shoved the content
@@ -374,6 +397,7 @@ export function DesktopChatArea() {
   // that compensation; a first measurement keeps the estimate→actual
   // correction so initial layout still settles. Instance field, not an option.
   virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) => {
+    if (previewScrollAnchor.restoringRef.current) return false;
     const offset = instance.scrollOffset ?? 0;
     if (!instance.itemSizeCache.has(item.key)) return item.start < offset;
     if (instance.scrollDirection === "backward") return false;
@@ -411,6 +435,8 @@ export function DesktopChatArea() {
     const viewportEl = viewportRef.current;
     const pending = pendingScrollTargetRef.current;
     if (!viewportEl || !pending) return;
+    // Explicit send/retry/navigation scrolls take ownership from an old preview.
+    previewScrollAnchor.cancel();
 
     if (pending.type === "bottom") {
       const lastIndex = groupedMessages.length - 1;
@@ -1050,7 +1076,7 @@ export function DesktopChatArea() {
           : "";
     const previewUrls: string[] = [];
     const localAttachmentMeta: MessageAttachmentMeta[] = files.map((file) => {
-      const previewUrl = file.type?.startsWith("image/") ? URL.createObjectURL(file) : undefined;
+      const previewUrl = URL.createObjectURL(file);
       if (previewUrl) {
         previewUrls.push(previewUrl);
       }
@@ -1352,17 +1378,7 @@ export function DesktopChatArea() {
         void autoTitleConversation(conversationId, autoTitleSeed).catch(() => {});
       }
 
-      const urls = pendingPreviewUrlsRef.current.get(userMessageId);
-      if (urls) {
-        for (const url of urls) {
-          try {
-            URL.revokeObjectURL(url);
-          } catch {
-            // ignore
-          }
-        }
-        pendingPreviewUrlsRef.current.delete(userMessageId);
-      }
+      // Keep local originals available until conversation cleanup revokes their URLs.
     } catch (error) {
       // A stopped turn may finish saving after another send has taken over.
       // Its reply remains owned by its message, but global UI belongs to the
@@ -2018,6 +2034,7 @@ export function DesktopChatArea() {
 
       <div
         ref={viewportRef}
+        data-chat-scroll-viewport
         className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-scroll scrollbar-thin"
         style={{ paddingLeft: PAGE_PAD, paddingRight: PAGE_PAD }}
       >
@@ -2045,6 +2062,7 @@ export function DesktopChatArea() {
                   <div
                     key={virtualRow.key}
                     data-index={virtualRow.index}
+                    data-chat-round-key={group.key}
                     ref={virtualizer.measureElement}
                     style={{
                       position: "absolute",

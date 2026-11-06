@@ -1,11 +1,22 @@
 import { create } from "zustand";
+import type { ChatScrollAnchor } from "../lib/chatScrollAnchor";
+import type { MessageAttachmentMeta } from "../types/chat";
 
 /**
- * Right-hand preview panel: workspace files (code view) and web pages
- * (embedded Tauri child webview) opened from links in assistant replies.
+ * Right-hand preview panel: workspace files, attachments and web pages.
+ * Attachments reuse one temporary tab; web tabs retain their native history.
  */
 
+export type AttachmentPreviewInput = {
+  attachments: MessageAttachmentMeta[];
+  index: number;
+  file?: File;
+  returnAnchor?: ChatScrollAnchor;
+};
+
 export type PreviewTab =
+  | { id: string; kind: "local"; path: string; revision: number; returnAnchor?: ChatScrollAnchor }
+  | ({ id: string; kind: "attachment" } & AttachmentPreviewInput)
   | {
       id: string;
       kind: "file";
@@ -20,17 +31,22 @@ export type PreviewTab =
       url: string;
       title?: string;
       loading: boolean;
+      returnAnchor?: ChatScrollAnchor;
       /** Native history availability, refreshed after page loads. */
       canGoBack: boolean;
       canGoForward: boolean;
     };
 
+type LocalPreviewTab = Extract<PreviewTab, { kind: "local" }>;
 type FilePreviewTab = Extract<PreviewTab, { kind: "file" }>;
+type AttachmentPreviewTab = Extract<PreviewTab, { kind: "attachment" }>;
 type WebPreviewTab = Extract<PreviewTab, { kind: "web" }>;
 
 /** Fields a tab may be patched with (web tabs: url/title/loading/history from page events). */
 export type PreviewTabPatch = Partial<Omit<FilePreviewTab, "id" | "kind">> &
-  Partial<Omit<WebPreviewTab, "id" | "kind">>;
+  Partial<Omit<WebPreviewTab, "id" | "kind">> &
+  Partial<Omit<AttachmentPreviewTab, "id" | "kind">> &
+  Partial<Omit<LocalPreviewTab, "id" | "kind">>;
 
 export const PREVIEW_PANEL_WIDTH_STORAGE_KEY = "openhorn.previewPanel.width";
 export const PREVIEW_PANEL_DEFAULT_WIDTH = 480;
@@ -55,7 +71,9 @@ export interface PreviewPanelState {
     endLine?: number;
     conversationId?: string | null;
   }) => void;
-  openUrl: (url: string) => void;
+  openLocalPath: (input: { path: string; returnAnchor?: ChatScrollAnchor }) => void;
+  openUrl: (url: string, returnAnchor?: ChatScrollAnchor) => void;
+  openAttachment: (input: AttachmentPreviewInput) => void;
   activateTab: (id: string) => void;
   closeTab: (id: string) => void;
   closePanel: () => void;
@@ -152,11 +170,60 @@ export function createPreviewPanelStore(options?: { initialWidth?: number }) {
       });
     },
 
-    openUrl: (url) => {
+    openAttachment: ({ attachments, index, file, returnAnchor }) => {
+      if (!attachments.length) return;
+      const { tabs } = get();
+      const previous = tabs.find((tab) => tab.kind === "attachment");
+      const id = previous?.id ?? generatePreviewTabId();
+      const tab: AttachmentPreviewTab = {
+        id,
+        kind: "attachment",
+        attachments,
+        file,
+        returnAnchor,
+        index: Number.isFinite(index)
+          ? Math.max(0, Math.min(Math.trunc(index), attachments.length - 1))
+          : 0,
+      };
+      set({
+        isOpen: true,
+        collapsed: false,
+        activeTabId: id,
+        tabs: previous ? tabs.map((item) => (item.id === id ? tab : item)) : [...tabs, tab],
+      });
+    },
+
+    openLocalPath: ({ path, returnAnchor }) => {
+      const { tabs } = get();
+      const existing = tabs.find((tab) => tab.kind === "local" && tab.path === path);
+      const id = existing?.id ?? generatePreviewTabId();
+      const tab: LocalPreviewTab = {
+        id,
+        kind: "local",
+        path,
+        returnAnchor,
+        revision: existing?.kind === "local" ? existing.revision + 1 : 1,
+      };
+      set({
+        isOpen: true,
+        collapsed: false,
+        activeTabId: id,
+        tabs: existing ? tabs.map((item) => (item.id === id ? tab : item)) : [...tabs, tab],
+      });
+    },
+
+    openUrl: (url, returnAnchor) => {
       const { tabs } = get();
       const existing = tabs.find((tab) => tab.kind === "web" && tab.url === url);
       if (existing) {
-        set({ isOpen: true, collapsed: false, activeTabId: existing.id });
+        set({
+          isOpen: true,
+          collapsed: false,
+          activeTabId: existing.id,
+          tabs: tabs.map((tab) =>
+            tab.id === existing.id && tab.kind === "web" ? { ...tab, returnAnchor } : tab,
+          ),
+        });
         return;
       }
       const id = generatePreviewTabId();
@@ -166,7 +233,15 @@ export function createPreviewPanelStore(options?: { initialWidth?: number }) {
         activeTabId: id,
         tabs: [
           ...tabs,
-          { id, kind: "web", url, loading: true, canGoBack: false, canGoForward: false },
+          {
+            id,
+            kind: "web",
+            url,
+            returnAnchor,
+            loading: true,
+            canGoBack: false,
+            canGoForward: false,
+          },
         ],
       });
     },

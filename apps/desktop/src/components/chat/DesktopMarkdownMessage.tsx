@@ -15,19 +15,22 @@ import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark, oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
+import { captureLocalPathScrollAnchor } from "../../lib/chatScrollAnchor";
 import { getDomainBadge } from "../../lib/domainBadge";
 import { blockStateKey } from "../../lib/genui/blockState";
 import { endsInsideOpenFence, genUiKindOf } from "../../lib/genui/fence";
 import { formatPreviewLabel, getPreviewLabel } from "../../lib/i18n/agent";
+import { localPathErrorLabel, parseInlineLocalPath } from "../../lib/localPathReference";
 import { notifyError } from "../../lib/notify";
 import { classifyReferenceHref, referenceUrlTransform } from "../../lib/referenceLink";
-import { openWorkspaceFile } from "../../lib/tauriBridge";
+import { openLocalPath, openWorkspaceFile } from "../../lib/tauriBridge";
 import { THEME_MODE_CHANGE_EVENT } from "../../lib/theme";
 import { useChatStore } from "../../stores/chatStore";
 import { useExternalEditorStore } from "../../stores/externalEditorStore";
 import { usePreviewPanelStore } from "../../stores/previewPanelStore";
 import { resolveProjectRootForConversation } from "../../stores/projectStore";
 import { useSidecarStore } from "../../stores/sidecarStore";
+import { DesktopLocalPathLink, LocalPathLinkContext } from "./DesktopLocalPathLink";
 import styles from "./desktop-markdown.module.css";
 import { HtmlUiBlock } from "./genui/HtmlUiBlock";
 import { LazyGenUiBlock } from "./genui/lazy";
@@ -416,7 +419,26 @@ function DesktopMarkdownMessageImpl({
               if (wantsExternal) openWithShell(resolved.url);
               else usePreviewPanelStore.getState().openUrl(resolved.url);
               return;
-            case "file":
+            case "file": {
+              const local = parseInlineLocalPath(resolved.path);
+              if (local) {
+                if (wantsExternal)
+                  void openLocalPath(local.path).catch((reason) =>
+                    notifyError(
+                      getPreviewLabel("preview.file.openFailedTitle"),
+                      localPathErrorLabel(reason),
+                    ),
+                  );
+                else
+                  usePreviewPanelStore.getState().openLocalPath({
+                    path: local.path,
+                    returnAnchor: captureLocalPathScrollAnchor(
+                      e.currentTarget as HTMLElement,
+                      local.path,
+                    ),
+                  });
+                return;
+              }
               if (wantsExternal) {
                 if (!workspaceRoot) {
                   notifyError(
@@ -449,6 +471,7 @@ function DesktopMarkdownMessageImpl({
                 conversationId: useChatStore.getState().currentConversation?.id ?? null,
               });
               return;
+            }
           }
         };
         // File references get an inert href: a relative `apps/x/route.ts:144`
@@ -460,6 +483,9 @@ function DesktopMarkdownMessageImpl({
         return (
           <a
             href={anchorHref}
+            data-chat-local-path-id={
+              link.kind === "file" && parseInlineLocalPath(link.path) ? link.path : undefined
+            }
             title={anchorTitle}
             onClick={handleClick}
             className={styles.richLink}
@@ -483,7 +509,7 @@ function DesktopMarkdownMessageImpl({
             ) : (
               <span className={styles.linkFaviconFallback}>🌐</span>
             )}
-            {children}
+            <LocalPathLinkContext.Provider value>{children}</LocalPathLinkContext.Provider>
           </a>
         );
       },
@@ -492,7 +518,8 @@ function DesktopMarkdownMessageImpl({
         const lang = match?.[1];
         const langMeta = getLanguageMeta(lang);
         const codeString = String(children).replace(/\n$/, "");
-        const isBlock = codeString.includes("\n") || Boolean(match);
+        const isBlock =
+          String(children).endsWith("\n") || codeString.includes("\n") || Boolean(match);
         const genUiKind = isBlock ? genUiKindOf(lang) : null;
         if (genUiKind) {
           const position = (node as { position?: HastPosition } | undefined)?.position;
@@ -552,10 +579,16 @@ function DesktopMarkdownMessageImpl({
           );
         }
 
-        return (
+        const path = parseInlineLocalPath(codeString);
+        const inline = (
           <code className={className} {...props}>
             {children}
           </code>
+        );
+        return path ? (
+          <DesktopLocalPathLink path={path.path}>{inline}</DesktopLocalPathLink>
+        ) : (
+          inline
         );
       },
       pre({ children }: PreProps) {

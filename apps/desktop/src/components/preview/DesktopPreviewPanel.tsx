@@ -1,5 +1,5 @@
-import { FileCode2, Globe, PanelRightClose, X } from "lucide-react";
-import { useCallback, useEffect, useRef } from "react";
+import { FileCode2, Globe, PanelRightClose, Paperclip, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, cn } from "ui";
 import { getPreviewLabel } from "../../lib/i18n/agent";
 import { previewTabIdFromLabel } from "../../lib/previewWebview";
@@ -15,10 +15,15 @@ import {
   type PreviewTab,
   usePreviewPanelStore,
 } from "../../stores/previewPanelStore";
+import { DesktopAttachmentViewer } from "../chat/DesktopAttachmentViewer";
 import { DesktopFilePreview } from "./DesktopFilePreview";
+import { DesktopLocalPathPreview } from "./DesktopLocalPathPreview";
 import { DesktopWebPreview } from "./DesktopWebPreview";
 
 function tabTitle(tab: PreviewTab): string {
+  if (tab.kind === "attachment")
+    return tab.attachments[tab.index]?.fileName ?? getPreviewLabel("preview.tab.untitled");
+  if (tab.kind === "local") return fileBasename(tab.path);
   if (tab.kind === "file") return fileBasename(tab.path);
   if (tab.title?.trim()) return tab.title.trim();
   try {
@@ -30,8 +35,9 @@ function tabTitle(tab: PreviewTab): string {
 
 /**
  * Right-hand column of the shell: a tab strip over either a workspace file
- * (code view) or an embedded browser. Every tab stays mounted so a web tab's
- * child webview survives switching; only the active one is displayed.
+ * (code view), an attachment or an embedded browser. File/web tabs stay mounted
+ * so native browser history survives switching. Inactive attachment readers
+ * unmount to stop media playback and release temporary URLs.
  */
 export function DesktopPreviewPanel({ collapsed = false }: { collapsed?: boolean }) {
   const width = usePreviewPanelStore((state) => state.width);
@@ -41,6 +47,21 @@ export function DesktopPreviewPanel({ collapsed = false }: { collapsed?: boolean
   const closeTab = usePreviewPanelStore((state) => state.closeTab);
   const collapsePanel = usePreviewPanelStore((state) => state.collapsePanel);
   const setWidth = usePreviewPanelStore((state) => state.setWidth);
+  const [narrow, setNarrow] = useState(
+    () => typeof window !== "undefined" && window.innerWidth < 1100,
+  );
+  const attachmentDialog =
+    narrow &&
+    tabs.some(
+      (tab) => tab.id === activeTabId && (tab.kind === "attachment" || tab.kind === "local"),
+    );
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 1099px)");
+    const changed = () => setNarrow(media.matches);
+    changed();
+    media.addEventListener("change", changed);
+    return () => media.removeEventListener("change", changed);
+  }, []);
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
 
   // Page events from the child webviews: keep the tab's url/title/loading
@@ -106,12 +127,13 @@ export function DesktopPreviewPanel({ collapsed = false }: { collapsed?: boolean
   }, []);
 
   return (
-    <div
+    <aside
+      aria-label={getPreviewLabel("preview.panel.title")}
       className={cn(
         "relative flex h-full shrink-0 flex-col border-l border-border/60 bg-background",
         // Collapsed keeps the column mounted (web tabs own native child
         // webviews that would be destroyed with it) but takes it out of layout.
-        collapsed && "hidden",
+        (collapsed || attachmentDialog) && "hidden",
       )}
       style={{ width }}
     >
@@ -147,10 +169,18 @@ export function DesktopPreviewPanel({ collapsed = false }: { collapsed?: boolean
                 <button
                   type="button"
                   onClick={() => activateTab(tab.id)}
-                  title={tab.kind === "file" ? tab.path : tab.url}
+                  title={
+                    tab.kind === "file" || tab.kind === "local"
+                      ? tab.path
+                      : tab.kind === "web"
+                        ? tab.url
+                        : tabTitle(tab)
+                  }
                   className="flex min-w-0 items-center gap-1.5"
                 >
-                  {tab.kind === "file" ? (
+                  {tab.kind === "attachment" ? (
+                    <Paperclip aria-hidden="true" size={13} className="shrink-0 opacity-75" />
+                  ) : tab.kind === "file" || tab.kind === "local" ? (
                     <FileCode2 size={13} className="shrink-0 opacity-75" />
                   ) : (
                     <Globe size={13} className="shrink-0 opacity-75" />
@@ -193,7 +223,23 @@ export function DesktopPreviewPanel({ collapsed = false }: { collapsed?: boolean
           const isActive = tab.id === activeTabId;
           return (
             <div key={tab.id} className={cn("absolute inset-0", !isActive && "hidden")}>
-              {tab.kind === "file" ? (
+              {tab.kind === "local" ? (
+                isActive && !collapsed && <DesktopLocalPathPreview tab={tab} narrow={narrow} />
+              ) : tab.kind === "attachment" ? (
+                isActive &&
+                !collapsed && (
+                  <DesktopAttachmentViewer
+                    attachments={tab.attachments}
+                    index={tab.index}
+                    file={tab.file}
+                    presentation={narrow ? "dialog" : "panel"}
+                    onIndexChange={(index) =>
+                      usePreviewPanelStore.getState().updateTab(tab.id, { index })
+                    }
+                    onClose={() => closeTab(tab.id)}
+                  />
+                )
+              ) : tab.kind === "file" ? (
                 // Collapsed counts as inactive: the initial centre-on-line
                 // scroll must wait until the tab can actually be laid out.
                 <DesktopFilePreview tab={tab} active={isActive && !collapsed} />
@@ -204,6 +250,6 @@ export function DesktopPreviewPanel({ collapsed = false }: { collapsed?: boolean
           );
         })}
       </div>
-    </div>
+    </aside>
   );
 }
