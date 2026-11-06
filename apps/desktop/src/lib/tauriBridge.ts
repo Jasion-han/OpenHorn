@@ -431,3 +431,28 @@ export function onPreviewWebviewPageLoad(
 export function onPreviewWebviewTitle(cb: (event: PreviewWebviewTitleEvent) => void): Unlisten {
   return subscribeTauriEvent<PreviewWebviewTitleEvent>("preview-webview:title", cb);
 }
+
+export interface LocalPathInfo {
+  path: string;
+  fileName: string;
+  kind: "file" | "directory";
+  size: number;
+}
+
+async function localPathCommand<T>(command: string, path: string): Promise<T> {
+  if (!isTauriRuntime()) throw new Error("Local path preview requires the desktop runtime");
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<T>(command, { path });
+}
+export function inspectLocalPath(path: string) {
+  return localPathCommand<LocalPathInfo>("inspect_local_path", path);
+}
+export function readLocalPath(path: string) {
+  return localPathCommand<number[]>("read_local_path", path);
+}
+export function openLocalPath(path: string) {
+  return localPathCommand<void>("open_local_path", path);
+}
+export function revealLocalPath(path: string) {
+  return localPathCommand<void>("reveal_local_path", path);
+}

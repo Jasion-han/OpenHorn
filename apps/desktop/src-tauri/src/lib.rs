@@ -10,6 +10,8 @@ use tauri::{Manager, State, Url, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_shell::process::CommandChild;
 use tauri_plugin_shell::ShellExt;
 
+mod attachment_preview;
+mod local_path;
 mod preview;
 mod sidecar_lifecycle;
 mod workspace_open;
@@ -1056,6 +1058,12 @@ pub fn run() {
             get_sidecar_endpoint,
             pick_workspace_dir,
             pick_import_file,
+            attachment_preview::save_attachment,
+            attachment_preview::open_attachment,
+            local_path::inspect_local_path,
+            local_path::read_local_path,
+            local_path::open_local_path,
+            local_path::reveal_local_path,
             mcp_discover_configs,
             mcp_pick_config_file,
             skills_discover,

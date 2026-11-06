@@ -39,7 +39,7 @@ fn resolve_workspace_file(workspace_root: &str, path: &str) -> Result<PathBuf, S
 /// Spawns a fire-and-forget launcher process with no inherited stdio and a
 /// background thread that reaps it, so each click does not leave a zombie
 /// `open` / `code` behind for the lifetime of the app.
-fn spawn_detached(mut command: std::process::Command) -> std::io::Result<()> {
+pub(crate) fn spawn_detached(mut command: std::process::Command) -> std::io::Result<()> {
     let mut child = command
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
@@ -51,17 +51,13 @@ fn spawn_detached(mut command: std::process::Command) -> std::io::Result<()> {
     Ok(())
 }
 
-fn open_with_default_app(file: &Path) -> Result<(), String> {
+pub(crate) fn open_with_default_app(file: &Path) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     let mut command = std::process::Command::new("open");
     #[cfg(target_os = "linux")]
     let mut command = std::process::Command::new("xdg-open");
     #[cfg(target_os = "windows")]
-    let mut command = {
-        let mut c = std::process::Command::new("cmd");
-        c.args(["/c", "start", ""]);
-        c
-    };
+    let mut command = std::process::Command::new("explorer.exe");
     command.arg(file);
     spawn_detached(command).map_err(|e| format!("无法启动系统默认应用：{e}"))
 }
@@ -239,6 +235,10 @@ pub fn open_workspace_file(
 #[tauri::command]
 pub fn reveal_workspace_file(workspace_root: String, path: String) -> Result<(), String> {
     let file = resolve_workspace_file(&workspace_root, &path)?;
+    reveal_in_file_manager(&file)
+}
+
+pub(crate) fn reveal_in_file_manager(file: &Path) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     let command = {
         let mut c = std::process::Command::new("open");
