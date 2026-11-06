@@ -655,6 +655,13 @@ export const chatLabels = {
   // Attachment viewer and composer actions
   "chat.attachment.searching": "正在搜索…",
   "chat.attachment.matchPages": "命中页数",
+  "chat.link.more": "链接操作",
+  "chat.link.openBrowser": "在浏览器中打开",
+  "chat.link.copy": "复制链接",
+  "chat.link.copied": "链接已复制",
+  "chat.link.copyFailed": "无法复制链接",
+  "chat.link.openFailed": "无法打开浏览器",
+  "chat.link.retryHint": "请重试或复制链接后打开。",
   "chat.attachment.close": "关闭附件预览",
   "chat.attachment.expand": "放大查看",
   "chat.attachment.preview": "查看附件",

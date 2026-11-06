@@ -5,19 +5,19 @@ import { cn } from "ui";
 import { sanitizeDisplayContent } from "../../lib/citations";
 import { formatMessageTime, formatTokenCount } from "../../lib/conversationTitle";
 import { getChatLabel } from "../../lib/i18n/agent";
-import { findKnownSlashToken, type SlashCommandType } from "../../lib/slashToken";
+import type { SlashCommandType } from "../../lib/slashToken";
 import { resolvePlainReplyEndState } from "../../lib/stopTurn";
 import type { Message } from "../../types/chat";
 import { AgentRunPanel } from "./DesktopAgentRunPanel";
 import { DesktopAgentTaskMetaLine } from "./DesktopAgentTaskMetaLine";
 import { DesktopCitationList } from "./DesktopCitationList";
-import { SLASH_ICONS } from "./DesktopComposer";
 import { LiveStatusBadge } from "./DesktopLiveStatusBadge";
 import { stripLeadingThematicBreak } from "./DesktopMarkdownMessage";
 import { MessageActionBar } from "./DesktopMessageActionBar";
 import { DesktopMessageAttachments } from "./DesktopMessageAttachments";
 import { DesktopStreamingMarkdownMessage } from "./DesktopStreamingMarkdownMessage";
 import { TypingIndicator } from "./DesktopTypingIndicator";
+import { DesktopUserMessageContent } from "./DesktopUserMessageContent";
 
 /**
  * Which single live indicator an agent answer shows while it is running.
@@ -201,41 +201,10 @@ function MessageBubbleImpl({
             <DesktopCitationList citations={message.citations} content={displayContent} />
           </div>
         ) : !isAssistant ? (
-          (() => {
-            // A user message may carry a slash command token (`/web-access …`) at
-            // any token boundary. It stays in the stored content so it survives
-            // reload; we render it inline, in place, as a typed chip — but only
-            // when it maps to a *known* skill/MCP, so ordinary text containing
-            // "/" is left untouched.
-            const content = message.content || "";
-            const token = knownCommands ? findKnownSlashToken(content, knownCommands) : null;
-            if (!token && !content.trim()) return null;
-            const ChipIcon = token ? SLASH_ICONS[token.type] : null;
-            return (
-              <p
-                className="text-sm"
-                style={{
-                  whiteSpace: "pre-wrap",
-                  overflowWrap: "anywhere",
-                  wordBreak: "break-word",
-                  maxWidth: "100%",
-                }}
-              >
-                {token && ChipIcon ? (
-                  <>
-                    {content.slice(0, token.start)}
-                    <span className="font-medium text-blue-500">
-                      <ChipIcon size={14} className="mr-1 inline-block align-[-2px]" />
-                      {content.slice(token.start, token.end)}
-                    </span>
-                    {content.slice(token.end)}
-                  </>
-                ) : (
-                  content
-                )}
-              </p>
-            );
-          })()
+          <DesktopUserMessageContent
+            content={message.content || ""}
+            knownCommands={knownCommands}
+          />
         ) : null}
         {liveIndicator === "trailing" && (
           <section className="mt-0.5 px-1 pt-0 pb-1">

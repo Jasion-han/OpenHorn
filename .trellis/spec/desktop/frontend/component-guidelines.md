@@ -68,6 +68,14 @@ Questions to answer:
 - 列表滚动会让条目滑到静止指针下触发合成 mouseEnter/mousemove 抢走键盘选中；hover 更新索引必须做指针坐标门控（见 DesktopComposer `slashPointerRef`）
 
 
+### Convention: 用户消息中的网页链接
+
+- 用户消息由 `DesktopUserMessageContent` 按原始文本切片渲染 HTTP(S) 链接，保持换行、原文复制和既有 slash chip；存储内容不变，不将整个用户正文解释成 Markdown/HTML。历史消息使用同一入口。
+- 普通单击在右侧网页预览打开；Cmd/Ctrl 单击或链接菜单可在浏览器打开，菜单可复制链接。文字选择不得触发打开；键盘可使用链接和菜单。
+- 消息显示不触发网址、favicon 或网页元数据请求，页面仅在明确交互后加载。
+- 用户链接和附件共用视口相对锚点，关闭预览返回各自点击来源；新发送/重试或切换会话取消旧来源，关闭标签不得重新激活已取消的锚点。
+- 边界与交互回归见 `userMessageLinks.test.ts`、`previewPanelStore.test.ts`、`user-message-links.browser.mjs` 和 `attachment-scroll.browser.mjs`。
+
 ### Convention: 回复中的本地文件路径
 
 - `DesktopMarkdownMessage` 中独立的行内代码路径可点击，保留代码外观和原始消息；支持绝对路径、`~/` 与本机 `file://`，不把命令、网页链接或代码块变成文件操作。

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { DesktopMarkdownMessage } from "../src/components/chat/DesktopMarkdownMessage";
 import { DesktopMessageAttachments } from "../src/components/chat/DesktopMessageAttachments";
+import { DesktopUserMessageContent } from "../src/components/chat/DesktopUserMessageContent";
 import { DesktopPreviewPanel } from "../src/components/preview/DesktopPreviewPanel";
 import { useChatPreviewScrollAnchor } from "../src/hooks/useChatPreviewScrollAnchor";
 import { usePreviewPanelStore } from "../src/stores/previewPanelStore";
@@ -151,6 +152,8 @@ function Fixture() {
                     {row.index === 55 && <div style={{ height: tall ? 360 : 0 }} />}
                     {query.has("path") ? (
                       <DesktopMarkdownMessage content={`Created \`${query.get("path")}\``} />
+                    ) : query.has("link") ? (
+                      <DesktopUserMessageContent content={`Read ${query.get("link")}`} />
                     ) : (
                       <DesktopMessageAttachments attachments={attachment} />
                     )}
