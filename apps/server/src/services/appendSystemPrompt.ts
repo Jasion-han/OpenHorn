@@ -1,3 +1,4 @@
+import { REVIEW_JSON_SYSTEM_TAG } from "shared/reviews";
 import { mergeSystemPromptParts } from "./responseStyle";
 
 /**
@@ -26,5 +27,7 @@ export function withAppendedSystemPrompt(
   effectiveSystemPrompt: string | null | undefined,
   appendSystemPrompt: string | null | undefined,
 ): string | null {
+  if (effectiveSystemPrompt?.trimStart().startsWith(REVIEW_JSON_SYSTEM_TAG))
+    return effectiveSystemPrompt;
   return mergeSystemPromptParts(effectiveSystemPrompt, appendSystemPrompt);
 }

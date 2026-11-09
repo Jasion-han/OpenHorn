@@ -1,0 +1,34 @@
+{
+  "evaluationCalls": 68,
+  "productionRouteLiveCalls": 2,
+  "totalLiveCalls": 70,
+  "estimatedCostUsd": 0.0014715960000000001,
+  "reservedUpperBoundUsd": 0.19267584000000001,
+  "evaluationLatencyMs": {
+    "p50": 317.0,
+    "p95": 518,
+    "max": 6277
+  },
+  "productionResults": [
+    {
+      "text": "Good, but slow",
+      "note": "客服承诺终身免费换新。",
+      "probability": 0.01,
+      "model": "jev-1.14.0",
+      "usage": {
+        "input_tokens": 410,
+        "output_tokens": 20
+      }
+    },
+    {
+      "text": "Good, but slow",
+      "note": "评论认可使用体验，同时指出速度慢。",
+      "probability": 0.78,
+      "model": "jev-1.14.0",
+      "usage": {
+        "input_tokens": 416,
+        "output_tokens": 20
+      }
+    }
+  ]
+}

@@ -14,6 +14,7 @@ import {
   assistantMessageContent,
   chatFailureFinishReason,
 } from "shared/message-text";
+import { REVIEW_JSON_SYSTEM_TAG } from "shared/reviews";
 import type { ModelContextMetadata } from "shared/types";
 import { type ChatContentPart, type ChatMessage, createAdapter } from "../agent-adapters";
 import { client, db } from "../db";
@@ -494,9 +495,10 @@ export async function buildChatMessages(
   const chatMessages: ChatMessage[] = [];
 
   let effectiveSystemPrompt = systemPrompt || "";
+  const reviewBatchOnly = effectiveSystemPrompt.trimStart().startsWith(REVIEW_JSON_SYSTEM_TAG);
 
   // For new conversations (< 3 messages), inject historical summaries as memory
-  if (conversationId && conversationMessages.length < 3) {
+  if (!reviewBatchOnly && conversationId && conversationMessages.length < 3) {
     try {
       const summaries = await getRecentSummaries(userId, conversationId);
       if (summaries.length > 0) {
@@ -517,7 +519,7 @@ export async function buildChatMessages(
   // latest query and append them to the system prompt so the model can reference
   // uploaded documents during the conversation.
   const lastUserMsg = conversationMessages.filter((m) => m.role === "user").pop();
-  if (lastUserMsg) {
+  if (lastUserMsg && !reviewBatchOnly) {
     try {
       const embeddingCreds = await getEmbeddingApiKey(userId);
       if (embeddingCreds) {
@@ -767,6 +769,7 @@ export async function sendMessage(userId: string, input: SendMessageInput) {
     userSettings: settings,
     tavilyEnvKey: process.env.TAVILY_API_KEY ?? null,
     forceWebSearch: Boolean(conversation.forceWebSearch),
+    dataOnly: conversation.systemPrompt?.trimStart().startsWith(REVIEW_JSON_SYSTEM_TAG),
     classifier,
   });
   const assistantMessageId = generateId();
@@ -1010,6 +1013,7 @@ export async function streamMessage(
       userSettings: settings,
       tavilyEnvKey: process.env.TAVILY_API_KEY ?? null,
       forceWebSearch: Boolean(conversation.forceWebSearch),
+      dataOnly: conversation.systemPrompt?.trimStart().startsWith(REVIEW_JSON_SYSTEM_TAG),
       classifier,
     });
     const effectiveSystemPrompt = buildEffectiveSystemPrompt(baseSystemPrompt, liveContext);
@@ -1373,6 +1377,7 @@ async function editUserMessageWithMutation(
       userSettings: settings,
       tavilyEnvKey: process.env.TAVILY_API_KEY ?? null,
       forceWebSearch: Boolean(conversation.forceWebSearch),
+      dataOnly: conversation.systemPrompt?.trimStart().startsWith(REVIEW_JSON_SYSTEM_TAG),
       classifier,
     });
     requireChatMutation(mutation);
@@ -1591,6 +1596,7 @@ async function regenerateMessageWithMutation(
       userSettings: settings,
       tavilyEnvKey: process.env.TAVILY_API_KEY ?? null,
       forceWebSearch: Boolean(conversation.forceWebSearch),
+      dataOnly: conversation.systemPrompt?.trimStart().startsWith(REVIEW_JSON_SYSTEM_TAG),
       classifier,
     });
     requireChatMutation(mutation);

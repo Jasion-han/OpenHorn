@@ -1,0 +1,24 @@
+{
+  "additionalLiveCalls": 67,
+  "cumulativeLiveCalls": 137,
+  "additionalEstimatedCostUsd": 0.0016322880000000002,
+  "cumulativeEstimatedCostUsd": 0.0031038840000000003,
+  "cumulativeReservedUpperBoundUsd": 0.377094144,
+  "v2LiveResults": [
+    {
+      "note": "客服承诺终身免费换新。",
+      "supportProbability": 0.02,
+      "hasClaimsProbability": 0.96
+    },
+    {
+      "note": "评论认可使用体验，同时指出速度慢。",
+      "supportProbability": 0.81,
+      "hasClaimsProbability": 0.97
+    },
+    {
+      "note": "建议联系售后处理。",
+      "supportProbability": 0.92,
+      "hasClaimsProbability": 0.06
+    }
+  ]
+}

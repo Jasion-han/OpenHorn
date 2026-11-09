@@ -1,6 +1,6 @@
-import { scheduledTaskRuns, scheduledTasks } from "db";
-import { and, desc, eq, lte } from "drizzle-orm";
-import type { ScheduledTaskFrequency } from "shared/types";
+import { projects, scheduledTaskRuns, scheduledTasks } from "db";
+import { and, asc, desc, eq, gt, isNull, lte, or } from "drizzle-orm";
+import type { FrozenRecipeSnapshot, ScheduledTaskFrequency } from "shared/types";
 import { db } from "../db";
 import { generateId } from "../utils";
 
@@ -44,12 +44,22 @@ export function computeNextRunAt(frequency: ScheduledTaskFrequency, time: string
   return candidate;
 }
 
+function taskWithSnapshot(row: typeof scheduledTasks.$inferSelect) {
+  return {
+    ...row,
+    recipeSnapshot: row.recipeSnapshot
+      ? (JSON.parse(row.recipeSnapshot) as FrozenRecipeSnapshot)
+      : undefined,
+  };
+}
+
 export async function listScheduledTasks(userId: string) {
   return db
     .select()
     .from(scheduledTasks)
     .where(eq(scheduledTasks.userId, userId))
-    .orderBy(desc(scheduledTasks.createdAt));
+    .orderBy(desc(scheduledTasks.createdAt))
+    .then((rows) => rows.map(taskWithSnapshot));
 }
 
 export async function getScheduledTask(userId: string, taskId: string) {
@@ -57,7 +67,7 @@ export async function getScheduledTask(userId: string, taskId: string) {
     .select()
     .from(scheduledTasks)
     .where(and(eq(scheduledTasks.id, taskId), eq(scheduledTasks.userId, userId)));
-  return rows[0] ?? null;
+  return rows[0] ? taskWithSnapshot(rows[0]) : null;
 }
 
 export async function createScheduledTask(
@@ -70,11 +80,21 @@ export async function createScheduledTask(
     notifyOnComplete?: boolean;
     channelId?: string;
     modelId?: string;
+    projectId?: string;
+    recipeSnapshot?: FrozenRecipeSnapshot;
   },
+  id = generateId(),
 ) {
   const now = new Date();
-  const id = generateId();
   const nextRunAt = computeNextRunAt(data.frequency, data.time);
+  if (data.projectId) {
+    const [project] = await db
+      .select({ id: projects.id })
+      .from(projects)
+      .where(and(eq(projects.id, data.projectId), eq(projects.userId, userId)))
+      .limit(1);
+    if (!project) throw new Error("Project not found");
+  }
 
   await db.insert(scheduledTasks).values({
     id,
@@ -87,6 +107,8 @@ export async function createScheduledTask(
     notifyOnComplete: data.notifyOnComplete ?? true,
     channelId: data.channelId ?? null,
     modelId: data.modelId ?? null,
+    projectId: data.projectId ?? null,
+    recipeSnapshot: data.recipeSnapshot ? JSON.stringify(data.recipeSnapshot) : null,
     nextRunAt,
     createdAt: now,
     updatedAt: now,
@@ -110,6 +132,13 @@ export async function updateScheduledTask(
 ) {
   const existing = await getScheduledTask(userId, taskId);
   if (!existing) return null;
+  if (existing.recipeSnapshot) {
+    for (const field of ["prompt", "channelId", "modelId", "projectId"] as const) {
+      if (Object.hasOwn(data, field) && (data[field] ?? null) !== (existing[field] ?? null)) {
+        throw new Error("Recipe execution snapshot is immutable; create a new schedule");
+      }
+    }
+  }
 
   const now = new Date();
   const frequency = (data.frequency as ScheduledTaskFrequency) ?? existing.frequency;
@@ -122,7 +151,13 @@ export async function updateScheduledTask(
   await db
     .update(scheduledTasks)
     .set({
-      ...data,
+      ...(data.title !== undefined ? { title: data.title } : {}),
+      ...(data.prompt !== undefined ? { prompt: data.prompt } : {}),
+      ...(data.frequency !== undefined ? { frequency: data.frequency } : {}),
+      ...(data.time !== undefined ? { time: data.time } : {}),
+      ...(data.notifyOnComplete !== undefined ? { notifyOnComplete: data.notifyOnComplete } : {}),
+      ...(data.channelId !== undefined ? { channelId: data.channelId } : {}),
+      ...(data.modelId !== undefined ? { modelId: data.modelId } : {}),
       ...(nextRunAt ? { nextRunAt } : {}),
       updatedAt: now,
     })
@@ -165,6 +200,8 @@ export async function listTaskRuns(userId: string, taskId?: string, limit = 50) 
       conversationId: scheduledTaskRuns.conversationId,
       result: scheduledTaskRuns.result,
       error: scheduledTaskRuns.error,
+      errorCode: scheduledTaskRuns.errorCode,
+      leaseExpiresAt: scheduledTaskRuns.leaseExpiresAt,
       startedAt: scheduledTaskRuns.startedAt,
       completedAt: scheduledTaskRuns.completedAt,
       taskTitle: scheduledTasks.title,
@@ -189,14 +226,15 @@ export async function getDueTasks() {
   return db
     .select()
     .from(scheduledTasks)
-    .where(and(eq(scheduledTasks.enabled, true), lte(scheduledTasks.nextRunAt, now)));
+    .where(and(eq(scheduledTasks.enabled, true), lte(scheduledTasks.nextRunAt, now)))
+    .then((rows) => rows.map(taskWithSnapshot));
 }
 
 export async function createTaskRun(
   taskId: string,
   userId: string,
   conversationId?: string,
-  status: "pending" | "running" = "running",
+  status: "pending" | "running" = "pending",
 ) {
   const id = generateId();
   const now = new Date();
@@ -211,15 +249,129 @@ export async function createTaskRun(
   return id;
 }
 
-/**
- * Hands a scheduler-created `pending` run to the client that will execute it.
- * Conditional on the current status so two clients (or a retry) cannot both
- * take the same run: only the first caller sees `true`.
- */
-export async function claimTaskRun(userId: string, runId: string): Promise<boolean> {
+export const TASK_RUN_LEASE_MS = 120_000;
+const PENDING_RUN_MAX_AGE_MS = 15 * 60_000;
+
+export function isTaskRunOwnerToken(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Za-z0-9_-]{16,128}$/.test(value);
+}
+
+/** Owner retries are idempotent, but another client cannot acquire a live run. */
+export async function claimTaskRun(
+  userId: string,
+  runId: string,
+  ownerToken?: string,
+  now = new Date(),
+): Promise<boolean> {
+  if (!isTaskRunOwnerToken(ownerToken)) return false;
   const result = await db
     .update(scheduledTaskRuns)
-    .set({ status: "running" })
+    .set({
+      status: "running",
+      ownerToken,
+      leaseExpiresAt: new Date(now.getTime() + TASK_RUN_LEASE_MS),
+    })
+    .where(
+      and(
+        eq(scheduledTaskRuns.id, runId),
+        eq(scheduledTaskRuns.userId, userId),
+        or(
+          and(
+            eq(scheduledTaskRuns.status, "pending"),
+            gt(scheduledTaskRuns.startedAt, new Date(now.getTime() - PENDING_RUN_MAX_AGE_MS)),
+          ),
+          and(
+            eq(scheduledTaskRuns.status, "running"),
+            eq(scheduledTaskRuns.ownerToken, ownerToken),
+            gt(scheduledTaskRuns.leaseExpiresAt, now),
+          ),
+        ),
+      ),
+    );
+  return result.rowsAffected > 0;
+}
+
+export async function heartbeatTaskRun(
+  userId: string,
+  runId: string,
+  ownerToken: string,
+  now = new Date(),
+): Promise<boolean> {
+  if (!isTaskRunOwnerToken(ownerToken)) return false;
+  const result = await db
+    .update(scheduledTaskRuns)
+    .set({ leaseExpiresAt: new Date(now.getTime() + TASK_RUN_LEASE_MS) })
+    .where(
+      and(
+        eq(scheduledTaskRuns.id, runId),
+        eq(scheduledTaskRuns.userId, userId),
+        eq(scheduledTaskRuns.status, "running"),
+        eq(scheduledTaskRuns.ownerToken, ownerToken),
+        gt(scheduledTaskRuns.leaseExpiresAt, now),
+      ),
+    );
+  return result.rowsAffected > 0;
+}
+
+/** A fenced terminal write cannot change a completed/failed run or a lost lease. */
+export async function finishTaskRun(
+  userId: string,
+  runId: string,
+  result: { status: "completed" | "failed"; result?: string; error?: string },
+  ownerToken?: string,
+  now = new Date(),
+): Promise<boolean> {
+  if (!isTaskRunOwnerToken(ownerToken)) return false;
+  const updated = await db
+    .update(scheduledTaskRuns)
+    .set({
+      status: result.status,
+      result: result.result ?? null,
+      error: result.error ?? null,
+      errorCode: null,
+      completedAt: now,
+      leaseExpiresAt: null,
+    })
+    .where(
+      and(
+        eq(scheduledTaskRuns.id, runId),
+        eq(scheduledTaskRuns.userId, userId),
+        eq(scheduledTaskRuns.status, "running"),
+        eq(scheduledTaskRuns.ownerToken, ownerToken),
+        gt(scheduledTaskRuns.leaseExpiresAt, now),
+      ),
+    );
+  if (updated.rowsAffected > 0) return true;
+  // A lost HTTP ACK may repeat the same completion, but can never change it.
+  const [settled] = await db
+    .select()
+    .from(scheduledTaskRuns)
+    .where(
+      and(
+        eq(scheduledTaskRuns.id, runId),
+        eq(scheduledTaskRuns.userId, userId),
+        eq(scheduledTaskRuns.ownerToken, ownerToken),
+        eq(scheduledTaskRuns.status, result.status),
+        isNull(scheduledTaskRuns.errorCode),
+      ),
+    )
+    .limit(1);
+  return (
+    !!settled &&
+    settled.result === (result.result ?? null) &&
+    settled.error === (result.error ?? null)
+  );
+}
+
+/** Only server-side preparation failures may settle an unclaimed run. */
+export async function failPendingTaskRun(
+  userId: string,
+  runId: string,
+  error: string,
+): Promise<void> {
+  await db
+    .update(scheduledTaskRuns)
+    .set({ status: "failed", error, completedAt: new Date() })
     .where(
       and(
         eq(scheduledTaskRuns.id, runId),
@@ -227,41 +379,70 @@ export async function claimTaskRun(userId: string, runId: string): Promise<boole
         eq(scheduledTaskRuns.status, "pending"),
       ),
     );
-  return result.rowsAffected > 0;
 }
 
-export async function finishTaskRun(
-  userId: string,
-  runId: string,
-  result: { status: "completed" | "failed"; result?: string; error?: string },
-): Promise<boolean> {
-  const now = new Date();
-  const updated = await db
-    .update(scheduledTaskRuns)
-    .set({
-      status: result.status,
-      result: result.result ?? null,
-      error: result.error ?? null,
-      completedAt: now,
+/** The queue is not a truncated page of history. It never returns owner tokens. */
+export async function listPendingTaskRuns(userId: string) {
+  return db
+    .select({
+      id: scheduledTaskRuns.id,
+      taskId: scheduledTaskRuns.taskId,
+      userId: scheduledTaskRuns.userId,
+      status: scheduledTaskRuns.status,
+      conversationId: scheduledTaskRuns.conversationId,
+      result: scheduledTaskRuns.result,
+      error: scheduledTaskRuns.error,
+      errorCode: scheduledTaskRuns.errorCode,
+      leaseExpiresAt: scheduledTaskRuns.leaseExpiresAt,
+      startedAt: scheduledTaskRuns.startedAt,
+      completedAt: scheduledTaskRuns.completedAt,
     })
-    .where(and(eq(scheduledTaskRuns.id, runId), eq(scheduledTaskRuns.userId, userId)));
-  return updated.rowsAffected > 0;
+    .from(scheduledTaskRuns)
+    .where(and(eq(scheduledTaskRuns.userId, userId), eq(scheduledTaskRuns.status, "pending")))
+    .orderBy(asc(scheduledTaskRuns.startedAt))
+    .limit(100);
 }
 
-export async function completeTaskRun(
-  runId: string,
-  result: { status: "completed" | "failed"; result?: string; error?: string },
-) {
-  const now = new Date();
+/** Expiry only fails abandoned runs; it never replays possibly completed tools. */
+export async function reconcileExpiredTaskRuns(userId?: string, now = new Date()): Promise<void> {
+  const scope = userId ? [eq(scheduledTaskRuns.userId, userId)] : [];
   await db
     .update(scheduledTaskRuns)
     .set({
-      status: result.status,
-      result: result.result ?? null,
-      error: result.error ?? null,
+      status: "failed",
+      error: null,
+      errorCode: "lease_expired",
+      completedAt: now,
+      leaseExpiresAt: null,
+    })
+    .where(
+      and(
+        ...scope,
+        eq(scheduledTaskRuns.status, "running"),
+        or(
+          lte(scheduledTaskRuns.leaseExpiresAt, now),
+          and(
+            isNull(scheduledTaskRuns.leaseExpiresAt),
+            lte(scheduledTaskRuns.startedAt, new Date(now.getTime() - TASK_RUN_LEASE_MS)),
+          ),
+        ),
+      ),
+    );
+  await db
+    .update(scheduledTaskRuns)
+    .set({
+      status: "failed",
+      error: null,
+      errorCode: "missed",
       completedAt: now,
     })
-    .where(eq(scheduledTaskRuns.id, runId));
+    .where(
+      and(
+        ...scope,
+        eq(scheduledTaskRuns.status, "pending"),
+        lte(scheduledTaskRuns.startedAt, new Date(now.getTime() - PENDING_RUN_MAX_AGE_MS)),
+      ),
+    );
 }
 
 export async function deleteTaskRun(userId: string, runId: string) {

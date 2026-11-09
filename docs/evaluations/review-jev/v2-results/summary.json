@@ -1,0 +1,21 @@
+{
+  "model": "jev-1.14.0",
+  "calls": 44,
+  "estimatedCostUsd": 0.001088724,
+  "cumulativeReservedUpperBoundUsd": 0.36883660800000007,
+  "cumulativeEstimatedCostUsd": 0.003031854,
+  "groups": {
+    "edge": {
+      "total": 20,
+      "mismatches": []
+    },
+    "previous-holdout": {
+      "total": 16,
+      "mismatches": []
+    },
+    "fresh-holdout": {
+      "total": 8,
+      "mismatches": []
+    }
+  }
+}

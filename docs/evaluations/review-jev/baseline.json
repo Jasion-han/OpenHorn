@@ -1,0 +1,296 @@
+{
+  "cases": 32,
+  "structurallyAccepted": 32,
+  "knownWrongMeaningAccepted": 16,
+  "livePaidCalls": 0,
+  "rows": [
+    {
+      "id": "explore-01",
+      "split": "explore",
+      "structurallyAccepted": true,
+      "expected": {
+        "sentiment": false,
+        "note": false
+      }
+    },
+    {
+      "id": "explore-02",
+      "split": "explore",
+      "structurallyAccepted": true,
+      "expected": {
+        "sentiment": true,
+        "note": true
+      }
+    },
+    {
+      "id": "explore-03",
+      "split": "explore",
+      "structurallyAccepted": true,
+      "expected": {
+        "sentiment": true,
+        "note": true
+      }
+    },
+    {
+      "id": "explore-04",
+      "split": "explore",
+      "structurallyAccepted": true,
+      "expected": {
+        "sentiment": false,
+        "note": false
+      }
+    },
+    {
+      "id": "explore-05",
+      "split": "explore",
+      "structurallyAccepted": true,
+      "expected": {
+        "sentiment": true,
+        "note": true
+      }
+    },
+    {
+      "id": "explore-06",
+      "split": "explore",
+      "structurallyAccepted": true,
+      "expected": {
+        "sentiment": false,
+        "note": false
+      }
+    },
+    {
+      "id": "explore-07",
+      "split": "explore",
+      "structurallyAccepted": true,
+      "expected": {
+        "sentiment": true,
+        "note": true
+      }
+    },
+    {
+      "id": "explore-08",
+      "split": "explore",
+      "structurallyAccepted": true,
+      "expected": {
+        "sentiment": false,
+        "note": false
+      }
+    },
+    {
+      "id": "explore-09",
+      "split": "explore",
+      "structurallyAccepted": true,
+      "expected": {
+        "sentiment": true,
+        "note": true
+      }
+    },
+    {
+      "id": "explore-10",
+      "split": "explore",
+      "structurallyAccepted": true,
+      "expected": {
+        "sentiment": true,
+        "note": false
+      }
+    },
+    {
+      "id": "explore-11",
+      "split": "explore",
+      "structurallyAccepted": true,
+      "expected": {
+        "sentiment": true,
+        "note": true
+      }
+    },
+    {
+      "id": "explore-12",
+      "split": "explore",
+      "structurallyAccepted": true,
+      "expected": {
+        "sentiment": false,
+        "note": false
+      }
+    },
+    {
+      "id": "explore-13",
+      "split": "explore",
+      "structurallyAccepted": true,
+      "expected": {
+        "sentiment": true,
+        "note": true
+      }
+    },
+    {
+      "id": "explore-14",
+      "split": "explore",
+      "structurallyAccepted": true,
+      "expected": {
+        "sentiment": false,
+        "note": false
+      }
+    },
+    {
+      "id": "explore-15",
+      "split": "explore",
+      "structurallyAccepted": true,
+      "expected": {
+        "sentiment": true,
+        "note": true
+      }
+    },
+    {
+      "id": "explore-16",
+      "split": "explore",
+      "structurallyAccepted": true,
+      "expected": {
+        "sentiment": true,
+        "note": false
+      }
+    },
+    {
+      "id": "holdout-01",
+      "split": "holdout",
+      "structurallyAccepted": true,
+      "expected": {
+        "sentiment": true,
+        "note": true
+      }
+    },
+    {
+      "id": "holdout-02",
+      "split": "holdout",
+      "structurallyAccepted": true,
+      "expected": {
+        "sentiment": false,
+        "note": false
+      }
+    },
+    {
+      "id": "holdout-03",
+      "split": "holdout",
+      "structurallyAccepted": true,
+      "expected": {
+        "sentiment": true,
+        "note": true
+      }
+    },
+    {
+      "id": "holdout-04",
+      "split": "holdout",
+      "structurallyAccepted": true,
+      "expected": {
+        "sentiment": true,
+        "note": false
+      }
+    },
+    {
+      "id": "holdout-05",
+      "split": "holdout",
+      "structurallyAccepted": true,
+      "expected": {
+        "sentiment": true,
+        "note": true
+      }
+    },
+    {
+      "id": "holdout-06",
+      "split": "holdout",
+      "structurallyAccepted": true,
+      "expected": {
+        "sentiment": false,
+        "note": false
+      }
+    },
+    {
+      "id": "holdout-07",
+      "split": "holdout",
+      "structurallyAccepted": true,
+      "expected": {
+        "sentiment": true,
+        "note": true
+      }
+    },
+    {
+      "id": "holdout-08",
+      "split": "holdout",
+      "structurallyAccepted": true,
+      "expected": {
+        "sentiment": false,
+        "note": false
+      }
+    },
+    {
+      "id": "holdout-09",
+      "split": "holdout",
+      "structurallyAccepted": true,
+      "expected": {
+        "sentiment": true,
+        "note": true
+      }
+    },
+    {
+      "id": "holdout-10",
+      "split": "holdout",
+      "structurallyAccepted": true,
+      "expected": {
+        "sentiment": true,
+        "note": false
+      }
+    },
+    {
+      "id": "holdout-11",
+      "split": "holdout",
+      "structurallyAccepted": true,
+      "expected": {
+        "sentiment": true,
+        "note": true
+      }
+    },
+    {
+      "id": "holdout-12",
+      "split": "holdout",
+      "structurallyAccepted": true,
+      "expected": {
+        "sentiment": false,
+        "note": false
+      }
+    },
+    {
+      "id": "holdout-13",
+      "split": "holdout",
+      "structurallyAccepted": true,
+      "expected": {
+        "sentiment": true,
+        "note": true
+      }
+    },
+    {
+      "id": "holdout-14",
+      "split": "holdout",
+      "structurallyAccepted": true,
+      "expected": {
+        "sentiment": false,
+        "note": false
+      }
+    },
+    {
+      "id": "holdout-15",
+      "split": "holdout",
+      "structurallyAccepted": true,
+      "expected": {
+        "sentiment": true,
+        "note": true
+      }
+    },
+    {
+      "id": "holdout-16",
+      "split": "holdout",
+      "structurallyAccepted": true,
+      "expected": {
+        "sentiment": true,
+        "note": false
+      }
+    }
+  ]
+}

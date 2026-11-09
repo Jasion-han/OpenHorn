@@ -1,5 +1,26 @@
 import { expect, test } from "bun:test";
-import { getWebSearchPolicy, routeLiveQuery } from "./liveCapabilities";
+import { buildLiveContext, getWebSearchPolicy, routeLiveQuery } from "./liveCapabilities";
+
+test("data-only review batches cannot invoke weather, web, classifier or workspace enrichment", async () => {
+  let calls = 0;
+  for (const prompt of ["上海今天天气", "帮我联网查询最新新闻", "查看当前工作目录"]) {
+    const result = await buildLiveContext({
+      prompt,
+      dataOnly: true,
+      forceWebSearch: true,
+      classifier: async () => {
+        calls++;
+        return "web_search";
+      },
+      fetchImpl: async () => {
+        calls++;
+        throw new Error("External requests forbidden");
+      },
+    });
+    expect(result).toEqual({ status: "offline", route: "direct_model", source: { type: "none" } });
+  }
+  expect(calls).toBe(0);
+});
 
 test("routeLiveQuery classifies local time questions", () => {
   expect(routeLiveQuery("今天周几")).toEqual({

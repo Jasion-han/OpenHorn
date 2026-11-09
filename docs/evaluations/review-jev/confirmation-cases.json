@@ -1,0 +1,50 @@
+[
+  {
+    "id": "confirm-01",
+    "text": "两台电脑都试过了，只有旧电脑能识别这个设备。",
+    "note": "用户在两台电脑上测试，只有旧电脑能识别设备。建议记录系统版本后继续排查。",
+    "expected": { "hasClaims": true, "supported": true }
+  },
+  {
+    "id": "confirm-02",
+    "text": "两台电脑都试过了，只有旧电脑能识别这个设备。",
+    "note": "两台电脑均已成功识别设备。建议更新驱动。",
+    "expected": { "hasClaims": true, "supported": false }
+  },
+  {
+    "id": "confirm-03",
+    "text": "客服答应下周换一个，但新的还没寄出来。",
+    "note": "客服承诺下周换货，目前尚未发出新件。",
+    "expected": { "hasClaims": true, "supported": true }
+  },
+  {
+    "id": "confirm-04",
+    "text": "客服答应下周换一个，但新的还没寄出来。",
+    "note": "用户已收到更换的新件。",
+    "expected": { "hasClaims": true, "supported": false }
+  },
+  {
+    "id": "confirm-05",
+    "text": "Payment went through, but my account still shows the free plan.",
+    "note": "The payment succeeded but the plan has not updated. Ask for the order reference.",
+    "expected": { "hasClaims": true, "supported": true }
+  },
+  {
+    "id": "confirm-06",
+    "text": "Payment went through, but my account still shows the free plan.",
+    "note": "Would the customer like to contact billing support?",
+    "expected": { "hasClaims": false, "supported": null }
+  },
+  {
+    "id": "confirm-07",
+    "text": "密码重置邮件一直没到。",
+    "note": "建议查看垃圾邮件文件夹。",
+    "expected": { "hasClaims": false, "supported": null }
+  },
+  {
+    "id": "confirm-08",
+    "text": "まだ使用していないので、性能は分かりません。",
+    "note": "用户已经确认性能优秀。",
+    "expected": { "hasClaims": true, "supported": false }
+  }
+]

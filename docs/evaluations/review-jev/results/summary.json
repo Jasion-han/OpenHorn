@@ -1,0 +1,56 @@
+{
+  "policy": {
+    "supported": 0.7,
+    "unsupported": 0.3
+  },
+  "model": "jev-1.14.0",
+  "calls": 36,
+  "reservedUpperBoundUsd": 0.099090432,
+  "estimatedCostUsd": 0.0008611259999999999,
+  "summary": {
+    "explore": {
+      "sentiment": {
+        "total": 16,
+        "correctSupported": 10,
+        "falseWarnings": 0,
+        "detectedErrors": 6,
+        "missedErrors": 0,
+        "uncertain": 0,
+        "goodCases": 10,
+        "badCases": 6
+      },
+      "note": {
+        "total": 16,
+        "correctSupported": 8,
+        "falseWarnings": 0,
+        "detectedErrors": 8,
+        "missedErrors": 0,
+        "uncertain": 0,
+        "goodCases": 8,
+        "badCases": 8
+      }
+    },
+    "holdout": {
+      "sentiment": {
+        "total": 16,
+        "correctSupported": 8,
+        "falseWarnings": 0,
+        "detectedErrors": 5,
+        "missedErrors": 0,
+        "uncertain": 3,
+        "goodCases": 11,
+        "badCases": 5
+      },
+      "note": {
+        "total": 16,
+        "correctSupported": 8,
+        "falseWarnings": 0,
+        "detectedErrors": 8,
+        "missedErrors": 0,
+        "uncertain": 0,
+        "goodCases": 8,
+        "badCases": 8
+      }
+    }
+  }
+}

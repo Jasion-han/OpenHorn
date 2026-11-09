@@ -1,0 +1,28 @@
+{
+  "model": "jev-1.14.0",
+  "policy": {
+    "supported": 0.7,
+    "unsupported": 0.3
+  },
+  "calls": 32,
+  "cumulativeReservedUpperBoundUsd": 0.18717081600000002,
+  "estimatedCostUsd": 0.0005757779999999999,
+  "splits": {
+    "explore": {
+      "total": 16,
+      "detectedErrors": 8,
+      "missedErrors": 0,
+      "falseWarnings": 0,
+      "correctSupported": 8,
+      "uncertain": 0
+    },
+    "holdout": {
+      "total": 16,
+      "detectedErrors": 8,
+      "missedErrors": 0,
+      "falseWarnings": 0,
+      "correctSupported": 8,
+      "uncertain": 0
+    }
+  }
+}

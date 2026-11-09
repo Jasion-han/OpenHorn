@@ -40,6 +40,7 @@ export type LiveContextResult = {
 };
 
 export type BuildLiveContextInput = {
+  dataOnly?: boolean;
   prompt: string;
   timezone?: string;
   now?: Date;
@@ -472,6 +473,7 @@ function routeFromType(type: LiveRouteType): LiveRoute {
 }
 
 export async function buildLiveContext(input: BuildLiveContextInput): Promise<LiveContextResult> {
+  if (input.dataOnly) return { status: "offline", route: "direct_model", source: { type: "none" } };
   let route = routeLiveQuery(input.prompt);
   const timezone = inferTimezone(input.timezone);
   const webSearchPolicy = getWebSearchPolicy(input.prompt);

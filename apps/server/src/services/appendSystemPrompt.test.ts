@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { REVIEW_JSON_SYSTEM_TAG } from "shared/reviews";
 import {
   APPEND_SYSTEM_PROMPT_MAX_LENGTH,
   parseAppendSystemPrompt,
@@ -34,4 +35,9 @@ test("withAppendedSystemPrompt leaves the effective prompt unchanged without an 
   expect(withAppendedSystemPrompt("Base", undefined)).toBe("Base");
   expect(withAppendedSystemPrompt("Base", "")).toBe("Base");
   expect(withAppendedSystemPrompt(null, undefined)).toBe(null);
+});
+
+test("review classification preserves JSON mode during regenerate and edit", () => {
+  const prompt = `${REVIEW_JSON_SYSTEM_TAG}\nReturn only JSON.`;
+  expect(withAppendedSystemPrompt(prompt, "Render interactive UI")).toBe(prompt);
 });

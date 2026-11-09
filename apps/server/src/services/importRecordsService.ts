@@ -57,6 +57,8 @@ const IMPORT_PART_TYPES: ReadonlySet<string> = new Set<ImportPartType>([
   "scheduledTasks",
   "settings",
   "attachments",
+  "recipes",
+  "artifacts",
 ]);
 
 const IMPORT_PART_LINK_KINDS: ReadonlySet<string> = new Set<ImportPartLinkKind>([

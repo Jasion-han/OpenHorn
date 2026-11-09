@@ -5,15 +5,13 @@
  * Security invariant: API keys, JWT secrets, and encryption keys are NEVER
  * included in any export format.
  */
+import { randomUUID } from "node:crypto";
 import { createWriteStream } from "node:fs";
-import { mkdir, stat } from "node:fs/promises";
+import { mkdir, rm, stat } from "node:fs/promises";
 import path from "node:path";
 
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const archiver = require("archiver") as (
-  format: string,
-  options?: object,
-) => import("archiver").Archiver;
+import { pipeline } from "node:stream/promises";
+import { ZipArchive } from "archiver";
 
 import {
   attachments,
@@ -23,18 +21,33 @@ import {
   mcpServers,
   messages,
   projects,
+  reviewWorkspaces,
+  savedArtifacts,
+  savedArtifactVersions,
   scheduledTasks,
   settings,
+  taskRecipes,
+  taskRecipeVersions,
 } from "db";
 import { eq } from "drizzle-orm";
 import { db } from "../db";
+import { isSafeBackupSetting, sanitizeBackupEndpoint, sanitizeBackupMcp } from "./backupSanitizer";
 
-export const EXPORT_FORMAT_VERSION = "1.0.0";
+export const EXPORT_FORMAT_VERSION = "1.2.0";
 
 export interface ExportManifest {
   formatVersion: string;
   exportedAt: string;
   appVersion: string;
+  attachmentFiles?: {
+    included: number;
+    missing: Array<{
+      id: string;
+      fileName: string;
+      reason: "not_on_server" | "not_found" | "not_file";
+    }>;
+  };
+  configuration?: { mcpRequiresSetup: string[]; omittedSettings: number };
   contents: {
     conversations: number;
     messages: number;
@@ -44,6 +57,11 @@ export interface ExportManifest {
     mcpServers: number;
     scheduledTasks: number;
     settings: number;
+    recipes?: number;
+    recipeVersions?: number;
+    artifacts?: number;
+    artifactVersions?: number;
+    reviewWorkspaces?: number;
   };
 }
 
@@ -61,6 +79,8 @@ function stripApiKey<T extends Record<string, unknown>>(row: T): Omit<T, "apiKey
 }
 
 async function collectExportData(userId: string) {
+  // LibSQL batch executes these related SELECTs in one transaction. Independent
+  // reads can mix a parent version from before an append with its later history.
   const [
     convRows,
     msgRows,
@@ -71,7 +91,12 @@ async function collectExportData(userId: string) {
     mcpRows,
     taskRows,
     settingRows,
-  ] = await Promise.all([
+    recipeRows,
+    recipeVersionRows,
+    artifactRows,
+    artifactVersionRows,
+    reviewRows,
+  ] = await db.batch([
     db.select().from(conversations).where(eq(conversations.userId, userId)),
     db
       .select()
@@ -93,18 +118,40 @@ async function collectExportData(userId: string) {
     db.select().from(mcpServers).where(eq(mcpServers.userId, userId)),
     db.select().from(scheduledTasks).where(eq(scheduledTasks.userId, userId)),
     db.select().from(settings).where(eq(settings.userId, userId)),
+    db.select().from(taskRecipes).where(eq(taskRecipes.userId, userId)),
+    db
+      .select()
+      .from(taskRecipeVersions)
+      .innerJoin(taskRecipes, eq(taskRecipeVersions.recipeId, taskRecipes.id))
+      .where(eq(taskRecipes.userId, userId)),
+    db.select().from(savedArtifacts).where(eq(savedArtifacts.userId, userId)),
+    db
+      .select()
+      .from(savedArtifactVersions)
+      .innerJoin(savedArtifacts, eq(savedArtifactVersions.artifactId, savedArtifacts.id))
+      .where(eq(savedArtifacts.userId, userId)),
+    db.select().from(reviewWorkspaces).where(eq(reviewWorkspaces.userId, userId)),
   ]);
 
   return {
     conversations: convRows,
     messages: msgRows.map((r) => r.messages),
     attachments: attachRows.map((r) => r.attachments),
-    channels: channelRows.map(stripApiKey),
+    channels: channelRows.map((row) => ({
+      ...stripApiKey(row),
+      baseUrl: sanitizeBackupEndpoint(row.baseUrl),
+    })),
     channelModels: modelRows.map((r) => r.channel_models),
     projects: projectRows,
-    mcpServers: mcpRows,
+    mcpServers: mcpRows.map(sanitizeBackupMcp),
     scheduledTasks: taskRows,
-    settings: settingRows,
+    settings: settingRows.filter(isSafeBackupSetting),
+    omittedSettings: settingRows.filter((row) => !isSafeBackupSetting(row)).length,
+    recipes: recipeRows,
+    recipeVersions: recipeVersionRows.map((row) => row.task_recipe_versions),
+    artifacts: artifactRows,
+    artifactVersions: artifactVersionRows.map((row) => row.saved_artifact_versions),
+    reviewWorkspaces: reviewRows,
   };
 }
 
@@ -119,15 +166,43 @@ export async function exportBackup(
 ): Promise<{ filePath: string; manifest: ExportManifest }> {
   const data = await collectExportData(userId);
 
+  const included: Array<{ id: string; localPath: string; entryName: string }> = [];
+  const missing: NonNullable<ExportManifest["attachmentFiles"]>["missing"] = [];
+  for (const att of data.attachments) {
+    const localPath = resolveAttachmentPath(att.filePath);
+    if (!localPath) {
+      missing.push({ id: att.id, fileName: att.fileName, reason: "not_on_server" });
+      continue;
+    }
+    try {
+      const info = await stat(localPath);
+      if (!info.isFile()) {
+        missing.push({ id: att.id, fileName: att.fileName, reason: "not_file" });
+        continue;
+      }
+      included.push({
+        id: att.id,
+        localPath,
+        entryName: `attachments/${att.id}${path.extname(att.fileName || "")}`,
+      });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      missing.push({ id: att.id, fileName: att.fileName, reason: "not_found" });
+    }
+  }
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-  const fileName = `openhorn-backup-${timestamp}.zip`;
+  const fileName = `openhorn-backup-${timestamp}-${randomUUID()}.zip`;
   await mkdir(outputDir, { recursive: true });
   const filePath = path.join(outputDir, fileName);
-
   const manifest: ExportManifest = {
     formatVersion: EXPORT_FORMAT_VERSION,
     exportedAt: new Date().toISOString(),
     appVersion: process.env.APP_VERSION || "dev",
+    attachmentFiles: { included: included.length, missing },
+    configuration: {
+      mcpRequiresSetup: data.mcpServers.map((row) => row.id),
+      omittedSettings: data.omittedSettings,
+    },
     contents: {
       conversations: data.conversations.length,
       messages: data.messages.length,
@@ -137,49 +212,56 @@ export async function exportBackup(
       mcpServers: data.mcpServers.length,
       scheduledTasks: data.scheduledTasks.length,
       settings: data.settings.length,
+      recipes: data.recipes.length,
+      recipeVersions: data.recipeVersions.length,
+      artifacts: data.artifacts.length,
+      artifactVersions: data.artifactVersions.length,
+      reviewWorkspaces: data.reviewWorkspaces.length,
     },
   };
-
-  const output = createWriteStream(filePath);
-  const archive = archiver("zip", { zlib: { level: 6 } });
-  archive.pipe(output);
-
-  onProgress?.({ phase: "metadata", current: 0, total: data.attachments.length + 5 });
-
-  archive.append(JSON.stringify(manifest, null, 2), { name: "manifest.json" });
-  archive.append(JSON.stringify(data.conversations, null, 2), { name: "conversations.json" });
-  archive.append(JSON.stringify(data.messages, null, 2), { name: "messages.json" });
-  archive.append(JSON.stringify(data.channels, null, 2), { name: "channels.json" });
-  archive.append(JSON.stringify(data.channelModels, null, 2), { name: "channel-models.json" });
-  archive.append(JSON.stringify(data.projects, null, 2), { name: "projects.json" });
-  archive.append(JSON.stringify(data.mcpServers, null, 2), { name: "mcp-servers.json" });
-  archive.append(JSON.stringify(data.scheduledTasks, null, 2), { name: "scheduled-tasks.json" });
-  archive.append(JSON.stringify(data.settings, null, 2), { name: "settings.json" });
-
-  onProgress?.({ phase: "attachments", current: 0, total: data.attachments.length });
-
-  let attachCount = 0;
-  for (const att of data.attachments) {
-    const localPath = resolveAttachmentPath(att.filePath);
-    if (!localPath) continue;
-    try {
-      await stat(localPath);
-      const ext = path.extname(att.fileName || "") || path.extname(localPath) || "";
-      archive.file(localPath, { name: `attachments/${att.id}${ext}` });
-      attachCount++;
-      onProgress?.({ phase: "attachments", current: attachCount, total: data.attachments.length });
-    } catch {
-      // file missing on disk — skip silently
+  const output = createWriteStream(filePath, { flags: "wx", mode: 0o600 });
+  const archive = new ZipArchive({ zlib: { level: 6 } });
+  // A source disappearing after preflight must fail, never yield a partial
+  // backup reported as successful. pipeline installs both streams' handlers
+  // before append/finalize and rejects output errors as well as ZIP errors.
+  archive.on("warning", (error) => archive.destroy(error));
+  const completed = pipeline(archive, output);
+  try {
+    onProgress?.({ phase: "metadata", current: 0, total: data.attachments.length + 10 });
+    const entries: Record<string, unknown> = {
+      "manifest.json": manifest,
+      "conversations.json": data.conversations,
+      "messages.json": data.messages,
+      "attachments.json": data.attachments.map((row) => ({ ...row, filePath: "" })),
+      "channels.json": data.channels,
+      "channel-models.json": data.channelModels,
+      "projects.json": data.projects,
+      "mcp-servers.json": data.mcpServers,
+      "scheduled-tasks.json": data.scheduledTasks,
+      "settings.json": data.settings,
+      "task-recipes.json": data.recipes,
+      "task-recipe-versions.json": data.recipeVersions,
+      "saved-artifacts.json": data.artifacts,
+      "saved-artifact-versions.json": data.artifactVersions,
+      "review-workspaces.json": data.reviewWorkspaces,
+    };
+    for (const [name, value] of Object.entries(entries))
+      archive.append(JSON.stringify(value, null, 2), { name });
+    let current = 0;
+    onProgress?.({ phase: "attachments", current, total: included.length });
+    for (const file of included) {
+      archive.file(file.localPath, { name: file.entryName });
+      onProgress?.({ phase: "attachments", current: ++current, total: included.length });
     }
+    await Promise.all([completed, archive.finalize()]);
+    return { filePath, manifest };
+  } catch (error) {
+    archive.destroy();
+    output.destroy();
+    await completed.catch(() => {});
+    await rm(filePath, { force: true });
+    throw error;
   }
-
-  await archive.finalize();
-  await new Promise<void>((resolve, reject) => {
-    output.on("close", resolve);
-    output.on("error", reject);
-  });
-
-  return { filePath, manifest };
 }
 
 /**
@@ -219,14 +301,18 @@ export async function exportDTI(userId: string): Promise<object[]> {
 }
 
 function resolveAttachmentPath(filePath: string): string | null {
-  if (filePath.startsWith("local:")) {
-    return filePath.slice("local:".length);
-  }
+  // local: is metadata-only, not a server path. Reading its suffix could expose
+  // an unrelated server file with the same name.
+  if (filePath.startsWith("local:")) return null;
   if (filePath.startsWith("uploaded:")) {
-    const uploadsDir = path.join(process.cwd(), "data", "uploads");
-    return path.join(uploadsDir, filePath.slice("uploaded:".length));
+    const uploadsDir = path.resolve(
+      process.env.OPENHORN_DATA_DIR || path.join(process.cwd(), "data"),
+      "uploads",
+    );
+    const resolved = path.resolve(uploadsDir, filePath.slice("uploaded:".length));
+    return resolved.startsWith(`${uploadsDir}${path.sep}`) ? resolved : null;
   }
-  return null;
+  return path.isAbsolute(filePath) ? filePath : null;
 }
 
 /**

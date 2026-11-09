@@ -12,6 +12,7 @@
  * Every import writes an `import_records` row (source `file`) and stamps the
  * conversations / MCP servers it created with `imported_from` / `imported_at`.
  */
+import { createHash } from "node:crypto";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
@@ -22,11 +23,18 @@ import {
   mcpServers,
   messages,
   projects,
+  reviewWorkspaces,
+  savedArtifacts,
+  savedArtifactVersions,
   scheduledTasks,
   settings,
+  taskRecipes,
+  taskRecipeVersions,
 } from "db";
 import { and, eq } from "drizzle-orm";
 import { assistantMessageContent } from "shared/message-text";
+import { validateRecipeSpec } from "shared/recipes";
+import { validateReviewData } from "shared/reviews";
 import type { ImportKind, ImportPart } from "shared/types";
 import yauzl from "yauzl";
 import { db } from "../db";
@@ -53,6 +61,9 @@ export interface ImportResult {
   mcpServers: { imported: number; skipped: number; needsConfirm: number };
   scheduledTasks: { imported: number };
   errors: string[];
+  recipes?: { imported: number; skipped: number };
+  artifacts?: { imported: number; skipped: number };
+  reviewWorkspaces?: { imported: number; skipped: number };
   /** Id of the `import_records` row written for this run (absent when nothing could be parsed). */
   recordId?: string;
 }
@@ -253,70 +264,337 @@ export async function importOpenHornBackup(userId: string, zipPath: string): Pro
   const collector = new PartCollector();
   const importedAt = new Date();
   const entries = await extractZipEntries(zipPath);
-
   const manifest = parseJsonEntry<ExportManifest>(entries, "manifest.json");
   if (!manifest) {
     result.errors.push("manifest.json 缺失或解析失败");
     return result;
   }
-
-  // --- Conversations ---
-  // biome-ignore lint/suspicious/noExplicitAny: external JSON schema
-  const convRows = parseJsonEntry<any[]>(entries, "conversations.json") ?? [];
-  const existingConvIds = new Set(
-    (
-      await db
-        .select({ id: conversations.id })
-        .from(conversations)
-        .where(eq(conversations.userId, userId))
-    ).map((r) => r.id),
-  );
-
-  // biome-ignore lint/suspicious/noExplicitAny: external JSON schema
-  const msgRows = parseJsonEntry<any[]>(entries, "messages.json") ?? [];
-  const messageCountByConv = new Map<string, number>();
-  for (const msg of msgRows) {
-    const convId = String(msg.conversationId);
-    messageCountByConv.set(convId, (messageCountByConv.get(convId) ?? 0) + 1);
+  // Incoming JSON is external. Only owner-checked maps may become references.
+  // biome-ignore lint/suspicious/noExplicitAny: legacy backup row schemas vary by version
+  type Row = Record<string, any>;
+  const rows = (name: string): Row[] => {
+    const value = parseJsonEntry<unknown>(entries, name);
+    if (value === null) return [];
+    if (
+      !Array.isArray(value) ||
+      value.some((row) => !row || typeof row !== "object" || typeof row.id !== "string" || !row.id)
+    ) {
+      throw new Error(`Invalid backup entry: ${name}`);
+    }
+    return value;
+  };
+  const convRows = rows("conversations.json"),
+    msgRows = rows("messages.json");
+  const channelRows = rows("channels.json"),
+    modelRows = rows("channel-models.json");
+  const projectRows = rows("projects.json"),
+    mcpRows = rows("mcp-servers.json");
+  const taskRows = rows("scheduled-tasks.json"),
+    settingRows = rows("settings.json");
+  const attRows = rows("attachments.json"),
+    recipeRows = rows("task-recipes.json");
+  const recipeVersionRows = rows("task-recipe-versions.json");
+  const artifactRows = rows("saved-artifacts.json"),
+    artifactVersionRows = rows("saved-artifact-versions.json");
+  const reviewRows = rows("review-workspaces.json");
+  const [
+    ownConvs,
+    ownChannels,
+    ownProjects,
+    ownMcps,
+    ownTasks,
+    ownSettings,
+    ownRecipes,
+    ownArtifacts,
+    ownReviews,
+    ownMessageRows,
+    ownAttachmentRows,
+    ownModelRows,
+  ] = await Promise.all([
+    db.select().from(conversations).where(eq(conversations.userId, userId)),
+    db.select().from(channels).where(eq(channels.userId, userId)),
+    db.select().from(projects).where(eq(projects.userId, userId)),
+    db.select().from(mcpServers).where(eq(mcpServers.userId, userId)),
+    db.select().from(scheduledTasks).where(eq(scheduledTasks.userId, userId)),
+    db.select().from(settings).where(eq(settings.userId, userId)),
+    db.select().from(taskRecipes).where(eq(taskRecipes.userId, userId)),
+    db.select().from(savedArtifacts).where(eq(savedArtifacts.userId, userId)),
+    db.select().from(reviewWorkspaces).where(eq(reviewWorkspaces.userId, userId)),
+    db
+      .select()
+      .from(messages)
+      .innerJoin(conversations, eq(messages.conversationId, conversations.id))
+      .where(eq(conversations.userId, userId)),
+    db
+      .select()
+      .from(attachments)
+      .innerJoin(conversations, eq(attachments.conversationId, conversations.id))
+      .where(eq(conversations.userId, userId)),
+    db
+      .select()
+      .from(channelModels)
+      .innerJoin(channels, eq(channelModels.channelId, channels.id))
+      .where(eq(channels.userId, userId)),
+  ]);
+  type IdentityTable =
+    | typeof conversations
+    | typeof messages
+    | typeof channels
+    | typeof projects
+    | typeof mcpServers
+    | typeof scheduledTasks
+    | typeof settings
+    | typeof attachments
+    | typeof channelModels
+    | typeof taskRecipes
+    | typeof savedArtifacts;
+  type ReviewIdentityTable = IdentityTable | typeof reviewWorkspaces;
+  const importedRow = <
+    T extends ReviewIdentityTable | typeof taskRecipeVersions | typeof savedArtifactVersions,
+  >(
+    _table: T,
+    row: Row,
+  ): T["$inferInsert"] => reviveDates(row) as T["$inferInsert"];
+  const stableId = (kind: string, original: string, salt = 0) => {
+    const hex = createHash("sha256")
+      .update(JSON.stringify(["openhorn-backup", userId, kind, original, salt]))
+      .digest("hex");
+    return [
+      hex.slice(0, 8),
+      hex.slice(8, 12),
+      `4${hex.slice(13, 16)}`,
+      `8${hex.slice(17, 20)}`,
+      hex.slice(20, 32),
+    ].join("-");
+  };
+  async function identities(
+    table: ReviewIdentityTable,
+    incoming: Row[],
+    ownedRows: Array<{ id: string }>,
+    kind: string,
+    natural?: (row: Row) => string,
+  ) {
+    const occupied = new Set((await db.select({ id: table.id }).from(table)).map((row) => row.id));
+    const owned = new Set(ownedRows.map((row) => row.id));
+    const naturalRows = new Map(natural ? ownedRows.map((row) => [natural(row), row.id]) : []);
+    const map = new Map<string, string>();
+    for (const row of incoming) {
+      const sameNatural = natural ? naturalRows.get(natural(row)) : undefined;
+      let id = sameNatural ?? row.id;
+      if (!sameNatural && !owned.has(id)) {
+        const stable = stableId(kind, row.id);
+        if (owned.has(stable)) id = stable;
+        else if (occupied.has(id)) {
+          id = stable;
+          let salt = 0;
+          while (occupied.has(id) && !owned.has(id)) {
+            if (++salt > 100) throw new Error("Unable to map backup identity");
+            id = stableId(kind, row.id, salt);
+          }
+        }
+      }
+      map.set(row.id, id);
+      occupied.add(id);
+    }
+    return { map, owned };
   }
+  const convIds = await identities(conversations, convRows, ownConvs, "conversation");
+  const messageIds = await identities(
+    messages,
+    msgRows,
+    ownMessageRows.map((row) => row.messages),
+    "message",
+  );
+  const channelIds = await identities(channels, channelRows, ownChannels, "channel", (row) =>
+    JSON.stringify([row.name, row.provider]),
+  );
+  const projectIds = await identities(
+    projects,
+    projectRows,
+    ownProjects,
+    "project",
+    (row) => row.rootPath,
+  );
+  const mcpIds = await identities(mcpServers, mcpRows, ownMcps, "mcp", (row) => row.name);
+  const taskIds = await identities(scheduledTasks, taskRows, ownTasks, "task");
+  const settingIds = await identities(
+    settings,
+    settingRows,
+    ownSettings,
+    "setting",
+    (row) => row.key,
+  );
+  const attachmentIds = await identities(
+    attachments,
+    attRows,
+    ownAttachmentRows.map((row) => row.attachments),
+    "attachment",
+  );
+  const modelIds = await identities(
+    channelModels,
+    modelRows,
+    ownModelRows.map((row) => row.channel_models),
+    "model",
+  );
+  const recipeIds = await identities(taskRecipes, recipeRows, ownRecipes, "recipe");
+  const artifactIds = await identities(savedArtifacts, artifactRows, ownArtifacts, "artifact");
+  const reviewIds = await identities(reviewWorkspaces, reviewRows, ownReviews, "review-workspace");
+  const reference = (
+    ids: { map: Map<string, string>; owned: Set<string> },
+    value: unknown,
+  ): string | null =>
+    typeof value === "string"
+      ? (ids.map.get(value) ?? (ids.owned.has(value) ? value : null))
+      : null;
+  const insertable = (ids: { map: Map<string, string>; owned: Set<string> }, original: string) =>
+    !!ids.map.get(original) && !ids.owned.has(ids.map.get(original) as string);
+  const rebindSpec = (raw: unknown) => {
+    const spec = validateRecipeSpec(typeof raw === "string" ? JSON.parse(raw) : raw);
+    const projectId = reference(projectIds, spec.projectId);
+    const channelId = reference(channelIds, spec.channelId);
+    return validateRecipeSpec({
+      ...spec,
+      projectId: projectId ?? undefined,
+      channelId: channelId ?? undefined,
+      modelId: channelId ? spec.modelId : undefined,
+    });
+  };
 
-  for (const conv of convRows) {
-    if (existingConvIds.has(conv.id)) {
-      result.conversations.skipped++;
-      collector.add("conversations", {
-        label: String(conv.title ?? conv.id),
+  for (const row of channelRows) {
+    const id = channelIds.map.get(row.id);
+    if (!insertable(channelIds, row.id)) {
+      result.channels.skipped++;
+      collector.add("channels", {
+        label: String(row.name),
         detail: IMPORT_DETAIL.alreadyExists,
         status: "skipped",
-        link: { kind: "conversation", id: String(conv.id) },
+        link: { kind: "channel", id: id as string },
       });
       continue;
     }
-    await db
-      .insert(conversations)
-      .values({ ...reviveDates(conv), userId, importedFrom: FILE_IMPORT_SOURCE, importedAt });
-    result.conversations.imported++;
-    collector.add("conversations", {
-      label: String(conv.title ?? conv.id),
-      detail: IMPORT_DETAIL.messageCount(messageCountByConv.get(String(conv.id)) ?? 0),
-      status: "imported",
-      link: { kind: "conversation", id: String(conv.id) },
+    await db.insert(channels).values({ ...importedRow(channels, row), id, userId, apiKey: "" });
+    result.channels.imported++;
+    result.channels.needsKey++;
+    collector.add("channels", {
+      label: String(row.name),
+      detail: IMPORT_DETAIL.channelKeyMissing,
+      status: "needsAction",
+      link: { kind: "channel", id: id as string },
     });
   }
-
-  // --- Messages ---
-  const importedConvIds = new Set(
-    convRows
-      .filter((c: { id: string }) => !existingConvIds.has(c.id))
-      .map((c: { id: string }) => c.id),
-  );
-  for (const msg of msgRows) {
-    if (!importedConvIds.has(msg.conversationId)) continue;
-    const row = reviveDates(msg);
-    // Backups written before the reply-text invariant may hold agent replies
-    // whose `content` disagrees with their run; restore them in line with it.
-    // (Their tasks are not in the backup, so task-backed rows take the generic
-    // path — see normalizeStoredAgentReply.)
-    if (row.role === "assistant" && typeof row.agentRun === "string") {
+  for (const row of modelRows) {
+    const channelId = reference(channelIds, row.channelId);
+    if (!channelId || !insertable(modelIds, row.id)) continue;
+    const [existing] = await db
+      .select({ id: channelModels.id })
+      .from(channelModels)
+      .where(and(eq(channelModels.channelId, channelId), eq(channelModels.modelId, row.modelId)))
+      .limit(1);
+    if (!existing)
+      await db
+        .insert(channelModels)
+        .values({ ...importedRow(channelModels, row), id: modelIds.map.get(row.id), channelId });
+  }
+  for (const row of projectRows) {
+    const id = projectIds.map.get(row.id);
+    if (!insertable(projectIds, row.id)) {
+      result.projects.imported++;
+      collector.add("projects", {
+        label: String(row.name ?? row.rootPath),
+        detail: IMPORT_DETAIL.alreadyExists,
+        status: "skipped",
+        link: { kind: "project", id: id as string },
+      });
+      continue;
+    }
+    let exists = false;
+    try {
+      exists = (await stat(String(row.rootPath))).isDirectory();
+    } catch {
+      /* needs rebind */
+    }
+    await db.insert(projects).values({ ...importedRow(projects, row), id, userId });
+    result.projects.imported++;
+    if (!exists) result.projects.needsRebind++;
+    collector.add("projects", {
+      label: String(row.name ?? row.rootPath),
+      detail: exists
+        ? String(row.rootPath)
+        : IMPORT_DETAIL.projectFolderMissing(String(row.rootPath)),
+      status: exists ? "imported" : "needsAction",
+      link: { kind: "project", id: id as string },
+    });
+  }
+  for (const row of mcpRows) {
+    const id = mcpIds.map.get(row.id);
+    if (!insertable(mcpIds, row.id)) {
+      result.mcpServers.skipped++;
+      collector.add("mcp", {
+        label: String(row.name),
+        detail: IMPORT_DETAIL.mcpSameName,
+        status: "skipped",
+        link: { kind: "mcp", id: id as string },
+      });
+      continue;
+    }
+    await db.insert(mcpServers).values({
+      ...importedRow(mcpServers, row),
+      id,
+      userId,
+      isEnabled: false,
+      importedFrom: FILE_IMPORT_SOURCE,
+      importedAt,
+    });
+    result.mcpServers.imported++;
+    result.mcpServers.needsConfirm++;
+    collector.add("mcp", {
+      label: String(row.name),
+      detail: IMPORT_DETAIL.mcpVerifyBeforeEnable,
+      status: "needsAction",
+      link: { kind: "mcp", id: id as string },
+    });
+  }
+  const importedConversations = new Set<string>();
+  const messageCount = new Map<string, number>();
+  for (const row of msgRows)
+    messageCount.set(row.conversationId, (messageCount.get(row.conversationId) ?? 0) + 1);
+  for (const row of convRows) {
+    const id = convIds.map.get(row.id);
+    if (!insertable(convIds, row.id)) {
+      result.conversations.skipped++;
+      collector.add("conversations", {
+        label: String(row.title ?? row.id),
+        detail: IMPORT_DETAIL.alreadyExists,
+        status: "skipped",
+        link: { kind: "conversation", id: id as string },
+      });
+      continue;
+    }
+    await db.insert(conversations).values({
+      ...importedRow(conversations, row),
+      id,
+      userId,
+      projectId: reference(projectIds, row.projectId),
+      channelId: reference(channelIds, row.channelId),
+      scheduledTaskId: reference(taskIds, row.scheduledTaskId),
+      workspaceId: null,
+      importedFrom: FILE_IMPORT_SOURCE,
+      importedAt,
+    });
+    importedConversations.add(row.id);
+    result.conversations.imported++;
+    collector.add("conversations", {
+      label: String(row.title ?? row.id),
+      detail: IMPORT_DETAIL.messageCount(messageCount.get(row.id) ?? 0),
+      status: "imported",
+      link: { kind: "conversation", id: id as string },
+    });
+  }
+  for (const original of msgRows) {
+    if (!importedConversations.has(original.conversationId) || !insertable(messageIds, original.id))
+      continue;
+    const row = reviveDates(original);
+    if (row.role === "assistant" && typeof row.agentRun === "string")
       Object.assign(
         row,
         normalizeStoredAgentReply({
@@ -324,190 +602,262 @@ export async function importOpenHornBackup(userId: string, zipPath: string): Pro
           agentRun: row.agentRun,
         }),
       );
+    let reboundAttachments: string | null = null;
+    if (typeof row.attachments === "string") {
+      try {
+        const values: unknown = JSON.parse(row.attachments);
+        if (Array.isArray(values))
+          reboundAttachments = JSON.stringify(
+            values.map((value) => reference(attachmentIds, value)).filter(Boolean),
+          );
+      } catch {
+        /* Invalid legacy attachment lists remain unavailable. */
+      }
     }
-    await db.insert(messages).values(row);
+    await db.insert(messages).values({
+      ...importedRow(messages, row),
+      attachments: reboundAttachments,
+      id: messageIds.map.get(original.id),
+      conversationId: reference(convIds, original.conversationId),
+      workspaceId: null,
+    });
     result.messages.imported++;
   }
   collector.noteMessages(result.messages.imported);
-
-  // --- Attachments ---
-  // biome-ignore lint/suspicious/noExplicitAny: external JSON schema
-  const attRows = parseJsonEntry<any[]>(entries, "attachments.json") ?? [];
-  const uploadsDir = path.join(process.cwd(), "data", "uploads");
+  const uploadsDir = path.resolve(
+    process.env.OPENHORN_DATA_DIR || path.join(process.cwd(), "data"),
+    "uploads",
+  );
   await mkdir(uploadsDir, { recursive: true });
-
-  for (const att of attRows) {
-    if (!importedConvIds.has(att.conversationId)) continue;
-    const ext = path.extname(att.fileName || "") || "";
-    const zipEntryName = `attachments/${att.id}${ext}`;
-    const fileData = entries.get(zipEntryName);
-    if (fileData) {
-      const localName = `imported-${att.id}${ext}`;
-      const localPath = path.join(uploadsDir, localName);
-      await writeFile(localPath, fileData);
-      await db
-        .insert(attachments)
-        .values({ ...reviveDates(att), userId, filePath: `uploaded:${localName}` });
-      result.attachments.imported++;
-      collector.count("attachments", "imported");
-    } else {
+  for (const row of attRows) {
+    if (!importedConversations.has(row.conversationId) || !insertable(attachmentIds, row.id))
+      continue;
+    const ext = path.extname(String(row.fileName || ""));
+    const fileData = entries.get(`attachments/${row.id}${ext}`);
+    if (!fileData) {
       result.attachments.missing++;
       collector.add("attachments", {
-        label: String(att.fileName ?? att.id),
+        label: String(row.fileName ?? row.id),
         detail: IMPORT_DETAIL.attachmentMissing,
         status: "skipped",
       });
+      continue;
     }
+    const safeExt = /^\.[a-zA-Z0-9]{1,12}$/.test(ext) ? ext : "";
+    const localPath = path.join(uploadsDir, `imported-${crypto.randomUUID()}${safeExt}`);
+    await writeFile(localPath, fileData);
+    await db.insert(attachments).values({
+      ...importedRow(attachments, row),
+      id: attachmentIds.map.get(row.id),
+      conversationId: reference(convIds, row.conversationId),
+      messageId: reference(messageIds, row.messageId),
+      sessionId: null,
+      filePath: localPath,
+    });
+    result.attachments.imported++;
+    collector.count("attachments", "imported");
   }
 
-  // --- Channels (no apiKey) ---
-  // biome-ignore lint/suspicious/noExplicitAny: external JSON schema
-  const channelRows = parseJsonEntry<any[]>(entries, "channels.json") ?? [];
-  for (const ch of channelRows) {
-    const existing = await db
-      .select()
-      .from(channels)
-      .where(
-        and(
-          eq(channels.userId, userId),
-          eq(channels.name, ch.name),
-          eq(channels.provider, ch.provider),
-        ),
+  if (entries.has("task-recipes.json")) result.recipes = { imported: 0, skipped: 0 };
+  for (const row of recipeRows) {
+    if (!insertable(recipeIds, row.id)) {
+      if (result.recipes) result.recipes.skipped++;
+      collector.add("recipes", {
+        label: String(typeof row.spec === "string" ? JSON.parse(row.spec).title : row.id),
+        status: "skipped",
+      });
+      continue;
+    }
+    const versions = recipeVersionRows
+      .filter((version) => version.recipeId === row.id)
+      .sort((a, b) => a.version - b.version);
+    if (
+      !Number.isSafeInteger(row.version) ||
+      row.version < 1 ||
+      versions.length !== row.version ||
+      versions.some((version, index) => version.version !== index + 1)
+    )
+      throw new Error("Invalid recipe backup history");
+    const spec = rebindSpec(row.spec);
+    await db.transaction(async (tx) => {
+      await tx.insert(taskRecipes).values({
+        ...importedRow(taskRecipes, row),
+        id: recipeIds.map.get(row.id),
+        userId,
+        spec: JSON.stringify(spec),
+      });
+      for (const version of versions)
+        await tx.insert(taskRecipeVersions).values({
+          ...importedRow(taskRecipeVersions, version),
+          id: stableId("recipe-version", `${String(recipeIds.map.get(row.id))}:${version.version}`),
+          recipeId: recipeIds.map.get(row.id),
+          spec: JSON.stringify(rebindSpec(version.spec)),
+        });
+    });
+    if (result.recipes) result.recipes.imported++;
+    collector.add("recipes", { label: spec.title, status: "imported" });
+  }
+  if (entries.has("saved-artifacts.json")) result.artifacts = { imported: 0, skipped: 0 };
+  for (const row of artifactRows) {
+    if (!insertable(artifactIds, row.id)) {
+      if (result.artifacts) result.artifacts.skipped++;
+      collector.add("artifacts", { label: String(row.title), status: "skipped" });
+      continue;
+    }
+    const versions = artifactVersionRows
+      .filter((version) => version.artifactId === row.id)
+      .sort((a, b) => a.version - b.version);
+    if (
+      !Number.isSafeInteger(row.currentVersion) ||
+      row.currentVersion < 1 ||
+      versions.length !== row.currentVersion ||
+      versions.some(
+        (version, index) =>
+          version.version !== index + 1 ||
+          typeof version.content !== "string" ||
+          !["markdown", "html", "openui"].includes(version.format),
       )
-      .limit(1);
-    if (existing.length > 0) {
-      result.channels.skipped++;
-      collector.add("channels", {
-        label: String(ch.name),
-        detail: IMPORT_DETAIL.alreadyExists,
-        status: "skipped",
-        link: { kind: "channel", id: existing[0].id },
+    )
+      throw new Error("Invalid artifact backup history");
+    await db.transaction(async (tx) => {
+      await tx.insert(savedArtifacts).values({
+        ...importedRow(savedArtifacts, row),
+        id: artifactIds.map.get(row.id),
+        userId,
+        projectId: reference(projectIds, row.projectId),
       });
+      for (const version of versions) {
+        let sourceConversationId = reference(convIds, version.sourceConversationId);
+        let sourceMessageId = reference(messageIds, version.sourceMessageId);
+        if (sourceMessageId) {
+          const [source] = await tx
+            .select({ conversationId: messages.conversationId })
+            .from(messages)
+            .innerJoin(conversations, eq(messages.conversationId, conversations.id))
+            .where(and(eq(messages.id, sourceMessageId), eq(conversations.userId, userId)))
+            .limit(1);
+          if (!source || source.conversationId !== sourceConversationId) sourceMessageId = null;
+        }
+        if (sourceConversationId) {
+          const [source] = await tx
+            .select({ id: conversations.id })
+            .from(conversations)
+            .where(
+              and(eq(conversations.id, sourceConversationId), eq(conversations.userId, userId)),
+            )
+            .limit(1);
+          if (!source) {
+            sourceConversationId = null;
+            sourceMessageId = null;
+          }
+        }
+        await tx.insert(savedArtifactVersions).values({
+          ...importedRow(savedArtifactVersions, version),
+          id: stableId(
+            "artifact-version",
+            `${String(artifactIds.map.get(row.id))}:${version.version}`,
+          ),
+          artifactId: artifactIds.map.get(row.id),
+          sourceConversationId,
+          sourceMessageId,
+        });
+      }
+    });
+    if (result.artifacts) result.artifacts.imported++;
+    collector.add("artifacts", { label: String(row.title), status: "imported" });
+  }
+  if (entries.has("review-workspaces.json")) result.reviewWorkspaces = { imported: 0, skipped: 0 };
+  for (const row of reviewRows) {
+    if (!insertable(reviewIds, row.id)) {
+      if (result.reviewWorkspaces) result.reviewWorkspaces.skipped++;
       continue;
     }
-    await db.insert(channels).values({ ...reviveDates(ch), userId, apiKey: "" });
-    result.channels.imported++;
-    result.channels.needsKey++;
-    collector.add("channels", {
-      label: String(ch.name),
-      detail: IMPORT_DETAIL.channelKeyMissing,
-      status: "needsAction",
-      link: { kind: "channel", id: String(ch.id) },
-    });
-  }
-
-  // --- Channel Models ---
-  // biome-ignore lint/suspicious/noExplicitAny: external JSON schema
-  const modelRows = parseJsonEntry<any[]>(entries, "channel-models.json") ?? [];
-  for (const m of modelRows) {
-    try {
-      await db.insert(channelModels).values(reviveDates(m));
-    } catch {
-      // skip if channel doesn't exist or duplicate
+    if (
+      typeof row.title !== "string" ||
+      !row.title.trim() ||
+      row.title.length > 200 ||
+      !Number.isSafeInteger(row.revision) ||
+      row.revision < 1
+    )
+      throw new Error("Invalid review workspace backup");
+    const data = validateReviewData(typeof row.data === "string" ? JSON.parse(row.data) : row.data);
+    for (const run of data.runs) {
+      run.conversationId = reference(convIds, run.conversationId);
+      run.sourceMessageId = reference(messageIds, run.sourceMessageId);
+      if (run.sourceMessageId) {
+        const [source] = await db
+          .select({ conversationId: messages.conversationId })
+          .from(messages)
+          .innerJoin(conversations, eq(messages.conversationId, conversations.id))
+          .where(and(eq(messages.id, run.sourceMessageId), eq(conversations.userId, userId)))
+          .limit(1);
+        if (!source || source.conversationId !== run.conversationId) run.sourceMessageId = null;
+      }
     }
+    const dates = reviveDates(row);
+    if (
+      !(dates.createdAt instanceof Date) ||
+      !Number.isFinite(dates.createdAt.getTime()) ||
+      !(dates.updatedAt instanceof Date) ||
+      !Number.isFinite(dates.updatedAt.getTime())
+    )
+      throw new Error("Invalid review workspace dates");
+    await db.insert(reviewWorkspaces).values({
+      id: reviewIds.map.get(row.id) as string,
+      userId,
+      title: row.title.trim(),
+      revision: row.revision,
+      data: JSON.stringify(data),
+      createdAt: dates.createdAt,
+      updatedAt: dates.updatedAt,
+    });
+    if (result.reviewWorkspaces) result.reviewWorkspaces.imported++;
   }
-
-  // --- Projects ---
-  // biome-ignore lint/suspicious/noExplicitAny: external JSON schema
-  const projectRows = parseJsonEntry<any[]>(entries, "projects.json") ?? [];
-  for (const p of projectRows) {
-    const existing = await db
-      .select()
-      .from(projects)
-      .where(and(eq(projects.userId, userId), eq(projects.rootPath, p.rootPath)))
-      .limit(1);
-    if (existing.length > 0) {
-      result.projects.imported++;
-      collector.add("projects", {
-        label: String(p.name ?? p.rootPath),
-        detail: IMPORT_DETAIL.alreadyExists,
-        status: "skipped",
-        link: { kind: "project", id: existing[0].id },
+  for (const row of taskRows) {
+    if (!insertable(taskIds, row.id)) continue;
+    let recipeSnapshot = null;
+    if (row.recipeSnapshot) {
+      const snapshot =
+        typeof row.recipeSnapshot === "string"
+          ? JSON.parse(row.recipeSnapshot)
+          : row.recipeSnapshot;
+      // Deleted recipes still have usable frozen snapshots; their derived ID
+      // is historical provenance and is never used to load another user's recipe.
+      recipeSnapshot = JSON.stringify({
+        ...snapshot,
+        recipeId:
+          reference(recipeIds, snapshot.recipeId) ??
+          stableId("missing-recipe", String(snapshot.recipeId)),
+        spec: rebindSpec(snapshot.spec),
       });
-      continue;
     }
-    let pathExists = false;
-    try {
-      await stat(p.rootPath);
-      pathExists = true;
-    } catch {
-      // path doesn't exist on this machine
-    }
-    await db.insert(projects).values({ ...reviveDates(p), userId });
-    result.projects.imported++;
-    if (!pathExists) result.projects.needsRebind++;
-    collector.add("projects", {
-      label: String(p.name ?? p.rootPath),
-      detail: pathExists
-        ? String(p.rootPath)
-        : IMPORT_DETAIL.projectFolderMissing(String(p.rootPath)),
-      status: pathExists ? "imported" : "needsAction",
-      link: { kind: "project", id: String(p.id) },
+    await db.insert(scheduledTasks).values({
+      ...importedRow(scheduledTasks, row),
+      id: taskIds.map.get(row.id),
+      userId,
+      enabled: false,
+      channelId: reference(channelIds, row.channelId),
+      modelId: reference(channelIds, row.channelId) ? row.modelId : null,
+      projectId: reference(projectIds, row.projectId),
+      recipeSnapshot,
     });
-  }
-
-  // --- MCP Servers ---
-  // biome-ignore lint/suspicious/noExplicitAny: external JSON schema
-  const mcpRows = parseJsonEntry<any[]>(entries, "mcp-servers.json") ?? [];
-  for (const m of mcpRows) {
-    const existing = await db
-      .select({ id: mcpServers.id })
-      .from(mcpServers)
-      .where(and(eq(mcpServers.userId, userId), eq(mcpServers.name, String(m.name))))
-      .limit(1);
-    if (existing.length > 0) {
-      result.mcpServers.skipped++;
-      collector.add("mcp", {
-        label: String(m.name),
-        detail: IMPORT_DETAIL.mcpSameName,
-        status: "skipped",
-        link: { kind: "mcp", id: existing[0].id },
-      });
-      continue;
-    }
-    await db
-      .insert(mcpServers)
-      .values({ ...reviveDates(m), userId, importedFrom: FILE_IMPORT_SOURCE, importedAt });
-    result.mcpServers.imported++;
-    result.mcpServers.needsConfirm++;
-    collector.add("mcp", {
-      label: String(m.name),
-      detail: IMPORT_DETAIL.mcpVerifyBeforeEnable,
-      status: "needsAction",
-      link: { kind: "mcp", id: String(m.id) },
-    });
-  }
-
-  // --- Scheduled Tasks ---
-  // biome-ignore lint/suspicious/noExplicitAny: external JSON schema
-  const taskRows = parseJsonEntry<any[]>(entries, "scheduled-tasks.json") ?? [];
-  for (const t of taskRows) {
-    await db.insert(scheduledTasks).values({ ...reviveDates(t), userId, enabled: false });
     result.scheduledTasks.imported++;
     collector.add("scheduledTasks", {
-      label: String(t.title ?? t.id),
+      label: String(row.title ?? row.id),
       detail: IMPORT_DETAIL.scheduledTaskDisabled,
       status: "imported",
     });
   }
-
-  // --- Settings ---
-  // biome-ignore lint/suspicious/noExplicitAny: external JSON schema
-  const settingRows = parseJsonEntry<any[]>(entries, "settings.json") ?? [];
-  for (const s of settingRows) {
-    const existing = await db
-      .select()
-      .from(settings)
-      .where(and(eq(settings.userId, userId), eq(settings.key, s.key)))
-      .limit(1);
-    if (existing.length > 0) {
-      collector.add("settings", { label: String(s.key), status: "skipped" });
+  for (const row of settingRows) {
+    if (!insertable(settingIds, row.id)) {
+      collector.add("settings", { label: String(row.key), status: "skipped" });
       continue;
     }
-    await db.insert(settings).values({ ...reviveDates(s), userId });
-    collector.add("settings", { label: String(s.key), status: "imported" });
+    await db
+      .insert(settings)
+      .values({ ...importedRow(settings, row), id: settingIds.map.get(row.id), userId });
+    collector.add("settings", { label: String(row.key), status: "imported" });
   }
-
   return finishImport(userId, result, collector);
 }
 

@@ -6,11 +6,15 @@ import { createConversation } from "./conversationService";
 import {
   advanceNextRunAt,
   createTaskRun,
-  finishTaskRun,
+  failPendingTaskRun,
   getDueTasks,
+  reconcileExpiredTaskRuns,
 } from "./scheduledTaskService";
 
 let timerHandle: ReturnType<typeof setTimeout> | null = null;
+let stopped = true;
+let schedulingVersion = 0;
+let executing = false;
 
 // Upper bound on one sleep. Mutations re-arm the timer precisely; this only
 // guards against changes that bypass the routes (another process, a clock
@@ -18,7 +22,10 @@ let timerHandle: ReturnType<typeof setTimeout> | null = null;
 const MAX_SLEEP_MS = 60_000;
 
 async function executeDueTasks() {
+  if (stopped || executing) return;
+  executing = true;
   try {
+    await reconcileExpiredTaskRuns();
     const dueTasks = await getDueTasks();
     for (const task of dueTasks) {
       try {
@@ -39,6 +46,7 @@ async function executeDueTasks() {
           modelId,
           forceNew: true,
           scheduledTaskId: task.id,
+          projectId: task.projectId,
         });
 
         // The server is only the clock: it records that the task is due and
@@ -50,10 +58,11 @@ async function executeDueTasks() {
         await advanceNextRunAt(task.id);
       } catch (err) {
         const runId = await createTaskRun(task.id, task.userId, undefined, "pending");
-        await finishTaskRun(task.userId, runId, {
-          status: "failed",
-          error: err instanceof Error ? err.message : String(err),
-        });
+        await failPendingTaskRun(
+          task.userId,
+          runId,
+          err instanceof Error ? err.message : String(err),
+        );
         await advanceNextRunAt(task.id);
         console.error("[scheduler] task failed:", task.id, err);
       }
@@ -61,10 +70,12 @@ async function executeDueTasks() {
   } catch {
     // silently retry
   }
-  scheduleNext();
+  executing = false;
+  if (!stopped) void scheduleNext();
 }
 
 async function scheduleNext() {
+  const version = ++schedulingVersion;
   if (timerHandle) {
     clearTimeout(timerHandle);
     timerHandle = null;
@@ -82,6 +93,7 @@ async function scheduleNext() {
       .orderBy(asc(scheduledTasks.nextRunAt))
       .limit(1);
 
+    if (stopped || version !== schedulingVersion) return;
     if (upcoming.length === 0 || !upcoming[0].nextRunAt) {
       timerHandle = setTimeout(() => void executeDueTasks(), MAX_SLEEP_MS);
       return;
@@ -95,6 +107,7 @@ async function scheduleNext() {
 
     timerHandle = setTimeout(() => void executeDueTasks(), cappedDelay);
   } catch {
+    if (stopped || version !== schedulingVersion) return;
     timerHandle = setTimeout(() => void executeDueTasks(), MAX_SLEEP_MS);
   }
 }
@@ -105,14 +118,17 @@ async function scheduleNext() {
  * task that becomes due sooner would otherwise wait for that (or the cap).
  */
 export function rescheduleScheduler() {
-  void scheduleNext();
+  if (!stopped) void scheduleNext();
 }
 
 export function startScheduler() {
+  stopped = false;
   void executeDueTasks();
 }
 
 export function stopScheduler() {
+  stopped = true;
+  schedulingVersion++;
   if (timerHandle) {
     clearTimeout(timerHandle);
     timerHandle = null;

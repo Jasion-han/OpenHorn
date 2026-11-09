@@ -5,15 +5,19 @@ import { rescheduleScheduler } from "../services/scheduledTaskScheduler";
 import {
   advanceNextRunAt,
   claimTaskRun,
-  completeTaskRun,
   createScheduledTask,
   createTaskRun,
   deleteScheduledTask,
   deleteTaskRun,
   finishTaskRun,
   getScheduledTask,
+  heartbeatTaskRun,
+  isTaskRunOwnerToken,
+  listPendingTaskRuns,
   listScheduledTasks,
   listTaskRuns,
+  reconcileExpiredTaskRuns,
+  TASK_RUN_LEASE_MS,
   toggleScheduledTask,
   updateScheduledTask,
 } from "../services/scheduledTaskService";
@@ -39,6 +43,7 @@ router.post("/", async (c) => {
     notifyOnComplete?: boolean;
     channelId?: string;
     modelId?: string;
+    projectId?: string;
   }>();
 
   if (!body.title?.trim() || !body.prompt?.trim() || !body.frequency || !body.time) {
@@ -53,6 +58,7 @@ router.post("/", async (c) => {
     notifyOnComplete: body.notifyOnComplete,
     channelId: body.channelId,
     modelId: body.modelId,
+    projectId: body.projectId,
   });
   rescheduleScheduler();
   return c.json({ task }, 201);
@@ -107,9 +113,9 @@ router.post("/:id/run", async (c) => {
     modelId,
     forceNew: true,
     scheduledTaskId: task.id,
+    projectId: task.projectId,
   });
-  const runId = await createTaskRun(task.id, user.id, conversation.id);
-  await completeTaskRun(runId, { status: "completed" });
+  const runId = await createTaskRun(task.id, user.id, conversation.id, "pending");
   await advanceNextRunAt(task.id);
   rescheduleScheduler();
   return c.json({ success: true, runId, conversationId: conversation.id });
@@ -124,8 +130,15 @@ router.get("/:id/runs", async (c) => {
 
 router.get("/runs", async (c) => {
   const user = c.get("user");
+  await reconcileExpiredTaskRuns(user.id);
   const runs = await listTaskRuns(user.id);
   return c.json({ runs });
+});
+
+router.get("/runs/pending", async (c) => {
+  const user = c.get("user");
+  await reconcileExpiredTaskRuns(user.id);
+  return c.json({ runs: await listPendingTaskRuns(user.id) });
 });
 
 // Desktop-side execution of a scheduler-created run: claim it (pending →
@@ -134,23 +147,52 @@ router.get("/runs", async (c) => {
 router.patch("/runs/:runId/claim", async (c) => {
   const user = c.get("user");
   const runId = c.req.param("runId");
-  const claimed = await claimTaskRun(user.id, runId);
-  return c.json({ claimed });
+  const body = await c.req
+    .json<{ ownerToken?: unknown }>()
+    .catch(() => ({}) as { ownerToken?: unknown });
+  if (!isTaskRunOwnerToken(body.ownerToken))
+    return c.json({ error: "valid ownerToken is required" }, 400);
+  const claimed = await claimTaskRun(user.id, runId, body.ownerToken);
+  return c.json({ claimed, leaseDurationMs: TASK_RUN_LEASE_MS });
+});
+
+router.patch("/runs/:runId/heartbeat", async (c) => {
+  const user = c.get("user");
+  const body = await c.req
+    .json<{ ownerToken?: unknown }>()
+    .catch(() => ({}) as { ownerToken?: unknown });
+  if (!isTaskRunOwnerToken(body.ownerToken))
+    return c.json({ error: "valid ownerToken is required" }, 400);
+  const renewed = await heartbeatTaskRun(user.id, c.req.param("runId"), body.ownerToken);
+  if (!renewed) return c.json({ error: "execution lease lost" }, 409);
+  return c.json({ renewed, leaseDurationMs: TASK_RUN_LEASE_MS });
 });
 
 router.patch("/runs/:runId/complete", async (c) => {
   const user = c.get("user");
   const runId = c.req.param("runId");
-  const body = await c.req.json<{ status?: string; result?: string; error?: string }>();
+  const body = await c.req.json<{
+    status?: string;
+    result?: string;
+    error?: string;
+    ownerToken?: unknown;
+  }>();
   if (body.status !== "completed" && body.status !== "failed") {
     return c.json({ error: "status must be completed or failed" }, 400);
   }
-  const updated = await finishTaskRun(user.id, runId, {
-    status: body.status,
-    result: typeof body.result === "string" ? body.result : undefined,
-    error: typeof body.error === "string" ? body.error : undefined,
-  });
-  if (!updated) return c.json({ error: "not found" }, 404);
+  if (!isTaskRunOwnerToken(body.ownerToken))
+    return c.json({ error: "valid ownerToken is required" }, 400);
+  const updated = await finishTaskRun(
+    user.id,
+    runId,
+    {
+      status: body.status,
+      result: typeof body.result === "string" ? body.result : undefined,
+      error: typeof body.error === "string" ? body.error : undefined,
+    },
+    body.ownerToken,
+  );
+  if (!updated) return c.json({ error: "execution lease lost or run already settled" }, 409);
   return c.json({ success: true });
 });
 
