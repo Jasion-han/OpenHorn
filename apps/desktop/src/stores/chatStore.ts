@@ -387,6 +387,7 @@ export interface ChatState {
     assistantId: string,
     token: symbol,
   ) => { userMessageId: string; assistantMessageId: string } | null;
+  isMessageUnsaved: (messageId: string) => boolean;
   isSidecarTurnRetained: (assistantId: string, token: symbol) => boolean;
   releaseSidecarTurn: (assistantId: string, token: symbol) => void;
   isMessageActive: (messageId: string) => boolean;
@@ -1176,6 +1177,9 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
       return null;
     },
 
+    isMessageUnsaved(messageId) {
+      return unsaved.has(messageId);
+    },
     isSidecarTurnRetained(assistantId, token) {
       return unsaved.get(assistantId)?.token === token;
     },

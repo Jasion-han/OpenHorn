@@ -21,26 +21,33 @@ import {
   Trash2,
   Zap,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ScheduledTaskFrequency } from "shared/types";
 import {
   Button,
   cn,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuTrigger,
   ScrollArea,
   Switch,
 } from "ui";
+import { wakeBackgroundTaskRunner } from "../../lib/backgroundTaskRunner";
 import { getScheduledTaskLabel } from "../../lib/i18n/agent";
 import { notifyError, notifySuccess } from "../../lib/notify";
 import { useChatStore } from "../../stores/chatStore";
 import { useDesktopShellStore } from "../../stores/desktopShellStore";
 import { useScheduledTaskStore } from "../../stores/scheduledTaskStore";
+import { type RecipeScheduleHandoff, useWorkbenchStore } from "../../stores/workbenchStore";
 import { CreateTaskDialog } from "./CreateTaskDialog";
-
-type Tab = "tasks" | "runs";
 
 const TEMPLATES: {
   title: string;
@@ -171,22 +178,61 @@ function formatNextRun(date: Date | undefined | null): string {
 }
 
 export function ScheduledTasksView() {
-  const scheduledTasksTab = useDesktopShellStore((s) => s.scheduledTasksTab);
-  const [tab, setTab] = useState<Tab>(scheduledTasksTab);
+  const tab = useDesktopShellStore((s) => s.scheduledTasksTab);
+  const runsTaskId = useDesktopShellStore((s) => s.scheduledTaskRunsTaskId);
+  const openScheduledTasks = useDesktopShellStore((s) => s.openScheduledTasks);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [templateData, setTemplateData] = useState<{
     title: string;
     prompt: string;
     frequency: ScheduledTaskFrequency;
     time: string;
+    notifyOnComplete?: boolean;
   } | null>(null);
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
+  const recipeScheduleDraft = useWorkbenchStore((state) => state.recipeScheduleDraft);
+  const [recipeSchedule, setRecipeSchedule] = useState<RecipeScheduleHandoff | null>(null);
+  useEffect(() => {
+    if (!recipeScheduleDraft) return;
+    // Keep the handoff in memory until confirmation/cancellation. StrictMode
+    // may repeat this effect; consuming by deletion would lose the form.
+    setEditingTaskId(null);
+    setRecipeSchedule(recipeScheduleDraft);
+    setTemplateData({
+      title: recipeScheduleDraft.title,
+      prompt: recipeScheduleDraft.prompt,
+      frequency: "daily",
+      time: "09:00",
+      notifyOnComplete: true,
+    });
+    setDialogOpen(true);
+  }, [recipeScheduleDraft]);
   const [runningTaskIds, setRunningTaskIds] = useState<Set<string>>(new Set());
+  const navigationEpoch = useRef(0);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: tab/filter changes invalidate a pending navigation even while the view stays mounted
+  useEffect(() => {
+    navigationEpoch.current++;
+    return () => {
+      navigationEpoch.current++;
+    };
+  }, [tab, runsTaskId]);
+  const [deleteTarget, setDeleteTarget] = useState<{
+    kind: "task" | "run";
+    id: string;
+    title: string;
+  } | null>(null);
+  const [deleteError, setDeleteError] = useState(false);
 
   const {
     tasks,
     runs,
+    taskRuns,
     loading,
+    error,
+    runsLoading,
+    runsErrors,
+    pendingTasks,
+    pendingRuns,
     loadTasks,
     loadRuns,
     deleteTask,
@@ -200,19 +246,33 @@ export function ScheduledTasksView() {
 
   useEffect(() => {
     void loadTasks();
-    void loadRuns();
+    void loadRuns(runsTaskId ?? undefined);
     const timer = setInterval(() => {
       void loadTasks();
-      void loadRuns();
+      void loadRuns(runsTaskId ?? undefined);
     }, 30_000);
     return () => clearInterval(timer);
-  }, [loadTasks, loadRuns]);
+  }, [loadTasks, loadRuns, runsTaskId]);
 
-  useEffect(() => {
-    setTab(scheduledTasksTab);
-  }, [scheduledTasksTab]);
+  const editingRecipe = editingTaskId
+    ? tasks.find((task) => task.id === editingTaskId)?.recipeSnapshot
+    : undefined;
+  const visibleRuns = runsTaskId ? (taskRuns[runsTaskId] ?? []) : runs;
+  const runsKey = runsTaskId ?? "";
+  const runsTaskTitle = tasks.find((task) => task.id === runsTaskId)?.title ?? runsTaskId;
+  const activeRuns = new Map(
+    runs
+      .filter((run) => run.status === "pending" || run.status === "running")
+      .map((run) => [run.taskId, run.status]),
+  );
 
+  const clearRecipeHandoff = () => {
+    if (recipeSchedule) useWorkbenchStore.getState().clearRecipeSchedule(recipeSchedule.handoffId);
+    setRecipeSchedule(null);
+  };
   const handleTemplateClick = (tpl: (typeof TEMPLATES)[0]) => {
+    clearRecipeHandoff();
+    setEditingTaskId(null);
     setTemplateData({
       title: tpl.title,
       prompt: tpl.prompt,
@@ -223,26 +283,33 @@ export function ScheduledTasksView() {
   };
 
   const handleNewTask = () => {
+    clearRecipeHandoff();
     setTemplateData(null);
     setEditingTaskId(null);
     setDialogOpen(true);
   };
 
   const handleEdit = (task: (typeof tasks)[0]) => {
+    clearRecipeHandoff();
     setEditingTaskId(task.id);
     setTemplateData({
       title: task.title,
       prompt: task.prompt,
       frequency: task.frequency,
       time: task.time,
+      notifyOnComplete: task.notifyOnComplete,
     });
     setDialogOpen(true);
   };
 
   const selectConversation = useChatStore((s) => s.selectConversation);
-  const setPendingPrompt = useDesktopShellStore((s) => s.setPendingPrompt);
 
   const handleRunNow = async (task: (typeof tasks)[0]) => {
+    if (runningTaskIds.has(task.id) || pendingTasks[task.id] || activeRuns.has(task.id)) return;
+    const epoch = navigationEpoch.current;
+    const ownsNavigation = () =>
+      epoch === navigationEpoch.current &&
+      useDesktopShellStore.getState().activeView === "scheduled-tasks";
     setRunningTaskIds((prev) => new Set(prev).add(task.id));
     const conversationId = await runTaskNow(task.id);
     setRunningTaskIds((prev) => {
@@ -251,12 +318,25 @@ export function ScheduledTasksView() {
       return next;
     });
     if (conversationId) {
+      wakeBackgroundTaskRunner();
       void loadRuns();
       void loadTasks();
-      void useChatStore.getState().loadConversations();
-      await selectConversation(conversationId);
-      setPendingPrompt({ text: task.prompt, files: [] });
-      setActiveView("chat");
+      notifySuccess(
+        getScheduledTaskLabel("scheduledTask.notify.queuedTitle"),
+        getScheduledTaskLabel("scheduledTask.notify.queuedBody"),
+      );
+      if (!ownsNavigation() || useChatStore.getState().isStreaming) return;
+      try {
+        await useChatStore.getState().loadConversations();
+        if (!ownsNavigation()) return;
+        await selectConversation(conversationId);
+        if (ownsNavigation()) setActiveView("chat");
+      } catch {
+        notifyError(
+          getScheduledTaskLabel("scheduledTask.notify.openFailedTitle"),
+          getScheduledTaskLabel("scheduledTask.notify.openFailedBody"),
+        );
+      }
     } else {
       notifyError(
         getScheduledTaskLabel("scheduledTask.notify.runFailedTitle"),
@@ -265,11 +345,37 @@ export function ScheduledTasksView() {
     }
   };
 
-  const handleDelete = async (id: string) => {
-    await deleteTask(id);
+  const handleToggle = async (id: string) => {
+    if (!(await toggleTask(id)))
+      notifyError(
+        getScheduledTaskLabel("scheduledTask.notify.updateFailedTitle"),
+        getScheduledTaskLabel("scheduledTask.notify.toggleFailedBody"),
+      );
+  };
+  const deleting =
+    !!deleteTarget &&
+    (deleteTarget.kind === "task"
+      ? pendingTasks[deleteTarget.id] === "delete"
+      : !!pendingRuns[deleteTarget.id]);
+  const handleDelete = async () => {
+    if (!deleteTarget || deleting) return;
+    setDeleteError(false);
+    const success =
+      deleteTarget.kind === "task"
+        ? await deleteTask(deleteTarget.id)
+        : await deleteRun(deleteTarget.id);
+    if (!success) {
+      setDeleteError(true);
+      return;
+    }
+    setDeleteTarget(null);
     notifySuccess(
       getScheduledTaskLabel("scheduledTask.notify.deletedTitle"),
-      getScheduledTaskLabel("scheduledTask.notify.deletedBody"),
+      getScheduledTaskLabel(
+        deleteTarget.kind === "task"
+          ? "scheduledTask.notify.deletedBody"
+          : "scheduledTask.notify.runDeletedBody",
+      ),
     );
   };
 
@@ -321,7 +427,7 @@ export function ScheduledTasksView() {
                   ? "bg-background text-foreground shadow-sm"
                   : "text-muted-foreground hover:text-foreground",
               )}
-              onClick={() => setTab("tasks")}
+              onClick={() => openScheduledTasks("tasks")}
             >
               {getScheduledTaskLabel("scheduledTask.tab.tasks")}
             </button>
@@ -333,7 +439,7 @@ export function ScheduledTasksView() {
                   ? "bg-background text-foreground shadow-sm"
                   : "text-muted-foreground hover:text-foreground",
               )}
-              onClick={() => setTab("runs")}
+              onClick={() => openScheduledTasks("runs")}
             >
               {getScheduledTaskLabel("scheduledTask.tab.runs")}
             </button>
@@ -341,11 +447,27 @@ export function ScheduledTasksView() {
 
           {tab === "tasks" && (
             <div className="flex flex-col gap-6">
-              {loading ? (
+              {error ? (
+                <div
+                  role="alert"
+                  className="flex items-center justify-between gap-3 text-sm text-destructive"
+                >
+                  <p>{getScheduledTaskLabel("scheduledTask.loadFailed")}</p>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={loading}
+                    onClick={() => void loadTasks()}
+                  >
+                    {getScheduledTaskLabel("scheduledTask.retry")}
+                  </Button>
+                </div>
+              ) : null}
+              {loading && tasks.length === 0 ? (
                 <div className="flex justify-center py-12">
                   <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
                 </div>
-              ) : tasks.length === 0 ? (
+              ) : tasks.length === 0 && !error ? (
                 <div className="flex flex-col items-center gap-2 py-12 text-muted-foreground">
                   <Clock size={48} strokeWidth={1} />
                   <p className="text-sm">{getScheduledTaskLabel("scheduledTask.emptyState")}</p>
@@ -359,6 +481,16 @@ export function ScheduledTasksView() {
                     >
                       <div className="flex flex-col gap-0.5 min-w-0 flex-1">
                         <span className="font-medium text-sm truncate">{task.title}</span>
+                        {task.recipeSnapshot ? (
+                          <span
+                            className="text-xs text-muted-foreground truncate"
+                            data-testid="scheduled-task-recipe-source"
+                          >
+                            {getScheduledTaskLabel("scheduledTask.recipe.source")
+                              .replace("{title}", task.recipeSnapshot.spec.title)
+                              .replace("{version}", String(task.recipeSnapshot.version))}
+                          </span>
+                        ) : null}
                         <span className="text-xs text-muted-foreground truncate">
                           {task.prompt}
                         </span>
@@ -367,12 +499,32 @@ export function ScheduledTasksView() {
                             <Clock size={12} />
                             {formatFrequency(task.frequency)} {task.time}
                           </span>
+                          <span>
+                            {getScheduledTaskLabel(
+                              task.enabled
+                                ? "scheduledTask.state.enabled"
+                                : "scheduledTask.state.paused",
+                            )}
+                          </span>
                           {runningTaskIds.has(task.id) ? (
                             <span className="flex items-center gap-1 text-primary">
                               <span className="h-3 w-3 animate-spin rounded-full border border-primary border-t-transparent" />
-                              {getScheduledTaskLabel("scheduledTask.runStatus.running")}
+                              {getScheduledTaskLabel("scheduledTask.submitting")}
+                            </span>
+                          ) : activeRuns.has(task.id) ? (
+                            <span>
+                              {getScheduledTaskLabel(
+                                activeRuns.get(task.id) === "pending"
+                                  ? "scheduledTask.runStatus.pending"
+                                  : "scheduledTask.runStatus.running",
+                              )}
+                            </span>
+                          ) : pendingTasks[task.id] ? (
+                            <span aria-live="polite">
+                              {getScheduledTaskLabel("scheduledTask.updating")}
                             </span>
                           ) : (
+                            task.enabled &&
                             task.nextRunAt && (
                               <span>
                                 {getScheduledTaskLabel("scheduledTask.nextRun")}:{" "}
@@ -385,20 +537,42 @@ export function ScheduledTasksView() {
                       <div className="flex items-center gap-2 shrink-0">
                         <Switch
                           checked={task.enabled}
-                          onCheckedChange={() => void toggleTask(task.id)}
+                          disabled={!!pendingTasks[task.id]}
+                          aria-label={task.title}
+                          onCheckedChange={() => void handleToggle(task.id)}
                         />
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <Button
                               variant="ghost"
                               size="icon-sm"
-                              className="h-7 w-7 opacity-0 group-hover:opacity-100"
+                              aria-label={getScheduledTaskLabel(
+                                "scheduledTask.action.moreFor",
+                              ).replace("{title}", task.title)}
+                              disabled={!!pendingTasks[task.id]}
+                              className="h-8 w-8 text-muted-foreground hover:text-foreground"
                             >
                               <MoreHorizontal size={14} />
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end" className="w-36">
-                            <DropdownMenuItem onClick={() => void handleRunNow(task)}>
+                            {activeRuns.has(task.id) ? (
+                              <DropdownMenuLabel className="whitespace-normal text-xs font-normal text-muted-foreground">
+                                {getScheduledTaskLabel("scheduledTask.action.activeHint")}
+                              </DropdownMenuLabel>
+                            ) : null}
+                            <DropdownMenuItem onClick={() => openScheduledTasks("runs", task.id)}>
+                              <Clock size={14} />
+                              {getScheduledTaskLabel("scheduledTask.tab.runs")}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              disabled={
+                                runningTaskIds.has(task.id) ||
+                                !!pendingTasks[task.id] ||
+                                activeRuns.has(task.id)
+                              }
+                              onClick={() => void handleRunNow(task)}
+                            >
                               <Play size={14} />
                               {getScheduledTaskLabel("scheduledTask.action.runNow")}
                             </DropdownMenuItem>
@@ -408,7 +582,11 @@ export function ScheduledTasksView() {
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               className="text-destructive focus:text-destructive"
-                              onClick={() => void handleDelete(task.id)}
+                              disabled={activeRuns.has(task.id)}
+                              onClick={() => {
+                                setDeleteError(false);
+                                setDeleteTarget({ kind: "task", id: task.id, title: task.title });
+                              }}
                             >
                               <Trash2 size={14} />
                               {getScheduledTaskLabel("scheduledTask.action.delete")}
@@ -421,11 +599,11 @@ export function ScheduledTasksView() {
                 </div>
               )}
 
-              <div className="flex flex-col gap-3">
-                <h2 className="text-base font-semibold">
+              <details className="border-t pt-3">
+                <summary className="w-fit cursor-pointer rounded py-1 text-sm text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
                   {getScheduledTaskLabel("scheduledTask.templateHeading")}
-                </h2>
-                <div className="grid grid-cols-2 gap-3">
+                </summary>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
                   {TEMPLATES.map((tpl) => {
                     const Icon = tpl.icon;
                     return (
@@ -454,18 +632,46 @@ export function ScheduledTasksView() {
                     );
                   })}
                 </div>
-              </div>
+              </details>
             </div>
           )}
 
           {tab === "runs" && (
             <div className="flex flex-col gap-2">
-              {runs.length === 0 ? (
+              {runsErrors[runsKey] ? (
+                <div
+                  role="alert"
+                  className="flex items-center justify-between gap-3 text-sm text-destructive"
+                >
+                  <p>{getScheduledTaskLabel("scheduledTask.runsLoadFailed")}</p>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={runsLoading[runsKey]}
+                    onClick={() => void loadRuns(runsTaskId ?? undefined)}
+                  >
+                    {getScheduledTaskLabel("scheduledTask.retry")}
+                  </Button>
+                </div>
+              ) : null}
+              {runsTaskId && (
+                <div className="flex items-center justify-between gap-3">
+                  <span className="min-w-0 truncate text-sm font-medium">{runsTaskTitle}</span>
+                  <Button variant="ghost" size="sm" onClick={() => openScheduledTasks("runs")}>
+                    {getScheduledTaskLabel("scheduledTask.runsAll")}
+                  </Button>
+                </div>
+              )}
+              {runsLoading[runsKey] && visibleRuns.length === 0 ? (
+                <output className="py-12 text-center text-sm text-muted-foreground">
+                  {getScheduledTaskLabel("scheduledTask.loadingRuns")}
+                </output>
+              ) : visibleRuns.length === 0 && !runsErrors[runsKey] ? (
                 <p className="py-12 text-center text-sm text-muted-foreground">
                   {getScheduledTaskLabel("scheduledTask.runsEmpty")}
                 </p>
               ) : (
-                runs.map((run) => (
+                visibleRuns.map((run) => (
                   <div
                     key={run.id}
                     className="group flex items-center justify-between rounded-xl border border-border/60 bg-background px-4 py-3"
@@ -479,8 +685,14 @@ export function ScheduledTasksView() {
                           {run.result}
                         </span>
                       )}
-                      {run.error && (
-                        <span className="text-xs text-destructive line-clamp-1">{run.error}</span>
+                      {(run.error || run.errorCode) && (
+                        <span className="text-xs text-destructive line-clamp-1">
+                          {run.errorCode === "lease_expired"
+                            ? getScheduledTaskLabel("scheduledTask.run.interrupted")
+                            : run.errorCode === "missed"
+                              ? getScheduledTaskLabel("scheduledTask.run.missed")
+                              : run.error}
+                        </span>
                       )}
                     </div>
                     <div className="flex items-center gap-3 shrink-0">
@@ -508,8 +720,23 @@ export function ScheduledTasksView() {
                       <Button
                         variant="ghost"
                         size="icon-sm"
-                        className="h-6 w-6 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive"
-                        onClick={() => void deleteRun(run.id)}
+                        className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                        aria-label={getScheduledTaskLabel(
+                          "scheduledTask.action.deleteRunFor",
+                        ).replace("{title}", run.taskTitle ?? run.taskId)}
+                        disabled={
+                          !!pendingRuns[run.id] ||
+                          run.status === "pending" ||
+                          run.status === "running"
+                        }
+                        onClick={() => {
+                          setDeleteError(false);
+                          setDeleteTarget({
+                            kind: "run",
+                            id: run.id,
+                            title: run.taskTitle ?? run.taskId,
+                          });
+                        }}
                       >
                         <Trash2 size={13} />
                       </Button>
@@ -525,6 +752,7 @@ export function ScheduledTasksView() {
             onOpenChange={(open) => {
               setDialogOpen(open);
               if (!open) {
+                clearRecipeHandoff();
                 setTemplateData(null);
                 setEditingTaskId(null);
               }
@@ -534,7 +762,58 @@ export function ScheduledTasksView() {
             initialPrompt={templateData?.prompt}
             initialFrequency={templateData?.frequency}
             initialTime={templateData?.time}
+            initialNotifyOnComplete={templateData?.notifyOnComplete}
+            recipeSchedule={recipeSchedule}
+            recipeSource={
+              editingRecipe
+                ? { title: editingRecipe.spec.title, version: editingRecipe.version }
+                : null
+            }
           />
+          <Dialog
+            open={!!deleteTarget}
+            onOpenChange={(open) => {
+              if (!open && !deleting) setDeleteTarget(null);
+            }}
+          >
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>
+                  {getScheduledTaskLabel(
+                    deleteTarget?.kind === "run"
+                      ? "scheduledTask.deleteRunTitle"
+                      : "scheduledTask.deleteTitle",
+                  )}
+                </DialogTitle>
+                <DialogDescription>
+                  {getScheduledTaskLabel(
+                    deleteTarget?.kind === "run"
+                      ? "scheduledTask.deleteRunHint"
+                      : "scheduledTask.deleteHint",
+                  ).replace("{title}", deleteTarget?.title ?? "")}
+                </DialogDescription>
+              </DialogHeader>
+              {deleteError ? (
+                <p role="alert" className="text-sm text-destructive">
+                  {getScheduledTaskLabel("scheduledTask.deleteFailed")}
+                </p>
+              ) : null}
+              <DialogFooter>
+                <Button variant="outline" disabled={deleting} onClick={() => setDeleteTarget(null)}>
+                  {getScheduledTaskLabel("scheduledTask.cancel")}
+                </Button>
+                <Button
+                  variant="destructive"
+                  disabled={deleting}
+                  onClick={() => void handleDelete()}
+                >
+                  {getScheduledTaskLabel(
+                    deleting ? "scheduledTask.deleting" : "scheduledTask.confirmDelete",
+                  )}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </div>
       </ScrollArea>
     </div>

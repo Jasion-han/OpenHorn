@@ -3,6 +3,7 @@ import type {
   ImportRecord,
   MessageFinishReason,
   ModelContextConfig,
+  RecipeRequirements,
 } from "shared/types";
 
 export type ChatMode = "chat" | "agent";
@@ -111,6 +112,7 @@ export interface ApiAgentRunStep {
 }
 
 export interface ApiAgentRun {
+  recipeRequirements?: RecipeRequirements;
   status: "running" | "awaiting_approval" | "completed" | "failed" | "cancelled" | "partial";
   summary: string;
   error?: string;
@@ -334,6 +336,7 @@ export type ChatStreamEvent =
 
 export interface CreateConversationInput {
   title: string;
+  forceNew?: boolean;
   channelId?: string | null;
   modelId?: string | null;
   /** Seeds both defaultMode and lastMode server-side. */
@@ -389,6 +392,8 @@ export interface ExportBackupResult {
 }
 
 export interface ImportResult {
+  recipes?: { imported: number; skipped: number };
+  artifacts?: { imported: number; skipped: number };
   format: "openhorn" | "chatgpt" | "claude";
   conversations: { imported: number; skipped: number };
   messages: { imported: number };

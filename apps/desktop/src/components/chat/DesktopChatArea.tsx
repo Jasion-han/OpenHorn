@@ -7,7 +7,7 @@ import {
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { fileKey } from "shared/format";
 import { chatFailureFinishReason } from "shared/message-text";
-import type { ChatStreamErrorCode } from "shared/types";
+import type { ChatStreamErrorCode, RecipeRequirements } from "shared/types";
 import {
   Button,
   cn,
@@ -211,6 +211,12 @@ export function DesktopChatArea() {
   >(null);
   const [streamingAssistantId, setStreamingAssistantId] = useState<string | null>(null);
   const autoSendRef = useRef(false);
+  const autoSendConversationRef = useRef<string | null>(null);
+  const autoSendPayloadRef = useRef<{
+    text: string;
+    files: File[];
+    requirements?: RecipeRequirements;
+  } | null>(null);
   const pendingPrompt = useDesktopShellStore((state) => state.pendingPrompt);
   const setPendingPrompt = useDesktopShellStore((state) => state.setPendingPrompt);
   const fullAccessEnabled = useDesktopShellStore((state) => state.fullAccessEnabled);
@@ -1022,7 +1028,7 @@ export function DesktopChatArea() {
     };
   };
 
-  const handleSend = async () => {
+  const handleSend = async (recipeRequirements?: RecipeRequirements) => {
     if (!canSend || !currentConversation || hasRunningTurn()) return;
 
     if (composerMode === "agent" && !agentModeSupported) {
@@ -1119,6 +1125,7 @@ export function DesktopChatArea() {
                 status: "partial",
                 summary: "Thinking",
                 steps: [],
+                recipeRequirements,
               }
             : undefined,
         createdAt: new Date(),
@@ -1181,6 +1188,7 @@ export function DesktopChatArea() {
           modelId: effectiveModel.modelId,
           assistantMessageId,
           prompt: sendContent,
+          recipeRequirements,
           displayContent,
           stoppedBeforeStart: turn.stopped,
           permissionMode: fullAccessEnabled ? "full-access" : "default",
@@ -1426,18 +1434,50 @@ export function DesktopChatArea() {
   useEffect(() => {
     if (!pendingPrompt || !currentConversation) return;
     setPendingPrompt(null);
+    if (pendingPrompt.conversationId && pendingPrompt.conversationId !== currentConversation.id)
+      return;
     setInput(pendingPrompt.text);
     if (pendingPrompt.files.length > 0) setPendingAttachments(pendingPrompt.files);
-    autoSendRef.current = true;
+    autoSendRef.current = pendingPrompt.autoSend !== false;
+    autoSendConversationRef.current = currentConversation.id;
+    autoSendPayloadRef.current = pendingPrompt;
+    if (pendingPrompt.autoSend === false) {
+      const targetId = currentConversation.id;
+      requestAnimationFrame(() => {
+        const field = inputRef.current;
+        if (
+          useChatStore.getState().currentConversation?.id !== targetId ||
+          field?.value !== pendingPrompt.text
+        )
+          return;
+        field.focus();
+        field.setSelectionRange(field.value.length, field.value.length);
+        field.scrollTop = field.scrollHeight;
+      });
+    }
   }, [pendingPrompt, currentConversation, setPendingPrompt]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: handleSend is re-created every render; adding it would re-run this on every render
   useEffect(() => {
     if (!autoSendRef.current) return;
+    if (autoSendConversationRef.current !== currentConversation?.id) {
+      autoSendRef.current = false;
+      autoSendConversationRef.current = null;
+      return;
+    }
     if (!input.trim() && pendingAttachments.length === 0) return;
+    const handoff = autoSendPayloadRef.current;
+    if (
+      handoff &&
+      (input !== handoff.text ||
+        pendingAttachments.length !== handoff.files.length ||
+        pendingAttachments.some((file, index) => file !== handoff.files[index]))
+    )
+      return;
     if (canSend) {
       autoSendRef.current = false;
-      void handleSend();
+      autoSendPayloadRef.current = null;
+      void handleSend(handoff?.requirements);
       return;
     }
     // No usable model — leave the draft in the composer rather than dropping it,
@@ -1448,7 +1488,14 @@ export function DesktopChatArea() {
     // input, drop the auto-send so it never fires later on its own once the
     // other turn ends, and let the composer's busy hint explain why.
     if (busyElsewhere) autoSendRef.current = false;
-  }, [canSend, input, pendingAttachments, effectiveModel.ok, busyElsewhere]);
+  }, [
+    canSend,
+    input,
+    pendingAttachments,
+    effectiveModel.ok,
+    busyElsewhere,
+    currentConversation?.id,
+  ]);
 
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [deleteInFlight, setDeleteInFlight] = useState(false);

@@ -14,7 +14,7 @@ export function DesktopShellLayout({
   activeView,
 }: {
   children: React.ReactNode;
-  activeView: "chat" | "settings" | "scheduled-tasks";
+  activeView: "chat" | "settings" | "scheduled-tasks" | "workbench";
 }) {
   const needsOuterPadding = activeView === "settings";
   const nativeScroll = activeView === "settings";

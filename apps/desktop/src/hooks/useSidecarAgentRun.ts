@@ -1,4 +1,10 @@
-import type { AttachmentPart, MessageFinishReason, ModelContextMetadata } from "shared/types";
+import { missingRecipeCapabilities } from "shared/recipes";
+import type {
+  AttachmentPart,
+  MessageFinishReason,
+  ModelContextMetadata,
+  RecipeRequirements,
+} from "shared/types";
 import { create } from "zustand";
 import { formatChatLabel, getChatLabel } from "../lib/i18n/agent";
 import { createServerApi } from "../lib/serverApi";
@@ -36,6 +42,7 @@ interface ActiveSidecarRun {
 }
 
 export interface SidecarAgentRunInput {
+  recipeRequirements?: RecipeRequirements;
   conversationId: string;
   channelId: string;
   modelId: string;
@@ -223,6 +230,18 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
   };
 
   const startRun = async (input: SidecarAgentRunInput): Promise<void> => {
+    const recipeRequirements =
+      input.recipeRequirements ??
+      input.previousReply?.agentRun?.recipeRequirements ??
+      useChatStore.getState().findMessageAnywhere(input.assistantMessageId)?.agentRun
+        ?.recipeRequirements;
+    if (recipeRequirements) {
+      const message = useChatStore.getState().findMessageAnywhere(input.assistantMessageId);
+      if (message?.agentRun)
+        useChatStore.getState().updateMessage(input.assistantMessageId, {
+          agentRun: { ...message.agentRun, recipeRequirements },
+        });
+    }
     const sidecar = useSidecarStore.getState();
     const client = sidecar.client;
     // Run-ownership guard. Regenerate re-uses the SAME assistant message id:
@@ -601,7 +620,10 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
     let skillMetas: SkillMeta[] | undefined;
     if (credentials.protocol === "anthropic" || credentials.protocol === "openai") {
       try {
-        const resolved = await resolveEnabledSkills();
+        const resolved = await resolveEnabledSkills({
+          prompt: input.prompt,
+          required: recipeRequirements?.skills,
+        });
         if (resolved.length > 0) skillMetas = resolved;
       } catch {
         // Skills are additive; ignore discovery failures and run without.
@@ -613,6 +635,30 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
     if (!isLive()) return;
 
     let acceptedRunId: string;
+    if (recipeRequirements) {
+      let missing: string[];
+      try {
+        missing = missingRecipeCapabilities(recipeRequirements, {
+          skills: skillMetas?.map((skill) => skill.name) ?? [],
+          mcpServers: credentials.protocol === "acp" ? [] : Object.keys(mcpServers ?? {}),
+          workspace: !!projectRoot && !!workspaceRoot,
+          webSearch: credentials.protocol !== "acp" && input.webSearchEnabled === true,
+        });
+      } catch {
+        missing = ["invalid recipe requirements"];
+      }
+      if (missing.length) {
+        const message = formatChatLabel("chat.run.recipeCapabilitiesMissing", {
+          names: missing.join(", "),
+        });
+        setLastError(message);
+        useChatStore
+          .getState()
+          .applyStreamEvent(input.assistantMessageId, { type: "error", message });
+        persistFailure(message, runModel);
+        return;
+      }
+    }
     try {
       acceptedRunId = await client.runAgent({
         prompt: input.prompt,

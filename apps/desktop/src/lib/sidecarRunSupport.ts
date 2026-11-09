@@ -1,5 +1,6 @@
 import { useChatStore } from "../stores/chatStore";
 import type { AgentTaskStreamEvent } from "./agentTaskStream";
+import { decisionApi } from "./decisionApi";
 import { normalizeMcpServerConfig } from "./mcpServerConfig";
 import type { ServerApi } from "./serverApi";
 import { discoverSkills, skillsDisabledList } from "./tauriBridge";
@@ -24,16 +25,44 @@ export interface SkillMeta {
  * Gemini) minus the user-disabled set, and read IN PLACE — the run carries each
  * skill's name/description + absolute folder path; nothing is copied.
  */
-export async function resolveEnabledSkills(): Promise<SkillMeta[]> {
+export async function resolveEnabledSkills(options?: {
+  prompt: string;
+  required?: string[];
+}): Promise<SkillMeta[]> {
   const [discovered, disabled] = await Promise.all([discoverSkills(), skillsDisabledList()]);
   const disabledSet = new Set(disabled.map((n) => n.trim().toLowerCase()));
-  return (discovered ?? [])
+  const all = (discovered ?? [])
     .filter((s) => !disabledSet.has(s.name.trim().toLowerCase()))
     .map((s) => ({
       name: s.name,
       description: (s.description ?? "").replace(/\s+/g, " ").trim(),
       path: s.path,
     }));
+  if (!options?.prompt.trim() || options.prompt.trimStart().startsWith("/") || all.length < 2)
+    return all;
+  try {
+    // Shortlist metadata only; all enabled skills remain available to the runtime.
+    const terms =
+      options.prompt.toLocaleLowerCase().match(/[a-z0-9_-]{2,}|[\p{Script=Han}]{2}/gu) ?? [];
+    const candidates = all
+      .map((skill, index) => ({
+        skill,
+        index,
+        score: terms.filter((term) =>
+          `${skill.name} ${skill.description}`.toLocaleLowerCase().includes(term),
+        ).length,
+      }))
+      .sort((a, b) => b.score - a.score || a.index - b.index)
+      .slice(0, 40)
+      .map(({ skill }) => ({
+        name: skill.name.slice(0, 150),
+        description: skill.description.slice(0, 600),
+      }));
+    const { preferredNames } = await decisionApi.skills(options.prompt, candidates);
+    return prioritizeEnabledSkills(all, preferredNames, options.required);
+  } catch {
+    return all;
+  }
 }
 
 /**
@@ -241,4 +270,28 @@ export function applySidecarEventToChat(
     return { kind: "error", message };
   }
   return { kind: "handled" };
+}
+
+/** Recommendations change order only; explicit recipe requirements stay first. */
+export function prioritizeEnabledSkills(
+  all: SkillMeta[],
+  names: string[] = [],
+  requiredNames: string[] = [],
+): SkillMeta[] {
+  const required = new Set(requiredNames.map((name) => name.toLocaleLowerCase()));
+  const preferred = new Set(names.map((name) => name.toLocaleLowerCase()));
+  const priority = (skill: SkillMeta) =>
+    required.has(skill.name.toLocaleLowerCase())
+      ? 2
+      : preferred.has(skill.name.toLocaleLowerCase())
+        ? 1
+        : 0;
+  return all
+    .map((skill, index) => ({ skill, index }))
+    .sort((a, b) => priority(b.skill) - priority(a.skill) || a.index - b.index)
+    .map(({ skill }) =>
+      preferred.has(skill.name.toLocaleLowerCase()) && !required.has(skill.name.toLocaleLowerCase())
+        ? { ...skill, description: `[Suggested for this task] ${skill.description}` }
+        : skill,
+    );
 }

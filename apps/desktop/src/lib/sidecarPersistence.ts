@@ -22,7 +22,7 @@ export function createSidecarPersistence(options: {
     userId: string;
     assistantId: string;
     ownsRun: () => boolean;
-    inFlight: Promise<void> | null;
+    inFlight: Promise<boolean> | null;
     deferred: boolean;
   };
   const entries = new Map<string, Entry>();
@@ -41,11 +41,11 @@ export function createSidecarPersistence(options: {
       }
     }
   });
-  const attempt = (entry: Entry): Promise<void> => {
-    if (!current(entry)) return Promise.resolve();
+  const attempt = (entry: Entry): Promise<boolean> => {
+    if (!current(entry)) return Promise.resolve(false);
     if (!entry.ownsRun() && options.store.getState().isMessageActive(entry.assistantId)) {
       entry.deferred = true;
-      return Promise.resolve();
+      return Promise.resolve(false);
     }
     if (entry.inFlight) return entry.inFlight;
     entry.deferred = false;
@@ -55,11 +55,11 @@ export function createSidecarPersistence(options: {
         .setSidecarSavePending([entry.userId, entry.assistantId], entry.token, true);
       try {
         const result = await options.sync(entry.payload);
-        if (!current(entry)) return;
+        if (!current(entry)) return false;
         // A late ACK cannot release protection for a newer, still-running edit.
         if (!entry.ownsRun() && options.store.getState().isMessageActive(entry.assistantId)) {
           entry.deferred = true;
-          return;
+          return false;
         }
         if (
           result.userMessageId !== entry.userId ||
@@ -70,15 +70,19 @@ export function createSidecarPersistence(options: {
         options.store.getState().releaseSidecarTurn(entry.assistantId, entry.token);
         entries.delete(entry.assistantId);
         options.saved(entry.assistantId);
+        return true;
       } catch {
         if (
           current(entry) &&
           (entry.ownsRun() || !options.store.getState().isMessageActive(entry.assistantId))
         ) {
-          options.failed(entry.assistantId, () => attempt(entry));
+          options.failed(entry.assistantId, async () => {
+            await attempt(entry);
+          });
         } else if (current(entry)) {
           entry.deferred = true;
         }
+        return false;
       } finally {
         entry.inFlight = null;
         options.store

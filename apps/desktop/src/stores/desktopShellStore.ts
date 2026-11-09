@@ -1,7 +1,8 @@
+import type { RecipeRequirements } from "shared/types";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-export type DesktopActiveView = "chat" | "settings" | "scheduled-tasks";
+export type DesktopActiveView = "chat" | "settings" | "scheduled-tasks" | "workbench";
 export type DesktopSettingsTab =
   | "general"
   | "channels"
@@ -29,9 +30,16 @@ export interface DesktopShellState {
    * update inside `createConversation` flushes the chat area's effects (and
    * hence the send) before the welcome screen's `await` even resumes.
    */
-  pendingPrompt: { text: string; files: File[] } | null;
+  pendingPrompt: {
+    text: string;
+    files: File[];
+    conversationId?: string;
+    requirements?: RecipeRequirements;
+    autoSend?: boolean;
+  } | null;
   prefillComposer: string | null;
   scheduledTasksTab: "tasks" | "runs";
+  scheduledTaskRunsTaskId: string | null;
   selectedRunId: string | null;
 
   setActiveView: (view: DesktopActiveView) => void;
@@ -39,9 +47,17 @@ export interface DesktopShellState {
   setSettingsTab: (tab: DesktopSettingsTab) => void;
   openSettings: (tab?: DesktopSettingsTab) => void;
   toggleFullAccess: () => void;
-  setPendingPrompt: (prompt: { text: string; files: File[] } | null) => void;
+  setPendingPrompt: (
+    prompt: {
+      text: string;
+      files: File[];
+      conversationId?: string;
+      requirements?: RecipeRequirements;
+      autoSend?: boolean;
+    } | null,
+  ) => void;
   setPrefillComposer: (text: string | null) => void;
-  openScheduledTasks: (tab?: "tasks" | "runs") => void;
+  openScheduledTasks: (tab?: "tasks" | "runs", taskId?: string) => void;
   openRunDetail: (runId: string) => void;
   reset: () => void;
 }
@@ -51,9 +67,16 @@ const INITIAL_STATE = {
   sidebarCollapsed: false,
   settingsTab: "channels" as DesktopSettingsTab,
   fullAccessEnabled: false,
-  pendingPrompt: null as { text: string; files: File[] } | null,
+  pendingPrompt: null as {
+    text: string;
+    files: File[];
+    conversationId?: string;
+    requirements?: RecipeRequirements;
+    autoSend?: boolean;
+  } | null,
   prefillComposer: null as string | null,
   scheduledTasksTab: "tasks" as "tasks" | "runs",
+  scheduledTaskRunsTaskId: null as string | null,
   selectedRunId: null as string | null,
 };
 
@@ -73,8 +96,13 @@ export function createDesktopShellStore() {
         toggleFullAccess: () => set((state) => ({ fullAccessEnabled: !state.fullAccessEnabled })),
         setPendingPrompt: (pendingPrompt) => set({ pendingPrompt }),
         setPrefillComposer: (prefillComposer) => set({ prefillComposer }),
-        openScheduledTasks: (tab = "tasks") =>
-          set({ activeView: "scheduled-tasks", scheduledTasksTab: tab, selectedRunId: null }),
+        openScheduledTasks: (tab = "tasks", taskId) =>
+          set({
+            activeView: "scheduled-tasks",
+            scheduledTasksTab: tab,
+            scheduledTaskRunsTaskId: tab === "runs" ? (taskId ?? null) : null,
+            selectedRunId: null,
+          }),
         openRunDetail: (runId) => set({ activeView: "scheduled-tasks", selectedRunId: runId }),
         reset: () => set({ ...INITIAL_STATE }),
       }),

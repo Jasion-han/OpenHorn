@@ -17,6 +17,7 @@ import {
   Settings,
   Star,
   Trash2,
+  Workflow,
 } from "lucide-react";
 import { memo, useEffect, useMemo, useState } from "react";
 import type { Project } from "shared/types";
@@ -45,7 +46,12 @@ import {
 import { useClockTick } from "../../hooks/useClockTick";
 import { getDesktopBackendBase } from "../../lib/backendBase";
 import { displayConversationTitle } from "../../lib/conversationTitle";
-import { formatSidebarLabel, getSidebarLabel, type SidebarLabelKey } from "../../lib/i18n/agent";
+import {
+  formatSidebarLabel,
+  getSidebarLabel,
+  getWorkbenchLabel,
+  type SidebarLabelKey,
+} from "../../lib/i18n/agent";
 import { hideNotification, notifyError, notifyErrorOnce, notifySuccess } from "../../lib/notify";
 import { useAuthStore } from "../../stores/authStore";
 import { useBackendStatusStore } from "../../stores/backendStatusStore";
@@ -674,6 +680,19 @@ export function DesktopLeftSidebar() {
           </Button>
 
           <div className="flex flex-col gap-0.5">
+            <button
+              type="button"
+              onClick={() => setActiveView("workbench")}
+              className={cn(
+                "flex items-center gap-2 rounded-[10px] px-3 py-[7px] text-left text-sm transition-colors duration-100 titlebar-no-drag",
+                activeView === "workbench"
+                  ? "bg-foreground/[0.08] text-foreground"
+                  : "text-foreground/70 hover:bg-foreground/[0.04] hover:text-foreground",
+              )}
+            >
+              <Workflow size={15} className="shrink-0 text-muted-foreground" />
+              {getWorkbenchLabel("workbench.title")}
+            </button>
             <button
               type="button"
               className={cn(

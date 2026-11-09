@@ -5,16 +5,20 @@ import { DesktopChatArea } from "./components/chat/DesktopChatArea";
 import { ScheduledTasksView } from "./components/scheduled-tasks/ScheduledTasksView";
 import { SettingsView } from "./components/settings/SettingsView";
 import { ThemeListener } from "./components/theme/ThemeListener";
+import { ArtifactSaveDialog } from "./components/workbench/ArtifactSaveDialog";
+import { WorkbenchView } from "./components/workbench/WorkbenchView";
 import { useRefreshOnFocus } from "./hooks/useRefreshOnFocus";
 import { startBackgroundTaskRunner } from "./lib/backgroundTaskRunner";
 import { getTauriSidecarPlatform, hasOverlayTitleBar } from "./lib/tauriBridge";
 import { useAuthStore } from "./stores/authStore";
 import { useDesktopShellStore } from "./stores/desktopShellStore";
 import { useSidecarStore } from "./stores/sidecarStore";
+import { useWorkbenchStore } from "./stores/workbenchStore";
 
 export function App() {
   const activeView = useDesktopShellStore((state) => state.activeView);
   const authReady = useAuthStore((state) => state.ready);
+  const artifactMessageId = useWorkbenchStore((state) => state.artifactMessageId);
   const bootstrapAuth = useAuthStore((state) => state.bootstrap);
 
   useEffect(() => {
@@ -86,7 +90,9 @@ export function App() {
       <ThemeListener />
       <Toaster />
       <DesktopShellLayout activeView={activeView}>
-        {activeView === "settings" ? (
+        {activeView === "workbench" ? (
+          <WorkbenchView />
+        ) : activeView === "settings" ? (
           <SettingsView />
         ) : activeView === "scheduled-tasks" ? (
           <ScheduledTasksView />
@@ -94,6 +100,11 @@ export function App() {
           <DesktopChatArea />
         )}
       </DesktopShellLayout>
+      <ArtifactSaveDialog
+        messageId={artifactMessageId}
+        onClose={() => useWorkbenchStore.getState().setArtifactMessageId(null)}
+        onSaved={() => useWorkbenchStore.getState().refreshArtifacts()}
+      />
     </TooltipProvider>
   );
 }

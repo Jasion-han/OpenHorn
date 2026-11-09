@@ -1,7 +1,10 @@
-import { Pencil, RefreshCw, Trash2 } from "lucide-react";
+import { Bookmark, Pencil, RefreshCw, Trash2, Workflow } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { cn } from "ui";
-import { getChatLabel } from "../../lib/i18n/agent";
+import { getChatLabel, getWorkbenchLabel } from "../../lib/i18n/agent";
+import { useChatStore } from "../../stores/chatStore";
+import { useDesktopShellStore } from "../../stores/desktopShellStore";
+import { useWorkbenchStore } from "../../stores/workbenchStore";
 import type { Message } from "../../types/chat";
 
 function IconActionButton({
@@ -59,6 +62,8 @@ export function MessageActionBar({
   onDelete: () => void;
 }) {
   const [copied, setCopied] = useState(false);
+  const saving = useChatStore((state) => state.savingMessageIds.has(message.id));
+  const unsaved = useChatStore((state) => state.isMessageUnsaved(message.id));
   const copyResetTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -85,7 +90,7 @@ export function MessageActionBar({
         message.role === "assistant" ? "justify-start" : "justify-end",
         isStreaming
           ? "pointer-events-none opacity-0"
-          : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100",
+          : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100",
       )}
     >
       {message.role === "user" && (
@@ -97,6 +102,29 @@ export function MessageActionBar({
           <Pencil size={13} />
         </IconActionButton>
       )}
+      <IconActionButton
+        title={getWorkbenchLabel(
+          message.role === "assistant"
+            ? "workbench.actions.saveArtifact"
+            : "workbench.actions.saveRecipe",
+        )}
+        disabled={
+          isStreaming ||
+          saving ||
+          (message.role === "assistant" && unsaved) ||
+          !message.content.trim()
+        }
+        onClick={() => {
+          if (message.role === "assistant")
+            useWorkbenchStore.getState().setArtifactMessageId(message.id);
+          else {
+            useWorkbenchStore.getState().setRecipeDraft(message.content);
+            useDesktopShellStore.getState().setActiveView("workbench");
+          }
+        }}
+      >
+        {message.role === "assistant" ? <Bookmark size={13} /> : <Workflow size={13} />}
+      </IconActionButton>
       <IconActionButton
         onClick={() => void handleCopy()}
         title={copied ? getChatLabel("chat.action.copied") : getChatLabel("chat.action.copy")}

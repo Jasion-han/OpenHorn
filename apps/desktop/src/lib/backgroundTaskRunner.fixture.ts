@@ -21,6 +21,38 @@ const tasks: ScheduledTask[] = Array.from({ length: count }, (_, index) => ({
   createdAt: new Date(now),
   updatedAt: new Date(now),
 }));
+if (scenario.startsWith("recipe-")) {
+  const { renderRecipePrompt } = await import("shared/recipes");
+  const spec = {
+    title: "Synthetic recipe",
+    description: "",
+    promptTemplate: "Synthetic recipe prompt",
+    parameters: [],
+    requirements: {
+      skills: scenario === "recipe-missing" ? ["Missing skill"] : [],
+      mcpServers: [],
+      workspace: scenario !== "recipe-missing",
+      webSearch: false,
+    },
+    outputFormat: "markdown" as const,
+    ...(scenario !== "recipe-missing" ? { projectId: "fixture-project" } : {}),
+    ...(["recipe-moved", "recipe-model-changed"].includes(scenario)
+      ? { channelId: "fixture-channel", modelId: "fixture-model" }
+      : {}),
+  };
+  const rendered = renderRecipePrompt(spec, {});
+  tasks[0].prompt = rendered.prompt;
+  tasks[0].projectId = spec.projectId;
+  tasks[0].channelId = spec.channelId;
+  tasks[0].modelId = spec.modelId;
+  tasks[0].recipeSnapshot = {
+    recipeId: "fixture-recipe",
+    version: 1,
+    spec,
+    values: rendered.values,
+    renderedPrompt: rendered.prompt,
+  };
+}
 const runs: ScheduledTaskRun[] = tasks.map((task, index) => ({
   id: `run-${index}`,
   taskId: task.id,
@@ -29,6 +61,13 @@ const runs: ScheduledTaskRun[] = tasks.map((task, index) => ({
   conversationId: `conversation-${index}`,
   startedAt: new Date(now),
 }));
+if (scenario === "other-client")
+  runs.push({
+    ...runs[0],
+    id: "foreign-run",
+    status: "running",
+    conversationId: "foreign-conversation",
+  });
 const conversations = runs.map((_run, index) => ({
   id: `conversation-${index}`,
   title: "Synthetic scheduled conversation",
@@ -39,7 +78,11 @@ const conversations = runs.map((_run, index) => ({
   lastMode: "agent" as const,
   isPinned: false,
   forceWebSearch: false,
-  projectId: scenario.startsWith("project-") ? "fixture-project" : null,
+  projectId:
+    scenario.startsWith("project-") ||
+    (scenario.startsWith("recipe-") && scenario !== "recipe-missing")
+      ? "fixture-project"
+      : null,
   createdAt: new Date(now),
   updatedAt: new Date(now),
 }));
@@ -77,12 +120,24 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   }
   if (url.pathname === "/scheduled-tasks") return Response.json({ tasks });
   if (url.pathname === "/scheduled-tasks/runs") return Response.json({ runs });
+  if (url.pathname === "/scheduled-tasks/runs/pending")
+    return Response.json({ runs: runs.filter((run) => run.status === "pending") });
+  if (/\/scheduled-tasks\/runs\/run-\d+\/heartbeat$/.test(url.pathname)) {
+    if (scenario === "lease-loss") {
+      runs[0].status = "failed";
+      return Response.json({ error: "Synthetic lease revoked" }, { status: 409 });
+    }
+    return Response.json({ renewed: true, leaseDurationMs: 120_000 });
+  }
   const claim = /^\/scheduled-tasks\/runs\/(run-\d+)\/claim$/.exec(url.pathname);
   if (claim) {
     const run = runs.find((run) => run.id === claim[1]);
     if (!run) throw new Error("Unknown synthetic claim");
     run.status = "running";
-    return Response.json({ claimed: true });
+    return Response.json({
+      claimed: true,
+      leaseDurationMs: scenario === "lease-loss" ? 60 : 120_000,
+    });
   }
   const complete = /^\/scheduled-tasks\/runs\/(run-\d+)\/complete$/.exec(url.pathname);
   if (complete) {
@@ -95,6 +150,17 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     return Response.json({ success: true });
   }
   if (url.pathname === "/conversations") return Response.json({ conversations });
+  const conversationDetail = /^\/conversations\/(conversation-\d+)$/.exec(url.pathname);
+  if (conversationDetail) {
+    const conversation = conversations.find((row) => row.id === conversationDetail[1]);
+    return Response.json({
+      conversation: {
+        ...conversation,
+        ...(scenario === "recipe-moved" ? { projectId: "different-project" } : {}),
+        ...(scenario === "recipe-model-changed" ? { modelId: "different-model" } : {}),
+      },
+    });
+  }
   if (url.pathname === "/projects") {
     projectLoads++;
     if (scenario === "project-cold") {
@@ -121,15 +187,22 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (url.pathname === "/messages/sync-sidecar") {
     const body = JSON.parse(String(init?.body));
     saved.push(body);
+    if (scenario === "save-failure")
+      return Response.json({ error: "Synthetic save failure" }, { status: 503 });
     return Response.json({
-      userMessageId: `saved-user-${body.conversationId}`,
-      assistantMessageId: `saved-assistant-${body.conversationId}`,
+      userMessageId: body.userMessageId,
+      assistantMessageId: body.assistantMessageId ?? body.newAssistantMessageId,
     });
   }
   unknownRequests.push(url.pathname);
   throw new Error(`Unexpected synthetic API path: ${url.pathname}`);
 }) as typeof fetch;
 
+const { useAuthStore } = await import("../stores/authStore");
+useAuthStore.setState({
+  user: { id: "fixture-user", email: "fixture@example.invalid", username: "Synthetic" },
+  ready: true,
+});
 const { useChatStore } = await import("../stores/chatStore");
 const { useScheduledTaskStore } = await import("../stores/scheduledTaskStore");
 const { useSidecarStore } = await import("../stores/sidecarStore");
@@ -171,7 +244,10 @@ useChatStore.setState({
   },
 });
 useScheduledTaskStore.setState({ tasks, runs });
-if (scenario === "project-workspace")
+if (
+  scenario === "project-workspace" ||
+  (scenario.startsWith("recipe-") && scenario !== "recipe-missing")
+)
   useProjectStore.setState({
     projects: [
       {
@@ -194,6 +270,15 @@ const allAgents = new Promise<void>((resolve) => {
   allStarted = resolve;
 });
 let agentCalls = 0;
+let cancellations = 0;
+let approvedLateTools = 0;
+const lateRunEvents = { current: null as (() => void) | null };
+let runTimeout: (() => void) | null = null;
+let releaseLateAck!: (id: string) => void;
+let lateAckReceived = false;
+const lateAck = new Promise<string>((resolve) => {
+  releaseLateAck = resolve;
+});
 const client = {
   setWorkspace: async (root: string) => {
     workspaceRequests.push(root);
@@ -205,6 +290,32 @@ const client = {
     const index = agentCalls++;
     agentRoots.push(input.workspaceRoot);
     if (agentCalls === count) allStarted();
+    if (scenario === "lease-loss") return `synthetic-run-${index}`;
+    if (scenario.endsWith("before-ack")) {
+      lateRunEvents.current = () => {
+        input.onEvent({
+          type: "execution_event",
+          taskId: "late-run",
+          runId: "late-run",
+          eventType: "text",
+          content: "LATE-ORPHAN-TEXT",
+        });
+        input.onApproval({
+          runId: "late-run",
+          toolUseId: "late-tool",
+          toolName: "Bash",
+          toolInput: {},
+        });
+        input.onDone?.("late-run");
+      };
+      queueMicrotask(() => {
+        if (scenario === "error-before-ack") input.onError?.("Synthetic start failure");
+        else runTimeout?.();
+      });
+      const id = await lateAck;
+      lateAckReceived = true;
+      return id;
+    }
     void allAgents.then(() => {
       input.onEvent({
         type: "execution_event",
@@ -222,8 +333,13 @@ const client = {
     });
     return `synthetic-run-${index}`;
   },
-  cancelRun: async () => {},
-  respondApproval: async () => {},
+  cancelRun: async () => {
+    cancellations++;
+    if (scenario === "lease-loss") finished();
+  },
+  respondApproval: async (_id: string, allowed: boolean) => {
+    if (allowed) approvedLateTools++;
+  },
 } as unknown as SidecarClient;
 useSidecarStore.setState({ status: "ready", client, workspaceRoot: currentRoot });
 if (scenario === "project-workspace" || scenario === "project-cold")
@@ -233,6 +349,16 @@ if (scenario === "project-workspace" || scenario === "project-cold")
   };
 // The public startup sweep is exercised; recurring wall-clock polling is not.
 globalThis.setInterval = (() => 0) as unknown as typeof setInterval;
+if (scenario === "timeout-before-ack") {
+  const realSetTimeout = globalThis.setTimeout;
+  globalThis.setTimeout = ((callback: () => void, delay?: number, ...args: unknown[]) => {
+    if (delay === 30 * 60_000) {
+      runTimeout = callback;
+      return realSetTimeout(() => {}, 10_000);
+    }
+    return realSetTimeout(callback, delay, ...args);
+  }) as typeof setTimeout;
+}
 const { startBackgroundTaskRunner } = await import("./backgroundTaskRunner");
 const timeout = setTimeout(() => {
   throw new Error("Synthetic runner did not settle");
@@ -250,6 +376,14 @@ if (scenario === "project-cold") {
   }
 }
 await completion;
+if (scenario.endsWith("before-ack")) {
+  releaseLateAck("late-run");
+  // Flush ACK handlers and runner cleanup before injecting late transport events.
+  for (let i = 0; i < 40; i++) await Promise.resolve();
+  lateRunEvents.current?.();
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+}
+if (scenario === "lease-loss") await new Promise((resolve) => setTimeout(resolve, 10));
 clearTimeout(timeout);
 await Promise.resolve();
 await writeFile(
@@ -259,10 +393,15 @@ await writeFile(
     completed,
     pairs,
     agentCalls,
+    cancellations,
+    approvedLateTools,
+    lateAckReceived,
     agentRoots,
     workspaceRequests,
     unknownRequests,
     projectLoads,
     callsBeforeProjects,
+    runStates: runs.map((run) => ({ id: run.id, status: run.status })),
+    messages: useChatStore.getState().messages,
   }),
 );

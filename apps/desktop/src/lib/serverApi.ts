@@ -361,6 +361,16 @@ async function requestWithBackendStatus(
   }
 }
 
+/**
+ * A plain `fetch` that reports server reachability like every `ServerApi` call:
+ * a response marks the server up, a network failure marks it down (and starts
+ * the automatic reconnect). Stores that build their own requests use this so an
+ * outage — or a recovery — is never invisible to the connection store.
+ */
+export function fetchWithBackendStatus(url: string, init?: RequestInit): Promise<Response> {
+  return requestWithBackendStatus(fetch, url, { credentials: "include", ...init });
+}
+
 async function fetchJson<T>(
   fetchImpl: FetchLike,
   baseUrl: string,

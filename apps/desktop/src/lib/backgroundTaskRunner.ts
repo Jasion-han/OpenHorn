@@ -1,3 +1,4 @@
+import { missingRecipeCapabilities, renderRecipePrompt, validateRecipeSpec } from "shared/recipes";
 import type { ModelContextMetadata, ScheduledTask, ScheduledTaskRun } from "shared/types";
 import { claimRunOwnership, createRunPersistGuard, isRunOwner } from "../hooks/sidecarRunOwnership";
 import { useChatStore } from "../stores/chatStore";
@@ -10,8 +11,10 @@ import { buildConversationHistory } from "./conversationHistory";
 import { getEffectiveModelForConversation } from "./effectiveModel";
 import { getChatLabel, getScheduledTaskLabel } from "./i18n/agent";
 import { notifyError, notifySuccess } from "./notify";
-import { createServerApi } from "./serverApi";
+import { createScheduledRunLease } from "./scheduledRunLease";
+import { createServerApi, fetchWithBackendStatus } from "./serverApi";
 import type { SidecarClient } from "./sidecarClient";
+import { sidecarPersistence } from "./sidecarPersistence";
 import {
   applySidecarEventToChat,
   type RunUsage,
@@ -46,9 +49,6 @@ const PICKUP_RETRIES = 5;
 const FALLBACK_POLL_MS = 60_000;
 // setTimeout caps at 2^31-1 ms; re-arm hourly rather than trusting long timers.
 const MAX_TIMER_MS = 3_600_000;
-// A pending run older than this was due while the app was closed; it is
-// recorded as missed rather than executed hours late.
-const MISSED_GRACE_MS = 15 * 60_000;
 // A due time this far in the past that still has no run means the server has
 // not fired yet (down, or its clock behind). Leave it to the fallback poll
 // rather than re-arming a timer that would fire immediately, over and over.
@@ -63,7 +63,15 @@ const RESULT_SUMMARY_CHARS = 300;
 let initialized = false;
 let dueTimer: ReturnType<typeof setTimeout> | null = null;
 let sweepInFlight: Promise<boolean> | null = null;
+const MAX_CONCURRENT_RUNS = 2;
 const handledRunIds = new Set<string>();
+const claimTokens = new Map<string, string>();
+type RunLease = {
+  ownerToken: string;
+  backendBase: string;
+  lease: ReturnType<typeof createScheduledRunLease>;
+};
+const runLeases = new Map<string, RunLease>();
 
 export function startBackgroundTaskRunner() {
   if (initialized) return;
@@ -74,32 +82,22 @@ export function startBackgroundTaskRunner() {
   useScheduledTaskStore.subscribe((state, prev) => {
     if (state.tasks !== prev.tasks) armDueTimer(state.tasks);
   });
+  // The task list itself is part of the unified server load (lib/serverState),
+  // which may already have finished by the time the sidecar platform resolves.
+  armDueTimer(useScheduledTaskStore.getState().tasks);
 
-  void (async () => {
-    await useScheduledTaskStore.getState().loadTasks();
-    await failInterruptedRuns();
-    await sweepPendingRuns();
-  })();
+  void sweepPendingRuns();
   setInterval(() => void sweepPendingRuns(), FALLBACK_POLL_MS);
 }
 
-/**
- * A fresh page means no run of this client can still be in flight: anything
- * left `running` was cut off by a reload or crash mid-turn (its sidecar run,
- * if any, has no listener any more). Record that instead of leaving the row
- * "running" indefinitely.
- */
-async function failInterruptedRuns() {
-  const store = useScheduledTaskStore.getState();
-  await store.loadRuns();
-  const interrupted = useScheduledTaskStore.getState().runs.filter((r) => r.status === "running");
-  for (const run of interrupted) {
-    await completeRun(run.id, {
-      status: "failed",
-      error: getScheduledTaskLabel("scheduledTask.run.interrupted"),
-    });
-  }
-  if (interrupted.length > 0) void useScheduledTaskStore.getState().loadRuns();
+/** Startup/reconnect and manual enqueue use the same pending-run queue. */
+export async function syncScheduledRunsAfterLoad(): Promise<void> {
+  if (!initialized) return;
+  await sweepPendingRuns();
+}
+
+export function wakeBackgroundTaskRunner(): void {
+  if (initialized) void sweepPendingRuns();
 }
 
 function armDueTimer(tasks: ScheduledTask[]) {
@@ -152,9 +150,20 @@ async function pickUpDueRuns() {
 function sweepPendingRuns(): Promise<boolean> {
   if (sweepInFlight) return sweepInFlight;
   sweepInFlight = (async () => {
-    await useScheduledTaskStore.getState().loadRuns();
+    let runs: ScheduledTaskRun[];
+    try {
+      const response = await fetchWithBackendStatus(
+        `${getDesktopBackendBase()}/scheduled-tasks/runs/pending`,
+      );
+      if (!response.ok) return false;
+      const data = (await response.json()) as { runs: ScheduledTaskRun[] };
+      runs = data.runs.map((run) => ({ ...run, startedAt: new Date(run.startedAt) }));
+    } catch {
+      return false;
+    }
     let picked = false;
-    for (const run of useScheduledTaskStore.getState().runs) {
+    for (const run of runs) {
+      if (handledRunIds.size >= MAX_CONCURRENT_RUNS) break;
       if (run.status !== "pending" || handledRunIds.has(run.id)) continue;
       handledRunIds.add(run.id);
       picked = true;
@@ -168,49 +177,53 @@ function sweepPendingRuns(): Promise<boolean> {
 }
 
 async function handlePendingRun(run: ScheduledTaskRun) {
-  if (Date.now() - run.startedAt.getTime() > MISSED_GRACE_MS) {
-    await completeRun(run.id, {
-      status: "failed",
-      error: getScheduledTaskLabel("scheduledTask.run.missed"),
-    });
-    void useScheduledTaskStore.getState().loadRuns();
-    return;
-  }
   const claim = await claimRun(run.id);
-  if (claim === "error") {
-    // Transient (server unreachable): let the next sweep try again.
+  if (claim !== "claimed") {
     handledRunIds.delete(run.id);
     return;
   }
-  if (claim === "taken") return;
+  try {
+    let task = useScheduledTaskStore.getState().tasks.find((t) => t.id === run.taskId);
+    if (!task) {
+      await useScheduledTaskStore.getState().loadTasks();
+      task = useScheduledTaskStore.getState().tasks.find((t) => t.id === run.taskId);
+    }
+    if (!task) {
+      await completeRun(run.id, {
+        status: "failed",
+        error: getScheduledTaskLabel("scheduledTask.run.startFailed"),
+      });
+      void useScheduledTaskStore.getState().loadRuns();
+      return;
+    }
 
-  let task = useScheduledTaskStore.getState().tasks.find((t) => t.id === run.taskId);
-  if (!task) {
-    await useScheduledTaskStore.getState().loadTasks();
-    task = useScheduledTaskStore.getState().tasks.find((t) => t.id === run.taskId);
-  }
-  if (!task) {
+    await executeRun(run, task);
+  } catch (error) {
     await completeRun(run.id, {
       status: "failed",
-      error: getScheduledTaskLabel("scheduledTask.run.startFailed"),
+      error:
+        error instanceof Error
+          ? error.message
+          : getScheduledTaskLabel("scheduledTask.run.startFailed"),
     });
-    void useScheduledTaskStore.getState().loadRuns();
-    return;
-  }
-
-  try {
-    await executeRun(run, task);
   } finally {
+    runLeases.get(run.id)?.lease.stop();
+    runLeases.delete(run.id);
+    claimTokens.delete(run.id);
+    handledRunIds.delete(run.id);
     const scheduled = useScheduledTaskStore.getState();
     void scheduled.loadRuns();
     void scheduled.loadTasks();
     // The task's conversation now has content and a fresh updatedAt; the
     // sidebar reads both from the conversation list.
     void useChatStore.getState().loadConversations();
+    queueMicrotask(() => void sweepPendingRuns());
   }
 }
 
 async function executeRun(run: ScheduledTaskRun, task: ScheduledTask) {
+  const executionLease = runLeases.get(run.id);
+  if (!executionLease || !executionLease.lease.isLive()) return;
   const conversationId = run.conversationId;
   const failEarly = async (error: string) => {
     await completeRun(run.id, { status: "failed", error });
@@ -245,6 +258,50 @@ async function executeRun(run: ScheduledTaskRun, task: ScheduledTask) {
   if (!conversation) {
     await failEarly(getScheduledTaskLabel("scheduledTask.run.conversationMissing"));
     return;
+  }
+  let recipeSpec: ReturnType<typeof validateRecipeSpec> | undefined;
+  if (task.recipeSnapshot) {
+    try {
+      const response = await fetchWithBackendStatus(
+        `${executionLease.backendBase}/conversations/${conversationId}`,
+      );
+      if (!response.ok) throw new Error("Recipe conversation unavailable");
+      const { conversation: fresh } = (await response.json()) as {
+        conversation: {
+          id: string;
+          projectId?: string | null;
+          channelId?: string | null;
+          modelId?: string | null;
+          forceWebSearch?: boolean | null;
+        };
+      };
+      if (!fresh || fresh.id !== conversationId) throw new Error("Recipe conversation unavailable");
+      conversation = {
+        ...conversation,
+        projectId: fresh.projectId,
+        channelId: fresh.channelId ?? undefined,
+        modelId: fresh.modelId ?? undefined,
+        forceWebSearch: fresh.forceWebSearch ?? conversation.forceWebSearch ?? true,
+      };
+      recipeSpec = validateRecipeSpec(task.recipeSnapshot.spec);
+      const rendered = renderRecipePrompt(recipeSpec, task.recipeSnapshot.values);
+      if (
+        rendered.prompt !== task.prompt ||
+        task.recipeSnapshot.renderedPrompt !== task.prompt ||
+        (recipeSpec.projectId ?? null) !== (task.projectId ?? null) ||
+        (conversation.projectId ?? null) !== (task.projectId ?? null) ||
+        (recipeSpec.channelId ?? null) !== (task.channelId ?? null) ||
+        (recipeSpec.modelId ?? null) !== (task.modelId ?? null) ||
+        (recipeSpec.channelId &&
+          (conversation.channelId !== recipeSpec.channelId ||
+            conversation.modelId !== recipeSpec.modelId)) ||
+        (recipeSpec.requirements.workspace && !task.projectId)
+      )
+        throw new Error("Invalid recipe snapshot binding");
+    } catch {
+      await failEarly(getScheduledTaskLabel("scheduledTask.run.recipeSnapshotInvalid"));
+      return;
+    }
   }
   const effectiveModel = getEffectiveModelForConversation(
     useChatStore.getState().channels,
@@ -284,7 +341,8 @@ async function executeRun(run: ScheduledTaskRun, task: ScheduledTask) {
   useChatStore.getState().seedConversationMessages(conversationId, drafts);
   useChatStore.getState().markMessagesActive([userMessageId, assistantMessageId]);
   const ownerToken = claimRunOwnership([assistantMessageId]);
-  const ownsMessage = () => isRunOwner(assistantMessageId, ownerToken);
+  const ownsMessage = () =>
+    executionLease.lease.isLive() && isRunOwner(assistantMessageId, ownerToken);
   const shouldPersist = createRunPersistGuard(assistantMessageId, ownerToken);
 
   let runUsage: RunUsage | null = null;
@@ -292,31 +350,40 @@ async function executeRun(run: ScheduledTaskRun, task: ScheduledTask) {
   // One-shot persistence through the same endpoint a typed turn uses, followed
   // by the same draft → server id reconciliation; a failed run keeps the user's
   // message and its failure state in the DB just like the composer path.
-  const persistOnce = async (assistantContent: string, agentRun: unknown, model: string) => {
-    if (!shouldPersist()) return;
+  const persistOnce = async (
+    assistantContent: string,
+    agentRun: unknown,
+    model: string,
+  ): Promise<boolean> => {
+    if (!(await executionLease.lease.renew()) || !shouldPersist()) return false;
     let stampId = assistantMessageId;
+    let savedUserId: string | undefined;
     try {
-      const res = await api.messages.syncSidecar({
-        conversationId,
-        userContent: task.prompt,
-        assistantContent,
-        model,
-        agentRun: agentRun ?? undefined,
-        usage: runUsage ?? undefined,
-      });
-      if (res?.userMessageId && res?.assistantMessageId) {
-        useChatStore.getState().reconcileSidecarMessageIds({
+      const save = sidecarPersistence.save(
+        assistantMessageId,
+        {
           conversationId,
-          assistantDraftId: assistantMessageId,
-          userMessageId: res.userMessageId,
-          assistantMessageId: res.assistantMessageId,
-        });
-        stampId = res.assistantMessageId;
-      }
-    } catch {
-      // Best-effort: a persistence failure must not affect the UI.
+          userContent: task.prompt,
+          assistantContent,
+          model,
+          agentRun: agentRun ?? undefined,
+          usage: runUsage ?? undefined,
+        },
+        ownsMessage,
+      );
+      if (!save) return false;
+      stampId = save.assistantMessageId;
+      savedUserId = save.userMessageId;
+      return (await save.completion) === true;
     } finally {
-      useChatStore.getState().unmarkMessagesActive([userMessageId, assistantMessageId]);
+      useChatStore
+        .getState()
+        .unmarkMessagesActive([
+          userMessageId,
+          assistantMessageId,
+          stampId,
+          ...(savedUserId ? [savedUserId] : []),
+        ]);
       useChatStore.getState().updateMessage(stampId, {
         updatedAt: new Date(),
         ...(runUsage ? { usage: runUsage } : {}),
@@ -325,7 +392,7 @@ async function executeRun(run: ScheduledTaskRun, task: ScheduledTask) {
   };
 
   const failRun = async (message: string, model: string) => {
-    if (!ownsMessage()) return;
+    if (!isRunOwner(assistantMessageId, ownerToken)) return;
     useChatStore.getState().applyStreamEvent(assistantMessageId, { type: "error", message });
     const msg = useChatStore.getState().findMessageAnywhere(assistantMessageId);
     await persistOnce(
@@ -337,172 +404,250 @@ async function executeRun(run: ScheduledTaskRun, task: ScheduledTask) {
     notifyOutcome(task, { ok: false, error: message });
   };
 
-  let credentials: {
-    apiKey: string;
-    baseUrl: string | null;
-    modelId: string;
-    contextWindow?: number | null;
-    contextMetadata?: ModelContextMetadata | null;
-    protocol: "openai" | "anthropic" | "google" | "acp";
-  };
+  let resolvedModel = modelId;
   try {
-    credentials = (await api.channels.getCredentials(channelId, modelId)).credentials;
+    let credentials: {
+      apiKey: string;
+      baseUrl: string | null;
+      modelId: string;
+      contextWindow?: number | null;
+      contextMetadata?: ModelContextMetadata | null;
+      protocol: "openai" | "anthropic" | "google" | "acp";
+    };
+    try {
+      credentials = (await api.channels.getCredentials(channelId, modelId)).credentials;
+    } catch (error) {
+      await failRun(
+        error instanceof Error
+          ? error.message
+          : getScheduledTaskLabel("scheduledTask.run.credentialsFailed"),
+        modelId,
+      );
+      return;
+    }
+    const model = modelId || credentials.modelId;
+    resolvedModel = model;
+
+    if (
+      credentials.protocol !== "anthropic" &&
+      credentials.protocol !== "openai" &&
+      credentials.protocol !== "acp"
+    ) {
+      await failRun(
+        `${getScheduledTaskLabel("scheduledTask.run.unsupportedProtocol")}：${credentials.protocol}`,
+        model,
+      );
+      return;
+    }
+
+    // ACP channels carry the local agent launch config JSON-encoded in the apiKey
+    // slot, same as the composer path.
+    let acpAgent: { command: string; args?: string[]; env?: Record<string, string> } | undefined;
+    if (credentials.protocol === "acp") {
+      try {
+        const parsed = JSON.parse(credentials.apiKey) as {
+          command?: string;
+          args?: string[];
+          env?: Record<string, string>;
+        };
+        if (!parsed.command || typeof parsed.command !== "string")
+          throw new Error("missing command");
+        acpAgent = { command: parsed.command, args: parsed.args, env: parsed.env };
+      } catch {
+        await failRun(getScheduledTaskLabel("scheduledTask.run.startFailed"), model);
+        return;
+      }
+    }
+
+    // MCP/skills/settings are additive. Workspace resolution is mandatory and
+    // belongs to this run, independently of another turn's later workspace RPC.
+    let mcpServers: Record<string, Record<string, unknown>> | undefined;
+    try {
+      mcpServers = await resolveEnabledMcpServers(api);
+    } catch {
+      mcpServers = undefined;
+    }
+    let projectRoot = resolveProjectRootForConversation(conversation);
+    if (conversation.projectId && !projectRoot) {
+      // Startup can claim due tasks before the sidebar's project load finishes.
+      await useProjectStore
+        .getState()
+        .loadProjects()
+        .catch(() => {});
+      projectRoot = resolveProjectRootForConversation(conversation);
+    }
+    if (conversation.projectId && !projectRoot) {
+      await failRun(getChatLabel("chat.run.workspaceUnavailable"), model);
+      return;
+    }
+    let preparedWorkspaceRoot: string | null = null;
+    try {
+      preparedWorkspaceRoot = await useSidecarStore.getState().ensureWorkspace(projectRoot);
+    } catch {
+      // A failed preparation cannot reuse a previous turn's workspace.
+    }
+    if (!preparedWorkspaceRoot) {
+      await failRun(getChatLabel("chat.run.workspaceUnavailable"), model);
+      return;
+    }
+    const workspaceRoot = preparedWorkspaceRoot;
+    let skills: Awaited<ReturnType<typeof resolveEnabledSkills>> | undefined;
+    if (credentials.protocol === "anthropic" || credentials.protocol === "openai") {
+      try {
+        const resolved = await resolveEnabledSkills({
+          prompt: task.prompt,
+          required: recipeSpec?.requirements.skills,
+        });
+        if (resolved.length > 0) skills = resolved;
+      } catch {
+        skills = undefined;
+      }
+    }
+    const conversationHistory = await loadConversationHistory(conversationId);
+    const { systemPrompt, tavilyApiKey } = await resolveRunSettings(api, forceWebSearch);
+    if (recipeSpec) {
+      const spec = recipeSpec;
+      const localExtensions =
+        credentials.protocol === "anthropic" || credentials.protocol === "openai";
+      const missing = missingRecipeCapabilities(spec.requirements, {
+        skills: localExtensions ? (skills ?? []).map((skill) => skill.name) : [],
+        mcpServers: localExtensions ? Object.keys(mcpServers ?? {}) : [],
+        workspace: !!workspaceRoot && (!spec.requirements.workspace || !!conversation.projectId),
+        webSearch: localExtensions && forceWebSearch,
+      });
+      if (missing.length > 0) {
+        await failRun(
+          `${getScheduledTaskLabel("scheduledTask.run.requirementsMissing")}${missing.join(", ")}`,
+          model,
+        );
+        return;
+      }
+    }
+    if (!executionLease.lease.isLive()) return;
+
+    const outcome = await new Promise<{ ok: true } | { ok: false; error: string }>((resolve) => {
+      let sidecarRunId: string | null = null;
+      let settled = false;
+      let cancellationRequested = false;
+      const cancel = () => {
+        cancellationRequested = true;
+        if (sidecarRunId) void client.cancelRun(sidecarRunId).catch(() => {});
+      };
+      const settle = (result: { ok: true } | { ok: false; error: string }) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        executionLease.lease.signal.removeEventListener("abort", onLeaseLost);
+        resolve(result);
+      };
+      const onLeaseLost = () => {
+        cancel();
+        settle({ ok: false, error: getScheduledTaskLabel("scheduledTask.run.leaseLost") });
+      };
+      executionLease.lease.signal.addEventListener("abort", onLeaseLost, { once: true });
+      const timeout = setTimeout(() => {
+        cancel();
+        settle({ ok: false, error: getScheduledTaskLabel("scheduledTask.run.timeout") });
+      }, RUN_TIMEOUT_MS);
+      client
+        .runAgent({
+          prompt: task.prompt,
+          workspaceRoot,
+          apiKey: credentials.protocol === "acp" ? "" : credentials.apiKey,
+          model,
+          contextWindow: credentials.contextWindow,
+          contextMetadata: credentials.contextMetadata,
+          baseUrl: credentials.baseUrl ?? undefined,
+          protocol: credentials.protocol,
+          acpAgent,
+          // Unattended: nobody is there to answer an approval prompt, so the run
+          // gets the full-access mode a user would toggle for a hands-off task.
+          permissionMode: "full-access",
+          systemPrompt,
+          webSearchEnabled: conversation.forceWebSearch,
+          tavilyApiKey,
+          mcpServers,
+          skills,
+          conversationHistory: conversationHistory.length > 0 ? conversationHistory : undefined,
+          onEvent: (event) => {
+            if (settled || !ownsMessage()) return;
+            const result = applySidecarEventToChat(assistantMessageId, event);
+            if (result.kind === "usage") runUsage = result.usage;
+            if (result.kind === "done") settle({ ok: true });
+          },
+          onApproval: (request) => {
+            void client
+              .respondApproval(request.toolUseId, !settled && ownsMessage())
+              .catch(() => {});
+          },
+          onError: (message) => {
+            if (settled) return;
+            cancel();
+            settle({ ok: false, error: message });
+          },
+          onDone: () => {
+            if (settled || !ownsMessage()) return;
+            // Some transports deliver completion before their projected done event.
+            useChatStore.getState().applyStreamEvent(assistantMessageId, {
+              type: "done",
+              messageId: assistantMessageId,
+            });
+            settle({ ok: true });
+          },
+        })
+        .then((runId) => {
+          sidecarRunId = runId;
+          if (cancellationRequested || !executionLease.lease.isLive())
+            void client.cancelRun(runId).catch(() => {});
+        })
+        .catch((error: unknown) => {
+          settle({
+            ok: false,
+            error:
+              error instanceof Error
+                ? error.message
+                : getScheduledTaskLabel("scheduledTask.run.startFailed"),
+          });
+        });
+    });
+
+    if (!outcome.ok) {
+      await failRun(outcome.error, model);
+      return;
+    }
+    const assistantMsg = useChatStore.getState().findMessageAnywhere(assistantMessageId);
+    const assistantContent = assistantMsg?.content || "";
+    const saved = await persistOnce(assistantContent, assistantMsg?.agentRun ?? undefined, model);
+    if (!saved) {
+      const error = getScheduledTaskLabel("scheduledTask.run.saveFailed");
+      await completeRun(run.id, { status: "failed", error });
+      notifyOutcome(task, { ok: false, error });
+      return;
+    }
+    const completed = await completeRun(run.id, {
+      status: "completed",
+      result: summarize(assistantContent) || getScheduledTaskLabel("scheduledTask.run.noOutput"),
+    });
+    if (completed) notifyOutcome(task, { ok: true });
   } catch (error) {
     await failRun(
       error instanceof Error
         ? error.message
-        : getScheduledTaskLabel("scheduledTask.run.credentialsFailed"),
-      modelId,
+        : getScheduledTaskLabel("scheduledTask.run.startFailed"),
+      resolvedModel,
     );
-    return;
-  }
-  const model = modelId || credentials.modelId;
-
-  if (
-    credentials.protocol !== "anthropic" &&
-    credentials.protocol !== "openai" &&
-    credentials.protocol !== "acp"
-  ) {
-    await failRun(
-      `${getScheduledTaskLabel("scheduledTask.run.unsupportedProtocol")}：${credentials.protocol}`,
-      model,
-    );
-    return;
-  }
-
-  // ACP channels carry the local agent launch config JSON-encoded in the apiKey
-  // slot, same as the composer path.
-  let acpAgent: { command: string; args?: string[]; env?: Record<string, string> } | undefined;
-  if (credentials.protocol === "acp") {
-    try {
-      const parsed = JSON.parse(credentials.apiKey) as {
-        command?: string;
-        args?: string[];
-        env?: Record<string, string>;
-      };
-      if (!parsed.command || typeof parsed.command !== "string") throw new Error("missing command");
-      acpAgent = { command: parsed.command, args: parsed.args, env: parsed.env };
-    } catch {
-      await failRun(getScheduledTaskLabel("scheduledTask.run.startFailed"), model);
-      return;
-    }
-  }
-
-  // MCP/skills/settings are additive. Workspace resolution is mandatory and
-  // belongs to this run, independently of another turn's later workspace RPC.
-  let mcpServers: Record<string, Record<string, unknown>> | undefined;
-  try {
-    mcpServers = await resolveEnabledMcpServers(api);
-  } catch {
-    mcpServers = undefined;
-  }
-  let projectRoot = resolveProjectRootForConversation(conversation);
-  if (conversation.projectId && !projectRoot) {
-    // Startup can claim due tasks before the sidebar's project load finishes.
-    await useProjectStore
-      .getState()
-      .loadProjects()
-      .catch(() => {});
-    projectRoot = resolveProjectRootForConversation(conversation);
-  }
-  if (conversation.projectId && !projectRoot) {
-    await failRun(getChatLabel("chat.run.workspaceUnavailable"), model);
-    return;
-  }
-  let preparedWorkspaceRoot: string | null = null;
-  try {
-    preparedWorkspaceRoot = await useSidecarStore.getState().ensureWorkspace(projectRoot);
-  } catch {
-    // A failed preparation cannot reuse a previous turn's workspace.
-  }
-  if (!preparedWorkspaceRoot) {
-    await failRun(getChatLabel("chat.run.workspaceUnavailable"), model);
-    return;
-  }
-  const workspaceRoot = preparedWorkspaceRoot;
-  let skills: Awaited<ReturnType<typeof resolveEnabledSkills>> | undefined;
-  if (credentials.protocol === "anthropic" || credentials.protocol === "openai") {
-    try {
-      const resolved = await resolveEnabledSkills();
-      if (resolved.length > 0) skills = resolved;
-    } catch {
-      skills = undefined;
-    }
-  }
-  const conversationHistory = await loadConversationHistory(conversationId);
-  const { systemPrompt, tavilyApiKey } = await resolveRunSettings(api, forceWebSearch);
-
-  const outcome = await new Promise<{ ok: true } | { ok: false; error: string }>((resolve) => {
-    let sidecarRunId: string | null = null;
-    let settled = false;
-    const settle = (result: { ok: true } | { ok: false; error: string }) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeout);
-      resolve(result);
-    };
-    const timeout = setTimeout(() => {
-      if (sidecarRunId) void client.cancelRun(sidecarRunId).catch(() => {});
-      settle({ ok: false, error: getScheduledTaskLabel("scheduledTask.run.timeout") });
-    }, RUN_TIMEOUT_MS);
-    client
-      .runAgent({
-        prompt: task.prompt,
-        workspaceRoot,
-        apiKey: credentials.protocol === "acp" ? "" : credentials.apiKey,
-        model,
-        contextWindow: credentials.contextWindow,
-        contextMetadata: credentials.contextMetadata,
-        baseUrl: credentials.baseUrl ?? undefined,
-        protocol: credentials.protocol,
-        acpAgent,
-        // Unattended: nobody is there to answer an approval prompt, so the run
-        // gets the full-access mode a user would toggle for a hands-off task.
-        permissionMode: "full-access",
-        systemPrompt,
-        webSearchEnabled: conversation.forceWebSearch,
-        tavilyApiKey,
-        mcpServers,
-        skills,
-        conversationHistory: conversationHistory.length > 0 ? conversationHistory : undefined,
-        onEvent: (event) => {
-          if (!ownsMessage()) return;
-          const result = applySidecarEventToChat(assistantMessageId, event);
-          if (result.kind === "usage") runUsage = result.usage;
-          if (result.kind === "done") settle({ ok: true });
-        },
-        onApproval: (request) => {
-          void client.respondApproval(request.toolUseId, true).catch(() => {});
-        },
-        onError: (message) => settle({ ok: false, error: message }),
-        onDone: () => settle({ ok: true }),
-      })
-      .then((runId) => {
-        sidecarRunId = runId;
-      })
-      .catch((error: unknown) => {
-        settle({
-          ok: false,
-          error:
-            error instanceof Error
-              ? error.message
-              : getScheduledTaskLabel("scheduledTask.run.startFailed"),
+  } finally {
+    useChatStore.getState().unmarkMessagesActive([userMessageId, assistantMessageId]);
+    if (!executionLease.lease.isLive() && isRunOwner(assistantMessageId, ownerToken)) {
+      const message = useChatStore.getState().findMessageAnywhere(assistantMessageId);
+      if (message?.agentRun?.status === "partial") {
+        useChatStore.getState().applyStreamEvent(assistantMessageId, {
+          type: "error",
+          message: getScheduledTaskLabel("scheduledTask.run.leaseLost"),
         });
-      });
-  });
-
-  if (!outcome.ok) {
-    await failRun(outcome.error, model);
-    return;
+      }
+    }
   }
-  const assistantMsg = useChatStore.getState().findMessageAnywhere(assistantMessageId);
-  const assistantContent = assistantMsg?.content || "";
-  await persistOnce(assistantContent, assistantMsg?.agentRun ?? undefined, model);
-  await completeRun(run.id, {
-    status: "completed",
-    result: summarize(assistantContent) || getScheduledTaskLabel("scheduledTask.run.noOutput"),
-  });
-  notifyOutcome(task, { ok: true });
 }
 
 async function loadConversationHistory(
@@ -553,16 +698,50 @@ function summarize(text: string): string {
   return `${collapsed.slice(0, RESULT_SUMMARY_CHARS)}…`;
 }
 
-/** "taken" = another client (or an earlier attempt) already owns this run. */
+/** Stable token retries a lost claim ACK without starting a second execution. */
 async function claimRun(runId: string): Promise<"claimed" | "taken" | "error"> {
+  const ownerToken = claimTokens.get(runId) ?? crypto.randomUUID();
+  claimTokens.set(runId, ownerToken);
+  const backendBase = getDesktopBackendBase();
+  const acquiredAt = performance.now();
   try {
-    const res = await fetch(`${getDesktopBackendBase()}/scheduled-tasks/runs/${runId}/claim`, {
+    const res = await fetchWithBackendStatus(`${backendBase}/scheduled-tasks/runs/${runId}/claim`, {
       method: "PATCH",
-      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ownerToken }),
     });
     if (!res.ok) return "error";
-    const data = (await res.json()) as { claimed?: boolean };
-    return data.claimed === true ? "claimed" : "taken";
+    const data = (await res.json()) as { claimed?: boolean; leaseDurationMs: number };
+    if (!data.claimed) {
+      claimTokens.delete(runId);
+      return "taken";
+    }
+    const lease = createScheduledRunLease({
+      acquiredAt,
+      durationMs: data.leaseDurationMs,
+      heartbeat: async () => {
+        const response = await fetchWithBackendStatus(
+          `${backendBase}/scheduled-tasks/runs/${runId}/heartbeat`,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ownerToken }),
+          },
+        );
+        if (response.status === 409 || response.status === 404 || response.status === 400)
+          return null;
+        if (!response.ok) throw new Error("Task heartbeat unavailable");
+        const result = (await response.json()) as { renewed: boolean; leaseDurationMs: number };
+        return result.renewed ? result.leaseDurationMs : null;
+      },
+    });
+    if (!lease.isLive()) {
+      lease.stop();
+      claimTokens.delete(runId);
+      return "taken";
+    }
+    runLeases.set(runId, { ownerToken, backendBase, lease });
+    return "claimed";
   } catch {
     return "error";
   }
@@ -571,17 +750,24 @@ async function claimRun(runId: string): Promise<"claimed" | "taken" | "error"> {
 async function completeRun(
   runId: string,
   body: { status: "completed" | "failed"; result?: string; error?: string },
-) {
+): Promise<boolean> {
+  const execution = runLeases.get(runId);
+  if (!execution || !(await execution.lease.renew())) return false;
   try {
-    await fetch(`${getDesktopBackendBase()}/scheduled-tasks/runs/${runId}/complete`, {
-      method: "PATCH",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
+    const response = await fetchWithBackendStatus(
+      `${execution.backendBase}/scheduled-tasks/runs/${runId}/complete`,
+      {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...body, ownerToken: execution.ownerToken }),
+      },
+    );
+    return response.ok;
   } catch {
-    // Best-effort: the run stays "running" in the list; the turn itself is
-    // already persisted in the conversation.
+    // An unreachable server cannot be called completed. The lease expires and
+    // the server reports interruption instead of preserving running forever.
+    return false;
   }
 }
 
