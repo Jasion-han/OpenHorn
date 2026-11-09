@@ -1,0 +1,12 @@
+[33mThe CJS build of Vite's Node API is deprecated. See https://vite.dev/guide/troubleshooting.html#vite-cjs-node-api-deprecated for more details.[39m
+Browserslist: browsers data (caniuse-lite) is 9 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+PASS Jev settings show configuration and daily budget with feature switches collapsed
+PASS failed preference writes preserve the old toggle; disabling reviews disables quick classification
+PASS one explicit quick action calls the typed provider once, persists results/provenance and creates no fake chat
+PASS existing note verification uses OpenRouter, preserves request provenance and reuses saved checks without re-billing
+PASS exhausted budget preserves manual annotations and records a failed batch without contacting the model
+PASS late classification persists independently without navigating back into a closed review page
+PASS shadow routing records a disagreement while the actual route remains unchanged
+Evidence: /tmp/openhorn-ship-ovv_tjfr/jev-browser

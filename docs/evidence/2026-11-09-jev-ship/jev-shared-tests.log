@@ -1,0 +1,95 @@
+bun test v1.3.10 (30e609e0)
+
+src/decisions.test.ts:
+(pass) decision payloads keep ratings/secrets out and use the actual Score array protocol [2.23ms]
+(pass) typed decision validation rejects missing options, wrong versions and invented choices [1.39ms]
+
+src/child-env.test.ts:
+(pass) Jev service credentials never reach spawned tools or agent children [0.10ms]
+
+src/message-text.test.ts:
+(pass) agentRunReplyText > joins text steps and skips reasoning / thinking / tool steps [0.14ms]
+(pass) agentRunReplyText > parses agentRun stored as a JSON string [0.70ms]
+(pass) agentRunReplyText > returns empty string for missing / malformed agentRun [0.08ms]
+(pass) assistantMessageContent > text steps override whatever content the caller passed [0.07ms]
+(pass) assistantMessageContent > whitespace-only text steps still own the content [0.08ms]
+(pass) assistantMessageContent > a run without text steps stores empty content, never the given text [0.17ms]
+(pass) assistantMessageContent > messages without an agent run keep their content [0.03ms]
+(pass) assistantFinishReason > safe Chat failure reasons never become Agent termination state
+(pass) assistantFinishReason > keeps an explicit stop
+(pass) assistantFinishReason > keeps explicit Chat truncation without applying it to Agent runs [0.04ms]
+(pass) assistantFinishReason > a cancelled agent run is a stopped reply, parsed or stored as JSON [0.03ms]
+(pass) assistantFinishReason > anything else is null — a finished reply clears an earlier stop [0.02ms]
+
+src/recipes.test.ts:
+(pass) recipe rendering treats values as literal data and validates named numeric inputs [5.06ms]
+(pass) invalid placeholders and prototype keys are rejected rather than evaluated [0.14ms]
+(pass) capability checks use configured names, preserve missing details and do not claim connection health [0.14ms]
+
+src/review-note.test.ts:
+(pass) new requests ask for facts and their support while explicit v1 requests remain reproducible [2.30ms]
+(pass) no factual claims and uncertain existence do not become false warnings or verified content [0.06ms]
+(pass) v1 checks remain readable and v2 requires both probabilities and the derived verdict [0.24ms]
+(pass) cached request model reconstructs the actual provider alias [0.06ms]
+
+src/reviews.test.ts:
+(pass) CSV preserves quoted newlines, BOM, duplicate comments and source row identities [4.27ms]
+(pass) malformed and excessive CSV never silently drops or truncates data [4.16ms]
+(pass) model results require the exact batch identity, complete unique rows and verbatim evidence [0.45ms]
+(pass) batch import is atomic and skips annotations changed since the input snapshot [0.56ms]
+(pass) CSV export escapes text and neutralizes spreadsheet formula cells
+(pass) batch budget includes rating cells and escaped JSON, not just comment text [0.61ms]
+(pass) note verification metadata survives a validated round trip and is invalidated by new analysis [0.29ms]
+
+src/context-policy.test.ts:
+(pass) reported limits work for other providers and exact namespaced channel model IDs [0.28ms]
+(pass) manual settings cannot bypass reported input/output limits and blank restores discovery [0.04ms]
+(pass) current reports supersede old built-in context while keeping independent input ceilings [0.20ms]
+(pass) cached catalog/runtime provenance survives without assuming every alias has 1M [0.02ms]
+(pass) malformed remote metadata cannot create an unbounded budget [0.07ms]
+(pass) verified model windows respect distinct input ceilings and output reserves [0.03ms]
+(pass) only verified exact IDs gain an automatic large window [0.10ms]
+(pass) channel overrides can describe aliases or lower gateway ceilings [0.03ms]
+(pass) malformed capacities cannot disable budgeting [0.05ms]
+(pass) large policy retains a request above 32K and histories above 200 messages [1.42ms]
+(pass) CJK and emoji estimates no longer use the ASCII compression ratio [0.39ms]
+
+src/context-budget.test.ts:
+(pass) a current request is never silently removed to satisfy the budget [0.65ms]
+(pass) all system sections consume budget and keep their full contents [0.20ms]
+(pass) an oversized historical answer is omitted with its question, leaving the current request [0.28ms]
+(pass) history keeps complete question-answer groups in order and includes notice cost [0.06ms]
+(pass) the message cap preserves every system section and the current request [0.24ms]
+(pass) expanded multipart text and images consume the same final budget [0.19ms]
+(pass) full fitting histories need no omission reserve and remain unchanged [0.03ms]
+(pass) if even an omission notice cannot fit, reject instead of silently hiding history [0.04ms]
+
+src/vision/vision.test.ts:
+(pass) modelSupportsVision > recognizes known vision-capable models (case-insensitive) [0.14ms]
+(pass) modelSupportsVision > returns false for clearly non-vision models [0.04ms]
+(pass) modelSupportsVision > conservatively returns false for unknown / empty ids [0.03ms]
+(pass) modelSupportsVision > non-vision markers take precedence over vision markers
+
+src/search/curatedSources.test.ts:
+(pass) trustScore matches exact curated hosts [0.46ms]
+(pass) trustScore merges www/m subdomains and TLD variants to the main domain
+(pass) trustScore returns the 0.3 baseline for unknown or malformed urls [0.26ms]
+(pass) domainsForCategory caps at the requested max
+(pass) domainsForCategory can filter by language [0.42ms]
+(pass) classifyCategory routes clear queries to their category [0.13ms]
+(pass) classifyCategory returns null for ambiguous queries
+
+src/search/duckduckgoProvider.test.ts:
+(pass) parseDuckDuckGoLiteHtml extracts titles, urls and snippets [0.70ms]
+(pass) parseDuckDuckGoLiteHtml decodes uddg redirect links
+(pass) parseDuckDuckGoLiteHtml respects maxResults
+(pass) searchDuckDuckGo returns parsed citations from the lite endpoint [0.93ms]
+(pass) searchDuckDuckGo retries on 202 soft rate-limit then succeeds [0.28ms]
+(pass) searchDuckDuckGo returns empty array when soft-limited past retry budget [0.09ms]
+(pass) searchDuckDuckGo caches results within the TTL window [0.07ms]
+(pass) searchDuckDuckGo returns empty array on network error [0.10ms]
+
+ 67 pass
+ 0 fail
+ 326 expect() calls
+Ran 67 tests across 11 files. [153.00ms]

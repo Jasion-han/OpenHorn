@@ -1,0 +1,37 @@
+
+> openhorn@ typecheck /private/tmp/openhorn-ship-ovv_tjfr/jev-verify
+> turbo typecheck
+
+• turbo 2.8.14
+• Packages in scope: adapters, db, desktop, server, shared, sidecar, ui
+• Running typecheck in 7 packages
+• Remote caching disabled, using shared worktree cache
+ui:typecheck: cache hit, replaying logs d743133c6c93c1c6
+adapters:typecheck: cache hit, replaying logs b841b1bed3add72c
+ui:typecheck:
+ui:typecheck: > ui@1.0.0 typecheck /Users/han/Project/OpenHorn/packages/ui
+ui:typecheck: > tsc --noEmit
+ui:typecheck:
+adapters:typecheck:
+adapters:typecheck: > adapters@1.0.0 typecheck /Users/han/Project/OpenHorn/packages/adapters
+adapters:typecheck: > tsc --noEmit
+adapters:typecheck:
+desktop:typecheck: cache miss, executing 642ef62ff1e3b191
+server:typecheck: cache miss, executing 77a8d4422c13e4f6
+sidecar:typecheck: cache hit, replaying logs 4681f36b28d0b8d6
+sidecar:typecheck:
+sidecar:typecheck: > sidecar@1.0.0 typecheck /private/var/folders/2b/0vr77k3j1yv2m83zxdkpx48c0000gn/T/openhorn-ship-46n4nw7z/candidate/apps/sidecar
+sidecar:typecheck: > tsc --noEmit
+sidecar:typecheck:
+desktop:typecheck:
+desktop:typecheck: > desktop@1.0.0 typecheck /private/tmp/openhorn-ship-ovv_tjfr/jev-verify/apps/desktop
+desktop:typecheck: > tsc --noEmit
+desktop:typecheck:
+server:typecheck:
+server:typecheck: > server@1.0.0 typecheck /private/tmp/openhorn-ship-ovv_tjfr/jev-verify/apps/server
+server:typecheck: > tsc -p tsconfig.json --noEmit
+server:typecheck:
+
+ Tasks:    5 successful, 5 total
+Cached:    3 cached, 5 total
+  Time:    8.463s

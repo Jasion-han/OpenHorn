@@ -1,0 +1,22 @@
+{
+  "enabled": true,
+  "features": {
+    "reviews": true,
+    "suggestions": true,
+    "rerank": true,
+    "skills": true,
+    "routeShadow": true
+  },
+  "configured": true,
+  "model": "typesafe/jev-1.14",
+  "day": "2026-11-09",
+  "dailyLimitUsd": 0.05,
+  "spentUsd": 2.8812e-5,
+  "reservedUsd": 0,
+  "requests": 1,
+  "shadow": {
+    "compared": 0,
+    "disagreements": 0,
+    "unavailable": 0
+  }
+}

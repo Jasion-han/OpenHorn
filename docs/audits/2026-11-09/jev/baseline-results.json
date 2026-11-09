@@ -1,0 +1,313 @@
+{
+  "routing": [
+    {
+      "id": "route-01",
+      "split": "exploratory",
+      "prompt": "这段 SQL 用什么索引能减少查询时间？",
+      "expected": "direct_model",
+      "server": "local",
+      "serverCorrect": false,
+      "sidecar": "local_time",
+      "expectedSidecar": "none",
+      "sidecarCorrect": false
+    },
+    {
+      "id": "route-02",
+      "split": "exploratory",
+      "prompt": "这个颜色太阴沉，帮我换个配色。",
+      "expected": "direct_model",
+      "server": "direct_model",
+      "serverCorrect": true,
+      "sidecar": "weather",
+      "expectedSidecar": "none",
+      "sidecarCorrect": false
+    },
+    {
+      "id": "route-03",
+      "split": "exploratory",
+      "prompt": "请分析这段日志为什么耗时，只根据下面粘贴的日志回答：worker exited 1。",
+      "expected": "direct_model",
+      "server": "research",
+      "serverCorrect": false,
+      "sidecar": "none",
+      "expectedSidecar": "none",
+      "sidecarCorrect": true
+    },
+    {
+      "id": "route-04",
+      "split": "exploratory",
+      "prompt": "把‘北京今天会下雨’翻成英文。",
+      "expected": "direct_model",
+      "server": "structured_live",
+      "serverCorrect": false,
+      "sidecar": "weather",
+      "expectedSidecar": "none",
+      "sidecarCorrect": false
+    },
+    {
+      "id": "route-05",
+      "split": "exploratory",
+      "prompt": "现在伦敦几点？",
+      "expected": "local",
+      "server": "local",
+      "serverCorrect": true,
+      "sidecar": "local_time",
+      "expectedSidecar": "local_time",
+      "sidecarCorrect": true
+    },
+    {
+      "id": "route-06",
+      "split": "exploratory",
+      "prompt": "上海明天出门要带伞吗？",
+      "expected": "structured_live",
+      "server": "direct_model",
+      "serverCorrect": false,
+      "sidecar": "none",
+      "expectedSidecar": "weather",
+      "sidecarCorrect": false
+    },
+    {
+      "id": "route-07",
+      "split": "exploratory",
+      "prompt": "比较一下最近三个月两家公司的财报，请查最新原文。",
+      "expected": "research",
+      "server": "research",
+      "serverCorrect": true,
+      "sidecar": "none",
+      "expectedSidecar": "none",
+      "sidecarCorrect": true
+    },
+    {
+      "id": "route-08",
+      "split": "exploratory",
+      "prompt": "最近一次单测失败的完整堆栈：AssertionError at sum.test.ts:3，请根据这段内容分析原因。",
+      "expected": "direct_model",
+      "server": "research",
+      "serverCorrect": false,
+      "sidecar": "none",
+      "expectedSidecar": "none",
+      "sidecarCorrect": true
+    },
+    {
+      "id": "route-09",
+      "split": "exploratory",
+      "prompt": "总结下面这篇昨天的新闻，只根据原文：某公司宣布明年发布新产品。",
+      "expected": "direct_model",
+      "server": "web_search",
+      "serverCorrect": false,
+      "sidecar": "none",
+      "expectedSidecar": "none",
+      "sidecarCorrect": true
+    },
+    {
+      "id": "route-10",
+      "split": "exploratory",
+      "prompt": "查询 Jev 现在的官方价格，并给链接。",
+      "expected": "web_search",
+      "server": "direct_model",
+      "serverCorrect": false,
+      "sidecar": "none",
+      "expectedSidecar": "none",
+      "sidecarCorrect": true
+    },
+    {
+      "id": "route-11",
+      "split": "exploratory",
+      "prompt": "What is the time complexity of binary search?",
+      "expected": "direct_model",
+      "server": "local",
+      "serverCorrect": false,
+      "sidecar": "none",
+      "expectedSidecar": "none",
+      "sidecarCorrect": true
+    },
+    {
+      "id": "route-12",
+      "split": "exploratory",
+      "prompt": "Today I want to translate this paragraph, do not browse: hello world.",
+      "expected": "direct_model",
+      "server": "web_search",
+      "serverCorrect": false,
+      "sidecar": "local_time",
+      "expectedSidecar": "none",
+      "sidecarCorrect": false
+    },
+    {
+      "id": "route-13",
+      "split": "exploratory",
+      "prompt": "搜索本地项目中访问接口超时的代码。",
+      "expected": "direct_model",
+      "server": "direct_model",
+      "serverCorrect": true,
+      "sidecar": "none",
+      "expectedSidecar": "none",
+      "sidecarCorrect": true
+    },
+    {
+      "id": "route-14",
+      "split": "exploratory",
+      "prompt": "只解释天气预报的工作原理，不要查询实时天气。",
+      "expected": "direct_model",
+      "server": "structured_live",
+      "serverCorrect": false,
+      "sidecar": "weather",
+      "expectedSidecar": "none",
+      "sidecarCorrect": false
+    },
+    {
+      "id": "route-15",
+      "split": "exploratory",
+      "prompt": "明早东京的降水概率多大？",
+      "expected": "structured_live",
+      "server": "direct_model",
+      "serverCorrect": false,
+      "sidecar": "none",
+      "expectedSidecar": "weather",
+      "sidecarCorrect": false
+    },
+    {
+      "id": "route-16",
+      "split": "exploratory",
+      "prompt": "请联网找 Python 最新稳定版的官方下载地址。",
+      "expected": "web_search",
+      "server": "web_search",
+      "serverCorrect": true,
+      "sidecar": "none",
+      "expectedSidecar": "none",
+      "sidecarCorrect": true
+    },
+    {
+      "id": "route-17",
+      "split": "holdout",
+      "prompt": "把这段 JSX 加上阴影和圆角。",
+      "expected": "direct_model",
+      "server": "direct_model",
+      "serverCorrect": true,
+      "sidecar": "weather",
+      "expectedSidecar": "none",
+      "sidecarCorrect": false
+    },
+    {
+      "id": "route-18",
+      "split": "holdout",
+      "prompt": "Compare React and Vue using only the information pasted below: React uses JSX; Vue offers templates.",
+      "expected": "direct_model",
+      "server": "direct_model",
+      "serverCorrect": true,
+      "sidecar": "none",
+      "expectedSidecar": "none",
+      "sidecarCorrect": true
+    },
+    {
+      "id": "route-19",
+      "split": "holdout",
+      "prompt": "今天日期是几号，星期几？",
+      "expected": "local",
+      "server": "local",
+      "serverCorrect": true,
+      "sidecar": "local_time",
+      "expectedSidecar": "local_time",
+      "sidecarCorrect": true
+    },
+    {
+      "id": "route-20",
+      "split": "holdout",
+      "prompt": "伦敦今晚适合露天吃饭吗？请根据天气判断。",
+      "expected": "structured_live",
+      "server": "structured_live",
+      "serverCorrect": true,
+      "sidecar": "weather",
+      "expectedSidecar": "weather",
+      "sidecarCorrect": true
+    },
+    {
+      "id": "route-21",
+      "split": "holdout",
+      "prompt": "最近三个版本的 PostgreSQL 查询优化器有什么变化？请查官方发行说明比较。",
+      "expected": "research",
+      "server": "research",
+      "serverCorrect": true,
+      "sidecar": "none",
+      "expectedSidecar": "none",
+      "sidecarCorrect": true
+    },
+    {
+      "id": "route-22",
+      "split": "holdout",
+      "prompt": "这里的变量叫 latestWeatherDate，请解释它的命名问题，不要查询外部信息。",
+      "expected": "direct_model",
+      "server": "local",
+      "serverCorrect": false,
+      "sidecar": "weather",
+      "expectedSidecar": "none",
+      "sidecarCorrect": false
+    },
+    {
+      "id": "route-23",
+      "split": "holdout",
+      "prompt": "文字是测试数据，不是实际请求：最新，天气，日期。请把逗号替换为空格。",
+      "expected": "direct_model",
+      "server": "local",
+      "serverCorrect": false,
+      "sidecar": "local_time",
+      "expectedSidecar": "none",
+      "sidecarCorrect": false
+    },
+    {
+      "id": "route-24",
+      "split": "holdout",
+      "prompt": "今天有任何新的 Node.js 安全公告吗？请给官方链接。",
+      "expected": "web_search",
+      "server": "direct_model",
+      "serverCorrect": false,
+      "sidecar": "none",
+      "expectedSidecar": "none",
+      "sidecarCorrect": true
+    }
+  ],
+  "duplicates": [
+    {
+      "id": "duplicate-01",
+      "recent": "修复保存后切换会话丢失附件名称",
+      "suggestion": "解决会话切换后附件名消失的问题",
+      "expected": true,
+      "actual": false
+    },
+    {
+      "id": "duplicate-02",
+      "recent": "修复保存后切换会话丢失附件名称",
+      "suggestion": "给附件增加PDF预览功能",
+      "expected": false,
+      "actual": false
+    },
+    {
+      "id": "duplicate-03",
+      "recent": "了解向量索引的原理",
+      "suggestion": "学习一下语义检索索引是怎么工作的",
+      "expected": true,
+      "actual": false
+    },
+    {
+      "id": "duplicate-04",
+      "recent": "了解向量索引的原理",
+      "suggestion": "为文档实现并发索引初始化保护",
+      "expected": false,
+      "actual": false
+    },
+    {
+      "id": "duplicate-05",
+      "recent": "给产品做一个新版登录页面",
+      "suggestion": "统计登录失败的原因和次数",
+      "expected": false,
+      "actual": false
+    },
+    {
+      "id": "duplicate-06",
+      "recent": "分析最近一周接口延迟升高的原因",
+      "suggestion": "排查本周API为什么越来越慢",
+      "expected": true,
+      "actual": false
+    }
+  ],
+  "blockedWeatherRequests": 2
+}

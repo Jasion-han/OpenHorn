@@ -1,0 +1,103 @@
+{
+  "requests": {
+    "attempted": 22,
+    "successful": 21,
+    "rejected": [
+      {
+        "name": "retrieval-relevance",
+        "status": 400,
+        "error": {
+          "code": 400,
+          "message": "[\n  {\n    \"expected\": \"array\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"questions\",\n      \"rag-01_score\",\n      \"criteria\"\n    ],\n    \"message\": \"Invalid input: expected array, received object\"\n  },\n  {\n    \"expected\": \"array\",\n    "
+        }
+      }
+    ]
+  },
+  "resolvedModels": ["typesafe/jev-1.14-20261014"],
+  "successfulTypedJudgments": 192,
+  "uniqueSyntheticCases": 56,
+  "usage": {
+    "inputTokens": 26517,
+    "outputTokens": 6334,
+    "costUsdReturnedBySuccessfulRequests": 0.001113714
+  },
+  "latencyMs": {
+    "successfulAll": {
+      "n": 21,
+      "min": 355,
+      "median": 1348.0,
+      "p95_nearest_rank": 1555,
+      "max": 1717
+    },
+    "warmSerialIndividualRoute": {
+      "n": 3,
+      "min": 389,
+      "median": 396.0,
+      "p95_nearest_rank": 453,
+      "max": 453
+    },
+    "parallelIndividualRoute": {
+      "n": 4,
+      "min": 1181,
+      "median": 1315.0,
+      "p95_nearest_rank": 1717,
+      "max": 1717
+    }
+  },
+  "routing": {
+    "all": {
+      "n": 24,
+      "rulesCorrect": 10,
+      "jevCorrect": 24
+    },
+    "exploratory": {
+      "n": 16,
+      "rulesCorrect": 5,
+      "jevCorrect": 16
+    },
+    "holdout": {
+      "n": 8,
+      "rulesCorrect": 5,
+      "jevCorrect": 8
+    }
+  },
+  "routingOptionOrderHoldout": {
+    "n": 8,
+    "stable": 8
+  },
+  "reviews": {
+    "sentimentCorrectWithInterpretableGate": 8,
+    "n": 8,
+    "topicGoldEvaluation": "Not performed; six topic probabilities per row inspected qualitatively, no independent topic gold set."
+  },
+  "retrieval": {
+    "n": 6,
+    "correct": 6
+  },
+  "grounding": {
+    "n": 6,
+    "decided": 5,
+    "correctWhenDecided": 5,
+    "uncertain": ["ground-04"]
+  },
+  "skills": {
+    "n": 6,
+    "correctWithApplicabilityGate": 6,
+    "stableAfterReorder": 6
+  },
+  "duplicates": {
+    "n": 6,
+    "rulesCorrect": 3,
+    "jevCorrect": 6
+  },
+  "schemaValidationErrors": [],
+  "limits": [
+    "Hand-authored challenge cases, not a representative production accuracy or calibration benchmark.",
+    "Only routing has a predeclared 8-case holdout; no wording tuning followed the observed holdout.",
+    "The rules baseline is routeLiveQuery, not the complete pipeline with its fallback generative classifier.",
+    "The initial Score request used an object for criteria, returned HTTP 400, and was corrected to the documented array form. It is retained as an error, not counted as a judgment.",
+    "Timing is local end-to-end HTTP time; the 3 serial samples are insufficient for a production p95 or SLA.",
+    "No live comparison against the user's ordinary chat model; no claimed total application speedup or realized cost savings.",
+    "The HTTP 400 response has no usage receipt; cost total sums successful receipts only."
+  ]
+}

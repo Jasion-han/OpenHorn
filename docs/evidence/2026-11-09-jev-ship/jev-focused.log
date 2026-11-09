@@ -1,0 +1,78 @@
+bun test v1.3.10 (30e609e0)
+
+src/services/decisionClient.test.ts:
+(pass) decisions share in-flight requests and cache successful exact inputs per user/feature [2.33ms]
+(pass) disabled, missing keys and exhausted budgets do not contact OpenRouter [0.14ms]
+(pass) API failures and malformed answers remain errors and cool down across different payloads [0.81ms]
+(pass) timeout aborts HTTP and leaves the conservative billing reservation unsettled [5.68ms]
+(pass) disabling a feature also prevents previously cached answers from being served [0.17ms]
+(pass) decision state redacts supplied credentials while the fixed HTTP auth header remains separate [0.15ms]
+
+src/services/ragService.integrity.test.ts:
+(pass) RAG excludes deleted sources and skips pointless embedding when no live source remains [12.26ms]
+(pass) RAG result visibility requires the live attachment owner and exact conversation [8.12ms]
+(pass) deleting a source while vector search awaits prevents its late result entering the prompt [5.77ms]
+(pass) deletion during embedding prevents late indexing from leaving source chunks [6.59ms]
+(pass) deletion during add prevents late indexing from leaving source chunks [5.80ms]
+(pass) indexing missing or wrongly owned source IDs performs no embedding or vector write [4.73ms]
+(pass) an owned live source indexes and retrieves normally while an empty store stays cheap [7.02ms]
+(pass) deleting a multi-batch source stops later embedding batches [5.51ms]
+(pass) deleting a source during the semantic rerank await prevents stale context injection [6.50ms]
+(pass) semantic rerank evaluates the same bounded document excerpt the answering model sees [5.47ms]
+
+src/services/liveCapabilities.test.ts:
+(pass) data-only review batches cannot invoke weather, web, classifier or workspace enrichment [0.29ms]
+(pass) routeLiveQuery classifies local time questions [0.27ms]
+(pass) routeLiveQuery classifies weather questions [0.03ms]
+(pass) routeLiveQuery classifies recent-news questions [0.02ms]
+(pass) routeLiveQuery classifies research-heavy requests separately
+(pass) routeLiveQuery leaves non-live prompts as direct model
+(pass) getWebSearchPolicy blocks identity questions from web search
+(pass) getWebSearchPolicy forces web search for explicit lookup prompts
+(pass) getWebSearchPolicy still forces web search when lookup prompts also request a summary
+(pass) getWebSearchPolicy forces research for recent comparison prompts
+(pass) getWebSearchPolicy treats current interview-practice comparisons as research
+
+src/services/searchService.test.ts:
+(pass) buildSearchContext prefers user tavily key over env key [553.19ms]
+(pass) buildSearchContext uses env key when user key is absent [0.78ms]
+(pass) buildSearchContext falls back to DuckDuckGo when no tavily key exists [0.93ms]
+(pass) buildSearchContext goes offline when DuckDuckGo returns nothing [0.30ms]
+(pass) buildSearchContext uses DuckDuckGo when Tavily disabled but a key exists [0.40ms]
+(pass) buildSearchContext goes offline when Tavily disabled and DuckDuckGo empty [0.18ms]
+(pass) buildSearchContext narrows OpenAI official-doc queries to official domains [0.40ms]
+(pass) buildSearchContext tightens news queries to topic=news and time_range=day [0.43ms]
+(pass) buildSearchContext soft-targets curated domains for a clear category [0.27ms]
+(pass) buildSearchContext reranks high-trust fresh results ahead of low-trust ones [0.91ms]
+(pass) buildSearchContext falls back to DuckDuckGo when Tavily upstream fails [0.61ms]
+(pass) buildSearchContext aborts slow web search and keeps a user-facing timeout label [608.39ms]
+
+src/services/decisionEnhancements.test.ts:
+(pass) unavailable decision service preserves suggestions, ranking and full skill eligibility [1.30ms]
+(pass) semantic filter retains uncertain candidates and reranking keeps every source [0.55ms]
+(pass) skill selection uses meaningful option names and requires a positive applicability judgment
+(pass) large skill catalogs fit a bounded advisory request without changing the caller's roster [3.65ms]
+
+src/services/reviewDecisionService.test.ts:
+(pass) Jev batch is durable and idempotent after lost ACK without creating a conversation [13.09ms]
+(pass) manual changes during Jev's await are skipped, keeping their note and evidence [9.65ms]
+(pass) failed decisions preserve old annotations and repeat request IDs never re-bill [7.54ms]
+(pass) deleted workspaces are never resurrected by late Jev answers [8.06ms]
+
+src/services/decisionUsageService.test.ts:
+(pass) daily decision reservations persist, prevent overspend and settle each receipt once [12.72ms]
+
+src/services/reviewNoteVerification.test.ts:
+(pass) production payload is identical to the recorded successful minimal-input live probe [1.07ms]
+(pass) note request sends just the review and saved note with the evaluated question
+(pass) current protocol matches every recorded v2 live payload [0.96ms]
+(pass) a non-factual note never becomes supported or a factual contradiction [0.32ms]
+(pass) provider response validation rejects bad probabilities, types, versions and usage [0.47ms]
+(pass) successful call returns exact payload, probability and usage without leaking the key [0.22ms]
+(pass) empty notes and missing keys never invoke the provider [0.16ms]
+(pass) HTTP and transport failures are errors, never unsupported answers, with no automatic retry [0.38ms]
+
+ 56 pass
+ 0 fail
+ 350 expect() calls
+Ran 56 tests across 8 files. [1.58s]

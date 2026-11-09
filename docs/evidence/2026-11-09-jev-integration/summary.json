@@ -1,0 +1,56 @@
+{
+  "implementation": "First Jev integration batch",
+  "tests": {
+    "server": 521,
+    "desktop": 670,
+    "shared": 66,
+    "sidecar": 331,
+    "adapters": 82
+  },
+  "unitTotal": 1670,
+  "browserChecks": {
+    "jev": 7,
+    "reviews": 16,
+    "settings": 21,
+    "workbench": 25,
+    "chat": 56
+  },
+  "browserTotal": 125,
+  "checks": {
+    "types": "passed",
+    "productionSourceBiome": "passed",
+    "wholeRepoBiome": "12 formatting diagnostics in other-session evidence JSON; not modified",
+    "sidecarHostCompile": "passed",
+    "macosDebugBundle": "passed",
+    "composeEnvironment": "validated, no container deployed"
+  },
+  "liveSynthetic": {
+    "requests": 12,
+    "status": "all 200",
+    "model": "typesafe/jev-1.14-20261014",
+    "totalReturnedCostUsd": 0.00025263,
+    "lastRoundRequests": 6,
+    "lastRoundCostUsd": 0.000128016
+  },
+  "runtime": {
+    "server": "restarted, loopback:3002",
+    "desktop": "restarted and native entry verification passed",
+    "configured": true,
+    "enabled": true,
+    "dailyLimitUsd": 0.05,
+    "automaticRequestsSinceStart": 1,
+    "confirmedCostUsd": 2.8812e-5,
+    "unconfirmedUsd": 0,
+    "comments": 0,
+    "conversations": 345,
+    "scheduledTasks": 2,
+    "enabledTasks": 0
+  },
+  "limits": [
+    "Only first-priority features implemented; route comparison does not change routing.",
+    "Server search/RAG reranking only; Sidecar search tools unchanged.",
+    "Skills remain available in full; no claim of global token reduction.",
+    "Stored credentials are in ignored server configuration, absent from source/evidence.",
+    "Production quality, long-term p95 and application-wide savings were not measured."
+  ]
+}

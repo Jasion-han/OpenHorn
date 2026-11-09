@@ -1,0 +1,20 @@
+{
+  "apps/server/src/services/liveRouteClassifier.ts": "9de175254079859c444b798c46e3400b5e6e2c115ea71c6764ece8881774aa1d",
+  "apps/server/src/services/liveCapabilities.ts": "c3a441966bc7afbacfc590af4714bd824ca65203f1f76b2081180d1e3bd149c9",
+  "apps/sidecar/src/agent/intent-context.ts": "03715dcb3542c73783358fedaaf5c94b1e07f289df158983283f13661f95d289",
+  "packages/shared/src/reviews.ts": "0b6e41e84e3318ff6ee65cf7dd3ae0f101177487e66a44909ed74b81679a4db9",
+  "apps/server/src/services/reviewWorkspaceService.ts": "ba81a520bfe25d4fb131420dd9cc0c66665035eba1e43351dbe261770c26dae7",
+  "apps/server/src/services/welcomeSuggestionService.ts": "96cdbb45962bf143cc71d2dd3f85336bb997b7b6c9e6dfcbb0df90ba615213f5",
+  "packages/shared/src/search/core.ts": "2fdbd2b02bb488d732480ad145273b8bf1d41f9b2161aed0d31cc51cfa814102",
+  "packages/shared/src/search/curatedSources.ts": "b078305fb6f6b05be09b8527896dfa747ab5c1908f11e3b9988c1ba41e20808a",
+  "apps/server/src/services/ragService.ts": "c14adfcd8ee430567f56e19c128d77ee6f01156da0fc5f5b9ef0cf3cfc23a464",
+  "apps/server/src/services/summaryService.ts": "e83eeede61cb37478e42900378ad7725addcbaa1165686af0e06a244b146d0d6",
+  "apps/desktop/src/lib/sidecarRunSupport.ts": "06e24fc7b0413031296529a450764db70ff6afd44dadba74784594097bb64e0e",
+  "apps/desktop/src/hooks/useSidecarAgentRun.ts": "d98995d298e6b4eb2cb0d7c49204498605fb52d5055c2c15bd61c98e22482cdf",
+  "apps/sidecar/src/agent/contextPolicy.ts": "cc808f66974d8a43453e4c0a416ce8ea882c2fe1dc55e8c8c590d8c192ca89a5",
+  "apps/desktop/src/lib/genui/promptMerge.ts": "52fafbbbb3dae10918a09ea07ddd361245dc80b4e18a014d671729d69bd9a753",
+  "apps/server/src/services/providerErrorSummary.ts": "1ee1e44d9e7ce3c46398ec541a27b7aca0ed2698426c86c7331b6dd9306c40a7",
+  "apps/server/src/services/localImportService.ts": "142c2ae017fb3ef5d8a8d2c9129a6765f7503c5686492082fd5f2e9362e6601a",
+  "packages/shared/src/child-env.ts": "36e98ff04d97bd07adf00afb2ae0c84370b0c64c012d2185a58bf6ae32955a3c",
+  "packages/shared/src/shell-risk.ts": "5d8f5d2174906f6f058fbe06f60c57d50451800e5fe2182a87b42a2f901897f0"
+}

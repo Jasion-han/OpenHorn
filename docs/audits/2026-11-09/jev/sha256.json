@@ -1,0 +1,14 @@
+{
+  "analyze.py": "a9d063e531cdcb9b15f7afc9e58e74c7d42ae9480867c9330feca6dbf23bd9d7",
+  "baseline-results.json": "2bdf7a19a3cd8be9f024b150922ce6abb9d4dc9dd943321400b32582327b753c",
+  "baseline.ts": "a0aec6e48e9682790a7cc51202e50c34d708d718e769c767a8191240e7e16bd4",
+  "cases.json": "32f501bc852e4ce229e9bbf9f5020a71a2ff044ed0821d5a4869531522ea7bd4",
+  "comparisons.json": "1d3c5e3195c46c9571d8e13e0dcc026ba87026bc8478885f70d44a4dd8e09462",
+  "inventory.json": "fcc7458dd85ae5917e6ee20161bd8a62db0628b64d70c06f7a68d13218e8d3f3",
+  "live-results.json": "49ed8e4fef16cf7236a20fa41d57b340b664267091327a3a15f2fbbe53f180a3",
+  "openrouter-model-metadata.json": "7eadc590f299bdcccdc27ccd041944785039c5898c6ce6bbb280f225b0efaa81",
+  "probe.mjs": "51b6af7f762bdb7c826161ad5010946dd6b4fd0e0a4a9e05433805fd4e1d966f",
+  "source-hashes.json": "c2f79d9116a04de5ec40c2967c4c8ae321d3f9f309c8a958dc7511112c3a8153",
+  "sources.json": "61dd2decd269f8b7af5f2428b4c292d1482d6d6d62dc1c5d5941d6e208556cee",
+  "summary.json": "f533d286ab06304b62688c765132ef2bd470a94498753125dd7d79c5e71f7ef0"
+}

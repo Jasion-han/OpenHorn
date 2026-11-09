@@ -1,0 +1,57 @@
+PASS real composer send: partial/state/DB survive failure, late chunks ignored, persisted-ID retry succeeds
+PASS terminal SSE failures: partial retry survives and zero-output retry restores the preceding reply/state
+PASS edited tail failure: error reconciles newly persisted reply ID and immediate retry uses that ID
+PASS failed reply reload/remount retains the exact closed program and edited binding
+PASS reloaded legacy empty Chat reply: the real Retry action uses its persisted ID
+PASS old rejected save after Stop/new send cannot mutate the newer turn
+PASS old successful save after Stop/new send cannot mutate the newer turn
+PASS old retry success after Stop/new send: newer stream/loading/error/optimistic controls retained
+PASS old retry failure after Stop/new send: newer stream/loading/error/optimistic controls retained
+PASS old edit success after Stop/new send: newer stream/loading/error/optimistic controls retained
+PASS old edit failure after Stop/new send: newer stream/loading/error/optimistic controls retained
+PASS Agent send stopped during preparation: question/prior reply persisted once, new turn survives late setup and reload
+PASS Agent retry stopped during preparation: question/prior reply persisted once, new turn survives late setup and reload
+PASS Agent edit stopped during preparation: question/prior reply persisted once, new turn survives late setup and reload
+PASS failure unclosed openui-lang: preceding block interactive, unfinished block inert after reload/remount
+PASS failure unclosed html-ui: preceding block interactive, unfinished block inert after reload/remount
+PASS stop unclosed openui-lang: preceding block interactive, unfinished block inert after reload/remount
+PASS stop unclosed html-ui: preceding block interactive, unfinished block inert after reload/remount
+PASS historical Chat reruns under ACP are blocked before changing the previous answer or sending a request
+PASS ACP current composer: Chat blocked before writes, notice/draft retained, Agent remains available
+PASS ACP welcome composer: Chat blocked before writes, notice/draft retained, Agent remains available
+PASS Agent send disconnects during preparation: failure releases owner, preserves the round and allows recovery
+PASS Agent retry disconnects during preparation: failure releases owner, preserves the round and allows recovery
+PASS Agent edit disconnects during preparation: failure releases owner, preserves the round and allows recovery
+PASS unavailable default workspace: stale project root is refused, no Agent starts and the failed question persists
+PASS chat remount: real Stop cancels once, persists partial, ignores late text and allows the next turn
+PASS agent remount: real Stop cancels once, persists partial, ignores late text and allows the next turn
+PASS Agent terminal save barrier: both callback orders persist once, remount cannot retry before ID reconciliation, subsequent same-ID retry finishes
+PASS Agent save failure: persistent real toast, navigation retains reply/control state, Retry save reuses exact IDs/payload and never regenerates
+PASS accepted Agent here: historical Retry and edit Enter cannot overlap or replace its turn
+PASS accepted Agent elsewhere: historical Retry and edit Enter cannot overlap or replace its turn
+PASS accepted Agent here after remount: historical Retry and edit Enter cannot overlap or replace its turn
+PASS accepted Agent elsewhere after remount: historical Retry and edit Enter cannot overlap or replace its turn
+PASS current response policy chat/send/Auto: real transport carries selected contract after a live preference change
+PASS current response policy chat/send/Text only: real transport carries selected contract after a live preference change
+PASS current response policy chat/retry/Auto: real transport carries selected contract after a live preference change
+PASS current response policy chat/retry/Text only: real transport carries selected contract after a live preference change
+PASS current response policy chat/edit/Auto: real transport carries selected contract after a live preference change
+PASS current response policy chat/edit/Text only: real transport carries selected contract after a live preference change
+PASS current response policy agent/send/Auto: real transport carries selected contract after a live preference change
+PASS current response policy agent/send/Text only: real transport carries selected contract after a live preference change
+PASS current response policy agent/retry/Auto: real transport carries selected contract after a live preference change
+PASS current response policy agent/retry/Text only: real transport carries selected contract after a live preference change
+PASS current response policy agent/edit/Auto: real transport carries selected contract after a live preference change
+PASS current response policy agent/edit/Text only: real transport carries selected contract after a live preference change
+PASS Text only historical chat widget: live local state survives policy change/remount; follow-up appends to the draft without a model call
+PASS Text only historical agent widget: live local state survives policy change/remount; follow-up appends to the draft without a model call
+PASS sidecar partial output limit: exact content/usage, structured notice, reload label, inert program and ignored late error
+PASS sidecar empty output limit: exact content/usage, structured notice, reload label
+PASS delayed truncated SSE retry: old error/usage/content do not mutate the newer turn
+PASS delayed truncated SSE edit: old error/usage/content do not mutate the newer turn
+PASS SSE truncated retry: structured error/usage reach the actual bubble and survive reload
+PASS zero-output truncated SSE retry: prior reply/content/usage/end state remain intact
+PASS truncated SSE tail edit: persisted reply identity/usage/label and edited question survive reload
+PASS prepare budget rejection: saved identity, no model run, localized reason survives next send and reload
+PASS empty and partial provider failures: exact Markdown plus localized durable reason after reload
+GenUI actual Chat failure browser regressions passed.

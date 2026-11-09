@@ -1,0 +1,9 @@
+bun test v1.3.10 (30e609e0)
+
+src/lib/sidecarRunSupport.skills.test.ts:
+(pass) skill recommendations retain the full eligible roster and keep required skills first [5.91ms]
+
+ 1 pass
+ 0 fail
+ 4 expect() calls
+Ran 1 test across 1 file. [34.00ms]

@@ -1,0 +1,760 @@
+bun test v1.3.10 (30e609e0)
+
+src/stores/chatStore.truncation.test.ts:
+(pass) an empty truncated reply keeps generated content separate from the error banner [3.35ms]
+(pass) an ordinary empty Chat failure keeps its reason separate from generated text [0.04ms]
+(pass) structured failure preserves exact reply and saved identity: 0 [0.45ms]
+(pass) structured failure preserves exact reply and saved identity: 27 [0.09ms]
+
+src/stores/chatStore.agentContent.test.ts:
+(pass) agent reply content invariant > deltas land in text steps and in content [0.95ms]
+(pass) agent reply content invariant > text separated by a tool call joins with a blank line [0.25ms]
+(pass) agent reply content invariant > clear_streaming_text drops the cleared text from content; reasoning adds none [0.17ms]
+(pass) agent reply content invariant > a failed agent run keeps the error in agentRun, not in content [2.00ms]
+(pass) agent reply content invariant > a chat message without a run retains a safe failure reason outside content [0.22ms]
+(pass) agent reply content invariant > an Agent reply without a run records failure in a run, never Chat metadata [0.12ms]
+(pass) agent reply content invariant > background (cached) messages keep content in sync too [0.59ms]
+(pass) agent reply content invariant > a server task-backed done event derives content from its text step, like the DB [0.18ms]
+
+src/stores/chatStore.streamingOwnership.test.ts:
+(pass) composer streaming ownership > background list refresh cannot clear the current turn's loading or error [0.19ms]
+(pass) composer streaming ownership > another message's completion or failure cannot release the current turn [0.32ms]
+(pass) composer streaming ownership > persisted Chat id replacement transfers ownership before completion [0.08ms]
+(pass) composer streaming ownership > a terminal edited-tail id completes exactly its renamed owner [0.05ms]
+(pass) composer streaming ownership > Agent reconciliation transfers an owner in a background conversation [0.23ms]
+
+src/stores/previewPanelStore.test.ts:
+(pass) preview panel store > starts closed with the default width [0.04ms]
+(pass) preview panel store > openFile opens the panel and activates a new tab [3.30ms]
+(pass) preview panel store > openFile reuses the tab for the same path and updates its range [0.14ms]
+(pass) preview panel store > openUrl reuses the tab for the same url [0.12ms]
+(pass) preview panel store > web tabs start with no history in either direction [0.02ms]
+(pass) preview panel store > closing the active tab activates its right neighbour, then the left one [0.23ms]
+(pass) preview panel store > closing a background tab keeps the active tab [0.30ms]
+(pass) preview panel store > closing the last tab closes the panel [0.03ms]
+(pass) preview panel store > collapsePanel hides an open panel without dropping tabs; expandPanel restores it [0.42ms]
+(pass) preview panel store > togglePanel flips collapsed only while the panel is open [0.06ms]
+(pass) preview panel store > opening new content expands a collapsed panel [0.04ms]
+(pass) preview panel store > closing a tab while collapsed keeps the panel collapsed [0.05ms]
+(pass) preview panel store > closing the last tab of a collapsed panel closes it and resets collapsed [0.21ms]
+(pass) preview panel store > closePanel drops every tab [0.11ms]
+(pass) preview panel store > updateTab patches web tab url/title/loading [0.08ms]
+(pass) preview panel store > updateTab patches history availability independently of other fields [0.03ms]
+(pass) preview panel store > setWidth clamps to the minimum [0.06ms]
+(pass) preview panel store > clampPreviewPanelWidth caps at 70% of the window [0.02ms]
+(pass) preview panel store > tab ids are safe as webview labels [0.05ms]
+(pass) attachment sidebar > replaces the one attachment tab without closing existing file/web tabs [7.12ms]
+(pass) attachment sidebar > ignores empty attachment collections and normalizes invalid selections [0.11ms]
+(pass) web tabs follow the most recent user-link origin and unanchored callers clear stale origins [0.04ms]
+(pass) opening an existing local path revalidates the file and updates its click origin [0.12ms]
+
+src/stores/desktopShellStore.test.ts:
+[zustand persist middleware] Unable to update item 'openhorn.desktop.shell', the given storage is currently unavailable.
+[zustand persist middleware] Unable to update item 'openhorn.desktop.shell', the given storage is currently unavailable.
+[zustand persist middleware] Unable to update item 'openhorn.desktop.shell', the given storage is currently unavailable.
+[zustand persist middleware] Unable to update item 'openhorn.desktop.shell', the given storage is currently unavailable.
+(pass) desktop shell store > task history navigation scopes runs and clears the scope for the full list [0.20ms]
+[zustand persist middleware] Unable to update item 'openhorn.desktop.shell', the given storage is currently unavailable.
+[zustand persist middleware] Unable to update item 'openhorn.desktop.shell', the given storage is currently unavailable.
+[zustand persist middleware] Unable to update item 'openhorn.desktop.shell', the given storage is currently unavailable.
+[zustand persist middleware] Unable to update item 'openhorn.desktop.shell', the given storage is currently unavailable.
+(pass) desktop shell store > opening tasks and resetting both clear the task history scope [0.04ms]
+(pass) desktop shell store > fullAccessEnabled defaults to false [0.04ms]
+[zustand persist middleware] Unable to update item 'openhorn.desktop.shell', the given storage is currently unavailable.
+[zustand persist middleware] Unable to update item 'openhorn.desktop.shell', the given storage is currently unavailable.
+(pass) desktop shell store > toggleFullAccess flips fullAccessEnabled [0.05ms]
+[zustand persist middleware] Unable to update item 'openhorn.desktop.shell', the given storage is currently unavailable.
+[zustand persist middleware] Unable to update item 'openhorn.desktop.shell', the given storage is currently unavailable.
+(pass) desktop shell store > reset restores fullAccessEnabled to false [0.04ms]
+
+src/stores/artifactDraftStore.test.ts:
+(pass) artifact navigation retains independent drafts until explicit discard [0.08ms]
+(pass) logout or switching accounts clears drafts and selection [0.01ms]
+
+src/stores/projectStore.test.ts:
+(pass) projectStore > folderNameFromPath takes the last segment on either separator [0.08ms]
+(pass) projectStore > addProjectFromPicker names the project after the folder and opens it expanded [0.93ms]
+(pass) projectStore > a cancelled picker adds nothing [0.06ms]
+(pass) projectStore > adding the same folder twice keeps a single row [0.13ms]
+(pass) projectStore > starred projects sort first, then by name [1.71ms]
+(pass) projectStore > removeProject clears the scope and drops its conversations locally [0.31ms]
+(pass) projectStore > the scope follows the selected conversation's project [0.05ms]
+(pass) projectStore > resolveProjectRootForConversation maps a filed conversation to its folder [0.07ms]
+
+src/stores/chatStore.test.ts:
+(pass) desktop chat store > loads conversations [0.17ms]
+(pass) desktop chat store > selects conversation and loads messages [0.08ms]
+(pass) desktop chat store > switches current conversation immediately before messages finish loading [0.32ms]
+(pass) desktop chat store > adds optimistic assistant placeholder while streaming [0.31ms]
+(pass) desktop chat store > keeps uploaded attachment metadata on optimistic user message [0.10ms]
+(pass) desktop chat store > appends stream delta to assistant placeholder [0.18ms]
+(pass) desktop chat store > keeps a code-point-accurate rolling tail across a multi-token stream [0.28ms]
+(pass) desktop chat store > maps live status metadata onto the assistant message [0.11ms]
+(pass) desktop chat store > updates inline agent run metadata and marks stream complete [0.19ms]
+(pass) desktop chat store > keeps failed agent status when a done event follows an error [0.13ms]
+(pass) desktop chat store > rolls back optimistic draft messages when send fails [0.33ms]
+(pass) desktop chat store > toggles composer mode
+(pass) desktop chat store > conversation refresh preserves the current composer choice (agent, background=false) [0.13ms]
+(pass) desktop chat store > conversation refresh preserves the current composer choice (chat, background=false) [0.13ms]
+(pass) desktop chat store > conversation refresh preserves the current composer choice (agent, background=true) [0.04ms]
+(pass) desktop chat store > conversation refresh preserves the current composer choice (chat, background=true) [0.04ms]
+(pass) desktop chat store > a pending metadata refresh preserves a mode selected after it started [0.13ms]
+(pass) desktop chat store > stops active streaming via adapter [0.07ms]
+(pass) desktop chat store > setStreaming records which conversation is streaming and clears it on stop [0.08ms]
+(pass) desktop chat store > deletes message through adapter and removes it locally [0.05ms]
+(pass) desktop chat store > regenerates message through adapter [0.23ms]
+(pass) desktop chat store > edits user message through adapter [0.12ms]
+(pass) desktop chat store > updates conversation fields optimistically [0.13ms]
+(pass) desktop chat store > updates local conversation title after auto title succeeds [0.18ms]
+(pass) desktop chat store message cache > returns cached messages instantly when switching back [0.19ms]
+(pass) desktop chat store message cache > evicts the least-recently-used conversation past the cap [0.36ms]
+(pass) desktop chat store message cache > keeps streamTail/streamPulseKey in sync for a backgrounded streaming message [0.20ms]
+(pass) desktop chat store message cache > drops cached server-id messages the DB no longer returns, keeps in-flight drafts [0.20ms]
+(pass) desktop chat store message cache > reset clears the message cache [0.13ms]
+
+src/stores/sidecarStore.test.ts:
+(pass) sidecarStore > initial state is idle with no endpoint [0.13ms]
+(pass) sidecarStore > start goes through starting → connecting → ready on the happy path [1.08ms]
+(pass) sidecarStore > start hands the sidecar an empty root so it resolves its own default [0.09ms]
+(pass) sidecarStore > start records an error when startSidecar IPC rejects [0.17ms]
+(pass) sidecarStore > start records an error when the handshake fails [0.11ms]
+(pass) sidecarStore > start is idempotent when the sidecar is already ready [0.07ms]
+(pass) sidecarStore > stop closes the client, stops the sidecar, and resets state [0.19ms]
+(pass) sidecarStore > pickAndSetWorkspace calls into the dialog, then the sidecar setWorkspace [0.34ms]
+(pass) sidecarStore > pickAndSetWorkspace returns null and does not touch the sidecar when the user cancels [0.09ms]
+(pass) sidecarStore > setWorkspace records lastError when the sidecar rejects the root [0.05ms]
+(pass) sidecarStore > setWorkspace is a no-op when the sidecar is not ready [0.09ms]
+(pass) sidecarStore > ensureWorkspace pushes the per-conversation override for that run only [0.21ms]
+(pass) sidecarStore > ensureWorkspace returns null and records the error when the override is rejected [0.14ms]
+(pass) sidecarStore > a failed default resolution cannot return an older project's root [0.12ms]
+(pass) sidecarStore > markUnsupported sets status to unsupported and records the reason [0.06ms]
+(pass) sidecarStore > reset clears all state [0.09ms]
+(pass) sidecarStore > store created with null platform parks in unsupported status on start [0.10ms]
+(pass) sidecarStore > attachPlatform swaps a null platform for a real one and unparks status [0.21ms]
+(pass) sidecarStore > attachPlatform(null) flips a running-idle store to unsupported [0.01ms]
+
+src/stores/externalEditorStore.test.ts:
+(pass) external editor store > starts unset with nothing detected [0.27ms]
+(pass) external editor store > setPreference persists to storage and clearing removes the key [0.11ms]
+(pass) external editor store > reads a persisted preference on creation [0.02ms]
+(pass) external editor store > ignores corrupt or unknown persisted values [0.11ms]
+(pass) external editor store > detect runs once and a detected preference resolves against it [0.16ms]
+(pass) external editor store > a detected preference whose editor is gone resolves to null [0.10ms]
+(pass) external editor store > detection failure yields an empty list instead of throwing [0.06ms]
+(pass) external editor store > works without any storage
+(pass) openWithPreference > non-text files always go to the OS default app, even with an editor chosen [0.32ms]
+(pass) openWithPreference > text files use the resolved editor with the line
+(pass) openWithPreference > text files without a usable preference open nothing and report false
+(pass) editorNameFromAppPath > strips the folder and the .app suffix [0.29ms]
+
+src/stores/importStore.test.ts:
+(pass) importSourceFromClientLabel > maps every Rust/server client label onto a shared ImportSource
+(pass) importSourceFromClientLabel > unknown labels (picked file) return null
+(pass) aggregateScan > folds server parts and desktop discovery into one row per source, in display order [0.21ms]
+(pass) aggregateScan > a skill symlinked into several clients is listed only under its owner (`client`)
+(pass) aggregateScan > an MCP server symlinked into several clients is listed only under its owner (`client`) [0.43ms]
+(pass) aggregateScan > entries whose owner label is unknown (picked file) land in the `file` row [0.03ms]
+(pass) aggregateScan > sources with nothing to import stay unavailable and are omitted when never scanned
+(pass) aggregateScan > summaryNewCount counts only not-yet-imported things
+(pass) run helpers > chunkSessionIds splits at the server cap [0.42ms]
+(pass) run helpers > mergeParts sums counts per type and caps concatenated items [0.17ms]
+(pass) collectNeedsAction > returns only needsAction items, tagged with their record and part
+(pass) collectNeedsAction > looks at the most recent `limit` records only
+(pass) createImportStore.runImport > batches conversations at 500 per run, attaching instructions to the first batch only [1.64ms]
+(pass) createImportStore.runImport > desktop parts create MCP (skipping existing), enable skills, create channels and write one record [0.26ms]
+
+src/stores/sidecarStore.lifecycle.test.ts:
+(pass) Stop during host startup cannot restore a ready client afterward
+(pass) Stop disposes a connecting client and ignores its delayed handshake [0.50ms]
+(pass) Stop, reset and unsupported invalidate default workspace responses [0.22ms]
+(pass) an old disconnected client cannot erase a replacement client [0.13ms]
+(pass) automatic recovery retries failed connections with bounded exponential backoff [0.42ms]
+(pass) automatic recovery continues after host startup fails and resets backoff on success [0.23ms]
+(pass) explicit lifecycle cancellation removes queued retries and ignores already queued callbacks [0.18ms]
+(pass) a replacement start waits for the captured host stop before starting again [0.11ms]
+(pass) a repeated Stop invalidates a replacement queued behind the same host stop [0.07ms]
+(pass) a shared host stop failure belongs to the final Stop rather than its canceled replacement [0.13ms]
+(pass) late manual workspace results cannot change a replacement connection [0.19ms]
+(pass) a public ready-client injection supports workspace resolution and Stop cleanup [0.07ms]
+
+src/stores/chatStore.toolStartMerge.test.ts:
+(pass) applyAgentEventToRun tool_start merge by toolCallId > early name-only tool_start and later tool_start with input collapse into one step
+(pass) applyAgentEventToRun tool_start merge by toolCallId > tool_start with a different toolCallId appends a new step [0.09ms]
+(pass) applyAgentEventToRun tool_start merge by toolCallId > tool_start without toolCallId still appends
+(pass) applyAgentEventToRun tool_start merge by toolCallId > tool_result carries toolCallId and toolName
+
+src/stores/scheduledTaskStore.test.ts:
+(pass) failed deletes and toggles preserve task/run state and report failure [0.44ms]
+(pass) overlapping actions on a task submit once and release pending state [0.23ms]
+(pass) task deletion removes associated cached runs only after success [0.17ms]
+(pass) list failures stay distinct from empty data and recover on retry
+(pass) late list responses cannot resurrect a successfully deleted task or run
+
+src/stores/chatStore.renderIdentity.test.ts:
+(pass) mounted message identity > reconciling both IDs keeps the round mounted and preserves message fields [0.28ms]
+(pass) mounted message identity > a server refresh keeps local keys while accepting authoritative content [0.24ms]
+(pass) mounted message identity > background reconciliation and cache reload keep the original identity [0.04ms]
+(pass) mounted message identity > update, delta, and stream-done ID changes retain the first mounted key [0.18ms]
+
+src/stores/workbenchStore.test.ts:
+(pass) recipe schedule handoff is a frozen memory-only draft until matching confirm or cancel [0.41ms]
+
+src/hooks/useRefreshOnFocus.test.ts:
+(pass) shouldRefreshOnFocus > first call (lastRefreshAt null) refreshes
+(pass) shouldRefreshOnFocus > within minIntervalMs is throttled
+(pass) shouldRefreshOnFocus > after minIntervalMs refreshes again
+(pass) shouldRefreshOnFocus > never refreshes while streaming
+(pass) shouldRefreshOnFocus > skips when auth is not ready
+
+src/hooks/sidecarRunOwnership.test.ts:
+(pass) claimRunOwnership / isRunOwner > a new claim disowns the previous run's token [0.22ms]
+(pass) claimRunOwnership / isRunOwner > the same run stays the owner across its own event stream
+(pass) claimRunOwnership / isRunOwner > claims cover every provided id and skip undefined
+(pass) claimRunOwnership / isRunOwner > an id that was never claimed has no owner
+(pass) regenerate interleave scenario > old run's late deltas are dropped after the new run claims the message
+(pass) regenerate interleave scenario > old run's done cannot flip state owned by the new run
+(pass) createRunPersistGuard > the same run persists at most once [0.15ms]
+(pass) createRunPersistGuard > a superseded run can no longer persist; the new run persists once
+(pass) createRunPersistGuard > guards are independent per run (per-closure, not hook-level)
+
+src/lib/stopTurn.test.ts:
+(pass) stopAgentRun > an in-progress run becomes cancelled and keeps every step
+(pass) stopAgentRun > a run that already finished keeps its outcome
+(pass) stopAgentRun > a reply stopped before its first event gets an empty cancelled run
+(pass) resolveStoppedAgentReply > partial output is persisted as the reply, content derived from text steps [0.43ms]
+(pass) resolveStoppedAgentReply > nothing generated on a new send / edit: persisted as an empty cancelled reply [0.01ms]
+(pass) resolveStoppedAgentReply > regenerate stopped before any output restores the previous reply [0.04ms]
+(pass) resolveStoppedAgentReply > regenerate stopped after producing output replaces the previous reply [0.03ms]
+(pass) resolveStoppedAgentReply > a tool call alone counts as output [0.02ms]
+(pass) resolveSidecarSyncIds > a fresh send inserts a new pair [0.04ms]
+(pass) resolveSidecarSyncIds > regenerate / edit with a reply updates the round in place
+(pass) resolveSidecarSyncIds > edit of a user message without a persisted reply reuses only the user row
+(pass) resolveSidecarSyncIds > optimistic ids never reach the server
+(pass) resolveRunEndState > a stopped reply with output closes with the stopped line [0.08ms]
+(pass) resolveRunEndState > a reply stopped before any output reads as cancelled
+(pass) resolveRunEndState > a finished run without any output says there is no reply
+(pass) resolveRunEndState > running, failed-with-error and ordinary finished runs add no line
+(pass) replyHasOutput > text, steps and errors count; whitespace does not
+(pass) resolvePlainReplyEndState > a stopped reply without a run reads as stopped (with text) or cancelled (without)
+(pass) resolvePlainReplyEndState > an unstopped reply closes only when it holds nothing
+
+src/lib/composerHistory.test.ts:
+(pass) buildComposerHistory > keeps user messages in send order and ignores assistant/system [0.04ms]
+(pass) buildComposerHistory > trims and drops blank entries [0.03ms]
+(pass) buildComposerHistory > collapses consecutive duplicates but keeps non-adjacent repeats [0.02ms]
+(pass) navigateHistory > up from idle saves the draft and yields the newest entry [0.05ms]
+(pass) navigateHistory > repeated up walks older and stops at the oldest with no change [0.04ms]
+(pass) navigateHistory > down walks newer and past the newest restores the draft [0.02ms]
+(pass) navigateHistory > down while idle leaves the key to the browser [0.02ms]
+(pass) navigateHistory > up with empty history is a no-op [0.01ms]
+(pass) navigateHistory > editing resets navigation so the next up starts from the newest again [0.03ms]
+(pass) caretOnFirstLine / caretOnLastLine > single line is both first and last [0.03ms]
+(pass) caretOnFirstLine / caretOnLastLine > caret on the middle line of multi-line text is neither
+(pass) caretOnFirstLine / caretOnLastLine > caret at start of multi-line text is on the first line only
+(pass) caretOnFirstLine / caretOnLastLine > caret at end of multi-line text is on the last line only
+
+src/lib/agentToolSummary.test.ts:
+(pass) extractToolUrls > returns every url of a batched fetch so the panel can give each its own row [0.09ms]
+(pass) extractToolUrls > wraps a single-url tool so both shapes are handled the same way
+(pass) extractToolUrls > accepts `urls` given as a bare string, which models actually send
+(pass) extractToolUrls > drops blanks and non-strings
+(pass) extractToolUrls > a tool with no url yields an empty list, not a fabricated one
+(pass) summarizeToolInput > lists every url of a multi-url fetch, one per line [0.13ms]
+(pass) summarizeToolInput > urls win over query so the pages hit are always visible [0.02ms]
+(pass) summarizeToolInput > falls back to the query when a tool only searches
+(pass) summarizeToolInput > ignores blank and non-string entries in the url list
+(pass) summarizeToolInput > an all-blank url list falls through instead of rendering empty
+(pass) summarizeToolInput > still summarises shell commands and file paths
+(pass) summarizeToolInput > unrecognised shapes serialise, and non-objects yield nothing [0.09ms]
+
+src/lib/slashToken.test.ts:
+(pass) findKnownSlashToken > matches a leading token
+(pass) findKnownSlashToken > matches a mid-text token after whitespace
+(pass) findKnownSlashToken > matches after a newline
+(pass) findKnownSlashToken > preserves original casing in name
+(pass) findKnownSlashToken > ignores slash not at a token boundary
+(pass) findKnownSlashToken > ignores unknown tokens
+(pass) findKnownSlashToken > returns only the first known token
+(pass) findSlashTokenAtCursor > triggers at start of empty-prefix input
+(pass) findSlashTokenAtCursor > triggers when / typed at the start of existing text
+(pass) findSlashTokenAtCursor > triggers mid-text after whitespace
+(pass) findSlashTokenAtCursor > does not trigger inside a path or URL
+(pass) findSlashTokenAtCursor > does not trigger when cursor left the token [0.64ms]
+(pass) findSlashTokenAtCursor > does not trigger right after CJK text without whitespace [0.01ms]
+(pass) findSlashTokenAtCursor > does not trigger on a double slash [0.01ms]
+(pass) findSlashTokenAtCursor > triggers after a newline
+(pass) stripSlashToken > removes a leading token and its trailing space
+(pass) stripSlashToken > removes a mid-text token keeping surrounding text
+(pass) stripSlashToken > token-only text strips to empty
+
+src/lib/attachmentPreview.test.ts:
+(pass) attachment originals > classifies generic MIME by extension and keeps active documents inert [0.13ms]
+(pass) attachment originals > reads original local bytes and handles empty/truncated UTF8 text [1.48ms]
+(pass) attachment originals > missing sources produce a typed unavailable state
+(pass) authenticated original-file requests distinguish missing, auth and network failures [0.67ms]
+(pass) missing media MIME is inferred without changing original bytes
+(pass) revoked session URLs fall back to the authenticated uploaded original
+(pass) UTF16 BOM text retains Chinese characters in both byte orders [0.67ms]
+(pass) camera and scanned image formats retain their system-viewer fallback
+
+src/lib/composerPlaceholder.test.ts:
+(pass) pickPlaceholder > an empty pool yields an empty string rather than undefined
+(pass) pickPlaceholder > a single-entry pool always yields that entry, even when it is the one to avoid
+(pass) pickPlaceholder > every draw comes from the pool [0.21ms]
+(pass) pickPlaceholder > draws move away from the previous value
+(pass) tickMsFor > a narrow character takes half the time of a wide one
+(pass) tickMsFor > the two pools end up taking comparable wall time for a comparable width [0.14ms]
+(pass) tickMsFor > punctuation and spaces count as narrow
+(pass) takeChars > reveals one character at a time and ends on the whole string [0.08ms]
+(pass) takeChars > counts by code point, so a surrogate pair is never split in half
+(pass) takeChars > a count past the end returns the whole string, and a negative one nothing
+
+src/lib/messageGroups.test.ts:
+(pass) groupMessagesByRound > packs a user + immediate assistant of the same mode into one round
+(pass) groupMessagesByRound > keeps original flat indexes on the entries
+(pass) groupMessagesByRound > does not pair when modes differ
+(pass) groupMessagesByRound > a lone user message becomes its own group keyed by its id
+(pass) groupMessagesByRound > a lone assistant message becomes its own group keyed by its id
+(pass) groupMessagesByRound > group keys are stable across content changes (streaming) for getItemKey
+(pass) findGroupIndexByMessageId > finds a group by its user message id
+(pass) findGroupIndexByMessageId > finds a group by its assistant message id
+(pass) findGroupIndexByMessageId > finds a lone user group
+(pass) findGroupIndexByMessageId > returns -1 when the message id is absent
+
+src/lib/domainBadge.test.ts:
+(pass) getDomainBadge > uses the first letter of the hostname [0.30ms]
+(pass) getDomainBadge > ignores a leading www.
+(pass) getDomainBadge > the same hostname always maps to the same hue
+(pass) getDomainBadge > www. and bare hostname share one identity
+(pass) getDomainBadge > different hostnames generally get different hues
+(pass) getDomainBadge > hue stays within the valid range
+(pass) getDomainBadge > is case-insensitive
+(pass) getDomainBadge > falls back to ? when there is no alphanumeric character [0.23ms]
+(pass) getDomainBadge > handles a hostname that starts with a digit
+(pass) getDomainBadge > yellow-green hues get a darker lightness than the rest [0.03ms]
+(pass) getDomainBadge > lightness is always in a sane range
+
+src/lib/composerRunState.test.ts:
+(pass) deriveComposerRunState > idle: nothing streaming [0.02ms]
+(pass) deriveComposerRunState > streaming in the current conversation [0.03ms]
+(pass) deriveComposerRunState > streaming in another conversation
+(pass) deriveComposerRunState > streaming with no current conversation counts as busy elsewhere
+
+src/lib/chatAdapter.test.ts:
+(pass) chatAdapter > maps conversation list into desktop chat conversations
+(pass) chatAdapter > maps message list into desktop messages
+(pass) chatAdapter > sends stream request with the expected shape and supports abort [1.44ms]
+(pass) chatAdapter > deletes and regenerates messages through the desktop adapter
+(pass) chatAdapter > edits user messages through the desktop adapter
+(pass) chatAdapter > auto titles conversations through the desktop adapter [0.37ms]
+(pass) chatAdapter > exposes the desktop chat contract [0.10ms]
+(pass) loading a Chat reply preserves persisted truncation and usage after refresh [0.11ms]
+(pass) chatAdapter appendSystemPrompt over the real server api > regenerate sends appendSystemPrompt in the body when provided [0.17ms]
+(pass) chatAdapter appendSystemPrompt over the real server api > regenerate omits appendSystemPrompt when absent or blank
+(pass) chatAdapter appendSystemPrompt over the real server api > edit sends appendSystemPrompt in the body when provided
+(pass) chatAdapter appendSystemPrompt over the real server api > edit omits appendSystemPrompt when absent
+
+src/lib/clockBoundary.test.ts:
+(pass) msUntilNextBoundary > waits out the rest of the current hour
+(pass) msUntilNextBoundary > waits out the rest of the current day
+(pass) msUntilNextBoundary > lands past the boundary, never exactly on it
+(pass) msUntilNextBoundary > never schedules a timer in the past or at zero [0.27ms]
+(pass) msUntilNextBoundary > the day boundary is the next midnight, not now-plus-24h [0.01ms]
+(pass) msUntilNextBoundary > an hour boundary at the end of the day rolls the date [0.02ms]
+
+src/lib/localPathReference.test.ts:
+(pass) exact standalone local paths preserve filenames and existing line ranges [0.43ms]
+(pass) commands, ordinary code, web links and remote file URIs stay ordinary code [0.08ms]
+
+src/lib/sidecarClient.test.ts:
+(pass) projectSidecarAgentEvent > projects only recognized structured output-limit codes
+(pass) projectSidecarAgentEvent > projects text events as execution_event:text
+(pass) projectSidecarAgentEvent > projects tool_start with toolName and toolInput
+(pass) projectSidecarAgentEvent > projects tool_start toolCallId into metadata
+(pass) projectSidecarAgentEvent > projects tool_result content
+(pass) projectSidecarAgentEvent > projects done
+(pass) projectSidecarAgentEvent > projects error with a fallback message
+(pass) projectSidecarAgentEvent > drops user_message and unknown event types
+(pass) SidecarClient > Chat truncation delivers its structured code once and removes the completed handler [1.12ms]
+(pass) SidecarClient > connect sends auth.handshake with the injected token
+(pass) SidecarClient > setWorkspace sends workspace.setCurrent and resolves with the canonical root
+(pass) SidecarClient > readFile sends fs.read with the path and resolves with the content
+(pass) SidecarClient > readFile surfaces the sidecar's error text for paths outside the workspace [0.17ms]
+(pass) SidecarClient > rejects the pending promise when the response comes back with ok:false [0.04ms]
+(pass) SidecarClient > runAgent routes sidecar agent.event messages to the run's onEvent handler [0.39ms]
+(pass) SidecarClient > runAgent error events invoke onError and surface an error event [0.10ms]
+(pass) SidecarClient > events for an unknown runId are dropped instead of crashing [0.09ms]
+(pass) SidecarClient > socket close rejects pending requests and surfaces a final error to active runs [0.06ms]
+
+src/lib/referenceLink.test.ts:
+(pass) classifyReferenceHref > http(s) urls are web [0.09ms]
+(pass) classifyReferenceHref > mailto / tel and unknown schemes go external [0.02ms]
+(pass) classifyReferenceHref > file:// is a file with the scheme stripped
+(pass) classifyReferenceHref > in-document anchors and empty hrefs are ignored
+(pass) classifyReferenceHref > bare domains become https web links [0.20ms]
+(pass) classifyReferenceHref > file-looking names are not mistaken for domains [0.10ms]
+(pass) classifyReferenceHref > real sample: href start line + text range → merged range [0.03ms]
+(pass) classifyReferenceHref > href range wins over the link text [0.02ms]
+(pass) classifyReferenceHref > text range only applies when the basename matches [0.03ms]
+(pass) classifyReferenceHref > supports :line, :line-end, :line:col and #L forms [0.04ms]
+(pass) classifyReferenceHref > an inverted range collapses to the start line
+(pass) classifyReferenceHref > absolute paths under the workspace root become relative
+(pass) classifyReferenceHref > absolute paths outside the workspace are passed through untouched
+(pass) classifyReferenceHref > leading ./ is dropped and percent-encoding decoded [0.10ms]
+(pass) classifyReferenceHref > falls back to the link text when react-markdown blanked the href [0.02ms]
+(pass) parseFileReference > returns the path alone when there is no range [0.01ms]
+(pass) referenceUrlTransform > keeps http, mailto and relative hrefs like the default [0.06ms]
+(pass) referenceUrlTransform > keeps bare file:line references and file:// urls the default would blank [0.03ms]
+(pass) referenceUrlTransform > still blanks javascript: / data: urls, even with a leading digit [0.02ms]
+(pass) referenceUrlTransform > keeps every line-range shape the classifier understands [0.02ms]
+(pass) languageForPath > maps extensions and special filenames [0.03ms]
+(pass) isTextLikePath > anything with a Prism language is text-like
+(pass) isTextLikePath > plain text formats and config files without a Prism language are text-like [0.07ms]
+(pass) isTextLikePath > images, documents, media, archives and unknown binaries are not [0.06ms]
+(pass) fileBasename > fileBasename [0.02ms]
+
+src/lib/sidecarPersistence.workbench.test.ts:
+(pass) workbench task completion requires an acknowledged save: true [0.66ms]
+(pass) workbench task completion requires an acknowledged save: false [0.11ms]
+
+src/lib/contextWindowPresentation.test.ts:
+(pass) unknown capacity remains a conservative budget, never a reported model window
+(pass) each discovered source keeps provenance and survives a manual-to-auto reset [0.11ms]
+(pass) built-in facts, input-only reports and malformed timestamps stay distinguishable [0.04ms]
+
+src/lib/contextWindowDraft.test.ts:
+(pass) context window editor > blank restores automatic resolution while valid integer capacities remain exact [0.08ms]
+(pass) context window editor > rejects out-of-range, fractional, non-finite and ambiguous formatted values
+(pass) context window editor > model list edits preserve separate overrides and explicit automatic resets [0.11ms]
+
+src/lib/userMessageLinks.test.ts:
+(pass) links next to Chinese text exclude sentence punctuation and preserve all source offsets [1.69ms]
+(pass) balanced URL parentheses, queries, hashes and adjacent links retain the actual destination [0.32ms]
+(pass) Unicode URLs are preserved and the pasted forum ID does not absorb glued Chinese prose [0.66ms]
+(pass) only absolute HTTP(S) URLs become links [0.06ms]
+
+src/lib/sidecarPersistence.test.ts:
+(pass) Agent result saving is independent from generation > fresh streaming drafts reach HTTP, preserve rendering, and retry only the immutable save [0.70ms]
+(pass) Agent result saving is independent from generation > failed fresh pairs survive nonempty LRU eviction in prompt-before-answer order [0.46ms]
+(pass) Agent result saving is independent from generation > failed persisted edits overlay stale database values after navigation [0.76ms]
+(pass) Agent result saving is independent from generation > deleting an unsaved user cancels pair retries and preserves only the other local message [0.49ms]
+(pass) Agent result saving is independent from generation > deleting an unsaved assistant cancels pair retries and preserves only the other local message [0.95ms]
+(pass) Agent result saving is independent from generation > ACK loss followed by deletion cannot recreate a committed reply [0.54ms]
+(pass) Agent result saving is independent from generation > deletion is gated during the HTTP save and becomes available after failure settles [0.31ms]
+(pass) Agent result saving is independent from generation > delete conversation and reset invalidate pending save actions [0.39ms]
+(pass) Agent result saving is independent from generation > late old ACK never releases a newer failed result [0.38ms]
+(pass) Agent result saving is independent from generation > an old save defers during a replacement run and resumes after a zero-output restoration [0.28ms]
+(pass) Agent result saving is independent from generation > stale reads that started before ACK reload after confirmed save [0.26ms]
+(pass) Agent result saving is independent from generation > user-only edits use an explicit stable new assistant ID [0.15ms]
+
+src/lib/scheduledRunLease.test.ts:
+(pass) a rejected heartbeat aborts the worker and clears future heartbeats [0.33ms]
+(pass) network failure retains only the original lease and then aborts [0.09ms]
+(pass) a live heartbeat extends the deadline and a late response cannot revive an expired lease
+
+src/lib/welcomeHero.test.ts:
+(pass) welcomeTitleKeyFor > covers the whole day with no gap and no overlap
+(pass) welcomeTitleKeyFor > no phrase has to stretch across more than a few hours [0.04ms]
+(pass) welcomeTitleKeyFor > boundaries land on the later phrase, not the earlier one [0.01ms]
+(pass) welcomeTitleKeyFor > every hour resolves to real copy in the dictionary
+(pass) welcomeTitleKeyFor > the line starts mid-sentence so the name can lead it [0.08ms]
+
+src/lib/contextTransport.test.ts:
+(pass) credentials resolve the selected model including encoded aliases instead of the default [0.35ms]
+(pass) channel model capacity survives the server to desktop mapping [0.21ms]
+(pass) capacity refresh uses the non-destructive endpoint without sending a model update [0.09ms]
+
+src/lib/agentStepKeys.test.ts:
+(pass) Agent process step identity > keeps identities across content/status updates and unrelated insertions [0.15ms]
+(pass) Agent process step identity > distinguishes tool start/result and duplicate legacy steps without changing earlier keys on append [0.05ms]
+
+src/lib/backgroundTaskRunner.test.ts:
+(pass) scheduled runner preserves independent ownership and workspace during collision [318.24ms]
+(pass) scheduled runner preserves independent ownership and workspace during timeout-before-ack [578.44ms]
+(pass) scheduled runner preserves independent ownership and workspace during error-before-ack [322.81ms]
+(pass) scheduled runner preserves independent ownership and workspace during workspace-failure [257.74ms]
+(pass) scheduled runner preserves independent ownership and workspace during project-missing [297.17ms]
+(pass) scheduled runner preserves independent ownership and workspace during project-workspace [240.26ms]
+(pass) scheduled runner preserves independent ownership and workspace during project-cold [214.64ms]
+(pass) scheduled runner preserves independent ownership and workspace during other-client [168.38ms]
+(pass) scheduled runner preserves independent ownership and workspace during save-failure [126.03ms]
+(pass) scheduled runner preserves independent ownership and workspace during lease-loss [152.43ms]
+(pass) scheduled runner preserves independent ownership and workspace during recipe-missing [173.31ms]
+(pass) scheduled runner preserves independent ownership and workspace during recipe-project [196.63ms]
+(pass) scheduled runner preserves independent ownership and workspace during recipe-moved [359.76ms]
+(pass) scheduled runner preserves independent ownership and workspace during recipe-model-changed [448.77ms]
+
+src/lib/textStreamSmoother.test.ts:
+(pass) createTextStreamSmoother > releases snapshot text in ordered chunks and flushes to the full target [1.89ms]
+(pass) createTextStreamSmoother > bypasses pacing for short text [0.03ms]
+(pass) createTextStreamSmoother > replaces the active target with a newer snapshot without duplicating prefixes [2.63ms]
+(pass) createTextStreamSmoother > flushNow emits the full target immediately [0.10ms]
+
+src/lib/previewWebview.test.ts:
+(pass) previewWebview helpers > label round-trips the tab id [0.15ms]
+(pass) previewWebview helpers > address input gets https:// when no scheme is given [0.22ms]
+(pass) previewWebview helpers > address input rejects empty, unparsable and non-http values [0.10ms]
+
+src/lib/mcpServerConfig.test.ts:
+(pass) normalizeMcpServerConfig > maps npx-typed command servers to stdio [0.14ms]
+(pass) normalizeMcpServerConfig > maps uvx-typed command servers to stdio [0.04ms]
+(pass) normalizeMcpServerConfig > maps any custom server type with a command to stdio [0.02ms]
+(pass) normalizeMcpServerConfig > keeps sse when declared in config, overriding the DB type
+(pass) normalizeMcpServerConfig > keeps http when declared in config
+(pass) normalizeMcpServerConfig > lowercases a declared SSE type [0.06ms]
+(pass) normalizeMcpServerConfig > keeps sse declared as the server type when config has no type
+(pass) normalizeMcpServerConfig > defaults to http when only a url is present
+(pass) normalizeMcpServerConfig > passes through env, headers and alwaysAllow untouched
+(pass) normalizeMcpServerConfig > returns a null config as-is without crashing
+(pass) normalizeMcpServerConfig > returns configs with neither command nor url as-is
+
+src/lib/sse.test.ts:
+(pass) Chat EOF without a terminal is an interruption, preserving received deltas (0) [2.35ms]
+(pass) Chat EOF without a terminal is an interruption, preserving received deltas (51) [2.41ms]
+(pass) Chat EOF without a terminal is an interruption, preserving received deltas (20) [0.10ms]
+(pass) Chat done remains a delivered terminal, not a transport interruption [0.34ms]
+(pass) Chat error remains a delivered terminal, not a transport interruption
+(pass) UTF8 split chunks and a final terminal frame without newline are preserved [1.83ms]
+(pass) the generic typed SSE reader accepts protocols without Chat terminal events [0.42ms]
+(pass) a callback failure cancels its source and releases the reader without replacing the error [0.41ms]
+(pass) a read failure releases the reader and preserves the original transport error [0.39ms]
+
+src/lib/agentRerunRoute.test.ts:
+(pass) resolveRerunRoute > chat rounds go to the server [0.17ms]
+(pass) resolveRerunRoute > agent rounds run in the sidecar
+(pass) resolveRerunRoute > an agent round without a channel never falls back to the server [0.02ms]
+(pass) resolveRerunRoute > an agent round without a usable model never falls back to the server [0.08ms]
+(pass) resolveRerunRoute > a missing channel is reported before a missing model, like the send path [0.10ms]
+
+src/lib/conversationHistory.test.ts:
+(pass) buildConversationHistory > keeps user / assistant turns in order [0.08ms]
+(pass) buildConversationHistory > drops empty messages and non-chat roles [0.14ms]
+
+src/lib/tauriBridge.previewSnapshot.test.ts:
+(pass) previewWebviewSnapshot > resolves null outside the Tauri runtime instead of rejecting
+
+src/lib/conversationTitle.test.ts:
+(pass) displayConversationTitle > strips the legacy MM-DD HH:mm suffix [0.14ms]
+(pass) displayConversationTitle > strips the suffix from the default title [0.08ms]
+(pass) displayConversationTitle > leaves clean titles untouched
+(pass) displayConversationTitle > does not strip a bare time that is not the full suffix
+(pass) displayConversationTitle > falls back to the original when stripping would empty the title
+(pass) isDefaultConversationTitle > matches the new bare default title
+(pass) isDefaultConversationTitle > matches the legacy timestamped default title
+(pass) isDefaultConversationTitle > does not match a real title
+(pass) isDefaultConversationTitle > does not match a title that merely starts with 新会话
+(pass) formatConversationTime > formats as YYYY-MM-DD HH:mm [0.14ms]
+(pass) formatMessageTime > formats as YYYY-MM-DD HH:mm
+(pass) formatMessageTime > handles midnight [0.20ms]
+(pass) formatMessageTime > handles afternoon time
+(pass) formatMessageTime > returns an empty string for an invalid date
+
+src/components/app/conversationGrouping.test.ts:
+(pass) groupByCreatedAt > splits on local midnight, not on elapsed hours [0.46ms]
+(pass) groupByCreatedAt > the same list regroups once the day turns [0.02ms]
+(pass) groupByCreatedAt > midnight exactly belongs to the new day
+(pass) groupByCreatedAt > empty groups are omitted, and the order is today then yesterday then earlier
+(pass) groupByCreatedAt > each group is sorted newest first
+(pass) partitionByProject > files conversations under their project and keeps the rest plain [0.87ms]
+(pass) partitionByProject > a conversation whose project is unknown falls back to the plain list [0.31ms]
+(pass) partitionByProject > project buckets are ordered by last activity, newest first [0.12ms]
+(pass) partitionByProject > every known project gets a bucket, even an empty one
+
+src/components/chat/DesktopMessageBubble.test.ts:
+(pass) resolveAgentLiveIndicator > shows the leading placeholder before any output exists [0.07ms]
+(pass) resolveAgentLiveIndicator > switches to the trailing indicator once text starts arriving [0.05ms]
+(pass) resolveAgentLiveIndicator > hides the indicator once steps are recorded (timeline takes over) [0.68ms]
+(pass) resolveAgentLiveIndicator > never returns both — leading and trailing are mutually exclusive [0.21ms]
+(pass) resolveAgentLiveIndicator > shows nothing once streaming has stopped
+(pass) resolveAgentLiveIndicator > shows nothing for chat-mode answers
+(pass) resolveBubbleEndLabel > persisted safe errors render outside both empty and partial replies [0.35ms]
+(pass) resolveBubbleEndLabel > a finished empty reply without a run says so instead of rendering blank
+(pass) resolveBubbleEndLabel > a stopped chat reply keeps its stopped state after a reload [0.05ms]
+(pass) resolveBubbleEndLabel > nothing for a finished reply, while streaming, with a run, or for users [0.04ms]
+(pass) resolveBubbleEndLabel > persisted Chat truncation stays visible for partial and empty replies [0.02ms]
+
+src/components/chat/DesktopMarkdownMessage.test.ts:
+(pass) getLanguageMeta > maps known aliases to a canonical prism syntax [1.10ms]
+(pass) getLanguageMeta > is case and whitespace insensitive [0.01ms]
+(pass) getLanguageMeta > falls back to a plain-text label when language is missing [0.01ms]
+(pass) getLanguageMeta > echoes unknown languages with a neutral accent [0.02ms]
+(pass) shouldHighlightEagerly > highlights a small block synchronously [0.26ms]
+(pass) shouldHighlightEagerly > defers a block with too many lines [0.03ms]
+(pass) shouldHighlightEagerly > defers a block whose single line is too long [1.91ms]
+(pass) shouldHighlightEagerly > highlights at the line-count boundary [0.22ms]
+(pass) shouldHighlightEagerly > defers just past the line-count boundary [0.03ms]
+(pass) shouldHighlightEagerly > highlights at the char-count boundary
+(pass) stripLeadingThematicBreak > removes a rule the answer opens with [0.21ms]
+(pass) stripLeadingThematicBreak > accepts the other thematic-break spellings
+(pass) stripLeadingThematicBreak > keeps rules that separate sections
+(pass) stripLeadingThematicBreak > leaves content that merely starts with a dash alone
+(pass) stripLeadingThematicBreak > leaves ordinary text untouched
+
+src/lib/genui/genui.test.ts:
+(pass) genUiKindOf > recognizes the two block languages [0.09ms]
+(pass) genUiKindOf > leaves ordinary code fences alone
+(pass) endsInsideOpenFence > is true while the last fence is unclosed [9.05ms]
+(pass) endsInsideOpenFence > is false once the fence closes [0.95ms]
+(pass) endsInsideOpenFence > needs a closing fence at least as long, without an info string [2.97ms]
+(pass) endsInsideOpenFence > tracks several blocks [12.16ms]
+(pass) processPartialHtml > drops scripts, complete or not [0.30ms]
+(pass) processPartialHtml > drops a half-written trailing tag [0.02ms]
+(pass) processPartialHtml > drops a trailing partial entity
+(pass) processPartialHtml > keeps only the body when there is one
+(pass) processPartialHtml > collects complete style blocks for the preview head
+(pass) sandbox documents > the trusted bootstrap contains no model markup and starts after the CSP [0.12ms]
+(pass) sandbox documents > the CSP denies everything not listed
+(pass) sandbox documents > the preview document allows no script at all
+(pass) sandbox documents > theme variables and color scheme are injected
+(pass) parseBridgeMessage > ignores foreign and malformed messages
+(pass) parseBridgeMessage > clamps heights [0.32ms]
+(pass) parseBridgeMessage > trims and caps follow-up text, and rejects empty text [0.02ms]
+(pass) parseBridgeMessage > opens only http(s) links [0.05ms]
+(pass) safeWebUrl > accepts http and https only
+(pass) block state > round-trips per key [0.48ms]
+(pass) block state > evicts the oldest entries beyond the cap [64.14ms]
+(pass) block state > ignores corrupt entries [0.32ms]
+(pass) genUi store > initial preference null resolves to Auto without rewriting storage [0.21ms]
+(pass) genUi store > initial preference true resolves to Auto without rewriting storage
+(pass) genUi store > initial preference false resolves to Text only without rewriting storage [0.09ms]
+(pass) genUi store > initial preference invalid resolves to Auto without rewriting storage [0.04ms]
+(pass) genUi store > initial preference FALSE resolves to Auto without rewriting storage
+(pass) genUi store > preserves an explicit text-only choice across reloads and later changes [0.51ms]
+(pass) genUi store > unavailable storage defaults to Auto and blocked writes keep the session choice [0.38ms]
+(pass) genUi store > composer requests carry a fresh nonce and clear only their own [0.17ms]
+(pass) genUi store > composer requests are capped for every source
+(pass) functions > list helpers [0.21ms]
+(pass) functions > payment matches the annuity formula and handles zero interest
+(pass) functions > format [43.03ms]
+
+src/lib/genui/blockState.test.ts:
+(pass) GenUI program state ownership > separates replacement programs and can restore a canceled retry's original program [1.03ms]
+(pass) GenUI program state ownership > publishes an isolated snapshot before the disk debounce and keeps storages independent [0.13ms]
+(pass) GenUI program state ownership > an old unmount flush cannot overwrite the latest synchronously published value [0.17ms]
+(pass) GenUI program state ownership > migrates every Agent step and program revision and aliases delayed old-id writes [1.15ms]
+(pass) GenUI program state ownership > migrates cache-only state and resolves chained aliases for pending saves [0.42ms]
+(pass) GenUI program state ownership > keeps immediate state available even with blocked storage [0.62ms]
+(pass) GenUI persistence bounds and recovery > caps the immediate cache independently of disk writes [6.00ms]
+(pass) GenUI persistence bounds and recovery > enforces UTF-8 entry bytes for multibyte text and rejects cyclic state [1.50ms]
+(pass) GenUI persistence bounds and recovery > evicts by aggregate byte budget before reaching the entry count [301.55ms]
+(pass) GenUI persistence bounds and recovery > evicts before writing the next entry at the count cap [125.26ms]
+(pass) GenUI persistence bounds and recovery > recovers from shared storage quota before reaching the count cap
+(pass) GenUI persistence bounds and recovery > disk eviction preserves another block's newer debounced memory snapshot
+(pass) GenUI persistence bounds and recovery > rolls back a new unindexed payload if writing its index is blocked
+(pass) GenUI persistence bounds and recovery > a corrupt index does not permanently disable subsequent saves
+
+src/lib/genui/fence.test.ts:
+(pass) Markdown streaming uses the renderer's CommonMark and GFM grammar > ordinary long text and short inline markers have no open fence [1.30ms]
+(pass) Markdown streaming uses the renderer's CommonMark and GFM grammar > tracks open and explicitly closed fences inside top level [5.73ms]
+(pass) Markdown streaming uses the renderer's CommonMark and GFM grammar > preserves ` fence character and length rules inside top level [2.80ms]
+(pass) Markdown streaming uses the renderer's CommonMark and GFM grammar > preserves ~ fence character and length rules inside top level [7.91ms]
+(pass) Markdown streaming uses the renderer's CommonMark and GFM grammar > tracks open and explicitly closed fences inside blockquote [0.96ms]
+(pass) Markdown streaming uses the renderer's CommonMark and GFM grammar > preserves ` fence character and length rules inside blockquote [0.80ms]
+(pass) Markdown streaming uses the renderer's CommonMark and GFM grammar > preserves ~ fence character and length rules inside blockquote [4.10ms]
+(pass) Markdown streaming uses the renderer's CommonMark and GFM grammar > tracks open and explicitly closed fences inside nested quote [0.22ms]
+(pass) Markdown streaming uses the renderer's CommonMark and GFM grammar > preserves ` fence character and length rules inside nested quote [3.21ms]
+(pass) Markdown streaming uses the renderer's CommonMark and GFM grammar > preserves ~ fence character and length rules inside nested quote [1.05ms]
+(pass) Markdown streaming uses the renderer's CommonMark and GFM grammar > tracks open and explicitly closed fences inside list [0.60ms]
+(pass) Markdown streaming uses the renderer's CommonMark and GFM grammar > preserves ` fence character and length rules inside list [4.72ms]
+(pass) Markdown streaming uses the renderer's CommonMark and GFM grammar > preserves ~ fence character and length rules inside list [0.96ms]
+(pass) Markdown streaming uses the renderer's CommonMark and GFM grammar > tracks open and explicitly closed fences inside numbered list [0.26ms]
+(pass) Markdown streaming uses the renderer's CommonMark and GFM grammar > preserves ` fence character and length rules inside numbered list [1.62ms]
+(pass) Markdown streaming uses the renderer's CommonMark and GFM grammar > preserves ~ fence character and length rules inside numbered list [0.75ms]
+(pass) Markdown streaming uses the renderer's CommonMark and GFM grammar > tracks open and explicitly closed fences inside list in quote [0.38ms]
+(pass) Markdown streaming uses the renderer's CommonMark and GFM grammar > preserves ` fence character and length rules inside list in quote [0.91ms]
+(pass) Markdown streaming uses the renderer's CommonMark and GFM grammar > preserves ~ fence character and length rules inside list in quote [0.75ms]
+(pass) Markdown streaming uses the renderer's CommonMark and GFM grammar > tracks a GFM footnote container [0.91ms]
+(pass) Markdown streaming uses the renderer's CommonMark and GFM grammar > does not execute an earlier block while the final nested block is still open [0.26ms]
+(pass) Markdown streaming uses the renderer's CommonMark and GFM grammar > a quote ending before the current tail ends its unclosed child fence [0.35ms]
+(pass) Markdown streaming uses the renderer's CommonMark and GFM grammar > code-looking lines in HTML and indented code blocks are not fences [4.22ms]
+(pass) Markdown streaming uses the renderer's CommonMark and GFM grammar > the fence character, length and info string obey CommonMark [0.82ms]
+
+src/lib/genui/promptMerge.reviews.test.ts:
+(pass) review JSON sessions keep their output contract when generative UI is enabled [0.17ms]
+
+src/lib/genui/mortgageExample.test.ts:
+(pass) complete local mortgage calculator example > parses completely with literal editable defaults and explicit local mode [1.22ms]
+(pass) complete local mortgage calculator example > 1000000/3.5%/30 years 等额本息 agrees with independent schedule [4.05ms]
+(pass) complete local mortgage calculator example > 1000000/3.5%/30 years 等额本金 agrees with independent schedule [0.92ms]
+(pass) complete local mortgage calculator example > 100000/0%/1 years 等额本息 agrees with independent schedule [0.03ms]
+(pass) complete local mortgage calculator example > 100000/0%/1 years 等额本金 agrees with independent schedule
+(pass) complete local mortgage calculator example > 100000/0%/7 years 等额本息 agrees with independent schedule [1.38ms]
+(pass) complete local mortgage calculator example > 100000/0%/7 years 等额本金 agrees with independent schedule
+(pass) complete local mortgage calculator example > 100000/3.5%/1 years 等额本息 agrees with independent schedule [1.55ms]
+(pass) complete local mortgage calculator example > 100000/3.5%/1 years 等额本金 agrees with independent schedule [0.17ms]
+(pass) complete local mortgage calculator example > 5000000/8%/40 years 等额本息 agrees with independent schedule [0.60ms]
+(pass) complete local mortgage calculator example > 5000000/8%/40 years 等额本金 agrees with independent schedule [0.62ms]
+(pass) complete local mortgage calculator example > default visible results distinguish fixed monthly and declining first/last payments [1.33ms]
+
+src/lib/i18n/agent.test.ts:
+(pass) agent i18n dictionary > action labels are all defined non-empty strings [3.20ms]
+(pass) agent i18n dictionary > panel label dictionary entries are non-empty strings [0.35ms]
+
+src/components/chat/genui/actionSemantics.test.ts:
+(pass) Button follow-up disclosure > recognizes the real evaluated assistant plan and its explicit context [1.54ms]
+(pass) Button follow-up disclosure > recognizes a follow-up anywhere in a mixed action plan [0.46ms]
+(pass) Button follow-up disclosure > keeps the actionless and legacy implicit follow-ups visible [0.15ms]
+(pass) Button follow-up disclosure > local state, reset, clipboard and links do not offer a draft [0.25ms]
+(pass) Button follow-up disclosure > a button label cannot change the action's meaning [0.20ms]
+(pass) Button follow-up disclosure > empty or malformed plans never invent an assistant step
+(pass) Button follow-up disclosure > a falsey steps field still uses the runtime's fallback follow-up
+
+src/components/chat/genui/prompt.test.ts:
+(pass) prompt examples > the parser reports components the library does not have [1.18ms]
+(pass) prompt examples > example 1 parses cleanly against the library [1.21ms]
+(pass) prompt examples > example 1 gives every $variable a literal default [0.23ms]
+(pass) prompt examples > example 1 only calls functions that exist [0.28ms]
+(pass) prompt examples > example 2 parses cleanly against the library [0.36ms]
+(pass) prompt examples > example 2 gives every $variable a literal default
+(pass) prompt examples > example 2 only calls functions that exist [0.01ms]
+(pass) local interactions > an example switches a mode with a SegmentedControl bound to a declared $variable [0.04ms]
+(pass) local interactions > the mode switch never goes through @ToAssistant [0.21ms]
+(pass) local interactions > the parser keeps computed $variable defaults as expressions [3.36ms]
+(pass) local interactions > the rules forbid computed $variables and @ToAssistant for local switches [0.17ms]
+(pass) computed $variable repair > the real model output has computed $variables before repair [0.52ms]
+(pass) computed $variable repair > after repair no $variable defaults to an expression and the program is clean [5.31ms]
+(pass) computed $variable repair > derived values compute for both modes [13.85ms]
+(pass) computed $variable repair > leaves strings and comments alone [0.14ms]
+(pass) computed $variable repair > does not touch longer names sharing a prefix
+(pass) computed $variable repair > renames around a plain name that is already declared [0.07ms]
+(pass) computed $variable repair > never renames to a literal keyword [0.03ms]
+(pass) computed $variable repair > two computed names that lower-case alike get distinct names
+(pass) computed $variable repair > repairs only complete blocks [1.57ms]
+(pass) buildGenUiSystemPrompt > replaces the whole-response-is-code framing with inline blocks [0.04ms]
+(pass) buildGenUiSystemPrompt > lists every component and library function [0.08ms]
+(pass) buildGenUiSystemPrompt > Auto honors explicit text/source requests and requires real Agent work
+(pass) response format policy > Text only explicitly forbids interactive fences while permitting source and tools [0.14ms]
+(pass) response format policy > Text only uses the same Agent and Chat system-prompt transports [0.16ms]
+(pass) response format policy > a retained policy reader uses the live preference after either change
+(pass) withGenUiPrompt > leaves the prompt untouched without a policy section [0.18ms]
+(pass) withGenUiPrompt > appends the section after the base prompt [0.01ms]
+(pass) withGenUiPrompt > uses the section alone without a base prompt
+(pass) withGenUiMessages > appends to the first system message
+(pass) withGenUiMessages > adds a system message when there is none [0.09ms]
+(pass) withGenUiMessages > returns the same array without a policy section
+(pass) iconFor > resolves canonical names and older aliases [0.14ms]
+(pass) iconFor > returns null for unknown names and non-icon exports
+(pass) numberText > prints strings unchanged and formats finite numbers [0.41ms]
+(pass) numberText > renders non-scalars empty instead of [object Object] [0.08ms]
+(pass) prompt size > stays under the server's appendSystemPrompt cap [0.10ms]
+(pass) source-based computed state and sequence roots > literal objects resembling any AST kind remain editable state [0.43ms]
+(pass) source-based computed state and sequence roots > expressions nested inside literal containers are still repaired [0.22ms]
+(pass) source-based computed state and sequence roots > named root sequences preserve literal object keys and member references [2.01ms]
+(pass) source-based computed state and sequence roots > root sequences are wrapped in a component without shadowing existing names [1.04ms]
+(pass) reviewable follow-up context > preserves the whole message and context when they fit the shared limit [0.21ms]
+(pass) reviewable follow-up context > preserves explicit context, including false and zero, in the bounded draft [0.44ms]
+(pass) reviewable follow-up context > an action only queues its explicit context for review, without unrelated form state [0.31ms]
+
+src/components/chat/genui/charts.test.ts:
+(pass) finite chart domains > ticks cover -42..86 without overflowing or underflowing [1.25ms]
+(pass) finite chart domains > ticks cover -1e+308..1e+308 without overflowing or underflowing
+(pass) finite chart domains > ticks cover 0..1.7976931348623157e+308 without overflowing or underflowing [2.37ms]
+(pass) finite chart domains > ticks cover -1.7976931348623157e+308..0 without overflowing or underflowing [0.04ms]
+(pass) finite chart domains > ticks cover 0..5e-324 without overflowing or underflowing
+(pass) finite chart domains > ticks cover -5e-324..5e-324 without overflowing or underflowing
+(pass) finite chart domains > a zero-only chart has a finite baseline [0.11ms]
+
+ 618 pass
+ 0 fail
+ 2448 expect() calls
+Ran 618 tests across 62 files. [6.22s]

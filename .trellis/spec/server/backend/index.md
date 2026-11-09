@@ -19,6 +19,7 @@ This directory contains guidelines for backend development. Fill in each file wi
 | [Error Handling](./error-handling.md) | Error types, handling strategies | To fill |
 | [Quality Guidelines](./quality-guidelines.md) | Code standards; isolated encryption-backed test fixtures | Partial |
 | [Logging Guidelines](./logging-guidelines.md) | Structured logging, log levels | To fill |
+| [Decision Assistance](./decision-assistance.md) | OpenRouter Jev protocol, budget and application boundaries | Complete |
 | [Chat Streaming](./chat-streaming.md) | Partial output, terminal failures and persistence before SSE completion | Complete |
 
 ---

@@ -1,0 +1,21 @@
+[33mThe CJS build of Vite's Node API is deprecated. See https://vite.dev/guide/troubleshooting.html#vite-cjs-node-api-deprecated for more details.[39m
+Browserslist: browsers data (caniuse-lite) is 9 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+PASS real CSV import validates UTF-8, previews quoted data and persists the original in SQLite
+PASS batch preparation uses the real conversation handoff in Chat mode without invoking a model
+PASS real API rejects unfinished/wrong-batch output and preserves manual edits when applying the batch
+PASS native save dispatch exports complete original bytes, formula-safe labeled CSV and an evidence report
+PASS reload retains datasets/results and a stale manual write preserves its draft on conflict
+PASS a successful write settles a superseded list spinner and a late refresh cannot lock the workspace
+PASS note checks display support/review signals, reveal the exact minimal payload and reuse a saved result without another call
+PASS historical v1 records remain readable without triggering a paid upgrade
+PASS pure recommendations show not-applicable and never display a misleading support percentage
+PASS uncertain factual existence hides even a 99-percent support answer
+PASS a verification response arriving after navigation cannot install an old dialog or change the current view
+PASS provider errors and timeouts never become negative answers and intermediate probabilities remain uncertain
+PASS light desktop and narrow dark layouts retain the controls without document overflow
+PASS a deleted source reports a recoverable error while the saved analysis stays available
+PASS a late prepare response cannot navigate or fill a draft after the user leaves
+PASS refresh recovers from a remotely deleted selection and discovers another client's dataset
+Evidence: /var/folders/2b/0vr77k3j1yv2m83zxdkpx48c0000gn/T/openhorn-reviews-evidence

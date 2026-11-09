@@ -1,0 +1,73 @@
+{
+  "baseCommit": "70b613ec7f63a3aed08abc9e481fe2eb62f8e04b",
+  "scope": "precise Jev follow-up on main; excludes unrelated dirty worktree content",
+  "unitTests": {
+    "server": {
+      "pass": 464,
+      "fail": 1,
+      "initialRunBeforePreloadChange": {
+        "pass": 465,
+        "fail": 0
+      }
+    },
+    "desktop": {
+      "pass": 618,
+      "fail": 0
+    },
+    "shared": {
+      "pass": 67,
+      "fail": 0
+    },
+    "newDesktopSkillTest": {
+      "pass": 1,
+      "fail": 0
+    },
+    "focusedServerJev": {
+      "pass": 56,
+      "fail": 0
+    }
+  },
+  "baselineComparison": {
+    "file": "messageService.mutation-ownership.test.ts",
+    "baseline": {
+      "pass": 11,
+      "fail": 2
+    },
+    "candidate": {
+      "pass": 11,
+      "fail": 2
+    },
+    "reason": "5000ms timeout in edit/retry completion tests; reproduced on unchanged 70b613e"
+  },
+  "checks": {
+    "typecheck": "passed (server/desktop fresh; unchanged packages cached)",
+    "wholeRepositoryBiome": "passed",
+    "jevBrowser": 7,
+    "reviewBrowser": 16
+  },
+  "paidCallsDuringShipping": 0,
+  "limitations": [
+    "Server suite is not consistently green; baseline edit/retry timeouts are retained and not fixed by this scoped ship.",
+    "Historical integration evidence concerns the full working tree, not only this candidate.",
+    "No Sidecar rebuild, native restart, container deployment or new paid probe performed during shipping."
+  ],
+  "sourceSha256": {
+    "apps/desktop/src/components/settings/JevSettings.tsx": "e07a5c7dc4ee5329d0b9dafa90eab1d69dde9e6696763c68c909f0ab94ae1e29",
+    "apps/server/src/services/liveCapabilities.ts": "24f90252ff386003c4f7c59f18f07f8ae5cd6e1ff5e03a22616d80a4fe46b4ba",
+    "apps/server/src/services/searchService.ts": "15e5b9232e68ccf5b1dbac96dafff23569568c17ea4c0d56e85ae8b5f48c9d04",
+    "apps/server/src/services/ragService.ts": "d793bf2c41b3d8a8df69d9dc50fc02c6a793c26c7aff133d0e0a83e891d0b3a2",
+    "apps/server/src/services/ragService.integrity.test.ts": "9786a18a5d40eb39f526e64c92f1e0db0ed9356580ad503be799f9540eb3de80",
+    "apps/server/src/services/messageService.ts": "fbd12481250b8f7b09b276f3b433e117ffa86efbd4e67eed8aae6067e8a0ed35",
+    "apps/server/src/services/welcomeSuggestionService.ts": "20adb8cc2df19aefc7d3aa85bd92e91367e6307c6c77762337d64f5d9f739335",
+    "README.md": "faab4a11f60b82c626faf20548b9a147587946b81d1f43beb2edcae2f735e71f",
+    "docker-compose.yml": "0c8ad8056187c5a77b4f36c48fbcec7ac093162da65eec1d46c981903219f83c",
+    "apps/server/src/routes/reviewWorkspaces.browser-fixture.ts": "9565cc820cfb172b6d00639879a348fa2a0eab59195a21c7abab3834f14329c3",
+    "apps/desktop/scripts/jev-integration.browser.mjs": "f3afe6d9aa2b0029cc2eab91b5986926be78c075841179e3758b4916949cd5c0",
+    "apps/desktop/tests/jev-integration.html": "89856a9206f19aff4a246452fce5e315a981cf488984f3d86600568217595dd4",
+    "apps/desktop/tests/jev-integration.tsx": "9332d4bbc50f1ee84f930711a5e52f6e442fb948172e0edc8dfc43090e120b6a",
+    "apps/server/src/test-setup.ts": "8f29b0dc18a800801da49f29889e1272795cf76ba83846206886e46f924a8e18",
+    "apps/server/src/scripts/jevSmoke.ts": "cac71e9e0678765fea001df66ee65bb359a975dec7c9b4a9ce09a70729832eb4",
+    "apps/desktop/src/lib/sidecarRunSupport.skills.test.ts": "9056de20a63ada9b478a04f0e08282807f0c15a9ba7e22634d7210477da534ae"
+  },
+  "implementationCommit": "1700a28668df99fca358bc12b5d0625b74a33b18"
+}

@@ -1,0 +1,26 @@
+bun test v1.3.10 (30e609e0)
+
+src/services/messageService.mutation-ownership.test.ts:
+(pass) late retry completion cannot overwrite a newer retry [38.62ms]
+(fail) late retry completion cannot overwrite a newer edit [5001.04ms]
+  ^ this test timed out after 5000ms.
+(fail) late edit completion cannot overwrite a newer retry [5001.77ms]
+  ^ this test timed out after 5000ms.
+(pass) a stopped retry's delayed partial save cannot overwrite its newer retry [28.17ms]
+(pass) delayed edit preparation cannot reclaim a newer retry [14.38ms]
+(pass) delayed edit preparation cannot reclaim a newer retry on budget failure [10.69ms]
+(pass) deleting an edited tail question during preparation creates no reply or provider request [8.73ms]
+(pass) deleting an edited tail question removes its pending reserved reply [12.09ms]
+(pass) an unauthorized retry cannot cancel another user's active reply [8.89ms]
+(pass) deleting an active retry's reply cannot recreate its row or search entry [7.31ms]
+(pass) deleting a tail question preserves its reserved row after it becomes an Agent reply [16.28ms]
+(pass) a committed conversation deletion aborts its retry and suppresses late deltas [10.49ms]
+(pass) a rolled-back conversation deletion does not abort its valid retry [10.82ms]
+
+ 11 pass
+ 2 fail
+ 43 expect() calls
+Ran 13 tests across 1 file. [11.88s]
+undefined
+/private/tmp/openhorn-ship-ovv_tjfr/jev-baseline/apps/server:
+ ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command failed with exit code 1: bun test src/services/messageService.mutation-ownership.test.ts

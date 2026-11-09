@@ -1,0 +1,643 @@
+bun test v1.3.10 (30e609e0)
+
+src/utils.crypto.test.ts:
+(pass) encrypt / decrypt > round-trips a value [148.50ms]
+(pass) encrypt / decrypt > new ciphertexts carry the v2 marker [0.27ms]
+(pass) encrypt / decrypt > the same plaintext encrypts differently each time (random IV) [0.10ms]
+(pass) encrypt / decrypt > round-trips unicode and long values [0.08ms]
+(pass) encrypt / decrypt > still decrypts legacy v1 ciphertexts [0.50ms]
+(pass) encrypt / decrypt > v1 and v2 of the same plaintext both decrypt to it [0.06ms]
+(pass) encrypt / decrypt > a tampered auth tag is rejected
+(pass) encrypt / decrypt > a malformed value is rejected [0.65ms]
+(pass) encrypt / decrypt > a different secret cannot decrypt [85.39ms]
+(pass) encrypt / decrypt > missing ENCRYPTION_KEY is reported [0.31ms]
+(pass) isLegacyCiphertext > recognises the 3-part v1 format [0.31ms]
+(pass) isLegacyCiphertext > does not flag v2 [123.86ms]
+
+src/agent-adapters.test.ts:
+(pass) OpenAIAdapter chat aborts slow requests with a timeout [12.90ms]
+(pass) OpenAIAdapter chatStream aborts when streamed output goes idle [18.61ms]
+(pass) OpenAIAdapter chatStream parses SSE streams that start with comment lines [0.56ms]
+(pass) OpenAIAdapter chatStream aborts when the first streamed chunk never arrives [15.56ms]
+(pass) resolveToolCallingStreamFirstTokenTimeoutMs uses a longer default for agent tool calling [0.08ms]
+(pass) OpenAIAdapter runToolCallingTurn parses structured tool calls [4.09ms]
+(pass) OpenAIAdapter runToolCallingTurn canonicalizes tool aliases against declared tools [0.42ms]
+(pass) OpenAIAdapter runToolCallingTurn returns final text when no tool call exists [0.18ms]
+(pass) AnthropicAdapter runToolCallingTurn parses tool_use blocks [2.02ms]
+(pass) AnthropicAdapter runToolCallingTurn returns final text [0.54ms]
+(pass) AnthropicAdapter runToolCallingTurn retries with auto tool choice when forced mode is rejected [1.06ms]
+
+src/utils/sse.error-shape.test.ts:
+(pass) createSseStream > emits error events with both message and content for compatibility [0.86ms]
+
+src/db/bootstrap.migration-safety.test.ts:
+(pass) resolveMigrationBackupTarget > file database → <db dir>/backups [0.15ms]
+(pass) resolveMigrationBackupTarget > in-memory and remote databases are not backed up [0.34ms]
+[db] Backed up the database to /var/folders/2b/0vr77k3j1yv2m83zxdkpx48c0000gn/T/openhorn-migration-safety-xwW3xH/rotation/openhorn-2026-11-09T11-31-40-900Z-v2.db before test.
+[db] Backed up the database to /var/folders/2b/0vr77k3j1yv2m83zxdkpx48c0000gn/T/openhorn-migration-safety-xwW3xH/rotation/openhorn-2026-11-09T11-31-40-912Z-v2.db before test.
+[db] Backed up the database to /var/folders/2b/0vr77k3j1yv2m83zxdkpx48c0000gn/T/openhorn-migration-safety-xwW3xH/rotation/openhorn-2026-11-09T11-31-40-925Z-v2.db before test.
+(pass) createMigrationBackup > writes a readable snapshot and keeps only the newest `keep` [39.32ms]
+(pass) createMigrationBackup > throws when the snapshot cannot be written [2.71ms]
+[db] Backed up the database to /var/folders/2b/0vr77k3j1yv2m83zxdkpx48c0000gn/T/openhorn-migration-safety-xwW3xH/pending/openhorn-2026-11-09T11-31-40-944Z-v1.db before one-time migrations (backfill-agent-reply-content).
+(pass) one-time migrations and backups > pending migrations are backed up first, then recorded [9.62ms]
+(pass) one-time migrations and backups > nothing pending: no backup [10.73ms]
+(pass) one-time migrations and backups > a failed backup blocks the migrations [2.87ms]
+[db] Backed up the database to /var/folders/2b/0vr77k3j1yv2m83zxdkpx48c0000gn/T/openhorn-migration-safety-xwW3xH/handover/openhorn-2026-11-09T11-31-40-967Z-v1.db before one-time migrations (backfill-agent-reply-content).
+(pass) one-time migrations and backups > user_version from before schema_migrations is carried over once [15.86ms]
+(pass) one-time migrations and backups > a user_version OpenHorn never wrote is ignored [4.67ms]
+[db] Backed up the database to /var/folders/2b/0vr77k3j1yv2m83zxdkpx48c0000gn/T/openhorn-migration-safety-xwW3xH/july-users/openhorn-2026-11-09T11-31-41-017Z-v2.db before making users.password_hash nullable.
+(pass) users table from an old schema > July 2026 layout boots and keeps every value under its own column [58.55ms]
+[db] Backed up the database to /var/folders/2b/0vr77k3j1yv2m83zxdkpx48c0000gn/T/openhorn-migration-safety-xwW3xH/stranded/openhorn-2026-11-09T11-31-41-059Z-v2.db before restoring users from an interrupted users rebuild.
+(pass) users table from an old schema > users stranded in users__ph_mig by the old untransacted rebuild are restored [31.53ms]
+[db] Backed up the database to /var/folders/2b/0vr77k3j1yv2m83zxdkpx48c0000gn/T/openhorn-migration-safety-xwW3xH/leftover/openhorn-2026-11-09T11-31-41-081Z-v2.db before restoring users from an interrupted users rebuild.
+(pass) users table from an old schema > a leftover copy whose users are all back is dropped only after a backup [14.81ms]
+
+src/db/bootstrap.indexes.test.ts:
+(pass) isCreateIndexStatement > matches a plain CREATE INDEX
+(pass) isCreateIndexStatement > matches CREATE UNIQUE INDEX [0.03ms]
+(pass) isCreateIndexStatement > matches despite leading whitespace and lowercase [0.02ms]
+(pass) isCreateIndexStatement > does not match CREATE TABLE [0.01ms]
+(pass) isCreateIndexStatement > does not match a table named like an index
+(pass) bootstrapDatabase leaves the core indexes in place > key indexes exist after bootstrap [6.62ms]
+
+src/db/schema-import.test.ts:
+(pass) server imports schema from db package [0.58ms]
+
+src/db/bootstrap.import-columns.test.ts:
+(pass) bootstrapDatabase import-center schema is idempotent > imported_from / imported_at and import_records survive a second bootstrap [13.99ms]
+
+src/db/bootstrap.context-window.test.ts:
+(pass) legacy channel models acquire nullable context fields without changing existing records [295.29ms]
+
+src/db/settleServerAgentTasks.test.ts:
+(pass) settles stuck server agent turns without touching reply text [28.93ms]
+(pass) one-time migrations run once per database, tracked in schema_migrations [11.73ms]
+
+src/db/bootstrap.delete-semantics.test.ts:
+(pass) bootstrapDatabase applies delete semantics to key foreign keys [11.55ms]
+
+src/db/testDatabaseGuard.test.ts:
+(pass) missing preload/default DB import fails before creating or opening any SQLite file [100.20ms]
+(pass) relative, normalized, query and percent-encoded file aliases cannot bypass the import guard [649.53ms]
+(pass) symlinked existing files, hard links, and a missing file under a symlinked directory are rejected [390.17ms]
+(pass) an explicit isolated temp DB works without preload or OPENHORN_TEST_DATABASE_URL [87.22ms]
+(pass) production imports keep the existing default DB behavior [89.53ms]
+(pass) the pure guard keeps memory/remote URLs and non-test runtime behavior unchanged [3.33ms]
+
+src/routes/channels.context-credentials.test.ts:
+(pass) saved ACP model credentials return refreshed limits on the first request [160.96ms]
+(pass) live-only ACP credentials use exact catalog limits without inheriting saved overrides [12.27ms]
+(pass) credentials reject disabled saved ACP models, unknown HTTP models and foreign channels [11.84ms]
+
+src/routes/reviewWorkspaces.test.ts:
+(pass) review workspace HTTP/service and backup boundaries hold in an isolated child [939.28ms]
+
+src/routes/artifacts.test.ts:
+(pass) artifact HTTP endpoints preserve original text, immutable history and structured failures [200.14ms]
+
+src/routes/scheduledTasks.test.ts:
+(pass) manual task routes enqueue real pending work and fence owner completion [267.85ms]
+
+src/routes/messages.append-system-prompt.test.ts:
+(pass) regenerate rejects an over-long appendSystemPrompt with 400 [2.47ms]
+(pass) edit rejects an over-long appendSystemPrompt with 400 [2.30ms]
+(pass) regenerate forwards a valid appendSystemPrompt and ignores non-strings [2.08ms]
+(pass) edit forwards a valid appendSystemPrompt and ignores blank values [1.85ms]
+
+src/routes/recipes.test.ts:
+(pass) recipe routes return versioned ISO DTOs and prepare/schedule without running models [320.52ms]
+
+src/services/messageService.context-budget.test.ts:
+(pass) a current request exceeding the Chat budget is explicitly rejected [1.73ms]
+(pass) the real Chat builder keeps a current question after omitting an oversized answer [0.96ms]
+(pass) a previous unanswered user message cannot consume the current question's reservation [0.18ms]
+(pass) coarse history limits preserve a system section and the latest user [2.11ms]
+(pass) a coarse cap cannot remove a current user before many empty assistant placeholders [1.01ms]
+(pass) large history stops attachment expansion after the first non-fitting whole turn [10.96ms]
+
+src/services/recipeService.test.ts:
+(pass) recipe CRUD is user-scoped with immutable historical versions and compare-and-swap [18.92ms]
+(pass) historical prepare uses literal frozen inputs and creates a fresh project Agent conversation [21.54ms]
+(pass) schedules preserve project and full version snapshot, reject unsupported formats and missing workspace [21.90ms]
+(pass) concurrent updates admit one immutable revision and missing projects reject historical execution [8.97ms]
+(pass) selected non-global channel resolves its strict default pair for prepare and frozen scheduling [20.60ms]
+(pass) explicit models that become disabled are rejected rather than silently switching to the global channel [16.68ms]
+(pass) recipes using the global default bind a complete channel/model pair for execution [17.63ms]
+(pass) unconfigured global defaults reject before creating recipe execution state [6.10ms]
+(pass) schedule options keep recipe identity immutable and retries/double submissions create one task [14.55ms]
+(pass) restored channels without configured credentials reject execution before creating state [14.35ms]
+
+src/services/conversationService.delete.test.ts:
+(pass) deleteConversation clears related agent and attachment records before deleting the conversation [32.63ms]
+
+src/services/messageService.usage.test.ts:
+(pass) a freshly inserted agent round stores the token counts [11.12ms]
+(pass) a run that reported nothing stores null, not zeros [8.31ms]
+(pass) regenerating in place replaces the previous turn's counts [13.39ms]
+
+src/services/messageService.agent-mode.test.ts:
+(pass) streamMessage refuses agent mode (explicit or omitted) before writing anything [5.90ms]
+(pass) sendMessage refuses agent mode before writing anything [5.08ms]
+(pass) regenerating an agent reply is refused and leaves the round untouched [8.01ms]
+(pass) regenerate of someone else's agent reply reports the conversation, not the mode [5.49ms]
+(pass) editing an agent round is refused, with or without a reply after it [10.97ms]
+(pass) sidecar sync with only the user id updates it in place and inserts the reply [7.17ms]
+
+src/services/messageService.lifecycle.test.ts:
+(pass) older SSE Chat completion preserves a newer Agent request mode [31.04ms]
+(pass) older SSE Chat failure preserves a newer Agent request mode [15.09ms]
+(pass) SSE Chat request-start mode update respects a newer inserted user even at equal timestamps [10.32ms]
+(pass) empty sidecar replacement removes old full-text matches while retaining the empty reply [10.98ms]
+(pass) sidecar completion rejects foreign identity without changing primary or search records [16.24ms]
+(pass) sidecar completion rejects same-owner identity without changing primary or search records [14.57ms]
+(pass) sidecar completion rejects user-role identity without changing primary or search records [15.10ms]
+(pass) sidecar completion rejects missing identity without changing primary or search records [15.58ms]
+(pass) search ignores mismatched index and message conversation identities [11.55ms]
+(pass) non-streaming Chat preserves reported token usage [11.61ms]
+(pass) non-streaming Chat preserves reported zero token usage [12.32ms]
+(pass) non-streaming Chat preserves unreported token usage [14.41ms]
+(pass) non-streaming Chat saves its mode when the prior mode was Agent [13.08ms]
+(pass) non-streaming Chat saves its mode without overwriting a newer request [15.21ms]
+(pass) sidecar Chat completion rejects agent-mode assistant rows [11.64ms]
+(pass) sidecar Chat completion rejects agent-run assistant rows [9.97ms]
+(pass) sidecar Chat completion accepts legacy-chat assistant rows [12.61ms]
+
+src/services/mcpService.test.ts:
+(pass) mcp: user isolation (account-level) [10.69ms]
+
+src/services/decisionClient.test.ts:
+(pass) decisions share in-flight requests and cache successful exact inputs per user/feature [1.12ms]
+(pass) disabled, missing keys and exhausted budgets do not contact OpenRouter [0.14ms]
+(pass) API failures and malformed answers remain errors and cool down across different payloads [0.62ms]
+(pass) timeout aborts HTTP and leaves the conservative billing reservation unsettled [6.13ms]
+(pass) disabling a feature also prevents previously cached answers from being served [0.37ms]
+(pass) decision state redacts supplied credentials while the fixed HTTP auth header remains separate
+
+src/services/messageService.agent-content.test.ts:
+(pass) sidecar sync derives content from the run's text steps [11.68ms]
+(pass) sidecar sync stores empty content for a run without text steps (no fallback) [5.73ms]
+(pass) backfill brings every legacy agent row in line with its run, once [23.55ms]
+
+src/services/ragService.integrity.test.ts:
+(pass) RAG excludes deleted sources and skips pointless embedding when no live source remains [7.35ms]
+(pass) RAG result visibility requires the live attachment owner and exact conversation [7.22ms]
+(pass) deleting a source while vector search awaits prevents its late result entering the prompt [5.54ms]
+(pass) deletion during embedding prevents late indexing from leaving source chunks [6.07ms]
+(pass) deletion during add prevents late indexing from leaving source chunks [7.61ms]
+(pass) indexing missing or wrongly owned source IDs performs no embedding or vector write [5.08ms]
+(pass) an owned live source indexes and retrieves normally while an empty store stays cheap [5.84ms]
+(pass) deleting a multi-batch source stops later embedding batches [6.11ms]
+(pass) deleting a source during the semantic rerank await prevents stale context injection [6.43ms]
+(pass) semantic rerank evaluates the same bounded document excerpt the answering model sees [6.38ms]
+
+src/services/liveCapabilities.test.ts:
+(pass) data-only review batches cannot invoke weather, web, classifier or workspace enrichment [0.20ms]
+(pass) routeLiveQuery classifies local time questions [0.26ms]
+(pass) routeLiveQuery classifies weather questions [0.12ms]
+(pass) routeLiveQuery classifies recent-news questions
+(pass) routeLiveQuery classifies research-heavy requests separately
+(pass) routeLiveQuery leaves non-live prompts as direct model
+(pass) getWebSearchPolicy blocks identity questions from web search
+(pass) getWebSearchPolicy forces web search for explicit lookup prompts
+(pass) getWebSearchPolicy still forces web search when lookup prompts also request a summary
+(pass) getWebSearchPolicy forces research for recent comparison prompts
+(pass) getWebSearchPolicy treats current interview-practice comparisons as research
+
+src/services/messageService.sidecar-mode.test.ts:
+(pass) sidecar new completed persists the latest mode and conversation activity [7.89ms]
+(pass) sidecar new failed persists the latest mode and conversation activity [6.01ms]
+(pass) sidecar new stopped persists the latest mode and conversation activity [5.43ms]
+(pass) sidecar user-only completed persists the latest mode and conversation activity [7.07ms]
+(pass) sidecar user-only failed persists the latest mode and conversation activity [7.37ms]
+(pass) sidecar user-only stopped persists the latest mode and conversation activity [7.98ms]
+(pass) sidecar pair completed persists the latest mode and conversation activity [7.59ms]
+(pass) sidecar pair failed persists the latest mode and conversation activity [7.88ms]
+(pass) sidecar pair stopped persists the latest mode and conversation activity [8.19ms]
+(pass) an explicit Chat sync preserves Chat as the last executed mode [6.90ms]
+(pass) retrying an older Agent round preserves the later Chat mode (reply=false) [9.94ms]
+(pass) retrying an older Agent round preserves the later Chat mode (reply=true) [8.76ms]
+(pass) a newer Chat inserted during Agent sync wins the atomic mode update [9.40ms]
+(pass) a late Chat completion preserves the mode of a newer Agent request [9.33ms]
+(pass) completion of the latest prepared Chat keeps its saved Chat mode [11.86ms]
+(pass) Chat preparation preserves a newer Agent accepted between its user and assistant writes [9.10ms]
+(pass) foreign conversation sync rejects before changing messages or conversation metadata [4.53ms]
+
+src/services/projectService.test.ts:
+(pass) createProject dedupes on rootPath and listProjects orders starred first then by name [7.08ms]
+(pass) updateProject only touches the caller's own project [4.80ms]
+(pass) deleteProject deletes the conversations filed under it [13.09ms]
+(pass) deleteProject removes every filed conversation's rows and leaves the plain one alone [17.85ms]
+(pass) deleteProject is atomic: a failure midway leaves every conversation and the project in place [21.74ms]
+(pass) blank-conversation reuse is scoped per project [9.12ms]
+(pass) updateConversation moves a conversation between projects and back to the plain list [6.92ms]
+
+src/services/messageService.failure-state.test.ts:
+(pass) over-budget prepare retains safe termination metadata without calling completion [10.62ms]
+(pass) over-budget send retains safe termination metadata without calling completion [15.33ms]
+(pass) over-budget stream retains safe termination metadata without calling completion [15.47ms]
+(pass) over-budget edit retains safe termination metadata without calling completion [17.26ms]
+(pass) over-budget edit-tail retains safe termination metadata without calling completion [16.95ms]
+(pass) over-budget retry retains safe termination metadata without calling completion [15.53ms]
+(pass) HTTP prepare failure returns saved pair identity and a safe code, without provider credentials [13.65ms]
+(pass) provider failure keeps exact partial Markdown and safe state across nonstream [8.83ms]
+(pass) provider failure keeps exact partial Markdown and safe state across stream [9.76ms]
+(pass) provider failure keeps exact partial Markdown and safe state across edit [12.11ms]
+(pass) provider failure keeps exact partial Markdown and safe state across retry [7.54ms]
+(pass) sidecar completion persists bounded failure reasons and success clears them [16.68ms]
+
+src/services/channelAgentCheckService.test.ts:
+(pass) evaluateAgentProbe: success when bash tool runs and marker text arrives [2.99ms]
+(pass) evaluateAgentProbe: fail when text arrives without bash tool start [1.26ms]
+(pass) evaluateAgentProbe: fail when error arrives [1.25ms]
+(pass) evaluateAgentProbe: fail when done without output [1.11ms]
+(pass) probeClaudeAgentSdkCompatibility: marks init-only timeout as incompatible [32.95ms]
+(pass) probeClaudeAgentSdkCompatibility: succeeds when sdk emits bash tool start and marker text [1.93ms]
+(pass) probeGenericToolCallingCompatibility: succeeds when adapter returns a structured tool call [1.88ms]
+(pass) probeGenericToolCallingCompatibility: retries without forced tool_choice when provider rejects required mode [1.61ms]
+(pass) probeGenericToolCallingCompatibility: retries once after a transient timeout [2.22ms]
+(pass) probeGenericToolCallingCompatibility: fails when no structured tool call is returned [2.12ms]
+(pass) probeGenericToolCallingCompatibility: fails when follow-up turn does not produce final text [1.03ms]
+(pass) checkChannelAgentCompatibility: falls back to generic tool calling for anthropic protocol [3.18ms]
+(pass) checkChannelAgentCompatibility returns the real generic fallback error for anthropic protocol [3.39ms]
+(pass) checkChannelAgentCompatibility reuses cached runtime result for repeated checks [2.32ms]
+(pass) checkChannelAgentCompatibility re-checks after the channel apiKey changes [1.30ms]
+
+src/services/messageService.stop.test.ts:
+(pass) a chat regenerate stopped mid-stream persists what streamed as the new reply [31.20ms]
+(pass) a chat regenerate stopped before any output keeps the previous reply [110.37ms]
+(pass) a chat edit-and-resend stopped mid-stream keeps the edited question and the partial reply [33.68ms]
+(pass) a stopped agent turn is stored with its partial steps and a cancelled run [7.88ms]
+(pass) a chat reply completed as stopped keeps that state; completing it normally clears it [8.70ms]
+(pass) regenerating an agent reply in place clears its earlier stop once it finishes [10.19ms]
+(pass) chat regenerate provider failure persists partial output and reports the error separately [7.90ms]
+(pass) chat edit provider failure persists partial output and reports the error separately [10.84ms]
+(pass) chat send provider failure persists partial output and reports the error separately [13.01ms]
+(pass) chat regenerate provider failure before output preserves the previous reply [6.56ms]
+
+src/services/searchService.test.ts:
+(pass) buildSearchContext prefers user tavily key over env key [558.97ms]
+(pass) buildSearchContext uses env key when user key is absent [0.33ms]
+(pass) buildSearchContext falls back to DuckDuckGo when no tavily key exists [0.41ms]
+(pass) buildSearchContext goes offline when DuckDuckGo returns nothing
+(pass) buildSearchContext uses DuckDuckGo when Tavily disabled but a key exists
+(pass) buildSearchContext goes offline when Tavily disabled and DuckDuckGo empty [0.30ms]
+(pass) buildSearchContext narrows OpenAI official-doc queries to official domains [0.16ms]
+(pass) buildSearchContext tightens news queries to topic=news and time_range=day [0.11ms]
+(pass) buildSearchContext soft-targets curated domains for a clear category [1.19ms]
+(pass) buildSearchContext reranks high-trust fresh results ahead of low-trust ones [0.33ms]
+(pass) buildSearchContext falls back to DuckDuckGo when Tavily upstream fails [0.21ms]
+(pass) buildSearchContext aborts slow web search and keeps a user-facing timeout label [660.65ms]
+
+src/services/decisionEnhancements.test.ts:
+(pass) unavailable decision service preserves suggestions, ranking and full skill eligibility
+(pass) semantic filter retains uncertain candidates and reranking keeps every source [1.00ms]
+(pass) skill selection uses meaningful option names and requires a positive applicability judgment
+(pass) large skill catalogs fit a bounded advisory request without changing the caller's roster [1.03ms]
+
+src/services/welcomeSuggestionService.test.ts:
+(pass) returns nothing (and never blocks) when no suggestions are cached [3.41ms]
+(pass) serves a cached set whose seed still matches the current context [4.89ms]
+(pass) still serves a stale set rather than showing nothing while it refreshes [5.72ms]
+(pass) ignores a corrupted cache entry instead of throwing [3.78ms]
+(pass) dropEchoes > drops a suggestion restating the conversation the user just created [0.59ms]
+(pass) dropEchoes > keeps suggestions that head somewhere new
+(pass) dropEchoes > only compares against the most recent handful of titles [0.07ms]
+(pass) dropEchoes > ignores punctuation and case differences
+
+src/services/messageService.live.test.ts:
+(pass) stream chat emits live status metadata before assistant deltas [4.91ms]
+(pass) regenerate falls back to the previous user message when assistant id is missing [1.81ms]
+(pass) edit user message creates a new assistant reply when the user message is the conversation tail [2.68ms]
+
+src/services/reviewDecisionService.test.ts:
+(pass) Jev batch is durable and idempotent after lost ACK without creating a conversation [10.05ms]
+(pass) manual changes during Jev's await are skipped, keeping their note and evidence [6.81ms]
+(pass) failed decisions preserve old annotations and repeat request IDs never re-bill [4.99ms]
+(pass) deleted workspaces are never resurrected by late Jev answers [5.42ms]
+
+src/services/anthropicProbe.test.ts:
+(pass) probeAnthropicModel uses the provided model id in the request body [0.53ms]
+(pass) probeAnthropicModel treats model-specific 400 responses as failures [0.20ms]
+
+src/services/settingsService.test.ts:
+(pass) settings: set/get/delete value by key [3.52ms]
+(pass) settings: repeated set upserts a single row with the latest value [3.49ms]
+(pass) settings: user isolation [7.37ms]
+
+src/services/metadataFetch.test.ts:
+(pass) macOS proxy parsing uses enabled manual settings and treats PAC as unsupported data [0.36ms]
+(pass) loopback always bypasses proxies; listed local/private CIDRs and wildcards are honored [0.51ms]
+(pass) explicit environment proxies win without a system read, while NO_PROXY domains, ports and IPv6 bypass [0.37ms]
+(pass) macOS system settings are cached for 30 seconds and simultaneous reads are single-flight [0.45ms]
+(pass) non-macOS, absent settings, failed reads and PAC-only settings fall back without changing routing [0.29ms]
+(pass) metadata fetch keeps the injected fetch and request deadline, adds JSON headers and a scoped proxy [0.13ms]
+
+src/services/channelService.conversation-resolve.test.ts:
+(pass) resolveModelIdFromChannelItem returns explicit modelId only when enabled; otherwise returns null; global default is strict [0.11ms]
+
+src/services/decisionUsageService.test.ts:
+(pass) daily decision reservations persist, prevent overspend and settle each receipt once [11.55ms]
+
+src/services/messageService.updated-at.test.ts:
+(pass) re-persisting an assistant answer stamps updatedAt and leaves createdAt alone [9.35ms]
+
+src/services/conversationService.model.test.ts:
+(pass) normalizeConversationModelInput keeps both channelId+modelId or strips both [0.16ms]
+
+src/services/channelService.context-discovery.test.ts:
+(pass) manual additions return persisted channel capacities without a refresh or first run [126.10ms]
+(pass) manual additions use the exact catalog when the channel lists IDs only [12.29ms]
+(pass) metadata outage cannot undo a newly saved manual model or invent its capacity [10.76ms]
+(pass) a new channel's automatic model synchronization includes independent input and output reports [15.82ms]
+(pass) a manually added OpenRouter alias is queried before returning without reconciling the model list [15.08ms]
+(pass) disabled new models are discovered, while toggles, manual limits and removals do not repeat discovery [20.52ms]
+(pass) metadata-only refresh never reconciles models, defaults, enabled flags or manual overrides [13.15ms]
+(pass) lazy catalog fallback is cached and transports automatic capacities beyond the manual RPC range [61.62ms]
+(pass) partial channel updates retain earlier input/output ceilings and failed refresh preserves last good data [82.10ms]
+(pass) new model IDs invalidate the successful channel refresh cache; numeric override changes do not [32.70ms]
+(pass) metadata refresh and regular directory sync cannot repopulate metadata from an old endpoint [23.98ms]
+(pass) fresh OpenRouter list metadata receives one selected endpoint enrichment, with exact low input ceiling [19.13ms]
+(pass) future metadata timestamps do not suppress automatic discovery [14.09ms]
+(pass) metadata-only HTTP refresh enforces channel ownership before any fetch [17.09ms]
+(pass) CLI-only channels use the public catalog without transmitting local credentials [10.60ms]
+(pass) discovered low output ceilings reach the actual Chat adapter request [21.33ms]
+(pass) OpenRouter metadata-only refresh uses its public directory independently of empty or invalid inference auth [36.59ms]
+(pass) a cold OpenRouter resolution starts directory, catalog and selected detail concurrently then caches the result [11.42ms]
+(pass) a warm OpenRouter channel still discovers a selected unlisted alias and backs off missing endpoints [83.94ms]
+(pass) warm OpenRouter selection verifies endpoint limits even when directory or catalog reports input [27.52ms]
+(pass) explicit channel refresh invalidates selected endpoint cache without scanning the roster [15.08ms]
+(pass) delayed endpoint enrichment merges the current model row instead of overwriting stricter metadata [22.52ms]
+(pass) endpoint merging keeps total context independent from input-only reports [33.02ms]
+(pass) a selected OpenRouter model joining another refresh still receives its own endpoint limits [12.63ms]
+(pass) directory synchronization re-reads endpoint ceilings committed while its transaction was waiting [15.02ms]
+
+src/services/unifiedConversationService.migration.test.ts:
+(pass) ensureLegacyAgentSessionsMigrated > migrates a legacy session exactly once [7.81ms]
+(pass) ensureLegacyAgentSessionsMigrated > concurrent calls do not duplicate the conversation [7.67ms]
+(pass) ensureLegacyAgentSessionsMigrated > a migrated session is not picked up again [7.80ms]
+(pass) ensureLegacyAgentSessionsMigrated > assistant replies become text steps in timeline order; failures stay out of content [10.95ms]
+
+src/services/attachmentService.cleanup.test.ts:
+(pass) removeAttachmentFiles > deletes the blobs it is given [1.30ms]
+(pass) removeAttachmentFiles > skips local: marker paths instead of treating them as real files [0.35ms]
+(pass) removeAttachmentFiles > a missing file does not stop the remaining deletions [0.46ms]
+(pass) removeAttachmentFiles > tolerates empty input and blank paths [0.03ms]
+
+src/services/messageService.acp-chat.test.ts:
+(pass) ACP Chat send refuses before mutating messages or conversation [5.80ms]
+(pass) ACP Chat stream refuses before mutating messages or conversation [4.00ms]
+(pass) ACP Chat prepare refuses before mutating messages or conversation [3.84ms]
+(pass) ACP Chat edit refuses before mutating messages or conversation [4.09ms]
+(pass) ACP Chat regenerate refuses before mutating messages or conversation [4.16ms]
+(pass) ACP Chat fallback refuses before mutating messages or conversation [4.79ms]
+(pass) ACP Chat send returns a typed HTTP 400 before opening an SSE stream [6.93ms]
+(pass) ACP Chat stream returns a typed HTTP 400 before opening an SSE stream [5.42ms]
+(pass) ACP Chat prepare returns a typed HTTP 400 before opening an SSE stream [5.09ms]
+(pass) ACP Chat edit returns a typed HTTP 400 before opening an SSE stream [5.43ms]
+(pass) ACP Chat regenerate returns a typed HTTP 400 before opening an SSE stream [6.70ms]
+
+src/services/attachmentService.ownership.test.ts:
+(pass) getAttachmentsByIds returns only attachments owned by the given user [6.19ms]
+(pass) getAttachmentsByIds recognizes session-owned attachments [3.12ms]
+(pass) linkAttachmentsToMessage links only attachments owned by the given user [8.71ms]
+
+src/services/exportService.test.ts:
+(pass) backup: ZIP round-trips uploaded bytes and removes configuration credentials [70.51ms]
+(pass) backup: empty ZIP closes and disappearing source rejects [25.56ms]
+(pass) backup: asynchronous output open failure rejects without an unhandled stream error [6.36ms]
+(pass) workbench backup remaps foreign IDs and natural-key references, preserves all revisions and source-independent copies [79.77ms]
+(pass) backup uses a consistent SQL snapshot while recipe and artifact versions append concurrently [45.34ms]
+
+src/services/messageService.truncation.test.ts:
+(pass) non-streaming Chat retains explicit truncation content, usage and persisted state [8.37ms]
+(pass) Chat send persists partial and usage before one identifiable truncation event [7.53ms]
+(pass) Chat edit persists partial and usage before one identifiable truncation event [8.14ms]
+(pass) Chat edit-tail persists partial and usage before one identifiable truncation event [8.59ms]
+(pass) Chat retry persists partial and usage before one identifiable truncation event [7.06ms]
+(pass) zero-output truncated retry keeps the previous reply and its own terminal metadata [5.84ms]
+(pass) normal replacement clears a previous truncation and stores normal generator usage [8.59ms]
+(pass) sidecar Chat completion round-trips length and clears it on normal replacement [9.15ms]
+
+src/services/channelService.delete.test.ts:
+(pass) deleteChannel clears conversation and agent session references before delete [71.93ms]
+
+src/services/importService.steps.test.ts:
+(pass) chatgpt import: thoughts, tool calls, tool outputs and interim text are steps; final text is the body [9.85ms]
+(pass) claude.ai import: thinking, tool_use and tool_result blocks are steps in order; flat text is the fallback body [7.34ms]
+
+src/services/agentSdk.test.ts:
+(pass) convertSdkEvent: rewrites generic network errors to actionable guidance [0.14ms]
+(pass) convertSdkEvent: surfaces auth status errors [0.08ms]
+(pass) convertSdkEvent: maps assistant invalid_request errors [0.03ms]
+(pass) convertSdkEvent: unknown sdk lifecycle messages count as meta activity
+(pass) convertSdkEvent: maps result success payload to text output [0.04ms]
+(pass) convertSdkEvent: maps sdk task notifications to thought output [0.03ms]
+(pass) convertSdkEvent: treats end_turn as a normal completion [0.05ms]
+(pass) convertSdkEvent: treats tool_use as meta activity instead of failure [0.02ms]
+(pass) mergeAgentTextOutput: prefers cumulative final result over partial streamed text [0.04ms]
+(pass) mergeAgentTextOutput: avoids duplicating identical final text [0.01ms]
+(pass) runClaudeAgentSdk emits heartbeat meta events while waiting for the next sdk message [16.42ms]
+
+src/services/attachmentService.e2e-cleanup.test.ts:
+(pass) attachment blobs are reclaimed on delete > deleting a conversation removes its attachment files [26.43ms]
+(pass) attachment blobs are reclaimed on delete > deleting a single message removes its attachment files [11.01ms]
+
+src/services/agentTaskMessage.test.ts:
+(pass) selectTaskReplyText > returns the full final_result of the latest execution run, never clipped
+(pass) selectTaskReplyText > falls back to the newest final_result when the latest run produced none
+(pass) selectTaskReplyText > is empty without a final_result
+(pass) selectTaskFailure > returns the latest execution error of a failed task
+(pass) selectTaskFailure > is undefined for tasks that did not fail
+
+src/services/channelAgentCheckService.model-guard.test.ts:
+(pass) checkChannelAgentCompatibility probes the provided model without name heuristics [1.47ms]
+
+src/services/providerErrorSummary.test.ts:
+(pass) summarizeProviderError extracts cloudflare 525 title [0.04ms]
+(pass) summarizeProviderError trims long plain text [0.35ms]
+(pass) summarizeProviderError falls back to status message when text is empty
+(pass) classifyProviderError normalizes quota errors for agent usage [0.12ms]
+(pass) classifyProviderError normalizes ssl handshake failures
+(pass) classifyProviderError normalizes auth failures [0.08ms]
+
+src/services/currentWorkspaceContext.test.ts:
+(pass) buildCurrentWorkspaceSystemContext loads the local README content [0.87ms]
+
+src/services/importRecordsService.test.ts:
+(pass) createPart/addPartItem: counters follow item status and items cap at the limit [0.19ms]
+(pass) sanitizeParts: drops unknown part types, bad items and unknown link kinds; keeps counters [0.19ms]
+(pass) import records: create/get/list(desc, cursor paging)/delete with user isolation [10.65ms]
+(pass) legacy rows: retired part types are dropped on read and totals re-derived from the rest [2.02ms]
+
+src/services/channelService.agent-check-baseurl.test.ts:
+(pass) agent-check: runtime=agent_sdk keeps OpenAI-compatible /v1 endpoints intact [1.88ms]
+(pass) agent-check: runtime=agent_sdk strips mixed Anthropic suffixes for sdk execution [1.81ms]
+
+src/services/artifactService.test.ts:
+(pass) source saves preserve complete canonical text and metadata without trusting client content [10.10ms]
+(pass) unfinished, missing, foreign and user-role message sources reject without creating artifacts [14.82ms]
+(pass) explicit content, format and the UTF-8 size boundary preserve original text [16.77ms]
+(pass) all artifact operations and source/project references are owner scoped [12.42ms]
+(pass) concurrent expectedVersion updates append one immutable version and return a conflict [7.97ms]
+(pass) source message, conversation and project deletion leave independent saved versions intact [13.29ms]
+(pass) version insert failure rolls back the artifact CAS, and metadata edits never alter versions [9.88ms]
+
+src/services/messageService.sidecar-persistence.test.ts:
+(pass) stable sidecar IDs and revisions make lost ACK retries idempotent [11.79ms]
+(pass) user and assistant writes roll back together if the second insert fails [6.39ms]
+(pass) partial pairs, wrong roles, identity collisions, and foreign conversations reject atomically [20.54ms]
+(pass) existing opaque imported IDs remain valid for pair updates and unanswered user retries [15.80ms]
+(pass) new client-selected identities must be UUIDs while legacy no-ID calls still insert [8.30ms]
+(pass) malformed revision and message identity shapes reject without writing [2.40ms]
+(pass) Agent mode cannot store Chat length status without a valid Agent run [5.84ms]
+(pass) deleting an unsaved stable ID is idempotent while foreign existing rows remain protected [10.34ms]
+
+src/services/backupSanitizer.test.ts:
+(pass) safe backup endpoint keeps common API paths and strips every credential-bearing URL component [0.76ms]
+(pass) safe MCP descriptions never copy arbitrary fields or malformed raw configuration [0.12ms]
+(pass) safe settings validate both the known key and the bounded value [0.06ms]
+
+src/services/attachmentService.integrity.test.ts:
+(pass) an attachment bound to one message cannot be stolen by a later message [11.33ms]
+(pass) same-owner cross-conversation linking neither moves the source nor stores invalid IDs [10.10ms]
+(pass) attachment linking rejects a foreign target before modifying the upload [7.96ms]
+(pass) attachment linking rejects a assistant target before modifying the upload [6.84ms]
+(pass) attachment linking rejects a missing target before modifying the upload [6.60ms]
+(pass) valid fresh uploads and exact-message retries keep real binding metadata consistent [9.13ms]
+(pass) attachment binding reuses the caller transaction and rolls back with its user turn [7.73ms]
+
+src/services/channelService.context-window.test.ts:
+(pass) per-model context override persists, omitted legacy updates preserve it, null clears it [65.79ms]
+(pass) invalid context capacities reject before reconciliation mutates model rows [12.82ms]
+(pass) explicit selected model credentials and conversation resolution never use the default model capacity [1389.16ms]
+(pass) real sidecar preparation accepts a large selected-model request and retains over 200 earlier messages [41.33ms]
+(pass) model synchronization preserves existing channel-specific capacity [8.15ms]
+(pass) additive context-window schema survives repeated bootstrap with stored model values [16.65ms]
+(pass) real Chat send, SSE, edit and retry submit selected large-model context to the adapter [66.99ms]
+(pass) credentials HTTP endpoint carries the selected capacity and rejects an unknown requested model [16.67ms]
+
+src/services/scheduledTaskService.lease.test.ts:
+(pass) a run admits one owner, owner retries are idempotent and terminal writes are fenced [6.79ms]
+(pass) reconciliation leaves other clients' live runs alone, heartbeat extends only the matching lease [6.07ms]
+(pass) pending queue is independent of the newest 50 historical rows and expires missed runs server-side [8.25ms]
+
+src/services/reviewNoteVerification.test.ts:
+(pass) production payload is identical to the recorded successful minimal-input live probe [1.84ms]
+(pass) note request sends just the review and saved note with the evaluated question [0.11ms]
+(pass) current protocol matches every recorded v2 live payload [0.95ms]
+(pass) a non-factual note never becomes supported or a factual contradiction [0.87ms]
+(pass) provider response validation rejects bad probabilities, types, versions and usage [0.13ms]
+(pass) successful call returns exact payload, probability and usage without leaking the key [0.14ms]
+(pass) empty notes and missing keys never invoke the provider [0.21ms]
+(pass) HTTP and transport failures are errors, never unsupported answers, with no automatic retry [0.39ms]
+
+src/services/conversationService.blank-reuse.test.ts:
+(pass) createConversation reuses the existing blank conversation instead of piling up new ones [4.57ms]
+(pass) reuse adopts the settings passed on the later call [5.19ms]
+(pass) a conversation that already has a message never blocks creating a new one [4.91ms]
+(pass) excludeConversationId protects a conversation whose content is not persisted yet [3.35ms]
+(pass) excludeConversationId still allows reusing a different blank conversation [5.02ms]
+(pass) a renamed blank conversation is not hijacked by the next default-titled create [3.38ms]
+
+src/services/agentWorkspace.test.ts:
+(pass) resolveAgentWorkingDirectory prefers the nearest repo-like root [1.41ms]
+(pass) resolveAgentWorkingDirectory falls back to the starting directory when no better root exists [0.46ms]
+
+src/services/liveCapabilities.orchestrator.test.ts:
+(pass) buildLiveContext resolves weekday locally [1.20ms]
+(pass) buildLiveContext resolves weather via structured live data [0.97ms]
+(pass) buildLiveContext does not guess weather location from timezone or defaults [0.13ms]
+(pass) buildLiveContext marks web-search routes as degraded when keyless search finds nothing [0.11ms]
+(pass) buildLiveContext uses tavily for web search when a key is available [0.33ms]
+(pass) buildLiveContext keeps web search route when live search times out [4000.30ms]
+(pass) buildLiveContext keeps web search routing for lookup prompts that also ask for a summary [0.45ms]
+(pass) buildLiveContext can use semantic classifier when keyword routing is direct_model [0.21ms]
+(pass) buildLiveContext does not force web search for identity questions even when enabled [0.18ms]
+(pass) buildLiveContext does not force web search for translation prompts even when enabled [0.18ms]
+(pass) buildLiveContext keeps current workspace README questions local even when web search is enabled [0.21ms]
+(pass) buildLiveContext still allows explicit web lookup requests for current project pages [0.30ms]
+(pass) buildLiveContext prefers web search for named tool capability lookups when allowed [0.19ms]
+(pass) buildLiveContext prefers research for named tool comparison lookups when allowed
+(pass) buildLiveContext routes current interview-practice comparisons to research [0.34ms]
+
+src/services/localImportService.test.ts:
+(pass) scan: counts importable sessions per source and skips SDK / OpenHorn / subagent / empty files [7.93ms]
+(pass) list: claude titles come from ai-title, codex from first user prompt; alreadyImported flips after run [26.26ms]
+(pass) claude: linearizes user/assistant text, folds one reply's message.ids into one row, drops meta/tool/compact/error lines [13.88ms]
+(pass) claude: explicit sessionIds restricts the run; unknown ids are ignored [5.13ms]
+(pass) claude: re-run skips unchanged for all, rewrites explicitly picked sessions, re-imports when the source grew [54.86ms]
+(pass) claude: prompt images become attachments linked to the user message; re-import replaces rows and files [36.94ms]
+(pass) stripImagePlaceholders: removes markers, collapses spaces, drops marker-only lines, leaves other text alone [0.15ms]
+(pass) ImportTurnBuilder: last text is the body, everything else keeps its order as steps [0.14ms]
+(pass) ImportTurnBuilder: a turn of only tool steps keeps an empty body; only-text turns get no agentRun [0.07ms]
+(pass) toolResultContentToText: strings, text blocks, image markers, unknown blocks [0.08ms]
+(pass) claude: one reply spread over 3 message.ids with tool calls in between imports as 1 user + 1 assistant [20.14ms]
+(pass) codex: drops developer/injected/commentary, keeps final answers with model + usage, skips openhorn-originated threads [17.17ms]
+(pass) codex: one reply spread over 3 assistant messages with a tool call in between imports as 1 user + 1 assistant [11.28ms]
+(pass) codex: newest state_<n>.sqlite threads index supplies the title; a broken index falls back to jsonl [27.75ms]
+(pass) mergeInstructions: appends with a marker, then replaces the marked segment in place
+(pass) instructions: CLAUDE.md is appended to chat.systemPrompt once; empty AGENTS.md is skipped [8.14ms]
+(pass) parsePromptFile: frontmatter description / argument-hint + body; no frontmatter → whole file is body [0.23ms]
+(pass) prompts: claude commands (namespaced) and codex prompts (symlinked) land in prompts.templates, deduped by source+name [7.15ms]
+(pass) prompts: a symlink escaping $HOME is refused [16.29ms]
+
+src/services/messageService.delete.test.ts:
+(pass) deleteMessage clears linked attachments before deleting the message [6.81ms]
+
+src/services/importService.records.test.ts:
+(pass) chatgpt import: writes an import record and stamps conversations with imported_from=file [9.14ms]
+(pass) backup import: dedupes MCP servers by name, stamps new ones, and records needsAction items [22.83ms]
+
+src/services/messageService.mutation-ownership.test.ts:
+(pass) late retry completion cannot overwrite a newer retry [11.53ms]
+(pass) late retry completion cannot overwrite a newer edit [2218.66ms]
+(fail) late edit completion cannot overwrite a newer retry [5001.08ms]
+  ^ this test timed out after 5000ms.
+(pass) a stopped retry's delayed partial save cannot overwrite its newer retry [26.74ms]
+(pass) delayed edit preparation cannot reclaim a newer retry [11.36ms]
+(pass) delayed edit preparation cannot reclaim a newer retry on budget failure [10.35ms]
+(pass) deleting an edited tail question during preparation creates no reply or provider request [5.87ms]
+(pass) deleting an edited tail question removes its pending reserved reply [10.66ms]
+(pass) an unauthorized retry cannot cancel another user's active reply [10.02ms]
+(pass) deleting an active retry's reply cannot recreate its row or search entry [7.98ms]
+(pass) deleting a tail question preserves its reserved row after it becomes an Agent reply [12.69ms]
+(pass) a committed conversation deletion aborts its retry and suppresses late deltas [6.27ms]
+(pass) a rolled-back conversation deletion does not abort its valid retry [8.97ms]
+
+src/services/modelContextDiscovery.test.ts:
+(pass) provider directory formats retain separate context, input and output limits [0.25ms]
+(pass) catalog matching uses exact namespaces or an unambiguous model ID, never fuzzy aliases [0.05ms]
+(pass) only Google's models/ prefix is normalized; compatible IDs remain byte-for-byte [0.54ms]
+(pass) Google and Anthropic model pagination accumulate every page with a bounded shared signal [0.43ms]
+(pass) foreign pagination and incomplete later pages fail instead of returning an authoritative partial list [0.25ms]
+(pass) directory byte and pagination limits reject oversized or endlessly paginated responses [1.44ms]
+(pass) catalog reads are single-flight and cached, carry no provider credentials, and preserve good data after failure [12.94ms]
+(pass) failed initial catalog retrieval backs off and retries, including synchronously throwing fetch guards [0.55ms]
+(pass) selected OpenRouter endpoint limits are cached and conservative across heterogeneous routes [0.18ms]
+(pass) selected endpoint aggregation keeps independent input-only limits separate from real totals [0.35ms]
+(pass) output-only endpoint reports constrain output without establishing a total window [0.25ms]
+(pass) explicit endpoint refresh bypasses success and failure caches while remaining single-flight [0.25ms]
+(pass) endpoint invalidation expires only named models and retains last-good limits after failure [0.19ms]
+(pass) invalid nonempty model directories cannot be mistaken for a valid empty list [0.22ms]
+(pass) directory fetches abort within their bounded metadata deadline [26.46ms]
+(pass) explicit catalog refresh bypasses TTL while subsequent lazy reads use the refreshed cache [0.57ms]
+
+src/services/appendSystemPrompt.test.ts:
+(pass) parseAppendSystemPrompt ignores absent, non-string and blank values
+(pass) parseAppendSystemPrompt trims and accepts values up to the cap [0.02ms]
+(pass) parseAppendSystemPrompt rejects values over the cap
+(pass) withAppendedSystemPrompt appends after the effective prompt
+(pass) withAppendedSystemPrompt leaves the effective prompt unchanged without an addendum [0.10ms]
+(pass) review classification preserves JSON mode during regenerate and edit [0.05ms]
+
+1 tests failed:
+(fail) late edit completion cannot overwrite a newer retry [5001.08ms]
+  ^ this test timed out after 5000ms.
+
+ 464 pass
+ 1 fail
+ 2274 expect() calls
+Ran 465 tests across 78 files. [22.99s]
+undefined
+/private/tmp/openhorn-ship-ovv_tjfr/jev-verify/apps/server:
+ ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command failed with exit code 1: bun test

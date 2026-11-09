@@ -1,0 +1,12 @@
+{
+  "apps/server/src/services/decisionClient.ts": "bd3959087fd0773ad145459ab7eb20e6b44978912f65b50564ee385112a9071a",
+  "apps/server/src/services/decisionUsageService.ts": "e47cb1ffcabf998ba8bbabfff1140d39b17e5fe0cf018707fd593b074258d913",
+  "apps/server/src/services/decisionEnhancements.ts": "dbf49c322109a09d3e3e0f20366ff1f6a41cb619c2b422a9d18ea5c6b671cb14",
+  "apps/server/src/services/reviewDecisionService.ts": "c11f19824cb742fcf8ad0009fd750cc26b828b36fe01ec1d89c4b3266df468b4",
+  "packages/shared/src/decisions.ts": "c6b1c1b7bbd78d6ee02b0f7ba0af05d474a33986dbdfd9aa919dbeb14d5956d6",
+  "packages/shared/src/decision-questions.ts": "f06016b31b3e7d7811b25f75e321db9cf906596e8b268a22dd3c250b8a4c4356",
+  "apps/desktop/src/components/settings/JevSettings.tsx": "e07a5c7dc4ee5329d0b9dafa90eab1d69dde9e6696763c68c909f0ab94ae1e29",
+  "apps/desktop/src/components/workbench/reviews/ReviewWorkspacePanel.tsx": "2b0b2e04d089cd2ab3ffddabbcceb3b145d5b7d1e0ebf9b4f2beee8d810be49f",
+  "apps/server/src/services/reviewNoteVerification.ts": "dce3f42aa6eb4031c0612882984b42084c7c6524b39462a659e280c712f8ed1b",
+  "packages/shared/src/review-note.ts": "8b65e091dff0b005df284870c03119267ae4fee0f704f07b8987cd2d3fdb133b"
+}

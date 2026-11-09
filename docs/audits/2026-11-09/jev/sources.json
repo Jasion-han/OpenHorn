@@ -1,0 +1,15 @@
+{
+  "checkedAt": "2026-11-09T16:21:15.129452+08:00",
+  "sources": [
+    "https://openrouter.ai/docs/guides/community/jev",
+    "https://raw.githubusercontent.com/openrouterteam/docs/main/guides/community/jev.mdx",
+    "https://raw.githubusercontent.com/openrouterteam/docs/main/guides/community/typesafe-sdk.mdx",
+    "https://openrouter.ai/api/v1/models/typesafe/jev-1.14/endpoints",
+    "https://docs.typesafe.ai/models.md",
+    "https://docs.typesafe.ai/model-jaggedness.md",
+    "https://docs.typesafe.ai/primitives/choice.md",
+    "https://docs.typesafe.ai/primitives/noul.md",
+    "https://docs.typesafe.ai/primitives/score.md",
+    "https://docs.typesafe.ai/cookbooks/skill_suggestion.md"
+  ]
+}
