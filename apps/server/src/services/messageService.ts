@@ -765,6 +765,7 @@ export async function sendMessage(userId: string, input: SendMessageInput) {
 
   const conversationMessages = await getMessages(input.conversationId);
   const liveContext = await buildLiveContext({
+    userId,
     prompt: input.content,
     userSettings: settings,
     tavilyEnvKey: process.env.TAVILY_API_KEY ?? null,
@@ -1009,6 +1010,7 @@ export async function streamMessage(
           })
       : undefined;
     const liveContext = await buildLiveContext({
+      userId,
       prompt: input.content,
       userSettings: settings,
       tavilyEnvKey: process.env.TAVILY_API_KEY ?? null,
@@ -1373,6 +1375,7 @@ async function editUserMessageWithMutation(
           })
       : undefined;
     const liveContext = await buildLiveContext({
+      userId,
       prompt: newContent.trim(),
       userSettings: settings,
       tavilyEnvKey: process.env.TAVILY_API_KEY ?? null,
@@ -1592,6 +1595,7 @@ async function regenerateMessageWithMutation(
           })
       : undefined;
     const liveContext = await buildLiveContext({
+      userId,
       prompt: lastUserMessage?.content || "",
       userSettings: settings,
       tavilyEnvKey: process.env.TAVILY_API_KEY ?? null,

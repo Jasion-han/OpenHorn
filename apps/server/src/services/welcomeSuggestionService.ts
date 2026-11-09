@@ -3,6 +3,7 @@ import { desc, eq } from "drizzle-orm";
 import { createAdapter } from "../agent-adapters";
 import { db } from "../db";
 import { getChannels, getResolvedChannelForUser } from "./channelService";
+import { decisionEnhancements } from "./decisionEnhancements";
 import { getSettingValues, setSettingValue } from "./settingsService";
 
 /**
@@ -204,7 +205,11 @@ export async function refreshWelcomeSuggestions(userId: string): Promise<string[
     // built-in defaults rather than storing something generic.
     if (titles.length === 0) return [];
 
-    const items = dropEchoes(await generate(userId, titles), titles).slice(0, SUGGESTION_COUNT);
+    const generated = await generate(userId, titles);
+    const semantic = await decisionEnhancements
+      .filterSuggestions(userId, generated, titles)
+      .catch(() => null);
+    const items = (semantic ?? dropEchoes(generated, titles)).slice(0, SUGGESTION_COUNT);
     if (items.length === 0) return [];
 
     const payload: CachedSuggestions = { items, generatedAt: Date.now(), seed };

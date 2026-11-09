@@ -28,6 +28,10 @@ import path from "node:path";
  * An ambient `.env` value cannot be told apart from a deliberate choice, so the
  * opt-out moved to a name nothing sets by accident.
  */
+// Never inherit paid decision credentials from the developer profile in tests.
+delete process.env.OPENHORN_JEV_API_KEY;
+process.env.OPENHORN_JEV_ENABLED = "false";
+
 const explicit = process.env.OPENHORN_TEST_DATABASE_URL;
 if (explicit) {
   process.env.DATABASE_URL = explicit;

@@ -262,3 +262,40 @@ test("deleting a multi-batch source stops later embedding batches", async () => 
     expect(chunks).toHaveLength(0);
   });
 });
+
+test("deleting a source during the semantic rerank await prevents stale context injection", async () => {
+  await fixture(async (ids) => {
+    chunks = [record(ids)];
+    const result = await retrieveContext(
+      "query",
+      ids.userId,
+      "synthetic",
+      undefined,
+      5,
+      async (_user, _query, rows) => {
+        await db.delete(attachments).where(eq(attachments.id, ids.attachmentId));
+        return rows;
+      },
+    );
+    expect(result).toBe("");
+  });
+});
+
+test("semantic rerank evaluates the same bounded document excerpt the answering model sees", async () => {
+  await fixture(async (ids) => {
+    chunks = [record(ids, "x".repeat(2800))];
+    const context = await retrieveContext(
+      "query",
+      ids.userId,
+      "synthetic",
+      undefined,
+      5,
+      async (_u, _q, rows, text) => {
+        expect(text(rows[0])).toHaveLength(800);
+        return rows;
+      },
+    );
+    expect(context.includes("x".repeat(800))).toBe(true);
+    expect(context.includes("x".repeat(801))).toBe(false);
+  });
+});

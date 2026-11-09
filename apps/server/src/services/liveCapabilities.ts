@@ -1,3 +1,4 @@
+import { observeRouteDecision } from "./decisionEnhancements";
 export type LiveRouteType =
   | "local"
   | "structured_live"
@@ -40,6 +41,8 @@ export type LiveContextResult = {
 };
 
 export type BuildLiveContextInput = {
+  userId?: string;
+  /** Structured dataset tasks must not route text inside their untrusted data. */
   dataOnly?: boolean;
   prompt: string;
   timezone?: string;
@@ -503,6 +506,9 @@ export async function buildLiveContext(input: BuildLiveContextInput): Promise<Li
     }
   }
 
+  if (input.userId)
+    void observeRouteDecision(input.userId, input.prompt, route.type).catch(() => {});
+
   if (route.type === "local") {
     const now = input.now ?? new Date();
     const weekday = new Intl.DateTimeFormat("en-US", {
@@ -531,6 +537,7 @@ export async function buildLiveContext(input: BuildLiveContextInput): Promise<Li
 
   if (route.type === "web_search" || route.type === "research") {
     const searchContext = await buildSearchContext({
+      userId: input.userId,
       route: route.type,
       prompt: input.prompt,
       userSettings: input.userSettings,

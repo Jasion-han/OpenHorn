@@ -1,3 +1,4 @@
+import { decisionEnhancements } from "./decisionEnhancements";
 /**
  * RAG orchestration service — coordinates chunking, embedding, and vector
  * storage to enable retrieval-augmented generation over attached documents.
@@ -95,6 +96,12 @@ export async function retrieveContext(
   apiKey: string,
   baseUrl?: string,
   limit = 5,
+  rerank: (
+    userId: string,
+    query: string,
+    items: DocumentChunk[],
+    text: (item: DocumentChunk) => string,
+  ) => Promise<DocumentChunk[]> = decisionEnhancements.rerank,
 ): Promise<string> {
   // Skip the (paid) embedding API call when the user has no indexed documents.
   const hasDocuments = await hasChunksForUser(userId);
@@ -111,8 +118,17 @@ export async function retrieveContext(
     results.map((row) => row.attachmentId),
   );
 
-  return results
-    .filter((row) => row.userId === userId && live.get(row.attachmentId) === row.conversationId)
+  const owned = results.filter(
+    (row) => row.userId === userId && live.get(row.attachmentId) === row.conversationId,
+  );
+  const ranked = await rerank(userId, query, owned, (row) => row.text.slice(0, 800));
+  // Ownership/existence may change while the external judgment is pending.
+  const stillLive = await liveSources(
+    userId,
+    ranked.map((row) => row.attachmentId),
+  );
+  return ranked
+    .filter((row) => stillLive.get(row.attachmentId) === row.conversationId)
     .map(
       (r, i) =>
         `[${i + 1}] From "${r.fileName}" (chunk ${r.chunkIndex + 1}): ${r.text.slice(0, 800)}`,

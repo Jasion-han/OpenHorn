@@ -200,6 +200,14 @@ app
   .route("/review-workspaces", reviews)
   .route("/conversations", conversations)
   .route("/messages", messageRoutes);
+app.post("/__fixture/route-shadow", async (c) => {
+  const { buildLiveContext } = await import("../services/liveCapabilities");
+  const result = await buildLiveContext({
+    userId: "reviews-browser-user",
+    prompt: "What is the time complexity of binary search?",
+  });
+  return c.json({ route: result.route });
+});
 app.get("/__fixture/decision-stats", (c) => c.json({ calls: syntheticDecisionCalls }));
 app.post("/__fixture/decision-budget", async (c) => {
   process.env.OPENHORN_JEV_DAILY_BUDGET_USD = String((await c.req.json()).limit);

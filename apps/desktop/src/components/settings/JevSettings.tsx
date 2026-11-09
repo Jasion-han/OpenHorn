@@ -73,6 +73,13 @@ export function JevSettings() {
               .replace("{limit}", status.dailyLimitUsd.toFixed(2))}
           </p>
         )}
+        {status?.shadow && status.features.routeShadow && (
+          <p className="text-xs text-muted-foreground">
+            {label("jev.shadowStats")
+              .replace("{compared}", String(status.shadow.compared))
+              .replace("{different}", String(status.shadow.disagreements))}
+          </p>
+        )}
         <Button
           variant="ghost"
           size="sm"
@@ -86,27 +93,25 @@ export function JevSettings() {
             {label("jev.features")}
           </summary>
           <div className="mt-3 space-y-3">
-            {JEV_FEATURES.filter((feature) => feature === "reviews" || feature === "skills").map(
-              (feature) => (
-                <div key={feature} className="flex items-center justify-between gap-3">
-                  <Label htmlFor={`jev-${feature}`} className="font-normal">
-                    {label(`jev.feature.${feature}`)}
-                  </Label>
-                  <Switch
-                    id={`jev-${feature}`}
-                    checked={status?.features[feature] ?? false}
-                    disabled={!status?.configured || !status.enabled || saving || loading}
-                    onCheckedChange={(enabled) =>
-                      status &&
-                      void save({
-                        enabled: status.enabled,
-                        features: { ...status.features, [feature]: enabled },
-                      })
-                    }
-                  />
-                </div>
-              ),
-            )}
+            {JEV_FEATURES.map((feature) => (
+              <div key={feature} className="flex items-center justify-between gap-3">
+                <Label htmlFor={`jev-${feature}`} className="font-normal">
+                  {label(`jev.feature.${feature}`)}
+                </Label>
+                <Switch
+                  id={`jev-${feature}`}
+                  checked={status?.features[feature] ?? false}
+                  disabled={!status?.configured || !status.enabled || saving || loading}
+                  onCheckedChange={(enabled) =>
+                    status &&
+                    void save({
+                      enabled: status.enabled,
+                      features: { ...status.features, [feature]: enabled },
+                    })
+                  }
+                />
+              </div>
+            ))}
             <p className="text-xs leading-relaxed text-muted-foreground">{label("jev.fallback")}</p>
           </div>
         </details>

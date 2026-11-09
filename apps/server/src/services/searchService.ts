@@ -8,6 +8,7 @@ import {
   searchDuckDuckGo,
   type TavilyResult,
 } from "shared/search";
+import { decisionEnhancements } from "./decisionEnhancements";
 import type { LiveRouteType } from "./liveCapabilities";
 
 // Re-exported so existing consumers (e.g. liveCapabilities.ts) keep importing
@@ -29,6 +30,7 @@ export type SearchContextResult = {
 };
 
 export type BuildSearchContextInput = {
+  userId?: string;
   route: Extract<LiveRouteType, "web_search" | "research">;
   prompt: string;
   userSettings?: Record<string, string>;
@@ -174,7 +176,15 @@ async function runDuckDuckGoSearch(input: BuildSearchContextInput): Promise<Sear
     );
   }
 
-  const citations = rerankCitations(rawCitations, isNewsQuery(input.prompt), input.now);
+  const ordered = rerankCitations(rawCitations, isNewsQuery(input.prompt), input.now);
+  const citations = input.userId
+    ? await decisionEnhancements.rerank(
+        input.userId,
+        input.prompt,
+        ordered,
+        (item) => `${item.title}\n${item.snippet ?? ""}`,
+      )
+    : ordered;
   return {
     status: "live",
     label: input.route === "research" ? "已使用研究搜索" : "已使用实时搜索",
@@ -228,7 +238,15 @@ async function runTavilySearch(
     }
 
     const data = (await response.json()) as { results?: TavilyResult[] };
-    const citations = rerankCitations(normalizeCitations(data.results), isNews, input.now);
+    const ordered = rerankCitations(normalizeCitations(data.results), isNews, input.now);
+    const citations = input.userId
+      ? await decisionEnhancements.rerank(
+          input.userId,
+          input.prompt,
+          ordered,
+          (item) => `${item.title}\n${item.snippet ?? ""}`,
+        )
+      : ordered;
     if (citations.length === 0) {
       const fallback = await degradeToDuckDuckGo(input);
       if (fallback) return fallback;

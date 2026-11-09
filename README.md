@@ -147,3 +147,17 @@ Before deploying or sharing:
 ## Status
 
 OpenHorn is under active iteration. Interfaces and routing behavior are still evolving.
+
+### Optional Jev decision assistance
+
+Jev uses OpenRouter's System One endpoint, separately from ordinary chat model channels.
+Configure `OPENHORN_JEV_API_KEY` in the server's private environment (local development:
+`apps/server/.env`; Docker: the Compose `.env`), then enable it under **Settings → Agent →
+Jev**. `OPENHORN_JEV_ENABLED` defaults to `false`; the default daily decision budget is
+`OPENHORN_JEV_DAILY_BUDGET_USD=0.05` USD per local user, reset at UTC midnight.
+
+The first release provides explicit quick review sentiment/topic tagging, welcome
+suggestion deduplication, server-side search/document reranking, skill recommendations,
+and route comparison statistics. Unavailable helpers preserve existing behavior;
+route comparisons do not change routing. Keep keys out of client code and backups.
+See [implementation and validation](docs/2026-11-09_jev-integration-results.md).

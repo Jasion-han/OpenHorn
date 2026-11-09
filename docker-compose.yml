@@ -19,3 +19,7 @@ services:
       - ANTHROPIC_OAUTH_TOKEN=${ANTHROPIC_OAUTH_TOKEN:-}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - TAVILY_API_KEY=${TAVILY_API_KEY:-}
+      # Optional OpenRouter decision assistance, separate from chat model channels
+      - OPENHORN_JEV_API_KEY=${OPENHORN_JEV_API_KEY:-}
+      - OPENHORN_JEV_ENABLED=${OPENHORN_JEV_ENABLED:-false}
+      - OPENHORN_JEV_DAILY_BUDGET_USD=${OPENHORN_JEV_DAILY_BUDGET_USD:-0.05}
