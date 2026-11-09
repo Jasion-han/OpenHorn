@@ -25,6 +25,8 @@ function isSensitiveEnvKey(key: string): boolean {
     key === "GOOGLE_API_KEY" ||
     key === "GEMINI_API_KEY" ||
     key === "TAVILY_API_KEY" ||
+    key === "OPENROUTER_API_KEY" ||
+    key === "TYPESAFE_API_KEY" ||
     key === "JWT_SECRET" ||
     key === "ENCRYPTION_KEY" ||
     key === "DATABASE_URL"

@@ -17,7 +17,12 @@
     "./child-env": "./src/child-env.ts",
     "./message-text": "./src/message-text.ts",
     "./context-budget": "./src/context-budget.ts",
-    "./context-policy": "./src/context-policy.ts"
+    "./context-policy": "./src/context-policy.ts",
+    "./recipes": "./src/recipes.ts",
+    "./reviews": "./src/reviews.ts",
+    "./review-note": "./src/review-note.ts",
+    "./decisions": "./src/decisions.ts",
+    "./decision-questions": "./src/decision-questions.ts"
   },
   "devDependencies": {
     "typescript": "^5.0.0"

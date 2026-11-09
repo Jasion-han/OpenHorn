@@ -313,6 +313,8 @@ const SCHEMA_DDL: string[] = [
     notify_on_complete INTEGER NOT NULL DEFAULT 1,
     channel_id TEXT,
     model_id TEXT,
+    project_id TEXT,
+    recipe_snapshot TEXT,
     last_run_at INTEGER,
     next_run_at INTEGER,
     created_at INTEGER NOT NULL,
@@ -328,6 +330,9 @@ const SCHEMA_DDL: string[] = [
     conversation_id TEXT,
     result TEXT,
     error TEXT,
+    error_code TEXT,
+    owner_token TEXT,
+    lease_expires_at INTEGER,
     started_at INTEGER NOT NULL,
     completed_at INTEGER,
     FOREIGN KEY (task_id) REFERENCES scheduled_tasks(id) ON DELETE CASCADE,
@@ -372,6 +377,70 @@ const SCHEMA_DDL: string[] = [
     FOREIGN KEY (session_id) REFERENCES agent_sessions(id) ON DELETE CASCADE
   );`,
 
+  `CREATE TABLE IF NOT EXISTS review_workspaces (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    revision INTEGER NOT NULL DEFAULT 1 CHECK(revision > 0),
+    data TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );`,
+  `CREATE INDEX IF NOT EXISTS review_workspaces_user_updated_idx
+    ON review_workspaces(user_id, updated_at);`,
+  `CREATE TABLE IF NOT EXISTS task_recipes (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    version INTEGER NOT NULL DEFAULT 1,
+    spec TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );`,
+  `CREATE TABLE IF NOT EXISTS task_recipe_versions (
+    id TEXT PRIMARY KEY,
+    recipe_id TEXT NOT NULL REFERENCES task_recipes(id) ON DELETE CASCADE,
+    version INTEGER NOT NULL,
+    spec TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );`,
+  `CREATE INDEX IF NOT EXISTS task_recipes_user_updated_idx ON task_recipes(user_id, updated_at);`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS task_recipe_versions_version_unique ON task_recipe_versions(recipe_id, version);`,
+
+  `CREATE TABLE IF NOT EXISTS saved_artifacts (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    project_id TEXT,
+    current_version INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL
+  );`,
+  `CREATE TABLE IF NOT EXISTS saved_artifact_versions (
+    id TEXT PRIMARY KEY,
+    artifact_id TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    content TEXT NOT NULL,
+    format TEXT NOT NULL CONSTRAINT saved_artifact_versions_format_check
+      CHECK (format IN ('markdown', 'html', 'openui')),
+    source_conversation_id TEXT,
+    source_message_id TEXT,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY (artifact_id) REFERENCES saved_artifacts(id) ON DELETE CASCADE,
+    FOREIGN KEY (source_conversation_id) REFERENCES conversations(id) ON DELETE SET NULL,
+    FOREIGN KEY (source_message_id) REFERENCES messages(id) ON DELETE SET NULL
+  );`,
+  `CREATE INDEX IF NOT EXISTS saved_artifacts_user_updated_idx
+    ON saved_artifacts(user_id, updated_at);`,
+  `CREATE INDEX IF NOT EXISTS saved_artifacts_project_idx ON saved_artifacts(project_id);`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS saved_artifact_versions_version_unique
+    ON saved_artifact_versions(artifact_id, version);`,
+  `CREATE INDEX IF NOT EXISTS saved_artifact_versions_source_conversation_idx
+    ON saved_artifact_versions(source_conversation_id);`,
+  `CREATE INDEX IF NOT EXISTS saved_artifact_versions_source_message_idx
+    ON saved_artifact_versions(source_message_id);`,
+
   // Indexes for hot-path lookups. SQLite does not auto-index foreign-key
   // columns, so every FK that appears in a WHERE / JOIN / ORDER BY / DELETE
   // gets an explicit index here. Keep this list in sync with the `index()`
@@ -407,6 +476,7 @@ const SCHEMA_DDL: string[] = [
   `CREATE INDEX IF NOT EXISTS scheduled_tasks_next_run_idx ON scheduled_tasks(next_run_at);`,
   `CREATE INDEX IF NOT EXISTS scheduled_task_runs_task_idx ON scheduled_task_runs(task_id);`,
   `CREATE INDEX IF NOT EXISTS scheduled_task_runs_user_idx ON scheduled_task_runs(user_id);`,
+  `CREATE INDEX IF NOT EXISTS scheduled_task_runs_pending_idx ON scheduled_task_runs(user_id, status, started_at);`,
   `CREATE INDEX IF NOT EXISTS import_records_user_created_idx ON import_records(user_id, created_at);`,
   // Duplicate (user_id, key) rows on old databases are removed by
   // dedupeSettings before this pass, or this index could not be built.
@@ -1286,6 +1356,30 @@ async function ensureConversationSummaryColumns(): Promise<void> {
   }
 }
 
+async function ensureScheduledTaskRunLeaseColumns(): Promise<void> {
+  const result = await client.execute(`PRAGMA table_info('scheduled_task_runs');`);
+  const rows = getRows(result);
+  for (const [name, type] of [
+    ["owner_token", "TEXT"],
+    ["lease_expires_at", "INTEGER"],
+    ["error_code", "TEXT"],
+  ]) {
+    if (rows.length > 0 && !hasColumnNamed(rows, name)) {
+      await client.execute(`ALTER TABLE scheduled_task_runs ADD COLUMN ${name} ${type};`);
+    }
+  }
+}
+
+async function ensureScheduledTaskRecipeColumns(): Promise<void> {
+  const result = await client.execute(`PRAGMA table_info('scheduled_tasks');`);
+  const rows = getRows(result);
+  for (const name of ["project_id", "recipe_snapshot"]) {
+    if (rows.length > 0 && !hasColumnNamed(rows, name)) {
+      await client.execute(`ALTER TABLE scheduled_tasks ADD COLUMN ${name} TEXT;`);
+    }
+  }
+}
+
 async function ensureScheduledTaskRunConversationIdColumn(): Promise<void> {
   const result = await client.execute(`PRAGMA table_info('scheduled_task_runs');`);
   const rows = getRows(result);
@@ -1587,6 +1681,8 @@ export async function bootstrapDatabase(options: BootstrapOptions = {}): Promise
 
   await ensureConversationSummaryColumns();
   await ensureScheduledTaskRunConversationIdColumn();
+  await ensureScheduledTaskRunLeaseColumns();
+  await ensureScheduledTaskRecipeColumns();
   // Before any conversations rebuild: its backfill only runs when it adds the
   // column, and a rebuild from SCHEMA_DDL would add it empty.
   await ensureConversationScheduledTaskIdColumn();

@@ -1,3 +1,15 @@
+export type {
+  AppendArtifactVersionInput,
+  ArtifactDetail,
+  ArtifactFormat,
+  ArtifactMutationResult,
+  ArtifactVersion,
+  ArtifactVersionInfo,
+  CreateArtifactInput,
+  SavedArtifact,
+  UpdateArtifactInput,
+} from "./artifacts";
+
 // "acp" is a local-agent channel: it stores an ACP agent launch config
 // (command/args/env, JSON-encoded in the apiKey slot) instead of provider
 // credentials, and only the desktop agent runtime consumes it.
@@ -187,6 +199,8 @@ export type ScheduledTaskFrequency =
 
 export type ScheduledTaskRunStatus = "pending" | "running" | "completed" | "failed";
 
+import type { FrozenRecipeSnapshot } from "./recipes";
+
 export interface ScheduledTask {
   id: string;
   userId: string;
@@ -198,6 +212,8 @@ export interface ScheduledTask {
   notifyOnComplete: boolean;
   channelId?: string;
   modelId?: string;
+  projectId?: string;
+  recipeSnapshot?: FrozenRecipeSnapshot;
   lastRunAt?: Date;
   nextRunAt?: Date;
   createdAt: Date;
@@ -212,6 +228,8 @@ export interface ScheduledTaskRun {
   conversationId?: string;
   result?: string;
   error?: string;
+  errorCode?: "lease_expired" | "missed";
+  leaseExpiresAt?: Date;
   startedAt: Date;
   completedAt?: Date;
   taskTitle?: string;
@@ -248,6 +266,8 @@ export type ImportKind = "local" | "backup" | "chatgpt" | "claude-export";
  * so `totalImported` counts conversations, not the messages inside them.
  */
 export type ImportPartType =
+  | "recipes"
+  | "artifacts"
   | "conversations"
   | "mcp"
   | "skills"
@@ -378,3 +398,18 @@ export interface PromptTemplate {
   source: ImportSource;
   importedAt: number;
 }
+
+export * from "./decisions";
+export type {
+  FrozenRecipeSnapshot,
+  PreparedRecipe,
+  RecipeDetail,
+  RecipeParameter,
+  RecipeRequirements,
+  RecipeScheduleOptions,
+  RecipeSpec,
+  RecipeValues,
+  RecipeVersion,
+  TaskRecipe,
+} from "./recipes";
+export * from "./reviews";

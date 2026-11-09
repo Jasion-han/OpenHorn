@@ -1,4 +1,5 @@
-import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { sql } from "drizzle-orm";
+import { check, index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export const users = sqliteTable("users", {
   id: text("id").primaryKey(),
@@ -452,6 +453,8 @@ export const scheduledTasks = sqliteTable(
     notifyOnComplete: integer("notify_on_complete", { mode: "boolean" }).notNull().default(true),
     channelId: text("channel_id"),
     modelId: text("model_id"),
+    projectId: text("project_id"),
+    recipeSnapshot: text("recipe_snapshot"),
     lastRunAt: integer("last_run_at", { mode: "timestamp" }),
     nextRunAt: integer("next_run_at", { mode: "timestamp" }),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
@@ -477,12 +480,16 @@ export const scheduledTaskRuns = sqliteTable(
     conversationId: text("conversation_id"),
     result: text("result"),
     error: text("error"),
+    errorCode: text("error_code"),
+    ownerToken: text("owner_token"),
+    leaseExpiresAt: integer("lease_expires_at", { mode: "timestamp" }),
     startedAt: integer("started_at", { mode: "timestamp" }).notNull(),
     completedAt: integer("completed_at", { mode: "timestamp" }),
   },
   (table) => [
     index("scheduled_task_runs_task_idx").on(table.taskId),
     index("scheduled_task_runs_user_idx").on(table.userId),
+    index("scheduled_task_runs_pending_idx").on(table.userId, table.status, table.startedAt),
   ],
 );
 
@@ -537,3 +544,102 @@ export const schemaMigrations = sqliteTable("schema_migrations", {
   id: text("id").primaryKey(),
   appliedAt: integer("applied_at", { mode: "timestamp" }).notNull(),
 });
+
+/** Bounded review datasets and their immutable batch snapshots. */
+export const reviewWorkspaces = sqliteTable(
+  "review_workspaces",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    revision: integer("revision").notNull().default(1),
+    data: text("data").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [
+    index("review_workspaces_user_updated_idx").on(table.userId, table.updatedAt),
+    check("review_workspaces_revision_check", sql`${table.revision} > 0`),
+  ],
+);
+
+/** User recipes and immutable revisions are independent of imported prompts. */
+export const taskRecipes = sqliteTable(
+  "task_recipes",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    version: integer("version").notNull().default(1),
+    spec: text("spec").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [index("task_recipes_user_updated_idx").on(table.userId, table.updatedAt)],
+);
+
+export const taskRecipeVersions = sqliteTable(
+  "task_recipe_versions",
+  {
+    id: text("id").primaryKey(),
+    recipeId: text("recipe_id")
+      .notNull()
+      .references(() => taskRecipes.id, { onDelete: "cascade" }),
+    version: integer("version").notNull(),
+    spec: text("spec").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [uniqueIndex("task_recipe_versions_version_unique").on(table.recipeId, table.version)],
+);
+
+/** Independent saved copies; source deletion never removes artifact versions. */
+export const savedArtifacts = sqliteTable(
+  "saved_artifacts",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    projectId: text("project_id").references(() => projects.id, { onDelete: "set null" }),
+    currentVersion: integer("current_version").notNull().default(1),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [
+    index("saved_artifacts_user_updated_idx").on(table.userId, table.updatedAt),
+    index("saved_artifacts_project_idx").on(table.projectId),
+  ],
+);
+
+export const savedArtifactVersions = sqliteTable(
+  "saved_artifact_versions",
+  {
+    id: text("id").primaryKey(),
+    artifactId: text("artifact_id")
+      .notNull()
+      .references(() => savedArtifacts.id, { onDelete: "cascade" }),
+    version: integer("version").notNull(),
+    content: text("content").notNull(),
+    format: text("format", { enum: ["markdown", "html", "openui"] }).notNull(),
+    sourceConversationId: text("source_conversation_id").references(() => conversations.id, {
+      onDelete: "set null",
+    }),
+    sourceMessageId: text("source_message_id").references(() => messages.id, {
+      onDelete: "set null",
+    }),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [
+    check(
+      "saved_artifact_versions_format_check",
+      sql`${table.format} IN ('markdown', 'html', 'openui')`,
+    ),
+    uniqueIndex("saved_artifact_versions_version_unique").on(table.artifactId, table.version),
+    index("saved_artifact_versions_source_conversation_idx").on(table.sourceConversationId),
+    index("saved_artifact_versions_source_message_idx").on(table.sourceMessageId),
+  ],
+);
