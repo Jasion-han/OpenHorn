@@ -1,0 +1,130 @@
+{
+  "checks": [
+    "real CSV import validates UTF-8, previews quoted data and persists the original in SQLite",
+    "batch preparation uses the real conversation handoff in Chat mode without invoking a model",
+    "real API rejects unfinished/wrong-batch output and preserves manual edits when applying the batch",
+    "native save dispatch exports complete original bytes, formula-safe labeled CSV and an evidence report",
+    "reload retains datasets/results and a stale manual write preserves its draft on conflict",
+    "a successful write settles a superseded list spinner and a late refresh cannot lock the workspace",
+    "light desktop and narrow dark layouts retain the controls without document overflow",
+    "a deleted source reports a recoverable error while the saved analysis stays available",
+    "a late prepare response cannot navigate or fill a draft after the user leaves",
+    "refresh recovers from a remotely deleted selection and discovers another client's dataset"
+  ],
+  "errors": [],
+  "unexpected": [],
+  "requests": [
+    {
+      "path": "/review-workspaces",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces",
+      "method": "POST"
+    },
+    {
+      "path": "/review-workspaces/9e9eea82-c2f2-4ec8-ae9e-cd857152042f/runs",
+      "method": "POST"
+    },
+    {
+      "path": "/conversations",
+      "method": "GET"
+    },
+    {
+      "path": "/messages/2002342e-4145-4809-9210-6a413318b1f8",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces/9e9eea82-c2f2-4ec8-ae9e-cd857152042f",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces/9e9eea82-c2f2-4ec8-ae9e-cd857152042f/runs/27544b76-9f6a-4b39-8abb-2296e7511b4f/import",
+      "method": "POST"
+    },
+    {
+      "path": "/review-workspaces/9e9eea82-c2f2-4ec8-ae9e-cd857152042f/runs/27544b76-9f6a-4b39-8abb-2296e7511b4f/import",
+      "method": "POST"
+    },
+    {
+      "path": "/review-workspaces/9e9eea82-c2f2-4ec8-ae9e-cd857152042f/rows/r2",
+      "method": "PATCH"
+    },
+    {
+      "path": "/review-workspaces/9e9eea82-c2f2-4ec8-ae9e-cd857152042f/runs/27544b76-9f6a-4b39-8abb-2296e7511b4f/import",
+      "method": "POST"
+    },
+    {
+      "path": "/review-workspaces",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces/9e9eea82-c2f2-4ec8-ae9e-cd857152042f",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces/9e9eea82-c2f2-4ec8-ae9e-cd857152042f/rows/r2",
+      "method": "PATCH"
+    },
+    {
+      "path": "/review-workspaces",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces/9e9eea82-c2f2-4ec8-ae9e-cd857152042f",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces/9e9eea82-c2f2-4ec8-ae9e-cd857152042f/rows/r2",
+      "method": "PATCH"
+    },
+    {
+      "path": "/conversations",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces/9e9eea82-c2f2-4ec8-ae9e-cd857152042f/runs",
+      "method": "POST"
+    },
+    {
+      "path": "/review-workspaces",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces/9e9eea82-c2f2-4ec8-ae9e-cd857152042f",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces/d5ec7dae-2e7d-4c38-b3d9-19913c97723e",
+      "method": "GET"
+    }
+  ]
+}

@@ -1,0 +1,164 @@
+{
+  "checks": [
+    "real CSV import validates UTF-8, previews quoted data and persists the original in SQLite",
+    "batch preparation uses the real conversation handoff in Chat mode without invoking a model",
+    "real API rejects unfinished/wrong-batch output and preserves manual edits when applying the batch",
+    "native save dispatch exports complete original bytes, formula-safe labeled CSV and an evidence report",
+    "reload retains datasets/results and a stale manual write preserves its draft on conflict",
+    "a successful write settles a superseded list spinner and a late refresh cannot lock the workspace",
+    "actual production route and SQLite persist two real Jev judgments, cache reuse and annotation invalidation",
+    "provider errors and timeouts never become negative answers and intermediate probabilities remain uncertain",
+    "light desktop and narrow dark layouts retain the controls without document overflow",
+    "a deleted source reports a recoverable error while the saved analysis stays available",
+    "a late prepare response cannot navigate or fill a draft after the user leaves",
+    "refresh recovers from a remotely deleted selection and discovers another client's dataset"
+  ],
+  "errors": [],
+  "unexpected": [],
+  "requests": [
+    {
+      "path": "/review-workspaces",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces",
+      "method": "POST"
+    },
+    {
+      "path": "/review-workspaces/062af50e-5f97-4d94-84b8-2df6c0dd84b3/runs",
+      "method": "POST"
+    },
+    {
+      "path": "/conversations",
+      "method": "GET"
+    },
+    {
+      "path": "/messages/e604225f-6c6d-4af5-aab3-a47825e3f91d",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces/062af50e-5f97-4d94-84b8-2df6c0dd84b3",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces/062af50e-5f97-4d94-84b8-2df6c0dd84b3/runs/9a2432ec-0cb0-4add-8b17-256e119ae789/import",
+      "method": "POST"
+    },
+    {
+      "path": "/review-workspaces/062af50e-5f97-4d94-84b8-2df6c0dd84b3/runs/9a2432ec-0cb0-4add-8b17-256e119ae789/import",
+      "method": "POST"
+    },
+    {
+      "path": "/review-workspaces/062af50e-5f97-4d94-84b8-2df6c0dd84b3/rows/r2",
+      "method": "PATCH"
+    },
+    {
+      "path": "/review-workspaces/062af50e-5f97-4d94-84b8-2df6c0dd84b3/runs/9a2432ec-0cb0-4add-8b17-256e119ae789/import",
+      "method": "POST"
+    },
+    {
+      "path": "/review-workspaces",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces/062af50e-5f97-4d94-84b8-2df6c0dd84b3",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces/062af50e-5f97-4d94-84b8-2df6c0dd84b3/rows/r2",
+      "method": "PATCH"
+    },
+    {
+      "path": "/review-workspaces",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces/062af50e-5f97-4d94-84b8-2df6c0dd84b3",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces/062af50e-5f97-4d94-84b8-2df6c0dd84b3/rows/r2",
+      "method": "PATCH"
+    },
+    {
+      "path": "/review-workspaces/062af50e-5f97-4d94-84b8-2df6c0dd84b3/rows/r2",
+      "method": "PATCH"
+    },
+    {
+      "path": "/review-workspaces/062af50e-5f97-4d94-84b8-2df6c0dd84b3/rows/r2/verify-note",
+      "method": "POST"
+    },
+    {
+      "path": "/review-workspaces/062af50e-5f97-4d94-84b8-2df6c0dd84b3/rows/r2/verify-note",
+      "method": "POST"
+    },
+    {
+      "path": "/review-workspaces/062af50e-5f97-4d94-84b8-2df6c0dd84b3/rows/r2",
+      "method": "PATCH"
+    },
+    {
+      "path": "/review-workspaces/062af50e-5f97-4d94-84b8-2df6c0dd84b3/rows/r2/verify-note",
+      "method": "POST"
+    },
+    {
+      "path": "/review-workspaces/062af50e-5f97-4d94-84b8-2df6c0dd84b3/rows/r3/verify-note",
+      "method": "POST"
+    },
+    {
+      "path": "/review-workspaces/062af50e-5f97-4d94-84b8-2df6c0dd84b3/rows/r3/verify-note",
+      "method": "POST"
+    },
+    {
+      "path": "/review-workspaces/062af50e-5f97-4d94-84b8-2df6c0dd84b3/rows/r3/verify-note",
+      "method": "POST"
+    },
+    {
+      "path": "/conversations",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces/062af50e-5f97-4d94-84b8-2df6c0dd84b3/runs",
+      "method": "POST"
+    },
+    {
+      "path": "/review-workspaces",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces/062af50e-5f97-4d94-84b8-2df6c0dd84b3",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces/0936f850-bccb-4b1e-96fe-954e9300111d",
+      "method": "GET"
+    }
+  ]
+}
