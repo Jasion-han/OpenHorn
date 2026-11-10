@@ -116,7 +116,7 @@ export function MessageActionBar({
         }
         onClick={() => {
           if (message.role === "assistant")
-            useWorkbenchStore.getState().setArtifactMessageId(message.id);
+            useWorkbenchStore.getState().setArtifactMessageId(message.id, message.conversationId);
           else {
             useWorkbenchStore.getState().setRecipeDraft(message.content);
             useDesktopShellStore.getState().setActiveView("workbench");

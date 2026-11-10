@@ -1,13 +1,16 @@
 import { useEffect, useRef } from "react";
 import type { ArtifactVersion, SavedArtifact } from "shared/types";
 import { Button, cn } from "ui";
+import { getDesktopBackendBase } from "../../lib/backendBase";
 import { getGlobalDefaultChannel } from "../../lib/defaultChannel";
 import { formatWorkbenchLabel, getWorkbenchLabel as label } from "../../lib/i18n/agent";
 import { notifyError } from "../../lib/notify";
 import { createServerApi } from "../../lib/serverApi";
 import { workbenchError } from "../../lib/workbenchApi";
+import { useAuthStore } from "../../stores/authStore";
 import { useChatStore } from "../../stores/chatStore";
 import { useDesktopShellStore } from "../../stores/desktopShellStore";
+import { useWorkbenchSessionStore } from "../../stores/workbenchSessionStore";
 import { useWorkbenchStore } from "../../stores/workbenchStore";
 import { ArtifactPanel, artifactPreviewContent } from "./ArtifactPanel";
 import { RecipePanel } from "./RecipePanel";
@@ -15,6 +18,8 @@ import { ReviewWorkspacePanel } from "./reviews/ReviewWorkspacePanel";
 
 const api = createServerApi();
 export function WorkbenchView() {
+  const userId = useAuthStore((s) => s.user?.id ?? "");
+  const sessionKey = `${getDesktopBackendBase()}:${userId}`;
   const tab = useWorkbenchStore((s) => s.tab);
   const setTab = useWorkbenchStore((s) => s.setTab);
   const artifactRefresh = useWorkbenchStore((s) => s.artifactRefresh);
@@ -26,7 +31,7 @@ export function WorkbenchView() {
     return () => {
       operationEpoch.current++;
     };
-  }, [tab]);
+  }, [tab, sessionKey]);
   const ownsNavigation = (epoch: number) =>
     operationEpoch.current === epoch &&
     useDesktopShellStore.getState().activeView === "workbench" &&
@@ -84,6 +89,9 @@ export function WorkbenchView() {
         conversationId: result.conversation.id,
         autoSend: false,
       });
+      useWorkbenchSessionStore
+        .getState()
+        .rememberContinuation(result.conversation.id, artifact.id, version.version);
       useDesktopShellStore.getState().setActiveView("chat");
     } catch (error) {
       notifyError(label("workbench.artifacts.failed"), workbenchError(error));
@@ -99,24 +107,15 @@ export function WorkbenchView() {
           <header className="flex flex-wrap items-start justify-between gap-4 border-b pb-4">
             <div className="min-w-0 space-y-1">
               <h1 className="text-xl font-semibold tracking-tight">{label("workbench.title")}</h1>
-              <p className="text-sm text-muted-foreground">
-                {label(
-                  tab === "recipes"
-                    ? "workbench.recipes.roleDescription"
-                    : tab === "reviews"
-                      ? "reviews.description"
-                      : "workbench.artifacts.roleDescription",
-                )}
-              </p>
             </div>
-            <div className="flex gap-1 rounded-md bg-muted/50 p-0.5">
+            <nav aria-label={label("workbench.title")} className="flex flex-wrap gap-1">
               {(["recipes", "artifacts", "reviews"] as const).map((value) => (
                 <Button
                   key={value}
                   variant="ghost"
                   aria-pressed={tab === value}
                   size="sm"
-                  className={cn("px-3", tab === value && "bg-background shadow-sm")}
+                  className={cn("px-3", tab === value && "bg-muted font-medium")}
                   onClick={() => setTab(value)}
                 >
                   {label(
@@ -128,14 +127,15 @@ export function WorkbenchView() {
                   )}
                 </Button>
               ))}
-            </div>
+            </nav>
           </header>
           {tab === "recipes" ? (
-            <RecipePanel />
+            <RecipePanel key={sessionKey} />
           ) : tab === "reviews" ? (
             <ReviewWorkspacePanel />
           ) : (
             <ArtifactPanel
+              key={sessionKey}
               refreshToken={artifactRefresh}
               onContinue={continueArtifact}
               onOpenSource={openSource}

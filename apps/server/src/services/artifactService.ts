@@ -187,6 +187,26 @@ async function writeArtifact<T>(artifactId: string, action: () => Promise<T>): P
   }
 }
 
+export async function restoreArtifact(
+  userId: string,
+  artifactId: string,
+  sourceVersion: unknown,
+  expectedVersion: unknown,
+) {
+  if (
+    typeof sourceVersion !== "number" ||
+    !Number.isSafeInteger(sourceVersion) ||
+    sourceVersion < 1
+  )
+    return invalid();
+  const source = await getArtifactDetail(userId, artifactId, sourceVersion);
+  return appendArtifactVersion(userId, artifactId, {
+    expectedVersion,
+    content: source.version.content,
+    format: source.version.format,
+  });
+}
+
 export async function listArtifacts(userId: string): Promise<SavedArtifact[]> {
   const rows = await db
     .select()

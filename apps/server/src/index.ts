@@ -18,6 +18,7 @@ import projectRoutes from "./routes/projects";
 import recipeRoutes from "./routes/recipes";
 import reviewWorkspaceRoutes from "./routes/reviewWorkspaces";
 import scheduledTaskRoutes from "./routes/scheduledTasks";
+import searchRoutes from "./routes/search";
 import settingsRoutes from "./routes/settings";
 
 import { startScheduler } from "./services/scheduledTaskScheduler";
@@ -74,6 +75,7 @@ app.route("/mcp", mcpRoutes);
 app.route("/credentials", credentialRoutes);
 app.route("/scheduled-tasks", scheduledTaskRoutes);
 app.route("/settings", settingsRoutes);
+app.route("/search", searchRoutes);
 app.route("/library", libraryRoutes);
 app.route("/decisions", decisionRoutes);
 app.route("/data-transfer", dataTransferRoutes);

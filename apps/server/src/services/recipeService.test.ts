@@ -18,6 +18,7 @@ import {
   getRecipe,
   listRecipes,
   prepareRecipe,
+  restoreRecipe,
   scheduleRecipe,
   updateRecipe,
 } from "./recipeService";
@@ -74,6 +75,60 @@ async function rejectsCode(action: () => Promise<unknown>, code: string) {
   }
   expect((error as { code?: string })?.code).toBe(code);
 }
+
+test("restore creates a new recipe revision without modifying existing versions or frozen tasks", async () => {
+  const f = await fixture();
+  try {
+    const first = await createRecipe(f.userId, f.spec);
+    const snapshot = JSON.stringify({
+      recipeId: first.id,
+      version: 1,
+      spec: first.spec,
+      values: { file: "a.ts" },
+      renderedPrompt: "Review a.ts",
+    });
+    await db.insert(scheduledTasks).values({
+      id: `${first.id}-frozen`,
+      userId: f.userId,
+      title: "Frozen",
+      prompt: "Review a.ts",
+      frequency: "daily",
+      time: "09:00",
+      enabled: false,
+      recipeSnapshot: snapshot,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const second = await updateRecipe(
+      f.userId,
+      first.id,
+      { ...f.spec, title: "New title", promptTemplate: "Changed {{file}}" },
+      1,
+    );
+    const restored = await restoreRecipe(f.userId, first.id, 1, second.version);
+    expect(restored.version).toBe(3);
+    expect(restored.spec).toEqual(first.spec);
+    expect(
+      (
+        await db
+          .select()
+          .from(scheduledTasks)
+          .where(eq(scheduledTasks.id, `${first.id}-frozen`))
+      )[0]?.recipeSnapshot,
+    ).toBe(snapshot);
+    const history = await getRecipe(f.userId, first.id);
+    expect(history?.versions).toHaveLength(3);
+    expect(history?.versions.find((v) => v.version === 2)?.spec.title).toBe("New title");
+    await rejectsCode(() => restoreRecipe("foreign", first.id, 1, 3), "recipe_not_found");
+    await rejectsCode(() => restoreRecipe(f.userId, first.id, 1, 2), "recipe_version_conflict");
+    await rejectsCode(() => restoreRecipe(f.userId, first.id, 0, 3), "invalid_parameters");
+    await db.delete(projects).where(eq(projects.id, f.projectId));
+    await rejectsCode(() => restoreRecipe(f.userId, first.id, 1, 3), "project_not_found");
+    expect((await getRecipe(f.userId, first.id))?.recipe.version).toBe(3);
+  } finally {
+    await f.cleanup();
+  }
+});
 
 test("recipe CRUD is user-scoped with immutable historical versions and compare-and-swap", async () => {
   const a = await fixture(),

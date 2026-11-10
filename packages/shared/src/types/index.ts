@@ -9,6 +9,7 @@ export type {
   SavedArtifact,
   UpdateArtifactInput,
 } from "./artifacts";
+export type { UnifiedSearchKind, UnifiedSearchResult } from "./search";
 
 // "acp" is a local-agent channel: it stores an ACP agent launch config
 // (command/args/env, JSON-encoded in the apiKey slot) instead of provider

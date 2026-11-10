@@ -1,0 +1,32 @@
+{
+  "scope": "Current full working tree, secondary controls hidden by default; supersedes the previous always-visible action layout",
+  "desktopUnitTests": {
+    "passed": 675,
+    "failed": 0
+  },
+  "browserCheckpoints": {
+    "workbench.json": 32,
+    "reviews.json": 20,
+    "jev.json": 8
+  },
+  "browserTotal": 60,
+  "typecheck": "passed",
+  "wholeRepositoryBiome": "passed",
+  "nativeDebugBuild": "passed",
+  "nativeVerification": [
+    "Recipe default only shows parameters, Run once and More in the detail area",
+    "Recipe More retains edit, history, task content, schedule and delete",
+    "Artifact default shows content, Continue and More; edit/export/source/history/rename/delete retained in More"
+  ],
+  "sourceSha256": {
+    "apps/desktop/src/components/workbench/RecipePanel.tsx": "730967f92939cc89a1cc6fec25dc1d2f29eb4c83d37bbde81a94367c8d28fe1f",
+    "apps/desktop/src/components/workbench/ArtifactPanel.tsx": "c62c1f617a79aec7523511e85fe576dd0cc480d55575d4c70b6ba4f7382e33e6",
+    "apps/desktop/src/components/workbench/reviews/ReviewWorkspacePanel.tsx": "5683b00b3959e57ad8d761c80c8d0be6b32f26389e34ebd61a34dba5869e161e",
+    "apps/desktop/src/components/workbench/reviews/ReviewDataset.tsx": "e5c4fd9a3004a5a8e635e9228b9daeeeafa29a887a4d57034eb8cbeb31b83aed",
+    "apps/desktop/src/components/workbench/reviews/ReviewRuns.tsx": "0d3ccf96136480c016b457006af053064d1fd7e6dc2b53d6b900e0b57d39e394",
+    "apps/desktop/src/lib/i18n/agent.ts": "527e8e542faabfc4013113fd44764e3486d11ff69d995dbfaf53c591fa431319",
+    "apps/desktop/scripts/workbench.browser.mjs": "78118c74af084adf7f6a5cfdcd55cea8429a66933ae0bdf45b1a5a0adabfdd45",
+    "apps/desktop/scripts/reviews.browser.mjs": "d27869d75df198e6eab5678d88bec0345fc67747315d0d82d769e78ad770b50f",
+    "apps/desktop/scripts/jev-integration.browser.mjs": "7781c296436e1d82d06c8d85c06d4fd90de7ec75b9855601a20ba8fca84d4610"
+  }
+}

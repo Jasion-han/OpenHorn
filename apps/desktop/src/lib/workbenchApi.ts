@@ -12,6 +12,7 @@ import type {
   ScheduledTask,
   ScheduledTaskFrequency,
   TaskRecipe,
+  UnifiedSearchResult,
   UpdateArtifactInput,
 } from "shared/types";
 import { getDesktopBackendBase } from "./backendBase";
@@ -57,6 +58,8 @@ export function workbenchError(error: unknown): string {
   return getWorkbenchLabel(keys[code as keyof typeof keys] ?? "workbench.errors.unknown");
 }
 export const workbenchApi = {
+  search: (query: string) =>
+    request<{ results: UnifiedSearchResult[] }>(`/search?q=${encodeURIComponent(query)}`),
   recipes: {
     list: () => request<{ recipes: TaskRecipe[] }>("/recipes"),
     detail: (id: string) =>
@@ -67,6 +70,11 @@ export const workbenchApi = {
     update: (id: string, spec: RecipeSpec, expectedVersion: number) =>
       request<{ recipe: TaskRecipe }>(`/recipes/${encodeURIComponent(id)}`, "PUT", {
         spec,
+        expectedVersion,
+      }),
+    restore: (id: string, sourceVersion: number, expectedVersion: number) =>
+      request<{ recipe: TaskRecipe }>(`/recipes/${encodeURIComponent(id)}/restore`, "POST", {
+        sourceVersion,
         expectedVersion,
       }),
     delete: (id: string) =>
@@ -91,6 +99,11 @@ export const workbenchApi = {
       request<{ task: ScheduledTask }>(`/recipes/${encodeURIComponent(id)}/schedule`, "POST", data),
   },
   artifacts: {
+    restore: (id: string, sourceVersion: number, expectedVersion: number) =>
+      request<ArtifactMutationResult>(`/artifacts/${encodeURIComponent(id)}/restore`, "POST", {
+        sourceVersion,
+        expectedVersion,
+      }),
     list: () => request<{ artifacts: SavedArtifact[] }>("/artifacts"),
     detail: (id: string, version?: number) =>
       request<ArtifactDetail>(

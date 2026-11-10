@@ -16,9 +16,49 @@ import {
   deleteArtifact,
   getArtifactDetail,
   listArtifacts,
+  restoreArtifact,
   updateArtifact,
 } from "./artifactService";
 import { applyConversationDeletion, planConversationDeletion } from "./conversationService";
+
+test("restoring an artifact copies immutable history, preserves newer versions and rejects stale/foreign writes", async () => {
+  const f = await fixture();
+  try {
+    const first = await createArtifact(f.userId, { sourceMessageId: f.sourceMessageId });
+    await appendArtifactVersion(f.userId, first.artifact.id, {
+      expectedVersion: 1,
+      content: "Newer content",
+      format: "html",
+    });
+    await db
+      .update(messages)
+      .set({ content: "The source has since changed" })
+      .where(eq(messages.id, f.sourceMessageId));
+    const restored = await restoreArtifact(f.userId, first.artifact.id, 1, 2);
+    expect(restored.version.content).toBe(first.version.content);
+    expect(restored.version.format).toBe("markdown");
+    expect(restored.version.version).toBe(3);
+    expect(restored.version.sourceMessageId).toBe(null);
+    expect((await getArtifactDetail(f.userId, first.artifact.id, 2)).version.content).toBe(
+      "Newer content",
+    );
+    expect(await restoreArtifact("other-user", first.artifact.id, 1, 3).catch((e) => e.code)).toBe(
+      "artifact_not_found",
+    );
+    expect(await restoreArtifact(f.userId, first.artifact.id, 1, 2).catch((e) => e.code)).toBe(
+      "artifact_version_conflict",
+    );
+    expect(await restoreArtifact(f.userId, first.artifact.id, "1", 3).catch((e) => e.code)).toBe(
+      "invalid_artifact",
+    );
+    await db.delete(messages).where(eq(messages.id, f.sourceMessageId));
+    const again = await restoreArtifact(f.userId, first.artifact.id, 1, 3);
+    expect(again.version.content).toBe(first.version.content);
+    expect((await getArtifactDetail(f.userId, first.artifact.id)).versions).toHaveLength(4);
+  } finally {
+    await f.close();
+  }
+});
 
 async function fixture() {
   const userId = crypto.randomUUID();

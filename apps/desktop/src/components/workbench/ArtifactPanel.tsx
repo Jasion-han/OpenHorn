@@ -30,11 +30,14 @@ import {
   Textarea,
 } from "ui";
 import { saveAttachment } from "../../lib/attachmentPreview";
+import { getDesktopBackendBase } from "../../lib/backendBase";
 import { formatWorkbenchLabel, getWorkbenchLabel } from "../../lib/i18n/agent";
 import { workbenchApi, workbenchError } from "../../lib/workbenchApi";
 import { useArtifactDraftStore } from "../../stores/artifactDraftStore";
+import { useWorkbenchStore } from "../../stores/workbenchStore";
 import { DesktopMarkdownMessage } from "../chat/DesktopMarkdownMessage";
-import { DiscardChangesDialog } from "./DiscardChangesDialog";
+import { ArtifactHistory } from "./ArtifactHistory";
+import { DiscardChangesNotice } from "./DiscardChangesNotice";
 
 export interface ArtifactPanelProps {
   refreshToken?: number;
@@ -60,6 +63,15 @@ export function artifactPreviewContent(
 }
 
 export function ArtifactPanel({ refreshToken = 0, onContinue, onOpenSource }: ArtifactPanelProps) {
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  const navigation = useWorkbenchStore((s) => s.navigationTarget);
+  const lastNavigation = useRef(navigation?.token);
   const [artifacts, setArtifacts] = useState<SavedArtifact[]>([]);
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState("");
@@ -76,6 +88,7 @@ export function ArtifactPanel({ refreshToken = 0, onContinue, onOpenSource }: Ar
   const [detailError, setDetailError] = useState("");
   const [detailRefresh, setDetailRefresh] = useState(0);
   const [raw, setRaw] = useState(false);
+  const [showVersions, setShowVersions] = useState(false);
   const edits = useArtifactDraftStore((state) => state.drafts);
   const editDraft = selectedId ? edits[selectedId] : undefined;
   const editing = !!editDraft;
@@ -93,6 +106,8 @@ export function ArtifactPanel({ refreshToken = 0, onContinue, onOpenSource }: Ar
   const listRequest = useRef(0);
   const operation = useRef(false);
   const loadedRefresh = useRef(refreshToken);
+  const selectedIdentity = useRef(selectedId);
+  selectedIdentity.current = selectedId;
   const detailIdentity = useRef("");
   const detailRequest = useRef("");
   const refreshDraftBaseline = useRef<{ id: string | null; revision: number } | null>(null);
@@ -105,24 +120,39 @@ export function ArtifactPanel({ refreshToken = 0, onContinue, onOpenSource }: Ar
     setConfirmDiscard(false);
   };
   const loadList = useCallback(async () => {
+    if (!mounted.current) return;
     const request = ++listRequest.current;
+    const navigationAtStart = useWorkbenchStore.getState().navigationTarget?.token;
     setLoading(true);
     setListError("");
     try {
       const response = await workbenchApi.artifacts.list();
-      if (request !== listRequest.current) return;
+      if (!mounted.current || request !== listRequest.current) return;
+      const currentNavigation = useWorkbenchStore.getState().navigationTarget;
+      if (currentNavigation && currentNavigation.token !== navigationAtStart) return;
       setArtifacts(response.artifacts);
-      setSelectedId((current) =>
-        response.artifacts.some((item) => item.id === current)
-          ? current
-          : (response.artifacts[0]?.id ?? null),
-      );
+      const target = useWorkbenchStore.getState().navigationTarget;
+      if (target?.tab === "artifacts") {
+        setSelectedId(target.id);
+        setSelectedVersion(undefined);
+        useWorkbenchStore.getState().clearNavigation(target.token);
+      } else
+        setSelectedId((current) =>
+          response.artifacts.some((item) => item.id === current)
+            ? current
+            : (response.artifacts[0]?.id ?? null),
+        );
     } catch (error) {
       if (request === listRequest.current) setListError(workbenchError(error));
     } finally {
       if (request === listRequest.current) setLoading(false);
     }
   }, []);
+  useEffect(() => {
+    if (navigation?.tab !== "artifacts" || navigation.token === lastNavigation.current) return;
+    lastNavigation.current = navigation.token;
+    void loadList();
+  }, [navigation, loadList]);
   useEffect(() => {
     if (loadedRefresh.current !== refreshToken) setDetailRefresh((value) => value + 1);
     loadedRefresh.current = refreshToken;
@@ -133,6 +163,7 @@ export function ArtifactPanel({ refreshToken = 0, onContinue, onOpenSource }: Ar
   }, [loadList, refreshToken]);
   useEffect(() => {
     useArtifactDraftStore.getState().select(selectedId);
+    setShowVersions(false);
   }, [selectedId]);
   useEffect(() => {
     const requestKey = JSON.stringify([selectedId, selectedVersion, detailRefresh]);
@@ -180,7 +211,7 @@ export function ArtifactPanel({ refreshToken = 0, onContinue, onOpenSource }: Ar
       cancelled = true;
     };
   }, [selectedId, selectedVersion, detailRefresh]);
-  const act = async (name: string, work: () => Promise<void>) => {
+  const act = async (name: string, work: () => Promise<void>, propagate = false) => {
     if (operation.current) return;
     operation.current = true;
     setBusy(name);
@@ -188,6 +219,7 @@ export function ArtifactPanel({ refreshToken = 0, onContinue, onOpenSource }: Ar
     try {
       await work();
     } catch (error) {
+      if (propagate) throw error;
       setActionError(workbenchError(error));
     } finally {
       operation.current = false;
@@ -209,6 +241,34 @@ export function ArtifactPanel({ refreshToken = 0, onContinue, onOpenSource }: Ar
       setSelectedVersion(result.version.version);
       await loadList();
     });
+  };
+  const restoreVersion = async (sourceVersion: number, expectedVersion: number) => {
+    if (!detail || operation.current) return;
+    const owner = useArtifactDraftStore.getState().ownerId;
+    const backend = getDesktopBackendBase();
+    const revision = useWorkbenchStore.getState().navigationRevision;
+    const artifactId = detail.artifact.id;
+    await act(
+      "restore",
+      async () => {
+        const result = await workbenchApi.artifacts.restore(
+          detail.artifact.id,
+          sourceVersion,
+          expectedVersion,
+        );
+        if (
+          !mounted.current ||
+          owner !== useArtifactDraftStore.getState().ownerId ||
+          backend !== getDesktopBackendBase() ||
+          selectedIdentity.current !== artifactId ||
+          revision !== useWorkbenchStore.getState().navigationRevision
+        )
+          return;
+        setSelectedVersion(result.version.version);
+        await loadList();
+      },
+      true,
+    );
   };
   const exportVersion = () => {
     if (!detail) return;
@@ -386,26 +446,11 @@ export function ArtifactPanel({ refreshToken = 0, onContinue, onOpenSource }: Ar
                     </h2>
                   )}
                   <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                    <Label htmlFor="artifact-version" className="sr-only">
-                      {getWorkbenchLabel("workbench.artifacts.versions")}
-                    </Label>
-                    <select
-                      id="artifact-version"
-                      className={selectClass}
-                      value={detail.version.version}
-                      disabled={!!busy || editing || renaming}
-                      onChange={(event) => setSelectedVersion(Number(event.target.value))}
-                    >
-                      {[...detail.versions]
-                        .sort((a, b) => b.version - a.version)
-                        .map((version) => (
-                          <option key={version.version} value={version.version}>
-                            {formatWorkbenchLabel("workbench.artifacts.version", {
-                              version: version.version,
-                            })}
-                          </option>
-                        ))}
-                    </select>
+                    <span>
+                      {formatWorkbenchLabel("workbench.artifacts.version", {
+                        version: detail.version.version,
+                      })}
+                    </span>
                     <span>{formats[detail.version.format]}</span>
                   </div>
                   {!editing && detail.version.version < detail.artifact.currentVersion ? (
@@ -430,130 +475,113 @@ export function ArtifactPanel({ refreshToken = 0, onContinue, onOpenSource }: Ar
                     </div>
                   ) : null}
                 </div>
-                <div className="flex max-w-full flex-wrap items-center gap-2">
-                  <Button
-                    size="sm"
-                    disabled={!!busy || editing || renaming}
-                    onClick={() =>
-                      void act("continue", async () => {
-                        await onContinue(detail.artifact, detail.version);
-                      })
-                    }
-                  >
-                    {getWorkbenchLabel("workbench.artifacts.continue")}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={!!busy || editing || renaming}
-                    onClick={() => {
-                      useArtifactDraftStore.getState().put(detail.artifact.id, {
-                        content: detail.version.content,
-                        format: detail.version.format,
-                        sourceVersion: detail.version.version,
-                        expectedVersion: detail.artifact.currentVersion,
-                        originalContent: detail.version.content,
-                        originalFormat: detail.version.format,
-                      });
-                    }}
-                  >
-                    <Plus />
-                    {getWorkbenchLabel("workbench.artifacts.edit")}
-                  </Button>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label={getWorkbenchLabel("workbench.artifacts.more")}
-                        disabled={!!busy || editing || renaming}
-                      >
-                        <MoreHorizontal />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-52">
-                      <DropdownMenuItem onSelect={exportVersion}>
-                        <Download />
-                        {getWorkbenchLabel("workbench.artifacts.export")}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        disabled={!detail.version.sourceConversationId}
-                        onSelect={() =>
-                          void act("source", async () => {
-                            if (detail.version.sourceConversationId)
-                              await onOpenSource(detail.version.sourceConversationId);
-                          })
-                        }
-                      >
-                        <ExternalLink />
-                        {getWorkbenchLabel("workbench.artifacts.openSource")}
-                      </DropdownMenuItem>
-                      {!detail.version.sourceConversationId ? (
-                        <DropdownMenuLabel className="max-w-52 whitespace-normal text-xs font-normal leading-relaxed text-muted-foreground">
-                          {getWorkbenchLabel("workbench.artifacts.sourceGone")}
-                        </DropdownMenuLabel>
-                      ) : null}
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem
-                        onSelect={() => {
-                          setTitle(detail.artifact.title);
-                          setRenaming(true);
-                        }}
-                      >
-                        <Pencil />
-                        {getWorkbenchLabel("workbench.artifacts.rename")}
-                      </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem
-                        className="text-destructive focus:text-destructive"
-                        onSelect={() => {
-                          setActionError("");
-                          setConfirmDelete(true);
-                        }}
-                      >
-                        <Trash2 />
-                        {getWorkbenchLabel("workbench.artifacts.delete")}
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
+                {!editing && !renaming && (
+                  <div className="flex max-w-full flex-wrap items-center gap-2">
+                    <Button
+                      size="sm"
+                      disabled={!!busy || editing || renaming}
+                      onClick={() =>
+                        void act("continue", async () => {
+                          await onContinue(detail.artifact, detail.version);
+                        })
+                      }
+                    >
+                      {getWorkbenchLabel("workbench.artifacts.continue")}
+                    </Button>
+                    <DropdownMenu modal={false}>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          aria-label={getWorkbenchLabel("workbench.artifacts.more")}
+                          disabled={!!busy || editing || renaming}
+                        >
+                          <MoreHorizontal />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-52">
+                        <DropdownMenuItem
+                          onSelect={() => {
+                            useArtifactDraftStore.getState().put(detail.artifact.id, {
+                              content: detail.version.content,
+                              format: detail.version.format,
+                              sourceVersion: detail.version.version,
+                              expectedVersion: detail.artifact.currentVersion,
+                              originalContent: detail.version.content,
+                              originalFormat: detail.version.format,
+                            });
+                          }}
+                        >
+                          <Plus />
+                          {getWorkbenchLabel("workbench.artifacts.edit")}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onSelect={() => void exportVersion()}>
+                          <Download />
+                          {getWorkbenchLabel("workbench.artifacts.export")}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onSelect={() => setRaw((value) => !value)}>
+                          <FileText />
+                          {getWorkbenchLabel(
+                            raw ? "workbench.artifacts.preview" : "workbench.artifacts.source",
+                          )}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onSelect={() => setShowVersions((value) => !value)}>
+                          {getWorkbenchLabel("workbench.artifacts.history")}
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          disabled={!detail.version.sourceConversationId}
+                          onSelect={() =>
+                            void act("source", async () => {
+                              if (detail.version.sourceConversationId)
+                                await onOpenSource(detail.version.sourceConversationId);
+                            })
+                          }
+                        >
+                          <ExternalLink />
+                          {getWorkbenchLabel("workbench.artifacts.openSource")}
+                        </DropdownMenuItem>
+                        {!detail.version.sourceConversationId ? (
+                          <DropdownMenuLabel className="max-w-52 whitespace-normal text-xs font-normal leading-relaxed text-muted-foreground">
+                            {getWorkbenchLabel("workbench.artifacts.sourceGone")}
+                          </DropdownMenuLabel>
+                        ) : null}
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          onSelect={() => {
+                            setTitle(detail.artifact.title);
+                            setRenaming(true);
+                          }}
+                        >
+                          <Pencil />
+                          {getWorkbenchLabel("workbench.artifacts.rename")}
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          className="text-destructive focus:text-destructive"
+                          onSelect={() => {
+                            setActionError("");
+                            setConfirmDelete(true);
+                          }}
+                        >
+                          <Trash2 />
+                          {getWorkbenchLabel("workbench.artifacts.delete")}
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                )}
               </div>
-              <fieldset
-                aria-label={getWorkbenchLabel("workbench.artifacts.viewMode")}
-                className="flex min-w-0 items-center gap-5 border-0 border-b border-border p-0"
-              >
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className={
-                    "h-9 rounded-none border-b-2 px-0 hover:bg-transparent " +
-                    (!raw
-                      ? "border-foreground text-foreground"
-                      : "border-transparent text-muted-foreground")
-                  }
-                  aria-pressed={!raw}
-                  disabled={editing}
-                  onClick={() => setRaw(false)}
-                >
-                  {getWorkbenchLabel("workbench.artifacts.preview")}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className={
-                    "h-9 rounded-none border-b-2 px-0 hover:bg-transparent " +
-                    (raw
-                      ? "border-foreground text-foreground"
-                      : "border-transparent text-muted-foreground")
-                  }
-                  aria-pressed={raw}
-                  disabled={editing}
-                  onClick={() => setRaw(true)}
-                >
-                  <FileText />
-                  {getWorkbenchLabel("workbench.artifacts.source")}
-                </Button>
-              </fieldset>
+              {showVersions && !editing && !renaming && (
+                <ArtifactHistory
+                  key={`${detail.artifact.id}:${detail.version.version}`}
+                  detail={detail}
+                  busy={!!busy}
+                  onSelect={setSelectedVersion}
+                  onClose={() => setShowVersions(false)}
+                  onRestore={restoreVersion}
+                />
+              )}
             </header>
             {actionError ? (
               <p role="alert" className="text-sm text-destructive">
@@ -632,7 +660,7 @@ export function ArtifactPanel({ refreshToken = 0, onContinue, onOpenSource }: Ar
                 />
               </div>
             )}
-            <DiscardChangesDialog
+            <DiscardChangesNotice
               open={confirmDiscard}
               onKeep={() => setConfirmDiscard(false)}
               onDiscard={discardDraft}

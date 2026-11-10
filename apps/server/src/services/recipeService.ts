@@ -239,6 +239,16 @@ async function updateRecipeRevision(
     updatedAt: now,
   });
 }
+export async function restoreRecipe(
+  userId: string,
+  recipeId: string,
+  sourceVersion: unknown,
+  expectedVersion: unknown,
+) {
+  const source = await ownedVersion(userId, recipeId, sourceVersion);
+  return updateRecipe(userId, recipeId, source.spec, expectedVersion);
+}
+
 export async function deleteRecipe(userId: string, recipeId: string): Promise<boolean> {
   return (
     (

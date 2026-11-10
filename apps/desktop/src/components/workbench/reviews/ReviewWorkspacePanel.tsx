@@ -21,6 +21,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
   Label,
 } from "ui";
@@ -51,6 +52,8 @@ export function ReviewWorkspacePanel() {
 }
 
 function ReviewWorkspaceSession({ userId }: { userId: string }) {
+  const navigation = useWorkbenchStore((s) => s.navigationTarget);
+  const lastNavigation = useRef(navigation?.token);
   const [workspaces, setWorkspaces] = useState<ReviewWorkspaceSummary[]>([]);
   const [workspace, setWorkspace] = useState<ReviewWorkspace | null>(null);
   const [selectedId, setSelectedId] = useState("");
@@ -138,13 +141,20 @@ function ReviewWorkspaceSession({ userId }: { userId: string }) {
   };
   const load = async () => {
     const token = ++listEpoch.current;
+    const navigationAtStart = useWorkbenchStore.getState().navigationTarget?.token;
     setLoading(true);
     setListError("");
     try {
       const result = await reviewApi.list();
       if (!owns() || token !== listEpoch.current) return;
+      const currentNavigation = useWorkbenchStore.getState().navigationTarget;
+      if (currentNavigation && currentNavigation.token !== navigationAtStart) return;
       setWorkspaces(result.workspaces);
-      if (!result.workspaces.some((item) => item.id === selected.current))
+      const target = useWorkbenchStore.getState().navigationTarget;
+      if (target?.tab === "reviews") {
+        choose(target.id);
+        useWorkbenchStore.getState().clearNavigation(target.token);
+      } else if (!result.workspaces.some((item) => item.id === selected.current))
         choose(result.workspaces[0]?.id ?? "");
       else if (selected.current) void loadDetail(selected.current);
     } catch (error) {
@@ -165,6 +175,12 @@ function ReviewWorkspaceSession({ userId }: { userId: string }) {
       handoffEpoch.current++;
     };
   }, []);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: load uses the mounted identity and only a new navigation token reissues the read
+  useEffect(() => {
+    if (navigation?.tab !== "reviews" || navigation.token === lastNavigation.current) return;
+    lastNavigation.current = navigation.token;
+    void load();
+  }, [navigation]);
   const act = async <T,>(action: () => Promise<T>): Promise<T> => {
     if (mutation.current) throw new Error("busy");
     mutation.current = true;
@@ -410,41 +426,71 @@ function ReviewWorkspaceSession({ userId }: { userId: string }) {
   };
   return (
     <div className="min-w-0 space-y-5">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-          <Label htmlFor="review-workspace">{label("reviews.project")}</Label>
-          <select
-            id="review-workspace"
-            aria-label={label("reviews.choose")}
-            className={`${reviewSelectClass} w-full sm:max-w-sm`}
-            value={selectedId}
-            disabled={busy || loading}
-            onChange={(e) => choose(e.target.value)}
-          >
-            <option value="" disabled>
-              {label("reviews.choose")}
-            </option>
-            {workspaces.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.title}
+      {workspaces.length > 0 && (
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+            <Label htmlFor="review-workspace">{label("reviews.project")}</Label>
+            <select
+              id="review-workspace"
+              aria-label={label("reviews.choose")}
+              className={`${reviewSelectClass} w-full sm:max-w-sm`}
+              value={selectedId}
+              disabled={busy || loading}
+              onChange={(e) => choose(e.target.value)}
+            >
+              <option value="" disabled>
+                {label("reviews.choose")}
               </option>
-            ))}
-          </select>
+              {workspaces.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.title}
+                </option>
+              ))}
+            </select>
+          </div>
+          <DropdownMenu modal={false}>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                disabled={busy || loading}
+                aria-label={label("reviews.more")}
+              >
+                <MoreHorizontal className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onSelect={() => setImporting(true)}>
+                <FileSpreadsheet className="mr-2 h-4 w-4" />
+                {label("reviews.import")}
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => void load()}>
+                <RefreshCw className="mr-2 h-4 w-4" />
+                {label("reviews.refresh")}
+              </DropdownMenuItem>
+              {workspace && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onSelect={() => void exportFile("csv")}>
+                    <Download className="mr-2 h-4 w-4" />
+                    {label("reviews.exportCsv")}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => void exportFile("source")}>
+                    {label("reviews.exportSource")}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => void exportFile("report")}>
+                    {label("reviews.exportReport")}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem className="text-destructive" onSelect={() => setDeleting(true)}>
+                    {label("reviews.delete")}
+                  </DropdownMenuItem>
+                </>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
-        <Button variant="outline" disabled={busy} onClick={() => setImporting(true)}>
-          <FileSpreadsheet className="mr-2 h-4 w-4" />
-          {label("reviews.import")}
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label={label("reviews.refresh")}
-          disabled={busy || loading}
-          onClick={() => void load()}
-        >
-          <RefreshCw className="h-4 w-4" />
-        </Button>
-      </div>
+      )}
       {listError && (
         <div role="alert" className="flex items-center gap-3 text-sm text-destructive">
           {listError}
@@ -495,36 +541,8 @@ function ReviewWorkspaceSession({ userId }: { userId: string }) {
                 })}
               </p>
             </div>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={busy}
-                  aria-label={label("reviews.export")}
-                >
-                  <Download className="mr-2 h-4 w-4" />
-                  {label("reviews.export")}
-                  <MoreHorizontal className="ml-2 h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onSelect={() => void exportFile("csv")}>
-                  {label("reviews.exportCsv")}
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => void exportFile("source")}>
-                  {label("reviews.exportSource")}
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => void exportFile("report")}>
-                  {label("reviews.exportReport")}
-                </DropdownMenuItem>
-                <DropdownMenuItem className="text-destructive" onSelect={() => setDeleting(true)}>
-                  {label("reviews.delete")}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
           </div>
-          <dl className="grid grid-cols-2 gap-3 rounded-md border p-4 sm:grid-cols-4">
+          <dl className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
             {(
               [
                 ["total", workspace.data.rows.length],
@@ -536,29 +554,12 @@ function ReviewWorkspaceSession({ userId }: { userId: string }) {
                 ["unannotated", workspace.rowCount - workspace.annotatedCount],
               ] as const
             ).map(([key, count]) => (
-              <div key={key}>
+              <div key={key} className="flex items-baseline gap-2">
                 <dt className="text-xs text-muted-foreground">{label(`reviews.${key}`)}</dt>
-                <dd className="mt-1 text-2xl font-semibold tabular-nums">{count}</dd>
+                <dd className="font-medium tabular-nums">{count}</dd>
               </div>
             ))}
           </dl>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="review-model">{label("reviews.model")}</Label>
-            <select
-              id="review-model"
-              disabled={busy}
-              value={model}
-              className={`${reviewSelectClass} sm:max-w-md`}
-              onChange={(e) => setModel(e.target.value)}
-            >
-              <option value="">{label("reviews.noModel")}</option>
-              {models.map((item) => (
-                <option key={item.value} value={item.value}>
-                  {item.label}
-                </option>
-              ))}
-            </select>
-          </div>
           <ReviewDataset
             key={workspace.id}
             workspace={workspace}
@@ -566,6 +567,9 @@ function ReviewWorkspaceSession({ userId }: { userId: string }) {
             onEdit={setEditing}
             onPrepare={prepare}
             onClassify={classify}
+            models={models}
+            model={model}
+            onModelChange={setModel}
             jevEnabled={Boolean(
               jev.status?.configured && jev.status.enabled && jev.status.features.reviews,
             )}

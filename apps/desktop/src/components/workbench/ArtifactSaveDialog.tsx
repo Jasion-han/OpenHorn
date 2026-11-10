@@ -14,14 +14,24 @@ import {
 } from "ui";
 import { formatWorkbenchLabel, getWorkbenchLabel } from "../../lib/i18n/agent";
 import { notifySuccess } from "../../lib/notify";
-import { workbenchApi, workbenchError } from "../../lib/workbenchApi";
+import { WorkbenchApiError, workbenchApi, workbenchError } from "../../lib/workbenchApi";
+import { useWorkbenchSessionStore } from "../../stores/workbenchSessionStore";
+import { useWorkbenchStore } from "../../stores/workbenchStore";
 
 export interface ArtifactSaveDialogProps {
   messageId: string | null;
   onClose: () => void;
   onSaved?: () => void;
 }
-export function ArtifactSaveDialog({ messageId, onClose, onSaved }: ArtifactSaveDialogProps) {
+export function ArtifactSaveDialog(props: ArtifactSaveDialogProps) {
+  const owner = useWorkbenchSessionStore((s) => s.owner);
+  return <ArtifactSaveSession key={owner ?? "anonymous"} {...props} />;
+}
+function ArtifactSaveSession({ messageId, onClose, onSaved }: ArtifactSaveDialogProps) {
+  const conversationId = useWorkbenchStore((s) => s.artifactConversationId);
+  const continuation = useWorkbenchSessionStore((s) =>
+    conversationId ? s.continuations[conversationId] : undefined,
+  );
   const [mode, setMode] = useState<"new" | "existing">("new");
   const [title, setTitle] = useState("");
   const [artifacts, setArtifacts] = useState<SavedArtifact[]>([]);
@@ -42,9 +52,9 @@ export function ArtifactSaveDialog({ messageId, onClose, onSaved }: ArtifactSave
     const requestKey = JSON.stringify([messageId, refresh]);
     listIdentity.current = requestKey;
     if (previousMessage.current !== messageId) {
-      setMode("new");
+      setMode(continuation ? "existing" : "new");
       setTitle("");
-      setTargetId("");
+      setTargetId(continuation?.artifactId ?? "");
       setTarget(null);
       setSaving(false);
       previousMessage.current = messageId;
@@ -55,8 +65,16 @@ export function ArtifactSaveDialog({ messageId, onClose, onSaved }: ArtifactSave
     void workbenchApi.artifacts
       .list()
       .then((response) => {
-        if (request === generation.current && listIdentity.current === requestKey)
+        if (request === generation.current && listIdentity.current === requestKey) {
           setArtifacts(response.artifacts);
+          if (
+            continuation &&
+            !response.artifacts.some((item) => item.id === continuation.artifactId)
+          ) {
+            setTargetId("");
+            setError(getWorkbenchLabel("workbench.artifacts.continueMissing"));
+          }
+        }
       })
       .catch((failure) => {
         if (request === generation.current) setError(workbenchError(failure));
@@ -67,7 +85,7 @@ export function ArtifactSaveDialog({ messageId, onClose, onSaved }: ArtifactSave
     return () => {
       generation.current++;
     };
-  }, [messageId, refresh]);
+  }, [messageId, refresh, continuation]);
   useEffect(() => {
     let cancelled = false;
     const requestKey = JSON.stringify([targetId, refresh]);
@@ -84,7 +102,14 @@ export function ArtifactSaveDialog({ messageId, onClose, onSaved }: ArtifactSave
         if (!cancelled && targetRequest.current === requestKey) setTarget(response.artifact);
       })
       .catch((failure) => {
-        if (!cancelled) setError(workbenchError(failure));
+        if (!cancelled)
+          setError(
+            continuation?.artifactId === targetId &&
+              failure instanceof WorkbenchApiError &&
+              failure.errorCode === "artifact_not_found"
+              ? getWorkbenchLabel("workbench.artifacts.continueMissing")
+              : workbenchError(failure),
+          );
       })
       .finally(() => {
         if (!cancelled) setTargetLoading(false);
@@ -92,7 +117,7 @@ export function ArtifactSaveDialog({ messageId, onClose, onSaved }: ArtifactSave
     return () => {
       cancelled = true;
     };
-  }, [mode, targetId, refresh]);
+  }, [mode, targetId, refresh, continuation]);
   const save = async () => {
     if (!messageId || submitting.current || (mode === "existing" && !target)) return;
     submitting.current = true;
@@ -139,6 +164,13 @@ export function ArtifactSaveDialog({ messageId, onClose, onSaved }: ArtifactSave
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 py-2">
+          {continuation && (
+            <p className="text-sm text-muted-foreground">
+              {formatWorkbenchLabel("workbench.artifacts.continueSaveHint", {
+                version: continuation.sourceVersion,
+              })}
+            </p>
+          )}
           <div className="flex flex-wrap gap-2">
             <Button
               size="sm"

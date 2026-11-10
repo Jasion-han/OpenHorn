@@ -154,6 +154,12 @@ const { default: reviews } = await import("./reviewWorkspaces");
 const { default: decisions } = await import("./decisions");
 const { default: conversations } = await import("./conversations");
 const { default: messageRoutes } = await import("./messages");
+const { default: recipeRoutes } = await import("./recipes");
+const { default: artifactRoutes } = await import("./artifacts");
+const { default: libraryRoutes } = await import("./library");
+const { default: searchRoutes } = await import("./search");
+const { default: projectRoutes } = await import("./projects");
+const { default: taskRoutes } = await import("./scheduledTasks");
 await bootstrapDatabase({ backup: null });
 // bootstrap's default local account is replaced only inside this owned test DB.
 await db.delete(users);
@@ -199,7 +205,32 @@ app
   .route("/decisions", decisions)
   .route("/review-workspaces", reviews)
   .route("/conversations", conversations)
-  .route("/messages", messageRoutes);
+  .route("/messages", messageRoutes)
+  .route("/recipes", recipeRoutes)
+  .route("/artifacts", artifactRoutes)
+  .route("/search", searchRoutes)
+  .route("/library", libraryRoutes)
+  .route("/projects", projectRoutes)
+  .route("/scheduled-tasks", taskRoutes);
+if (process.env.OPENHORN_SEARCH_VERSION_SYNTHETIC === "1") {
+  await db.insert(conversationTable).values({
+    id: "search-version-conversation",
+    userId: "reviews-browser-user",
+    title: "Needle conversation",
+    defaultMode: "chat",
+    lastMode: "chat",
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
+  await db.insert(messages).values({
+    id: "search-version-message",
+    conversationId: "search-version-conversation",
+    role: "assistant",
+    content: "Needle message evidence",
+    mode: "chat",
+    createdAt: new Date(),
+  });
+}
 app.post("/__fixture/route-shadow", async (c) => {
   const { buildLiveContext } = await import("../services/liveCapabilities");
   const result = await buildLiveContext({

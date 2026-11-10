@@ -130,11 +130,17 @@ function Fixture() {
   const pending = useDesktopShellStore((s) => s.pendingPrompt);
   const sourceId = useWorkbenchStore((s) => s.artifactMessageId);
   const [realChat, setRealChat] = useState(false);
+  const [fixtureMessage, setFixtureMessage] = useState(source);
   Object.assign(window, {
     workbenchTest: {
       runs: () => runs,
       pending: () => useDesktopShellStore.getState().pendingPrompt,
       source: () => source,
+      showReply: (conversationId: string) => {
+        setFixtureMessage({ ...source, id: "continuation-reply", conversationId });
+        setRealChat(false);
+        useDesktopShellStore.getState().setActiveView("chat");
+      },
       openTasks: () => useDesktopShellStore.getState().openScheduledTasks("tasks"),
       reloadTasks: () => useScheduledTaskStore.getState().loadTasks(),
       navigate: () => useDesktopShellStore.getState().setActiveView("settings"),
@@ -226,7 +232,7 @@ function Fixture() {
             <section className="p-6 group">
               <pre data-testid="handoff">{JSON.stringify(pending)}</pre>
               <MessageActionBar
-                message={source}
+                message={fixtureMessage}
                 canEdit={false}
                 canRetry={false}
                 canDelete={false}

@@ -1,6 +1,21 @@
 import { expect, test } from "bun:test";
 import { createWorkbenchStore } from "./workbenchStore";
 
+test("search navigation can only be consumed by its own token", () => {
+  const store = createWorkbenchStore();
+  store.getState().openItem("artifacts", "first");
+  const old = store.getState().navigationTarget;
+  store.getState().openItem("recipes", "second");
+  if (!old) throw new Error("Missing target");
+  store.getState().clearNavigation(old.token);
+  expect(store.getState().tab).toBe("recipes");
+  expect(store.getState().navigationTarget?.id).toBe("second");
+  const current = store.getState().navigationTarget;
+  if (!current) throw new Error("Missing target");
+  store.getState().clearNavigation(current.token);
+  expect(store.getState().navigationTarget).toBe(null);
+});
+
 test("recipe schedule handoff is a frozen memory-only draft until matching confirm or cancel", () => {
   let navigations = 0;
   const store = createWorkbenchStore({

@@ -1,0 +1,227 @@
+{
+  "checks": [
+    "one existing search entry groups all six owned content types through the real API",
+    "search opens the requested artifact and history compares escaped text without executing HTML",
+    "restore confirmation creates one new immutable artifact version despite double clicking",
+    "a concurrent update rejects restore, preserves the selected history and supports a fresh explicit retry",
+    "a restore finishing after another search navigation cannot apply its version to the newly opened artifact",
+    "recipe restoration includes its full saved spec and preserves the intervening revision",
+    "unified results navigate to review projects, local project scope and the owning conversation",
+    "a conversation created outside the current client is refreshed and opens from unified search",
+    "starting a new conversation while a search navigation refresh is delayed cancels the old handoff",
+    "a deleted conversation result gives explicit feedback without silently opening an empty chat",
+    "a deleted result reports an error rather than silently opening another saved artifact"
+  ],
+  "errors": [],
+  "unexpected": [],
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/projects"
+    },
+    {
+      "method": "GET",
+      "path": "/conversations"
+    },
+    {
+      "method": "GET",
+      "path": "/scheduled-tasks/runs"
+    },
+    {
+      "method": "GET",
+      "path": "/scheduled-tasks"
+    },
+    {
+      "method": "GET",
+      "path": "/recipes"
+    },
+    {
+      "method": "GET",
+      "path": "/search"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts/1e9fa16b-d7b8-4b63-ad17-1930c49abff6"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts/1e9fa16b-d7b8-4b63-ad17-1930c49abff6"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts/1e9fa16b-d7b8-4b63-ad17-1930c49abff6"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts/1e9fa16b-d7b8-4b63-ad17-1930c49abff6"
+    },
+    {
+      "method": "POST",
+      "path": "/artifacts/1e9fa16b-d7b8-4b63-ad17-1930c49abff6/restore"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts/1e9fa16b-d7b8-4b63-ad17-1930c49abff6"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts/1e9fa16b-d7b8-4b63-ad17-1930c49abff6"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts/1e9fa16b-d7b8-4b63-ad17-1930c49abff6"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts/1e9fa16b-d7b8-4b63-ad17-1930c49abff6"
+    },
+    {
+      "method": "POST",
+      "path": "/artifacts/1e9fa16b-d7b8-4b63-ad17-1930c49abff6/restore"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts/1e9fa16b-d7b8-4b63-ad17-1930c49abff6"
+    },
+    {
+      "method": "POST",
+      "path": "/artifacts/1e9fa16b-d7b8-4b63-ad17-1930c49abff6/restore"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts/1e9fa16b-d7b8-4b63-ad17-1930c49abff6"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts/1e9fa16b-d7b8-4b63-ad17-1930c49abff6"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts/1e9fa16b-d7b8-4b63-ad17-1930c49abff6"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts/1e9fa16b-d7b8-4b63-ad17-1930c49abff6"
+    },
+    {
+      "method": "POST",
+      "path": "/artifacts/1e9fa16b-d7b8-4b63-ad17-1930c49abff6/restore"
+    },
+    {
+      "method": "GET",
+      "path": "/search"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts/cdf6bb65-1b51-409d-8846-b25a9bc26801"
+    },
+    {
+      "method": "GET",
+      "path": "/search"
+    },
+    {
+      "method": "GET",
+      "path": "/recipes"
+    },
+    {
+      "method": "GET",
+      "path": "/recipes/8305a783-eca4-4bda-8ac1-e054cac85811"
+    },
+    {
+      "method": "POST",
+      "path": "/recipes/8305a783-eca4-4bda-8ac1-e054cac85811/restore"
+    },
+    {
+      "method": "GET",
+      "path": "/search"
+    },
+    {
+      "method": "GET",
+      "path": "/decisions/status"
+    },
+    {
+      "method": "GET",
+      "path": "/review-workspaces"
+    },
+    {
+      "method": "GET",
+      "path": "/review-workspaces/a7318a6f-0c79-4379-a4f1-0dc492aa566e"
+    },
+    {
+      "method": "GET",
+      "path": "/search"
+    },
+    {
+      "method": "GET",
+      "path": "/projects"
+    },
+    {
+      "method": "GET",
+      "path": "/search"
+    },
+    {
+      "method": "GET",
+      "path": "/conversations"
+    },
+    {
+      "method": "GET",
+      "path": "/messages/search-version-conversation"
+    },
+    {
+      "method": "GET",
+      "path": "/search"
+    },
+    {
+      "method": "GET",
+      "path": "/conversations"
+    },
+    {
+      "method": "GET",
+      "path": "/messages/d78188ca-4120-4b5f-9f82-b934753697ae"
+    },
+    {
+      "method": "GET",
+      "path": "/search"
+    },
+    {
+      "method": "GET",
+      "path": "/conversations"
+    },
+    {
+      "method": "GET",
+      "path": "/search"
+    },
+    {
+      "method": "GET",
+      "path": "/conversations"
+    },
+    {
+      "method": "GET",
+      "path": "/search"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts/cdf6bb65-1b51-409d-8846-b25a9bc26801"
+    }
+  ]
+}

@@ -1,0 +1,268 @@
+{
+  "checks": [
+    "empty review workspace exposes one import action without an empty project selector",
+    "real CSV import validates UTF-8, previews quoted data and persists the original in SQLite",
+    "review defaults hide filters, model settings, import/export controls and analysis records",
+    "chat model selection belongs to chat analysis and deletion is separated from exports",
+    "the first primary click only selects a batch and a separate explicit click prepares analysis",
+    "batch preparation uses the real conversation handoff in Chat mode without invoking a model",
+    "real API rejects unfinished/wrong-batch output and preserves manual edits when applying the batch",
+    "native save dispatch exports complete original bytes, formula-safe labeled CSV and an evidence report",
+    "reload retains datasets/results and a stale manual write preserves its draft on conflict",
+    "a successful write settles a superseded list spinner and a late refresh cannot lock the workspace",
+    "note checks display support/review signals, reveal the exact minimal payload and reuse a saved result without another call",
+    "historical v1 records remain readable without triggering a paid upgrade",
+    "pure recommendations show not-applicable and never display a misleading support percentage",
+    "uncertain factual existence hides even a 99-percent support answer",
+    "a verification response arriving after navigation cannot install an old dialog or change the current view",
+    "provider errors and timeouts never become negative answers and intermediate probabilities remain uncertain",
+    "light desktop and narrow dark layouts retain the controls without document overflow",
+    "a deleted source reports a recoverable error while the saved analysis stays available",
+    "a late prepare response cannot navigate or fill a draft after the user leaves",
+    "refresh recovers from a remotely deleted selection and discovers another client's dataset"
+  ],
+  "errors": [],
+  "unexpected": [],
+  "requests": [
+    {
+      "path": "/decisions/status",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces",
+      "method": "GET"
+    },
+    {
+      "path": "/decisions/status",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces",
+      "method": "POST"
+    },
+    {
+      "path": "/review-workspaces/36910093-6823-482a-9082-bf7d4af051af/runs",
+      "method": "POST"
+    },
+    {
+      "path": "/conversations",
+      "method": "GET"
+    },
+    {
+      "path": "/messages/688a243b-4021-4807-8a63-7c744eb4518a",
+      "method": "GET"
+    },
+    {
+      "path": "/decisions/status",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces",
+      "method": "GET"
+    },
+    {
+      "path": "/decisions/status",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces/36910093-6823-482a-9082-bf7d4af051af",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces/36910093-6823-482a-9082-bf7d4af051af/runs/455ec1b4-1715-46d2-84b9-45b0416a32c1/import",
+      "method": "POST"
+    },
+    {
+      "path": "/review-workspaces/36910093-6823-482a-9082-bf7d4af051af/runs/455ec1b4-1715-46d2-84b9-45b0416a32c1/import",
+      "method": "POST"
+    },
+    {
+      "path": "/review-workspaces/36910093-6823-482a-9082-bf7d4af051af/rows/r2",
+      "method": "PATCH"
+    },
+    {
+      "path": "/review-workspaces/36910093-6823-482a-9082-bf7d4af051af/runs/455ec1b4-1715-46d2-84b9-45b0416a32c1/import",
+      "method": "POST"
+    },
+    {
+      "path": "/decisions/status",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces",
+      "method": "GET"
+    },
+    {
+      "path": "/decisions/status",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces/36910093-6823-482a-9082-bf7d4af051af",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces/36910093-6823-482a-9082-bf7d4af051af/rows/r2",
+      "method": "PATCH"
+    },
+    {
+      "path": "/review-workspaces",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces/36910093-6823-482a-9082-bf7d4af051af",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces/36910093-6823-482a-9082-bf7d4af051af/rows/r2",
+      "method": "PATCH"
+    },
+    {
+      "path": "/review-workspaces/36910093-6823-482a-9082-bf7d4af051af/rows/r2",
+      "method": "PATCH"
+    },
+    {
+      "path": "/review-workspaces/36910093-6823-482a-9082-bf7d4af051af/rows/r2/verify-note",
+      "method": "POST"
+    },
+    {
+      "path": "/review-workspaces/36910093-6823-482a-9082-bf7d4af051af/rows/r2/verify-note",
+      "method": "POST"
+    },
+    {
+      "path": "/review-workspaces/36910093-6823-482a-9082-bf7d4af051af/rows/r2",
+      "method": "PATCH"
+    },
+    {
+      "path": "/review-workspaces/36910093-6823-482a-9082-bf7d4af051af/rows/r2/verify-note",
+      "method": "POST"
+    },
+    {
+      "path": "/decisions/status",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces",
+      "method": "GET"
+    },
+    {
+      "path": "/decisions/status",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces/36910093-6823-482a-9082-bf7d4af051af",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces/36910093-6823-482a-9082-bf7d4af051af/rows/r3",
+      "method": "PATCH"
+    },
+    {
+      "path": "/review-workspaces/36910093-6823-482a-9082-bf7d4af051af/rows/r3/verify-note",
+      "method": "POST"
+    },
+    {
+      "path": "/review-workspaces/36910093-6823-482a-9082-bf7d4af051af/rows/r3",
+      "method": "PATCH"
+    },
+    {
+      "path": "/review-workspaces/36910093-6823-482a-9082-bf7d4af051af/rows/r3/verify-note",
+      "method": "POST"
+    },
+    {
+      "path": "/review-workspaces/36910093-6823-482a-9082-bf7d4af051af/rows/r3/verify-note",
+      "method": "POST"
+    },
+    {
+      "path": "/review-workspaces/36910093-6823-482a-9082-bf7d4af051af/rows/r3/verify-note",
+      "method": "POST"
+    },
+    {
+      "path": "/review-workspaces/36910093-6823-482a-9082-bf7d4af051af/rows/r3",
+      "method": "PATCH"
+    },
+    {
+      "path": "/review-workspaces/36910093-6823-482a-9082-bf7d4af051af/rows/r3/verify-note",
+      "method": "POST"
+    },
+    {
+      "path": "/review-workspaces/36910093-6823-482a-9082-bf7d4af051af/rows/r4/verify-note",
+      "method": "POST"
+    },
+    {
+      "path": "/decisions/status",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces",
+      "method": "GET"
+    },
+    {
+      "path": "/decisions/status",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces/36910093-6823-482a-9082-bf7d4af051af",
+      "method": "GET"
+    },
+    {
+      "path": "/conversations",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces/36910093-6823-482a-9082-bf7d4af051af/runs",
+      "method": "POST"
+    },
+    {
+      "path": "/decisions/status",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces",
+      "method": "GET"
+    },
+    {
+      "path": "/decisions/status",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces/36910093-6823-482a-9082-bf7d4af051af",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces",
+      "method": "GET"
+    },
+    {
+      "path": "/review-workspaces/9525344a-d98a-4849-8cea-c5d560ffa7e0",
+      "method": "GET"
+    }
+  ]
+}

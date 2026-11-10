@@ -19,8 +19,8 @@ import {
   Trash2,
   Workflow,
 } from "lucide-react";
-import { memo, useEffect, useMemo, useState } from "react";
-import type { Project } from "shared/types";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
+import type { Project, UnifiedSearchResult } from "shared/types";
 import {
   Badge,
   Button,
@@ -53,13 +53,16 @@ import {
   type SidebarLabelKey,
 } from "../../lib/i18n/agent";
 import { hideNotification, notifyError, notifyErrorOnce, notifySuccess } from "../../lib/notify";
+import { workbenchApi } from "../../lib/workbenchApi";
 import { useAuthStore } from "../../stores/authStore";
 import { useBackendStatusStore } from "../../stores/backendStatusStore";
 import { useChatStore } from "../../stores/chatStore";
 import { useDesktopShellStore } from "../../stores/desktopShellStore";
 import { useProjectStore } from "../../stores/projectStore";
 import { useScheduledTaskStore } from "../../stores/scheduledTaskStore";
-import type { Conversation, MessageSearchResult } from "../../types/chat";
+import { useWorkbenchStore } from "../../stores/workbenchStore";
+import type { Conversation } from "../../types/chat";
+import { UnifiedSearchResults } from "./UnifiedSearchResults";
 
 // The shortcut hint next to the new-conversation button. The handler accepts both
 // modifiers, so the label follows the platform instead of always showing ⌘.
@@ -330,7 +333,6 @@ export function DesktopLeftSidebar() {
   const loadConversations = useChatStore((state) => state.loadConversations);
   const updateConversation = useChatStore((state) => state.updateConversation);
   const deleteConversation = useChatStore((state) => state.deleteConversation);
-  const searchMessages = useChatStore((state) => state.searchMessages);
   const streamingConversationId = useChatStore((state) => state.streamingConversationId);
   const projects = useProjectStore((state) => state.projects);
   const activeProjectId = useProjectStore((state) => state.activeProjectId);
@@ -347,7 +349,10 @@ export function DesktopLeftSidebar() {
   const recentRuns = useScheduledTaskStore((state) => state.runs);
   const loadRuns = useScheduledTaskStore((state) => state.loadRuns);
 
-  const [searchResults, setSearchResults] = useState<MessageSearchResult[] | null>(null);
+  const [searchResults, setSearchResults] = useState<UnifiedSearchResult[] | null>(null);
+  const searchNavigation = useRef(0);
+  const [searchStatus, setSearchStatus] = useState<"idle" | "loading" | "failed" | "done">("idle");
+  const [searchRetry, setSearchRetry] = useState(0);
 
   useEffect(() => {
     void loadRuns();
@@ -375,22 +380,37 @@ export function DesktopLeftSidebar() {
   // Debounced full-text search via backend FTS5 API. When the query is empty,
   // searchResults is set to null so the sidebar falls back to the normal
   // conversation list with client-side title filtering.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: retry must reissue the same query
   useEffect(() => {
     const q = query.trim();
+    searchNavigation.current++;
+    let cancelled = false;
+    setSearchResults(null);
     if (!q) {
-      setSearchResults(null);
+      setSearchStatus("idle");
       return;
     }
+    setSearchStatus("loading");
     const timer = setTimeout(async () => {
       try {
-        const results = await searchMessages(q);
+        const { results } = await workbenchApi.search(q);
+        if (
+          cancelled ||
+          backendBase !== getDesktopBackendBase() ||
+          user?.id !== useAuthStore.getState().user?.id
+        )
+          return;
         setSearchResults(results);
+        setSearchStatus("done");
       } catch {
-        setSearchResults(null);
+        if (!cancelled) setSearchStatus("failed");
       }
     }, 300);
-    return () => clearTimeout(timer);
-  }, [query, searchMessages]);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [query, searchRetry, user?.id, backendBase]);
 
   const filteredConversations = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
@@ -408,6 +428,9 @@ export function DesktopLeftSidebar() {
   // Opens the welcome screen rather than creating a row up front — the
   // conversation is created by the first message that is actually sent.
   const handleCreateConversation = () => {
+    searchNavigation.current++;
+    setQuery("");
+    setSearchOpen(false);
     startNewConversation();
     setActiveView("chat");
   };
@@ -468,10 +491,67 @@ export function DesktopLeftSidebar() {
   // Selecting a project makes it the scope for the next conversation and opens
   // the welcome screen, mirroring "new conversation" but inside that folder.
   const handleSelectProject = (project: Project) => {
+    searchNavigation.current++;
     setActiveProject(project.id);
     setProjectExpanded(project.id, true);
     startNewConversation();
     setActiveView("chat");
+  };
+  const openSearchResult = async (result: UnifiedSearchResult) => {
+    const epoch = ++searchNavigation.current;
+    const view = useDesktopShellStore.getState().activeView;
+    const tab = useWorkbenchStore.getState().tab;
+    const owns = () =>
+      epoch === searchNavigation.current &&
+      user?.id === useAuthStore.getState().user?.id &&
+      backendBase === getDesktopBackendBase() &&
+      useDesktopShellStore.getState().activeView === view &&
+      useWorkbenchStore.getState().tab === tab;
+    try {
+      if (result.kind === "message" || result.kind === "conversation") {
+        await loadConversations();
+        if (!owns()) return;
+        if (
+          !useChatStore
+            .getState()
+            .conversations.some((item) => item.id === (result.conversationId ?? result.id))
+        )
+          throw new Error("search_target_missing");
+        await selectConversation(result.conversationId ?? result.id);
+        if (!owns()) return;
+        if (
+          useChatStore.getState().currentConversation?.id !== (result.conversationId ?? result.id)
+        )
+          throw new Error("search_target_missing");
+        setActiveView("chat");
+      } else if (result.kind === "project") {
+        await useProjectStore.getState().loadProjects();
+        if (!owns()) return;
+        const project = useProjectStore.getState().projects.find((p) => p.id === result.id);
+        if (!project) throw new Error("search_target_missing");
+        handleSelectProject(project);
+      } else {
+        useWorkbenchStore
+          .getState()
+          .openItem(
+            result.kind === "artifact"
+              ? "artifacts"
+              : result.kind === "recipe"
+                ? "recipes"
+                : "reviews",
+            result.id,
+          );
+        setActiveView("workbench");
+      }
+      setQuery("");
+      setSearchOpen(false);
+    } catch {
+      if (owns())
+        notifyError(
+          getSidebarLabel("sidebar.searchOpenFailed"),
+          getSidebarLabel("sidebar.searchOpenFailedBody"),
+        );
+    }
   };
 
   const handleAddProject = async () => {
@@ -585,6 +665,7 @@ export function DesktopLeftSidebar() {
         indent={indent}
         onSelect={() => {
           setActiveView("chat");
+          searchNavigation.current++;
           void selectConversation(conversation.id);
         }}
         onRename={() => {
@@ -725,6 +806,8 @@ export function DesktopLeftSidebar() {
             <Input
               autoFocus
               placeholder={getSidebarLabel("sidebar.searchPlaceholder")}
+              maxLength={200}
+              aria-label={getSidebarLabel("sidebar.searchToggle")}
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               onKeyDown={(event) => {
@@ -738,37 +821,27 @@ export function DesktopLeftSidebar() {
 
           <ScrollArea className="flex-1 min-h-0">
             <div className="flex flex-col gap-1 py-1">
-              {searchResults !== null ? (
+              {query.trim() && searchStatus === "loading" ? (
+                <output className="px-3 py-4 text-sm text-muted-foreground">
+                  {getSidebarLabel("sidebar.searchLoading")}
+                </output>
+              ) : query.trim() && searchStatus === "failed" ? (
+                <div role="alert" className="space-y-2 px-3 py-4 text-sm text-destructive">
+                  <p>{getSidebarLabel("sidebar.searchFailed")}</p>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setSearchRetry((value) => value + 1)}
+                  >
+                    {getSidebarLabel("sidebar.searchRetry")}
+                  </Button>
+                </div>
+              ) : searchResults !== null ? (
                 searchResults.length > 0 ? (
-                  searchResults.map((result) => (
-                    // biome-ignore lint/a11y/useSemanticElements: cannot use <button> due to multi-line content layout
-                    <div
-                      key={result.messageId}
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => {
-                        setActiveView("chat");
-                        void selectConversation(result.conversationId);
-                      }}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter" || event.key === " ") {
-                          event.preventDefault();
-                          setActiveView("chat");
-                          void selectConversation(result.conversationId);
-                        }
-                      }}
-                      className="flex cursor-pointer flex-col gap-0.5 rounded-[10px] border border-transparent px-3 py-[7px] text-left text-sm transition-colors duration-100 titlebar-no-drag text-foreground/70 hover:bg-foreground/[0.04] hover:text-foreground"
-                    >
-                      <span className="truncate font-medium text-foreground">
-                        {displayConversationTitle(result.conversationTitle)}
-                      </span>
-                      <span className="line-clamp-2 text-xs text-muted-foreground">
-                        {result.snippet.length > 100
-                          ? `${result.snippet.slice(0, 100)}...`
-                          : result.snippet}
-                      </span>
-                    </div>
-                  ))
+                  <UnifiedSearchResults
+                    results={searchResults}
+                    onOpen={(result) => void openSearchResult(result)}
+                  />
                 ) : (
                   <p className="py-8 text-center text-xs text-muted-foreground">
                     {getSidebarLabel("sidebar.searchNoResults")}
@@ -824,6 +897,7 @@ export function DesktopLeftSidebar() {
                               const conversationId = run.conversationId;
                               if (conversationId) {
                                 void loadConversations().then(() => {
+                                  searchNavigation.current++;
                                   void selectConversation(conversationId);
                                   setActiveView("chat");
                                 });
@@ -837,6 +911,7 @@ export function DesktopLeftSidebar() {
                                 const conversationId = run.conversationId;
                                 if (conversationId) {
                                   void loadConversations().then(() => {
+                                    searchNavigation.current++;
                                     void selectConversation(conversationId);
                                     setActiveView("chat");
                                   });

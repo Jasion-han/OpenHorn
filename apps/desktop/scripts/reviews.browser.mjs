@@ -123,9 +123,29 @@ try {
     return route.continue();
   });
   const page = await context.newPage();
+  page.setDefaultTimeout(15_000);
+  const projectAction = async (name) => {
+    await page.getByRole("button", { name: "更多评论项目操作", exact: true }).click();
+    await page.getByRole("menuitem", { name, exact: true }).click();
+    await page.getByRole("menu").waitFor({ state: "hidden" });
+  };
+  const openSettings = async () => {
+    if ((await page.getByLabel("分析方式", { exact: true }).count()) === 0) {
+      await page.getByRole("button", { name: "更多分析操作", exact: true }).click();
+      await page.getByRole("menuitem", { name: "筛选与分析设置", exact: true }).click();
+    }
+  };
+  const openRuns = async () => {
+    const records = page.getByTestId("review-runs");
+    if ((await records.getAttribute("open")) === null) await records.locator("summary").click();
+  };
+
   page.on("pageerror", (error) => errors.push(error.message));
   await page.goto(`${origin}/tests/reviews.html`);
   await page.getByRole("heading", { name: "把评论变成可以持续使用的资料" }).waitFor();
+  assert.equal(await page.getByRole("button", { name: "导入 CSV", exact: true }).count(), 1);
+  assert.equal(await page.getByRole("combobox", { name: "选择评论项目", exact: true }).count(), 0);
+  pass("empty review workspace exposes one import action without an empty project selector");
   await page.getByRole("button", { name: "导入 CSV", exact: true }).first().click();
   const dialog = page.getByRole("dialog");
   await dialog
@@ -144,19 +164,51 @@ try {
     .getByText("可导入 3 条，跳过 0 条空正文。以下展示前 5 条。", { exact: true })
     .waitFor();
   await page.keyboard.press("Escape");
+  await page.getByRole("alert", { name: "放弃未保存的修改？", exact: true }).waitFor();
+  assert.equal(await page.getByRole("dialog").count(), 1);
   await page.getByRole("button", { name: "继续编辑", exact: true }).click();
   await dialog.getByRole("button", { name: "保存评论项目", exact: true }).click();
   await page.getByRole("heading", { name: "Browser review project" }).waitFor();
   const workspaces = await fetch(`${api}/review-workspaces`).then((r) => r.json());
   const workspaceId = workspaces.workspaces[0].id;
   pass("real CSV import validates UTF-8, previews quoted data and persists the original in SQLite");
+  assert.equal(await page.getByLabel("聊天分析模型", { exact: true }).count(), 0);
+  assert.equal(await page.getByLabel("分析方式", { exact: true }).count(), 0);
+  assert.equal(await page.getByRole("button", { name: "导出", exact: true }).count(), 0);
+  assert.equal(await page.getByRole("button", { name: "刷新已保存数据", exact: true }).count(), 0);
+  assert.equal(await page.getByTestId("review-runs").getAttribute("open"), null);
+  pass("review defaults hide filters, model settings, import/export controls and analysis records");
+  await openSettings();
+  await page.getByLabel("聊天分析模型", { exact: true }).waitFor();
+  const analysisRequests = requests.length;
+  await page.getByLabel("分析方式", { exact: true }).selectOption("jev");
+  assert.equal(await page.getByLabel("聊天分析模型", { exact: true }).count(), 0);
+  assert.equal(
+    await page.getByRole("button", { name: "选择下一批未标注", exact: true }).count(),
+    1,
+  );
+  await page.getByLabel("分析方式", { exact: true }).selectOption("chat");
+  assert.equal(requests.length, analysisRequests);
+  await page.getByRole("button", { name: "更多评论项目操作", exact: true }).click();
+  await page.getByRole("menuitem", { name: "导出全部标注 CSV", exact: true }).waitFor();
+  await page.getByRole("menuitem", { name: "删除评论项目", exact: true }).waitFor();
+  await page.keyboard.press("Escape");
+  pass("chat model selection belongs to chat analysis and deletion is separated from exports");
 
   await page.getByRole("textbox", { name: "搜索评论或主题" }).fill("missing review");
   await page.getByText("没有符合筛选条件的评论。", { exact: true }).waitFor();
   await page.getByRole("button", { name: "清除筛选" }).click();
   assert.equal(await page.getByRole("checkbox", { name: /选择评论/ }).count(), 3);
+  const runsBeforeSelection = requests.filter((request) => /\/runs$/.test(request.path)).length;
   await page.getByRole("button", { name: "选择下一批未标注" }).click();
-  await page.getByRole("button", { name: "准备 AI 分析", exact: true }).click();
+  assert.equal(
+    requests.filter((request) => /\/runs$/.test(request.path)).length,
+    runsBeforeSelection,
+  );
+  pass(
+    "the first primary click only selects a batch and a separate explicit click prepares analysis",
+  );
+  await page.getByRole("button", { name: "准备聊天分析", exact: true }).click();
   await page.getByTestId("handoff").waitFor();
   const pending = await page.evaluate(() => window.reviewsTest.pending());
   assert.equal(pending.autoSend, false);
@@ -170,6 +222,7 @@ try {
     "batch preparation uses the real conversation handoff in Chat mode without invoking a model",
   );
   await page.getByRole("button", { name: "Back fixture" }).click();
+  await openRuns();
   await page.getByRole("button", { name: "同步分析结果", exact: true }).click();
   await page
     .getByText("分析回复尚未完成或保存，或来源已删除。请打开会话检查后重试。", { exact: true })
@@ -179,6 +232,7 @@ try {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ workspaceId, bad: true }),
   });
+  await openRuns();
   await page.getByRole("button", { name: "同步分析结果", exact: true }).click();
   await page
     .getByText("结果格式、评论 ID 或原文证据不符合要求，整批未导入。请在分析会话修正后再次同步。", {
@@ -197,6 +251,7 @@ try {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ workspaceId }),
   });
+  await openRuns();
   await page.getByRole("button", { name: "同步分析结果", exact: true }).click();
   await page.getByText("应用 2 条，跳过 1 条后续修改。", { exact: true }).waitFor();
   assert.equal(await page.getByText("human topic", { exact: true }).count(), 1);
@@ -204,20 +259,17 @@ try {
     "real API rejects unfinished/wrong-batch output and preserves manual edits when applying the batch",
   );
 
-  await page.getByRole("button", { name: "导出", exact: true }).click();
-  await page.getByRole("menuitem", { name: "导出全部标注 CSV" }).click();
+  await projectAction("导出全部标注 CSV");
   await page.waitForFunction(() => window.fixtureIpc.length > 0);
   const exported = await page.evaluate(() => window.fixtureIpc.at(-1).args);
   const exportedText = new TextDecoder().decode(new Uint8Array(exported.bytes));
   assert.ok(exportedText.includes("'  =1+1"));
   assert.ok(exportedText.includes("human topic"));
-  await page.getByRole("button", { name: "导出", exact: true }).click();
-  await page.getByRole("menuitem", { name: "导出原始 CSV" }).click();
+  await projectAction("导出原始 CSV");
   await page.waitForFunction(() => window.fixtureIpc.length === 2);
   const original = await page.evaluate(() => window.fixtureIpc.at(-1).args.bytes);
   assert.equal(new TextDecoder().decode(new Uint8Array(original)), csv);
-  await page.getByRole("button", { name: "导出", exact: true }).click();
-  await page.getByRole("menuitem", { name: "导出证据报告 Markdown" }).click();
+  await projectAction("导出证据报告 Markdown");
   await page.waitForFunction(() => window.fixtureIpc.length === 3);
   const report = await page.evaluate(() => window.fixtureIpc.at(-1).args.bytes);
   assert.ok(new TextDecoder().decode(new Uint8Array(report)).includes("# Browser review project"));
@@ -225,6 +277,7 @@ try {
     "native save dispatch exports complete original bytes, formula-safe labeled CSV and an evidence report",
   );
   await page.reload();
+  await openRuns();
   await page.getByText("应用 2 条，跳过 1 条后续修改。", { exact: true }).waitFor();
   await page.getByRole("button", { name: "查看与修正 r2" }).click();
   await dialog.getByLabel("标注说明", { exact: true }).fill("unsaved draft");
@@ -241,8 +294,10 @@ try {
     .waitFor();
   assert.equal(await dialog.getByLabel("标注说明", { exact: true }).inputValue(), "unsaved draft");
   await page.keyboard.press("Escape");
+  await page.getByRole("alert", { name: "放弃未保存的修改？", exact: true }).waitFor();
+  assert.equal(await page.getByRole("dialog").count(), 1);
   await page.getByRole("button", { name: "放弃修改", exact: true }).click();
-  await page.getByRole("button", { name: "刷新已保存数据", exact: true }).first().click();
+  await projectAction("刷新已保存数据");
   pass("reload retains datasets/results and a stale manual write preserves its draft on conflict");
   let releaseList;
   holdList = new Promise((resolve) => {
@@ -251,14 +306,14 @@ try {
   const listEntered = new Promise((resolve) => {
     enteredList = resolve;
   });
-  await page.getByRole("button", { name: "刷新已保存数据", exact: true }).first().click();
+  await projectAction("刷新已保存数据");
   await listEntered;
   await page.getByRole("button", { name: "查看与修正 r2" }).click();
   await dialog.getByLabel("标注说明", { exact: true }).fill("Saved during a pending refresh");
   await dialog.getByRole("button", { name: "保存人工修正" }).click();
   await dialog.waitFor({ state: "hidden" });
   assert.equal(
-    await page.getByRole("button", { name: "刷新已保存数据", exact: true }).first().isEnabled(),
+    await page.getByRole("button", { name: "更多评论项目操作", exact: true }).isEnabled(),
     true,
   );
   const listResponse = page.waitForResponse(
@@ -456,6 +511,7 @@ try {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ workspaceId }),
   });
+  await openRuns();
   await page.getByRole("button", { name: "打开分析会话", exact: true }).click();
   await page
     .getByText("分析回复尚未完成或保存，或来源已删除。请打开会话检查后重试。", { exact: true })
@@ -470,7 +526,7 @@ try {
   const entered = new Promise((done) => {
     enteredPrepare = done;
   });
-  await page.getByRole("button", { name: "准备 AI 分析", exact: true }).click();
+  await page.getByRole("button", { name: "准备聊天分析", exact: true }).click();
   await entered;
   await page.evaluate(() => window.reviewsTest.leave());
   const lateResponse = page.waitForResponse(
@@ -504,7 +560,7 @@ try {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ expectedRevision: latest.workspace.revision }),
   });
-  await page.getByRole("button", { name: "刷新已保存数据", exact: true }).first().click();
+  await projectAction("刷新已保存数据");
   await page.getByRole("heading", { name: "Other client project" }).waitFor();
   assert.equal(
     await page.getByRole("option", { name: "Browser review project", exact: true }).count(),
@@ -518,6 +574,9 @@ try {
     JSON.stringify({ checks, errors, unexpected, requests }, null, 2),
   );
   console.log(`Evidence: ${evidence}`);
+} catch (error) {
+  console.error(error);
+  throw error;
 } finally {
   await browser?.close();
   await server?.close();

@@ -23,7 +23,7 @@ import { notifyError, notifySuccess } from "../../lib/notify";
 import { workbenchApi, workbenchError } from "../../lib/workbenchApi";
 import { useScheduledTaskStore } from "../../stores/scheduledTaskStore";
 import type { RecipeScheduleHandoff } from "../../stores/workbenchStore";
-import { DiscardChangesDialog } from "../workbench/DiscardChangesDialog";
+import { DiscardChangesNotice } from "../workbench/DiscardChangesNotice";
 
 const FREQUENCIES: ScheduledTaskFrequency[] = [
   "daily",
@@ -217,145 +217,162 @@ export function CreateTaskDialog({
     </div>
   );
   return (
-    <>
-      <Dialog
-        open={open}
-        onOpenChange={(next) => {
-          if (!next) requestClose();
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) requestClose();
+      }}
+    >
+      <DialogContent
+        onEscapeKeyDown={(event) => {
+          if (confirmDiscard) {
+            event.preventDefault();
+            setConfirmDiscard(false);
+          }
         }}
+        className="max-h-[85dvh] max-w-lg overflow-y-auto"
       >
-        <DialogContent className="max-h-[85dvh] max-w-lg overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>
-              {getScheduledTaskLabel(
-                isEdit ? "scheduledTask.editTitle" : "scheduledTask.createTitle",
-              )}
-            </DialogTitle>
-            <DialogDescription>
-              {getScheduledTaskLabel(
-                isEdit
-                  ? source
-                    ? "scheduledTask.recipe.editSubtitle"
-                    : "scheduledTask.editSubtitle"
-                  : source
-                    ? "scheduledTask.recipe.subtitle"
-                    : "scheduledTask.createSubtitle",
-              )}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex flex-col gap-4 py-2">
-            {source ? (
-              <div
-                className="space-y-1 text-xs text-muted-foreground"
-                data-testid="scheduled-recipe-source"
-              >
-                <p>
-                  {getScheduledTaskLabel("scheduledTask.recipe.source")
-                    .replace("{title}", source.title)
-                    .replace("{version}", String(source.version))}
-                </p>
-                <p id="scheduled-recipe-locked">
-                  {getScheduledTaskLabel("scheduledTask.recipe.locked")}
-                </p>
-              </div>
-            ) : null}
-            {recipeSchedule?.parameters?.length ? (
-              <div className="space-y-1">
-                <p className="text-xs font-medium">
-                  {getScheduledTaskLabel("scheduledTask.recipe.parameters")}
-                </p>
-                <dl className="grid max-h-32 grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 overflow-y-auto text-xs text-muted-foreground">
-                  {recipeSchedule.parameters.map((parameter, index) => (
-                    // biome-ignore lint/suspicious/noArrayIndexKey: summary rows are immutable within this handoff and labels may repeat
-                    <div key={`${parameter.label}-${index}`} className="contents">
-                      <dt className="max-w-40 break-words">{parameter.label}</dt>
-                      <dd className="whitespace-pre-wrap break-words">{parameter.value}</dd>
-                    </div>
-                  ))}
-                </dl>
-              </div>
-            ) : null}
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="scheduled-task-name" className="text-sm font-medium">
-                {getScheduledTaskLabel("scheduledTask.fieldName")}{" "}
-                <span className="text-destructive">*</span>
-              </Label>
-              <Input
-                id="scheduled-task-name"
-                value={title}
-                maxLength={160}
-                disabled={saving}
-                onChange={(event) => setTitle(event.target.value)}
-                placeholder={getScheduledTaskLabel("scheduledTask.fieldNamePlaceholder")}
-              />
-            </div>
-            {!isEdit ? (
-              <p className="text-xs text-muted-foreground">
-                {getScheduledTaskLabel("scheduledTask.createHint")}
-              </p>
-            ) : null}
-            {lockedPrompt ? (
-              <details>
-                <summary className="w-fit cursor-pointer rounded py-1 text-xs text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
-                  {getScheduledTaskLabel("scheduledTask.recipe.viewPrompt")}
-                </summary>
-                <div className="mt-2">{promptField}</div>
-              </details>
-            ) : (
-              promptField
+        <DialogHeader>
+          <DialogTitle>
+            {getScheduledTaskLabel(
+              isEdit ? "scheduledTask.editTitle" : "scheduledTask.createTitle",
             )}
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="scheduled-task-time" className="text-sm font-medium">
-                {getScheduledTaskLabel("scheduledTask.fieldTime")}{" "}
-                <span className="text-destructive">*</span>
-              </Label>
-              <div className="flex flex-wrap items-center gap-2">
-                <Select
-                  value={frequency}
-                  disabled={saving}
-                  onValueChange={(value) => setFrequency(value as ScheduledTaskFrequency)}
-                >
-                  <SelectTrigger
-                    className="w-[140px]"
-                    aria-label={getScheduledTaskLabel("scheduledTask.fieldFrequency")}
-                  >
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {FREQUENCIES.map((value) => (
-                      <SelectItem key={value} value={value}>
-                        {getScheduledTaskLabel(`scheduledTask.freq.${value}`)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Input
-                  id="scheduled-task-time"
-                  type="time"
-                  value={time}
-                  disabled={saving}
-                  onChange={(event) => setTime(event.target.value)}
-                  className="w-[140px]"
-                />
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <Checkbox
-                id="scheduled-task-notify"
-                checked={notify}
-                disabled={saving}
-                onCheckedChange={(value) => setNotify(value === true)}
-              />
-              <Label htmlFor="scheduled-task-notify" className="cursor-pointer text-sm">
-                {getScheduledTaskLabel("scheduledTask.fieldNotify")}
-              </Label>
-            </div>
-            {error ? (
-              <p role="alert" className="text-sm text-destructive">
-                {error}
+          </DialogTitle>
+          <DialogDescription>
+            {getScheduledTaskLabel(
+              isEdit
+                ? source
+                  ? "scheduledTask.recipe.editSubtitle"
+                  : "scheduledTask.editSubtitle"
+                : source
+                  ? "scheduledTask.recipe.subtitle"
+                  : "scheduledTask.createSubtitle",
+            )}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex flex-col gap-4 py-2">
+          {source ? (
+            <div
+              className="space-y-1 text-xs text-muted-foreground"
+              data-testid="scheduled-recipe-source"
+            >
+              <p>
+                {getScheduledTaskLabel("scheduledTask.recipe.source")
+                  .replace("{title}", source.title)
+                  .replace("{version}", String(source.version))}
               </p>
-            ) : null}
+              <p id="scheduled-recipe-locked">
+                {getScheduledTaskLabel("scheduledTask.recipe.locked")}
+              </p>
+            </div>
+          ) : null}
+          {recipeSchedule?.parameters?.length ? (
+            <div className="space-y-1">
+              <p className="text-xs font-medium">
+                {getScheduledTaskLabel("scheduledTask.recipe.parameters")}
+              </p>
+              <dl className="grid max-h-32 grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 overflow-y-auto text-xs text-muted-foreground">
+                {recipeSchedule.parameters.map((parameter, index) => (
+                  // biome-ignore lint/suspicious/noArrayIndexKey: summary rows are immutable within this handoff and labels may repeat
+                  <div key={`${parameter.label}-${index}`} className="contents">
+                    <dt className="max-w-40 break-words">{parameter.label}</dt>
+                    <dd className="whitespace-pre-wrap break-words">{parameter.value}</dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+          ) : null}
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="scheduled-task-name" className="text-sm font-medium">
+              {getScheduledTaskLabel("scheduledTask.fieldName")}{" "}
+              <span className="text-destructive">*</span>
+            </Label>
+            <Input
+              id="scheduled-task-name"
+              value={title}
+              maxLength={160}
+              disabled={saving}
+              onChange={(event) => setTitle(event.target.value)}
+              placeholder={getScheduledTaskLabel("scheduledTask.fieldNamePlaceholder")}
+            />
           </div>
+          {!isEdit ? (
+            <p className="text-xs text-muted-foreground">
+              {getScheduledTaskLabel("scheduledTask.createHint")}
+            </p>
+          ) : null}
+          {lockedPrompt ? (
+            <details>
+              <summary className="w-fit cursor-pointer rounded py-1 text-xs text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
+                {getScheduledTaskLabel("scheduledTask.recipe.viewPrompt")}
+              </summary>
+              <div className="mt-2">{promptField}</div>
+            </details>
+          ) : (
+            promptField
+          )}
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="scheduled-task-time" className="text-sm font-medium">
+              {getScheduledTaskLabel("scheduledTask.fieldTime")}{" "}
+              <span className="text-destructive">*</span>
+            </Label>
+            <div className="flex flex-wrap items-center gap-2">
+              <Select
+                value={frequency}
+                disabled={saving}
+                onValueChange={(value) => setFrequency(value as ScheduledTaskFrequency)}
+              >
+                <SelectTrigger
+                  className="w-[140px]"
+                  aria-label={getScheduledTaskLabel("scheduledTask.fieldFrequency")}
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {FREQUENCIES.map((value) => (
+                    <SelectItem key={value} value={value}>
+                      {getScheduledTaskLabel(`scheduledTask.freq.${value}`)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Input
+                id="scheduled-task-time"
+                type="time"
+                value={time}
+                disabled={saving}
+                onChange={(event) => setTime(event.target.value)}
+                className="w-[140px]"
+              />
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <Checkbox
+              id="scheduled-task-notify"
+              checked={notify}
+              disabled={saving}
+              onCheckedChange={(value) => setNotify(value === true)}
+            />
+            <Label htmlFor="scheduled-task-notify" className="cursor-pointer text-sm">
+              {getScheduledTaskLabel("scheduledTask.fieldNotify")}
+            </Label>
+          </div>
+          {error ? (
+            <p role="alert" className="text-sm text-destructive">
+              {error}
+            </p>
+          ) : null}
+        </div>
+        {confirmDiscard ? (
+          <DiscardChangesNotice
+            open={confirmDiscard}
+            onKeep={() => setConfirmDiscard(false)}
+            onDiscard={() => {
+              setConfirmDiscard(false);
+              onOpenChange(false);
+            }}
+          />
+        ) : (
           <DialogFooter>
             <Button variant="ghost" disabled={saving} onClick={requestClose}>
               {getScheduledTaskLabel("scheduledTask.cancel")}
@@ -375,16 +392,8 @@ export function CreateTaskDialog({
               )}
             </Button>
           </DialogFooter>
-        </DialogContent>
-      </Dialog>
-      <DiscardChangesDialog
-        open={confirmDiscard}
-        onKeep={() => setConfirmDiscard(false)}
-        onDiscard={() => {
-          setConfirmDiscard(false);
-          onOpenChange(false);
-        }}
-      />
-    </>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }

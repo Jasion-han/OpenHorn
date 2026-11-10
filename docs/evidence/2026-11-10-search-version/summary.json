@@ -1,0 +1,77 @@
+{
+  "scope": "Current complete working tree; first two recommended features",
+  "desktopTests": {
+    "pass": 678,
+    "fail": 0
+  },
+  "serverFocused": {
+    "pass": 20,
+    "fail": 0
+  },
+  "serverFullSerial": {
+    "pass": 522,
+    "fail": 2,
+    "failures": [
+      "late retry completion cannot overwrite a newer edit: 5000ms timeout",
+      "late edit completion cannot overwrite a newer retry: 5000ms timeout"
+    ],
+    "baselineEvidence": "docs/2026-11-09_jev-ship-validation.md"
+  },
+  "initialParallelServer": {
+    "pass": 521,
+    "fail": 3,
+    "extraFailure": "vectorStore lifecycle independent; subsequent isolated 3/3 and full serial vector cases passed"
+  },
+  "browsers": {
+    "features.json": 11,
+    "workbench.json": 32,
+    "settings.json": 21,
+    "reviews.json": 20,
+    "jev.json": 8
+  },
+  "browserTotal": 92,
+  "typecheck": "passed",
+  "biome": "passed",
+  "nativeDebugBuild": "passed",
+  "review": "four static-review issues fixed and covered by regression; final static re-review found no additional important issue",
+  "liveState": {
+    "conversations": 345,
+    "recipes": 1,
+    "artifacts": 1,
+    "artifactVersion": 3,
+    "tasks": 2,
+    "enabledTasks": 0,
+    "activeRuns": 0,
+    "reviews": 0
+  },
+  "sourceSha256": {
+    "packages/shared/src/types/search.ts": "efd0e5f097ef9806281470a25a685e8158b93fbe82860a03e540ace809beb984",
+    "packages/shared/src/types/index.ts": "828a7cac5c1a57fddd81919b0c91ae1ae3125ee67ccec3d1c9880d92f8728e32",
+    "apps/server/src/services/unifiedSearchService.ts": "6f136249f1d950ebd8c9de65972aafb2a2234402bdb31dac5c1e79d6b806b72c",
+    "apps/server/src/services/unifiedSearchService.test.ts": "cf1fb479012a12ddc0776d6c39810a2d606226faa6e5496898ee402956ecf1f6",
+    "apps/server/src/services/artifactService.ts": "d0481b57c80d676e7c735c7ba46e85008272b20b5e4b745bb517d96d75cdfba4",
+    "apps/server/src/services/artifactService.test.ts": "e5b7fecb0aff1576b4864929a93a6ff899be5b308a813d5d7b4fefbc955eff1d",
+    "apps/server/src/services/recipeService.ts": "1d07a3b55d3d669971d43e94633e739d1e82a89d845f268f2a4d425edc18266a",
+    "apps/server/src/services/recipeService.test.ts": "20359caab1677b61350d35ee4613e0b95d31e66974f9a660fc31e8c2e7167084",
+    "apps/server/src/routes/search.ts": "d39e608b77e1a84663e72aaefb0f107289cf23fc12164f974d2ecb82bedfb907",
+    "apps/server/src/routes/artifacts.ts": "7acbe058f06168260420a4478876fb718596a17ad3591e081510bfa2d7789ebd",
+    "apps/server/src/routes/recipes.ts": "fad2d2931fa79f03dcd9e69e2e55071a6f4a8334935f60830d66f47921add3e9",
+    "apps/server/src/index.ts": "7a700048d5dafe83184496f320e0781410aa542377d3cb51e4adcbf2963e80d7",
+    "apps/desktop/src/lib/versionDiff.ts": "a11814ac8576a8cfc87cf17e5c827b2dca31903f155816adfc71ad33d0a49f52",
+    "apps/desktop/src/lib/versionDiff.test.ts": "9b5422bebc5dd5a7f25fdad0d9061ea4da67db81356fa40db7fa5600a205727c",
+    "apps/desktop/src/lib/workbenchApi.ts": "106ab510a84769090e4f8c24e90289a3e1cb91616b84e8ade75a5a14ee740bec",
+    "apps/desktop/src/components/app/DesktopLeftSidebar.tsx": "059f69c34116320dae10abc3b06372ef74f36265088bab68f73f8e2f549d9712",
+    "apps/desktop/src/components/app/UnifiedSearchResults.tsx": "b43e554bdc2bae9c07713632b11b8fc3110204670db13541a2bbd8da7080bd97",
+    "apps/desktop/src/components/workbench/ArtifactPanel.tsx": "613ab1f839fc073adca2a0ff1db7c07ee9db94b48427582f2367e7b2a82a1b21",
+    "apps/desktop/src/components/workbench/ArtifactHistory.tsx": "c7495b4609fbb84c62f029bc23820a909e3ad4443c9af4042801c6930e3b2c47",
+    "apps/desktop/src/components/workbench/RecipePanel.tsx": "12baa47eb55ed658fa15702aba62c12c64a4798276637c0bd645458faae2b135",
+    "apps/desktop/src/components/workbench/RecipeHistory.tsx": "ca6163460740346a59b139db1b2b69b45a1550a2f4550d0a5020366becbc5d72",
+    "apps/desktop/src/components/workbench/VersionRestore.tsx": "0c0b5d0b0ee4d360133104992e42c46a6fc62848e2638a535af7af20dbcdc8fd",
+    "apps/desktop/src/components/workbench/VersionComparison.tsx": "77e690559260a0d7d663ef5204dae9c12e31f03a8d42ce5d180bc188dba6b0d5",
+    "apps/desktop/src/stores/workbenchStore.ts": "d6fb9f0386ceb29d2b32ab80a6b222d24acee493332ae2c8fafeecda97d507f6",
+    "apps/desktop/src/stores/workbenchSessionStore.ts": "828fc77dbff666dae1a9b0d07aecd2c85d677e3a178d62787d590c44483ba4dc",
+    "apps/desktop/scripts/search-version.browser.mjs": "c311cc3c996d5f53219a2fd0c85db6e2c69cb394eccd21dcb7ac7f0d5d880b12",
+    "apps/desktop/tests/search-version.tsx": "19d4e30f4444ddeaf287744205f237b9a5a1917634925ed4c5514cf3e058b979",
+    "apps/desktop/src/lib/i18n/agent.ts": "6cbe8861bcc3983a643381329061466685e286e770e155ee38ea79fd79fa968e"
+  }
+}

@@ -1,7 +1,17 @@
+import { MoreHorizontal } from "lucide-react";
 import { useMemo, useState } from "react";
 import { REVIEW_LIMITS, REVIEW_SENTIMENTS, reviewBatchChars } from "shared/reviews";
 import type { ReviewRecord, ReviewWorkspace } from "shared/types";
-import { Button, Input } from "ui";
+import {
+  Button,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+  Input,
+  Label,
+} from "ui";
 import {
   formatWorkbenchLabel as format,
   getJevLabel,
@@ -17,6 +27,9 @@ export function ReviewDataset({
   onPrepare,
   onClassify,
   jevEnabled,
+  model,
+  models,
+  onModelChange,
 }: {
   workspace: ReviewWorkspace;
   busy: boolean;
@@ -24,7 +37,13 @@ export function ReviewDataset({
   onPrepare(rowIds: string[]): Promise<boolean>;
   onClassify(rowIds: string[]): Promise<boolean>;
   jevEnabled: boolean;
+  model: string;
+  models: Array<{ value: string; label: string }>;
+  onModelChange(model: string): void;
 }) {
+  const [analysisMode, setAnalysisMode] = useState<"chat" | "jev">("chat");
+  const [showSettings, setShowSettings] = useState(false);
+  const [result, setResult] = useState("");
   const [query, setQuery] = useState("");
   const [sentiment, setSentiment] = useState("");
   const [unannotated, setUnannotated] = useState(false);
@@ -54,6 +73,7 @@ export function ReviewDataset({
   const pages = Math.max(1, Math.ceil(rows.length / 25));
   const currentPage = Math.min(page, pages);
   const nextBatch = () => {
+    setResult("");
     const ids: string[] = [];
     const batch: ReviewRecord[] = [];
     for (const row of candidates) {
@@ -69,122 +89,218 @@ export function ReviewDataset({
   };
   return (
     <section className="space-y-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <Input
-          className="w-full sm:w-64"
-          aria-label={label("reviews.search")}
-          placeholder={label("reviews.search")}
-          value={query}
-          onChange={(e) => {
-            setQuery(e.target.value);
-            setPage(1);
-          }}
-        />
-        <select
-          aria-label={label("reviews.sentimentFilter")}
-          className={reviewSelectClass}
-          value={sentiment}
-          onChange={(e) => {
-            setSentiment(e.target.value);
-            setPage(1);
-          }}
-        >
-          <option value="">{label("reviews.all")}</option>
-          {REVIEW_SENTIMENTS.map((value) => (
-            <option value={value} key={value}>
-              {label(`reviews.${value}`)}
-            </option>
-          ))}
-        </select>
-        <label className="flex cursor-pointer items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={unannotated}
-            onChange={(e) => {
-              setUnannotated(e.target.checked);
-              setPage(1);
-            }}
-          />
-          {label("reviews.onlyUnannotated")}
-        </label>
-        {(query || sentiment || unannotated) && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              setQuery("");
-              setSentiment("");
-              setUnannotated(false);
-              setPage(1);
-            }}
-          >
-            {label("reviews.clearFilters")}
-          </Button>
-        )}
-      </div>
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border bg-muted/20 p-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={busy || !candidates.length}
-            onClick={nextBatch}
-          >
-            {label("reviews.nextBatch")}
-          </Button>
-          {selected.length > 0 && (
-            <Button size="sm" variant="ghost" disabled={busy} onClick={() => setSelected([])}>
-              {label("reviews.clearSelection")}
-            </Button>
-          )}
+      <div className="space-y-2" data-testid="review-analysis-toolbar">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <span className="text-xs tabular-nums text-muted-foreground">
             {format("reviews.selection", { count: selected.length, chars })}
+            {(query || sentiment || unannotated) && (
+              <span className="ml-2">{label("reviews.filtersActive")}</span>
+            )}
           </span>
+          <div className="flex items-center gap-1">
+            <Button
+              size="sm"
+              disabled={
+                busy ||
+                (selected.length === 0
+                  ? !candidates.length
+                  : selected.length > REVIEW_LIMITS.batchRows ||
+                    chars > REVIEW_LIMITS.batchChars ||
+                    workspace.data.runs.length >= REVIEW_LIMITS.runs ||
+                    (analysisMode === "jev" ? !jevEnabled : !model))
+              }
+              onClick={() => {
+                setResult("");
+                if (!selected.length) {
+                  nextBatch();
+                  return;
+                }
+                void (analysisMode === "jev" ? onClassify(selected) : onPrepare(selected)).then(
+                  (done) => {
+                    if (done) {
+                      setSelected([]);
+                      if (analysisMode === "jev") setResult(getJevLabel("jev.reviews.completed"));
+                    }
+                  },
+                );
+              }}
+            >
+              {busy
+                ? label("reviews.working")
+                : !selected.length
+                  ? label("reviews.nextBatch")
+                  : analysisMode === "jev"
+                    ? getJevLabel("jev.reviews.run")
+                    : label("reviews.prepare")}
+            </Button>
+            <DropdownMenu modal={false}>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  disabled={busy}
+                  aria-label={label("reviews.analysisMore")}
+                >
+                  <MoreHorizontal size={16} />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onSelect={() => setShowSettings((open) => !open)}>
+                  {label("reviews.analysisSettings")}
+                </DropdownMenuItem>
+                <DropdownMenuItem disabled={!candidates.length} onSelect={nextBatch}>
+                  {label("reviews.nextBatch")}
+                </DropdownMenuItem>
+                {selected.length > 0 && (
+                  <DropdownMenuItem
+                    onSelect={() => {
+                      setSelected([]);
+                      setResult("");
+                    }}
+                  >
+                    {label("reviews.clearSelection")}
+                  </DropdownMenuItem>
+                )}
+                {(query || sentiment || unannotated) && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onSelect={() => {
+                        setQuery("");
+                        setSentiment("");
+                        setUnannotated(false);
+                        setPage(1);
+                      }}
+                    >
+                      {label("reviews.clearFilters")}
+                    </DropdownMenuItem>
+                  </>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </div>
-        <Button
-          size="sm"
-          disabled={
-            busy ||
-            !selected.length ||
-            selected.length > REVIEW_LIMITS.batchRows ||
-            chars > REVIEW_LIMITS.batchChars ||
-            workspace.data.runs.length >= REVIEW_LIMITS.runs
-          }
-          onClick={() =>
-            void onPrepare(selected).then((done) => {
-              if (done) setSelected([]);
-            })
-          }
-        >
-          {label(busy ? "reviews.working" : "reviews.prepare")}
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          title={getJevLabel(jevEnabled ? "jev.reviews.hint" : "jev.reviews.disabled")}
-          disabled={
-            !jevEnabled ||
-            busy ||
-            !selected.length ||
-            selected.length > REVIEW_LIMITS.batchRows ||
-            chars > REVIEW_LIMITS.batchChars ||
-            workspace.data.runs.length >= REVIEW_LIMITS.runs
-          }
-          onClick={() =>
-            void onClassify(selected).then((done) => {
-              if (done) setSelected([]);
-            })
-          }
-        >
-          {getJevLabel("jev.reviews.run")}
-        </Button>
-        <p className="w-full text-xs leading-relaxed text-muted-foreground">
-          {label("reviews.prepareHint")}
-        </p>
-        {workspace.data.runs.length >= REVIEW_LIMITS.runs && (
-          <p className="w-full text-xs text-muted-foreground">{label("reviews.runLimitReached")}</p>
+        {selected.length > 0 && (analysisMode === "jev" ? !jevEnabled : !model) && (
+          <p className="text-xs text-muted-foreground">
+            {analysisMode === "jev"
+              ? getJevLabel("jev.reviews.disabled")
+              : label("reviews.noModel")}
+          </p>
         )}
+        {result && <output className="block text-xs text-muted-foreground">{result}</output>}
       </div>
+      {showSettings && (
+        <section
+          className="space-y-3 border-y py-3"
+          aria-label={label("reviews.analysisSettings")}
+          data-testid="review-analysis-settings"
+        >
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="text-sm font-medium">{label("reviews.analysisSettings")}</h3>
+            <Button variant="ghost" size="sm" onClick={() => setShowSettings(false)}>
+              {label("reviews.closeSettings")}
+            </Button>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Input
+              className="w-full sm:w-64"
+              aria-label={label("reviews.search")}
+              placeholder={label("reviews.search")}
+              value={query}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                setPage(1);
+              }}
+            />
+            <select
+              aria-label={label("reviews.sentimentFilter")}
+              className={reviewSelectClass}
+              value={sentiment}
+              onChange={(e) => {
+                setSentiment(e.target.value);
+                setPage(1);
+              }}
+            >
+              <option value="">{label("reviews.all")}</option>
+              {REVIEW_SENTIMENTS.map((value) => (
+                <option value={value} key={value}>
+                  {label(`reviews.${value}`)}
+                </option>
+              ))}
+            </select>
+            <label className="flex cursor-pointer items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={unannotated}
+                onChange={(e) => {
+                  setUnannotated(e.target.checked);
+                  setPage(1);
+                }}
+              />
+              {label("reviews.onlyUnannotated")}
+            </label>
+            {(query || sentiment || unannotated) && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setQuery("");
+                  setSentiment("");
+                  setUnannotated(false);
+                  setPage(1);
+                }}
+              >
+                {label("reviews.clearFilters")}
+              </Button>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Label htmlFor="review-analysis-mode">{label("reviews.analysisMode")}</Label>
+            <select
+              id="review-analysis-mode"
+              className={reviewSelectClass}
+              disabled={busy}
+              value={analysisMode}
+              onChange={(e) => setAnalysisMode(e.target.value as "chat" | "jev")}
+            >
+              <option value="chat">{label("reviews.chatAnalysis")}</option>
+              <option value="jev">{getJevLabel("jev.reviews.run")}</option>
+            </select>
+            {analysisMode === "chat" && (
+              <>
+                <Label htmlFor="review-model" className="sr-only">
+                  {label("reviews.model")}
+                </Label>
+                <select
+                  id="review-model"
+                  disabled={busy}
+                  value={model}
+                  className={`${reviewSelectClass} w-full sm:w-64`}
+                  onChange={(e) => onModelChange(e.target.value)}
+                >
+                  <option value="">{label("reviews.noModel")}</option>
+                  {models.map((item) => (
+                    <option key={item.value} value={item.value}>
+                      {item.label}
+                    </option>
+                  ))}
+                </select>
+              </>
+            )}
+          </div>
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            {analysisMode === "chat"
+              ? label("reviews.prepareHint")
+              : jevEnabled
+                ? label("reviews.jevAnalysisHint")
+                : getJevLabel("jev.reviews.disabled")}
+          </p>
+        </section>
+      )}
+      {workspace.data.runs.length >= REVIEW_LIMITS.runs && (
+        <p className="w-full text-xs text-muted-foreground">{label("reviews.runLimitReached")}</p>
+      )}
       <div className="overflow-x-auto rounded-md border">
         <table className="w-full min-w-[580px] table-fixed text-left text-sm">
           <thead className="border-b bg-muted/30 text-xs text-muted-foreground">

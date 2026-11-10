@@ -1,0 +1,39 @@
+{
+  "desktopUnitTests": {
+    "passed": 675,
+    "failed": 0
+  },
+  "browserCheckpoints": {
+    "browser-workbench.json": 30,
+    "browser-reviews.json": 18,
+    "browser-jev.json": 8
+  },
+  "browserTotal": 56,
+  "typecheck": "passed",
+  "wholeRepositoryBiome": "passed",
+  "nativeDebugAppBuild": "passed",
+  "nativeVerification": [
+    "New saved-results naming and single-import empty state",
+    "Recipe parameters survived a tab round trip; value restored afterwards",
+    "Read-only recipe history loaded actual saved version; no task executed"
+  ],
+  "scope": "Current working tree, including pre-existing uncommitted work; not an isolated release candidate",
+  "liveModelProbesAdded": 0,
+  "sourceSha256": {
+    "apps/desktop/src/stores/workbenchSessionStore.ts": "c9ac27858d4742e5b53a91db26d9ba97b8d18cade4e20ced1c15dd01ee84aee2",
+    "apps/desktop/src/stores/workbenchSessionStore.test.ts": "3d9110a5e21ee69f2fff3e1570f977106f5bead6159ecc60903d9ae9d4910c55",
+    "apps/desktop/src/stores/workbenchStore.ts": "771a174834de3e35fda0499f2811ae20107555b368bffa37d411dbdc34ed40e0",
+    "apps/desktop/src/components/chat/DesktopMessageActionBar.tsx": "1b4393d4a4a113ea438e811354175128c7d1e7082a2e039eff82961ff2d1a7f6",
+    "apps/desktop/src/components/workbench/WorkbenchView.tsx": "25708a14b67e3006e5af82f2ec4c3a2503cbb0caf4099ddac146e4778f962aa8",
+    "apps/desktop/src/components/workbench/ArtifactSaveDialog.tsx": "c6a0a31552d6333c85a445466e67a721caa2cc32a5249127ac338d0721ab8a26",
+    "apps/desktop/src/components/workbench/RecipePanel.tsx": "e809f2a6520e600c1bd96529a59e2a967e640e462803b52ce787e80b4c19f963",
+    "apps/desktop/src/components/workbench/RecipeHistoryDialog.tsx": "0fb7254b684ce4ffff80188faaa395d15c40a806d9bab52edffb10ad7f41521f",
+    "apps/desktop/src/components/workbench/reviews/ReviewWorkspacePanel.tsx": "bee9726b8704b7e677f54e01febee4ff5e48382d23ca6465c12ce269716e3f48",
+    "apps/desktop/src/components/workbench/reviews/ReviewDataset.tsx": "edbe9f00953352112cc92c90539cdffeea12ab8898922ccdf9a0992bd27bc0c6",
+    "apps/desktop/src/lib/i18n/agent.ts": "acce06d7fa1d8e0bfb9bc83f39426c236942730d50f8a6bed2e8007eac40c5a5",
+    "apps/desktop/tests/workbench.tsx": "06598b8ce5066dc7ba3726ae6b9ec2d575f5f90c34fed313677a1f265d875c0d",
+    "apps/desktop/scripts/workbench.browser.mjs": "0587529732f427a961fb1631970c56574a92d05a0cd5c23a8b4732bda4bc52cd",
+    "apps/desktop/scripts/reviews.browser.mjs": "0b0f9a274ff5fae4db8ccbb96629ba513ab72f9ec70300306f5d836fcd38eb3d",
+    "apps/desktop/scripts/jev-integration.browser.mjs": "2ca45070452d42a5f1bc03a30b4070a546c81fd8e6854e0a7b4237409bbae2bf"
+  }
+}

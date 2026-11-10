@@ -1,0 +1,108 @@
+{
+  "checks": [
+    "Jev settings show configuration and daily budget with feature switches collapsed",
+    "failed preference writes preserve the old toggle; disabling reviews disables quick classification",
+    "Jev quick labeling remains available without selecting a chat analysis model",
+    "one explicit quick action calls the typed provider once, persists results/provenance and creates no fake chat",
+    "existing note verification uses OpenRouter, preserves request provenance and reuses saved checks without re-billing",
+    "exhausted budget preserves manual annotations and records a failed batch without contacting the model",
+    "late classification persists independently without navigating back into a closed review page",
+    "shadow routing records a disagreement while the actual route remains unchanged"
+  ],
+  "errors": [],
+  "unexpected": [],
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/decisions/status"
+    },
+    {
+      "method": "PUT",
+      "path": "/decisions/config"
+    },
+    {
+      "method": "PUT",
+      "path": "/decisions/config"
+    },
+    {
+      "method": "GET",
+      "path": "/decisions/status"
+    },
+    {
+      "method": "GET",
+      "path": "/review-workspaces"
+    },
+    {
+      "method": "GET",
+      "path": "/review-workspaces/e4cede40-27e4-435b-b77b-9ab7bade6d35"
+    },
+    {
+      "method": "GET",
+      "path": "/decisions/status"
+    },
+    {
+      "method": "PUT",
+      "path": "/decisions/config"
+    },
+    {
+      "method": "GET",
+      "path": "/decisions/status"
+    },
+    {
+      "method": "GET",
+      "path": "/review-workspaces"
+    },
+    {
+      "method": "GET",
+      "path": "/review-workspaces/e4cede40-27e4-435b-b77b-9ab7bade6d35"
+    },
+    {
+      "method": "POST",
+      "path": "/review-workspaces/e4cede40-27e4-435b-b77b-9ab7bade6d35/jev-runs"
+    },
+    {
+      "method": "PATCH",
+      "path": "/review-workspaces/e4cede40-27e4-435b-b77b-9ab7bade6d35/rows/r2"
+    },
+    {
+      "method": "GET",
+      "path": "/review-workspaces"
+    },
+    {
+      "method": "GET",
+      "path": "/review-workspaces/e4cede40-27e4-435b-b77b-9ab7bade6d35"
+    },
+    {
+      "method": "GET",
+      "path": "/review-workspaces/f8b54dce-9c47-4ff2-9194-ae81d7ab0167"
+    },
+    {
+      "method": "POST",
+      "path": "/review-workspaces/f8b54dce-9c47-4ff2-9194-ae81d7ab0167/jev-runs"
+    },
+    {
+      "method": "GET",
+      "path": "/review-workspaces"
+    },
+    {
+      "method": "GET",
+      "path": "/review-workspaces/f8b54dce-9c47-4ff2-9194-ae81d7ab0167"
+    },
+    {
+      "method": "GET",
+      "path": "/review-workspaces/74f86260-aa27-4c01-aded-e343004988d5"
+    },
+    {
+      "method": "POST",
+      "path": "/review-workspaces/74f86260-aa27-4c01-aded-e343004988d5/jev-runs"
+    },
+    {
+      "method": "GET",
+      "path": "/decisions/status"
+    },
+    {
+      "method": "GET",
+      "path": "/decisions/status"
+    }
+  ]
+}

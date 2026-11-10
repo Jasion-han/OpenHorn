@@ -1,4 +1,13 @@
-import { ArrowUpRight, FileText, MoreHorizontal, Pencil, Play, Plus, Trash2 } from "lucide-react";
+import {
+  ArrowUpRight,
+  ChevronDown,
+  FileText,
+  MoreHorizontal,
+  Pencil,
+  Play,
+  Plus,
+  Trash2,
+} from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { missingRecipeCapabilities, renderRecipePrompt } from "shared/recipes";
 import type { RecipeSpec, RecipeValues, TaskRecipe } from "shared/types";
@@ -27,8 +36,10 @@ import { useChatStore } from "../../stores/chatStore";
 import { useDesktopShellStore } from "../../stores/desktopShellStore";
 import { useProjectStore } from "../../stores/projectStore";
 import { useSidecarStore } from "../../stores/sidecarStore";
+import { recipeInputValues, useWorkbenchSessionStore } from "../../stores/workbenchSessionStore";
 import { useWorkbenchStore } from "../../stores/workbenchStore";
 import { RecipeEditor } from "./RecipeEditor";
+import { RecipeHistory } from "./RecipeHistory";
 
 const api = createServerApi();
 function missingLabel(value: string): string {
@@ -44,7 +55,10 @@ function missingLabel(value: string): string {
 }
 export function RecipePanel() {
   const [recipes, setRecipes] = useState<TaskRecipe[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(
+    () => useWorkbenchSessionStore.getState().selectedRecipeId,
+  );
+  const [history, setHistory] = useState(false);
   const [filter, setFilter] = useState("");
   const [values, setValues] = useState<RecipeValues>({});
   const [editor, setEditor] = useState<{ spec: RecipeSpec; id?: string; version?: number } | null>(
@@ -56,6 +70,8 @@ export function RecipePanel() {
   const [listError, setListError] = useState<string | null>(null);
   const [missing, setMissing] = useState<string[]>([]);
   const draft = useWorkbenchStore((s) => s.recipeDraft);
+  const navigation = useWorkbenchStore((s) => s.navigationTarget);
+  const lastNavigation = useRef(navigation?.token);
   const projects = useProjectStore((s) => s.projects);
   const channels = useChatStore((s) => s.channels);
   const requestEpoch = useRef(0);
@@ -64,27 +80,45 @@ export function RecipePanel() {
   const loadEpoch = useRef(0);
   const formVersion = useRef<string | null>(null);
   const changeValue = (key: string, value: string) => {
-    setValues((old) => ({ ...old, [key]: value }));
+    const next = { ...values, [key]: value };
+    setValues(next);
+    if (selected)
+      useWorkbenchSessionStore.getState().saveRecipeInputs(selected.id, selected.version, next);
     setError(null);
     setMissing([]);
   };
   const load = useCallback(async () => {
     const epoch = ++loadEpoch.current;
+    const navigationAtStart = useWorkbenchStore.getState().navigationTarget?.token;
     setLoading(true);
     setListError(null);
     try {
       const result = await workbenchApi.recipes.list();
       if (loadEpoch.current !== epoch) return;
+      const currentNavigation = useWorkbenchStore.getState().navigationTarget;
+      if (currentNavigation && currentNavigation.token !== navigationAtStart) return;
       setRecipes(result.recipes);
-      setSelectedId((id) =>
-        result.recipes.some((r) => r.id === id) ? id : (result.recipes[0]?.id ?? null),
-      );
+      const target = useWorkbenchStore.getState().navigationTarget;
+      if (target?.tab === "recipes") {
+        setSelectedId(target.id);
+        if (!result.recipes.some((r) => r.id === target.id))
+          setError(label("workbench.errors.notFound"));
+        useWorkbenchStore.getState().clearNavigation(target.token);
+      } else
+        setSelectedId((id) =>
+          result.recipes.some((r) => r.id === id) ? id : (result.recipes[0]?.id ?? null),
+        );
     } catch (error) {
       if (loadEpoch.current === epoch) setListError(workbenchError(error));
     } finally {
       if (loadEpoch.current === epoch) setLoading(false);
     }
   }, []);
+  useEffect(() => {
+    if (navigation?.tab !== "recipes" || navigation.token === lastNavigation.current) return;
+    lastNavigation.current = navigation.token;
+    void load();
+  }, [navigation, load]);
   useEffect(() => {
     void load();
     const retry = () => {
@@ -107,9 +141,17 @@ export function RecipePanel() {
     const identity = recipe ? `${recipe.id}:${recipe.version}` : null;
     if (formVersion.current === identity) return;
     formVersion.current = identity;
+    useWorkbenchSessionStore.getState().selectRecipe(recipe?.id ?? null);
     setValues(
-      Object.fromEntries(recipe?.spec.parameters.map((p) => [p.key, p.defaultValue ?? ""]) ?? []),
+      recipe
+        ? recipeInputValues(
+            recipe.spec,
+            recipe.version,
+            useWorkbenchSessionStore.getState().recipeInputs[recipe.id],
+          )
+        : {},
     );
+    setHistory(false);
     setMissing([]);
     setError(null);
     requestEpoch.current++;
@@ -242,6 +284,30 @@ export function RecipePanel() {
       setBusy(false);
     }
   };
+  const restore = async (sourceVersion: number, expectedVersion: number) => {
+    if (!selected || submitting.current) return;
+    submitting.current = true;
+    setBusy(true);
+    const epoch = ++requestEpoch.current;
+    try {
+      const result = await workbenchApi.recipes.restore(
+        selected.id,
+        sourceVersion,
+        expectedVersion,
+      );
+      if (!owns(epoch)) return;
+      setRecipes((items) =>
+        items.map((item) => (item.id === result.recipe.id ? result.recipe : item)),
+      );
+      notifySuccess(
+        label("workbench.versions.restored"),
+        formatWorkbenchLabel("workbench.recipes.version", { version: result.recipe.version }),
+      );
+    } finally {
+      submitting.current = false;
+      setBusy(false);
+    }
+  };
   const visible = recipes.filter((r) =>
     r.spec.title.toLocaleLowerCase().includes(filter.trim().toLocaleLowerCase()),
   );
@@ -367,7 +433,7 @@ export function RecipePanel() {
         )}
         {selected ? (
           <>
-            <header className="flex items-start justify-between gap-3">
+            <header className="flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0 space-y-2">
                 <h2 className="break-words text-xl font-medium">{selected.spec.title}</h2>
                 {selected.spec.description && (
@@ -375,111 +441,147 @@ export function RecipePanel() {
                     {selected.spec.description}
                   </p>
                 )}
-                <p className="break-words text-xs text-muted-foreground">{bindings}</p>
               </div>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    size="icon-sm"
-                    variant="ghost"
-                    aria-label={label("workbench.recipes.more")}
-                    disabled={busy}
-                  >
-                    <MoreHorizontal size={16} />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem
-                    onClick={() =>
-                      setEditor({ spec: selected.spec, id: selected.id, version: selected.version })
-                    }
-                  >
-                    <Pencil size={14} />
-                    {label("workbench.recipes.edit")}
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem className="text-destructive" onClick={() => void remove()}>
-                    <Trash2 size={14} />
-                    {label("workbench.recipes.delete")}
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+              <div className="flex shrink-0 flex-wrap items-center gap-1">
+                <DropdownMenu modal={false}>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      size="icon-sm"
+                      variant="ghost"
+                      aria-label={label("workbench.recipes.more")}
+                      disabled={busy}
+                    >
+                      <MoreHorizontal size={16} />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem
+                      onSelect={() =>
+                        setEditor({
+                          spec: selected.spec,
+                          id: selected.id,
+                          version: selected.version,
+                        })
+                      }
+                    >
+                      <Pencil size={14} />
+                      {label("workbench.recipes.edit")}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onSelect={() => {
+                        setHistory((open) => !open);
+                      }}
+                    >
+                      <FileText size={14} />
+                      {label("workbench.recipes.history")}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={schedule}>
+                      <ArrowUpRight size={14} />
+                      {label("workbench.recipes.scheduleElsewhere")}
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem className="text-destructive" onClick={() => void remove()}>
+                      <Trash2 size={14} />
+                      {label("workbench.recipes.delete")}
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
             </header>
-            <form
-              className="max-w-2xl space-y-4"
-              onSubmit={(event) => {
-                event.preventDefault();
-                void run();
-              }}
-            >
-              {selected.spec.parameters.map((p) => (
-                <div key={p.key} className="space-y-1.5">
-                  <Label htmlFor={`recipe-value-${p.key}`}>
-                    {p.label}
-                    {p.required ? " *" : ""}
-                  </Label>
-                  {p.type === "multiline" ? (
-                    <Textarea
-                      id={`recipe-value-${p.key}`}
-                      value={String(values[p.key] ?? "")}
-                      onChange={(event) => changeValue(p.key, event.target.value)}
-                      required={p.required}
-                      disabled={busy}
-                    />
-                  ) : (
-                    <Input
-                      id={`recipe-value-${p.key}`}
-                      type={p.type === "number" ? "number" : "text"}
-                      step={p.type === "number" ? "any" : undefined}
-                      value={String(values[p.key] ?? "")}
-                      onChange={(event) => changeValue(p.key, event.target.value)}
-                      required={p.required}
-                      disabled={busy}
-                    />
-                  )}
-                </div>
-              ))}
-              {missing.length > 0 && (
-                <div role="alert" className="space-y-1 text-sm text-destructive">
-                  {missing.map((item) => (
-                    <p key={item}>{missingLabel(item)}</p>
-                  ))}
-                </div>
-              )}
-              <details className="border-t pt-3" key={selected.id}>
-                <summary className="w-fit cursor-pointer rounded text-sm text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
-                  {label("workbench.recipes.previewTask")}
-                </summary>
-                <p className="mt-2 text-xs text-muted-foreground">
-                  {label("workbench.recipes.previewHint")}
-                </p>
-                {preview === null ? (
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    {label("workbench.recipes.previewMissing")}
-                  </p>
-                ) : (
-                  <pre
-                    className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/30 p-3 font-mono text-xs"
-                    data-testid="recipe-prompt-preview"
-                  >
-                    {preview}
-                  </pre>
+            {history ? (
+              <RecipeHistory
+                key={selected.id}
+                recipe={selected}
+                onClose={() => setHistory(false)}
+                busy={busy}
+                onRestore={restore}
+              />
+            ) : (
+              <form
+                className="max-w-2xl space-y-4"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void run();
+                }}
+              >
+                {selected.spec.parameters.map((p) => (
+                  <div key={p.key} className="space-y-1.5">
+                    <Label htmlFor={`recipe-value-${p.key}`}>
+                      {p.label}
+                      {p.required ? " *" : ""}
+                    </Label>
+                    {p.type === "multiline" ? (
+                      <Textarea
+                        id={`recipe-value-${p.key}`}
+                        value={String(values[p.key] ?? "")}
+                        onChange={(event) => changeValue(p.key, event.target.value)}
+                        required={p.required}
+                        disabled={busy}
+                      />
+                    ) : (
+                      <Input
+                        id={`recipe-value-${p.key}`}
+                        type={p.type === "number" ? "number" : "text"}
+                        step={p.type === "number" ? "any" : undefined}
+                        value={String(values[p.key] ?? "")}
+                        onChange={(event) => changeValue(p.key, event.target.value)}
+                        required={p.required}
+                        disabled={busy}
+                      />
+                    )}
+                  </div>
+                ))}
+                {missing.length > 0 && (
+                  <div role="alert" className="space-y-1 text-sm text-destructive">
+                    {missing.map((item) => (
+                      <p key={item}>{missingLabel(item)}</p>
+                    ))}
+                  </div>
                 )}
-              </details>
-              <div className="flex flex-wrap items-center gap-2 pt-1">
-                <Button type="submit" disabled={busy}>
-                  <Play size={14} />
-                  {label(busy ? "workbench.recipes.busy" : "workbench.recipes.runOnce")}
-                </Button>
-                <Button type="button" variant="ghost" onClick={schedule} disabled={busy}>
-                  {label("workbench.recipes.scheduleElsewhere")}
-                  <ArrowUpRight size={14} />
-                </Button>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                {label("workbench.recipes.scheduleHint")}
-              </p>
-            </form>
+                <details
+                  className="group border-t pt-3"
+                  key={selected.id}
+                  data-testid="recipe-task-details"
+                >
+                  <summary className="flex cursor-pointer list-none items-center justify-between gap-2 rounded text-sm font-medium focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+                    <span>{label("workbench.recipes.previewTask")}</span>
+                    <ChevronDown
+                      size={16}
+                      aria-hidden="true"
+                      className="shrink-0 text-muted-foreground group-open:rotate-180"
+                    />
+                  </summary>
+                  <p className="mt-2 text-xs text-muted-foreground">{bindings}</p>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    {label("workbench.recipes.inputDraftHint")}
+                  </p>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    {label("workbench.recipes.previewHint")}
+                  </p>
+                  {preview === null ? (
+                    <p className="mt-2 text-sm text-muted-foreground">
+                      {label("workbench.recipes.previewMissing")}
+                    </p>
+                  ) : (
+                    <pre
+                      className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/30 p-3 font-mono text-xs"
+                      data-testid="recipe-prompt-preview"
+                    >
+                      {preview}
+                    </pre>
+                  )}
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    {label("workbench.recipes.scheduleHint")}
+                  </p>
+                </details>
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <Button type="submit" disabled={busy}>
+                    <Play size={14} />
+                    {label(busy ? "workbench.recipes.busy" : "workbench.recipes.runOnce")}
+                  </Button>
+                </div>
+              </form>
+            )}
           </>
         ) : (
           !loading &&

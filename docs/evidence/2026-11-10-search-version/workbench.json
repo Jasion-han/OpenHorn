@@ -1,0 +1,540 @@
+{
+  "checks": [
+    "recipe defaults expose the run action while editing, history and scheduling stay in More",
+    "recipe preview tracks parameters without requests and empty search has a clear recovery",
+    "recipe parameters survive workbench tab and view navigation in the same session",
+    "recipe history is read-only and a failed load can retry without losing current input",
+    "changed recipe dismissals require explicit discard while untouched forms close normally",
+    "parameter validation stays local, clears when edited and never suggests reloading",
+    "template save, parameter form and target-bound immediate run",
+    "recipe scheduling hands off to existing task dialog and cancel creates nothing",
+    "failed task and run loads show retry instead of false empty states",
+    "recipe task edits preserve frozen content while ordinary tasks remain editable",
+    "schedule dismissal protects modified fields and discarding writes nothing",
+    "pending toggle controls block duplicates and failure preserves the original state",
+    "task and record deletion require confirmation and failed deletes retain their content",
+    "late manual-run acceptance reports queued without stealing the newer page",
+    "the shared task form owns time and notification settings and displays frozen recipe provenance",
+    "unavailable recipe bindings stay visible and can be explicitly reset",
+    "multiple capability requirements remain editable and missing tools block preparation",
+    "older recipe versions remain readable after edits and browsing history performs no writes",
+    "late recipe preparation cannot hand off after navigation",
+    "artifact defaults keep secondary actions and version controls hidden until requested",
+    "saved message retains complete text and uses the existing interactive sandbox",
+    "artifact drafts survive item, tab and view navigation; cancel and empty search are recoverable",
+    "version conflict preserves draft, immutable history loads and original export matches bytes",
+    "historical versions are explicit and discarding a draft never changes saved history",
+    "editing a historical version appends the next version and preserves existing history",
+    "late artifact continuation cannot send after changing workbench tabs",
+    "artifact workspace fits narrow/dark and desktop/light viewports",
+    "artifact continuation opens a bound editable draft without invoking a model",
+    "a continuation reply preselects its original artifact and appends only after explicit save",
+    "deleted continuation targets require an explicit alternative and other conversations default to a new artifact",
+    "actual Agent startup refuses recipe requirements missing from its freshly loaded roster",
+    "real chat composer rejects a wrong target and dispatches a matching handoff once"
+  ],
+  "errors": [],
+  "unexpected": [],
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/recipes"
+    },
+    {
+      "method": "POST",
+      "path": "/recipes"
+    },
+    {
+      "method": "GET",
+      "path": "/recipes"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts"
+    },
+    {
+      "method": "GET",
+      "path": "/recipes"
+    },
+    {
+      "method": "GET",
+      "path": "/recipes"
+    },
+    {
+      "method": "GET",
+      "path": "/recipes/recipe-1"
+    },
+    {
+      "method": "GET",
+      "path": "/recipes/recipe-1"
+    },
+    {
+      "method": "GET",
+      "path": "/mcp/servers"
+    },
+    {
+      "method": "POST",
+      "path": "/recipes/recipe-1/prepare"
+    },
+    {
+      "method": "GET",
+      "path": "/conversations"
+    },
+    {
+      "method": "GET",
+      "path": "/messages/prepared-1"
+    },
+    {
+      "method": "GET",
+      "path": "/recipes"
+    },
+    {
+      "method": "GET",
+      "path": "/scheduled-tasks"
+    },
+    {
+      "method": "GET",
+      "path": "/scheduled-tasks/runs"
+    },
+    {
+      "method": "GET",
+      "path": "/scheduled-tasks"
+    },
+    {
+      "method": "GET",
+      "path": "/scheduled-tasks/runs"
+    },
+    {
+      "method": "GET",
+      "path": "/recipes"
+    },
+    {
+      "method": "GET",
+      "path": "/scheduled-tasks"
+    },
+    {
+      "method": "GET",
+      "path": "/scheduled-tasks/runs"
+    },
+    {
+      "method": "GET",
+      "path": "/scheduled-tasks"
+    },
+    {
+      "method": "GET",
+      "path": "/scheduled-tasks/runs"
+    },
+    {
+      "method": "GET",
+      "path": "/recipes"
+    },
+    {
+      "method": "GET",
+      "path": "/scheduled-tasks"
+    },
+    {
+      "method": "GET",
+      "path": "/scheduled-tasks/runs"
+    },
+    {
+      "method": "GET",
+      "path": "/scheduled-tasks"
+    },
+    {
+      "method": "GET",
+      "path": "/scheduled-tasks/runs"
+    },
+    {
+      "method": "GET",
+      "path": "/scheduled-tasks"
+    },
+    {
+      "method": "GET",
+      "path": "/scheduled-tasks/runs"
+    },
+    {
+      "method": "GET",
+      "path": "/recipes"
+    },
+    {
+      "method": "GET",
+      "path": "/scheduled-tasks"
+    },
+    {
+      "method": "GET",
+      "path": "/scheduled-tasks/runs"
+    },
+    {
+      "method": "GET",
+      "path": "/scheduled-tasks"
+    },
+    {
+      "method": "GET",
+      "path": "/scheduled-tasks/runs"
+    },
+    {
+      "method": "POST",
+      "path": "/recipes/recipe-1/schedule"
+    },
+    {
+      "method": "GET",
+      "path": "/scheduled-tasks"
+    },
+    {
+      "method": "PUT",
+      "path": "/scheduled-tasks/task-1"
+    },
+    {
+      "method": "GET",
+      "path": "/scheduled-tasks"
+    },
+    {
+      "method": "PUT",
+      "path": "/scheduled-tasks/manual-task"
+    },
+    {
+      "method": "PATCH",
+      "path": "/scheduled-tasks/manual-task/toggle"
+    },
+    {
+      "method": "PATCH",
+      "path": "/scheduled-tasks/manual-task/toggle"
+    },
+    {
+      "method": "GET",
+      "path": "/recipes"
+    },
+    {
+      "method": "GET",
+      "path": "/scheduled-tasks"
+    },
+    {
+      "method": "GET",
+      "path": "/scheduled-tasks/runs"
+    },
+    {
+      "method": "GET",
+      "path": "/scheduled-tasks"
+    },
+    {
+      "method": "GET",
+      "path": "/scheduled-tasks/runs"
+    },
+    {
+      "method": "DELETE",
+      "path": "/scheduled-tasks/disposable-task"
+    },
+    {
+      "method": "DELETE",
+      "path": "/scheduled-tasks/runs/disposable-run"
+    },
+    {
+      "method": "DELETE",
+      "path": "/scheduled-tasks/runs/disposable-run"
+    },
+    {
+      "method": "DELETE",
+      "path": "/scheduled-tasks/disposable-task"
+    },
+    {
+      "method": "POST",
+      "path": "/scheduled-tasks/manual-task/run"
+    },
+    {
+      "method": "GET",
+      "path": "/recipes"
+    },
+    {
+      "method": "GET",
+      "path": "/scheduled-tasks/runs"
+    },
+    {
+      "method": "GET",
+      "path": "/scheduled-tasks"
+    },
+    {
+      "method": "GET",
+      "path": "/recipes"
+    },
+    {
+      "method": "PUT",
+      "path": "/recipes/recipe-1"
+    },
+    {
+      "method": "GET",
+      "path": "/recipes"
+    },
+    {
+      "method": "PUT",
+      "path": "/recipes/recipe-1"
+    },
+    {
+      "method": "GET",
+      "path": "/recipes"
+    },
+    {
+      "method": "GET",
+      "path": "/mcp/servers"
+    },
+    {
+      "method": "GET",
+      "path": "/recipes/recipe-1"
+    },
+    {
+      "method": "PUT",
+      "path": "/recipes/recipe-1"
+    },
+    {
+      "method": "GET",
+      "path": "/recipes"
+    },
+    {
+      "method": "GET",
+      "path": "/mcp/servers"
+    },
+    {
+      "method": "POST",
+      "path": "/recipes/recipe-1/prepare"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts"
+    },
+    {
+      "method": "POST",
+      "path": "/artifacts"
+    },
+    {
+      "method": "GET",
+      "path": "/recipes"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts/artifact-1"
+    },
+    {
+      "method": "GET",
+      "path": "/recipes"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts/artifact-1"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts/artifact-1"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts/artifact-1"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts/other-artifact"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts/artifact-1"
+    },
+    {
+      "method": "POST",
+      "path": "/artifacts/artifact-1/versions"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts/artifact-1"
+    },
+    {
+      "method": "POST",
+      "path": "/artifacts/artifact-1/versions"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts/artifact-1"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts/artifact-1"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts/artifact-1"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts/artifact-1"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts/artifact-1"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts/artifact-1"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts/artifact-1"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts/artifact-1"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts/artifact-1"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts/artifact-1"
+    },
+    {
+      "method": "POST",
+      "path": "/artifacts/artifact-1/versions"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts/artifact-1"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts/artifact-1"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts/artifact-1"
+    },
+    {
+      "method": "POST",
+      "path": "/conversations"
+    },
+    {
+      "method": "GET",
+      "path": "/recipes"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts/artifact-1"
+    },
+    {
+      "method": "POST",
+      "path": "/conversations"
+    },
+    {
+      "method": "GET",
+      "path": "/conversations"
+    },
+    {
+      "method": "GET",
+      "path": "/messages/continue-4"
+    },
+    {
+      "method": "GET",
+      "path": "/mcp/servers"
+    },
+    {
+      "method": "GET",
+      "path": "/settings"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts/artifact-1"
+    },
+    {
+      "method": "POST",
+      "path": "/artifacts/artifact-1/versions"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts/artifact-1"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts/artifact-1"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts"
+    },
+    {
+      "method": "GET",
+      "path": "/mcp/servers"
+    },
+    {
+      "method": "GET",
+      "path": "/settings"
+    },
+    {
+      "method": "GET",
+      "path": "/settings"
+    },
+    {
+      "method": "GET",
+      "path": "/channels/fixture-channel/credentials"
+    },
+    {
+      "method": "GET",
+      "path": "/mcp/servers"
+    },
+    {
+      "method": "POST",
+      "path": "/messages/sync-sidecar"
+    },
+    {
+      "method": "GET",
+      "path": "/conversations"
+    },
+    {
+      "method": "GET",
+      "path": "/settings"
+    },
+    {
+      "method": "GET",
+      "path": "/channels/fixture-channel/credentials"
+    },
+    {
+      "method": "GET",
+      "path": "/mcp/servers"
+    }
+  ]
+}

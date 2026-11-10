@@ -7,6 +7,7 @@ import {
   listRecipes,
   prepareRecipe,
   recipeError,
+  restoreRecipe,
   scheduleRecipe,
   updateRecipe,
 } from "../services/recipeService";
@@ -56,6 +57,17 @@ router.post("/:id/prepare", async (c) => {
   return c.json(
     await prepareRecipe(c.get("user").id, c.req.param("id"), body.version, body.values),
   );
+});
+router.post("/:id/restore", async (c) => {
+  const body = await bodyObject(c);
+  return c.json({
+    recipe: await restoreRecipe(
+      c.get("user").id,
+      c.req.param("id"),
+      body.sourceVersion,
+      body.expectedVersion,
+    ),
+  });
 });
 router.post("/:id/schedule", async (c) => {
   const body = await bodyObject(c);

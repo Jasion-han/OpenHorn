@@ -1,0 +1,473 @@
+{
+  "checks": [
+    "account identity is read-only and failed instruction load cannot overwrite unknown data",
+    "instruction draft survives reconnect and navigation; failed save remains retryable",
+    "discarding custom instructions is explicit and preserves the saved value",
+    "search rejects out-of-order and cleared responses and has explicit failure recovery",
+    "DTI uses the native file dialog and cancel never reports success",
+    "DTI save failures remain retryable and success uses the actual file receipt with exact JSON bytes",
+    "late export estimates cannot reopen a dialog after navigation",
+    "late DTI data cannot open a native save dialog after leaving the export page",
+    "MCP edits validate object config, update transport and discard stale health probes",
+    "late import format detection cannot open a dialog on a newer page",
+    "import cancel writes nothing; retry submits once, reports partial results and refreshes sidebar data",
+    "an import already accepted can complete without a late result dialog stealing navigation",
+    "editor detection failure is explicit and a forced rescan recovers without restarting",
+    "history loading errors stay visible and recover through an explicit retry",
+    "a delayed history page cannot mix into a refreshed list or restore its old cursor",
+    "history deletion confirms scope, preserves failed items and rejects resurrection by old reads",
+    "Agent initial read failure blocks edits and avoids pretending a default is loaded",
+    "Agent reconnect preserves dirty key and cancel restores the refreshed baseline",
+    "Agent pending save disables duplicate writes and reconnect cannot overwrite saved input",
+    "Agent failed key save retains draft and failed toggle restores the previous state",
+    "Agent save finishing after navigation refreshes the newly mounted settings"
+  ],
+  "errors": [],
+  "unexpected": [],
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/scheduled-tasks/runs"
+    },
+    {
+      "method": "GET",
+      "path": "/scheduled-tasks"
+    },
+    {
+      "method": "GET",
+      "path": "/settings"
+    },
+    {
+      "method": "GET",
+      "path": "/settings"
+    },
+    {
+      "method": "GET",
+      "path": "/settings"
+    },
+    {
+      "method": "GET",
+      "path": "/settings"
+    },
+    {
+      "method": "PUT",
+      "path": "/settings/chat.systemPrompt"
+    },
+    {
+      "method": "PUT",
+      "path": "/settings/chat.systemPrompt"
+    },
+    {
+      "method": "GET",
+      "path": "/search"
+    },
+    {
+      "method": "GET",
+      "path": "/search"
+    },
+    {
+      "method": "GET",
+      "path": "/search"
+    },
+    {
+      "method": "GET",
+      "path": "/search"
+    },
+    {
+      "method": "GET",
+      "path": "/search"
+    },
+    {
+      "method": "POST",
+      "path": "/import/local/scan"
+    },
+    {
+      "method": "GET",
+      "path": "/credentials/sources"
+    },
+    {
+      "method": "GET",
+      "path": "/mcp/servers"
+    },
+    {
+      "method": "GET",
+      "path": "/channels"
+    },
+    {
+      "method": "GET",
+      "path": "/import/records"
+    },
+    {
+      "method": "GET",
+      "path": "/data-transfer/export/estimate"
+    },
+    {
+      "method": "POST",
+      "path": "/data-transfer/export/dti"
+    },
+    {
+      "method": "GET",
+      "path": "/data-transfer/export/estimate"
+    },
+    {
+      "method": "POST",
+      "path": "/data-transfer/export/dti"
+    },
+    {
+      "method": "POST",
+      "path": "/data-transfer/export/dti"
+    },
+    {
+      "method": "GET",
+      "path": "/data-transfer/export/estimate"
+    },
+    {
+      "method": "GET",
+      "path": "/settings"
+    },
+    {
+      "method": "POST",
+      "path": "/import/local/scan"
+    },
+    {
+      "method": "GET",
+      "path": "/credentials/sources"
+    },
+    {
+      "method": "GET",
+      "path": "/mcp/servers"
+    },
+    {
+      "method": "GET",
+      "path": "/channels"
+    },
+    {
+      "method": "GET",
+      "path": "/import/records"
+    },
+    {
+      "method": "GET",
+      "path": "/data-transfer/export/estimate"
+    },
+    {
+      "method": "POST",
+      "path": "/data-transfer/export/dti"
+    },
+    {
+      "method": "GET",
+      "path": "/settings"
+    },
+    {
+      "method": "GET",
+      "path": "/mcp/servers"
+    },
+    {
+      "method": "PUT",
+      "path": "/mcp/servers/fixture-mcp"
+    },
+    {
+      "method": "GET",
+      "path": "/mcp/servers"
+    },
+    {
+      "method": "PUT",
+      "path": "/mcp/servers/fixture-mcp"
+    },
+    {
+      "method": "GET",
+      "path": "/mcp/servers"
+    },
+    {
+      "method": "POST",
+      "path": "/import/local/scan"
+    },
+    {
+      "method": "GET",
+      "path": "/credentials/sources"
+    },
+    {
+      "method": "GET",
+      "path": "/mcp/servers"
+    },
+    {
+      "method": "GET",
+      "path": "/channels"
+    },
+    {
+      "method": "GET",
+      "path": "/import/records"
+    },
+    {
+      "method": "POST",
+      "path": "/data-transfer/import/detect"
+    },
+    {
+      "method": "GET",
+      "path": "/settings"
+    },
+    {
+      "method": "POST",
+      "path": "/import/local/scan"
+    },
+    {
+      "method": "GET",
+      "path": "/credentials/sources"
+    },
+    {
+      "method": "GET",
+      "path": "/mcp/servers"
+    },
+    {
+      "method": "GET",
+      "path": "/channels"
+    },
+    {
+      "method": "GET",
+      "path": "/import/records"
+    },
+    {
+      "method": "POST",
+      "path": "/data-transfer/import/detect"
+    },
+    {
+      "method": "POST",
+      "path": "/data-transfer/import/detect"
+    },
+    {
+      "method": "POST",
+      "path": "/data-transfer/import"
+    },
+    {
+      "method": "POST",
+      "path": "/data-transfer/import"
+    },
+    {
+      "method": "GET",
+      "path": "/conversations"
+    },
+    {
+      "method": "GET",
+      "path": "/scheduled-tasks"
+    },
+    {
+      "method": "GET",
+      "path": "/channels"
+    },
+    {
+      "method": "GET",
+      "path": "/projects"
+    },
+    {
+      "method": "GET",
+      "path": "/import/records"
+    },
+    {
+      "method": "POST",
+      "path": "/data-transfer/import/detect"
+    },
+    {
+      "method": "POST",
+      "path": "/data-transfer/import"
+    },
+    {
+      "method": "GET",
+      "path": "/settings"
+    },
+    {
+      "method": "GET",
+      "path": "/scheduled-tasks"
+    },
+    {
+      "method": "GET",
+      "path": "/conversations"
+    },
+    {
+      "method": "GET",
+      "path": "/channels"
+    },
+    {
+      "method": "GET",
+      "path": "/projects"
+    },
+    {
+      "method": "GET",
+      "path": "/import/records"
+    },
+    {
+      "method": "POST",
+      "path": "/import/local/scan"
+    },
+    {
+      "method": "GET",
+      "path": "/credentials/sources"
+    },
+    {
+      "method": "GET",
+      "path": "/mcp/servers"
+    },
+    {
+      "method": "GET",
+      "path": "/channels"
+    },
+    {
+      "method": "GET",
+      "path": "/import/records"
+    },
+    {
+      "method": "GET",
+      "path": "/import/records"
+    },
+    {
+      "method": "GET",
+      "path": "/import/records"
+    },
+    {
+      "method": "POST",
+      "path": "/import/local/scan"
+    },
+    {
+      "method": "GET",
+      "path": "/credentials/sources"
+    },
+    {
+      "method": "GET",
+      "path": "/mcp/servers"
+    },
+    {
+      "method": "GET",
+      "path": "/channels"
+    },
+    {
+      "method": "GET",
+      "path": "/import/records"
+    },
+    {
+      "method": "POST",
+      "path": "/import/local/scan"
+    },
+    {
+      "method": "GET",
+      "path": "/credentials/sources"
+    },
+    {
+      "method": "GET",
+      "path": "/mcp/servers"
+    },
+    {
+      "method": "GET",
+      "path": "/channels"
+    },
+    {
+      "method": "GET",
+      "path": "/import/records"
+    },
+    {
+      "method": "DELETE",
+      "path": "/import/records/fresh"
+    },
+    {
+      "method": "DELETE",
+      "path": "/import/records/fresh"
+    },
+    {
+      "method": "GET",
+      "path": "/decisions/status"
+    },
+    {
+      "method": "GET",
+      "path": "/channels"
+    },
+    {
+      "method": "GET",
+      "path": "/settings"
+    },
+    {
+      "method": "GET",
+      "path": "/channels"
+    },
+    {
+      "method": "GET",
+      "path": "/settings"
+    },
+    {
+      "method": "GET",
+      "path": "/decisions/status"
+    },
+    {
+      "method": "GET",
+      "path": "/channels"
+    },
+    {
+      "method": "GET",
+      "path": "/settings"
+    },
+    {
+      "method": "GET",
+      "path": "/decisions/status"
+    },
+    {
+      "method": "GET",
+      "path": "/channels"
+    },
+    {
+      "method": "GET",
+      "path": "/settings"
+    },
+    {
+      "method": "PUT",
+      "path": "/settings/liveSearch.tavilyApiKey"
+    },
+    {
+      "method": "GET",
+      "path": "/decisions/status"
+    },
+    {
+      "method": "GET",
+      "path": "/channels"
+    },
+    {
+      "method": "GET",
+      "path": "/settings"
+    },
+    {
+      "method": "GET",
+      "path": "/channels"
+    },
+    {
+      "method": "GET",
+      "path": "/settings"
+    },
+    {
+      "method": "PUT",
+      "path": "/settings/liveSearch.tavilyApiKey"
+    },
+    {
+      "method": "PUT",
+      "path": "/settings/liveSearch.tavilyEnabled"
+    },
+    {
+      "method": "PUT",
+      "path": "/settings/liveSearch.tavilyApiKey"
+    },
+    {
+      "method": "GET",
+      "path": "/decisions/status"
+    },
+    {
+      "method": "GET",
+      "path": "/channels"
+    },
+    {
+      "method": "GET",
+      "path": "/settings"
+    },
+    {
+      "method": "GET",
+      "path": "/channels"
+    },
+    {
+      "method": "GET",
+      "path": "/settings"
+    }
+  ]
+}

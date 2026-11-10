@@ -27,6 +27,8 @@ const requests = [];
 const errors = [];
 const unexpected = [];
 const recipes = [];
+const recipeHistory = new Map();
+let failHistory = false;
 const artifacts = [];
 const versions = new Map();
 const tasks = [];
@@ -111,6 +113,9 @@ try {
         updatedAt: now,
       };
       recipes.push(recipe);
+      recipeHistory.set(recipe.id, [
+        { recipeId: recipe.id, version: 1, spec: structuredClone(recipe.spec), createdAt: now },
+      ]);
       return json({ recipe }, 201);
     }
     const recipeMatch = endpoint.match(/^\/recipes\/([^/]+)(?:\/(prepare|schedule))?$/);
@@ -122,6 +127,12 @@ try {
           return json({ errorCode: "recipe_version_conflict" }, 409);
         recipe.spec = data.spec;
         recipe.version++;
+        recipeHistory.get(recipe.id).push({
+          recipeId: recipe.id,
+          version: recipe.version,
+          spec: structuredClone(recipe.spec),
+          createdAt: now,
+        });
         return json({ recipe });
       }
       if (recipeMatch[2] === "schedule") {
@@ -174,7 +185,8 @@ try {
           recipeVersion: recipe.version,
         });
       }
-      return json({ recipe, versions: [] });
+      if (failHistory) return json({ errorCode: "unknown" }, 503);
+      return json({ recipe, versions: [...recipeHistory.get(recipe.id)].reverse() });
     }
     if (endpoint === "/artifacts" && method === "GET") return json({ artifacts });
     if (endpoint === "/artifacts" && method === "POST") {
@@ -299,6 +311,27 @@ try {
     return json({ error: "Unexpected fixture request" }, 500);
   });
   const page = await context.newPage();
+  page.setDefaultTimeout(15_000);
+  const recipeAction = async (name) => {
+    await page.getByRole("button", { name: "更多配方操作", exact: true }).click();
+    await page.getByRole("menuitem", { name, exact: true }).click();
+    await page.getByRole("menu").waitFor({ state: "hidden" });
+  };
+  const artifactAction = async (name) => {
+    await page.getByRole("button", { name: "更多成果操作", exact: true }).click();
+    await page.getByRole("menuitem", { name, exact: true }).click();
+    await page.getByRole("menu").waitFor({ state: "hidden" });
+  };
+  const selectArtifactVersion = async (version) => {
+    if ((await page.getByLabel("版本", { exact: true }).count()) === 0)
+      await artifactAction("版本历史");
+    await page.getByLabel("版本", { exact: true }).selectOption(version);
+    await page
+      .locator("header span")
+      .filter({ hasText: new RegExp(`^版本 ${version}$`) })
+      .waitFor();
+  };
+
   const capture = async (fileName) => {
     const controls = page.getByTestId("fixture-controls");
     await controls.evaluate((element) => {
@@ -324,12 +357,23 @@ try {
   original = await page.evaluate(() => window.workbenchTest.source().content);
   await page.getByRole("button", { name: "竞品周报", exact: false }).click();
   const dialog = page.getByRole("dialog");
+  const history = page.getByTestId("recipe-history");
   await dialog.getByLabel("配方名称", { exact: true }).fill("Weekly research");
   await dialog.getByRole("button", { name: "保存配方", exact: true }).click();
   await dialog.waitFor({ state: "hidden" });
+  assert.equal(await page.getByRole("button", { name: "编辑配方", exact: true }).count(), 0);
+  assert.equal(await page.getByRole("button", { name: "查看历史版本", exact: true }).count(), 0);
+  assert.equal(await page.getByRole("button", { name: "到定时任务设置…", exact: true }).count(), 0);
+  pass("recipe defaults expose the run action while editing, history and scheduling stay in More");
   await page.getByLabel("公司或产品", { exact: false }).fill("Example A / B");
   const previewRequests = requests.length;
-  await page.getByText("查看本次任务内容", { exact: true }).click();
+  const taskDetails = page.getByTestId("recipe-task-details");
+  assert.equal(await taskDetails.getAttribute("open"), null);
+  await taskDetails.locator("summary").click();
+  await page.getByTestId("recipe-prompt-preview").waitFor();
+  await taskDetails.locator("summary").click();
+  assert.equal(await page.getByTestId("recipe-prompt-preview").isVisible(), false);
+  await taskDetails.locator("summary").click();
   assert.ok(
     (await page.getByTestId("recipe-prompt-preview").innerText()).includes("Example A / B"),
   );
@@ -343,25 +387,48 @@ try {
   await page.getByRole("button", { name: "清除搜索", exact: true }).click();
   await page.getByLabel("公司或产品", { exact: false }).fill("Example A / B");
   pass("recipe preview tracks parameters without requests and empty search has a clear recovery");
-  await page.getByRole("button", { name: "更多配方操作", exact: true }).click();
-  await page.getByRole("menuitem", { name: "编辑配方", exact: true }).click();
+  await page.getByRole("button", { name: "已保存成果", exact: true }).click();
+  await page.getByRole("button", { name: "任务配方", exact: true }).click();
+  assert.equal(await page.getByLabel("公司或产品", { exact: false }).inputValue(), "Example A / B");
+  await page.getByRole("button", { name: "Source fixture", exact: true }).click();
+  await page.getByRole("button", { name: "Workbench fixture", exact: true }).click();
+  assert.equal(await page.getByLabel("公司或产品", { exact: false }).inputValue(), "Example A / B");
+  pass("recipe parameters survive workbench tab and view navigation in the same session");
+  failHistory = true;
+  await recipeAction("查看历史版本");
+  await history.getByRole("alert").waitFor();
+  failHistory = false;
+  await history.getByRole("button", { name: "重试", exact: true }).click();
+  await history.getByLabel("配方历史版本", { exact: true }).waitFor();
+  assert.equal(await history.getByLabel("配方历史版本", { exact: true }).inputValue(), "1");
+  assert.ok(
+    (await history.getByTestId("recipe-history-prompt").textContent()).includes("{{companies}}"),
+  );
+  assert.equal(await history.getByRole("button", { name: "运行一次", exact: true }).count(), 0);
+  assert.equal(await page.getByRole("dialog").count(), 0);
+  assert.equal(await page.getByRole("button", { name: "运行一次", exact: true }).count(), 0);
+  await history.getByRole("button", { name: "收起历史", exact: true }).click();
+  assert.equal(await page.getByLabel("公司或产品", { exact: false }).inputValue(), "Example A / B");
+  pass("recipe history is read-only and a failed load can retry without losing current input");
+  await recipeAction("编辑配方");
   await dialog.getByLabel("配方名称", { exact: true }).fill("Unsaved title");
   await dialog.getByRole("button", { name: "取消", exact: true }).click();
-  const discardDialog = page.getByRole("dialog", { name: "放弃未保存的修改？", exact: true });
-  await discardDialog.getByRole("button", { name: "继续编辑", exact: true }).click();
+  const discardNotice = page.getByRole("alert", { name: "放弃未保存的修改？", exact: true });
+  await discardNotice.waitFor();
+  assert.equal(await page.getByRole("dialog").count(), 1);
+  await discardNotice.getByRole("button", { name: "继续编辑", exact: true }).click();
   assert.equal(await dialog.getByLabel("配方名称", { exact: true }).inputValue(), "Unsaved title");
   await page.keyboard.press("Escape");
-  await discardDialog.getByRole("button", { name: "放弃修改", exact: true }).click();
+  await discardNotice.getByRole("button", { name: "放弃修改", exact: true }).click();
   await dialog.waitFor({ state: "hidden" });
   assert.equal(recipes[0].spec.title, "Weekly research");
-  await page.getByRole("button", { name: "更多配方操作", exact: true }).click();
-  await page.getByRole("menuitem", { name: "编辑配方", exact: true }).click();
+  await recipeAction("编辑配方");
   await dialog.getByRole("button", { name: "取消", exact: true }).click();
   await dialog.waitFor({ state: "hidden" });
   pass("changed recipe dismissals require explicit discard while untouched forms close normally");
   await page.getByLabel("公司或产品", { exact: false }).fill("");
   const beforeInvalid = requests.length;
-  await page.getByRole("button", { name: "到定时任务设置…", exact: true }).click();
+  await recipeAction("到定时任务设置…");
   await page.getByText("运行参数不完整或格式有误，请检查后重试。", { exact: true }).waitFor();
   assert.equal(await page.getByRole("button", { name: "重试", exact: true }).count(), 0);
   assert.equal(requests.length, beforeInvalid);
@@ -380,7 +447,7 @@ try {
   assert.equal(await page.getByLabel("执行时间", { exact: true }).count(), 0);
   assert.equal(await page.getByRole("button", { name: "竞品周报", exact: false }).count(), 0);
   await page.getByLabel("公司或产品", { exact: false }).fill("Cancelled schedule");
-  await page.getByRole("button", { name: "到定时任务设置…", exact: true }).click();
+  await recipeAction("到定时任务设置…");
   await page.locator("h1").filter({ hasText: "定时任务" }).waitFor();
   await dialog.getByTestId("scheduled-recipe-source").waitFor();
   assert.ok(
@@ -415,7 +482,7 @@ try {
 
   await page.getByRole("button", { name: "Workbench fixture" }).click();
   await page.getByLabel("公司或产品", { exact: false }).fill("Scheduled A");
-  await page.getByRole("button", { name: "到定时任务设置…", exact: true }).click();
+  await recipeAction("到定时任务设置…");
   await dialog.getByTestId("scheduled-recipe-source").waitFor();
   await dialog.locator("#scheduled-task-name").fill("Scheduled research");
   await dialog.locator("#scheduled-task-time").fill("10:15");
@@ -483,13 +550,15 @@ try {
   await page.getByRole("menuitem", { name: "编辑", exact: true }).click();
   await dialog.locator("#scheduled-task-prompt").fill("Unsaved schedule edit");
   await dialog.getByRole("button", { name: "取消", exact: true }).click();
-  await discardDialog.getByRole("button", { name: "继续编辑", exact: true }).click();
+  await discardNotice.waitFor();
+  assert.equal(await page.getByRole("dialog").count(), 1);
+  await discardNotice.getByRole("button", { name: "继续编辑", exact: true }).click();
   assert.equal(
     await dialog.locator("#scheduled-task-prompt").inputValue(),
     "Unsaved schedule edit",
   );
   await page.keyboard.press("Escape");
-  await discardDialog.getByRole("button", { name: "放弃修改", exact: true }).click();
+  await discardNotice.getByRole("button", { name: "放弃修改", exact: true }).click();
   await dialog.waitFor({ state: "hidden" });
   assert.equal(tasks[1].prompt, "Updated manual prompt");
   pass("schedule dismissal protects modified fields and discarding writes nothing");
@@ -601,8 +670,7 @@ try {
   recipes[0].spec.modelId = "retired-model";
   await page.getByRole("button", { name: "Source fixture" }).click();
   await page.getByRole("button", { name: "Workbench fixture" }).click();
-  await page.getByRole("button", { name: "更多配方操作", exact: true }).click();
-  await page.getByRole("menuitem", { name: "编辑配方", exact: true }).click();
+  await recipeAction("编辑配方");
   await dialog.getByText("运行设置（可选）", { exact: true }).click();
   assert.equal(await dialog.locator("#recipe-project").inputValue(), "removed-project");
   assert.equal(await dialog.locator("#recipe-channel").inputValue(), "removed-channel");
@@ -615,8 +683,7 @@ try {
   assert.equal(recipes[0].spec.modelId, undefined);
   pass("unavailable recipe bindings stay visible and can be explicitly reset");
 
-  await page.getByRole("button", { name: "更多配方操作", exact: true }).click();
-  await page.getByRole("menuitem", { name: "编辑配方", exact: true }).click();
+  await recipeAction("编辑配方");
   await dialog.getByText("运行设置（可选）", { exact: true }).click();
   await dialog
     .getByLabel("MCP（用逗号分隔名称）", { exact: true })
@@ -630,8 +697,21 @@ try {
   assert.equal(requests.filter((r) => r.path.endsWith("/prepare")).length, preparesBefore);
   assert.deepEqual(recipes[0].spec.requirements.mcpServers, ["missing-one", "missing-two"]);
   pass("multiple capability requirements remain editable and missing tools block preparation");
-  await page.getByRole("button", { name: "更多配方操作", exact: true }).click();
-  await page.getByRole("menuitem", { name: "编辑配方", exact: true }).click();
+  const beforeHistory = requests.length;
+  await recipeAction("查看历史版本");
+  await history.getByLabel("配方历史版本", { exact: true }).selectOption("1");
+  assert.ok(
+    (await history.getByTestId("recipe-history-prompt").textContent()).includes("{{companies}}"),
+  );
+  assert.ok((await history.getByRole("option").count()) > 1);
+  await history.getByRole("button", { name: "收起历史", exact: true }).click();
+  await history.waitFor({ state: "hidden" });
+  assert.equal(
+    requests.slice(beforeHistory).every((r) => r.method === "GET"),
+    true,
+  );
+  pass("older recipe versions remain readable after edits and browsing history performs no writes");
+  await recipeAction("编辑配方");
   await dialog.getByText("运行设置（可选）", { exact: true }).click();
   await dialog.getByLabel("MCP（用逗号分隔名称）", { exact: true }).fill("");
   await dialog.getByRole("button", { name: "保存配方", exact: true }).click();
@@ -657,26 +737,31 @@ try {
 
   await page.getByRole("button", { name: "Source fixture" }).click();
   await page.locator("main > section").hover();
-  await page.getByRole("button", { name: "收藏为产物", exact: true }).click();
-  await dialog.getByLabel("产物名称", { exact: true }).fill("Research artifact");
+  await page.getByRole("button", { name: "收藏为成果", exact: true }).click();
+  await dialog.getByLabel("成果名称", { exact: true }).fill("Research artifact");
   await dialog.getByRole("button", { name: "保存", exact: true }).click();
   await dialog.waitFor({ state: "hidden" });
   assert.equal(artifacts.length, 1);
   assert.equal(versions.get(artifacts[0].id)[0].content, original);
   await page.getByRole("button", { name: "Workbench fixture" }).click();
-  await page.getByRole("button", { name: "产物", exact: true }).click();
+  await page.getByRole("button", { name: "已保存成果", exact: true }).click();
   await page.getByRole("heading", { name: "Research artifact", exact: true }).waitFor();
+  assert.equal(await page.getByRole("button", { name: "编辑为新版本", exact: true }).count(), 0);
+  assert.equal(await page.getByRole("button", { name: "导出原文", exact: true }).count(), 0);
+  assert.equal(await page.getByLabel("版本", { exact: true }).count(), 0);
+  pass("artifact defaults keep secondary actions and version controls hidden until requested");
+
   const frame = page.frameLocator("iframe").first();
   await frame.getByRole("button", { name: "Inspect", exact: true }).click();
   await frame.getByRole("button", { name: "Changed", exact: true }).waitFor();
   pass("saved message retains complete text and uses the existing interactive sandbox");
 
-  await page.getByRole("button", { name: "编辑为新版本", exact: true }).click();
+  await artifactAction("编辑为新版本");
   const editor = page.getByRole("textbox", { name: "原文", exact: true });
   const updated = `${original}\n\nVersion two with 中文.`;
   await editor.fill(updated);
   await page.getByRole("button", { name: "任务配方", exact: true }).click();
-  await page.getByRole("button", { name: "产物", exact: true }).click();
+  await page.getByRole("button", { name: "已保存成果", exact: true }).click();
   await editor.waitFor();
   assert.equal(await editor.inputValue(), updated);
   await page.getByRole("button", { name: "Source fixture" }).click();
@@ -693,10 +778,12 @@ try {
   await editor.waitFor();
   assert.equal(await editor.inputValue(), updated);
   await page.getByRole("button", { name: "取消", exact: true }).click();
-  await discardDialog.getByRole("button", { name: "继续编辑", exact: true }).click();
+  await discardNotice.waitFor();
+  assert.equal(await page.getByRole("dialog").count(), 0);
+  await discardNotice.getByRole("button", { name: "继续编辑", exact: true }).click();
   assert.equal(await editor.inputValue(), updated);
-  await page.getByLabel("筛选产物", { exact: true }).fill("no such artifact");
-  await page.getByText("没有匹配的产物", { exact: true }).waitFor();
+  await page.getByLabel("筛选成果", { exact: true }).fill("no such artifact");
+  await page.getByText("没有匹配的成果", { exact: true }).waitFor();
   await page.getByRole("button", { name: "清除搜索", exact: true }).click();
   assert.equal(await editor.inputValue(), updated);
   pass(
@@ -723,20 +810,16 @@ try {
   assert.equal(await editor.inputValue(), updated);
   forceConflict = false;
   await page.getByRole("button", { name: "保存新版本", exact: true }).click();
-  await page.getByLabel("版本", { exact: true }).selectOption("3");
+  await selectArtifactVersion("3");
   assert.equal(versions.get(artifacts[0].id).length, 3);
-  await page.getByLabel("版本", { exact: true }).selectOption("1");
+  await selectArtifactVersion("1");
   await page.getByText("正在查看历史版本 1，最新为版本 3。", { exact: true }).waitFor();
   await page.getByRole("button", { name: "查看最新版本", exact: true }).click();
   await page.waitForFunction(() => document.querySelector("#artifact-version")?.value === "3");
-  await page.getByLabel("版本", { exact: true }).selectOption("1");
-  await page.getByRole("button", { name: "原文", exact: true }).click();
-  assert.equal(
-    await page.locator("pre").filter({ hasText: "Saved report" }).textContent(),
-    original,
-  );
-  await page.getByRole("button", { name: "更多产物操作", exact: true }).click();
-  await page.getByRole("menuitem", { name: "导出原文", exact: true }).click();
+  await selectArtifactVersion("1");
+  await artifactAction("原文");
+  assert.equal(await page.getByTestId("artifact-raw").textContent(), original);
+  await artifactAction("导出原文");
   await page.waitForFunction(() => window.fixtureIpc.some((r) => r.command === "save_attachment"));
   const exported = await page.evaluate(
     () => window.fixtureIpc.find((r) => r.command === "save_attachment").args,
@@ -745,18 +828,18 @@ try {
   pass(
     "version conflict preserves draft, immutable history loads and original export matches bytes",
   );
-  await page.getByRole("button", { name: "编辑为新版本", exact: true }).click();
+  await artifactAction("编辑为新版本");
   await editor.fill("A draft that will be discarded");
   await page.getByRole("button", { name: "取消", exact: true }).click();
-  await discardDialog.getByRole("button", { name: "放弃修改", exact: true }).click();
+  await discardNotice.getByRole("button", { name: "放弃修改", exact: true }).click();
   await editor.waitFor({ state: "hidden" });
   assert.equal(versions.get(artifacts[0].id).length, 3);
-  await page.getByRole("button", { name: "编辑为新版本", exact: true }).click();
+  await artifactAction("编辑为新版本");
   assert.equal(await editor.inputValue(), original);
   await page.getByRole("button", { name: "取消", exact: true }).click();
   await editor.waitFor({ state: "hidden" });
   pass("historical versions are explicit and discarding a draft never changes saved history");
-  await page.getByRole("button", { name: "编辑为新版本", exact: true }).click();
+  await artifactAction("编辑为新版本");
   await editor.fill("An intentional revision of historical version one");
   await page.getByRole("button", { name: "保存新版本", exact: true }).click();
   await page.waitForFunction(() => document.querySelector("#artifact-version")?.value === "4");
@@ -786,7 +869,7 @@ try {
   await page.setViewportSize({ width: 760, height: 900 });
   await page.evaluate(() => window.workbenchTest.dark());
   await page.waitForTimeout(200);
-  await page.getByRole("button", { name: "产物", exact: true }).click();
+  await page.getByRole("button", { name: "已保存成果", exact: true }).click();
   await page.getByRole("heading", { name: "Research artifact", exact: true }).waitFor();
   const dimensions = await page.evaluate(() => ({
     scroll: document.documentElement.scrollWidth,
@@ -818,6 +901,48 @@ try {
   );
   assert.equal(await page.evaluate(() => window.workbenchTest.runs().length), 0);
   pass("artifact continuation opens a bound editable draft without invoking a model");
+  await page.evaluate((id) => window.workbenchTest.showReply(id), editDraft.conversationId);
+  await page.locator("main > section").hover();
+  const countBeforeContinuationSave = artifacts.length;
+  await page.getByRole("button", { name: "收藏为成果", exact: true }).click();
+  await dialog.getByLabel("目标成果", { exact: true }).waitFor();
+  await page.waitForFunction(
+    (id) => document.querySelector("#artifact-save-target")?.value === id,
+    artifacts[0].id,
+  );
+  assert.equal(await dialog.getByLabel("目标成果", { exact: true }).inputValue(), artifacts[0].id);
+  await dialog.getByText("将追加为版本 5，已有版本保持不变。", { exact: true }).waitFor();
+  assert.equal(artifacts[0].currentVersion, 4);
+  await dialog.getByRole("button", { name: "保存", exact: true }).click();
+  await dialog.waitFor({ state: "hidden" });
+  assert.equal(artifacts.length, countBeforeContinuationSave);
+  assert.equal(artifacts[0].currentVersion, 5);
+  const append = requests.filter((r) => r.method === "POST" && r.path.endsWith("/versions")).at(-1);
+  assert.equal(append.data.sourceMessageId, "continuation-reply");
+  pass(
+    "a continuation reply preselects its original artifact and appends only after explicit save",
+  );
+
+  const removed = artifacts.shift();
+  await page.locator("main > section").hover();
+  await page.getByRole("button", { name: "收藏为成果", exact: true }).click();
+  await dialog
+    .getByText("原成果已不存在，请另存为新成果或选择其他成果。", { exact: true })
+    .waitFor();
+  assert.equal(await dialog.getByRole("button", { name: "保存", exact: true }).isDisabled(), true);
+  await dialog.getByRole("button", { name: "新建成果", exact: true }).click();
+  await dialog.getByLabel("成果名称", { exact: true }).waitFor();
+  await page.keyboard.press("Escape");
+  artifacts.unshift(removed);
+  await page.evaluate(() => window.workbenchTest.showReply("unrelated-conversation"));
+  await page.locator("main > section").hover();
+  await page.getByRole("button", { name: "收藏为成果", exact: true }).click();
+  await dialog.getByLabel("成果名称", { exact: true }).waitFor();
+  assert.equal(await dialog.getByLabel("目标成果", { exact: true }).count(), 0);
+  await page.keyboard.press("Escape");
+  pass(
+    "deleted continuation targets require an explicit alternative and other conversations default to a new artifact",
+  );
 
   await page.evaluate(() => window.workbenchTest.startRealChat("wrong-conversation"));
   await page.waitForTimeout(250);
@@ -863,6 +988,9 @@ try {
     ),
   );
   console.log(`Evidence: ${evidenceDir}`);
+} catch (error) {
+  console.error(error);
+  throw error;
 } finally {
   await browser?.close();
   await server.close();

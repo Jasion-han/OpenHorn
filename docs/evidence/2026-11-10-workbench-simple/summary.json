@@ -1,0 +1,38 @@
+{
+  "scope": "Current full working tree; UI simplification only, not an isolated release candidate",
+  "desktopUnitTests": {
+    "passed": 675,
+    "failed": 0
+  },
+  "browserCheckpoints": {
+    "workbench.json": 30,
+    "reviews.json": 18,
+    "jev.json": 8
+  },
+  "browserTotal": 56,
+  "typecheck": "passed",
+  "wholeRepositoryBiome": "passed",
+  "nativeDebugBuild": "passed",
+  "nativeVerification": [
+    "Direct recipe actions and inline saved version",
+    "History hides the run form and closing restores it",
+    "One edit window retains temporary draft after inline cancellation prompt; original description restored before closing"
+  ],
+  "sourceSha256": {
+    "apps/desktop/src/components/workbench/DiscardChangesNotice.tsx": "acc49473920f52f1b069441b246d395649b94350962a4dac961322f07b38b0c9",
+    "apps/desktop/src/components/workbench/RecipeHistory.tsx": "41b60f52c7783d6ac7aad6313dd7d6eda164d2c4f7941d7404ffa7e62f5a9ae4",
+    "apps/desktop/src/components/workbench/RecipePanel.tsx": "24165259d5a6a042b560ef99a551320199007f120f5afb007c51288f1bb72b8a",
+    "apps/desktop/src/components/workbench/RecipeEditor.tsx": "6042ad414d2e4a1a5641629d6dc42ce233a9aef0cdae39ebc7c5b4d01b520869",
+    "apps/desktop/src/components/workbench/WorkbenchView.tsx": "bbd614dfe0da419f492113285b418963f2b428d541a4d8872a44df833e8ec19c",
+    "apps/desktop/src/components/workbench/ArtifactPanel.tsx": "7b02a1a2ce52767c25a807a1767863ea1ffbbd76b0acd2e451130b90c3c8cfd3",
+    "apps/desktop/src/components/workbench/reviews/ReviewDataset.tsx": "31bd22b3a992a96b684ab858b01f33745e137c5a1390f8ec6594ba664fbd2f00",
+    "apps/desktop/src/components/workbench/reviews/ReviewWorkspacePanel.tsx": "32d40f642aed46740081d81d78bfcc46dafb353bdc2b1ec7b996539ce7cd8c05",
+    "apps/desktop/src/components/workbench/reviews/ReviewImportDialog.tsx": "93fbadd23bf652a1f253b3417cca2d8059bbb6d13b014be848dd5ee75fa0c6f4",
+    "apps/desktop/src/components/workbench/reviews/ReviewAnnotationDialog.tsx": "bbc036aa089b359deedd73737ecd48668f57a37f555f3fa4030288616b052dbd",
+    "apps/desktop/src/components/scheduled-tasks/CreateTaskDialog.tsx": "686f1c3f6b76d437c62b69a33b9759d74c42a57eef57c5168bdefa40a269b0b9",
+    "apps/desktop/src/lib/i18n/agent.ts": "8ee1bc4ef1cb63d794afcf31473c7ac5073363f5ec8cd68897ba43786ff81675",
+    "apps/desktop/scripts/workbench.browser.mjs": "5a7787186e88932a0e79a7798458ad2c595514219e11d3a1d2e839bb1689395d",
+    "apps/desktop/scripts/reviews.browser.mjs": "968e6d6d9d8aef6be0741ede74c07a00ef788e233ef948ff7d4ed794f8cb05c8",
+    "apps/desktop/scripts/jev-integration.browser.mjs": "65b44b120269b64f04c2e9d541f0ad4d51c8ce4d403395ea15751400196bb2e4"
+  }
+}

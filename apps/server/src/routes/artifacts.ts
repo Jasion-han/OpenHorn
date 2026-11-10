@@ -6,6 +6,7 @@ import {
   deleteArtifact,
   getArtifactDetail,
   listArtifacts,
+  restoreArtifact,
   updateArtifact,
 } from "../services/artifactService";
 import { requireUser, type UserEnv } from "../utils/requestUser";
@@ -43,6 +44,20 @@ router.post("/:id/versions", async (c) => {
     await c.req.json(),
   );
   return c.json(saved, 201);
+});
+router.post("/:id/restore", async (c) => {
+  const body: unknown = await c.req.json();
+  if (!body || typeof body !== "object" || Array.isArray(body))
+    throw new ArtifactServiceError("invalid_artifact", 400);
+  const input = body as Record<string, unknown>;
+  return c.json(
+    await restoreArtifact(
+      c.get("user").id,
+      c.req.param("id"),
+      input.sourceVersion,
+      input.expectedVersion,
+    ),
+  );
 });
 
 router.patch("/:id", async (c) => {

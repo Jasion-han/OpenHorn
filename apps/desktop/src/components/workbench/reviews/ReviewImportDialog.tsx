@@ -22,7 +22,7 @@ import {
   getWorkbenchLabel as label,
 } from "../../../lib/i18n/agent";
 import { reviewError } from "../../../lib/reviewWorkspaceApi";
-import { DiscardChangesDialog } from "../DiscardChangesDialog";
+import { DiscardChangesNotice } from "../DiscardChangesNotice";
 
 export const reviewSelectClass =
   "h-9 max-w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50";
@@ -124,144 +124,155 @@ export function ReviewImportDialog({
     }
   };
   return (
-    <>
-      <Dialog
-        open
-        onOpenChange={(open) => {
-          if (!open) close();
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open) close();
+      }}
+    >
+      <DialogContent
+        onEscapeKeyDown={(event) => {
+          if (discard) {
+            event.preventDefault();
+            setDiscard(false);
+          }
         }}
+        className="max-h-[90vh] max-w-2xl overflow-y-auto"
       >
-        <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>{label("reviews.import")}</DialogTitle>
-            <DialogDescription>{label("reviews.limits")}</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-1.5">
-              <Label htmlFor="review-file">{label("reviews.file")}</Label>
-              <Input
-                id="review-file"
-                type="file"
-                accept=".csv,.tsv,text/csv,text/tab-separated-values"
-                disabled={busy}
-                onChange={(event) => void read(event.target.files?.[0])}
-              />
-            </div>
-            {reading && (
-              <output className="block text-sm text-muted-foreground">
-                {label("reviews.reading")}
-              </output>
-            )}
-            {csv !== null && (
-              <>
-                <div className="space-y-1.5">
-                  <Label htmlFor="review-name">{label("reviews.name")}</Label>
-                  <Input
-                    id="review-name"
-                    value={title}
-                    maxLength={200}
-                    disabled={busy}
-                    onChange={(e) => setTitle(e.target.value)}
-                  />
-                </div>
-                <div className="grid gap-3 sm:grid-cols-3">
-                  <div className="flex flex-col gap-1.5">
-                    <Label htmlFor="review-delimiter">{label("reviews.delimiter")}</Label>
-                    <select
-                      id="review-delimiter"
-                      className={reviewSelectClass}
-                      disabled={busy}
-                      value={delimiter}
-                      onChange={(e) => {
-                        setDelimiter(e.target.value as ReviewDelimiter);
-                        setTextColumn(0);
-                        setRatingColumn(null);
-                      }}
-                    >
-                      <option value=",">{label("reviews.comma")}</option>
-                      <option value=";">{label("reviews.semicolon")}</option>
-                      <option value={"\t"}>{label("reviews.tab")}</option>
-                    </select>
-                  </div>
-                  <div className="flex flex-col gap-1.5">
-                    <Label htmlFor="review-text-column">{label("reviews.textColumn")}</Label>
-                    <select
-                      id="review-text-column"
-                      className={reviewSelectClass}
-                      disabled={busy}
-                      value={textColumn}
-                      onChange={(e) => setTextColumn(Number(e.target.value))}
-                    >
-                      {preview?.headers.map((name, i) => (
-                        // biome-ignore lint/suspicious/noArrayIndexKey: CSV column position is its stable identity, including duplicate/empty headers
-                        <option key={`${i}-${name}`} value={i}>
-                          {format("reviews.column", {
-                            index: i + 1,
-                            name: name || label("reviews.unnamed"),
-                          })}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="flex flex-col gap-1.5">
-                    <Label htmlFor="review-rating-column">{label("reviews.ratingColumn")}</Label>
-                    <select
-                      id="review-rating-column"
-                      className={reviewSelectClass}
-                      disabled={busy}
-                      value={ratingColumn ?? ""}
-                      onChange={(e) =>
-                        setRatingColumn(e.target.value === "" ? null : Number(e.target.value))
-                      }
-                    >
-                      <option value="">{label("reviews.none")}</option>
-                      {preview?.headers.map((name, i) => (
-                        // biome-ignore lint/suspicious/noArrayIndexKey: CSV column position is its stable identity, including duplicate/empty headers
-                        <option key={`${i}-${name}`} value={i}>
-                          {format("reviews.column", {
-                            index: i + 1,
-                            name: name || label("reviews.unnamed"),
-                          })}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-                {preview?.data && (
-                  <section className="space-y-2" aria-label={label("reviews.preview")}>
-                    <h3 className="text-sm font-medium">{label("reviews.preview")}</h3>
-                    <p className="text-xs text-muted-foreground">
-                      {format("reviews.previewCount", {
-                        count: preview.data.rows.length,
-                        skipped: preview.data.skippedRows,
-                      })}
-                    </p>
-                    <div className="divide-y rounded-md border">
-                      {preview.data.rows.slice(0, 5).map((row) => (
-                        <p
-                          key={row.id}
-                          className="whitespace-pre-wrap break-words px-3 py-2 text-sm"
-                        >
-                          <span className="mr-2 font-mono text-xs text-muted-foreground">
-                            {row.id}
-                          </span>
-                          {row.text}
-                        </p>
-                      ))}
-                    </div>
-                  </section>
-                )}
-              </>
-            )}
-            {(error || preview?.error) && (
-              <p role="alert" className="text-sm text-destructive">
-                {error || preview?.error}
-              </p>
-            )}
-            <p className="text-xs leading-relaxed text-muted-foreground">
-              {label("reviews.storage")}
-            </p>
+        <DialogHeader>
+          <DialogTitle>{label("reviews.import")}</DialogTitle>
+          <DialogDescription>{label("reviews.limits")}</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="review-file">{label("reviews.file")}</Label>
+            <Input
+              id="review-file"
+              type="file"
+              accept=".csv,.tsv,text/csv,text/tab-separated-values"
+              disabled={busy}
+              onChange={(event) => void read(event.target.files?.[0])}
+            />
           </div>
+          {reading && (
+            <output className="block text-sm text-muted-foreground">
+              {label("reviews.reading")}
+            </output>
+          )}
+          {csv !== null && (
+            <>
+              <div className="space-y-1.5">
+                <Label htmlFor="review-name">{label("reviews.name")}</Label>
+                <Input
+                  id="review-name"
+                  value={title}
+                  maxLength={200}
+                  disabled={busy}
+                  onChange={(e) => setTitle(e.target.value)}
+                />
+              </div>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="review-delimiter">{label("reviews.delimiter")}</Label>
+                  <select
+                    id="review-delimiter"
+                    className={reviewSelectClass}
+                    disabled={busy}
+                    value={delimiter}
+                    onChange={(e) => {
+                      setDelimiter(e.target.value as ReviewDelimiter);
+                      setTextColumn(0);
+                      setRatingColumn(null);
+                    }}
+                  >
+                    <option value=",">{label("reviews.comma")}</option>
+                    <option value=";">{label("reviews.semicolon")}</option>
+                    <option value={"\t"}>{label("reviews.tab")}</option>
+                  </select>
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="review-text-column">{label("reviews.textColumn")}</Label>
+                  <select
+                    id="review-text-column"
+                    className={reviewSelectClass}
+                    disabled={busy}
+                    value={textColumn}
+                    onChange={(e) => setTextColumn(Number(e.target.value))}
+                  >
+                    {preview?.headers.map((name, i) => (
+                      // biome-ignore lint/suspicious/noArrayIndexKey: CSV column position is its stable identity, including duplicate/empty headers
+                      <option key={`${i}-${name}`} value={i}>
+                        {format("reviews.column", {
+                          index: i + 1,
+                          name: name || label("reviews.unnamed"),
+                        })}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="review-rating-column">{label("reviews.ratingColumn")}</Label>
+                  <select
+                    id="review-rating-column"
+                    className={reviewSelectClass}
+                    disabled={busy}
+                    value={ratingColumn ?? ""}
+                    onChange={(e) =>
+                      setRatingColumn(e.target.value === "" ? null : Number(e.target.value))
+                    }
+                  >
+                    <option value="">{label("reviews.none")}</option>
+                    {preview?.headers.map((name, i) => (
+                      // biome-ignore lint/suspicious/noArrayIndexKey: CSV column position is its stable identity, including duplicate/empty headers
+                      <option key={`${i}-${name}`} value={i}>
+                        {format("reviews.column", {
+                          index: i + 1,
+                          name: name || label("reviews.unnamed"),
+                        })}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              {preview?.data && (
+                <section className="space-y-2" aria-label={label("reviews.preview")}>
+                  <h3 className="text-sm font-medium">{label("reviews.preview")}</h3>
+                  <p className="text-xs text-muted-foreground">
+                    {format("reviews.previewCount", {
+                      count: preview.data.rows.length,
+                      skipped: preview.data.skippedRows,
+                    })}
+                  </p>
+                  <div className="divide-y rounded-md border">
+                    {preview.data.rows.slice(0, 5).map((row) => (
+                      <p key={row.id} className="whitespace-pre-wrap break-words px-3 py-2 text-sm">
+                        <span className="mr-2 font-mono text-xs text-muted-foreground">
+                          {row.id}
+                        </span>
+                        {row.text}
+                      </p>
+                    ))}
+                  </div>
+                </section>
+              )}
+            </>
+          )}
+          {(error || preview?.error) && (
+            <p role="alert" className="text-sm text-destructive">
+              {error || preview?.error}
+            </p>
+          )}
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            {label("reviews.storage")}
+          </p>
+        </div>
+        {discard ? (
+          <DiscardChangesNotice
+            open={discard}
+            onKeep={() => setDiscard(false)}
+            onDiscard={onClose}
+          />
+        ) : (
           <DialogFooter>
             <Button variant="outline" disabled={busy || reading} onClick={close}>
               {label("reviews.cancel")}
@@ -273,9 +284,8 @@ export function ReviewImportDialog({
               {label(busy ? "reviews.working" : "reviews.create")}
             </Button>
           </DialogFooter>
-        </DialogContent>
-      </Dialog>
-      <DiscardChangesDialog open={discard} onKeep={() => setDiscard(false)} onDiscard={onClose} />
-    </>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }

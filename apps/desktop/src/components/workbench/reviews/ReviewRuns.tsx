@@ -18,8 +18,10 @@ export function ReviewRuns({
   onSync(run: ReviewRun): void;
 }) {
   return (
-    <section className="space-y-3 border-t pt-5">
-      <h2 className="text-base font-semibold">{label("reviews.history")}</h2>
+    <details className="space-y-3 border-t pt-4" data-testid="review-runs">
+      <summary className="w-fit cursor-pointer rounded text-sm text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+        {label("reviews.history")} · {runs.length}
+      </summary>
       {!runs.length && <p className="text-sm text-muted-foreground">{label("reviews.noRuns")}</p>}
       <ol className="divide-y">
         {[...runs].reverse().map((run) => (
@@ -84,6 +86,6 @@ export function ReviewRuns({
           </li>
         ))}
       </ol>
-    </section>
+    </details>
   );
 }
