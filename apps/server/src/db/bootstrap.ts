@@ -441,6 +441,36 @@ const SCHEMA_DDL: string[] = [
   `CREATE INDEX IF NOT EXISTS saved_artifact_versions_source_message_idx
     ON saved_artifact_versions(source_message_id);`,
 
+  `CREATE TABLE IF NOT EXISTS library_documents (
+    id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    project_id TEXT REFERENCES projects(id) ON DELETE CASCADE, scope_key TEXT NOT NULL,
+    file_name TEXT NOT NULL, file_type TEXT NOT NULL, file_size INTEGER NOT NULL, sha256 TEXT NOT NULL,
+    original_base64 TEXT NOT NULL, text_content TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'pending',
+    error_code TEXT, chunk_count INTEGER NOT NULL DEFAULT 0, revision INTEGER NOT NULL DEFAULT 1,
+    index_token TEXT, lease_until INTEGER, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+  );`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS library_documents_identity_unique ON library_documents(user_id, scope_key, file_name, sha256);`,
+  `CREATE INDEX IF NOT EXISTS library_documents_user_scope_idx ON library_documents(user_id, scope_key);`,
+  `CREATE INDEX IF NOT EXISTS library_documents_project_idx ON library_documents(project_id);`,
+  `CREATE TABLE IF NOT EXISTS library_chunks (
+    id TEXT PRIMARY KEY, document_id TEXT NOT NULL REFERENCES library_documents(id) ON DELETE CASCADE,
+    chunk_index INTEGER NOT NULL, text TEXT NOT NULL, heading TEXT
+  );`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS library_chunks_document_index_unique ON library_chunks(document_id, chunk_index);`,
+  `CREATE TABLE IF NOT EXISTS library_questions (
+    id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    request_id TEXT NOT NULL, input_hash TEXT NOT NULL, scope_kind TEXT NOT NULL, scope_project_id TEXT,
+    project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
+    conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL,
+    channel_id TEXT REFERENCES channels(id) ON DELETE SET NULL,
+    model_id TEXT NOT NULL, question TEXT NOT NULL, sources TEXT NOT NULL, prompt TEXT NOT NULL, created_at INTEGER NOT NULL
+  );`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS library_questions_request_unique ON library_questions(user_id, request_id);`,
+  `CREATE INDEX IF NOT EXISTS library_questions_user_idx ON library_questions(user_id);`,
+  `CREATE INDEX IF NOT EXISTS library_questions_project_idx ON library_questions(project_id);`,
+  `CREATE INDEX IF NOT EXISTS library_questions_conversation_idx ON library_questions(conversation_id);`,
+  `CREATE INDEX IF NOT EXISTS library_questions_channel_idx ON library_questions(channel_id);`,
+
   // Indexes for hot-path lookups. SQLite does not auto-index foreign-key
   // columns, so every FK that appears in a WHERE / JOIN / ORDER BY / DELETE
   // gets an explicit index here. Keep this list in sync with the `index()`

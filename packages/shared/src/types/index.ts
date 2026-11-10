@@ -266,6 +266,7 @@ export type ImportKind = "local" | "backup" | "chatgpt" | "claude-export";
  * so `totalImported` counts conversations, not the messages inside them.
  */
 export type ImportPartType =
+  | "library"
   | "recipes"
   | "artifacts"
   | "conversations"
@@ -400,6 +401,7 @@ export interface PromptTemplate {
 }
 
 export * from "./decisions";
+export * from "./library";
 export type {
   FrozenRecipeSnapshot,
   PreparedRecipe,

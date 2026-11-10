@@ -46,6 +46,7 @@ const IMPORT_KINDS: ReadonlySet<string> = new Set<ImportKind>([
 ]);
 
 const IMPORT_PART_TYPES: ReadonlySet<string> = new Set<ImportPartType>([
+  "library",
   "conversations",
   "mcp",
   "skills",

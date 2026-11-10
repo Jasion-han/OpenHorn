@@ -59,23 +59,35 @@ function chunkByHeadings(text: string): TextChunk[] {
 }
 
 function chunkByParagraphs(text: string): TextChunk[] {
-  const paragraphs = text.split(/\n\n+/);
   const chunks: TextChunk[] = [];
-  let buffer = "";
-
-  for (const para of paragraphs) {
-    if (buffer.length + para.length + 2 > MAX_CHUNK_CHARS && buffer.length > 0) {
-      chunks.push({ index: chunks.length, text: buffer.trim() });
-      // Overlap: keep tail of previous chunk
-      buffer = `${buffer.slice(-OVERLAP_CHARS)}\n\n${para}`;
-    } else {
-      buffer += (buffer ? "\n\n" : "") + para;
+  let start = 0;
+  while (start < text.length) {
+    let end = Math.min(start + MAX_CHUNK_CHARS, text.length);
+    if (end < text.length) {
+      const window = text.slice(start, end);
+      // Prefer a paragraph boundary in the latter half; otherwise use a line or
+      // word boundary. A hard cut still bounds single-line/minified documents.
+      const minimum = MAX_CHUNK_CHARS / 2;
+      const paragraph = window.lastIndexOf("\n\n");
+      const line = window.lastIndexOf("\n");
+      if (paragraph >= minimum) end = start + paragraph + 2;
+      else if (line >= minimum) end = start + line + 1;
+      else {
+        const space = window.lastIndexOf(" ");
+        if (space >= minimum) end = start + space + 1;
+      }
+      // JS counts UTF-16 code units; never cut an astral character in half.
+      if (isLowSurrogate(text.charCodeAt(end))) end--;
     }
+    const value = text.slice(start, end).trim();
+    if (value) chunks.push({ index: chunks.length, text: value });
+    if (end === text.length) break;
+    const next = end - OVERLAP_CHARS;
+    start = isLowSurrogate(text.charCodeAt(next)) ? next - 1 : next;
   }
-
-  if (buffer.trim()) {
-    chunks.push({ index: chunks.length, text: buffer.trim() });
-  }
-
   return chunks;
+}
+
+function isLowSurrogate(code: number): boolean {
+  return code >= 0xdc00 && code <= 0xdfff;
 }

@@ -1,4 +1,4 @@
-import { REVIEW_JSON_SYSTEM_TAG } from "shared/reviews";
+import { isDataOnlyPrompt } from "shared/data-only";
 import { mergeSystemPromptParts } from "./responseStyle";
 
 /**
@@ -27,7 +27,6 @@ export function withAppendedSystemPrompt(
   effectiveSystemPrompt: string | null | undefined,
   appendSystemPrompt: string | null | undefined,
 ): string | null {
-  if (effectiveSystemPrompt?.trimStart().startsWith(REVIEW_JSON_SYSTEM_TAG))
-    return effectiveSystemPrompt;
+  if (isDataOnlyPrompt(effectiveSystemPrompt)) return effectiveSystemPrompt;
   return mergeSystemPromptParts(effectiveSystemPrompt, appendSystemPrompt);
 }

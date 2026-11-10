@@ -22,7 +22,9 @@
     "./reviews": "./src/reviews.ts",
     "./review-note": "./src/review-note.ts",
     "./decisions": "./src/decisions.ts",
-    "./decision-questions": "./src/decision-questions.ts"
+    "./decision-questions": "./src/decision-questions.ts",
+    "./library": "./src/library.ts",
+    "./data-only": "./src/data-only.ts"
   },
   "devDependencies": {
     "typescript": "^5.0.0"

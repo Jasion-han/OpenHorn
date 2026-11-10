@@ -35,7 +35,7 @@ import { and, eq } from "drizzle-orm";
 import { assistantMessageContent } from "shared/message-text";
 import { validateRecipeSpec } from "shared/recipes";
 import { validateReviewData } from "shared/reviews";
-import type { ImportKind, ImportPart } from "shared/types";
+import type { ImportKind, ImportPart, LibraryImportCounts } from "shared/types";
 import yauzl from "yauzl";
 import { db } from "../db";
 import { normalizeStoredAgentReply } from "./agentReplyNormalization";
@@ -48,6 +48,7 @@ import {
   parseToolArguments,
   toolResultContentToText,
 } from "./importTurnBuilder";
+import { restoreLibraryBackup } from "./libraryBackup";
 
 const FILE_IMPORT_SOURCE = "file";
 
@@ -64,6 +65,7 @@ export interface ImportResult {
   recipes?: { imported: number; skipped: number };
   artifacts?: { imported: number; skipped: number };
   reviewWorkspaces?: { imported: number; skipped: number };
+  library?: LibraryImportCounts;
   /** Id of the `import_records` row written for this run (absent when nothing could be parsed). */
   recordId?: string;
 }
@@ -178,32 +180,65 @@ function reviveDates<T extends Record<string, unknown>>(row: T): T {
 // ZIP extraction helpers
 // ---------------------------------------------------------------------------
 
-async function extractZipEntries(zipPath: string): Promise<Map<string, Buffer>> {
+export async function extractZipEntries(zipPath: string): Promise<Map<string, Buffer>> {
+  const maxTotal = 512 * 1024 * 1024,
+    maxEntry = 128 * 1024 * 1024;
   return new Promise((resolve, reject) => {
     yauzl.open(zipPath, { lazyEntries: true }, (err, zipfile) => {
       if (err || !zipfile) return reject(err || new Error("Failed to open zip"));
-      const entries = new Map<string, Buffer>();
-      zipfile.readEntry();
+      let failed = false,
+        total = 0;
+      const entries = new Map<string, Buffer>(),
+        names = new Set<string>();
+      const fail = (error: Error) => {
+        if (!failed) {
+          failed = true;
+          zipfile.close();
+          reject(error);
+        }
+      };
+      zipfile.on("error", fail);
+      zipfile.on("end", () => {
+        if (!failed) resolve(entries);
+      });
       zipfile.on("entry", (entry) => {
+        if (failed) return;
+        if (
+          names.has(entry.fileName) ||
+          names.size >= 20000 ||
+          entry.uncompressedSize > maxEntry ||
+          total + entry.uncompressedSize > maxTotal
+        )
+          return fail(new Error("Duplicate or oversized backup entry"));
+        names.add(entry.fileName);
         if (/\/$/.test(entry.fileName)) {
           zipfile.readEntry();
           return;
         }
-        zipfile.openReadStream(entry, (streamErr, stream) => {
-          if (streamErr || !stream) {
-            zipfile.readEntry();
-            return;
-          }
+        zipfile.openReadStream(entry, (error, stream) => {
+          if (error || !stream) return fail(error || new Error("Unreadable backup entry"));
           const chunks: Buffer[] = [];
-          stream.on("data", (chunk: Buffer) => chunks.push(chunk));
+          let size = 0;
+          stream.on("error", fail);
+          stream.on("data", (chunk: Buffer) => {
+            size += chunk.length;
+            total += chunk.length;
+            if (size > maxEntry || total > maxTotal) {
+              stream.destroy();
+              fail(new Error("Backup decompression budget exceeded"));
+              return;
+            }
+            chunks.push(chunk);
+          });
           stream.on("end", () => {
-            entries.set(entry.fileName, Buffer.concat(chunks));
-            zipfile.readEntry();
+            if (!failed) {
+              entries.set(entry.fileName, Buffer.concat(chunks, size));
+              zipfile.readEntry();
+            }
           });
         });
       });
-      zipfile.on("end", () => resolve(entries));
-      zipfile.on("error", reject);
+      zipfile.readEntry();
     });
   });
 }
@@ -274,7 +309,10 @@ export async function importOpenHornBackup(userId: string, zipPath: string): Pro
   type Row = Record<string, any>;
   const rows = (name: string): Row[] => {
     const value = parseJsonEntry<unknown>(entries, name);
-    if (value === null) return [];
+    if (value === null) {
+      if (entries.has(name)) throw new Error(`Invalid backup entry: ${name}`);
+      return [];
+    }
     if (
       !Array.isArray(value) ||
       value.some((row) => !row || typeof row !== "object" || typeof row.id !== "string" || !row.id)
@@ -812,6 +850,23 @@ export async function importOpenHornBackup(userId: string, zipPath: string): Pro
       updatedAt: dates.updatedAt,
     });
     if (result.reviewWorkspaces) result.reviewWorkspaces.imported++;
+  }
+  if (entries.has("library-documents.json") || entries.has("library-questions.json")) {
+    const restored = await restoreLibraryBackup(
+      userId,
+      rows("library-documents.json"),
+      rows("library-questions.json"),
+      {
+        project: (value) => reference(projectIds, value),
+        conversation: (value) => reference(convIds, value),
+        channel: (value) => reference(channelIds, value),
+        stable: stableId,
+      },
+    );
+    result.library = { imported: restored.imported, skipped: restored.skipped };
+    collector.count("library", "imported", restored.imported);
+    collector.count("library", "skipped", restored.skipped);
+    result.errors.push(...restored.errors);
   }
   for (const row of taskRows) {
     if (!insertable(taskIds, row.id)) continue;

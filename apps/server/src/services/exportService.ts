@@ -18,6 +18,8 @@ import {
   channelModels,
   channels,
   conversations,
+  libraryDocuments,
+  libraryQuestions,
   mcpServers,
   messages,
   projects,
@@ -33,7 +35,7 @@ import { eq } from "drizzle-orm";
 import { db } from "../db";
 import { isSafeBackupSetting, sanitizeBackupEndpoint, sanitizeBackupMcp } from "./backupSanitizer";
 
-export const EXPORT_FORMAT_VERSION = "1.2.0";
+export const EXPORT_FORMAT_VERSION = "1.3.0";
 
 export interface ExportManifest {
   formatVersion: string;
@@ -62,6 +64,8 @@ export interface ExportManifest {
     artifacts?: number;
     artifactVersions?: number;
     reviewWorkspaces?: number;
+    libraryDocuments?: number;
+    libraryQuestions?: number;
   };
 }
 
@@ -96,6 +100,8 @@ async function collectExportData(userId: string) {
     artifactRows,
     artifactVersionRows,
     reviewRows,
+    libraryRows,
+    libraryQuestionRows,
   ] = await db.batch([
     db.select().from(conversations).where(eq(conversations.userId, userId)),
     db
@@ -131,6 +137,8 @@ async function collectExportData(userId: string) {
       .innerJoin(savedArtifacts, eq(savedArtifactVersions.artifactId, savedArtifacts.id))
       .where(eq(savedArtifacts.userId, userId)),
     db.select().from(reviewWorkspaces).where(eq(reviewWorkspaces.userId, userId)),
+    db.select().from(libraryDocuments).where(eq(libraryDocuments.userId, userId)),
+    db.select().from(libraryQuestions).where(eq(libraryQuestions.userId, userId)),
   ]);
 
   return {
@@ -152,6 +160,18 @@ async function collectExportData(userId: string) {
     artifacts: artifactRows,
     artifactVersions: artifactVersionRows.map((row) => row.saved_artifact_versions),
     reviewWorkspaces: reviewRows,
+    libraryDocuments: libraryRows.map(
+      ({
+        indexToken: _token,
+        leaseUntil: _lease,
+        textContent: _text,
+        chunkCount: _chunks,
+        status: _status,
+        errorCode: _error,
+        ...row
+      }) => row,
+    ),
+    libraryQuestions: libraryQuestionRows,
   };
 }
 
@@ -217,6 +237,8 @@ export async function exportBackup(
       artifacts: data.artifacts.length,
       artifactVersions: data.artifactVersions.length,
       reviewWorkspaces: data.reviewWorkspaces.length,
+      libraryDocuments: data.libraryDocuments.length,
+      libraryQuestions: data.libraryQuestions.length,
     },
   };
   const output = createWriteStream(filePath, { flags: "wx", mode: 0o600 });
@@ -244,6 +266,8 @@ export async function exportBackup(
       "saved-artifacts.json": data.artifacts,
       "saved-artifact-versions.json": data.artifactVersions,
       "review-workspaces.json": data.reviewWorkspaces,
+      "library-documents.json": data.libraryDocuments,
+      "library-questions.json": data.libraryQuestions,
     };
     for (const [name, value] of Object.entries(entries))
       archive.append(JSON.stringify(value, null, 2), { name });
@@ -332,6 +356,8 @@ export async function estimateExportSize(userId: string): Promise<{
   }
 
   const jsonBytes =
+    Buffer.byteLength(JSON.stringify(data.libraryDocuments), "utf8") +
+    Buffer.byteLength(JSON.stringify(data.libraryQuestions), "utf8") +
     JSON.stringify(data.conversations).length +
     JSON.stringify(data.messages).length +
     JSON.stringify(data.channels).length +

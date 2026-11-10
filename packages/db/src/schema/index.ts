@@ -643,3 +643,87 @@ export const savedArtifactVersions = sqliteTable(
     index("saved_artifact_versions_source_message_idx").on(table.sourceMessageId),
   ],
 );
+
+export const libraryDocuments = sqliteTable(
+  "library_documents",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    projectId: text("project_id").references(() => projects.id, { onDelete: "cascade" }),
+    scopeKey: text("scope_key").notNull(),
+    fileName: text("file_name").notNull(),
+    fileType: text("file_type").notNull(),
+    fileSize: integer("file_size").notNull(),
+    sha256: text("sha256").notNull(),
+    originalBase64: text("original_base64").notNull(),
+    textContent: text("text_content").notNull().default(""),
+    status: text("status", { enum: ["pending", "indexing", "ready", "failed"] })
+      .notNull()
+      .default("pending"),
+    errorCode: text("error_code"),
+    chunkCount: integer("chunk_count").notNull().default(0),
+    revision: integer("revision").notNull().default(1),
+    indexToken: text("index_token"),
+    leaseUntil: integer("lease_until", { mode: "timestamp_ms" }),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("library_documents_identity_unique").on(
+      table.userId,
+      table.scopeKey,
+      table.fileName,
+      table.sha256,
+    ),
+    index("library_documents_user_scope_idx").on(table.userId, table.scopeKey),
+    index("library_documents_project_idx").on(table.projectId),
+  ],
+);
+export const libraryChunks = sqliteTable(
+  "library_chunks",
+  {
+    id: text("id").primaryKey(),
+    documentId: text("document_id")
+      .notNull()
+      .references(() => libraryDocuments.id, { onDelete: "cascade" }),
+    chunkIndex: integer("chunk_index").notNull(),
+    text: text("text").notNull(),
+    heading: text("heading"),
+  },
+  (table) => [
+    uniqueIndex("library_chunks_document_index_unique").on(table.documentId, table.chunkIndex),
+  ],
+);
+export const libraryQuestions = sqliteTable(
+  "library_questions",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    requestId: text("request_id").notNull(),
+    inputHash: text("input_hash").notNull(),
+    scopeKind: text("scope_kind", { enum: ["personal", "project"] }).notNull(),
+    // Frozen original scope survives project deletion; projectId is the live owned binding.
+    scopeProjectId: text("scope_project_id"),
+    projectId: text("project_id").references(() => projects.id, { onDelete: "set null" }),
+    conversationId: text("conversation_id").references(() => conversations.id, {
+      onDelete: "set null",
+    }),
+    channelId: text("channel_id").references(() => channels.id, { onDelete: "set null" }),
+    modelId: text("model_id").notNull(),
+    question: text("question").notNull(),
+    sources: text("sources").notNull(),
+    prompt: text("prompt").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("library_questions_request_unique").on(table.userId, table.requestId),
+    index("library_questions_user_idx").on(table.userId),
+    index("library_questions_project_idx").on(table.projectId),
+    index("library_questions_conversation_idx").on(table.conversationId),
+    index("library_questions_channel_idx").on(table.channelId),
+  ],
+);
