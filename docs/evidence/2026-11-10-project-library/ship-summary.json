@@ -1,0 +1,28 @@
+{
+  "base": "64f9a4d",
+  "scope": "Isolated workspace, version/search and project library only",
+  "server": {
+    "passed": 475,
+    "failed": 0,
+    "maxConcurrency": 1,
+    "timeoutMs": 20000
+  },
+  "desktop": {
+    "passed": 625,
+    "failed": 0
+  },
+  "browser": {
+    "library": 16,
+    "searchAndVersions": 11,
+    "workbench": 32,
+    "reviews": 20,
+    "total": 79
+  },
+  "typecheck": "passed",
+  "biome": "passed",
+  "frontendBuild": "passed",
+  "rustCheck": "passed",
+  "modelRequests": 0,
+  "realBusinessDataWrites": 0,
+  "otherWorkingChanges": "preserved"
+}

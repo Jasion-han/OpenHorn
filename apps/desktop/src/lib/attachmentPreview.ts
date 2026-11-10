@@ -107,15 +107,21 @@ export function canOpenAttachment(fileName: string) {
   );
 }
 
-export async function saveAttachment(blob: Blob, fileName: string) {
+export async function saveAttachment(
+  blob: Blob,
+  fileName: string,
+  isCurrent: () => boolean = () => true,
+) {
   if (isDesktopRuntime()) {
     const { invoke } = await import("@tauri-apps/api/core");
-    await invoke("save_attachment", {
-      bytes: Array.from(new Uint8Array(await blob.arrayBuffer())),
+    const bytes = Array.from(new Uint8Array(await blob.arrayBuffer()));
+    if (!isCurrent()) return null;
+    return await invoke<string | null>("save_attachment", {
+      bytes,
       fileName,
     });
-    return;
   }
+  if (!isCurrent()) return null;
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
@@ -124,6 +130,8 @@ export async function saveAttachment(blob: Blob, fileName: string) {
   anchor.click();
   anchor.remove();
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  // Browser downloads have no native completion/path receipt.
+  return null;
 }
 
 export async function openAttachmentInDefaultApp(blob: Blob, fileName: string) {

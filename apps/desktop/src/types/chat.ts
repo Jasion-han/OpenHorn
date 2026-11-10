@@ -1,6 +1,7 @@
 import type {
   ChatStreamErrorCode,
   ImportRecord,
+  LibraryImportCounts,
   MessageFinishReason,
   ModelContextConfig,
   RecipeRequirements,
@@ -392,6 +393,7 @@ export interface ExportBackupResult {
 }
 
 export interface ImportResult {
+  library?: LibraryImportCounts;
   recipes?: { imported: number; skipped: number };
   artifacts?: { imported: number; skipped: number };
   format: "openhorn" | "chatgpt" | "claude";

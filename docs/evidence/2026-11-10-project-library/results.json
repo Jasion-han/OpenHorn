@@ -1,0 +1,275 @@
+{
+  "checks": [
+    "existing Library entry opens a quiet empty view with secondary actions hidden",
+    "upload draft discard stays in one dialog and performs no upload",
+    "text imports and same-document re-selection show escaped original text",
+    "duplicate upload reuses one original document and closes the form",
+    "project/personal scope and keyword fragments remain separate",
+    "Library retains scope/search/content without horizontal overflow at a narrow viewport",
+    "invalid text retains a downloadable original and reports an indexing failure",
+    "no-source question shows an in-form error, preserves input and creates no chat",
+    "question draft survives navigation without crossing the chosen scope",
+    "double-submit prepares one editable sourced Chat draft with no model request",
+    "late keyword results cannot overwrite a newly selected project scope",
+    "late unified-search navigation cannot override an explicit Library choice",
+    "reindex/delete use inline actions; prepared sources survive original deletion",
+    "deleting a saved question frees its record while preserving its chat",
+    "identity changes clear drafts and close old-account forms"
+  ],
+  "errors": [],
+  "unexpected": [],
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/scheduled-tasks/runs"
+    },
+    {
+      "method": "GET",
+      "path": "/scheduled-tasks"
+    },
+    {
+      "method": "GET",
+      "path": "/library"
+    },
+    {
+      "method": "GET",
+      "path": "/scheduled-tasks/runs"
+    },
+    {
+      "method": "GET",
+      "path": "/scheduled-tasks"
+    },
+    {
+      "method": "GET",
+      "path": "/library"
+    },
+    {
+      "method": "GET",
+      "path": "/projects"
+    },
+    {
+      "method": "GET",
+      "path": "/projects"
+    },
+    {
+      "method": "POST",
+      "path": "/library"
+    },
+    {
+      "method": "GET",
+      "path": "/library"
+    },
+    {
+      "method": "GET",
+      "path": "/library/4457c8d0-fe72-45b9-bd99-45c8736cb686"
+    },
+    {
+      "method": "POST",
+      "path": "/library"
+    },
+    {
+      "method": "GET",
+      "path": "/library"
+    },
+    {
+      "method": "GET",
+      "path": "/library/4457c8d0-fe72-45b9-bd99-45c8736cb686"
+    },
+    {
+      "method": "GET",
+      "path": "/library"
+    },
+    {
+      "method": "POST",
+      "path": "/library"
+    },
+    {
+      "method": "GET",
+      "path": "/library"
+    },
+    {
+      "method": "GET",
+      "path": "/library/61c0b51f-2aeb-4d69-b165-7a44a0e701ca"
+    },
+    {
+      "method": "GET",
+      "path": "/library"
+    },
+    {
+      "method": "GET",
+      "path": "/library/4457c8d0-fe72-45b9-bd99-45c8736cb686"
+    },
+    {
+      "method": "GET",
+      "path": "/library/search"
+    },
+    {
+      "method": "POST",
+      "path": "/library"
+    },
+    {
+      "method": "GET",
+      "path": "/library"
+    },
+    {
+      "method": "GET",
+      "path": "/library/b8c2f55f-61d0-4659-9a4d-cf16b970e4cb"
+    },
+    {
+      "method": "POST",
+      "path": "/library/questions"
+    },
+    {
+      "method": "GET",
+      "path": "/projects"
+    },
+    {
+      "method": "GET",
+      "path": "/library"
+    },
+    {
+      "method": "GET",
+      "path": "/projects"
+    },
+    {
+      "method": "GET",
+      "path": "/library"
+    },
+    {
+      "method": "GET",
+      "path": "/library/b8c2f55f-61d0-4659-9a4d-cf16b970e4cb"
+    },
+    {
+      "method": "POST",
+      "path": "/library/questions"
+    },
+    {
+      "method": "GET",
+      "path": "/conversations"
+    },
+    {
+      "method": "GET",
+      "path": "/messages/bf26d51d-6f77-466a-974a-8eaaa1121bd6"
+    },
+    {
+      "method": "GET",
+      "path": "/projects"
+    },
+    {
+      "method": "GET",
+      "path": "/library"
+    },
+    {
+      "method": "GET",
+      "path": "/projects"
+    },
+    {
+      "method": "GET",
+      "path": "/library"
+    },
+    {
+      "method": "GET",
+      "path": "/library/b8c2f55f-61d0-4659-9a4d-cf16b970e4cb"
+    },
+    {
+      "method": "GET",
+      "path": "/library/questions"
+    },
+    {
+      "method": "GET",
+      "path": "/library/questions"
+    },
+    {
+      "method": "GET",
+      "path": "/library/search"
+    },
+    {
+      "method": "GET",
+      "path": "/library"
+    },
+    {
+      "method": "GET",
+      "path": "/library/61c0b51f-2aeb-4d69-b165-7a44a0e701ca"
+    },
+    {
+      "method": "GET",
+      "path": "/library/4457c8d0-fe72-45b9-bd99-45c8736cb686"
+    },
+    {
+      "method": "GET",
+      "path": "/library"
+    },
+    {
+      "method": "GET",
+      "path": "/library/61c0b51f-2aeb-4d69-b165-7a44a0e701ca"
+    },
+    {
+      "method": "GET",
+      "path": "/library"
+    },
+    {
+      "method": "GET",
+      "path": "/library/b8c2f55f-61d0-4659-9a4d-cf16b970e4cb"
+    },
+    {
+      "method": "GET",
+      "path": "/library/4457c8d0-fe72-45b9-bd99-45c8736cb686"
+    },
+    {
+      "method": "POST",
+      "path": "/library/4457c8d0-fe72-45b9-bd99-45c8736cb686/index"
+    },
+    {
+      "method": "GET",
+      "path": "/library"
+    },
+    {
+      "method": "GET",
+      "path": "/library/4457c8d0-fe72-45b9-bd99-45c8736cb686"
+    },
+    {
+      "method": "DELETE",
+      "path": "/library/4457c8d0-fe72-45b9-bd99-45c8736cb686"
+    },
+    {
+      "method": "GET",
+      "path": "/library"
+    },
+    {
+      "method": "GET",
+      "path": "/library/b8c2f55f-61d0-4659-9a4d-cf16b970e4cb"
+    },
+    {
+      "method": "GET",
+      "path": "/library/questions"
+    },
+    {
+      "method": "GET",
+      "path": "/library/questions"
+    },
+    {
+      "method": "DELETE",
+      "path": "/library/questions/1e1f52cf-1182-4e80-98a4-1d3e86ae8c6d"
+    },
+    {
+      "method": "GET",
+      "path": "/projects"
+    },
+    {
+      "method": "GET",
+      "path": "/library"
+    },
+    {
+      "method": "GET",
+      "path": "/projects"
+    },
+    {
+      "method": "GET",
+      "path": "/library"
+    },
+    {
+      "method": "GET",
+      "path": "/library/b8c2f55f-61d0-4659-9a4d-cf16b970e4cb"
+    }
+  ]
+}

@@ -58,6 +58,7 @@ import { useAuthStore } from "../../stores/authStore";
 import { useBackendStatusStore } from "../../stores/backendStatusStore";
 import { useChatStore } from "../../stores/chatStore";
 import { useDesktopShellStore } from "../../stores/desktopShellStore";
+import { useLibraryStore } from "../../stores/libraryStore";
 import { useProjectStore } from "../../stores/projectStore";
 import { useScheduledTaskStore } from "../../stores/scheduledTaskStore";
 import { useWorkbenchStore } from "../../stores/workbenchStore";
@@ -530,6 +531,9 @@ export function DesktopLeftSidebar() {
         const project = useProjectStore.getState().projects.find((p) => p.id === result.id);
         if (!project) throw new Error("search_target_missing");
         handleSelectProject(project);
+      } else if (result.kind === "library") {
+        useLibraryStore.getState().openDocument(result.id);
+        setActiveView("library");
       } else {
         useWorkbenchStore
           .getState()
@@ -789,13 +793,13 @@ export function DesktopLeftSidebar() {
             </button>
             <button
               type="button"
-              className="flex items-center gap-2 rounded-[10px] px-3 py-[7px] text-left text-sm text-foreground/70 transition-colors duration-100 titlebar-no-drag hover:bg-foreground/[0.04] hover:text-foreground"
-              onClick={() =>
-                notifySuccess(
-                  getSidebarLabel("sidebar.knowledgeBase"),
-                  getSidebarLabel("sidebar.comingSoon"),
-                )
-              }
+              onClick={() => setActiveView("library")}
+              className={cn(
+                "flex items-center gap-2 rounded-[10px] px-3 py-[7px] text-left text-sm transition-colors duration-100 titlebar-no-drag",
+                activeView === "library"
+                  ? "bg-foreground/[0.08] text-foreground"
+                  : "text-foreground/70 hover:bg-foreground/[0.04] hover:text-foreground",
+              )}
             >
               <BookOpen size={15} className="shrink-0 text-muted-foreground" />
               {getSidebarLabel("sidebar.knowledgeBase")}

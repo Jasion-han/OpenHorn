@@ -2,7 +2,7 @@ import type { RecipeRequirements } from "shared/types";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-export type DesktopActiveView = "chat" | "settings" | "scheduled-tasks" | "workbench";
+export type DesktopActiveView = "chat" | "settings" | "scheduled-tasks" | "workbench" | "library";
 export type DesktopSettingsTab =
   | "general"
   | "channels"

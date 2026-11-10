@@ -4,7 +4,7 @@ import { Button, cn } from "ui";
 import { getPreviewLabel, getSidebarLabel } from "../../lib/i18n/agent";
 import { BACKEND_UP_EVENT } from "../../stores/backendStatusStore";
 import { useChatStore } from "../../stores/chatStore";
-import { useDesktopShellStore } from "../../stores/desktopShellStore";
+import { type DesktopActiveView, useDesktopShellStore } from "../../stores/desktopShellStore";
 import { usePreviewPanelStore } from "../../stores/previewPanelStore";
 import { DesktopPreviewPanel } from "../preview/DesktopPreviewPanel";
 import { DesktopLeftSidebar } from "./DesktopLeftSidebar";
@@ -14,7 +14,7 @@ export function DesktopShellLayout({
   activeView,
 }: {
   children: React.ReactNode;
-  activeView: "chat" | "settings" | "scheduled-tasks" | "workbench";
+  activeView: DesktopActiveView;
 }) {
   const needsOuterPadding = activeView === "settings";
   const nativeScroll = activeView === "settings";

@@ -231,6 +231,15 @@ export function BackupFileImportRow({ onImported }: { onImported?: () => void })
                   })}
                 </p>
               ) : null}
+              {importResult.library &&
+              (importResult.library.imported > 0 || importResult.library.skipped > 0) ? (
+                <p>
+                  {formatDataTransferLabel("settings.data.import.resultLibrary", {
+                    imported: importResult.library.imported,
+                    skipped: importResult.library.skipped,
+                  })}
+                </p>
+              ) : null}
               {importResult.scheduledTasks.imported > 0 ? (
                 <p>
                   {formatDataTransferLabel("settings.data.import.resultScheduledTasks", {

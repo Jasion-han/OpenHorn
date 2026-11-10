@@ -66,7 +66,7 @@ pub async fn save_attachment(
     app: tauri::AppHandle,
     bytes: Vec<u8>,
     file_name: String,
-) -> Result<(), String> {
+) -> Result<Option<String>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let name = safe_name(&file_name);
         if name.is_empty() {
@@ -78,11 +78,11 @@ pub async fn save_attachment(
             .set_file_name(&name)
             .blocking_save_file()
         else {
-            return Ok(());
+            return Ok(None);
         };
         let path = destination.into_path().map_err(|e| e.to_string())?;
         std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
-        Ok(())
+        Ok(Some(path.to_string_lossy().into_owned()))
     })
     .await
     .map_err(|e| e.to_string())?

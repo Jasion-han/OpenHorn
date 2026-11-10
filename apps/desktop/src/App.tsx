@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { Toaster, TooltipProvider } from "ui";
 import { DesktopShellLayout } from "./components/app/DesktopShellLayout";
 import { DesktopChatArea } from "./components/chat/DesktopChatArea";
+import { LibraryView } from "./components/library/LibraryView";
 import { ScheduledTasksView } from "./components/scheduled-tasks/ScheduledTasksView";
 import { SettingsView } from "./components/settings/SettingsView";
 import { ThemeListener } from "./components/theme/ThemeListener";
@@ -90,7 +91,9 @@ export function App() {
       <ThemeListener />
       <Toaster />
       <DesktopShellLayout activeView={activeView}>
-        {activeView === "workbench" ? (
+        {activeView === "library" ? (
+          <LibraryView />
+        ) : activeView === "workbench" ? (
           <WorkbenchView />
         ) : activeView === "settings" ? (
           <SettingsView />

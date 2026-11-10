@@ -54,6 +54,10 @@ export async function unifiedSearch(userId: string, input: string): Promise<Unif
   };
   const groups = await Promise.all([
     read(
+      "library",
+      `SELECT id,file_name AS title,substr(text_content,max(1,instr(lower(text_content),lower(?2))-50),220) AS snippet FROM library_documents WHERE user_id=?1 AND (instr(lower(file_name),lower(?2))>0 OR (status='ready' AND instr(lower(text_content),lower(?2))>0)) ORDER BY updated_at DESC,id LIMIT ?3`,
+    ),
+    read(
       "conversation",
       `SELECT id, title, '' AS snippet FROM conversations WHERE user_id=?1 AND instr(lower(title),lower(?2))>0 ORDER BY updated_at DESC, id LIMIT ?3`,
     ),
