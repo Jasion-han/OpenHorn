@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import {
   attachments,
+  backupRestoreConversations,
   channelModels,
   channels,
   conversations,
@@ -671,3 +672,140 @@ test("backup deletes incomplete output when a source grows after preflight", asy
     await rm(dir, { recursive: true, force: true });
   }
 }, 30000);
+
+test("backup retry restores a complete conversation after an interrupted message transaction", async () => {
+  const source = await seedUser(),
+    destination = await seedUser();
+  const dir = await mkdtemp(path.join(tmpdir(), "openhorn-restore-retry-test-"));
+  const trigger = `reject_restore_${crypto.randomUUID().replaceAll("-", "")}`;
+  try {
+    const conversationId = await seedConversation(source);
+    await db.insert(messages).values({
+      id: crypto.randomUUID(),
+      conversationId,
+      role: "assistant",
+      content: "INTERRUPT_THIS_RESTORE",
+      createdAt: new Date(),
+    });
+    const backup = await exportBackup(source, dir);
+    await client.execute(
+      `CREATE TRIGGER ${trigger} BEFORE INSERT ON messages WHEN NEW.content='INTERRUPT_THIS_RESTORE' BEGIN SELECT RAISE(ABORT,'Synthetic message failure'); END;`,
+    );
+    const first = await importOpenHornBackup(destination, backup.filePath);
+    expect(first.backupFailure).toBe("interrupted");
+    expect(first.conversations.imported).toBe(0);
+    expect(first.messages.imported).toBe(0);
+    expect(
+      await db.select().from(conversations).where(eq(conversations.userId, destination)),
+    ).toHaveLength(0);
+    await client.execute(`DROP TRIGGER ${trigger}`);
+    const retry = await importOpenHornBackup(destination, backup.filePath);
+    expect(retry.backupFailure).toBe(undefined);
+    expect(retry.conversations.imported).toBe(1);
+    expect(retry.messages.imported).toBe(2);
+    const repeated = await importOpenHornBackup(destination, backup.filePath);
+    expect(repeated.conversations.skipped).toBe(1);
+    expect(repeated.messages.imported).toBe(0);
+    expect(repeated.errors).toEqual([]);
+  } finally {
+    await client.execute(`DROP TRIGGER IF EXISTS ${trigger}`);
+    await cleanupUser(source);
+    await cleanupUser(destination);
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("same-archive retry completes missing attachments without resurrecting a deliberately deleted one", async () => {
+  const source = await seedUser(),
+    destination = await seedUser();
+  const dir = await mkdtemp(path.join(tmpdir(), "openhorn-restore-attachments-test-"));
+  const trigger = `reject_attachment_${crypto.randomUUID().replaceAll("-", "")}`;
+  const previousDataDir = process.env.OPENHORN_DATA_DIR;
+  process.env.OPENHORN_DATA_DIR = path.join(dir, "restored");
+  try {
+    const conversationId = await seedConversation(source);
+    const firstPath = path.join(dir, "first.txt"),
+      secondPath = path.join(dir, "second.txt");
+    await writeFile(firstPath, "first");
+    await writeFile(secondPath, "second");
+    await seedAttachment(conversationId, firstPath, "completed-first.txt");
+    await seedAttachment(conversationId, secondPath, "retry-second.txt");
+    const backup = await exportBackup(source, dir);
+    await client.execute(
+      `CREATE TRIGGER ${trigger} BEFORE INSERT ON attachments WHEN NEW.file_name='retry-second.txt' BEGIN SELECT RAISE(ABORT,'Synthetic attachment failure'); END;`,
+    );
+    const first = await importOpenHornBackup(destination, backup.filePath);
+    expect(first.backupFailure).toBe("interrupted");
+    expect(first.attachments.imported).toBe(1);
+    const [restored] = await db
+      .select()
+      .from(conversations)
+      .where(eq(conversations.userId, destination));
+    const [original] = await db
+      .select()
+      .from(attachments)
+      .where(eq(attachments.conversationId, restored.id));
+    await db.delete(attachments).where(eq(attachments.id, original.id));
+    await client.execute(`DROP TRIGGER ${trigger}`);
+    const retried = await importOpenHornBackup(destination, backup.filePath);
+    expect(retried.backupFailure).toBe(undefined);
+    expect(retried.attachments.imported).toBe(1);
+    const final = await db
+      .select()
+      .from(attachments)
+      .where(eq(attachments.conversationId, restored.id));
+    expect(final.map((row) => row.fileName)).toEqual(["retry-second.txt"]);
+    expect((await importOpenHornBackup(destination, backup.filePath)).attachments.imported).toBe(0);
+  } finally {
+    if (previousDataDir === undefined) delete process.env.OPENHORN_DATA_DIR;
+    else process.env.OPENHORN_DATA_DIR = previousDataDir;
+    await client.execute(`DROP TRIGGER IF EXISTS ${trigger}`);
+    await cleanupUser(source);
+    await cleanupUser(destination);
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("legacy partial conversations without resume evidence report missing messages instead of a false success", async () => {
+  const source = await seedUser(),
+    destination = await seedUser();
+  const dir = await mkdtemp(path.join(tmpdir(), "openhorn-legacy-restore-test-"));
+  try {
+    const id = await seedConversation(source);
+    await db.insert(messages).values({
+      id: crypto.randomUUID(),
+      conversationId: id,
+      role: "assistant",
+      content: "Legacy missing reply",
+      createdAt: new Date(),
+    });
+    const backup = await exportBackup(source, dir);
+    await importOpenHornBackup(destination, backup.filePath);
+    const [restored] = await db
+      .select()
+      .from(conversations)
+      .where(eq(conversations.userId, destination));
+    const rows = await db.select().from(messages).where(eq(messages.conversationId, restored.id));
+    await db
+      .delete(backupRestoreConversations)
+      .where(eq(backupRestoreConversations.userId, destination));
+    await db
+      .delete(messages)
+      .where(eq(messages.id, rows.find((row) => row.role === "assistant")?.id as string));
+    const retried = await importOpenHornBackup(destination, backup.filePath);
+    expect(retried.conversations.skipped).toBe(1);
+    expect(retried.messages.imported).toBe(0);
+    expect(
+      retried.errors.some((error) =>
+        error.startsWith("Existing conversation has missing backup messages"),
+      ),
+    ).toBe(true);
+    expect(
+      await db.select().from(messages).where(eq(messages.conversationId, restored.id)),
+    ).toHaveLength(1);
+  } finally {
+    await cleanupUser(source);
+    await cleanupUser(destination);
+    await rm(dir, { recursive: true, force: true });
+  }
+});

@@ -17,6 +17,7 @@ import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   attachments,
+  backupRestoreConversations,
   channelModels,
   channels,
   conversations,
@@ -55,6 +56,7 @@ import {
   toolResultContentToText,
 } from "./importTurnBuilder";
 import { prepareLibraryBackup, restorePreparedLibraryBackup } from "./libraryBackup";
+import { libraryTransaction } from "./libraryService";
 
 const FILE_IMPORT_SOURCE = "file";
 
@@ -300,7 +302,23 @@ export async function detectFormat(filePath: string): Promise<DetectedFormat> {
 // OpenHorn backup import
 // ---------------------------------------------------------------------------
 
+const activeBackupImports = new Map<string, Promise<void>>();
 export async function importOpenHornBackup(userId: string, zipPath: string): Promise<ImportResult> {
+  const previous = activeBackupImports.get(userId);
+  let release = () => {};
+  const pending = new Promise<void>((done) => {
+    release = done;
+  });
+  activeBackupImports.set(userId, pending);
+  await previous;
+  try {
+    return await importBackupOnce(userId, zipPath);
+  } finally {
+    release();
+    if (activeBackupImports.get(userId) === pending) activeBackupImports.delete(userId);
+  }
+}
+async function importBackupOnce(userId: string, zipPath: string): Promise<ImportResult> {
   const result = emptyResult("openhorn");
   const collector = new PartCollector();
   const progress = { writing: false, section: "archive" };
@@ -327,6 +345,22 @@ async function applyOpenHornBackup(
 ): Promise<void> {
   const importedAt = new Date();
   const entries = await extractZipEntries(zipPath);
+  const archiveDigest = createHash("sha256");
+  for (const name of [...entries.keys()].sort()) {
+    archiveDigest.update(JSON.stringify([name, entries.get(name)?.length]));
+    archiveDigest.update(entries.get(name) as Buffer);
+  }
+  const archiveHash = archiveDigest.digest("hex");
+  const checkpoints = await db
+    .select()
+    .from(backupRestoreConversations)
+    .where(
+      and(
+        eq(backupRestoreConversations.userId, userId),
+        eq(backupRestoreConversations.archiveHash, archiveHash),
+      ),
+    );
+  const checkpointBySource = new Map(checkpoints.map((row) => [row.sourceId, row]));
   const manifest = parseJsonEntry<ExportManifest>(entries, "manifest.json");
   if (!manifest) throw new Error("Invalid manifest");
   // Incoming JSON is external. Only owner-checked maps may become references.
@@ -550,6 +584,10 @@ async function applyOpenHornBackup(
     return { map, owned };
   }
   const convIds = await identities(conversations, convRows, ownConvs, "conversation");
+  for (const [sourceId, checkpoint] of checkpointBySource) {
+    if (ownConvs.some((row) => row.id === checkpoint.conversationId))
+      convIds.map.set(sourceId, checkpoint.conversationId);
+  }
   const messageIds = await identities(
     messages,
     msgRows,
@@ -710,46 +748,25 @@ async function applyOpenHornBackup(
     });
   }
   const importedConversations = new Set<string>();
-  const messageCount = new Map<string, number>();
-  for (const row of msgRows)
-    messageCount.set(row.conversationId, (messageCount.get(row.conversationId) ?? 0) + 1);
-  progress.section = "conversations";
-  for (const row of convRows) {
-    const id = convIds.map.get(row.id);
-    if (!insertable(convIds, row.id)) {
-      result.conversations.skipped++;
-      collector.add("conversations", {
-        label: String(row.title ?? row.id),
-        detail: IMPORT_DETAIL.alreadyExists,
-        status: "skipped",
-        link: { kind: "conversation", id: id as string },
-      });
-      continue;
-    }
-    await db.insert(conversations).values({
-      ...importedRow(conversations, row),
-      id,
-      userId,
-      projectId: reference(projectIds, row.projectId),
-      channelId: reference(channelIds, row.channelId),
-      scheduledTaskId: reference(taskIds, row.scheduledTaskId),
-      workspaceId: null,
-      importedFrom: FILE_IMPORT_SOURCE,
-      importedAt,
-    });
-    importedConversations.add(row.id);
-    result.conversations.imported++;
-    collector.add("conversations", {
-      label: String(row.title ?? row.id),
-      detail: IMPORT_DETAIL.messageCount(messageCount.get(row.id) ?? 0),
-      status: "imported",
-      link: { kind: "conversation", id: id as string },
-    });
+  const ownedMessages = new Map(
+    ownMessageRows.map(({ messages: row }) => [row.id, row.conversationId]),
+  );
+  const ownedAttachments = new Map(
+    ownAttachmentRows.map(({ attachments: row }) => [row.id, row.conversationId]),
+  );
+  const attachmentGroups = new Map<string, Row[]>();
+  for (const row of attRows) {
+    const group = attachmentGroups.get(row.conversationId);
+    if (group) group.push(row);
+    else attachmentGroups.set(row.conversationId, [row]);
   }
-  progress.section = "messages";
-  for (const original of msgRows) {
-    if (!importedConversations.has(original.conversationId) || !insertable(messageIds, original.id))
-      continue;
+  const messageGroups = new Map<string, Row[]>();
+  for (const row of msgRows) {
+    const group = messageGroups.get(row.conversationId);
+    if (group) group.push(row);
+    else messageGroups.set(row.conversationId, [row]);
+  }
+  const messageValues = (original: Row, conversationId: string) => {
     const row = reviveDates(original);
     if (row.role === "assistant" && typeof row.agentRun === "string")
       Object.assign(
@@ -771,14 +788,91 @@ async function applyOpenHornBackup(
         /* Invalid legacy attachment lists remain unavailable. */
       }
     }
-    await db.insert(messages).values({
+    return {
       ...importedRow(messages, row),
       attachments: reboundAttachments,
       id: messageIds.map.get(original.id),
-      conversationId: reference(convIds, original.conversationId),
+      conversationId,
       workspaceId: null,
+    };
+  };
+  progress.section = "conversations";
+  for (const row of convRows) {
+    const id = convIds.map.get(row.id) as string;
+    const previous = checkpointBySource.get(row.id);
+    if (!insertable(convIds, row.id)) {
+      result.conversations.skipped++;
+      // Only an authenticated checkpoint authorizes resuming this exact archive.
+      if (previous?.conversationId === id) importedConversations.add(row.id);
+      else {
+        const expected = messageGroups.get(row.id) ?? [];
+        if (
+          expected.some((source) => {
+            const messageId = reference(messageIds, source.id);
+            return !messageId || ownedMessages.get(messageId) !== id;
+          })
+        )
+          result.errors.push(
+            `Existing conversation has missing backup messages: ${String(row.title ?? row.id)}`,
+          );
+      }
+      if (
+        !previous &&
+        (attachmentGroups.get(row.id) ?? []).some((source) => {
+          const attachmentId = reference(attachmentIds, source.id);
+          return !attachmentId || ownedAttachments.get(attachmentId) !== id;
+        })
+      )
+        result.errors.push(
+          `Existing conversation has missing backup attachments: ${String(row.title ?? row.id)}`,
+        );
+      collector.add("conversations", {
+        label: String(row.title ?? row.id),
+        detail: IMPORT_DETAIL.alreadyExists,
+        status: "skipped",
+        link: { kind: "conversation", id },
+      });
+      continue;
+    }
+    const originals = messageGroups.get(row.id) ?? [];
+    await libraryTransaction(async (tx) => {
+      await tx.insert(conversations).values({
+        ...importedRow(conversations, row),
+        id,
+        userId,
+        projectId: reference(projectIds, row.projectId),
+        channelId: reference(channelIds, row.channelId),
+        scheduledTaskId: reference(taskIds, row.scheduledTaskId),
+        workspaceId: null,
+        importedFrom: FILE_IMPORT_SOURCE,
+        importedAt,
+      });
+      progress.section = "messages";
+      for (const original of originals) {
+        if (!insertable(messageIds, original.id))
+          throw new Error("Backup message identity unavailable");
+        await tx.insert(messages).values(messageValues(original, id));
+      }
+      await tx.insert(backupRestoreConversations).values({
+        id: stableId("backup-conversation", `${archiveHash}:${row.id}`),
+        userId,
+        archiveHash,
+        sourceId: row.id,
+        conversationId: id,
+        attachmentIds: "[]",
+        createdAt: importedAt,
+      });
     });
-    result.messages.imported++;
+    importedConversations.add(row.id);
+    result.conversations.imported++;
+    result.messages.imported += originals.length;
+    collector.add("conversations", {
+      label: String(row.title ?? row.id),
+      detail: IMPORT_DETAIL.messageCount(originals.length),
+      status: "imported",
+      link: { kind: "conversation", id },
+    });
+    progress.section = "conversations";
   }
   collector.noteMessages(result.messages.imported);
   progress.section = "attachments";
@@ -790,6 +884,38 @@ async function applyOpenHornBackup(
   for (const row of attRows) {
     if (!importedConversations.has(row.conversationId) || !insertable(attachmentIds, row.id))
       continue;
+    const conversationId = reference(convIds, row.conversationId) as string;
+    const [checkpoint] = await db
+      .select()
+      .from(backupRestoreConversations)
+      .where(
+        and(
+          eq(backupRestoreConversations.userId, userId),
+          eq(backupRestoreConversations.archiveHash, archiveHash),
+          eq(backupRestoreConversations.sourceId, row.conversationId),
+          eq(backupRestoreConversations.conversationId, conversationId),
+        ),
+      )
+      .limit(1);
+    if (!checkpoint) continue;
+    const completed = new Set<string>(JSON.parse(checkpoint.attachmentIds));
+    if (completed.has(row.id)) continue;
+    const messageId = reference(messageIds, row.messageId);
+    if (row.messageId != null) {
+      const [parent] = messageId
+        ? await db
+            .select({ id: messages.id })
+            .from(messages)
+            .where(and(eq(messages.id, messageId), eq(messages.conversationId, conversationId)))
+            .limit(1)
+        : [];
+      if (!parent) {
+        result.errors.push(
+          `Backup attachment parent unavailable: ${String(row.fileName ?? row.id)}`,
+        );
+        continue;
+      }
+    }
     const ext = path.extname(String(row.fileName || ""));
     const fileData = entries.get(`attachments/${row.id}${ext}`);
     if (!fileData) {
@@ -805,16 +931,38 @@ async function applyOpenHornBackup(
     const localPath = path.join(uploadsDir, `imported-${crypto.randomUUID()}${safeExt}`);
     await writeFile(localPath, fileData);
     try {
-      await db.insert(attachments).values({
-        ...importedRow(attachments, row),
-        id: attachmentIds.map.get(row.id),
-        conversationId: reference(convIds, row.conversationId),
-        messageId: reference(messageIds, row.messageId),
-        sessionId: null,
-        filePath: localPath,
+      await libraryTransaction(async (tx) => {
+        await tx.insert(attachments).values({
+          ...importedRow(attachments, row),
+          id: attachmentIds.map.get(row.id),
+          conversationId,
+          messageId,
+          sessionId: null,
+          filePath: localPath,
+        });
+        completed.add(row.id);
+        await tx
+          .update(backupRestoreConversations)
+          .set({ attachmentIds: JSON.stringify([...completed]) })
+          .where(
+            and(
+              eq(backupRestoreConversations.id, checkpoint.id),
+              eq(backupRestoreConversations.userId, userId),
+            ),
+          );
       });
     } catch (error) {
-      await rm(localPath, { force: true }).catch(() => {});
+      // A lost commit ACK must not delete an original that the DB already references.
+      try {
+        const [saved] = await db
+          .select({ id: attachments.id })
+          .from(attachments)
+          .where(eq(attachments.filePath, localPath))
+          .limit(1);
+        if (!saved) await rm(localPath, { force: true });
+      } catch {
+        /* Unknown commit state: retain the original. */
+      }
       throw error;
     }
     result.attachments.imported++;

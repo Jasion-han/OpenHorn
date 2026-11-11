@@ -727,3 +727,29 @@ export const libraryQuestions = sqliteTable(
     index("library_questions_channel_idx").on(table.channelId),
   ],
 );
+
+/** Same-archive resume evidence; deleted conversations remove their checkpoints. */
+export const backupRestoreConversations = sqliteTable(
+  "backup_restore_conversations",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    archiveHash: text("archive_hash").notNull(),
+    sourceId: text("source_id").notNull(),
+    conversationId: text("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    attachmentIds: text("attachment_ids").notNull().default("[]"),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("backup_restore_conversations_identity_unique").on(
+      table.userId,
+      table.archiveHash,
+      table.sourceId,
+    ),
+    index("backup_restore_conversations_conversation_idx").on(table.conversationId),
+  ],
+);

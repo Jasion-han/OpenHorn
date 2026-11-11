@@ -471,6 +471,17 @@ const SCHEMA_DDL: string[] = [
   `CREATE INDEX IF NOT EXISTS library_questions_conversation_idx ON library_questions(conversation_id);`,
   `CREATE INDEX IF NOT EXISTS library_questions_channel_idx ON library_questions(channel_id);`,
 
+  `CREATE TABLE IF NOT EXISTS backup_restore_conversations (
+    id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    archive_hash TEXT NOT NULL, source_id TEXT NOT NULL,
+    conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    attachment_ids TEXT NOT NULL DEFAULT '[]', created_at INTEGER NOT NULL
+  );`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS backup_restore_conversations_identity_unique
+    ON backup_restore_conversations(user_id, archive_hash, source_id);`,
+  `CREATE INDEX IF NOT EXISTS backup_restore_conversations_conversation_idx
+    ON backup_restore_conversations(conversation_id);`,
+
   // Indexes for hot-path lookups. SQLite does not auto-index foreign-key
   // columns, so every FK that appears in a WHERE / JOIN / ORDER BY / DELETE
   // gets an explicit index here. Keep this list in sync with the `index()`
