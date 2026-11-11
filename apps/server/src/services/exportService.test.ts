@@ -613,3 +613,61 @@ test("backup uses a consistent SQL snapshot while recipe and artifact versions a
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("backup refuses an oversized source before creating a ZIP", async () => {
+  const { open, readdir } = await import("node:fs/promises");
+  const { BACKUP_ARCHIVE_LIMITS } = await import("./backupArchiveBudget");
+  const userId = await seedUser();
+  const dir = await mkdtemp(path.join(tmpdir(), "openhorn-backup-budget-test-"));
+  try {
+    const conversationId = await seedConversation(userId);
+    const filePath = path.join(dir, "large.bin");
+    const file = await open(filePath, "w");
+    await file.truncate(BACKUP_ARCHIVE_LIMITS.entryBytes + 1);
+    await file.close();
+    await seedAttachment(conversationId, filePath, "large.bin");
+    let code: unknown;
+    try {
+      await exportBackup(userId, path.join(dir, "output"));
+    } catch (error) {
+      code = (error as { code?: unknown }).code;
+    }
+    expect(code).toBe("backup_size_limit");
+    expect(await readdir(path.join(dir, "output"))).toEqual([]);
+  } finally {
+    await cleanupUser(userId);
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("backup deletes incomplete output when a source grows after preflight", async () => {
+  const { readdir } = await import("node:fs/promises");
+  const { BACKUP_ARCHIVE_LIMITS } = await import("./backupArchiveBudget");
+  const userId = await seedUser();
+  const dir = await mkdtemp(path.join(tmpdir(), "openhorn-backup-growth-test-"));
+  try {
+    const conversationId = await seedConversation(userId);
+    const filePath = path.join(dir, "growing.bin");
+    await writeFile(filePath, "small at preflight");
+    await seedAttachment(conversationId, filePath, "growing.bin");
+    let mutated = false,
+      code: unknown;
+    try {
+      await exportBackup(userId, path.join(dir, "output"), (progress) => {
+        if (progress.phase !== "metadata" || mutated) return;
+        mutated = true;
+        // The synchronous callback simulates another writer extending the source after stat.
+        const { truncateSync } = require("node:fs") as typeof import("node:fs");
+        truncateSync(filePath, BACKUP_ARCHIVE_LIMITS.entryBytes + 1);
+      });
+    } catch (error) {
+      code = (error as { code?: unknown }).code;
+    }
+    expect(mutated).toBe(true);
+    expect(code).toBe("backup_size_limit");
+    expect(await readdir(path.join(dir, "output"))).toEqual([]);
+  } finally {
+    await cleanupUser(userId);
+    await rm(dir, { recursive: true, force: true });
+  }
+}, 30000);

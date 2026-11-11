@@ -1,5 +1,6 @@
 import { conversations, messages } from "db";
-import { and, desc, eq, isNotNull, ne } from "drizzle-orm";
+import { and, desc, eq, isNotNull, ne, sql } from "drizzle-orm";
+import { DATA_ONLY_PROMPT_TAGS, isDataOnlyPrompt } from "shared/data-only";
 import { createAdapter } from "../agent-adapters";
 import { db } from "../db";
 import { getChannels, getResolvedChannelForUser } from "./channelService";
@@ -40,7 +41,7 @@ export async function maybeSummarize(userId: string, conversationId: string): Pr
     .from(conversations)
     .where(and(eq(conversations.id, conversationId), eq(conversations.userId, userId)))
     .limit(1);
-  if (!conv[0]) return;
+  if (!conv[0] || isDataOnlyPrompt(conv[0].systemPrompt)) return;
 
   const msgRows = await db
     .select({ id: messages.id })
@@ -146,6 +147,10 @@ export async function getRecentSummaries(
   excludeConversationId: string,
   limit = 5,
 ): Promise<Array<{ title: string | null; summary: string }>> {
+  // Match trimStart() before limiting so existing private summaries cannot crowd out safe ones.
+  const leadingWhitespace =
+    "\t\n\v\f\r \u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff";
+  const prompt = sql`ltrim(coalesce(${conversations.systemPrompt}, ''), ${leadingWhitespace})`;
   const results = await db
     .select({
       title: conversations.title,
@@ -157,6 +162,7 @@ export async function getRecentSummaries(
         eq(conversations.userId, userId),
         isNotNull(conversations.summary),
         ne(conversations.id, excludeConversationId),
+        ...DATA_ONLY_PROMPT_TAGS.map((tag) => sql`instr(${prompt}, ${tag}) <> 1`),
       ),
     )
     .orderBy(desc(conversations.updatedAt))

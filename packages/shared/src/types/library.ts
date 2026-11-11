@@ -57,3 +57,6 @@ export interface LibraryImportCounts {
   imported: number;
   skipped: number;
 }
+
+/** Distinguishes an invalid archive from an interrupted import that may have committed rows. */
+export type BackupImportFailure = "validation" | "interrupted";

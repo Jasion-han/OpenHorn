@@ -159,6 +159,14 @@ export async function getLibraryOriginal(userId: string, id: string) {
   if (!row) throw new LibraryError("library_not_found", 404);
   return { ...row, bytes: Buffer.from(row.originalBase64, "base64") };
 }
+export function validateLibraryFileName(fileName: string) {
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: filenames must not contain header/path control characters
+  if (!fileName || fileName.length > 200 || /[\x00-\x1f\x7f/\\]/.test(fileName))
+    throw new LibraryError("library_invalid_file");
+  const fileType = libraryFileType(fileName);
+  if (!fileType) throw new LibraryError("library_unsupported_file");
+  return fileType;
+}
 export async function insertLibraryOriginal(
   tx: Writer,
   userId: string,
@@ -168,11 +176,7 @@ export async function insertLibraryOriginal(
   preferredId = generateId(),
 ): Promise<{ document: LibraryDocument; reused: boolean }> {
   await validateLibraryScope(tx, userId, scope);
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: filenames must not contain header/path control characters
-  if (!fileName || fileName.length > 200 || /[\x00-\x1f\x7f/\\]/.test(fileName))
-    throw new LibraryError("library_invalid_file");
-  const fileType = libraryFileType(fileName);
-  if (!fileType) throw new LibraryError("library_unsupported_file");
+  const fileType = validateLibraryFileName(fileName);
   if (!bytes.length || bytes.length > LIBRARY_LIMITS.fileBytes)
     throw new LibraryError("library_file_limit", 413);
   const scopeKey = libraryScopeKey(scope),
@@ -348,22 +352,61 @@ export async function deleteLibraryDocument(userId: string, id: string, revision
   if (result.rowsAffected !== 1) throw new LibraryError("library_conflict", 409);
   return true;
 }
+// SQLite lower() is ASCII-only. Match common full-width ASCII and Unicode case
+// variants without rewriting stored originals or changing the existing schema.
+function libraryTermGlob(word: string): string {
+  return `*${Array.from(word, (char) => {
+    const code = char.charCodeAt(0);
+    const variants = [
+      ...new Set([
+        char,
+        char.toUpperCase(),
+        char.toLowerCase(),
+        ...(code >= 0x61 && code <= 0x7a
+          ? [String.fromCharCode(code + 0xfee0), String.fromCharCode(code - 32 + 0xfee0)]
+          : code >= 0x30 && code <= 0x39
+            ? [String.fromCharCode(code + 0xfee0)]
+            : char === "_" || char === "-"
+              ? [String.fromCharCode(code + 0xfee0)]
+              : []),
+      ]),
+    ].filter((variant) => Array.from(variant).length === 1);
+    // A hyphen at the end of the bracket expression is a literal.
+    variants.sort((left, right) => Number(left === "-") - Number(right === "-"));
+    return variants.length === 1 ? variants[0] : `[${variants.join("")}]`;
+  }).join("")}*`;
+}
 async function searchIn(
   reader: Reader,
   userId: string,
   scope: LibraryFilter,
   query: string,
+  forQuestion = false,
 ): Promise<LibrarySearchResult[]> {
-  const words = libraryKeywords(query);
+  const words = libraryKeywords(query, forQuestion);
   if (!words.length) return [];
-  // SQL prefilter avoids materializing the whole user's index. Ranking and tie order are deterministic.
+  const terms = words.map((word) => {
+    const pattern = libraryTermGlob(word);
+    return {
+      body: sql`${libraryChunks.text} glob ${pattern}`,
+      title: sql`${libraryDocuments.fileName} glob ${pattern}`,
+    };
+  });
   const score = sql<number>`(${sql.join(
-    words.map(
-      (word) =>
-        sql`case when instr(lower(${libraryChunks.text}),${word}) > 0 then 1 else 0 end + case when instr(lower(${libraryDocuments.fileName}),${word}) > 0 then 2 else 0 end`,
+    terms.map(
+      ({ body, title }) =>
+        sql`case when ${body} then 1 else 0 end + case when ${title} then 2 else 0 end`,
     ),
     sql` + `,
   )})`;
+  const minimumMatches = forQuestion && words.length >= 4 ? 2 : 1;
+  const relevant =
+    minimumMatches === 1
+      ? sql`${score} > 0`
+      : sql`(${sql.join(
+          terms.map(({ body, title }) => sql`case when ${body} or ${title} then 1 else 0 end`),
+          sql` + `,
+        )}) >= ${minimumMatches}`;
   const rows = await reader
     .select({
       documentId: libraryDocuments.id,
@@ -375,7 +418,7 @@ async function searchIn(
     })
     .from(libraryChunks)
     .innerJoin(libraryDocuments, eq(libraryChunks.documentId, libraryDocuments.id))
-    .where(and(filter(userId, scope), eq(libraryDocuments.status, "ready"), sql`${score} > 0`))
+    .where(and(filter(userId, scope), eq(libraryDocuments.status, "ready"), relevant))
     .orderBy(desc(score), libraryDocuments.id, libraryChunks.chunkIndex)
     .limit(20);
   return rows.map(({ heading, ...row }) => ({ ...row, ...(heading ? { heading } : {}) }));
@@ -511,7 +554,7 @@ export async function prepareLibraryQuestion(
       .where(eq(libraryQuestions.userId, userId));
     if (Number(quota.count) >= LIBRARY_LIMITS.questions)
       throw new LibraryError("library_question_limit", 413);
-    const candidates = (await searchIn(tx, userId, scope, question)).map(
+    const candidates = (await searchIn(tx, userId, scope, question, true)).map(
       ({ score: _score, ...source }) => source,
     );
     const sources = packLibrarySources(question, candidates);

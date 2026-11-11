@@ -6,7 +6,7 @@
  * included in any export format.
  */
 import { randomUUID } from "node:crypto";
-import { createWriteStream } from "node:fs";
+import { createReadStream, createWriteStream } from "node:fs";
 import { mkdir, rm, stat } from "node:fs/promises";
 import path from "node:path";
 
@@ -33,6 +33,7 @@ import {
 } from "db";
 import { eq } from "drizzle-orm";
 import { db } from "../db";
+import { BackupArchiveBudget } from "./backupArchiveBudget";
 import { isSafeBackupSetting, sanitizeBackupEndpoint, sanitizeBackupMcp } from "./backupSanitizer";
 
 export const EXPORT_FORMAT_VERSION = "1.3.0";
@@ -186,7 +187,7 @@ export async function exportBackup(
 ): Promise<{ filePath: string; manifest: ExportManifest }> {
   const data = await collectExportData(userId);
 
-  const included: Array<{ id: string; localPath: string; entryName: string }> = [];
+  const included: Array<{ id: string; localPath: string; entryName: string; size: number }> = [];
   const missing: NonNullable<ExportManifest["attachmentFiles"]>["missing"] = [];
   for (const att of data.attachments) {
     const localPath = resolveAttachmentPath(att.filePath);
@@ -203,6 +204,7 @@ export async function exportBackup(
       included.push({
         id: att.id,
         localPath,
+        size: info.size,
         entryName: `attachments/${att.id}${path.extname(att.fileName || "")}`,
       });
     } catch (error) {
@@ -241,6 +243,33 @@ export async function exportBackup(
       libraryQuestions: data.libraryQuestions.length,
     },
   };
+  const entries: Record<string, unknown> = {
+    "manifest.json": manifest,
+    "conversations.json": data.conversations,
+    "messages.json": data.messages,
+    "attachments.json": data.attachments.map((row) => ({ ...row, filePath: "" })),
+    "channels.json": data.channels,
+    "channel-models.json": data.channelModels,
+    "projects.json": data.projects,
+    "mcp-servers.json": data.mcpServers,
+    "scheduled-tasks.json": data.scheduledTasks,
+    "settings.json": data.settings,
+    "task-recipes.json": data.recipes,
+    "task-recipe-versions.json": data.recipeVersions,
+    "saved-artifacts.json": data.artifacts,
+    "saved-artifact-versions.json": data.artifactVersions,
+    "review-workspaces.json": data.reviewWorkspaces,
+    "library-documents.json": data.libraryDocuments,
+    "library-questions.json": data.libraryQuestions,
+  };
+  const serialized = Object.entries(entries).map(
+    ([name, value]) => [name, JSON.stringify(value, null, 2)] as const,
+  );
+  const preflight = new BackupArchiveBudget();
+  for (const [name, value] of serialized) preflight.addEntry(name, Buffer.byteLength(value));
+  for (const file of included) preflight.addEntry(file.entryName, file.size);
+  const budget = new BackupArchiveBudget();
+  for (const [name, value] of serialized) budget.addEntry(name, Buffer.byteLength(value));
   const output = createWriteStream(filePath, { flags: "wx", mode: 0o600 });
   const archive = new ZipArchive({ zlib: { level: 6 } });
   // A source disappearing after preflight must fail, never yield a partial
@@ -248,38 +277,34 @@ export async function exportBackup(
   // before append/finalize and rejects output errors as well as ZIP errors.
   archive.on("warning", (error) => archive.destroy(error));
   const completed = pipeline(archive, output);
+  void completed.catch(() => {});
+  let activeTransfer: Promise<void> | undefined;
+  let stopTransfer: ((error?: Error) => void) | undefined;
   try {
     onProgress?.({ phase: "metadata", current: 0, total: data.attachments.length + 10 });
-    const entries: Record<string, unknown> = {
-      "manifest.json": manifest,
-      "conversations.json": data.conversations,
-      "messages.json": data.messages,
-      "attachments.json": data.attachments.map((row) => ({ ...row, filePath: "" })),
-      "channels.json": data.channels,
-      "channel-models.json": data.channelModels,
-      "projects.json": data.projects,
-      "mcp-servers.json": data.mcpServers,
-      "scheduled-tasks.json": data.scheduledTasks,
-      "settings.json": data.settings,
-      "task-recipes.json": data.recipes,
-      "task-recipe-versions.json": data.recipeVersions,
-      "saved-artifacts.json": data.artifacts,
-      "saved-artifact-versions.json": data.artifactVersions,
-      "review-workspaces.json": data.reviewWorkspaces,
-      "library-documents.json": data.libraryDocuments,
-      "library-questions.json": data.libraryQuestions,
-    };
-    for (const [name, value] of Object.entries(entries))
-      archive.append(JSON.stringify(value, null, 2), { name });
+    for (const [name, value] of serialized) archive.append(value, { name });
     let current = 0;
     onProgress?.({ phase: "attachments", current, total: included.length });
     for (const file of included) {
-      archive.file(file.localPath, { name: file.entryName });
+      const source = createReadStream(file.localPath);
+      const bounded = budget.attachment(file.entryName);
+      stopTransfer = (error) => {
+        source.destroy(error);
+        bounded.destroy(error);
+      };
+      activeTransfer = pipeline(source, bounded);
+      archive.append(bounded, { name: file.entryName });
+      // Only one source is open at a time. An output failure must also stop this source.
+      await Promise.race([activeTransfer, completed]);
+      activeTransfer = undefined;
+      stopTransfer = undefined;
       onProgress?.({ phase: "attachments", current: ++current, total: included.length });
     }
     await Promise.all([completed, archive.finalize()]);
     return { filePath, manifest };
   } catch (error) {
+    stopTransfer?.();
+    await activeTransfer?.catch(() => {});
     archive.destroy();
     output.destroy();
     await completed.catch(() => {});

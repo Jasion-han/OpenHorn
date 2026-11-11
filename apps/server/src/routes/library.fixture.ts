@@ -8,9 +8,28 @@ const directory = mkdtempSync(path.join(tmpdir(), "openhorn-library-test-"));
 process.env.NODE_ENV = "test";
 process.env.DATABASE_URL = `file:${path.join(directory, "isolated.db")}`;
 process.env.OPENHORN_TEST_DATABASE_URL = process.env.DATABASE_URL;
+process.env.OPENHORN_DATA_DIR = directory;
+process.env.ENCRYPTION_KEY = "synthetic-library-fixture-encryption-key";
+let providerAttempts = 0;
 globalThis.fetch = Object.assign(
-  async () => {
-    throw new Error("External network forbidden in library fixture");
+  async (input: Parameters<typeof fetch>[0]) => {
+    const url = new URL(typeof input === "string" || input instanceof URL ? input : input.url);
+    if (url.origin !== "https://library-fixture.invalid" || url.pathname !== "/v1/chat/completions")
+      throw new Error("External network forbidden in library fixture");
+    providerAttempts++;
+    return Response.json({
+      id: "synthetic-summary",
+      object: "chat.completion",
+      created: 1,
+      model: "synthetic",
+      choices: [
+        {
+          index: 0,
+          message: { role: "assistant", content: "SUMMARY:\nSynthetic summary\nKEY_FACTS:\n[]" },
+          finish_reason: "stop",
+        },
+      ],
+    });
   },
   { preconnect() {} },
 );
@@ -26,6 +45,8 @@ try {
     libraryDocuments,
     libraryChunks,
     libraryQuestions,
+    importRecords,
+    messages,
     projects,
     users,
   } = await import("db");
@@ -38,6 +59,9 @@ try {
   );
   const { exportBackup, estimateExportSize } = await import("../services/exportService");
   const { importOpenHornBackup, extractZipEntries } = await import("../services/importService");
+  const { encrypt } = await import("../utils");
+  const { maybeSummarize } = await import("../services/summaryService");
+  const { setSettingValue } = await import("../services/settingsService");
   const { buildChatMessages } = await import("../services/messageService");
   const { withAppendedSystemPrompt } = await import("../services/appendSystemPrompt");
   const {
@@ -76,7 +100,8 @@ try {
       name: "Synthetic",
       provider: "openai",
       protocol: "openai",
-      apiKey: "never-used",
+      apiKey: encrypt("synthetic-never-sent"),
+      baseUrl: "https://library-fixture.invalid/v1",
       enabled: true,
       createdAt: now,
       updatedAt: now,
@@ -195,6 +220,15 @@ try {
     code: "library_empty_text",
   });
   checks++;
+  await assert.rejects(
+    () =>
+      parseLibraryOriginal(
+        libraryTestPdf(55, "confidential budget ".repeat(2000).trim()),
+        "application/pdf",
+      ),
+    { code: "library_text_limit" },
+  );
+  checks++;
   check(isDataOnlyPrompt(LIBRARY_SYSTEM_PROMPT), true);
   check(withAppendedSystemPrompt(LIBRARY_SYSTEM_PROMPT, "Do not append"), LIBRARY_SYSTEM_PROMPT);
   check(isDataOnlyPrompt("[OpenHorn review classification JSON v1]"), true);
@@ -230,6 +264,30 @@ try {
     () => service.prepareLibraryQuestion(userId, { ...prepare, question: "nonexistent" }),
     "library_no_sources",
   );
+  const shopping = await upload("shopping.txt", "我想知道这台咖啡机的折扣，商品只在周末促销。");
+  const contract = await upload("contract.txt", "ＡＢＣ合同版本。");
+  check(
+    (await service.searchLibrary(userId, personal, "abc")).map((hit) => hit.fileName),
+    ["contract.txt"],
+  );
+  check(
+    (await service.searchLibrary(userId, personal, "咖啡机")).map((hit) => hit.fileName),
+    ["shopping.txt"],
+  );
+  await reject(
+    () => service.prepareLibraryQuestion(userId, { ...prepare, question: "我想知道季度安全预算" }),
+    "library_no_sources",
+  );
+  await service.deleteLibraryDocument(
+    userId,
+    shopping.body.document.id,
+    shopping.body.document.revision,
+  );
+  await service.deleteLibraryDocument(
+    userId,
+    contract.body.document.id,
+    contract.body.document.revision,
+  );
   check((await db.select().from(conversations).where(eq(conversations.userId, userId))).length, 0);
   const prepared = await service.prepareLibraryQuestion(userId, prepare);
   check(prepared.replayable, true);
@@ -256,13 +314,48 @@ try {
     conversation.id,
   );
   check(JSON.stringify(context).includes("MUST_NOT_LEAK_LIBRARY"), false);
+  await db
+    .update(conversations)
+    .set({ summary: "LIBRARY_PRIVATE_SUMMARY" })
+    .where(eq(conversations.id, conversation.id));
+  await db.insert(conversations).values({
+    id: "review-private-summary",
+    userId,
+    title: "Review fixture",
+    systemPrompt: "\u3000\t[OpenHorn review classification JSON v1] suffix",
+    summary: "REVIEW_PRIVATE_SUMMARY",
+    createdAt: now,
+    updatedAt: now,
+  });
   const ordinary = await buildChatMessages(
     userId,
     [{ role: "user", content: "ordinary" }],
     "Ordinary",
-    conversation.id,
+    "new-ordinary-chat",
   );
   check(JSON.stringify(ordinary).includes("MUST_NOT_LEAK_LIBRARY"), true);
+  check(JSON.stringify(ordinary).includes("LIBRARY_PRIVATE_SUMMARY"), false);
+  check(JSON.stringify(ordinary).includes("REVIEW_PRIVATE_SUMMARY"), false);
+  await setSettingValue(userId, "agent.autoSummarize", "true");
+  for (const id of [conversation.id, "review-private-summary", "foreign-memory"]) {
+    await db.insert(messages).values(
+      Array.from({ length: 10 }, (_, n) => ({
+        id: `${id}-summary-${n}`,
+        conversationId: id,
+        content: "Synthetic summary fixture",
+        role: n % 2 === 0 ? ("user" as const) : ("assistant" as const),
+        createdAt: now,
+      })),
+    );
+  }
+  const beforeSummary = providerAttempts;
+  await maybeSummarize(userId, conversation.id);
+  await maybeSummarize(userId, "review-private-summary");
+  check(providerAttempts, beforeSummary);
+  await maybeSummarize(userId, "foreign-memory");
+  check(providerAttempts, beforeSummary + 1);
+  await setSettingValue(userId, "agent.autoSummarize", "false");
+  await db.delete(conversations).where(eq(conversations.id, "review-private-summary"));
   await db.delete(conversations).where(eq(conversations.id, "foreign-memory"));
   check((await service.prepareLibraryQuestion(userId, prepare)).question.id, prepared.question.id);
   await reject(
@@ -479,6 +572,73 @@ try {
   await Promise.all([completed, archive.finalize()]);
   await assert.rejects(() => extractZipEntries(duplicatePath), /Duplicate/);
   checks++;
+  const testArchive = async (name: string, data: Record<string, unknown>) => {
+    const file = path.join(directory, name);
+    const zip = new ZipArchive();
+    const pipe = pipeline(zip, createWriteStream(file));
+    zip.append(JSON.stringify({ formatVersion: "1.3.0" }), { name: "manifest.json" });
+    for (const [entry, value] of Object.entries(data))
+      zip.append(JSON.stringify(value), { name: entry });
+    await Promise.all([pipe, zip.finalize()]);
+    return file;
+  };
+  const invalidArchive = await testArchive("invalid-library.zip", {
+    "conversations.json": [
+      { id: "preflight-no-write", title: "Must not import", createdAt: now, updatedAt: now },
+    ],
+    "library-documents.json": [{ ...exportedDocs[0], sha256: "invalid" }],
+  });
+  const invalidResult = await importOpenHornBackup(other, invalidArchive);
+  check(invalidResult.backupFailure, "validation");
+  check(invalidResult.conversations.imported, 0);
+  check(
+    (await db.select().from(conversations).where(eq(conversations.id, "preflight-no-write")))
+      .length,
+    0,
+  );
+  check(!!invalidResult.recordId, true);
+  await client.execute(`CREATE TRIGGER audit_reject_setting BEFORE INSERT ON settings
+    WHEN NEW.key = 'audit-fail-at-destination'
+    BEGIN SELECT RAISE(ABORT, 'Synthetic destination failure'); END;`);
+  const interruptedArchive = await testArchive("interrupted.zip", {
+    "conversations.json": [
+      { id: "committed-before-interruption", title: "Restored", createdAt: now, updatedAt: now },
+    ],
+    "settings.json": [
+      {
+        id: "cannot-restore-setting",
+        key: "audit-fail-at-destination",
+        value: "synthetic",
+        createdAt: now,
+        updatedAt: now,
+      },
+    ],
+  });
+  const interrupted = await importOpenHornBackup(other, interruptedArchive);
+  check(interrupted.backupFailure, "interrupted");
+  check(interrupted.conversations.imported, 1);
+  check(
+    interrupted.errors.some((error) => error.endsWith("settings")),
+    true,
+  );
+  check(
+    (
+      await db
+        .select()
+        .from(conversations)
+        .where(eq(conversations.id, "committed-before-interruption"))
+    ).length,
+    1,
+  );
+  check(
+    (
+      await db
+        .select()
+        .from(importRecords)
+        .where(eq(importRecords.id, interrupted.recordId as string))
+    ).length,
+    1,
+  );
   console.log(JSON.stringify({ checks }));
 } finally {
   client.close();

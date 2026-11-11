@@ -13,7 +13,7 @@
  * conversations / MCP servers it created with `imported_from` / `imported_at`.
  */
 import { createHash } from "node:crypto";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   attachments,
@@ -35,10 +35,16 @@ import { and, eq } from "drizzle-orm";
 import { assistantMessageContent } from "shared/message-text";
 import { validateRecipeSpec } from "shared/recipes";
 import { validateReviewData } from "shared/reviews";
-import type { ImportKind, ImportPart, LibraryImportCounts } from "shared/types";
+import type {
+  BackupImportFailure,
+  ImportKind,
+  ImportPart,
+  LibraryImportCounts,
+} from "shared/types";
 import yauzl from "yauzl";
 import { db } from "../db";
 import { normalizeStoredAgentReply } from "./agentReplyNormalization";
+import { BACKUP_ARCHIVE_LIMITS } from "./backupArchiveBudget";
 import type { ExportManifest } from "./exportService";
 import { addPartItem, createImportRecord, createPart, IMPORT_DETAIL } from "./importRecordsService";
 import {
@@ -48,7 +54,7 @@ import {
   parseToolArguments,
   toolResultContentToText,
 } from "./importTurnBuilder";
-import { restoreLibraryBackup } from "./libraryBackup";
+import { prepareLibraryBackup, restorePreparedLibraryBackup } from "./libraryBackup";
 
 const FILE_IMPORT_SOURCE = "file";
 
@@ -66,6 +72,7 @@ export interface ImportResult {
   artifacts?: { imported: number; skipped: number };
   reviewWorkspaces?: { imported: number; skipped: number };
   library?: LibraryImportCounts;
+  backupFailure?: BackupImportFailure;
   /** Id of the `import_records` row written for this run (absent when nothing could be parsed). */
   recordId?: string;
 }
@@ -181,8 +188,7 @@ function reviveDates<T extends Record<string, unknown>>(row: T): T {
 // ---------------------------------------------------------------------------
 
 export async function extractZipEntries(zipPath: string): Promise<Map<string, Buffer>> {
-  const maxTotal = 512 * 1024 * 1024,
-    maxEntry = 128 * 1024 * 1024;
+  const { totalBytes: maxTotal, entryBytes: maxEntry, entries: maxEntries } = BACKUP_ARCHIVE_LIMITS;
   return new Promise((resolve, reject) => {
     yauzl.open(zipPath, { lazyEntries: true }, (err, zipfile) => {
       if (err || !zipfile) return reject(err || new Error("Failed to open zip"));
@@ -205,7 +211,7 @@ export async function extractZipEntries(zipPath: string): Promise<Map<string, Bu
         if (failed) return;
         if (
           names.has(entry.fileName) ||
-          names.size >= 20000 ||
+          names.size >= maxEntries ||
           entry.uncompressedSize > maxEntry ||
           total + entry.uncompressedSize > maxTotal
         )
@@ -297,17 +303,37 @@ export async function detectFormat(filePath: string): Promise<DetectedFormat> {
 export async function importOpenHornBackup(userId: string, zipPath: string): Promise<ImportResult> {
   const result = emptyResult("openhorn");
   const collector = new PartCollector();
+  const progress = { writing: false, section: "archive" };
+  try {
+    await applyOpenHornBackup(userId, zipPath, result, collector, progress);
+  } catch {
+    result.backupFailure = progress.writing ? "interrupted" : "validation";
+    result.errors.push(
+      progress.writing
+        ? `Backup restore interrupted: ${progress.section}`
+        : `Invalid backup: ${progress.section}`,
+    );
+    collector.noteMessages(result.messages.imported);
+  }
+  return finishImport(userId, result, collector);
+}
+
+async function applyOpenHornBackup(
+  userId: string,
+  zipPath: string,
+  result: ImportResult,
+  collector: PartCollector,
+  progress: { writing: boolean; section: string },
+): Promise<void> {
   const importedAt = new Date();
   const entries = await extractZipEntries(zipPath);
   const manifest = parseJsonEntry<ExportManifest>(entries, "manifest.json");
-  if (!manifest) {
-    result.errors.push("manifest.json 缺失或解析失败");
-    return result;
-  }
+  if (!manifest) throw new Error("Invalid manifest");
   // Incoming JSON is external. Only owner-checked maps may become references.
   // biome-ignore lint/suspicious/noExplicitAny: legacy backup row schemas vary by version
   type Row = Record<string, any>;
   const rows = (name: string): Row[] => {
+    progress.section = name;
     const value = parseJsonEntry<unknown>(entries, name);
     if (value === null) {
       if (entries.has(name)) throw new Error(`Invalid backup entry: ${name}`);
@@ -319,6 +345,8 @@ export async function importOpenHornBackup(userId: string, zipPath: string): Pro
     ) {
       throw new Error(`Invalid backup entry: ${name}`);
     }
+    if (new Set(value.map((row) => row.id)).size !== value.length)
+      throw new Error(`Duplicate backup identity: ${name}`);
     return value;
   };
   const convRows = rows("conversations.json"),
@@ -335,6 +363,91 @@ export async function importOpenHornBackup(userId: string, zipPath: string): Pro
   const artifactRows = rows("saved-artifacts.json"),
     artifactVersionRows = rows("saved-artifact-versions.json");
   const reviewRows = rows("review-workspaces.json");
+  const libraryDocuments = rows("library-documents.json");
+  const libraryQuestions = rows("library-questions.json");
+  progress.section = "library";
+  const libraryBackup = prepareLibraryBackup(libraryDocuments, libraryQuestions);
+  const groupVersions = (versions: Row[], key: "recipeId" | "artifactId") => {
+    const histories = new Map<string, Row[]>();
+    for (const version of versions) {
+      const group = histories.get(version[key]);
+      if (group) group.push(version);
+      else histories.set(version[key], [version]);
+    }
+    return histories;
+  };
+  progress.section = "recipes";
+  const recipeHistories = groupVersions(recipeVersionRows, "recipeId");
+  for (const row of recipeRows) {
+    const versions = (recipeHistories.get(row.id) ?? []).sort((a, b) => a.version - b.version);
+    if (
+      !Number.isSafeInteger(row.version) ||
+      row.version < 1 ||
+      versions.length !== row.version ||
+      versions.some((version, index) => version.version !== index + 1)
+    )
+      throw new Error("Invalid recipe backup history");
+    validateRecipeSpec(typeof row.spec === "string" ? JSON.parse(row.spec) : row.spec);
+    for (const version of versions)
+      validateRecipeSpec(
+        typeof version.spec === "string" ? JSON.parse(version.spec) : version.spec,
+      );
+  }
+  progress.section = "artifacts";
+  const artifactHistories = groupVersions(artifactVersionRows, "artifactId");
+  for (const row of artifactRows) {
+    const versions = (artifactHistories.get(row.id) ?? []).sort((a, b) => a.version - b.version);
+    if (
+      !Number.isSafeInteger(row.currentVersion) ||
+      row.currentVersion < 1 ||
+      versions.length !== row.currentVersion ||
+      versions.some(
+        (version, index) =>
+          version.version !== index + 1 ||
+          typeof version.content !== "string" ||
+          !["markdown", "html", "openui"].includes(version.format),
+      )
+    )
+      throw new Error("Invalid artifact backup history");
+  }
+  progress.section = "review workspaces";
+  const reviewSnapshots = new Map<
+    string,
+    { data: ReturnType<typeof validateReviewData>; dates: Row }
+  >();
+  for (const row of reviewRows) {
+    if (
+      typeof row.title !== "string" ||
+      !row.title.trim() ||
+      row.title.length > 200 ||
+      !Number.isSafeInteger(row.revision) ||
+      row.revision < 1
+    )
+      throw new Error("Invalid review workspace backup");
+    const data = validateReviewData(typeof row.data === "string" ? JSON.parse(row.data) : row.data);
+    const dates = reviveDates(row);
+    if (
+      !(dates.createdAt instanceof Date) ||
+      !Number.isFinite(dates.createdAt.getTime()) ||
+      !(dates.updatedAt instanceof Date) ||
+      !Number.isFinite(dates.updatedAt.getTime())
+    )
+      throw new Error("Invalid review workspace dates");
+    reviewSnapshots.set(row.id, { data, dates });
+  }
+  progress.section = "scheduled tasks";
+  for (const row of taskRows) {
+    if (!row.recipeSnapshot) continue;
+    const snapshot =
+      typeof row.recipeSnapshot === "string" ? JSON.parse(row.recipeSnapshot) : row.recipeSnapshot;
+    validateRecipeSpec(
+      typeof snapshot.spec === "string" ? JSON.parse(snapshot.spec) : snapshot.spec,
+    );
+  }
+  progress.section = "settings";
+  if (settingRows.some((row) => typeof row.key !== "string" || typeof row.value !== "string"))
+    throw new Error("Invalid backup setting");
+  progress.section = "destination";
   const [
     ownConvs,
     ownChannels,
@@ -498,6 +611,8 @@ export async function importOpenHornBackup(userId: string, zipPath: string): Pro
     });
   };
 
+  progress.writing = true;
+  progress.section = "channels";
   for (const row of channelRows) {
     const id = channelIds.map.get(row.id);
     if (!insertable(channelIds, row.id)) {
@@ -533,6 +648,7 @@ export async function importOpenHornBackup(userId: string, zipPath: string): Pro
         .insert(channelModels)
         .values({ ...importedRow(channelModels, row), id: modelIds.map.get(row.id), channelId });
   }
+  progress.section = "projects";
   for (const row of projectRows) {
     const id = projectIds.map.get(row.id);
     if (!insertable(projectIds, row.id)) {
@@ -563,6 +679,7 @@ export async function importOpenHornBackup(userId: string, zipPath: string): Pro
       link: { kind: "project", id: id as string },
     });
   }
+  progress.section = "MCP";
   for (const row of mcpRows) {
     const id = mcpIds.map.get(row.id);
     if (!insertable(mcpIds, row.id)) {
@@ -596,6 +713,7 @@ export async function importOpenHornBackup(userId: string, zipPath: string): Pro
   const messageCount = new Map<string, number>();
   for (const row of msgRows)
     messageCount.set(row.conversationId, (messageCount.get(row.conversationId) ?? 0) + 1);
+  progress.section = "conversations";
   for (const row of convRows) {
     const id = convIds.map.get(row.id);
     if (!insertable(convIds, row.id)) {
@@ -628,6 +746,7 @@ export async function importOpenHornBackup(userId: string, zipPath: string): Pro
       link: { kind: "conversation", id: id as string },
     });
   }
+  progress.section = "messages";
   for (const original of msgRows) {
     if (!importedConversations.has(original.conversationId) || !insertable(messageIds, original.id))
       continue;
@@ -662,6 +781,7 @@ export async function importOpenHornBackup(userId: string, zipPath: string): Pro
     result.messages.imported++;
   }
   collector.noteMessages(result.messages.imported);
+  progress.section = "attachments";
   const uploadsDir = path.resolve(
     process.env.OPENHORN_DATA_DIR || path.join(process.cwd(), "data"),
     "uploads",
@@ -684,19 +804,25 @@ export async function importOpenHornBackup(userId: string, zipPath: string): Pro
     const safeExt = /^\.[a-zA-Z0-9]{1,12}$/.test(ext) ? ext : "";
     const localPath = path.join(uploadsDir, `imported-${crypto.randomUUID()}${safeExt}`);
     await writeFile(localPath, fileData);
-    await db.insert(attachments).values({
-      ...importedRow(attachments, row),
-      id: attachmentIds.map.get(row.id),
-      conversationId: reference(convIds, row.conversationId),
-      messageId: reference(messageIds, row.messageId),
-      sessionId: null,
-      filePath: localPath,
-    });
+    try {
+      await db.insert(attachments).values({
+        ...importedRow(attachments, row),
+        id: attachmentIds.map.get(row.id),
+        conversationId: reference(convIds, row.conversationId),
+        messageId: reference(messageIds, row.messageId),
+        sessionId: null,
+        filePath: localPath,
+      });
+    } catch (error) {
+      await rm(localPath, { force: true }).catch(() => {});
+      throw error;
+    }
     result.attachments.imported++;
     collector.count("attachments", "imported");
   }
 
   if (entries.has("task-recipes.json")) result.recipes = { imported: 0, skipped: 0 };
+  progress.section = "recipes";
   for (const row of recipeRows) {
     if (!insertable(recipeIds, row.id)) {
       if (result.recipes) result.recipes.skipped++;
@@ -706,16 +832,7 @@ export async function importOpenHornBackup(userId: string, zipPath: string): Pro
       });
       continue;
     }
-    const versions = recipeVersionRows
-      .filter((version) => version.recipeId === row.id)
-      .sort((a, b) => a.version - b.version);
-    if (
-      !Number.isSafeInteger(row.version) ||
-      row.version < 1 ||
-      versions.length !== row.version ||
-      versions.some((version, index) => version.version !== index + 1)
-    )
-      throw new Error("Invalid recipe backup history");
+    const versions = recipeHistories.get(row.id) ?? [];
     const spec = rebindSpec(row.spec);
     await db.transaction(async (tx) => {
       await tx.insert(taskRecipes).values({
@@ -736,27 +853,14 @@ export async function importOpenHornBackup(userId: string, zipPath: string): Pro
     collector.add("recipes", { label: spec.title, status: "imported" });
   }
   if (entries.has("saved-artifacts.json")) result.artifacts = { imported: 0, skipped: 0 };
+  progress.section = "artifacts";
   for (const row of artifactRows) {
     if (!insertable(artifactIds, row.id)) {
       if (result.artifacts) result.artifacts.skipped++;
       collector.add("artifacts", { label: String(row.title), status: "skipped" });
       continue;
     }
-    const versions = artifactVersionRows
-      .filter((version) => version.artifactId === row.id)
-      .sort((a, b) => a.version - b.version);
-    if (
-      !Number.isSafeInteger(row.currentVersion) ||
-      row.currentVersion < 1 ||
-      versions.length !== row.currentVersion ||
-      versions.some(
-        (version, index) =>
-          version.version !== index + 1 ||
-          typeof version.content !== "string" ||
-          !["markdown", "html", "openui"].includes(version.format),
-      )
-    )
-      throw new Error("Invalid artifact backup history");
+    const versions = artifactHistories.get(row.id) ?? [];
     await db.transaction(async (tx) => {
       await tx.insert(savedArtifacts).values({
         ...importedRow(savedArtifacts, row),
@@ -805,20 +909,15 @@ export async function importOpenHornBackup(userId: string, zipPath: string): Pro
     collector.add("artifacts", { label: String(row.title), status: "imported" });
   }
   if (entries.has("review-workspaces.json")) result.reviewWorkspaces = { imported: 0, skipped: 0 };
+  progress.section = "review workspaces";
   for (const row of reviewRows) {
     if (!insertable(reviewIds, row.id)) {
       if (result.reviewWorkspaces) result.reviewWorkspaces.skipped++;
       continue;
     }
-    if (
-      typeof row.title !== "string" ||
-      !row.title.trim() ||
-      row.title.length > 200 ||
-      !Number.isSafeInteger(row.revision) ||
-      row.revision < 1
-    )
-      throw new Error("Invalid review workspace backup");
-    const data = validateReviewData(typeof row.data === "string" ? JSON.parse(row.data) : row.data);
+    const preparedReview = reviewSnapshots.get(row.id);
+    if (!preparedReview) throw new Error("Missing review backup snapshot");
+    const { data, dates } = preparedReview;
     for (const run of data.runs) {
       run.conversationId = reference(convIds, run.conversationId);
       run.sourceMessageId = reference(messageIds, run.sourceMessageId);
@@ -832,14 +931,6 @@ export async function importOpenHornBackup(userId: string, zipPath: string): Pro
         if (!source || source.conversationId !== run.conversationId) run.sourceMessageId = null;
       }
     }
-    const dates = reviveDates(row);
-    if (
-      !(dates.createdAt instanceof Date) ||
-      !Number.isFinite(dates.createdAt.getTime()) ||
-      !(dates.updatedAt instanceof Date) ||
-      !Number.isFinite(dates.updatedAt.getTime())
-    )
-      throw new Error("Invalid review workspace dates");
     await db.insert(reviewWorkspaces).values({
       id: reviewIds.map.get(row.id) as string,
       userId,
@@ -852,22 +943,19 @@ export async function importOpenHornBackup(userId: string, zipPath: string): Pro
     if (result.reviewWorkspaces) result.reviewWorkspaces.imported++;
   }
   if (entries.has("library-documents.json") || entries.has("library-questions.json")) {
-    const restored = await restoreLibraryBackup(
-      userId,
-      rows("library-documents.json"),
-      rows("library-questions.json"),
-      {
-        project: (value) => reference(projectIds, value),
-        conversation: (value) => reference(convIds, value),
-        channel: (value) => reference(channelIds, value),
-        stable: stableId,
-      },
-    );
+    progress.section = "library";
+    const restored = await restorePreparedLibraryBackup(userId, libraryBackup, {
+      project: (value) => reference(projectIds, value),
+      conversation: (value) => reference(convIds, value),
+      channel: (value) => reference(channelIds, value),
+      stable: stableId,
+    });
     result.library = { imported: restored.imported, skipped: restored.skipped };
     collector.count("library", "imported", restored.imported);
     collector.count("library", "skipped", restored.skipped);
     result.errors.push(...restored.errors);
   }
+  progress.section = "scheduled tasks";
   for (const row of taskRows) {
     if (!insertable(taskIds, row.id)) continue;
     let recipeSnapshot = null;
@@ -903,6 +991,7 @@ export async function importOpenHornBackup(userId: string, zipPath: string): Pro
       status: "imported",
     });
   }
+  progress.section = "settings";
   for (const row of settingRows) {
     if (!insertable(settingIds, row.id)) {
       collector.add("settings", { label: String(row.key), status: "skipped" });
@@ -913,7 +1002,6 @@ export async function importOpenHornBackup(userId: string, zipPath: string): Pro
       .values({ ...importedRow(settings, row), id: settingIds.map.get(row.id), userId });
     collector.add("settings", { label: String(row.key), status: "imported" });
   }
-  return finishImport(userId, result, collector);
 }
 
 // ---------------------------------------------------------------------------

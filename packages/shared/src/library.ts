@@ -30,18 +30,27 @@ export function libraryFileType(fileName: string): string | null {
   if (ext === "pdf") return "application/pdf";
   return extensions.has(ext) ? "text/plain" : null;
 }
-export function libraryKeywords(query: string): string[] {
-  const segments =
-    query
-      .normalize("NFKC")
-      .toLowerCase()
-      .match(/[\p{L}\p{N}_-]+/gu) ?? [];
+const QUESTION_FILLERS = new Set(
+  "a an the i me you please tell know want how what when where which who why is are do does did can could would should of for about in on to and or with".split(
+    " ",
+  ),
+);
+export function libraryKeywords(query: string, forQuestion = false): string[] {
+  let normalized = query.normalize("NFKC").toLowerCase();
+  if (forQuestion)
+    normalized = normalized.replace(
+      /我想知道|我想问(?:一下)?|请问|请告诉我|帮我(?:查一下|看看)|能否告诉我|(?:是什么|有哪些|多少|怎么做|如何|怎么样)(?=[？?\s]|$)/gu,
+      " ",
+    );
+  const segments = normalized.match(/[\p{L}\p{N}_-]+/gu) ?? [];
   const words: string[] = [];
   for (const segment of segments.slice(0, 16)) {
-    if (/\p{Script=Han}/u.test(segment) && segment.length > 2) {
-      for (let i = 0; i < segment.length - 1 && words.length < 24; i++)
-        words.push(segment.slice(i, i + 2));
-    } else words.push(segment.slice(0, 80));
+    if (forQuestion && QUESTION_FILLERS.has(segment)) continue;
+    const letters = Array.from(segment);
+    if (/\p{Script=Han}/u.test(segment) && letters.length > 2) {
+      for (let i = 0; i < letters.length - 1 && words.length < 24; i++)
+        words.push(letters[i] + letters[i + 1]);
+    } else words.push(letters.slice(0, 80).join(""));
   }
   return [...new Set(words)].slice(0, 24);
 }

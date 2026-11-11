@@ -33,21 +33,37 @@ export async function parseLibraryOriginal(bytes: Buffer, fileType: string): Pro
     text = await pdfSlot(async () => {
       let length = 0;
       let pages = 0;
+      let extractionFailure: LibraryParseError | undefined;
       const result = await pdf(bytes, {
         max: LIBRARY_LIMITS.pdfPages + 1,
         pagerender: async (page: {
           getTextContent(options: object): Promise<{ items: Array<{ str?: string }> }>;
         }) => {
-          if (++pages > LIBRARY_LIMITS.pdfPages) throw new LibraryParseError("library_pdf_limit");
-          const content = await page.getTextContent({ normalizeWhitespace: true });
-          const value = content.items.map((item) => item.str ?? "").join(" ");
-          length += utf8Bytes(value);
-          if (length > LIBRARY_LIMITS.textBytes) throw new LibraryParseError("library_text_limit");
-          return value;
+          // pdf-parse catches per-page rejections; keep the first error outside its loop.
+          if (extractionFailure) return "";
+          try {
+            if (pages >= LIBRARY_LIMITS.pdfPages) throw new LibraryParseError("library_pdf_limit");
+            const content = await page.getTextContent({ normalizeWhitespace: true });
+            const value = content.items.map((item) => item.str ?? "").join(" ");
+            length += utf8Bytes(value);
+            if (length > LIBRARY_LIMITS.textBytes)
+              throw new LibraryParseError("library_text_limit");
+            pages++;
+            return value;
+          } catch (error) {
+            extractionFailure =
+              error instanceof LibraryParseError
+                ? error
+                : new LibraryParseError("library_parse_failed");
+            return "";
+          }
         },
       });
       if (result.numpages > LIBRARY_LIMITS.pdfPages)
         throw new LibraryParseError("library_pdf_limit");
+      if (extractionFailure) throw extractionFailure;
+      if (pages !== result.numpages || pages === 0)
+        throw new LibraryParseError("library_parse_failed");
       return result.text;
     });
   } else {

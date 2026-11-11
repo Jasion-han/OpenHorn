@@ -1,6 +1,7 @@
 import { stat } from "node:fs/promises";
 import path from "node:path";
 import { Hono } from "hono";
+import { BackupSizeLimitError } from "../services/backupArchiveBudget";
 import { estimateExportSize, exportBackup, exportDTI } from "../services/exportService";
 import {
   detectFormat,
@@ -25,8 +26,13 @@ router.post("/export/backup", async (c) => {
   const body = await c.req.json<{ outputDir?: string }>().catch(() => ({ outputDir: undefined }));
   const outputDir = body.outputDir || path.join(process.cwd(), "data", "exports");
 
-  const { filePath, manifest } = await exportBackup(user.id, outputDir);
-  return c.json({ filePath, manifest });
+  try {
+    const { filePath, manifest } = await exportBackup(user.id, outputDir);
+    return c.json({ filePath, manifest });
+  } catch (error) {
+    if (error instanceof BackupSizeLimitError) return c.json({ errorCode: error.code }, 413);
+    throw error;
+  }
 });
 
 router.post("/export/dti", async (c) => {
