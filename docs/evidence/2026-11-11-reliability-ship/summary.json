@@ -1,0 +1,30 @@
+{
+  "base": "c200b07",
+  "server": {
+    "passed": 479,
+    "failed": 0,
+    "timeoutMs": 20000,
+    "maxConcurrency": 1
+  },
+  "desktop": {
+    "passed": 633,
+    "failed": 0
+  },
+  "browser": {
+    "searchAndDrafts": 16,
+    "library": 17,
+    "total": 33
+  },
+  "typecheck": "passed",
+  "biome": "passed",
+  "frontendBuild": "passed",
+  "docker": {
+    "fullRebuild": "blocked by Docker Hub anonymous token EOF",
+    "runtimeWithCachedDependencies": "passed",
+    "httpStatuses": [200, 200, 200],
+    "hostMounts": 0,
+    "bind": "127.0.0.1"
+  },
+  "modelCalls": 0,
+  "realBusinessWrites": 0
+}
