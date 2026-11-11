@@ -1,4 +1,3 @@
-import { isServerReady, useBackendStatusStore } from "./backendStatusStore";
 import { assistantMessageContent, chatFailureFinishReason } from "shared/message-text";
 import { create } from "zustand";
 import { type ChatAdapter, createChatAdapter } from "../lib/chatAdapter";
@@ -17,6 +16,7 @@ import type {
   MessageSearchResult,
   SendMessageInput,
 } from "../types/chat";
+import { isServerReady, useBackendStatusStore } from "./backendStatusStore";
 import { useConversationDraftStore } from "./conversationDraftStore";
 
 function toErrorMessage(error: unknown) {
@@ -331,6 +331,7 @@ export interface ChatState {
       forceWebSearch?: boolean;
       /** Sidebar project to file the conversation under (null = plain list). */
       projectId?: string | null;
+      beforeSelect?: (conversation: Conversation) => boolean;
     },
   ) => Promise<Conversation>;
   /**
@@ -594,6 +595,7 @@ export function createDesktopChatStore(
     },
 
     async selectConversation(conversationId) {
+      const requestId = ++selectConversationRequestId;
       const prev = get();
       if (prev.currentConversation?.id && prev.messages.length > 0) {
         cacheSet(prev.currentConversation.id, prev.messages);
@@ -612,7 +614,6 @@ export function createDesktopChatStore(
       const retained = mergeUnsaved(conversationId, cacheGet(conversationId) ?? []);
       const cached = retained.length > 0 ? retained : undefined;
 
-      const requestId = ++selectConversationRequestId;
       set((state) => ({
         currentConversation: conversation,
         messages: cached || [],
@@ -681,15 +682,28 @@ export function createDesktopChatStore(
       // blank-conversation check, so the current conversation is excluded from
       // reuse whenever it holds any of them; otherwise "新会话" would silently
       // wipe what the user is looking at instead of opening a new one.
-      const curHasContent = cur ? state.messages.some((m) => m.conversationId === cur.id) : false;
+      const drafts = useConversationDraftStore.getState().drafts;
+      const hasDraft = (id: string) =>
+        !!drafts[id] && (!!drafts[id].text.trim() || drafts[id].files.length > 0);
+      const curHasContent = cur
+        ? state.messages.some((m) => m.conversationId === cur.id) || hasDraft(cur.id)
+        : false;
+      const hasUnsentBlank = state.conversations.some(
+        (row) =>
+          row.title === title &&
+          (row.projectId ?? null) === (options?.projectId ?? null) &&
+          hasDraft(row.id),
+      );
       // A blank conversation is only reused within the same project scope: its
       // agent turns run in that project's folder, so it must not be re-homed.
       const sameScope = cur ? (cur.projectId ?? null) === (options?.projectId ?? null) : false;
       if (cur && !curHasContent && sameScope) {
         // 当前已是空会话，复用它而不是再建一个空会话
+        options?.beforeSelect?.(cur);
         return cur;
       }
-
+      const requestId = ++selectConversationRequestId;
+      const ownerEpoch = useConversationDraftStore.getState().generation;
       const conversation = await adapter.createConversation({
         title,
         channelId: options?.channelId,
@@ -698,8 +712,21 @@ export function createDesktopChatStore(
         forceWebSearch: options?.forceWebSearch,
         projectId: options?.projectId ?? null,
         excludeConversationId: curHasContent ? cur?.id : undefined,
+        ...(hasUnsentBlank ? { forceNew: true } : {}),
       });
 
+      if (ownerEpoch !== useConversationDraftStore.getState().generation) return conversation;
+      const canSelect =
+        requestId === selectConversationRequestId &&
+        (options?.beforeSelect?.(conversation) ?? true);
+      if (!canSelect) {
+        set((state) => ({
+          conversations: state.conversations.some((row) => row.id === conversation.id)
+            ? state.conversations.map((row) => (row.id === conversation.id ? conversation : row))
+            : [conversation, ...state.conversations],
+        }));
+        return conversation;
+      }
       // Park the outgoing conversation's messages in the cache before switching
       // away. Unpersisted content (an optimistic send, a run that failed before
       // it was written) only lives in `messages`, so without this it would be
@@ -724,6 +751,7 @@ export function createDesktopChatStore(
             ? state.conversations.map((item) => (item.id === conversation.id ? conversation : item))
             : [conversation, ...state.conversations],
           currentConversation: conversation,
+          isLoading: false,
           messages: isSameConversation ? state.messages : [],
           composerMode: conversation.lastMode,
           selectedChannelId: conversation.channelId || state.selectedChannelId,
@@ -734,13 +762,14 @@ export function createDesktopChatStore(
     },
 
     startNewConversation() {
+      selectConversationRequestId++;
       const outgoing = get().currentConversation;
       if (!outgoing) return;
       // Same hazard as createConversation: unpersisted content lives only in
       // `messages`, so park it before the welcome screen takes over.
       const outgoingMessages = get().messages.filter((m) => m.conversationId === outgoing.id);
       if (outgoingMessages.length > 0) cacheSet(outgoing.id, outgoingMessages);
-      set({ currentConversation: null, messages: [], error: null });
+      set({ currentConversation: null, messages: [], error: null, isLoading: false });
     },
 
     async updateConversation(conversationId, updates) {
@@ -1336,6 +1365,7 @@ export function createDesktopChatStore(
     },
 
     reset() {
+      selectConversationRequestId++;
       messageCache.clear();
       unsaved.clear();
       pendingSaves.clear();

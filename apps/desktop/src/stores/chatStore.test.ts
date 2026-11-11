@@ -867,3 +867,30 @@ test("conversation deletion only discards retained composer contents after the s
     useConversationDraftStore.setState(previous, true);
   }
 });
+
+test("late conversation creation never reselects a conversation after newer navigation", async () => {
+  const { adapter } = createStubAdapter();
+  let release!: (conversation: Conversation) => void;
+  const store = createDesktopChatStore({
+    ...adapter,
+    createConversation: async () =>
+      new Promise((done) => {
+        release = done;
+      }),
+  });
+  await store.getState().loadConversations();
+  let handoffs = 0;
+  const pending = store.getState().createConversation("New target", {
+    beforeSelect: () => {
+      handoffs++;
+      return true;
+    },
+  });
+  await store.getState().selectConversation("conv-1");
+  release(await adapter.createConversation({ title: "New target" }));
+  const created = await pending;
+  expect(created.id).toBe("conv-created");
+  expect(store.getState().currentConversation?.id).toBe("conv-1");
+  expect(handoffs).toBe(0);
+  expect(store.getState().conversations.some((row) => row.id === created.id)).toBe(true);
+});

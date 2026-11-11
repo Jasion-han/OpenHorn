@@ -5,6 +5,7 @@ import { fileKey } from "shared/format";
 import { Button, cn, Textarea } from "ui";
 import { useClockTick } from "../../hooks/useClockTick";
 import { usePlaceholderTypewriter } from "../../hooks/usePlaceholderTypewriter";
+import { useServerConnection } from "../../hooks/useServerConnection";
 import { chatModeUnavailableReason } from "../../lib/agentRerunRoute";
 import { getDesktopBackendBase } from "../../lib/backendBase";
 import { DEFAULT_CONVERSATION_TITLE } from "../../lib/conversationTitle";
@@ -15,9 +16,14 @@ import { createServerApi } from "../../lib/serverApi";
 import { welcomeTitleKeyFor } from "../../lib/welcomeHero";
 import { useAuthStore } from "../../stores/authStore";
 import { useChatStore } from "../../stores/chatStore";
+import {
+  mergeComposerHandoff,
+  useConversationDraftStore,
+} from "../../stores/conversationDraftStore";
 import { useDesktopShellStore } from "../../stores/desktopShellStore";
 import { resolveProjectRootForConversation, useProjectStore } from "../../stores/projectStore";
 import { useSidecarStore } from "../../stores/sidecarStore";
+import { useWelcomeSuggestionStore } from "../../stores/welcomeSuggestionStore";
 import { DesktopAttachmentPreviewItem } from "./DesktopAttachmentPreviewItem";
 import { ACCEPT_FILES } from "./DesktopComposer";
 import { DesktopComposerToolbar } from "./DesktopComposerToolbar";
@@ -63,36 +69,6 @@ const PLACEHOLDER_KEYS = [
 
 const WELCOME_PLACEHOLDERS = PLACEHOLDER_KEYS.map((key) => getChatLabel(key));
 
-interface WelcomeSuggestionsResult {
-  items: string[];
-  /** The server scheduled a regeneration; a newer set will exist shortly. */
-  stale: boolean;
-}
-
-async function fetchWelcomeSuggestions(): Promise<WelcomeSuggestionsResult> {
-  try {
-    const response = await fetch(`${getDesktopBackendBase()}/settings/welcome-suggestions`, {
-      credentials: "include",
-    });
-    if (!response.ok) return { items: [], stale: false };
-    const data = (await response.json()) as { suggestions?: unknown; stale?: unknown };
-    const items = Array.isArray(data.suggestions)
-      ? data.suggestions.filter((item): item is string => typeof item === "string")
-      : [];
-    return { items, stale: data.stale === true };
-  } catch {
-    // Offline or backend down — the defaults stay.
-    return { items: [], stale: false };
-  }
-}
-
-/**
- * When the first read reports a scheduled regeneration, check back a couple of
- * times so a set that finishes generating while the user is still looking at
- * this screen actually appears — instead of waiting for the next visit.
- */
-const STALE_RECHECK_DELAYS_MS = [8000, 20000];
-
 /**
  * Landing view for "no conversation selected". Instead of a dead-end hint it
  * offers the same entry point the composer does: type, and the conversation is
@@ -113,7 +89,19 @@ export function DesktopWelcomeScreen() {
   // creation so the very first message already honours it.
   const [forceWebSearch, setForceWebSearch] = useState(true);
   const [starting, setStarting] = useState(false);
-  const [suggestions, setSuggestions] = useState<string[]>(DEFAULT_SUGGESTIONS);
+  const live = useRef(true),
+    submission = useRef(false);
+  useEffect(() => {
+    live.current = true;
+    return () => {
+      live.current = false;
+    };
+  }, []);
+  // Server set when there is one (loaded with the rest of the server state, and
+  // refreshed on each visit below), else the built-in defaults.
+  const serverSuggestions = useWelcomeSuggestionStore((state) => state.items);
+  const loadSuggestions = useWelcomeSuggestionStore((state) => state.load);
+  const suggestions = serverSuggestions.length > 0 ? serverSuggestions : DEFAULT_SUGGESTIONS;
   // Drawn once per mount, then re-drawn on every focus of the empty box below.
   const { text: placeholderText, reroll: drawPlaceholder } = usePlaceholderTypewriter(
     WELCOME_PLACEHOLDERS,
@@ -126,6 +114,11 @@ export function DesktopWelcomeScreen() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const user = useAuthStore((state) => state.user);
+  // Starting creates the conversation on the server. While the server state is
+  // not loaded (or the server is gone) the channel list here is empty rather
+  // than real, and a create that happens to land would leave an empty
+  // conversation behind whose first message cannot be sent.
+  const serverConnection = useServerConnection();
   const activeProjectId = useProjectStore((state) => state.activeProjectId);
   const projects = useProjectStore((state) => state.projects);
   const setActiveProject = useProjectStore((state) => state.setActiveProject);
@@ -200,28 +193,8 @@ export function DesktopWelcomeScreen() {
   // response costs nothing. The request also nudges the server to regenerate a
   // stale set for the next visit.
   useEffect(() => {
-    let cancelled = false;
-    const timers: number[] = [];
-
-    const load = async () => {
-      const { items, stale } = await fetchWelcomeSuggestions();
-      if (cancelled) return;
-      if (items.length > 0) setSuggestions(items);
-      return stale;
-    };
-
-    void load().then((stale) => {
-      if (cancelled || !stale) return;
-      for (const delay of STALE_RECHECK_DELAYS_MS) {
-        timers.push(window.setTimeout(() => void load(), delay));
-      }
-    });
-
-    return () => {
-      cancelled = true;
-      for (const timer of timers) window.clearTimeout(timer);
-    };
-  }, []);
+    void loadSuggestions();
+  }, [loadSuggestions]);
 
   const defaultChannel = getGlobalDefaultChannel(channels);
   const selection = pickedModel ?? defaultChannel ?? null;
@@ -236,17 +209,27 @@ export function DesktopWelcomeScreen() {
   const start = async (prompt: string) => {
     const trimmed = prompt.trim();
     if (modeUnavailableReason) return;
-    if ((!trimmed && attachments.length === 0) || starting) return;
+    if ((!trimmed && attachments.length === 0) || submission.current || !serverConnection.ready)
+      return;
+    submission.current = true;
     setStarting(true);
+    const backend = getDesktopBackendBase();
+    const userId = useAuthStore.getState().user?.id;
+    const scope = useProjectStore.getState().activeProjectId;
+    const draftOwner = useConversationDraftStore.getState();
+    let handedOff = false;
+    const current = () =>
+      live.current &&
+      backend === getDesktopBackendBase() &&
+      userId === useAuthStore.getState().user?.id &&
+      draftOwner.generation === useConversationDraftStore.getState().generation &&
+      scope === useProjectStore.getState().activeProjectId &&
+      useDesktopShellStore.getState().activeView === "chat";
     try {
-      // Parked before the conversation exists so the chat area can pick it up on
-      // its very first render for that conversation — which happens while this
-      // function is still suspended on the await below.
-      setPendingPrompt({ text: trimmed, files: attachments });
       // Mode and web-search seed the conversation itself rather than being
       // corrected afterwards: by the time the await resumes, the chat area has
       // already sent the message.
-      await createConversation(DEFAULT_CONVERSATION_TITLE, {
+      const conversation = await createConversation(DEFAULT_CONVERSATION_TITLE, {
         channelId: selection?.channelId ?? null,
         modelId: selection?.modelId ?? null,
         defaultMode: composerMode,
@@ -254,17 +237,38 @@ export function DesktopWelcomeScreen() {
         // Scope chosen in the sidebar: the conversation is filed under the
         // active project and its agent turns run in that folder.
         projectId: activeProject?.id ?? null,
+        beforeSelect: (target) => {
+          if (!current()) return false;
+          handedOff = true;
+          setPendingPrompt({ text: trimmed, files: attachments, conversationId: target.id });
+          return true;
+        },
       });
-      setDraft("");
-      setAttachments([]);
+      if (!handedOff) {
+        useConversationDraftStore.getState().update(
+          draftOwner.owner,
+          conversation.id,
+          (current) => {
+            const merged = mergeComposerHandoff(current, { text: trimmed, files: attachments });
+            return { text: merged.text, files: merged.files };
+          },
+          { generation: draftOwner.generation, revision: 0 },
+        );
+        return;
+      }
+      if (live.current) {
+        setDraft("");
+        setAttachments([]);
+      }
     } catch (error) {
-      setPendingPrompt(null);
+      if (!current()) return;
       notifyError(
         getChatLabel("chat.welcome.startFailedTitle"),
         error instanceof Error ? error.message : getChatLabel("chat.welcome.startFailedBody"),
       );
     } finally {
-      setStarting(false);
+      submission.current = false;
+      if (live.current) setStarting(false);
     }
   };
 
@@ -327,7 +331,16 @@ export function DesktopWelcomeScreen() {
   };
 
   const canSubmit =
-    (Boolean(draft.trim()) || attachments.length > 0) && !starting && !modeUnavailableReason;
+    (Boolean(draft.trim()) || attachments.length > 0) &&
+    !starting &&
+    serverConnection.ready &&
+    !modeUnavailableReason;
+  const serverNotice =
+    serverConnection.notice === "unavailable"
+      ? getChatLabel("chat.server.unavailable")
+      : serverConnection.notice === "connecting"
+        ? getChatLabel("chat.server.connecting")
+        : null;
 
   // Reading the hour during render would strand a window left open all morning
   // on the phrase it launched with.
@@ -442,6 +455,9 @@ export function DesktopWelcomeScreen() {
               </button>
             </div>
 
+            {serverNotice && (
+              <p className="px-[15px] pb-1 text-xs text-muted-foreground">{serverNotice}</p>
+            )}
             {modeUnavailableReason ? (
               <p className="px-[15px] pb-1 text-xs text-muted-foreground">
                 {modeUnavailableReason}

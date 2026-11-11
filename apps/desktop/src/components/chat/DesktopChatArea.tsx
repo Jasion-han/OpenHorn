@@ -1488,7 +1488,7 @@ export function DesktopChatArea() {
   useEffect(() => {
     if (!pendingPrompt || !currentConversation) return;
     setPendingPrompt(null);
-    if (pendingPrompt.conversationId && pendingPrompt.conversationId !== currentConversation.id)
+    if (!pendingPrompt.conversationId || pendingPrompt.conversationId !== currentConversation.id)
       return;
     const merged = mergeComposerHandoff(composerDraft, {
       text: pendingPrompt.text,
