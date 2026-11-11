@@ -1,20 +1,23 @@
-FROM oven/bun:1 as base
+FROM oven/bun:1 AS production
 
 WORKDIR /app
 
+# Match the repository packageManager and preserve workspace package paths.
+RUN bun install --global pnpm@9.0.0
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-COPY apps/server/package.json apps/server/
-COPY packages/*/package.json packages/*/
-
-RUN pnpm install --frozen-lockfile
+COPY apps/server/package.json apps/server/package.json
+COPY packages/adapters/package.json packages/adapters/package.json
+COPY packages/db/package.json packages/db/package.json
+COPY packages/shared/package.json packages/shared/package.json
+RUN pnpm --filter server... install --prod --frozen-lockfile
 
 COPY apps/server/src apps/server/src
-COPY packages/*/src packages/*/
+COPY packages/adapters/src packages/adapters/src
+COPY packages/db/src packages/db/src
+COPY packages/shared/src packages/shared/src
+RUN mkdir -p /app/data /app/attachments
 
-FROM base as production
+ENV NODE_ENV=production PORT=3002
+EXPOSE 3002
 
-ENV NODE_ENV=production
-
-EXPOSE 3000
-
-CMD ["bun", "run", "start"]
+CMD ["bun", "run", "apps/server/src/index.ts"]

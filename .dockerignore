@@ -1,0 +1,24 @@
+# Send only the server runtime source and dependency manifests to the builder.
+**
+!Dockerfile.server
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!apps/
+!apps/server/
+!apps/server/package.json
+!apps/server/src/
+!apps/server/src/**
+!packages/
+!packages/adapters/
+!packages/adapters/package.json
+!packages/adapters/src/
+!packages/adapters/src/**
+!packages/db/
+!packages/db/package.json
+!packages/db/src/
+!packages/db/src/**
+!packages/shared/
+!packages/shared/package.json
+!packages/shared/src/
+!packages/shared/src/**

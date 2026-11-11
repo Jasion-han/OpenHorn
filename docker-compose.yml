@@ -4,7 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile.server
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3002:3002"
     volumes:
       - ./data:/app/data
       - ./attachments:/app/attachments
@@ -13,6 +13,7 @@ services:
       - JWT_SECRET=${JWT_SECRET}
       - ENCRYPTION_KEY=${ENCRYPTION_KEY}
       - NODE_ENV=production
+      - PORT=3002
       # Optional provider keys (pass-through from host env / .env)
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}

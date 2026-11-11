@@ -83,7 +83,7 @@ pnpm dev:desktop
 ```
 
 Default local ports:
-- Server: `3000`
+- Server: `3002` (override with `PORT`)
 
 ## Useful Commands
 
@@ -126,6 +126,12 @@ A basic server container is included:
 ```bash
 docker compose up --build
 ```
+
+The API is available at `http://127.0.0.1:3002`, matching the desktop default.
+Run either the local server or this container on that port. The API uses a local
+single-user identity, so the Compose port binds to loopback by default.
+The build context includes only server runtime sources and dependency manifests;
+local credentials, databases, desktop build output and attachments are excluded.
 
 The compose file mounts:
 - `./data`
