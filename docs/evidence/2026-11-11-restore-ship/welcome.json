@@ -1,0 +1,18 @@
+{
+  "checks": [
+    "leaving welcome while create is pending neither installs nor sends its input in another conversation",
+    "a delayed response reusing a selected conversation preserves both the newer draft and old welcome input",
+    "normal welcome creation sends exactly one prompt bound to its actual target"
+  ],
+  "errors": [],
+  "unexpected": [],
+  "messageRequests": [
+    {
+      "path": "/messages/chat/prepare",
+      "body": {
+        "conversationId": "3144e7dd-e54c-4a1f-b0e8-e6974d92bab0",
+        "content": "Normal bound welcome question"
+      }
+    }
+  ]
+}

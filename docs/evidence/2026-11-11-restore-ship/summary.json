@@ -1,0 +1,25 @@
+{
+  "base": "92c2b49",
+  "server": {
+    "passed": 482,
+    "failed": 0,
+    "maxConcurrency": 1,
+    "timeoutMs": 20000
+  },
+  "desktop": {
+    "passed": 660,
+    "failed": 0
+  },
+  "browser": {
+    "welcome": 3,
+    "searchAndDrafts": 16,
+    "library": 17,
+    "total": 36
+  },
+  "typecheck": "passed",
+  "biome": "passed",
+  "frontendBuild": "passed",
+  "modelProviderCalls": 0,
+  "realBusinessWrites": 0,
+  "scope": "isolated restore, readiness and welcome handoff changes"
+}
