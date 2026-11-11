@@ -571,6 +571,8 @@ export function getAgentActionLabel(action: AgentActionKey): string {
  * server/user values are never routed through here.
  */
 export const chatLabels = {
+  "chat.draft.preservedTitle": "已保留未发送的草稿",
+  "chat.draft.preservedBody": "这次输入已与原草稿放在一起，请核对后再发送。",
   // Live status route badges
   "chat.liveRoute.local": "本地",
   "chat.liveRoute.structuredLive": "天气",
@@ -1190,6 +1192,8 @@ export const dataTransferLabels = {
   // Export result
   "settings.data.export.successTitle": "导出完成",
   "settings.data.export.successBody": "文件已保存到 {path}",
+  "settings.data.export.sizeLimit":
+    "备份内容超出可恢复上限（单项 128 MB、合计 512 MB 或 20000 个文件），本次未保留不完整备份。请保留原数据，可先使用通用格式导出会话，附件原件另行保留。",
   "settings.data.export.failedTitle": "导出失败",
   // Import area
   "settings.data.import.heading": "导入",
@@ -1205,6 +1209,9 @@ export const dataTransferLabels = {
   "settings.data.import.cancel": "取消",
   "settings.data.import.confirm": "开始导入",
   // Import result
+  "settings.data.import.validationFailedTitle": "备份校验未通过，未导入数据",
+  "settings.data.import.interruptedTitle": "恢复未完成，请核对已导入内容",
+  "settings.data.import.partialTitle": "导入完成，有项目需要处理",
   "settings.data.import.successTitle": "导入完成",
   "settings.data.import.failedTitle": "导入失败",
   "settings.data.import.resultConversations": "对话：导入 {imported} 个，跳过 {skipped} 个",

@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import { Toaster, TooltipProvider } from "ui";
 import { DesktopLeftSidebar } from "../src/components/app/DesktopLeftSidebar";
@@ -22,6 +23,22 @@ useBackendStatusStore.setState({ loaded: true });
 useDesktopShellStore.getState().setActiveView("workbench");
 void useProjectStore.getState().loadProjects();
 void useChatStore.getState().loadConversations();
+Object.assign(window, {
+  searchVersionTest: {
+    handoff: (text: string, autoSend = false) => {
+      const id = useChatStore.getState().currentConversation?.id;
+      if (id)
+        useDesktopShellStore
+          .getState()
+          .setPendingPrompt({ text, files: [], conversationId: id, autoSend });
+    },
+    logout: () => useAuthStore.getState().setUser(null),
+  },
+});
+const realChat = new URLSearchParams(window.location.search).has("realChat");
+const RealChat = lazy(async () => ({
+  default: (await import("../src/components/chat/DesktopChatArea")).DesktopChatArea,
+}));
 function Fixture() {
   const view = useDesktopShellStore((s) => s.activeView);
   const conversation = useChatStore((s) => s.currentConversation);
@@ -29,9 +46,13 @@ function Fixture() {
     <TooltipProvider>
       <div className="flex h-screen bg-background text-foreground">
         <DesktopLeftSidebar />
-        <main className="min-w-0 flex-1">
+        <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           {view === "workbench" ? (
             <WorkbenchView />
+          ) : realChat ? (
+            <Suspense fallback={null}>
+              <RealChat />
+            </Suspense>
           ) : (
             <section className="p-6">
               <h1>{conversation?.title || "Synthetic welcome"}</h1>

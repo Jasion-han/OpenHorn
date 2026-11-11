@@ -3,6 +3,7 @@ import { create } from "zustand";
 import { createServerApi, type ServerApi } from "../lib/serverApi";
 import type { ApiProject } from "../types/chat";
 import { useChatStore } from "./chatStore";
+import { useConversationDraftStore } from "./conversationDraftStore";
 
 /**
  * Sidebar projects: local folders the user added. A conversation filed under a
@@ -171,11 +172,15 @@ export function createProjectStore(deps: ProjectStoreDeps = {}) {
     },
 
     async removeProject(id) {
+      const { owner, generation } = useConversationDraftStore.getState();
       await api.projects.delete(id);
       // Mirror the server's delete semantics locally: the project's conversations
       // are gone, so drop them from the list right away; if one of them was open,
       // fall back to the welcome screen.
       useChatStore.setState((chat) => {
+        for (const conversation of chat.conversations)
+          if (conversation.projectId === id)
+            useConversationDraftStore.getState().discard(owner, conversation.id, generation);
         const conversations = chat.conversations.filter((item) => item.projectId !== id);
         if (chat.currentConversation?.projectId === id) {
           return { conversations, currentConversation: null, messages: [] };

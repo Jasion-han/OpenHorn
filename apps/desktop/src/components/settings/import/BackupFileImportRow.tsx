@@ -31,6 +31,24 @@ function getFormatLabel(format: string): string {
   }
 }
 
+const hasWarnings = (result: ImportResult) =>
+  result.errors.length > 0 ||
+  result.attachments.missing > 0 ||
+  result.channels.needsKey > 0 ||
+  result.projects.needsRebind > 0 ||
+  result.mcpServers.needsConfirm > 0;
+
+const resultTitle = (result: ImportResult) =>
+  getDataTransferLabel(
+    result.backupFailure === "validation"
+      ? "settings.data.import.validationFailedTitle"
+      : result.backupFailure === "interrupted"
+        ? "settings.data.import.interruptedTitle"
+        : hasWarnings(result)
+          ? "settings.data.import.partialTitle"
+          : "settings.data.import.successTitle",
+  );
+
 /**
  * The always-present "import from a backup / export file" source row shown at
  * the bottom of the import source list, plus its confirm and result dialogs.
@@ -93,8 +111,12 @@ export function BackupFileImportRow({ onImported }: { onImported?: () => void })
       setImportResult(result);
       setImportDialogOpen(false);
       setImportResultDialogOpen(true);
-      notifySuccess(
-        getDataTransferLabel("settings.data.import.successTitle"),
+      (result.backupFailure === "validation"
+        ? notifyError
+        : hasWarnings(result)
+          ? notifyWarning
+          : notifySuccess)(
+        resultTitle(result),
         formatDataTransferLabel("settings.data.import.resultConversations", {
           imported: result.conversations.imported,
           skipped: result.conversations.skipped,
@@ -179,7 +201,11 @@ export function BackupFileImportRow({ onImported }: { onImported?: () => void })
       <Dialog open={importResultDialogOpen} onOpenChange={setImportResultDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{getDataTransferLabel("settings.data.import.successTitle")}</DialogTitle>
+            <DialogTitle>
+              {importResult
+                ? resultTitle(importResult)
+                : getDataTransferLabel("settings.data.import.successTitle")}
+            </DialogTitle>
             <DialogDescription>
               {importResult ? getFormatLabel(importResult.format) : null}
             </DialogDescription>

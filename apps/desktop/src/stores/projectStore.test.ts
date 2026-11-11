@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { ServerApi } from "../lib/serverApi";
 import type { ApiProject } from "../types/chat";
 import { useChatStore } from "./chatStore";
+import { useConversationDraftStore } from "./conversationDraftStore";
 import {
   createProjectStore,
   folderNameFromPath,
@@ -178,4 +179,41 @@ describe("projectStore", () => {
     expect(resolveProjectRootForConversation({ projectId: "missing" })).toBe(null);
     expect(resolveProjectRootForConversation(null)).toBe(null);
   });
+});
+
+test("project deletion releases its conversations' composer contents and preserves other drafts", async () => {
+  const previousDrafts = useConversationDraftStore.getState();
+  const previousChat = useChatStore.getState();
+  try {
+    const store = createProjectStore({ api: makeApi() });
+    const project = await store
+      .getState()
+      .addProject({ name: "Synthetic draft project", rootPath: "/synthetic/draft-project" });
+    const now = new Date();
+    useChatStore.setState({
+      conversations: [
+        {
+          id: "project-draft",
+          title: "Synthetic",
+          projectId: project.id,
+          contextLength: 4096,
+          defaultMode: "chat",
+          lastMode: "chat",
+          isPinned: false,
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+    });
+    const drafts = useConversationDraftStore;
+    drafts.getState().bind("synthetic-project-owner");
+    for (const id of ["project-draft", "personal-draft"])
+      drafts.getState().update("synthetic-project-owner", id, () => ({ text: id, files: [] }));
+    await store.getState().removeProject(project.id);
+    expect(drafts.getState().drafts["project-draft"]).toBe(undefined);
+    expect(drafts.getState().drafts["personal-draft"].text).toBe("personal-draft");
+  } finally {
+    useConversationDraftStore.setState(previousDrafts, true);
+    useChatStore.setState(previousChat, true);
+  }
 });

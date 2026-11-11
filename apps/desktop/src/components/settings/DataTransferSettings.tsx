@@ -11,6 +11,7 @@ import {
   SettingsCard,
   SettingsSection,
 } from "ui";
+import { dataTransferErrorMessage } from "../../lib/dataTransferError";
 import { formatDataTransferLabel, getDataTransferLabel } from "../../lib/i18n/agent";
 import { notifyError, notifySuccess, notifyWarning } from "../../lib/notify";
 import { createServerApi } from "../../lib/serverApi";
@@ -45,7 +46,7 @@ export function DataTransferSettings() {
     } catch (err) {
       notifyError(
         getDataTransferLabel("settings.data.export.failedTitle"),
-        err instanceof Error ? err.message : String(err),
+        dataTransferErrorMessage(err),
       );
     } finally {
       setEstimating(false);
@@ -62,7 +63,7 @@ export function DataTransferSettings() {
     } catch (err) {
       notifyError(
         getDataTransferLabel("settings.data.export.failedTitle"),
-        err instanceof Error ? err.message : String(err),
+        dataTransferErrorMessage(err),
       );
     } finally {
       setEstimating(false);
@@ -125,7 +126,7 @@ export function DataTransferSettings() {
     } catch (err) {
       notifyError(
         getDataTransferLabel("settings.data.export.failedTitle"),
-        err instanceof Error ? err.message : String(err),
+        dataTransferErrorMessage(err),
       );
     } finally {
       setExporting(false);

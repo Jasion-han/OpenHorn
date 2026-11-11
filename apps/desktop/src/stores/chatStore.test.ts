@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { ChatAdapter } from "../lib/chatAdapter";
 import type { Channel, Conversation, Message } from "../types/chat";
 import { createDesktopChatStore } from "./chatStore";
+import { useConversationDraftStore } from "./conversationDraftStore";
 
 function createStubAdapter() {
   let sendInput: unknown;
@@ -809,4 +810,32 @@ describe("desktop chat store message cache", () => {
     expect(store.getState().isLoading).toBe(true);
     await miss;
   });
+});
+
+test("conversation deletion only discards retained composer contents after the server accepts it", async () => {
+  const previous = useConversationDraftStore.getState();
+  try {
+    const { adapter } = createStubAdapter();
+    const drafts = useConversationDraftStore;
+    drafts.getState().bind("synthetic-delete-owner");
+    drafts
+      .getState()
+      .update("synthetic-delete-owner", "one", () => ({ text: "Keep until accepted", files: [] }));
+    const store = createDesktopChatStore({
+      ...adapter,
+      deleteConversation: async () => {
+        throw new Error("synthetic delete failure");
+      },
+    });
+    await store
+      .getState()
+      .deleteConversation("one")
+      .catch(() => {});
+    expect(drafts.getState().drafts.one.text).toBe("Keep until accepted");
+    const accepted = createDesktopChatStore(adapter);
+    await accepted.getState().deleteConversation("one");
+    expect(drafts.getState().drafts.one).toBe(undefined);
+  } finally {
+    useConversationDraftStore.setState(previous, true);
+  }
 });

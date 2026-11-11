@@ -68,6 +68,7 @@ import {
 } from "../../lib/stopTurn";
 import { discoverSkills, skillsDisabledList } from "../../lib/tauriBridge";
 import { useChatStore } from "../../stores/chatStore";
+import { mergeComposerHandoff, useConversationDraft } from "../../stores/conversationDraftStore";
 import { useDesktopShellStore } from "../../stores/desktopShellStore";
 import { useGenUiStore } from "../../stores/genUiStore";
 import { useImportStore } from "../../stores/importStore";
@@ -195,11 +196,16 @@ export function DesktopChatArea() {
   const setError = useChatStore((state) => state.setError);
   const editUserMessage = useChatStore((state) => state.editUserMessage);
   const updateMessage = useChatStore((state) => state.updateMessage);
-  const [input, setInput] = useState("");
+  const {
+    draft: composerDraft,
+    setText: setInput,
+    setFiles: setPendingAttachments,
+  } = useConversationDraft(currentConversation?.id ?? null);
+  const input = composerDraft.text;
+  const pendingAttachments = composerDraft.files;
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editingContent, setEditingContent] = useState("");
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
-  const [pendingAttachments, setPendingAttachments] = useState<File[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const viewportRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -217,6 +223,7 @@ export function DesktopChatArea() {
     files: File[];
     requirements?: RecipeRequirements;
   } | null>(null);
+  const messageJump = useDesktopShellStore((state) => state.messageJump);
   const pendingPrompt = useDesktopShellStore((state) => state.pendingPrompt);
   const setPendingPrompt = useDesktopShellStore((state) => state.setPendingPrompt);
   const fullAccessEnabled = useDesktopShellStore((state) => state.fullAccessEnabled);
@@ -363,8 +370,19 @@ export function DesktopChatArea() {
       const idx = findGroupIndexByMessageId(groupedMessages, editingMessageId);
       if (idx >= 0) indexes.push(idx);
     }
+    if (messageJump && messageJump.conversationId === currentConversationId) {
+      const idx = findGroupIndexByMessageId(groupedMessages, messageJump.messageId);
+      if (idx >= 0) indexes.push(idx);
+    }
     return indexes;
-  }, [groupedMessages, streamingAssistantId, editingMessageId, previewScrollAnchor.pinnedRoundKey]);
+  }, [
+    groupedMessages,
+    streamingAssistantId,
+    editingMessageId,
+    previewScrollAnchor.pinnedRoundKey,
+    messageJump,
+    currentConversationId,
+  ]);
 
   const getItemKey = useCallback(
     (index: number) => groupedMessages[index]?.key ?? index,
@@ -416,9 +434,11 @@ export function DesktopChatArea() {
   // scrolls to the bottom and never gets focus.
   // biome-ignore lint/correctness/useExhaustiveDependencies: dep is a trigger, not read in body
   useEffect(() => {
-    pendingScrollTargetRef.current = { type: "bottom" };
+    if (messageJump?.conversationId !== currentConversation?.id) {
+      pendingScrollTargetRef.current = { type: "bottom" };
+      queueMicrotask(() => inputRef.current?.focus());
+    }
     historyNavRef.current = resetHistoryNav();
-    queueMicrotask(() => inputRef.current?.focus());
   }, [currentConversation?.id]);
 
   // A generative-UI answer asked to send a follow-up (@ToAssistant, or
@@ -431,7 +451,7 @@ export function DesktopChatArea() {
     historyNavRef.current = resetHistoryNav();
     useGenUiStore.getState().clearComposerRequest(nonce);
     queueMicrotask(() => inputRef.current?.focus());
-  }, [genUiComposerRequest]);
+  }, [genUiComposerRequest, setInput]);
 
   // `messages`, the conversation id and `editingMessageId` are triggers: they say
   // "the list just changed shape, re-run the pending scroll", which is why the
@@ -439,6 +459,39 @@ export function DesktopChatArea() {
   // biome-ignore lint/correctness/useExhaustiveDependencies: deps are triggers, not read in body
   useLayoutEffect(() => {
     const viewportEl = viewportRef.current;
+    if (messageJump) {
+      const shell = useDesktopShellStore.getState();
+      if (shell.messageJump !== messageJump) return;
+      if (messageJump.conversationId !== currentConversation?.id) {
+        shell.consumeMessageJump(messageJump);
+        return;
+      }
+      if (!viewportEl) return;
+      // A newly opened pane is measured by the virtualizer after layout.
+      // Keep the matching round mounted until that measurement and the jump finish.
+      const frame = requestAnimationFrame(() => {
+        if (
+          useDesktopShellStore.getState().messageJump !== messageJump ||
+          useChatStore.getState().currentConversation?.id !== messageJump.conversationId
+        )
+          return;
+        const target = viewportEl.querySelector<HTMLElement>(
+          `[data-chat-message-id="${CSS.escape(messageJump.messageId)}"]`,
+        );
+        if (!target) return;
+        previewScrollAnchor.cancel();
+        pendingScrollTargetRef.current = null;
+        virtualizer.scrollToOffset(
+          viewportEl.scrollTop +
+            target.getBoundingClientRect().top -
+            viewportEl.getBoundingClientRect().top -
+            8,
+        );
+        target.focus({ preventScroll: true });
+        shell.consumeMessageJump(messageJump);
+      });
+      return () => cancelAnimationFrame(frame);
+    }
     const pending = pendingScrollTargetRef.current;
     if (!viewportEl || !pending) return;
     // Explicit send/retry/navigation scrolls take ownership from an old preview.
@@ -480,6 +533,7 @@ export function DesktopChatArea() {
     messages,
     groupedMessages,
     currentConversation?.id,
+    messageJump,
     editingMessageId,
     isStreaming,
     virtualizer,
@@ -532,11 +586,6 @@ export function DesktopChatArea() {
     acpStartupPreconnectedRef.current = true;
     void sidecarRun.preconnect(acpChannel.id);
   }, [channels]);
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: dep is a trigger — drop a half-attached file when you leave the conversation
-  useEffect(() => {
-    setPendingAttachments([]);
-  }, [currentConversation?.id]);
 
   // Prefetch enabled skills + MCP servers for the slash (/) command panel.
   // currentConversation?.id and slashOpen are intentional re-fetch triggers.
@@ -1159,7 +1208,7 @@ export function DesktopChatArea() {
         // normalized parts: image base64 + extracted file/PDF text.
         const attachmentParts = files.length > 0 ? await filesToAttachmentParts(files) : undefined;
         if (files.length > 0) {
-          setPendingAttachments([]);
+          setPendingAttachments((current) => current.filter((file) => !files.includes(file)));
         }
         if (!currentConversation.channelId) {
           throw new Error(getChatLabel("chat.error.noChannel"));
@@ -1229,7 +1278,7 @@ export function DesktopChatArea() {
             };
           }),
         });
-        setPendingAttachments([]);
+        setPendingAttachments((current) => current.filter((file) => !files.includes(file)));
       }
 
       const prepared = await chatAreaApi.messages.chatPrepare({
@@ -1436,18 +1485,29 @@ export function DesktopChatArea() {
     setPendingPrompt(null);
     if (pendingPrompt.conversationId && pendingPrompt.conversationId !== currentConversation.id)
       return;
-    setInput(pendingPrompt.text);
-    if (pendingPrompt.files.length > 0) setPendingAttachments(pendingPrompt.files);
-    autoSendRef.current = pendingPrompt.autoSend !== false;
+    const merged = mergeComposerHandoff(composerDraft, {
+      text: pendingPrompt.text,
+      files: pendingPrompt.files,
+      autoSend: pendingPrompt.autoSend,
+    });
+    const nextText = merged.text;
+    setInput(nextText);
+    setPendingAttachments(merged.files);
+    autoSendRef.current = merged.autoSend;
+    if (merged.needsReview)
+      notifyWarning(
+        getChatLabel("chat.draft.preservedTitle"),
+        getChatLabel("chat.draft.preservedBody"),
+      );
     autoSendConversationRef.current = currentConversation.id;
-    autoSendPayloadRef.current = pendingPrompt;
-    if (pendingPrompt.autoSend === false) {
+    autoSendPayloadRef.current = { ...pendingPrompt, text: merged.text, files: merged.files };
+    if (!merged.autoSend) {
       const targetId = currentConversation.id;
       requestAnimationFrame(() => {
         const field = inputRef.current;
         if (
           useChatStore.getState().currentConversation?.id !== targetId ||
-          field?.value !== pendingPrompt.text
+          field?.value !== nextText
         )
           return;
         field.focus();
@@ -1455,7 +1515,14 @@ export function DesktopChatArea() {
         field.scrollTop = field.scrollHeight;
       });
     }
-  }, [pendingPrompt, currentConversation, setPendingPrompt]);
+  }, [
+    pendingPrompt,
+    currentConversation,
+    setPendingPrompt,
+    composerDraft,
+    setInput,
+    setPendingAttachments,
+  ]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: handleSend is re-created every render; adding it would re-run this on every render
   useEffect(() => {
@@ -1976,8 +2043,10 @@ export function DesktopChatArea() {
 
   const renderMessageRow = (message: Message) => (
     <div
+      data-chat-message-id={message.id}
+      tabIndex={-1}
       className={cn(
-        "flex min-w-0 flex-col",
+        "flex min-w-0 flex-col rounded-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring",
         message.role === "assistant" ? "items-start" : "items-end",
       )}
     >

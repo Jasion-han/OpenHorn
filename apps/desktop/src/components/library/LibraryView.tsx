@@ -112,6 +112,7 @@ function LibrarySession({ userId }: { userId: string }) {
   const changeScope = (key: string) => {
     epoch.current++;
     searchEpoch.current++;
+    setSearching(false);
     currentScope.current = key;
     setScopeKey(key);
     setDocuments([]);
@@ -185,6 +186,7 @@ function LibrarySession({ userId }: { userId: string }) {
       valid = () =>
         owns() && epoch.current === operation && useLibraryStore.getState().target?.token === token;
     searchEpoch.current++;
+    setSearching(false);
     void libraryApi
       .get(target.id)
       .then(({ document }) => {
@@ -207,6 +209,7 @@ function LibrarySession({ userId }: { userId: string }) {
   }, [target?.token]);
   const reload = () => {
     searchEpoch.current++;
+    setSearching(false);
     setResults(null);
     setMatched(null);
     setRefresh((v) => v + 1);
@@ -467,6 +470,7 @@ function LibrarySession({ userId }: { userId: string }) {
                       variant="ghost"
                       onClick={() => {
                         searchEpoch.current++;
+                        setSearching(false);
                         setResults(null);
                         setMatched(null);
                       }}

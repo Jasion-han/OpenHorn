@@ -230,6 +230,29 @@ if (process.env.OPENHORN_SEARCH_VERSION_SYNTHETIC === "1") {
     mode: "chat",
     createdAt: new Date(),
   });
+  await db.insert(conversationTable).values({
+    id: "search-version-long-chat",
+    userId: "reviews-browser-user",
+    title: "Long synthetic chat",
+    defaultMode: "chat",
+    lastMode: "chat",
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
+  const start = Date.now() - 200_000;
+  await db.insert(messages).values(
+    Array.from({ length: 150 }, (_, index) => ({
+      id: index === 3 ? "search-version-old-hit" : `search-version-long-${index}`,
+      conversationId: "search-version-long-chat",
+      role: index % 2 === 0 ? ("user" as const) : ("assistant" as const),
+      content:
+        index === 3
+          ? "Precisely located archival marker"
+          : `Synthetic row ${index}. ${"Fill the viewport. ".repeat(32)}`,
+      mode: "chat" as const,
+      createdAt: new Date(start + index * 1000),
+    })),
+  );
 }
 app.post("/__fixture/route-shadow", async (c) => {
   const { buildLiveContext } = await import("../services/liveCapabilities");

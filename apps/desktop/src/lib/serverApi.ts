@@ -30,6 +30,7 @@ import type {
   UpdateConversationInput,
 } from "../types/chat";
 import { getDesktopBackendBase } from "./backendBase";
+import { BackupSizeLimitError } from "./dataTransferError";
 
 export class ChatPreparationFailure extends Error {
   constructor(
@@ -387,6 +388,13 @@ async function fetchJson<T>(
   });
 
   if (!response.ok) {
+    if (path === "/data-transfer/export/backup" && response.status === 413) {
+      const body = await response
+        .clone()
+        .json()
+        .catch(() => null);
+      if (body?.errorCode === "backup_size_limit") throw new BackupSizeLimitError();
+    }
     // Only the prepare endpoint owns this saved pair. Do not interpret arbitrary
     // response bodies as permission to rename messages in another operation.
     if (path === "/messages/chat/prepare") {

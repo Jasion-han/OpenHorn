@@ -524,7 +524,24 @@ export function DesktopLeftSidebar() {
           useChatStore.getState().currentConversation?.id !== (result.conversationId ?? result.id)
         )
           throw new Error("search_target_missing");
-        setActiveView("chat");
+        if (result.kind === "message") {
+          const conversation = useChatStore.getState().currentConversation;
+          if (
+            !conversation ||
+            !useChatStore
+              .getState()
+              .messages.some(
+                (message) => message.id === result.id && message.conversationId === conversation.id,
+              )
+          )
+            throw new Error("search_target_missing");
+          useDesktopShellStore.getState().openChatMessage({
+            conversationId: conversation.id,
+            messageId: result.id,
+          });
+        } else {
+          setActiveView("chat");
+        }
       } else if (result.kind === "project") {
         await useProjectStore.getState().loadProjects();
         if (!owns()) return;

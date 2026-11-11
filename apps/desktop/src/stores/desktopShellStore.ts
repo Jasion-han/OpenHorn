@@ -13,6 +13,11 @@ export type DesktopSettingsTab =
   | "appearance"
   | "data";
 
+export interface ChatMessageJump {
+  conversationId: string;
+  messageId: string;
+}
+
 export interface DesktopShellState {
   activeView: DesktopActiveView;
   sidebarCollapsed: boolean;
@@ -38,11 +43,14 @@ export interface DesktopShellState {
     autoSend?: boolean;
   } | null;
   prefillComposer: string | null;
+  messageJump: ChatMessageJump | null;
   scheduledTasksTab: "tasks" | "runs";
   scheduledTaskRunsTaskId: string | null;
   selectedRunId: string | null;
 
   setActiveView: (view: DesktopActiveView) => void;
+  openChatMessage: (target: ChatMessageJump) => void;
+  consumeMessageJump: (target: ChatMessageJump) => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
   setSettingsTab: (tab: DesktopSettingsTab) => void;
   openSettings: (tab?: DesktopSettingsTab) => void;
@@ -75,6 +83,7 @@ const INITIAL_STATE = {
     autoSend?: boolean;
   } | null,
   prefillComposer: null as string | null,
+  messageJump: null as ChatMessageJump | null,
   scheduledTasksTab: "tasks" as "tasks" | "runs",
   scheduledTaskRunsTaskId: null as string | null,
   selectedRunId: null as string | null,
@@ -85,12 +94,16 @@ export function createDesktopShellStore() {
     persist(
       (set) => ({
         ...INITIAL_STATE,
-        setActiveView: (activeView) => set({ activeView }),
+        setActiveView: (activeView) => set({ activeView, messageJump: null }),
+        openChatMessage: (messageJump) => set({ activeView: "chat", messageJump }),
+        consumeMessageJump: (target) =>
+          set((state) => (state.messageJump === target ? { messageJump: null } : state)),
         setSidebarCollapsed: (sidebarCollapsed) => set({ sidebarCollapsed }),
         setSettingsTab: (settingsTab) => set({ settingsTab }),
         openSettings: (settingsTab = "channels") =>
           set({
             activeView: "settings",
+            messageJump: null,
             settingsTab,
           }),
         toggleFullAccess: () => set((state) => ({ fullAccessEnabled: !state.fullAccessEnabled })),
@@ -99,11 +112,13 @@ export function createDesktopShellStore() {
         openScheduledTasks: (tab = "tasks", taskId) =>
           set({
             activeView: "scheduled-tasks",
+            messageJump: null,
             scheduledTasksTab: tab,
             scheduledTaskRunsTaskId: tab === "runs" ? (taskId ?? null) : null,
             selectedRunId: null,
           }),
-        openRunDetail: (runId) => set({ activeView: "scheduled-tasks", selectedRunId: runId }),
+        openRunDetail: (runId) =>
+          set({ activeView: "scheduled-tasks", messageJump: null, selectedRunId: runId }),
         reset: () => set({ ...INITIAL_STATE }),
       }),
       {

@@ -253,6 +253,34 @@ try {
   await dialog.locator("summary").filter({ hasText: "来源快照" }).click();
   assert.ok((await dialog.textContent()).includes("Shipping costs 12 coins"));
   await dialog.getByRole("button", { name: "Close", exact: true }).click();
+  let releaseRefreshSearch;
+  const refreshSearchStarted = new Promise((resolve) => {
+    entered = resolve;
+  });
+  hold = new Promise((resolve) => {
+    releaseRefreshSearch = resolve;
+  });
+  matchHold = (url) => url.pathname === "/library/search";
+  const librarySearchField = view.getByRole("textbox", { name: "检索资料", exact: true });
+  const librarySearchButton = view.getByRole("button", { name: "检索资料", exact: true });
+  await librarySearchField.fill("shipping");
+  await librarySearchButton.click();
+  await refreshSearchStarted;
+  const refreshed = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === "/library" && response.request().method() === "GET",
+  );
+  await more("刷新");
+  await refreshed;
+  const delayedSearch = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === "/library/search",
+  );
+  releaseRefreshSearch();
+  hold = null;
+  await (await delayedSearch).finished();
+  await librarySearchButton.click();
+  await view.getByRole("complementary", { name: "匹配片段", exact: true }).waitFor();
+  pass("refresh cancels stale search without disabling another search of the same term");
   // A delayed search must not repopulate a new scope.
   let release;
   const started = new Promise((resolve) => {
@@ -327,6 +355,7 @@ try {
   throw error;
 } finally {
   await browser?.close();
-  await server?.close();
   child.kill("SIGTERM");
+  server?.httpServer?.closeAllConnections?.();
+  await server?.close();
 }

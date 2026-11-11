@@ -16,6 +16,7 @@ import type {
   MessageSearchResult,
   SendMessageInput,
 } from "../types/chat";
+import { useConversationDraftStore } from "./conversationDraftStore";
 
 function toErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Unknown error";
@@ -780,6 +781,7 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
     },
 
     async deleteConversation(conversationId) {
+      const { owner, generation } = useConversationDraftStore.getState();
       await adapter.deleteConversation(conversationId);
       messageCache.delete(conversationId);
       for (const [id, entry] of unsaved) {
@@ -794,6 +796,7 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
           state.currentConversation?.id === conversationId ? null : state.currentConversation,
         messages: state.currentConversation?.id === conversationId ? [] : state.messages,
       }));
+      useConversationDraftStore.getState().discard(owner, conversationId, generation);
     },
 
     async autoTitleConversation(conversationId, prompt) {

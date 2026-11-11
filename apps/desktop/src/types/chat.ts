@@ -1,4 +1,5 @@
 import type {
+  BackupImportFailure,
   ChatStreamErrorCode,
   ImportRecord,
   LibraryImportCounts,
@@ -393,6 +394,7 @@ export interface ExportBackupResult {
 }
 
 export interface ImportResult {
+  backupFailure?: BackupImportFailure;
   library?: LibraryImportCounts;
   recipes?: { imported: number; skipped: number };
   artifacts?: { imported: number; skipped: number };

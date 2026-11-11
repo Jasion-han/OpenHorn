@@ -346,6 +346,66 @@ try {
     .getByText("内容已不存在，请刷新后重试。", { exact: true })
     .waitFor();
   pass("a deleted result reports an error rather than silently opening another saved artifact");
+  await page.goto(`${origin}/tests/search-version.html?realChat=1`);
+  await search("archival marker");
+  await page.locator('[data-search-kind="message"]').click();
+  const hit = page.locator('[data-chat-message-id="search-version-old-hit"]');
+  await hit.waitFor();
+  await page.waitForFunction(() => {
+    const message = document.querySelector('[data-chat-message-id="search-version-old-hit"]');
+    const viewport = document.querySelector("[data-chat-scroll-viewport]");
+    if (!message || !viewport || document.activeElement !== message) return false;
+    const top = message.getBoundingClientRect().top;
+    const frame = viewport.getBoundingClientRect();
+    return top >= frame.top - 4 && top < frame.bottom;
+  });
+  pass("unified search scrolls and focuses the exact old message in a virtualized chat");
+  const composer = page.locator("textarea").first();
+  await composer.fill("Edited unfinished source question");
+  await page.locator('input[type="file"]').setInputFiles({
+    name: "draft.txt",
+    mimeType: "text/plain",
+    buffer: Buffer.from("Unsent file"),
+  });
+  await page.getByText("draft.txt", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "工作台", exact: true }).click();
+  await search("archival marker");
+  await page.locator('[data-search-kind="message"]').click();
+  await page.waitForFunction(
+    () => document.querySelector("textarea")?.value === "Edited unfinished source question",
+  );
+  await page.getByText("draft.txt", { exact: true }).waitFor();
+  pass("leaving Chat and reopening the conversation restores both text and pending files");
+  await page.evaluate(() => window.searchVersionTest.handoff("Original frozen source prompt"));
+  await page.waitForFunction(
+    () => document.querySelector("textarea")?.value === "Edited unfinished source question",
+  );
+  assert.equal(
+    requests.some((request) => request.method === "POST" && request.path.includes("/messages")),
+    false,
+  );
+  pass("resuming an editable sourced handoff preserves the user's revisions and does not send");
+  await json("/conversations", "POST", {
+    title: "Independent draft chat",
+    defaultMode: "chat",
+    forceNew: true,
+  });
+  await search("Independent draft chat");
+  await page.locator('[data-search-kind="conversation"]').click();
+  await page.waitForFunction(() => document.querySelector("textarea")?.value === "");
+  assert.equal(await page.getByText("draft.txt", { exact: true }).count(), 0);
+  await composer.fill("Second independent draft");
+  await search("archival marker");
+  await page.locator('[data-search-kind="message"]').click();
+  await page.waitForFunction(
+    () => document.querySelector("textarea")?.value === "Edited unfinished source question",
+  );
+  await page.getByText("draft.txt", { exact: true }).waitFor();
+  pass("switching conversations retains separate composer drafts without moving attachments");
+  await page.evaluate(() => window.searchVersionTest.logout());
+  await page.waitForFunction(() => document.querySelector("textarea")?.value === "");
+  assert.equal(await page.getByText("draft.txt", { exact: true }).count(), 0);
+  pass("logout clears the mounted composer and its retained file handles");
   assert.deepEqual(errors, []);
   assert.deepEqual(unexpected, []);
   assert.equal(
@@ -362,6 +422,7 @@ try {
   throw error;
 } finally {
   await browser?.close();
-  await server?.close();
   child.kill("SIGTERM");
+  server?.httpServer?.closeAllConnections?.();
+  await server?.close();
 }
