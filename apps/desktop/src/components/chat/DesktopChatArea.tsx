@@ -20,6 +20,7 @@ import {
   Textarea,
 } from "ui";
 import { useChatPreviewScrollAnchor } from "../../hooks/useChatPreviewScrollAnchor";
+import { useServerConnection } from "../../hooks/useServerConnection";
 import { useSidecarAgentRun } from "../../hooks/useSidecarAgentRun";
 import {
   chatModeUnavailableReason,
@@ -305,7 +306,11 @@ export function DesktopChatArea() {
     streamingConversationId,
     currentConversationId: currentConversation?.id ?? null,
   });
+  // Not loaded / unreachable: the channel list on screen is not real data and a
+  // send would write to a server that is not there.
+  const serverConnection = useServerConnection();
   const canSend =
+    serverConnection.ready &&
     effectiveModel.ok &&
     !modeUnavailableReason &&
     Boolean(currentConversation) &&
@@ -2296,6 +2301,13 @@ export function DesktopChatArea() {
           onToggleWebSearch={() => void handleToggleWebSearch()}
           streaming={streamingHere}
           busyElsewhere={busyElsewhere}
+          notice={
+            serverConnection.notice === "unavailable"
+              ? getChatLabel("chat.server.unavailable")
+              : serverConnection.notice === "connecting"
+                ? getChatLabel("chat.server.connecting")
+                : null
+          }
           canSubmit={canSend}
           onStop={() => void handleStop()}
           inputRef={inputRef}

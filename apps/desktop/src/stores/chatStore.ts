@@ -1,3 +1,4 @@
+import { isServerReady, useBackendStatusStore } from "./backendStatusStore";
 import { assistantMessageContent, chatFailureFinishReason } from "shared/message-text";
 import { create } from "zustand";
 import { type ChatAdapter, createChatAdapter } from "../lib/chatAdapter";
@@ -427,7 +428,21 @@ const INITIAL_STATE = {
   savingMessageIds: new Set<string>() as ReadonlySet<string>,
 };
 
-export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter()) {
+export interface DesktopChatStoreOptions {
+  /**
+   * Whether server writes that create state may proceed. The app wires this to
+   * the connection store; false means the server state is not loaded or the
+   * server is unreachable, and creating a conversation then would at best fail
+   * and at worst leave an empty row behind.
+   */
+  canWrite?: () => boolean;
+}
+
+export function createDesktopChatStore(
+  adapter: ChatAdapter = createChatAdapter(),
+  options: DesktopChatStoreOptions = {},
+) {
+  const canWrite = options.canWrite ?? (() => true);
   let selectConversationRequestId = 0;
   // Bounded LRU of per-conversation message lists. Purpose (from 05-20):
   //   A. instant, flicker-free re-open of recently visited conversations;
@@ -658,6 +673,7 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
     },
 
     async createConversation(title, options) {
+      if (!canWrite()) throw new Error(getChatLabel("chat.server.unavailable"));
       const state = get();
       const cur = state.currentConversation;
       // Anything on screen counts as content — including optimistic drafts and a
@@ -1330,4 +1346,6 @@ export function createDesktopChatStore(adapter: ChatAdapter = createChatAdapter(
   }));
 }
 
-export const useChatStore = createDesktopChatStore();
+export const useChatStore = createDesktopChatStore(createChatAdapter(), {
+  canWrite: () => isServerReady(useBackendStatusStore.getState()),
+});

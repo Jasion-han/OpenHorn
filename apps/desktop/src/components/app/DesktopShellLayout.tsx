@@ -2,8 +2,6 @@ import { PanelLeft, PanelRightOpen } from "lucide-react";
 import { useEffect } from "react";
 import { Button, cn } from "ui";
 import { getPreviewLabel, getSidebarLabel } from "../../lib/i18n/agent";
-import { BACKEND_UP_EVENT } from "../../stores/backendStatusStore";
-import { useChatStore } from "../../stores/chatStore";
 import { type DesktopActiveView, useDesktopShellStore } from "../../stores/desktopShellStore";
 import { usePreviewPanelStore } from "../../stores/previewPanelStore";
 import { DesktopPreviewPanel } from "../preview/DesktopPreviewPanel";
@@ -20,26 +18,11 @@ export function DesktopShellLayout({
   const nativeScroll = activeView === "settings";
   const sidebarCollapsed = useDesktopShellStore((state) => state.sidebarCollapsed);
   const setSidebarCollapsed = useDesktopShellStore((state) => state.setSidebarCollapsed);
-  const loadChannels = useChatStore((state) => state.loadChannels);
-  const loadConversations = useChatStore((state) => state.loadConversations);
   const previewOpen = usePreviewPanelStore((state) => state.isOpen);
   const previewCollapsed = usePreviewPanelStore((state) => state.collapsed);
   const previewTabCount = usePreviewPanelStore((state) => state.tabs.length);
   const expandPreview = usePreviewPanelStore((state) => state.expandPanel);
   const togglePreview = usePreviewPanelStore((state) => state.togglePanel);
-
-  // Owned by the shell, not by the sidebar: a collapsed sidebar is unmounted, so
-  // loading from there meant starting the app with it collapsed left the store
-  // with no channels and no conversations (the composer showed "选择模型" and the
-  // list stayed empty until you expanded it).
-  useEffect(() => {
-    const load = () => {
-      void Promise.allSettled([loadChannels(), loadConversations()]);
-    };
-    load();
-    window.addEventListener(BACKEND_UP_EVENT, load);
-    return () => window.removeEventListener(BACKEND_UP_EVENT, load);
-  }, [loadChannels, loadConversations]);
 
   // ⌘⇧E / Ctrl+Shift+E — collapse / expand the preview panel. Only meaningful
   // while it has tabs; ⌘N (new conversation) is the only other shell shortcut.

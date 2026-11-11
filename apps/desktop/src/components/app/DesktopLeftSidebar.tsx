@@ -44,6 +44,7 @@ import {
   ScrollArea,
 } from "ui";
 import { useClockTick } from "../../hooks/useClockTick";
+import { useServerConnection } from "../../hooks/useServerConnection";
 import { getDesktopBackendBase } from "../../lib/backendBase";
 import { displayConversationTitle } from "../../lib/conversationTitle";
 import {
@@ -52,7 +53,7 @@ import {
   getWorkbenchLabel,
   type SidebarLabelKey,
 } from "../../lib/i18n/agent";
-import { hideNotification, notifyError, notifyErrorOnce, notifySuccess } from "../../lib/notify";
+import { notifyError, notifyErrorOnce, notifySuccess } from "../../lib/notify";
 import { workbenchApi } from "../../lib/workbenchApi";
 import { useAuthStore } from "../../stores/authStore";
 import { useBackendStatusStore } from "../../stores/backendStatusStore";
@@ -323,8 +324,14 @@ export function DesktopLeftSidebar() {
   const openScheduledTasks = useDesktopShellStore((state) => state.openScheduledTasks);
   const user = useAuthStore((state) => state.user);
   const backendStatus = useBackendStatusStore((state) => state.status);
-  const backendLastError = useBackendStatusStore((state) => state.lastError);
   const backendRetry = useBackendStatusStore((state) => state.retry);
+  // Until the full server state has loaded, empty lists and a missing user are
+  // "not loaded", not "nothing there" — the connection notice replaces them.
+  const serverConnection = useServerConnection();
+  const connectionNoticeLabel =
+    serverConnection.notice === "unavailable"
+      ? getSidebarLabel("sidebar.connection.unavailable")
+      : getSidebarLabel("sidebar.connection.connecting");
   const [retrying, setRetrying] = useState(false);
 
   const conversations = useChatStore((state) => state.conversations);
@@ -338,7 +345,6 @@ export function DesktopLeftSidebar() {
   const projects = useProjectStore((state) => state.projects);
   const activeProjectId = useProjectStore((state) => state.activeProjectId);
   const projectsExpanded = useProjectStore((state) => state.expanded);
-  const loadProjects = useProjectStore((state) => state.loadProjects);
   const addProjectFromPicker = useProjectStore((state) => state.addProjectFromPicker);
   const renameProject = useProjectStore((state) => state.renameProject);
   const toggleProjectStar = useProjectStore((state) => state.toggleStar);
@@ -356,14 +362,10 @@ export function DesktopLeftSidebar() {
   const [searchRetry, setSearchRetry] = useState(0);
 
   useEffect(() => {
-    void loadRuns();
+    if (!serverConnection.ready) return;
     const timer = setInterval(() => void loadRuns(), 30_000);
     return () => clearInterval(timer);
-  }, [loadRuns]);
-
-  useEffect(() => {
-    void loadProjects();
-  }, [loadProjects]);
+  }, [loadRuns, serverConnection.ready]);
 
   // ⌘N / Ctrl+N — the shortcut advertised next to the new-conversation button.
   useEffect(() => {
@@ -428,7 +430,10 @@ export function DesktopLeftSidebar() {
 
   // Opens the welcome screen rather than creating a row up front — the
   // conversation is created by the first message that is actually sent.
+  // Blocked while the server state is not loaded: the welcome screen could not
+  // start a conversation anyway, and the list it returns to is not real yet.
   const handleCreateConversation = () => {
+    if (!serverConnection.ready) return;
     searchNavigation.current++;
     setQuery("");
     setSearchOpen(false);
@@ -631,19 +636,16 @@ export function DesktopLeftSidebar() {
     if (retrying) return;
     setRetrying(true);
     try {
+      // Same path as the automatic reconnect: a reachable server triggers the
+      // full reload, whose completion shows the "reconnected" toast.
       const ok = await backendRetry();
-      if (ok) {
-        hideNotification("backend_down");
-        notifySuccess(
-          getSidebarLabel("sidebar.notify.reconnectedTitle"),
-          getSidebarLabel("sidebar.notify.reconnectedBody"),
-        );
-        return;
-      }
+      if (ok) return;
+      // Read after the probe: the render-time value predates this attempt.
+      const lastError = useBackendStatusStore.getState().lastError;
       const hint =
-        backendLastError === "Blocked by browser (CORS?)"
+        lastError === "Blocked by browser (CORS?)"
           ? getSidebarLabel("sidebar.notify.backendDownCors")
-          : backendLastError === "Blocked by browser (mixed content)"
+          : lastError === "Blocked by browser (mixed content)"
             ? getSidebarLabel("sidebar.notify.backendDownMixedContent")
             : formatSidebarLabel("sidebar.notify.backendDownGeneric", { base: backendBase });
       notifyErrorOnce("backend_down", getSidebarLabel("sidebar.notify.backendDownTitle"), hint);
@@ -773,6 +775,7 @@ export function DesktopLeftSidebar() {
             variant="outline"
             className="w-full justify-start gap-2 px-3 titlebar-no-drag"
             onClick={handleCreateConversation}
+            disabled={!serverConnection.ready}
           >
             <Plus size={16} />
             <span className="flex-1 text-left">{getSidebarLabel("sidebar.newConversation")}</span>
@@ -985,12 +988,13 @@ export function DesktopLeftSidebar() {
                         aria-label={getSidebarLabel("sidebar.project.add")}
                         title={getSidebarLabel("sidebar.project.add")}
                         onClick={() => void handleAddProject()}
+                        disabled={!serverConnection.ready}
                       >
                         <FolderPlus size={13} />
                       </Button>
                     </div>
 
-                    {projects.length === 0 && (
+                    {serverConnection.loaded && projects.length === 0 && (
                       <p className="px-3 py-2 text-xs text-muted-foreground/70">
                         {getSidebarLabel("sidebar.project.empty")}
                       </p>
@@ -1150,7 +1154,9 @@ export function DesktopLeftSidebar() {
 
                   {plain.length === 0 && (
                     <p className="py-8 text-center text-xs text-muted-foreground">
-                      {getSidebarLabel("sidebar.emptyState")}
+                      {serverConnection.loaded
+                        ? getSidebarLabel("sidebar.emptyState")
+                        : connectionNoticeLabel}
                     </p>
                   )}
                 </>
@@ -1168,11 +1174,11 @@ export function DesktopLeftSidebar() {
               className="titlebar-no-drag flex min-w-0 flex-1 items-center gap-2 rounded-[10px] px-1.5 py-1.5 text-left transition-colors hover:bg-foreground/[0.04]"
             >
               <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold">
-                {user?.username?.slice(0, 1)?.toUpperCase() || "U"}
+                {user?.username?.slice(0, 1)?.toUpperCase() || (serverConnection.loaded ? "U" : "")}
               </div>
               <div className="min-w-0 flex-1">
                 <div className="truncate text-[13px] font-medium leading-4">
-                  {user?.username || "User"}
+                  {user?.username || (serverConnection.loaded ? "User" : connectionNoticeLabel)}
                 </div>
                 {user?.email && !user.email.endsWith("@openhorn.local") && (
                   <div className="truncate text-[11px] leading-4 text-muted-foreground">
@@ -1184,7 +1190,9 @@ export function DesktopLeftSidebar() {
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" side="top" className="w-44">
-            <DropdownMenuLabel>{user?.username || "User"}</DropdownMenuLabel>
+            <DropdownMenuLabel>
+              {user?.username || (serverConnection.loaded ? "User" : connectionNoticeLabel)}
+            </DropdownMenuLabel>
           </DropdownMenuContent>
         </DropdownMenu>
 

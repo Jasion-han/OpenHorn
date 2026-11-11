@@ -108,6 +108,34 @@ function createStubAdapter() {
 }
 
 describe("desktop chat store", () => {
+  test("refuses to create a conversation while server writes are blocked", async () => {
+    const { adapter } = createStubAdapter();
+    let created = 0;
+    const store = createDesktopChatStore(
+      {
+        ...adapter,
+        createConversation: async (input) => {
+          created += 1;
+          return adapter.createConversation(input);
+        },
+      },
+      { canWrite: () => false },
+    );
+
+    let rejected = false;
+    await store
+      .getState()
+      .createConversation("新会话")
+      .catch(() => {
+        rejected = true;
+      });
+
+    expect(rejected).toBe(true);
+    expect(created).toBe(0);
+    expect(store.getState().conversations).toHaveLength(0);
+    expect(store.getState().currentConversation).toBe(null);
+  });
+
   test("loads conversations", async () => {
     const { adapter } = createStubAdapter();
     const store = createDesktopChatStore(adapter);

@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { useAuthStore } from "../stores/authStore";
+import { isServerReady, useBackendStatusStore } from "../stores/backendStatusStore";
 import { useChatStore } from "../stores/chatStore";
 import { useProjectStore } from "../stores/projectStore";
 
@@ -33,6 +34,22 @@ export function shouldRefreshOnFocus(input: ShouldRefreshOnFocusInput): boolean 
 }
 
 function refreshIfAllowed() {
+  const backend = useBackendStatusStore.getState();
+  if (!isServerReady(backend)) {
+    // Not loaded / unreachable: a partial reload here is exactly the "some of it
+    // came back" state to avoid. Coming back to the window is a good moment to
+    // probe instead; a live server then gets the full reload.
+    const now = Date.now();
+    if (
+      backend.status === "down" &&
+      !backend.loading &&
+      (lastRefreshAt === null || now - lastRefreshAt >= MIN_REFRESH_INTERVAL_MS)
+    ) {
+      lastRefreshAt = now;
+      void backend.retry();
+    }
+    return;
+  }
   const auth = useAuthStore.getState();
   const chat = useChatStore.getState();
   const allowed = shouldRefreshOnFocus({

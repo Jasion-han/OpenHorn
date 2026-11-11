@@ -10,6 +10,7 @@ import type {
   PromptTemplate,
 } from "shared/types";
 import { create } from "zustand";
+import { getDesktopBackendBase } from "../lib/backendBase";
 import { createCliOAuthChannel } from "../lib/cliOAuthChannel";
 import { type CredentialSource, listCredentialSources } from "../lib/credentialApi";
 import { formatImportLabel, getImportLabel } from "../lib/i18n/agent";
@@ -23,6 +24,7 @@ import {
   skillsSetEnabled,
 } from "../lib/tauriBridge";
 import type { ApiImportRecord } from "../types/chat";
+import { useAuthStore } from "./authStore";
 import { useChatStore } from "./chatStore";
 
 // ---------------------------------------------------------------------------
@@ -399,7 +401,10 @@ async function settled<T>(promise: Promise<T>, fallback: T): Promise<T> {
   }
 }
 
+let templateIdentityRevision = 0;
+
 export function createImportStore(deps: ImportStoreDeps = {}) {
+  let templateRequest = 0;
   const api = deps.api ?? createServerApi();
   const discoverMcp = deps.discoverMcp ?? discoverMcpConfigs;
   const discoverSkillsImpl = deps.discoverSkills ?? discoverSkills;
@@ -760,8 +765,17 @@ export function createImportStore(deps: ImportStoreDeps = {}) {
     },
 
     async loadPromptTemplates() {
+      const request = ++templateRequest,
+        identity = templateIdentityRevision,
+        backend = getDesktopBackendBase();
       try {
         const promptTemplates = await api.prompts.templates();
+        if (
+          request !== templateRequest ||
+          identity !== templateIdentityRevision ||
+          backend !== getDesktopBackendBase()
+        )
+          return;
         set({ promptTemplates });
       } catch {
         // keep whatever we had — the slash panel degrades to no prompt group
@@ -771,3 +785,9 @@ export function createImportStore(deps: ImportStoreDeps = {}) {
 }
 
 export const useImportStore = createImportStore();
+
+useAuthStore.subscribe((state, previous) => {
+  if (state.user?.id === previous.user?.id) return;
+  templateIdentityRevision++;
+  useImportStore.setState({ promptTemplates: [] });
+});

@@ -10,6 +10,7 @@ import { ArtifactSaveDialog } from "./components/workbench/ArtifactSaveDialog";
 import { WorkbenchView } from "./components/workbench/WorkbenchView";
 import { useRefreshOnFocus } from "./hooks/useRefreshOnFocus";
 import { startBackgroundTaskRunner } from "./lib/backgroundTaskRunner";
+import { startServerConnection } from "./lib/serverState";
 import { getTauriSidecarPlatform, hasOverlayTitleBar } from "./lib/tauriBridge";
 import { useAuthStore } from "./stores/authStore";
 import { useDesktopShellStore } from "./stores/desktopShellStore";
@@ -20,7 +21,6 @@ export function App() {
   const activeView = useDesktopShellStore((state) => state.activeView);
   const authReady = useAuthStore((state) => state.ready);
   const artifactMessageId = useWorkbenchStore((state) => state.artifactMessageId);
-  const bootstrapAuth = useAuthStore((state) => state.bootstrap);
 
   useEffect(() => {
     if (hasOverlayTitleBar()) {
@@ -49,9 +49,13 @@ export function App() {
     return () => document.removeEventListener("click", handleLinkClick);
   }, []);
 
+  // The one load of server-backed state (user, channels, conversations,
+  // projects, scheduled tasks, prompt templates). It also arms the automatic
+  // reconnect: while the server is unreachable the shell shows that state, and
+  // the first sign of life reloads all of it.
   useEffect(() => {
-    void bootstrapAuth();
-  }, [bootstrapAuth]);
+    void startServerConnection();
+  }, []);
 
   useRefreshOnFocus();
 

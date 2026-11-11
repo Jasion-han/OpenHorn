@@ -646,6 +646,8 @@ export const chatLabels = {
   "chat.welcome.suggestion5": "帮我起草一封邮件",
   "chat.welcome.noModel": "选择模型",
   "chat.welcome.clearInput": "清空输入",
+  "chat.server.connecting": "正在连接服务端，连接后即可发送",
+  "chat.server.unavailable": "服务端不可用，恢复连接后即可发送",
   "chat.welcome.startFailedTitle": "无法开始会话",
   "chat.welcome.startFailedBody": "创建会话失败，请稍后重试",
   // Inline edit buttons
@@ -858,6 +860,8 @@ export const sidebarLabels = {
   "sidebar.notify.saveFailedBody": "无法更新标题",
   "sidebar.notify.reconnectedTitle": "连接已恢复",
   "sidebar.notify.reconnectedBody": "已重新连接后端",
+  "sidebar.connection.connecting": "正在连接服务端…",
+  "sidebar.connection.unavailable": "服务端不可用，正在自动重连…",
   "sidebar.notify.backendDownTitle": "后端不可用",
   "sidebar.notify.backendDownCors":
     "仍然无法访问后端（可能被浏览器跨域/CORS 拦截）。请检查后端 CORS 是否允许当前页面 Origin，并查看 DevTools Console/Network。",

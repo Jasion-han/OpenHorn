@@ -64,6 +64,7 @@ export function DesktopComposer({
   onToggleWebSearch,
   streaming,
   busyElsewhere = false,
+  notice = null,
   canSubmit,
   onStop,
   inputRef,
@@ -102,6 +103,8 @@ export function DesktopComposer({
   streaming: boolean;
   /** Another conversation's turn is running: sending here would cancel it. */
   busyElsewhere?: boolean;
+  /** Why sending is blocked right now (e.g. the server is unreachable). */
+  notice?: string | null;
   canSubmit: boolean;
   onStop: () => void | Promise<void>;
   inputRef?: RefObject<HTMLTextAreaElement | null>;
@@ -382,6 +385,9 @@ export function DesktopComposer({
 
         {showBusyElsewhere && (
           <p className="px-2 pt-1 text-xs text-muted-foreground">{busyElsewhereLabel}</p>
+        )}
+        {notice && !showBusyElsewhere && (
+          <p className="px-2 pt-1 text-xs text-muted-foreground">{notice}</p>
         )}
 
         <DesktopComposerToolbar
