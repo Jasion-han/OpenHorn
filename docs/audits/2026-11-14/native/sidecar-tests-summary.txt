@@ -1,0 +1,10 @@
+(pass) external runtime prompt context > Codex Chat surfaces a JSON failed turn even when stderr is empty [56.95ms]
+(pass) external runtime prompt context > Codex chat exec passes multi-line instructions as one config argument [57.53ms]
+(pass) runWebSearch degrades to DuckDuckGo when Tavily upstream fails [0.02ms]
+(pass) explicit DeepSeek failures do not fall back or expose upstream errors [0.46ms]
+(pass) runtime permission and cancellation boundaries > Codex propagates nested failed turn status [68.87ms]
+(pass) mapCodexEvent > maps a failed turn to an error carrying the message [0.01ms]
+ 344 pass
+ 0 fail
+ 912 expect() calls
+Ran 344 tests across 40 files. [7.41s]

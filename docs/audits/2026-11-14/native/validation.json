@@ -1,0 +1,40 @@
+{
+  "scope": "isolated shipped tree plus native audit follow-up changes",
+  "status": "native_gui_blocked",
+  "visualVerified": false,
+  "tests": {
+    "shared_adapters": 171,
+    "desktop": 674,
+    "sidecar": 344,
+    "server": 542,
+    "typescript_total": 1731,
+    "rust": 52,
+    "failures": 0
+  },
+  "checks": {
+    "typecheck": "passed",
+    "biome": "passed",
+    "frontend_production_build": "passed",
+    "sidecar_host_compile": "passed",
+    "cargo_test_offline_lib": "52 passed",
+    "tauri_debug_app_bundle": "built, unsigned local QA only",
+    "real_sidecar_provider_checks": 7,
+    "real_http_contract_groups": 6
+  },
+  "native": {
+    "productName": "OpenHorn Native QA",
+    "identifier": "com.openhorn.nativeqa",
+    "existing_installation_replaced": false,
+    "window_attempt": "cua.getApp(qa_app_path)",
+    "window_result": "cgWindowNotFound",
+    "os_lock_observed": true,
+    "scenarios_visually_verified": 0,
+    "executableSha256": "cc85ccac1a840869a22ec157a32c884da084b903878401e7e2182a50de47da11",
+    "sidecarSha256": "a92ee17f1c752d1f3126c09e18342bace02c1366b3311ffa88412d5469ce852a"
+  },
+  "limitations": [
+    "DeepSeek paid Search/Fetch/OCR/native-web quality was not exercised against the real DeepSeek API.",
+    "All visible native GUI steps remain pending macOS unlock.",
+    "A Bun 1.3.10 multipart parser defect was independently reproduced for certain 6–8-byte NUL-containing payloads; realistic DOCX, PNG, text roundtrips passed. No multipart-parser fix is claimed."
+  ]
+}

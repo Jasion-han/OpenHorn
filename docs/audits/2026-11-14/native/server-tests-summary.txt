@@ -1,0 +1,10 @@
+(pass) delayed edit preparation cannot reclaim a newer retry on budget failure [11.28ms]
+(pass) foreign pagination and incomplete later pages fail instead of returning an authoritative partial list [0.32ms]
+(pass) catalog reads are single-flight and cached, carry no provider credentials, and preserve good data after failure [7.89ms]
+(pass) failed initial catalog retrieval backs off and retries, including synchronously throwing fetch guards [0.52ms]
+(pass) explicit endpoint refresh bypasses success and failure caches while remaining single-flight [0.06ms]
+(pass) endpoint invalidation expires only named models and retains last-good limits after failure
+ 542 pass
+ 0 fail
+ 2761 expect() calls
+Ran 542 tests across 92 files. [20.46s]

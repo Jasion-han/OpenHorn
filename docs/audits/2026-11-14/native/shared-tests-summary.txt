@@ -1,0 +1,10 @@
+(pass) a disconnect after a refusal verdict cannot downgrade it to an ordinary partial failure [0.44ms]
+(pass) successful JSON responses are not truncated by the error diagnostic byte limit [0.48ms]
+(pass) explicit Chat output limits > openai preserves partial text and final usage in its typed failure [0.64ms]
+(pass) explicit Chat output limits > anthropic preserves partial text and final usage in its typed failure [0.08ms]
+(pass) explicit Chat output limits > google preserves partial text and final usage in its typed failure
+(pass) explicit Chat output limits > OpenAI JSON fallback preserves content and does not swallow the typed failure [0.46ms]
+ 171 pass
+ 0 fail
+ 879 expect() calls
+Ran 171 tests across 17 files. [797.00ms]

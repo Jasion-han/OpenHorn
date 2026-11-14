@@ -1,0 +1,37 @@
+{
+  "mode": "real local HTTP, no visible GUI",
+  "visualVerified": false,
+  "status": "passed",
+  "checks": [
+    {
+      "name": "special settings keys save and reload through real backend",
+      "status": "passed"
+    },
+    {
+      "name": "invalid MCP object configs rejected through real backend",
+      "status": "passed"
+    },
+    {
+      "name": "real import endpoints return structured actionable failures",
+      "status": "passed"
+    },
+    {
+      "name": "real upload/download preserves qa.docx and capability flags",
+      "status": "passed",
+      "bytes": 783,
+      "sha256": "994770dac55e257237e823e95f51fb1cac4f9791f9aeb759ae635d9e70a9a269"
+    },
+    {
+      "name": "real upload/download preserves qa.png and capability flags",
+      "status": "passed",
+      "bytes": 68,
+      "sha256": "1537abe6ad7b905f94549de60cb6f553ce971cbfc8fec5675757f11a7674be14"
+    },
+    {
+      "name": "real upload/download preserves qa.txt and capability flags",
+      "status": "passed",
+      "bytes": 30,
+      "sha256": "47f522822670234b4f59dceafbfa8a86c600f0e2e01c20952cb4dc0a242e9a17"
+    }
+  ]
+}

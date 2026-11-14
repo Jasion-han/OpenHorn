@@ -1,0 +1,51 @@
+{
+  "mode": "real local HTTP + compiled sidecar WebSocket + existing provider; NOT visible desktop interaction",
+  "visualVerified": false,
+  "checks": [
+    {
+      "name": "compiled sidecar starts and real client handshakes",
+      "status": "passed"
+    },
+    {
+      "name": "real workspace read and path traversal rejection",
+      "status": "passed"
+    },
+    {
+      "name": "prepare -> real provider sidecar -> complete -> HTTP reload",
+      "status": "passed",
+      "elapsedMs": 3182,
+      "characters": 5,
+      "providerUsageReported": true
+    },
+    {
+      "name": "real SSE retry replaces response and survives reload",
+      "status": "passed",
+      "characters": 5
+    },
+    {
+      "name": "old real preparation is rejected after retry with HTTP 409",
+      "status": "passed"
+    },
+    {
+      "name": "real provider stream cancellation persists exact partial response",
+      "status": "passed",
+      "elapsedMs": 2024,
+      "characters": 1,
+      "providerUsageReported": false
+    },
+    {
+      "name": "real provider agent reads/writes in workspace and checkpoint restores original",
+      "status": "passed",
+      "toolEvents": 6,
+      "deniedApprovals": 0
+    }
+  ],
+  "sidecarSha256": "a92ee17f1c752d1f3126c09e18342bace02c1366b3311ffa88412d5469ce852a",
+  "agentObservation": {
+    "toolEvents": 6,
+    "deniedApprovals": 0,
+    "checkpoint": true,
+    "fileChanged": true
+  },
+  "status": "passed"
+}

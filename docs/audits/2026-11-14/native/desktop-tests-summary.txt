@@ -1,0 +1,10 @@
+(pass) Agent result saving is independent from generation > deletion is gated during the HTTP save and becomes available after failure settles [0.12ms]
+(pass) Agent result saving is independent from generation > late old ACK never releases a newer failed result [0.44ms]
+(pass) network failure retains only the original lease and then aborts [0.51ms]
+(pass) normalizeMcpServerConfig > passes through env, headers and alwaysAllow untouched
+(pass) a callback failure cancels its source and releases the reader without replacing the error [0.22ms]
+(pass) a read failure releases the reader and preserves the original transport error [0.40ms]
+ 674 pass
+ 0 fail
+ 2752 expect() calls
+Ran 674 tests across 76 files. [3.95s]
