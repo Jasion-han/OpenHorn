@@ -1,0 +1,100 @@
+{
+  "status": "verified_and_cleaned",
+  "baseCommit": "ddf61608cbdffd135024dc29e3f54e46002e3aa3",
+  "productCommit": "92d86a50102e449ea334043e739b38c03ad20795",
+  "sourceSha256": {
+    "apps/desktop/src/components/library/LibraryQuestionDialog.tsx": "68d8e72d3edf9b453b849a4b57b3b71619df3e5293aa82e49ec2008fa2313d0e",
+    "apps/desktop/src/components/workbench/ArtifactPanel.tsx": "4f51e66202fb553ff8b83857142a87b1b97e3d59ce92a26545af21e7d4f739c2",
+    "apps/desktop/src/components/workbench/discardSubmission.test.ts": "089089b5906a92dec23eb276739555239cfb5a2e7d3d784619a6ea227d08b67b"
+  },
+  "buildSha256": "868059e3d4193f167cbe7d1573474e6b1db4e1e970995ee9eed1c9165cfecef5",
+  "regression": {
+    "baseline": {
+      "pass": 2,
+      "fail": 2
+    },
+    "candidate": {
+      "pass": 4,
+      "fail": 0
+    }
+  },
+  "checks": {
+    "isolatedDesktop": {
+      "pass": 688,
+      "fail": 0
+    },
+    "originalWorkspaceWithWip": {
+      "pass": 718,
+      "fail": 0
+    },
+    "typecheck": "both_passed",
+    "biome": "both_passed",
+    "uiAndNativeBuild": "passed",
+    "hostSidecarCompilation": "passed"
+  },
+  "nativeDataProof": {
+    "artifactCurrentVersion": 2,
+    "currentText": "Original generated QA content\nCONFIRMATION_DRAFT",
+    "originalVersionText": "Original generated QA content",
+    "questionCount": 1,
+    "conversationCount": 1,
+    "messageCount": 0
+  },
+  "nativeObservations": [
+    {
+      "action": "Launch new QA bundle",
+      "result": "Initial black/stale image; no initial visual acceptance claimed"
+    },
+    {
+      "action": "Open library question and enter generated text",
+      "result": "Native AX reported correct text and available prepare; screenshots remained stale"
+    },
+    {
+      "action": "Cancel question with dirty text",
+      "result": "Native AX reported disabled question, cancel and prepare; confirmation actions available; confirmation layer screenshot not reliable"
+    },
+    {
+      "action": "Continue editing then intentionally prepare",
+      "result": "Native controls restored; one unsent source-based draft created in native chat; zero messages sent"
+    },
+    {
+      "action": "Open generated artifact and edit as new version",
+      "result": "Actual native image showed editable original content and version-one baseline"
+    },
+    {
+      "action": "Enter generated extra line and cancel",
+      "result": "Actual screenshot showed confirmation plus disabled format, text, save and cancel"
+    },
+    {
+      "action": "Escape to continue editing",
+      "result": "Actual screenshot showed retained draft and enabled ordinary controls"
+    },
+    {
+      "action": "Save the generated new version",
+      "result": "Actual native screenshot showed version two and appended line; API separately confirms original version one retained"
+    }
+  ],
+  "limits": [
+    "Question confirmation native AX/function verified, but its portal screenshot remained stale; not counted as full visual acceptance",
+    "No click on discard/delete, no real provider call, no real credentials/history copied",
+    "Other forms were read for existing footer replacement, without claiming all forms audited exhaustively"
+  ],
+  "cleanup": {
+    "completed": true,
+    "taskRootRemoved": true,
+    "worktreeRemoved": true,
+    "sizeKiBBeforeCleanup": 3255424,
+    "publishedDirtyPathsChecked": 3,
+    "qaPortClosed": true,
+    "stoppedOwnedPids": [3741],
+    "ownedAppStorageRemoved": [
+      "~/Library/WebKit/com.openhorn.confirmqa",
+      "~/Library/Caches/com.openhorn.confirmqa",
+      "~/Library/Logs/com.openhorn.confirmqa"
+    ],
+    "originalAppPidsPreserved": [170, 227],
+    "originalBackendPidsPreserved": [99476],
+    "originalWipPathsChecked": 273,
+    "rawQaDataRetained": false
+  }
+}

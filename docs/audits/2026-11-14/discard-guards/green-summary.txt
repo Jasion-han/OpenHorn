@@ -1,0 +1,12 @@
+bun test v1.3.10 (30e609e0)
+
+src/components/workbench/discardSubmission.test.ts:
+(pass) discard confirmation blocks question preparation and leaves its draft untouched [0.65ms]
+(pass) ordinary question retry retains its request identity and draft
+(pass) discard confirmation cannot append an artifact version or clear its draft
+(pass) ordinary artifact save retains the expected-version contract [1.16ms]
+
+ 4 pass
+ 0 fail
+ 12 expect() calls
+Ran 4 tests across 1 file. [34.00ms]

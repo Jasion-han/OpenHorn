@@ -1,0 +1,7 @@
+> sidecar@1.0.0 compile:tauri:host <audit-root>/verify/apps/sidecar
+> bash scripts/compile-tauri-host.sh
+
+Compiling sidecar: target=bun-darwin-arm64 → <audit-root>/verify/apps/sidecar/../desktop/src-tauri/binaries/openhorn-sidecar-aarch64-apple-darwin
+ [431ms]  bundle  2191 modules
+ [482ms] compile  <audit-root>/verify/apps/sidecar/../desktop/src-tauri/binaries/openhorn-sidecar-aarch64-apple-darwin
+Done.

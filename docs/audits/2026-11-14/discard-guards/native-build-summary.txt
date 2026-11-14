@@ -1,0 +1,11 @@
+Compiling tauri-plugin-fs v2.5.0
+   Compiling tauri-plugin-shell v2.3.5
+   Compiling tauri-plugin-dialog v2.7.0
+   Compiling tauri-plugin-log v2.8.0
+   Compiling app v0.1.0 (<audit-root>/verify/apps/desktop/src-tauri)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 54.85s
+       Built application at: <audit-root>/target/debug/app
+    Bundling OpenHorn Confirmation QA.app (<audit-root>/target/debug/bundle/macos/OpenHorn Confirmation QA.app)
+        Warn Skipping signing due to --no-sign flag.
+    Finished 1 bundle at:
+        <audit-root>/target/debug/bundle/macos/OpenHorn Confirmation QA.app

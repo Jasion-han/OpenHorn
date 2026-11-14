@@ -1,0 +1,11 @@
+- Expected  - 3
++ Received  + 9
+
+      at <anonymous> (<audit-root>/verify/apps/desktop/src/components/workbench/discardSubmission.test.ts:144:45)
+(fail) discard confirmation cannot append an artifact version or clear its draft [0.11ms]
+(pass) ordinary artifact save retains the expected-version contract [0.47ms]
+
+ 2 pass
+ 2 fail
+ 9 expect() calls
+Ran 4 tests across 1 file. [41.00ms]
