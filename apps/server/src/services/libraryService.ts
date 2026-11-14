@@ -112,6 +112,8 @@ const filter = (userId: string, scope: LibraryFilter) =>
     scope.kind === "all" ? undefined : eq(libraryDocuments.scopeKey, libraryScopeKey(scope)),
   );
 function documentItem(row: Omit<Row, "originalBase64" | "textContent">): LibraryDocument {
+  const canClaim =
+    row.status !== "indexing" || !row.leaseUntil || row.leaseUntil.getTime() <= Date.now();
   return {
     id: row.id,
     projectId: row.projectId,
@@ -122,12 +124,8 @@ function documentItem(row: Omit<Row, "originalBase64" | "textContent">): Library
     errorCode: row.errorCode,
     chunkCount: row.chunkCount,
     revision: row.revision,
-    canIndex:
-      row.status !== "indexing" || !row.leaseUntil || row.leaseUntil.getTime() <= Date.now(),
-    canOcr:
-      libraryOcrFileType(row.fileType) &&
-      row.status !== "ready" &&
-      (row.status !== "indexing" || !row.leaseUntil || row.leaseUntil.getTime() <= Date.now()),
+    canIndex: (row.fileType === "text/plain" || row.fileType === "application/pdf") && canClaim,
+    canOcr: libraryOcrFileType(row.fileType) && row.status !== "ready" && canClaim,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
