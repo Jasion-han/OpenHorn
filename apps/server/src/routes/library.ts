@@ -12,6 +12,7 @@ import {
   LibraryError,
   listLibraryDocuments,
   listLibraryQuestions,
+  ocrLibraryDocument,
   parseLibraryScope,
   prepareLibraryQuestion,
   searchLibrary,
@@ -98,6 +99,9 @@ router.get("/:id", async (c) =>
 );
 router.post("/:id/index", async (c) =>
   c.json({ document: await indexLibraryDocument(c.get("user").id, c.req.param("id")) }),
+);
+router.post("/:id/ocr", async (c) =>
+  c.json({ document: await ocrLibraryDocument(c.get("user").id, c.req.param("id")) }),
 );
 router.delete("/:id", async (c) => {
   const { expectedRevision } = await c.req.json();

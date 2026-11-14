@@ -1934,10 +1934,21 @@ const libraryLabels = {
   "library.import": "导入资料",
   "library.importTitle": "导入资料",
   "library.importHint":
-    "支持 PDF 和 UTF-8 文本、Markdown、CSV、JSON、常见代码。单个文件最多 5 MB；PDF 最多 100 页。",
+    "支持 PDF、UTF-8 文本、常见代码，以及 Word、PowerPoint 和图片原件。单个文件最多 5 MB；解析最多 100 页。",
   "library.file": "选择文件",
   "library.destination": "保存到",
-  "library.localHint": "本地关键词索引，不调用模型。扫描 PDF 暂不支持文字识别。",
+  "library.localHint": "默认在本地提取文字并建立关键词索引。云端 OCR 需要单独确认。",
+  "library.ocr.localHint":
+    "上传只保留原件并尝试本地解析。Word、PowerPoint、图片或扫描 PDF 可在保存后单独确认使用 DeepSeek OCR。",
+  "library.ocr.required": "原件已保存，需要云端文字识别后才能检索。",
+  "library.ocr.action": "使用 DeepSeek OCR",
+  "library.ocr.title": "使用 DeepSeek 识别文字",
+  "library.ocr.description":
+    "将整份原件发送至 DeepSeek 官方 API，按成功识别页数计费（当前每千页 1.5 元）。识别后的文字会保存在此资料库，原件继续保留。",
+  "library.ocr.consent": "我同意将这份原件上传至 DeepSeek，并承担本次识别费用。",
+  "library.ocr.confirm": "上传并识别文字",
+  "library.ocr.working": "正在识别文字…",
+  "library.ocr.noText": "正文尚不可用。可下载原件；需要文字识别时，在更多菜单中选择 DeepSeek OCR。",
   "library.search": "检索资料",
   "library.searchPlaceholder": "输入关键词检索当前范围…",
   "library.searchResults": "匹配片段",
@@ -1992,9 +2003,25 @@ const libraryLabels = {
   "library.errors.fileLimit": "请选择非空文件，单个文件最多 5 MB。",
   "library.errors.storageLimit": "资料已达上限（100 份或原件合计 50 MB），请先删除不需要的资料。",
   "library.errors.questionLimit": "已保存 200 条问答记录，请先删除不需要的记录，聊天会保留。",
-  "library.errors.file": "文件名无效或类型暂不支持，请选择 PDF 或常见文本文件。",
+  "library.errors.file":
+    "文件名无效或类型暂不支持，请选择 PDF、常见文本、Word、PowerPoint 或图片。",
   "library.errors.encoding": "文件不是有效的 UTF-8 文本，或包含二进制字符，请转换后重试。",
-  "library.errors.empty": "没有提取到文字。扫描 PDF 暂不支持识别，原件已保留。",
+  "library.errors.empty": "没有提取到文字，原件已保留。扫描件可在更多菜单中选择 DeepSeek OCR。",
+  "library.errors.ocrKeyRequired": "请先在 Agent 设置中保存 DeepSeek 工具 API Key，再重试。",
+  "library.errors.ocrKeyInvalid":
+    "DeepSeek 工具密钥无效或无权调用，请在 Agent 设置中检查密钥。原件已保留。",
+  "library.errors.ocrReady": "这份资料已有可检索正文，无需再次付费识别。",
+  "library.errors.ocrFormat":
+    "这份资料的格式不支持 OCR，请转换为 PDF、Word、PowerPoint 或支持的图片。",
+  "library.errors.ocrTimeout":
+    "识别超时，原件已保留。远端可能仍在处理，请先核对 DeepSeek 用量后再手动重试。",
+  "library.errors.ocrIncomplete": "识别结果不完整，本次未建立索引。原件已保留，可拆分文件后重试。",
+  "library.errors.ocrBalance": "DeepSeek 账号余额不足，请充值后重试。原件已保留。",
+  "library.errors.ocrBusy": "DeepSeek 识别请求过多，请稍后再试。原件已保留。",
+  "library.errors.ocrUnavailable": "DeepSeek 识别服务暂不可用，请稍后重试。原件已保留。",
+  "library.errors.ocrPassword": "文件设有打开密码，请移除密码后重新导入。原件已保留。",
+  "library.errors.ocrLeaseExpired": "这次识别已过期，返回结果未覆盖资料。请刷新后核对状态。",
+  "library.errors.ocrFailed": "文字识别未完成，原件已保留。请检查文件或稍后手动重试。",
   "library.errors.textLimit":
     "提取文字超出上限（单份 2 MB、合计 25 MB 或 1000 个片段），原件已保留。",
   "library.errors.pdfLimit": "PDF 超过 100 页，原件已保留。请拆分后重新导入。",

@@ -31,6 +31,7 @@ import { useLibraryStore } from "../../stores/libraryStore";
 import { useProjectStore } from "../../stores/projectStore";
 import { reviewSelectClass } from "../workbench/reviews/ReviewImportDialog";
 import { LibraryHistoryDialog } from "./LibraryHistoryDialog";
+import { LibraryOcrDialog } from "./LibraryOcrDialog";
 import { LibraryQuestionDialog } from "./LibraryQuestionDialog";
 import { LibraryUploadDialog } from "./LibraryUploadDialog";
 
@@ -64,7 +65,7 @@ function LibrarySession({ userId }: { userId: string }) {
     [error, setError] = useState(""),
     [listError, setListError] = useState(""),
     [notice, setNotice] = useState("");
-  const [dialog, setDialog] = useState<"upload" | "question" | "history" | null>(null),
+  const [dialog, setDialog] = useState<"upload" | "question" | "history" | "ocr" | null>(null),
     [deleting, setDeleting] = useState(false),
     [refresh, setRefresh] = useState(0);
   const live = useRef(false),
@@ -95,6 +96,7 @@ function LibrarySession({ userId }: { userId: string }) {
       revision === useLibraryStore.getState().navigationRevision;
   };
   const choose = (id: string, match: LibrarySearchResult | null = null) => {
+    setDialog((current) => (current === "ocr" ? null : current));
     epoch.current++;
     const target = useLibraryStore.getState().target;
     if (target) useLibraryStore.getState().clearTarget(target.token);
@@ -289,11 +291,13 @@ function LibrarySession({ userId }: { userId: string }) {
     }
   };
   const status = (row: LibraryDocument) =>
-    label(
-      row.status === "indexing" && row.canIndex
-        ? "library.status.expired"
-        : `library.status.${row.status}`,
-    );
+    row.errorCode === "library_cloud_required"
+      ? label("library.ocr.required")
+      : label(
+          row.status === "indexing" && row.canIndex
+            ? "library.status.expired"
+            : `library.status.${row.status}`,
+        );
   const openDialog = (value: typeof dialog) => {
     setError("");
     setDialog(value);
@@ -328,7 +332,10 @@ function LibrarySession({ userId }: { userId: string }) {
                     <MoreHorizontal size={17} />
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
+                <DropdownMenuContent
+                  align="end"
+                  className="bg-card text-foreground [&_[role=menuitem]]:focus:bg-accent [&_[role=menuitem]]:focus:text-accent-foreground"
+                >
                   <DropdownMenuItem
                     disabled={scope.kind === "all"}
                     onSelect={() => openDialog("question")}
@@ -366,6 +373,18 @@ function LibrarySession({ userId }: { userId: string }) {
                       >
                         {label("library.index")}
                       </DropdownMenuItem>
+                      {document.canOcr &&
+                        document.status !== "ready" &&
+                        label("library.ocr.action") && (
+                          <DropdownMenuItem
+                            onSelect={() => {
+                              setError("");
+                              setDialog("ocr");
+                            }}
+                          >
+                            {label("library.ocr.action")}
+                          </DropdownMenuItem>
+                        )}
                       <DropdownMenuItem
                         className="text-destructive"
                         onSelect={() => setDeleting(true)}
@@ -608,7 +627,9 @@ function LibrarySession({ userId }: { userId: string }) {
                         </pre>
                       </details>
                     ) : (
-                      <p className="text-sm text-muted-foreground">{label("library.noText")}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {label(document.canOcr ? "library.ocr.noText" : "library.noText")}
+                      </p>
                     )}
                   </>
                 ) : (
@@ -616,6 +637,28 @@ function LibrarySession({ userId }: { userId: string }) {
                 )}
               </section>
             </div>
+          )}
+          {dialog === "ocr" && document && (
+            <LibraryOcrDialog
+              key={document.id}
+              document={document}
+              errorMessage={error}
+              onClose={() => setDialog(null)}
+              onConfirm={() =>
+                act(async (valid) => {
+                  const result = await libraryApi.ocr(document.id);
+                  if (!valid()) return;
+                  setDocument((current) =>
+                    current?.id === result.document.id
+                      ? { ...current, ...result.document }
+                      : current,
+                  );
+                  reload();
+                  if (result.document.status !== "ready")
+                    throw new LibraryApiError(result.document.errorCode ?? "library_ocr_failed");
+                })
+              }
+            />
           )}
           {dialog === "upload" && scope.kind !== "all" && (
             <LibraryUploadDialog

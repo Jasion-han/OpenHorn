@@ -49,6 +49,8 @@ export const libraryApi = {
   },
   index: (documentId: string) =>
     request<{ document: LibraryDocument }>(`/${id(documentId)}/index`, "POST"),
+  ocr: (documentId: string) =>
+    request<{ document: LibraryDocument }>(`/${id(documentId)}/ocr`, "POST"),
   delete: (documentId: string, expectedRevision: number) =>
     request<{ success: boolean }>(`/${id(documentId)}`, "DELETE", { expectedRevision }),
   search: (scope: LibraryFilter, query: string) =>
@@ -77,6 +79,32 @@ export const libraryApi = {
 export function libraryError(error: unknown): string {
   const code = error instanceof LibraryApiError ? error.code : "library_unavailable";
   switch (code) {
+    case "library_cloud_required":
+      return label("library.ocr.required");
+    case "library_ocr_key_required":
+      return label("library.errors.ocrKeyRequired");
+    case "library_ocr_key_invalid":
+      return label("library.errors.ocrKeyInvalid");
+    case "library_ocr_ready":
+      return label("library.errors.ocrReady");
+    case "library_ocr_format":
+      return label("library.errors.ocrFormat");
+    case "library_ocr_timeout":
+      return label("library.errors.ocrTimeout");
+    case "library_ocr_incomplete":
+      return label("library.errors.ocrIncomplete");
+    case "library_ocr_balance":
+      return label("library.errors.ocrBalance");
+    case "library_ocr_busy":
+      return label("library.errors.ocrBusy");
+    case "library_ocr_unavailable":
+      return label("library.errors.ocrUnavailable");
+    case "library_ocr_password":
+      return label("library.errors.ocrPassword");
+    case "library_ocr_lease_expired":
+      return label("library.errors.ocrLeaseExpired");
+    case "library_ocr_failed":
+      return label("library.errors.ocrFailed");
     case "library_invalid_scope":
       return label("library.errors.scope");
     case "library_file_limit":

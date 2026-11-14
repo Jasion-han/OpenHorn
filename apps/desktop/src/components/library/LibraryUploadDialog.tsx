@@ -115,7 +115,7 @@ export function LibraryUploadDialog({
               </p>
             )}
           </div>
-          <p className="text-xs text-muted-foreground">{label("library.localHint")}</p>
+          <p className="text-xs text-muted-foreground">{label("library.ocr.localHint")}</p>
           {(error || errorMessage) && (
             <p role="alert" className="text-sm text-destructive">
               {error || errorMessage}

@@ -7,12 +7,13 @@ import {
   libraryQuestions,
   projects,
 } from "db";
-import { and, desc, eq, getTableColumns, sql } from "drizzle-orm";
+import { and, desc, eq, getTableColumns, gt, lte, sql } from "drizzle-orm";
 import {
   LIBRARY_LIMITS,
   LIBRARY_SYSTEM_PROMPT,
   libraryFileType,
   libraryKeywords,
+  libraryOcrFileType,
   libraryQuestionPayload,
   libraryScopeKey,
   packLibrarySources,
@@ -31,7 +32,13 @@ import { db } from "../db";
 import { generateId } from "../utils";
 import { getChannelById, resolveModelIdFromChannelItem } from "./channelService";
 import { chunkText } from "./chunkingService";
-import { LibraryParseError, parseLibraryOriginal } from "./libraryParser";
+import { requestLibraryOcr } from "./libraryOcr";
+import {
+  LibraryParseError,
+  parseLibraryOriginal,
+  validateLibraryOcrOriginal,
+} from "./libraryParser";
+import { getSettingValues } from "./settingsService";
 
 export class LibraryError extends Error {
   constructor(
@@ -117,6 +124,10 @@ function documentItem(row: Omit<Row, "originalBase64" | "textContent">): Library
     revision: row.revision,
     canIndex:
       row.status !== "indexing" || !row.leaseUntil || row.leaseUntil.getTime() <= Date.now(),
+    canOcr:
+      libraryOcrFileType(row.fileType) &&
+      row.status !== "ready" &&
+      (row.status !== "indexing" || !row.leaseUntil || row.leaseUntil.getTime() <= Date.now()),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -247,14 +258,57 @@ export async function uploadLibraryDocument(
 export async function indexLibraryDocument(
   userId: string,
   id: string,
-  parser = parseLibraryOriginal,
+  parser: (
+    bytes: Buffer,
+    fileType: string,
+    expectedPages?: number,
+  ) => Promise<string> = parseLibraryOriginal,
+  options: { cloudOcr?: boolean } = {},
 ): Promise<LibraryDocument> {
-  const token = generateId();
+  const token = `${options.cloudOcr ? "ocr:" : ""}${generateId()}`;
   const claimed = await libraryTransaction(async (tx) => {
     const [row] = await tx.select().from(libraryDocuments).where(ownedWhere(userId, id)).limit(1);
     if (!row) throw new LibraryError("library_not_found", 404);
+    if (options.cloudOcr && row.status === "ready")
+      throw new LibraryError("library_ocr_ready", 409);
     if (row.status === "indexing" && row.leaseUntil && row.leaseUntil.getTime() > Date.now())
       throw new LibraryError("library_index_busy", 409);
+    let ocrPageCount: number | undefined;
+    if (options.cloudOcr) {
+      if (!row.fileSize || row.fileSize > LIBRARY_LIMITS.fileBytes)
+        throw new LibraryError("library_file_limit", 413);
+      const original = Buffer.from(row.originalBase64, "base64");
+      if (original.length !== row.fileSize || hash(original) !== row.sha256)
+        throw new LibraryError("library_ocr_format");
+      try {
+        ocrPageCount = await validateLibraryOcrOriginal(original, row.fileType);
+      } catch (error) {
+        if (error instanceof LibraryParseError) throw new LibraryError(error.code);
+        throw error;
+      }
+      // Serialize paid operations per user, also across server processes sharing SQLite.
+      const [active] = await tx
+        .select({ id: libraryDocuments.id })
+        .from(libraryDocuments)
+        .where(
+          and(
+            eq(libraryDocuments.userId, userId),
+            eq(libraryDocuments.status, "indexing"),
+            gt(libraryDocuments.leaseUntil, new Date()),
+            sql`${libraryDocuments.indexToken} like 'ocr:%'`,
+          ),
+        )
+        .limit(1);
+      if (active) throw new LibraryError("library_ocr_busy", 409);
+      const [quota] = await tx
+        .select({
+          bytes: sql<number>`coalesce(sum(length(cast(${libraryDocuments.textContent} as blob))),0)`,
+        })
+        .from(libraryDocuments)
+        .where(and(eq(libraryDocuments.userId, userId), sql`${libraryDocuments.id} <> ${id}`));
+      if (Number(quota.bytes) >= LIBRARY_LIMITS.totalTextBytes)
+        throw new LibraryError("library_text_limit", 413);
+    }
     const [updated] = await tx
       .update(libraryDocuments)
       .set({
@@ -262,13 +316,15 @@ export async function indexLibraryDocument(
         errorCode: null,
         indexToken: token,
         revision: row.revision + 1,
-        leaseUntil: new Date(Date.now() + LIBRARY_LIMITS.leaseMs),
+        leaseUntil: new Date(
+          Date.now() + (options.cloudOcr ? LIBRARY_LIMITS.ocrLeaseMs : LIBRARY_LIMITS.leaseMs),
+        ),
         updatedAt: new Date(),
       })
       .where(and(ownedWhere(userId, id), eq(libraryDocuments.revision, row.revision)))
       .returning();
     if (!updated) throw new LibraryError("library_conflict", 409);
-    return updated;
+    return { ...updated, ocrPageCount };
   });
   const guard = and(
     ownedWhere(userId, id),
@@ -276,17 +332,23 @@ export async function indexLibraryDocument(
     eq(libraryDocuments.indexToken, token),
   );
   try {
-    const text = await parser(Buffer.from(claimed.originalBase64, "base64"), claimed.fileType);
+    const text = await parser(
+      Buffer.from(claimed.originalBase64, "base64"),
+      claimed.fileType,
+      claimed.ocrPageCount,
+    );
     if (!text.trim()) throw new LibraryParseError("library_empty_text");
     if (utf8Bytes(text) > LIBRARY_LIMITS.textBytes)
       throw new LibraryParseError("library_text_limit");
     const chunks = chunkText(text, claimed.fileName);
     if (chunks.length > LIBRARY_LIMITS.chunks) throw new LibraryParseError("library_text_limit");
     await libraryTransaction(async (tx) => {
+      // Evaluate the lease when committing, not when the claim or HTTP request starts.
+      const commitGuard = and(guard, gt(libraryDocuments.leaseUntil, new Date()));
       const [active] = await tx
         .select({ id: libraryDocuments.id })
         .from(libraryDocuments)
-        .where(guard)
+        .where(commitGuard)
         .limit(1);
       if (!active) throw new LibraryError("library_conflict", 409);
       const [quota] = await tx
@@ -308,7 +370,7 @@ export async function indexLibraryDocument(
           leaseUntil: null,
           updatedAt: new Date(),
         })
-        .where(guard);
+        .where(and(guard, gt(libraryDocuments.leaseUntil, new Date())));
       if (updated.rowsAffected !== 1) throw new LibraryError("library_conflict", 409);
       await tx.delete(libraryChunks).where(eq(libraryChunks.documentId, id));
       // Keep statements under SQLite's bound-variable limit.
@@ -324,7 +386,28 @@ export async function indexLibraryDocument(
         );
     });
   } catch (error) {
-    if (error instanceof LibraryError) throw error;
+    if (error instanceof LibraryError) {
+      if (options.cloudOcr && error.code === "library_conflict") {
+        // An expired claim with no successor is a visible failure, never a successful late write.
+        await libraryTransaction(async (tx) => {
+          const failed = await tx
+            .update(libraryDocuments)
+            .set({
+              status: "failed",
+              errorCode: "library_ocr_lease_expired",
+              textContent: "",
+              chunkCount: 0,
+              indexToken: null,
+              leaseUntil: null,
+              updatedAt: new Date(),
+            })
+            .where(and(guard, lte(libraryDocuments.leaseUntil, new Date())));
+          if (failed.rowsAffected === 1)
+            await tx.delete(libraryChunks).where(eq(libraryChunks.documentId, id));
+        });
+      }
+      throw error;
+    }
     const code = error instanceof LibraryParseError ? error.code : "library_parse_failed";
     await libraryTransaction(async (tx) => {
       const result = await tx
@@ -339,11 +422,28 @@ export async function indexLibraryDocument(
           updatedAt: new Date(),
         })
         .where(guard);
-      if (result.rowsAffected === 1)
-        await tx.delete(libraryChunks).where(eq(libraryChunks.documentId, id));
+      if (result.rowsAffected !== 1) throw new LibraryError("library_conflict", 409);
+      await tx.delete(libraryChunks).where(eq(libraryChunks.documentId, id));
     });
   }
   return getLibraryDocument(userId, id);
+}
+export async function ocrLibraryDocument(userId: string, id: string): Promise<LibraryDocument> {
+  // Ownership is checked before credentials; the claim repeats all mutable eligibility checks.
+  await getLibraryDocument(userId, id);
+  const values = await getSettingValues(userId, ["deepseek.toolsApiKey"]);
+  const apiKey = values["deepseek.toolsApiKey"]?.trim();
+  if (!apiKey) throw new LibraryError("library_ocr_key_required");
+  return indexLibraryDocument(
+    userId,
+    id,
+    async (bytes, fileType, expectedPages) => {
+      // Fetch the immutable owned filename; a deletion here fails without an upstream request.
+      const original = await getLibraryOriginal(userId, id);
+      return requestLibraryOcr(bytes, original.fileName, fileType, apiKey, expectedPages);
+    },
+    { cloudOcr: true },
+  );
 }
 export async function deleteLibraryDocument(userId: string, id: string, revision: number) {
   const result = await db

@@ -12,6 +12,8 @@ export interface LibraryDocument {
   chunkCount: number;
   revision: number;
   canIndex: boolean;
+  /** Explicit cloud operation only; never inferred as permission during upload/index. */
+  canOcr?: boolean;
   createdAt: string;
   updatedAt: string;
 }
