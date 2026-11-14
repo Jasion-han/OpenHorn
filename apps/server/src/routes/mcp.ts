@@ -4,6 +4,7 @@ import {
   deleteMCPServer,
   getMCPServerById,
   getMCPServers,
+  McpInvalidConfigError,
   testMCPServer,
   updateMCPServer,
 } from "../services/mcpService";
@@ -44,6 +45,7 @@ mcp.post("/servers", async (c) => {
     return c.json(
       {
         error: error instanceof Error ? error.message : "Failed to create server",
+        ...(error instanceof McpInvalidConfigError ? { errorCode: error.code } : {}),
       },
       400,
     );
@@ -62,7 +64,13 @@ mcp.put("/servers/:id", async (c) => {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to update MCP server";
     const status = message === "MCP Server not found" ? 404 : 400;
-    return c.json({ error: message }, status);
+    return c.json(
+      {
+        error: message,
+        ...(error instanceof McpInvalidConfigError ? { errorCode: error.code } : {}),
+      },
+      status,
+    );
   }
 });
 

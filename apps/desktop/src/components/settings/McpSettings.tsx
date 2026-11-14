@@ -186,6 +186,14 @@ export function McpSettings() {
       return;
     }
 
+    if (!parsedConfig || typeof parsedConfig !== "object" || Array.isArray(parsedConfig)) {
+      notifyError(
+        getMcpLabel("settings.mcp.invalidConfigTitle"),
+        getMcpLabel("settings.mcp.invalidConfigObject"),
+      );
+      return;
+    }
+
     setLoading(true);
     try {
       await api.mcp.createServer({
@@ -288,6 +296,13 @@ export function McpSettings() {
       parsedConfig = JSON.parse(editConfig);
     } catch {
       notifyError("配置错误", "MCP config 必须是合法 JSON。");
+      return;
+    }
+    if (!parsedConfig || typeof parsedConfig !== "object" || Array.isArray(parsedConfig)) {
+      notifyError(
+        getMcpLabel("settings.mcp.invalidConfigTitle"),
+        getMcpLabel("settings.mcp.invalidConfigObject"),
+      );
       return;
     }
     setEditSaving(true);

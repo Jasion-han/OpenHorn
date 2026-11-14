@@ -2,6 +2,7 @@ import { mcpServers } from "db";
 import { and, eq } from "drizzle-orm";
 import { db } from "../db";
 import { generateId } from "../utils";
+import { isRecord } from "../utils/typeGuards";
 
 type McpServerRow = typeof mcpServers.$inferSelect;
 
@@ -31,6 +32,15 @@ export interface UpdateMCPServerInput {
   name?: string;
   config?: Record<string, unknown>;
   isEnabled?: boolean;
+}
+
+export class McpInvalidConfigError extends Error {
+  readonly code = "mcp_invalid_config";
+
+  constructor() {
+    super("MCP config must be a JSON object");
+    this.name = "McpInvalidConfigError";
+  }
 }
 
 function parseConfig(config: string): Record<string, unknown> {
@@ -81,6 +91,7 @@ export async function createMCPServer(
   userId: string,
   input: CreateMCPServerInput,
 ): Promise<MCPServerItem> {
+  if (!isRecord(input) || !isRecord(input.config)) throw new McpInvalidConfigError();
   const id = generateId();
   const now = new Date();
   const importedFrom =
@@ -131,12 +142,17 @@ export async function updateMCPServer(
     throw new Error("MCP Server not found");
   }
 
+  // Keep the ownership 404 above; invalid supplied configs must never reach a write.
+  if (!isRecord(input) || (Object.hasOwn(input, "config") && !isRecord(input.config))) {
+    throw new McpInvalidConfigError();
+  }
+
   const updates: Record<string, unknown> = {
     updatedAt: new Date(),
   };
 
   if (input.name) updates.name = input.name;
-  if (input.config) updates.config = JSON.stringify(input.config);
+  if (Object.hasOwn(input, "config")) updates.config = JSON.stringify(input.config);
   if (input.isEnabled !== undefined) updates.isEnabled = input.isEnabled;
 
   await db

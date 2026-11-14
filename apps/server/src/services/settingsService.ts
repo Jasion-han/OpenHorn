@@ -6,20 +6,20 @@ import { decrypt, encrypt, generateId } from "../utils";
 const TOOLS_KEY = "deepseek.toolsApiKey";
 
 export async function getSettingValues(userId: string, keys: string[]) {
-  if (!Array.isArray(keys) || keys.length === 0) return {};
+  const out: Record<string, string> = Object.create(null);
+  if (!Array.isArray(keys) || keys.length === 0) return out;
 
   const normalizedKeys = keys
     .map((k) => (typeof k === "string" ? k.trim() : ""))
     .filter((k) => k.length > 0);
 
-  if (normalizedKeys.length === 0) return {};
+  if (normalizedKeys.length === 0) return out;
 
   const rows = await db
     .select()
     .from(settings)
     .where(and(eq(settings.userId, userId), inArray(settings.key, normalizedKeys)));
 
-  const out: Record<string, string> = {};
   for (const row of rows) {
     out[row.key] = row.key === TOOLS_KEY ? decrypt(row.value) : row.value;
   }

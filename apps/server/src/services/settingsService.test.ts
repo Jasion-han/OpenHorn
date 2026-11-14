@@ -4,6 +4,41 @@ import { and, eq } from "drizzle-orm";
 import { db } from "../db";
 import { deleteSettingValue, getSettingValues, setSettingValue } from "./settingsService";
 
+test("settings dictionaries preserve special keys and have no inherited values", async () => {
+  const userId = crypto.randomUUID();
+  await db.insert(users).values({
+    id: userId,
+    email: `${userId}@test.local`,
+    username: "special-keys",
+    passwordHash: "unused",
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
+  const keys = ["__proto__", "constructor", "toString"];
+  try {
+    for (const key of keys) await setSettingValue(userId, key, `value:${key}`);
+    const values = await getSettingValues(userId, keys);
+    expect(Object.getPrototypeOf(values)).toBe(null);
+    for (const key of keys) {
+      expect(Object.hasOwn(values, key)).toBe(true);
+      expect(values[key]).toBe(`value:${key}`);
+    }
+    expect(JSON.parse(JSON.stringify(values))).toEqual(
+      Object.fromEntries(keys.map((key) => [key, `value:${key}`])),
+    );
+    for (const requested of [[], ["  "], ["missing"]]) {
+      const empty = await getSettingValues(userId, requested);
+      expect(Object.getPrototypeOf(empty)).toBe(null);
+      expect(Object.keys(empty)).toEqual([]);
+      expect(empty.constructor).toBeUndefined();
+    }
+    expect(Object.keys(await getSettingValues("other-user", keys))).toEqual([]);
+  } finally {
+    for (const key of keys) await deleteSettingValue(userId, key);
+    await db.delete(users).where(eq(users.id, userId));
+  }
+});
+
 test("DeepSeek tools credentials are encrypted at rest, isolated and validated", async () => {
   const previousKey = process.env.ENCRYPTION_KEY;
   process.env.ENCRYPTION_KEY = "deepseek-tools-settings-synthetic-key";

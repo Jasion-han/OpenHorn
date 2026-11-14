@@ -77,7 +77,7 @@ export async function resolveEnabledMcpServers(
   targetMcpServer?: string,
 ): Promise<Record<string, Record<string, unknown>> | undefined> {
   const { servers } = await api.mcp.listServers();
-  const map: Record<string, Record<string, unknown>> = {};
+  const map: Record<string, Record<string, unknown>> = Object.create(null);
   for (const server of (servers || []) as Array<{
     name: string;
     type: string;
@@ -91,7 +91,11 @@ export async function resolveEnabledMcpServers(
   const target = targetMcpServer?.trim().toLowerCase();
   if (mcpServers && target) {
     const hit = Object.entries(mcpServers).find(([name]) => name.toLowerCase() === target);
-    if (hit) mcpServers = { [hit[0]]: hit[1] };
+    if (hit) {
+      const selected: Record<string, Record<string, unknown>> = Object.create(null);
+      selected[hit[0]] = hit[1];
+      mcpServers = selected;
+    }
   }
   return mcpServers;
 }

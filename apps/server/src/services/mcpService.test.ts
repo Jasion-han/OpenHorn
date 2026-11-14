@@ -3,7 +3,64 @@ import { mcpServers, users } from "db";
 import { and, eq } from "drizzle-orm";
 import { db } from "../db";
 import { bootstrapDatabase } from "../db/bootstrap";
-import { createMCPServer, deleteMCPServer, getMCPServerById, getMCPServers } from "./mcpService";
+import {
+  type CreateMCPServerInput,
+  createMCPServer,
+  deleteMCPServer,
+  getMCPServerById,
+  getMCPServers,
+  type UpdateMCPServerInput,
+  updateMCPServer,
+} from "./mcpService";
+
+test("MCP service rejects non-object configs before writes and keeps owner checks", async () => {
+  const userId = crypto.randomUUID();
+  await db.insert(users).values({
+    id: userId,
+    email: `${userId}@test.local`,
+    username: "config-contract",
+    passwordHash: "unused",
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
+  try {
+    const owned = await createMCPServer(userId, {
+      name: "original",
+      type: "stdio",
+      config: { command: "openhorn-qa-do-not-execute" },
+    });
+    const original = await db.select().from(mcpServers).where(eq(mcpServers.userId, userId));
+    for (const config of [null, [], "scalar", 42, false, undefined]) {
+      await expect(
+        createMCPServer(userId, {
+          name: "invalid",
+          type: "stdio",
+          config,
+        } as unknown as CreateMCPServerInput),
+      ).rejects.toMatchObject({ code: "mcp_invalid_config" });
+      await expect(
+        updateMCPServer(userId, owned.id, {
+          name: "must-not-write",
+          config,
+        } as unknown as UpdateMCPServerInput),
+      ).rejects.toMatchObject({ code: "mcp_invalid_config" });
+      expect(await db.select().from(mcpServers).where(eq(mcpServers.userId, userId))).toEqual(
+        original,
+      );
+    }
+    await expect(
+      updateMCPServer("other-user", owned.id, { config: null } as unknown as UpdateMCPServerInput),
+    ).rejects.toThrow("MCP Server not found");
+    await updateMCPServer(userId, owned.id, { config: {}, isEnabled: false });
+    expect(await getMCPServerById(userId, owned.id)).toMatchObject({
+      config: {},
+      isEnabled: false,
+    });
+  } finally {
+    await db.delete(mcpServers).where(eq(mcpServers.userId, userId));
+    await db.delete(users).where(eq(users.id, userId));
+  }
+});
 
 test("mcp: user isolation (account-level)", async () => {
   await bootstrapDatabase();

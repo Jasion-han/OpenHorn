@@ -208,6 +208,8 @@ export function formatSkillLabel(
  * this dictionary only covers the surrounding user-facing copy.
  */
 export const mcpLabels = {
+  "settings.mcp.invalidConfigTitle": "配置格式错误",
+  "settings.mcp.invalidConfigObject": "MCP 配置必须是 JSON 对象，不能是 null、数组或文本。",
   "settings.mcp.test": "测试",
   "settings.mcp.testAll": "全部测试",
   "settings.mcp.testingAll": "测试中…",
