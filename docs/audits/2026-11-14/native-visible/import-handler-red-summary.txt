@@ -1,0 +1,6 @@
+(pass) failed import preserves structured feedback and releases its submission guard [0.57ms]
+ 1 pass
+ 2 fail
+ 6 expect() calls
+Ran 3 tests across 1 file. [116.00ms]
+ ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command failed with exit code 1: bun --no-env-file test src/components/settings/import/BackupFileImportRow.lifecycle.test.ts

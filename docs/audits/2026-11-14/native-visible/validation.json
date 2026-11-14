@@ -1,0 +1,51 @@
+{
+  "status": "code_verified_native_partial",
+  "nativeWindowObserved": true,
+  "nativeActionGroupsRecorded": 46,
+  "note": "Action groups are chronological observations, not an all-pass test count.",
+  "finalInlineConfirmationVisuallyObserved": true,
+  "finalInlineCancelObserved": true,
+  "finalGuiRestoreExecuted": false,
+  "nativeRepeatedImportCompleted": false,
+  "pickerFilterExperiment": "no improvement; reverted byte-for-byte, not shipped",
+  "checks": {
+    "desktopBun": {
+      "pass": 681,
+      "fail": 0
+    },
+    "importHandlerBaseline": {
+      "pass": 1,
+      "fail": 2
+    },
+    "importHandlerCandidate": {
+      "pass": 3,
+      "fail": 0
+    },
+    "typecheck": "passed",
+    "biome": "passed",
+    "nativeDebugBundle": "passed, unsigned local QA only"
+  },
+  "unchangedPriorBaseline": {
+    "sharedAdapters": 171,
+    "server": 542,
+    "sidecar": 344,
+    "rust": 52,
+    "rerunThisPhase": false
+  },
+  "nativeAppSha256": "85f7b7afa93a5a24d2c9a838e320b7e75ee8d9966003f9a47365df0863192df7",
+  "confirmationScope": {
+    "conversationId": "a5291abe-d489-4d90-bacf-b92b21f793a4",
+    "runId": "direct-1794640487771-z9sy01",
+    "files": ["qa.txt"],
+    "currentSha256": "c2db6f60058dab6dc5a6d06a9ea315b8319053d66ce182221c8d8e80126d7d28",
+    "expectedRestoredSha256": "b3f859ccf0bfb7839472b2f450c62e71e952963e916323049f80e9e8fd8a7cea",
+    "currentLines": 4,
+    "expectedRestoredLines": 3,
+    "finalGuiRestoreExecuted": false
+  },
+  "remaining": [
+    "Explicit confirmation is required before the agent clicks native restore and removes the generated final marker.",
+    "Repeated native ZIP selection needs manual review because Open stayed disabled; filter removal did not resolve it.",
+    "Real DeepSeek paid quality/billing, actual IME selection, automatic schedules and destructive GUI cases were not executed."
+  ]
+}

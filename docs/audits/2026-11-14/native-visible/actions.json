@@ -1,0 +1,238 @@
+{
+  "native": true,
+  "app": "com.openhorn.nativeqa",
+  "started": "2026-11-14T13:29:54.592667",
+  "records": [
+    {
+      "id": "window",
+      "observation": "独立QA应用原生窗口可见，tauri://localhost，无锁屏阻塞",
+      "status": "passed"
+    },
+    {
+      "id": "model-dialog",
+      "observation": "打开模型弹窗，查看选中渠道/模型，Escape关闭",
+      "status": "passed"
+    },
+    {
+      "id": "chat-mode",
+      "observation": "展开模式菜单切换Chat，关闭联网，输入合成中文消息",
+      "status": "passed"
+    },
+    {
+      "id": "chat-send",
+      "observation": "原生点击发送，看到正在生成及最终NATIVE_DESKTOP_QA_OK/usage",
+      "status": "passed"
+    },
+    {
+      "id": "chat-edit",
+      "observation": "原生编辑用户消息并确认，切资料库再返回，最终NATIVE_DESKTOP_EDIT_OK",
+      "status": "passed"
+    },
+    {
+      "id": "chat-retry",
+      "observation": "原生点击重新生成，看到busy/Stop状态，等待后继续其他页面",
+      "status": "observed_busy"
+    },
+    {
+      "id": "account-save",
+      "observation": "通用页修改合成用户名并点击保存无操作；源代码Button没有onClick",
+      "status": "bug_confirmed"
+    },
+    {
+      "id": "response-select",
+      "observation": "实际展开默认/选中菜单，Down键聚焦仅文字，Escape取消；浅色可读",
+      "status": "passed"
+    },
+    {
+      "id": "mcp-create-invalid",
+      "observation": "原生新建输入null，显示配置格式错误，草稿保留",
+      "status": "passed"
+    },
+    {
+      "id": "mcp-create",
+      "observation": "合成/usr/bin/true对象创建成功，立即禁用，未执行MCP测试命令",
+      "status": "passed"
+    },
+    {
+      "id": "mcp-edit-invalid",
+      "observation": "修改输入数组[]，显示错误，取消后原条目保持禁用",
+      "status": "passed"
+    },
+    {
+      "id": "search-source",
+      "observation": "原生展开来源菜单，End/Return选DuckDuckGo，保存显示工具设置已保存",
+      "status": "passed"
+    },
+    {
+      "id": "library-native-picker",
+      "observation": "实际打开macOS文件选择器并取消，导入按钮保持禁用，无残留busy",
+      "status": "passed"
+    },
+    {
+      "id": "library-capabilities",
+      "observation": "图片原件显示云端解析提示；更多菜单本地重建禁用，OCR可用；文本本地重建可用",
+      "status": "passed"
+    },
+    {
+      "id": "ocr-cancel",
+      "observation": "实际打开OCR显式确认，费用与传输说明可见，未勾选时提交禁用；取消未发云端请求",
+      "status": "passed"
+    },
+    {
+      "id": "library-search",
+      "observation": "原生输入ORCHARD检索到1个实际片段并打开正文",
+      "status": "passed"
+    },
+    {
+      "id": "library-ask",
+      "observation": "准备资料问题草稿，实际发送后模型回答ORCHARD-42并引用native-qa-notes.txt",
+      "status": "passed"
+    },
+    {
+      "id": "project-picker",
+      "observation": "原生选择生成的workspace目录并添加项目，点击项目进入项目范围欢迎页",
+      "status": "passed"
+    },
+    {
+      "id": "agent-read",
+      "observation": "原生发送只读任务，真实read_file读取专用qa.txt，步骤展开显示路径与marker",
+      "status": "passed"
+    },
+    {
+      "id": "agent-write",
+      "observation": "明确授权局部追加，原生显示Read/Write/Read与DONE，实际文件含追加marker",
+      "status": "passed"
+    },
+    {
+      "id": "checkpoint-entry",
+      "observation": "写文件后没有回滚UI；代码确认hook暴露了rollbackLast但无组件使用",
+      "status": "bug_confirmed"
+    },
+    {
+      "id": "import-error",
+      "observation": "原生选择损坏的合成ZIP，显示重新导出的中文错误提示",
+      "status": "passed"
+    },
+    {
+      "id": "settings-save-offline",
+      "observation": "只停止独立QA后端后点击保存，页面显示全局offline但无字段保存错误；后端已恢复",
+      "status": "bug_confirmed"
+    },
+    {
+      "id": "account-reload",
+      "observation": "离开设置再返回，之前点保存的合成用户名恢复han，证实保存入口无效",
+      "status": "bug_confirmed"
+    },
+    {
+      "id": "artifact-save",
+      "observation": "真实合成回复收藏为Native QA saved reply，在工作台成果页显示版本1和原正文",
+      "status": "passed"
+    },
+    {
+      "id": "workbench-review",
+      "observation": "评论分析页空状态、CSV入口和数据传输说明可见",
+      "status": "passed"
+    },
+    {
+      "id": "schedule-form",
+      "observation": "打开新任务菜单与手动表单，默认自动启用提示清楚，必填未填时保存禁用；取消未建任务",
+      "status": "passed"
+    },
+    {
+      "id": "window-zoom",
+      "observation": "实际执行macOS zoom，截图显示窗口尺寸变化后布局保持正常",
+      "status": "passed"
+    },
+    {
+      "id": "window-drag",
+      "observation": "执行标题区域拖拽操作，窗口继续正常；AX不提供窗口坐标，未独立确认位移",
+      "status": "observed_only"
+    },
+    {
+      "id": "settings-offline-fixed",
+      "observation": "新包显示保存失败字段提示；切页、重连后保留草稿，重试显示系统提示词已更新",
+      "status": "passed"
+    },
+    {
+      "id": "settings-restart-fixed",
+      "observation": "再次启动后读取到已保存的48字符合成指令；账户只读说明和浅黄头像可见",
+      "status": "passed"
+    },
+    {
+      "id": "credentials-skill",
+      "observation": "认证来源页如实显示未检测到；Skill扫描60项53开启，未改变真实全局技能开关",
+      "status": "passed"
+    },
+    {
+      "id": "channel-new-cancel",
+      "observation": "打开渠道管理空白新建，DeepSeek预设填官方地址，未填Key不能保存，取消无新渠道",
+      "status": "passed"
+    },
+    {
+      "id": "channel-test",
+      "observation": "触发连接测试并看到busy，稍后按钮恢复；未捕获到结果toast，不计连接成功",
+      "status": "observed_only"
+    },
+    {
+      "id": "deepseek-native-import",
+      "observation": "原生选择合成v3ZIP，确认后显示1会话2消息成功；结果关闭后历史更新但侧栏不刷新，按钮仍称取消",
+      "status": "bug_confirmed"
+    },
+    {
+      "id": "native-import-repeat",
+      "observation": "最终包第二次选择相同ZIP时Open禁用，键盘/路径/辅助动作未完成，已取消；不记为重复原生导入通过",
+      "status": "incomplete"
+    },
+    {
+      "id": "native-stop",
+      "observation": "实际点击Stop，保留84行左右部分输出并显示已停止生成，可继续输入",
+      "status": "passed"
+    },
+    {
+      "id": "native-project-missing",
+      "observation": "暂时移动仅有qa.txt的生成工作区，原生Agent明确报项目文件夹不可用；目录已立即恢复",
+      "status": "passed"
+    },
+    {
+      "id": "checkpoint-native-ready",
+      "observation": "最终包实际Agent追加标记，出现浅黄快照入口；新建欢迎页不显示，统一搜索返回所属会话后恢复",
+      "status": "passed"
+    },
+    {
+      "id": "checkpoint-native-dialog",
+      "observation": "AX树出现确认说明/保留/还原，但截图未可靠显示弹窗层；已取消，没有执行还原。改为内联确认，待下一构建实机复验",
+      "status": "candidate"
+    },
+    {
+      "id": "native-quit",
+      "observation": "通过CmdQ退出QA，两次读取进程列表确认QA宿主与Sidecar退出，原应用未替换",
+      "status": "passed"
+    },
+    {
+      "id": "picker-filter-comparison",
+      "observation": "去掉扩展名过滤的QA对照仍为Open禁用；已取消并按原字节恢复Rust，实验不发布",
+      "status": "experiment_rejected"
+    },
+    {
+      "id": "appearance-accessibility-final",
+      "observation": "最终包外观页的浅色/深色/系统选择均在原生AX报告toggle button与on/off；未切换深色",
+      "status": "passed"
+    },
+    {
+      "id": "checkpoint-inline-visible-final",
+      "observation": "真实Agent追加第四行后，实际截图看到内联覆盖说明、保留当前文件和确认还原文件按钮；点击保留后收起，文件未还原",
+      "status": "passed"
+    },
+    {
+      "id": "checkpoint-inline-owner-final",
+      "observation": "最终内联版本CmdN离开隐藏，统一搜索返回所属会话恢复；确认状态重置为收起",
+      "status": "passed"
+    },
+    {
+      "id": "native-content-reload",
+      "observation": "实际HTTP重载确认停止回复为stopped且正文非空；文件和唯一快照哈希确认仅qa.txt，当前4行/恢复3行，未执行GUI覆盖",
+      "status": "passed"
+    }
+  ],
+  "pending": "Actual GUI restore awaits explicit action-time confirmation; native repeated file selection remains incomplete."
+}

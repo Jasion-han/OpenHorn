@@ -1,0 +1,8 @@
+(pass) normalizeMcpServerConfig > passes through env, headers and alwaysAllow untouched
+(pass) a callback failure cancels its source and releases the reader without replacing the error [0.31ms]
+(pass) a read failure releases the reader and preserves the original transport error [0.20ms]
+(pass) failed import preserves structured feedback and releases its submission guard
+ 681 pass
+ 0 fail
+ 2785 expect() calls
+Ran 681 tests across 78 files. [2.91s]

@@ -1,0 +1,18 @@
+{
+  "nativeStop": {
+    "finishReason": "stopped",
+    "partialCharacters": 1939,
+    "sha256": "0e5762a92bf0b45da4137c17c4732a6de56eed78411e0b1ba032fd1f919a793a"
+  },
+  "restore": {
+    "conversationId": "a5291abe-d489-4d90-bacf-b92b21f793a4",
+    "runId": "direct-1794640487771-z9sy01",
+    "files": ["qa.txt"],
+    "currentSha256": "c2db6f60058dab6dc5a6d06a9ea315b8319053d66ce182221c8d8e80126d7d28",
+    "expectedRestoredSha256": "b3f859ccf0bfb7839472b2f450c62e71e952963e916323049f80e9e8fd8a7cea",
+    "currentLines": 4,
+    "expectedRestoredLines": 3,
+    "finalGuiRestoreExecuted": false
+  },
+  "importedDeepseekConversations": 1
+}
