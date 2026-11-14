@@ -1,0 +1,12 @@
+(pass) finite chart domains > ticks cover -42..86 without overflowing or underflowing [0.26ms]
+(pass) finite chart domains > ticks cover -1e+308..1e+308 without overflowing or underflowing [0.04ms]
+(pass) finite chart domains > ticks cover 0..1.7976931348623157e+308 without overflowing or underflowing
+(pass) finite chart domains > ticks cover -1.7976931348623157e+308..0 without overflowing or underflowing
+(pass) finite chart domains > ticks cover 0..5e-324 without overflowing or underflowing
+(pass) finite chart domains > ticks cover -5e-324..5e-324 without overflowing or underflowing
+(pass) finite chart domains > a zero-only chart has a finite baseline
+
+ 684 pass
+ 0 fail
+ 2796 expect() calls
+Ran 684 tests across 79 files. [5.40s]

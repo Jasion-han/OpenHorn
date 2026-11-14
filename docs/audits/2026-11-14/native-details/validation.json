@@ -1,0 +1,168 @@
+{
+  "status": "validated_and_task_temporaries_cleaned",
+  "baseCommit": "fb30ff232533f7a112ae9400b4ecb2c51ca3cef8",
+  "productFiles": ["apps/desktop/src/components/library/LibraryView.tsx"],
+  "sourceSha256": "3478133a276ff01843c33c7eb7be50ee46b779b483e4cbe53f848ed881d66d4e",
+  "checks": {
+    "desktop": {
+      "pass": 684,
+      "fail": 0
+    },
+    "typecheck": "passed",
+    "biome": "passed",
+    "uiAndNativeBuild": "passed",
+    "serverSidecarRustRerun": false
+  },
+  "contentProof": {
+    "personalDocuments": 3,
+    "notesCopies": 1,
+    "originalBytes": 100,
+    "originalSha256": "2a351682ab52d640bde91550e34d17e7233b385f4b21955600ee5274b11b8df5",
+    "sourceSha256": "2a351682ab52d640bde91550e34d17e7233b385f4b21955600ee5274b11b8df5",
+    "downloadMatchesSource": true
+  },
+  "fixtureSizes": {
+    "empty": 0,
+    "tooLarge": 5242881
+  },
+  "observations": [
+    {
+      "step": 1,
+      "action": "Native upload of the prepared generated text",
+      "observed": "Dialog closed; notes.txt selected, ready with one chunk and ORCHARD-42 body visible"
+    },
+    {
+      "step": 2,
+      "action": "Native duplicate text upload",
+      "observed": "Personal list remained three original documents; no second notes.txt"
+    },
+    {
+      "step": 3,
+      "action": "Switch from personal to project via keyboard",
+      "observed": "Project workspace empty; personal documents absent"
+    },
+    {
+      "step": 4,
+      "action": "Switch to all-documents view",
+      "observed": "All personal documents visible; import disabled"
+    },
+    {
+      "step": 5,
+      "action": "Stop only the isolated QA backend and submit selected file",
+      "observed": "Localized failure shown in native form; original File and enabled retry retained"
+    },
+    {
+      "step": 6,
+      "action": "Restart same QA backend and retry the same file",
+      "observed": "Native form closed successfully; body visible; no duplicate document"
+    },
+    {
+      "step": 7,
+      "action": "Search with leading and trailing spaces",
+      "observed": "ORCHARD-42 returned one matching fragment with source and body"
+    },
+    {
+      "step": 8,
+      "action": "Open Tauri picker and select previously imported generated ZIP",
+      "observed": "Open enabled; correct DeepSeek confirmation and selected path visible"
+    },
+    {
+      "step": 9,
+      "action": "Confirm repeat ZIP import",
+      "observed": "Native result showed imported 0 conversations, skipped 1, imported 0 messages"
+    },
+    {
+      "step": 10,
+      "action": "Close repeat-import result",
+      "observed": "History showed a new import record with zero imported items"
+    },
+    {
+      "step": 11,
+      "action": "Select empty generated text",
+      "observed": "Localized nonempty/5MB validation visible; import disabled without upload"
+    },
+    {
+      "step": 12,
+      "action": "Select generated 5MiB+1-byte text",
+      "observed": "Localized size validation visible; import disabled without upload"
+    },
+    {
+      "step": 13,
+      "action": "Inspect already-saved image and Office originals",
+      "observed": "Expected cloud-required state was displayed as a repeated red alert before refinement"
+    },
+    {
+      "step": 14,
+      "action": "Rebuild and open refined package",
+      "observed": "Image and Office retain saved-original status and OCR guidance without repeated red alert"
+    },
+    {
+      "step": 15,
+      "action": "Seed malformed UTF8 using local API only",
+      "observed": "Local API returned status=failed and errorCode=library_invalid_text; this is not native upload evidence"
+    },
+    {
+      "step": 16,
+      "action": "Open UTF8 failure in native library",
+      "observed": "Genuine UTF8 failure remained a red recoverable error"
+    },
+    {
+      "step": 17,
+      "action": "Verify original bytes using local API",
+      "observed": "Downloaded original equals generated source byte-for-byte; separate from native UI observations"
+    }
+  ],
+  "limits": [
+    "Native snapshot final overwrite was not performed; generated snapshot/workspace were removed per cleanup request",
+    "Paid DeepSeek OCR, actual IME candidate selection and autonomous scheduling not accepted",
+    "Native OS scope popup was not reliably captured; no popup-color claim"
+  ],
+  "cleanup": {
+    "status": "completed",
+    "auditDirectoryRemoved": true,
+    "auditDirectorySizeKiBBeforeRemoval": 3789056,
+    "candidateWorktreeRemoved": true,
+    "candidateBranchRemoved": true,
+    "publishedCandidatePathsVerified": 20,
+    "stoppedTaskPids": [1601, 1656, 89614],
+    "forcedTaskPids": [],
+    "qaPortClosed": true,
+    "qaAppStorageRemoved": [
+      "~/Library/WebKit/com.openhorn.nativeqa",
+      "~/Library/Caches/com.openhorn.nativeqa",
+      "~/Library/Preferences/com.openhorn.nativeqa.plist",
+      "~/Library/Logs/com.openhorn.nativeqa",
+      "~/Library/WebKit/com.openhorn.review",
+      "~/Library/Caches/com.openhorn.review",
+      "~/Library/Preferences/com.openhorn.review.plist",
+      "~/Library/WebKit/com.openhorn.nativereview",
+      "~/Library/Caches/com.openhorn.nativereview",
+      "~/Library/Preferences/com.openhorn.nativereview.plist",
+      "~/Library/Logs/com.openhorn.nativereview"
+    ],
+    "qaSnapshotBucketsRemoved": [
+      {
+        "bucket": "-private-var-folders-2b-0vr77k3j1yv2m83zxdkpx48c0000gn-T-openhorn-ship-c_aqqrxq-native-runtime-w-7db1d3482538fde91e9a995da9ac60c511646ac20b4621b192d0cd42c2f7d81d",
+        "manifests": 3
+      }
+    ],
+    "knownTmpRecordsRemoved": [
+      "openhorn-current-ship-dir",
+      "openhorn-status-current.txt",
+      "openhorn-native-qa-sample.txt",
+      "openhorn-sample-status.txt",
+      "openhorn-round2-ship-status.txt",
+      "openhorn-round2-ship-diffstat.txt",
+      "openhorn-round2-after-ship-status.txt",
+      "openhorn-detail-start-status.txt"
+    ],
+    "originalApplicationPidsPreserved": [170, 227],
+    "originalBackendListenerPidsPreserved": [99476],
+    "originalWipPathsChecked": 273,
+    "unexpectedOriginalWipChanges": [],
+    "remainingOwnedStoragePaths": [],
+    "rawPrivateEnvironmentAndDatabaseRetained": false
+  },
+  "productCommit": "a3ba99b89e376f34851c2be1910388e1c46cf8e5",
+  "nativeBuildSha256": "18692f9ad370e2b789692442dfbc960668948328de2d1b6e7ba3ba7539829011"
+}
