@@ -9,6 +9,7 @@ export type {
   SavedArtifact,
   UpdateArtifactInput,
 } from "./artifacts";
+export type { DataTransferImportErrorCode, DataTransferImportErrorResponse } from "./data-transfer";
 export type { NativeWebOptions, ProviderChatMetadata, ProviderChatState } from "./provider-chat";
 export type { UnifiedSearchKind, UnifiedSearchResult } from "./search";
 

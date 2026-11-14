@@ -35,7 +35,11 @@ import type {
   UpdateConversationInput,
 } from "../types/chat";
 import { getDesktopBackendBase } from "./backendBase";
-import { BackupSizeLimitError } from "./dataTransferError";
+import {
+  BackupSizeLimitError,
+  DataTransferImportError,
+  isDataTransferImportErrorCode,
+} from "./dataTransferError";
 
 export class ChatPreparationFailure extends Error {
   constructor(
@@ -398,16 +402,37 @@ async function fetchJson<T>(
   path: string,
   init?: RequestInit,
 ): Promise<T> {
-  const response = await requestWithBackendStatus(fetchImpl, `${baseUrl}${path}`, {
-    credentials: "include",
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers || {}),
-    },
-  });
+  const importRequest = path === "/data-transfer/import/detect" || path === "/data-transfer/import";
+  let response: Response;
+  try {
+    response = await requestWithBackendStatus(fetchImpl, `${baseUrl}${path}`, {
+      credentials: "include",
+      ...init,
+      headers: {
+        "Content-Type": "application/json",
+        ...(init?.headers || {}),
+      },
+    });
+  } catch (error) {
+    if (importRequest)
+      throw new DataTransferImportError(
+        "import_connection_failed",
+        error instanceof Error ? error.message : undefined,
+      );
+    throw error;
+  }
 
   if (!response.ok) {
+    if (importRequest) {
+      const body = await response
+        .clone()
+        .json()
+        .catch(() => null);
+      const code = isDataTransferImportErrorCode(body?.errorCode)
+        ? body.errorCode
+        : "import_failed";
+      throw new DataTransferImportError(code, await readErrorMessage(response, "Request failed"));
+    }
     if (path === "/data-transfer/export/backup" && response.status === 413) {
       const body = await response
         .clone()

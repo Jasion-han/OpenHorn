@@ -1173,6 +1173,16 @@ export function getScheduledTaskLabel(key: ScheduledTaskLabelKey): string {
  * Templates use `{name}` placeholders resolved via `formatDataTransferLabel`.
  */
 export const dataTransferLabels = {
+  "settings.data.import.error.invalidRequest": "导入参数不完整，请重新选择文件。",
+  "settings.data.import.error.fileNotFound": "文件已移动或删除，请重新选择导出文件。",
+  "settings.data.import.error.fileUnreadable":
+    "无法读取文件，请检查访问权限，或将文件移到可访问的位置后重试。",
+  "settings.data.import.error.invalidArchive": "导出文件已损坏或不符合格式，请重新导出后再导入。",
+  "settings.data.import.error.formatMismatch": "识别结果与文件内容不一致，请重新选择文件后重试。",
+  "settings.data.import.error.unsupportedFormat":
+    "暂不支持此文件格式，请选择 OpenHorn、ChatGPT、Claude 或 DeepSeek 导出文件。",
+  "settings.data.import.error.connectionFailed": "未能连接本机服务，请检查连接后重试。",
+  "settings.data.import.error.failed": "导入未完成，请检查文件和导入历史后重试。",
   // Section
   "settings.data.title": "数据管理",
   "settings.data.description": "导出备份、导入数据，或迁移到其他平台。",

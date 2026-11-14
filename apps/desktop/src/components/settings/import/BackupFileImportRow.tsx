@@ -10,6 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "ui";
+import { importErrorLabel } from "../../../lib/dataTransferError";
 import { formatDataTransferLabel, getDataTransferLabel } from "../../../lib/i18n/agent";
 import { notifyError, notifySuccess, notifyWarning } from "../../../lib/notify";
 import { createServerApi } from "../../../lib/serverApi";
@@ -94,7 +95,7 @@ export function BackupFileImportRow({ onImported }: { onImported?: () => void })
       if (format === "unknown") {
         notifyError(
           getDataTransferLabel("settings.data.import.failedTitle"),
-          getFormatLabel("unknown"),
+          getDataTransferLabel(importErrorLabel("import_unsupported_format")),
         );
         return;
       }
@@ -104,7 +105,7 @@ export function BackupFileImportRow({ onImported }: { onImported?: () => void })
       setDetecting(false);
       notifyError(
         getDataTransferLabel("settings.data.import.failedTitle"),
-        err instanceof Error ? err.message : String(err),
+        getDataTransferLabel(importErrorLabel(err)),
       );
     }
   }, []);
@@ -133,7 +134,7 @@ export function BackupFileImportRow({ onImported }: { onImported?: () => void })
     } catch (err) {
       notifyError(
         getDataTransferLabel("settings.data.import.failedTitle"),
-        err instanceof Error ? err.message : String(err),
+        getDataTransferLabel(importErrorLabel(err)),
       );
     } finally {
       setImporting(false);
