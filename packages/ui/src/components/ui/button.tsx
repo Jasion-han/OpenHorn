@@ -9,7 +9,8 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground shadow hover:bg-primary/90",
+        default:
+          "border border-amber-200 bg-amber-100 text-stone-900 shadow-sm hover:bg-amber-200 dark:border-transparent dark:bg-primary dark:text-primary-foreground dark:hover:bg-primary/90",
         // `--destructive` is tuned for text contrast in dark mode, which is
         // brighter than a fill wants to be. Blending it back toward the surface
         // keeps the button from glowing and lifts white-on-red to ~4.2:1.

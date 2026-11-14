@@ -36,13 +36,14 @@ export function SettingsSegmentedControl({
           <button
             key={option.value}
             type="button"
+            aria-pressed={value === option.value}
             disabled={disabled}
             onClick={() => onValueChange(option.value)}
             className={cn(
-              "px-3 py-1.5 rounded-md text-sm font-medium transition-colors",
+              "px-3 py-1.5 rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-600",
               "disabled:cursor-not-allowed disabled:opacity-50",
               value === option.value
-                ? "bg-background text-foreground shadow-sm"
+                ? "bg-amber-50 text-stone-900 shadow-sm"
                 : "text-muted-foreground hover:text-foreground",
             )}
           >
