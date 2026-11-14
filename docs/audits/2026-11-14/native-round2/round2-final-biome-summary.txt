@@ -1,0 +1,4 @@
+> openhorn@ check <audit-root>/verify
+> biome check .
+
+Checked 818 files in 1268ms. No fixes applied.

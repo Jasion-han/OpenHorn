@@ -1,0 +1,11 @@
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 4.91s
+   Compiling app v0.1.0 (<audit-root>/verify/apps/desktop/src-tauri)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 6.99s
+       Built application at: <audit-root>/native-build/debug/app
+    Bundling OpenHorn Native Review.app (<audit-root>/native-build/debug/bundle/macos/OpenHorn Native Review.app)
+        Warn Skipping signing due to --no-sign flag.
+    Finished 1 bundle at:
+        <audit-root>/native-build/debug/bundle/macos/OpenHorn Native Review.app

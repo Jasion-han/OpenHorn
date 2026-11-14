@@ -1,0 +1,196 @@
+{
+  "status": "native_form_verified_upload_confirmation_pending",
+  "baseCommit": "dcea75c40c24931f2f7aae6ce250e3d1228e43c7",
+  "remoteSync": "fetch + pull --ff-only before commit; ordinary product push dcea75c..da752c6 succeeded",
+  "newProductChangesCommitted": true,
+  "newProductChangesPushed": true,
+  "sourceSha256": {
+    "apps/desktop/src/components/library/LibraryUploadDialog.tsx": "3315b7347be6072da738014f26fa4337cfcea4bf97397a60254829bd363222c4",
+    "apps/desktop/src/components/library/LibraryUploadDialog.submit.test.ts": "70f4edf47fb38ec8c60f013b1a76857e4e98f47568d43c27030f8e48e5e76078"
+  },
+  "build": {
+    "identifier": "com.openhorn.nativereview",
+    "binarySha256": "052287f96b43789d8862cdccb44a8cdcf12172bedc0970edcb08d79d0ae91ee0",
+    "signedForDistribution": false,
+    "nativeRetest": "final_layout_focus_and_discard_guard_verified; picker/cancel/reselection/invalid_type_verified_before_label_only_polish"
+  },
+  "checks": {
+    "isolatedDesktop": {
+      "pass": 684,
+      "fail": 0
+    },
+    "integratedDesktopWithExistingWip": {
+      "pass": 714,
+      "fail": 0
+    },
+    "typecheck": "passed_both_trees",
+    "biome": "passed_both_trees",
+    "nativeDebugBuild": "passed",
+    "regressionBaseline": {
+      "pass": 2,
+      "fail": 1
+    },
+    "regressionCandidate": {
+      "pass": 3,
+      "fail": 0
+    },
+    "finalCandidateDesktop": {
+      "pass": 684,
+      "fail": 0
+    },
+    "finalCandidateTypecheck": "passed",
+    "finalCandidateBiome": "passed",
+    "finalMainBiome": "passed",
+    "finalNativeBuild": "passed"
+  },
+  "observations": [
+    {
+      "step": 1,
+      "action": "Open existing native QA checkpoint conversation",
+      "observed": "Native window, scoped snapshot notice and prior generated reply visible; final restore not clicked"
+    },
+    {
+      "step": 2,
+      "action": "Unified search with generated unmatched text; Escape",
+      "observed": "Loading then localized no-results state; Escape restored sidebar"
+    },
+    {
+      "step": 3,
+      "action": "Settings data and appearance navigation",
+      "observed": "AX content updated; old-instance screenshots did not reliably repaint all selected states, so not accepted as visual proof"
+    },
+    {
+      "step": 4,
+      "action": "Native backup ZIP picker; select two generated ZIPs",
+      "observed": "Selected file preview visible but Open disabled; canceled; no filter change"
+    },
+    {
+      "step": 5,
+      "action": "Old-instance library upload picker; select generated notes.txt",
+      "observed": "Selected text preview visible but Open disabled; later control connection failed"
+    },
+    {
+      "step": 6,
+      "action": "Read-only process and lock diagnostics",
+      "observed": "System initially unlocked; QA host alive; one-second sample showed event-loop waiting, not proof of a deadlock cause"
+    },
+    {
+      "step": 7,
+      "action": "Launch independent pre-fix OpenHorn Review instance",
+      "observed": "Fresh Tauri welcome and library visible; original QA and its snapshot ownership retained"
+    },
+    {
+      "step": 8,
+      "action": "Open upload dialog in fresh instance",
+      "observed": "Actual screenshot showed dialog, light surface, English Choose File and disabled empty submit"
+    },
+    {
+      "step": 9,
+      "action": "System picker selects generated notes.txt",
+      "observed": "Open enabled and file returned to real form; filename and enabled submit visible; no final upload"
+    },
+    {
+      "step": 10,
+      "action": "Click Cancel with selected file",
+      "observed": "Inline discard warning visible while ordinary import action still enabled"
+    },
+    {
+      "step": 11,
+      "action": "Continue editing",
+      "observed": "Warning closed and file preserved"
+    },
+    {
+      "step": 12,
+      "action": "View menu and zoom-key observation",
+      "observed": "Menu contained Toggle Full Screen only; keyboard observation inconclusive; no product zoom change made"
+    },
+    {
+      "step": 13,
+      "action": "Quit disposable pre-fix review instance",
+      "observed": "Process exited; original QA retained"
+    },
+    {
+      "step": 14,
+      "action": "Launch newly built candidate",
+      "observed": "Host and sidecar running, but cgWindowNotFound; IOConsoleLocked=Yes confirmed; no candidate visual acceptance claimed"
+    },
+    {
+      "step": 15,
+      "action": "Open candidate after unlock",
+      "observed": "Native upload dialog visible with localized button; empty submit disabled"
+    },
+    {
+      "step": 16,
+      "action": "Select generated notes.txt via system picker",
+      "observed": "Open enabled; filename returned and submit enabled; no upload"
+    },
+    {
+      "step": 17,
+      "action": "Reopen system picker and cancel",
+      "observed": "Selected notes.txt and available submit preserved"
+    },
+    {
+      "step": 18,
+      "action": "Cancel selected-file form",
+      "observed": "Screenshot and AX show file choice, ordinary cancel and submit disabled; Continue editing focused"
+    },
+    {
+      "step": 19,
+      "action": "Press Return on Continue editing",
+      "observed": "Confirmation closed; file and enabled ordinary actions restored"
+    },
+    {
+      "step": 20,
+      "action": "Reselect exact same notes.txt",
+      "observed": "System picker accepted same file and returned filename to form"
+    },
+    {
+      "step": 21,
+      "action": "Select unsupported generated ZIP",
+      "observed": "Localized type error visible and submit disabled; no network upload"
+    },
+    {
+      "step": 22,
+      "action": "Close invalid empty form",
+      "observed": "Original three library documents still shown"
+    },
+    {
+      "step": 23,
+      "action": "Review candidate screenshot",
+      "observed": "Duplicate visible file label discovered; associated label made screen-reader-only"
+    },
+    {
+      "step": 24,
+      "action": "Quit, rebuild and reopen final native package",
+      "observed": "Final source tested and built; actual final screenshot shows one Chinese choose-file button"
+    },
+    {
+      "step": 25,
+      "action": "Tab and Shift+Tab on final choose button",
+      "observed": "Visible keyboard focus ring on light button"
+    },
+    {
+      "step": 26,
+      "action": "Choose notes.txt in final package",
+      "observed": "Filename visible and submit enabled"
+    },
+    {
+      "step": 27,
+      "action": "Open final discard confirmation",
+      "observed": "Screenshot and AX show three ordinary controls disabled"
+    },
+    {
+      "step": 28,
+      "action": "Return to continue editing in final package",
+      "observed": "File retained; ordinary actions restored; stopped before final upload"
+    }
+  ],
+  "pending": [
+    "Final upload of generated file requires action-time confirmation",
+    "Backup ZIP repeat import remains unaccepted in native UI",
+    "Original single-file snapshot GUI overwrite still awaits separate confirmation",
+    "Paid OCR, real IME candidate selection and autonomous scheduling remain unverified"
+  ],
+  "preservedExistingPathsAtIntegration": 273,
+  "productCommit": "da752c67bd147f66c7c3ee93f20fa8ff0a965a58"
+}

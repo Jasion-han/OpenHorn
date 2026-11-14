@@ -1,0 +1,11 @@
+server:typecheck: > server@1.0.0 typecheck <project-root>/apps/server
+server:typecheck: > tsc -p tsconfig.json --noEmit
+server:typecheck:
+desktop:typecheck:
+desktop:typecheck: > desktop@1.0.0 typecheck <project-root>/apps/desktop
+desktop:typecheck: > tsc --noEmit
+desktop:typecheck:
+
+ Tasks:    5 successful, 5 total
+Cached:    4 cached, 5 total
+  Time:    7.165s

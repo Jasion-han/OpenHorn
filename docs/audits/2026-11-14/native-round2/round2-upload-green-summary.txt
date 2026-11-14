@@ -1,0 +1,11 @@
+bun test v1.3.10 (30e609e0)
+
+src/components/library/LibraryUploadDialog.submit.test.ts:
+(pass) pending discard confirmation blocks form submission without touching the file draft [1.26ms]
+(pass) ordinary upload is one-shot while pending and keeps its file on rejection [0.32ms]
+(pass) accepted upload clears only after the real handler receives success [0.14ms]
+
+ 3 pass
+ 0 fail
+ 11 expect() calls
+Ran 3 tests across 1 file. [19.00ms]

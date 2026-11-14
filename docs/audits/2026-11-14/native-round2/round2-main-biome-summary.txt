@@ -1,0 +1,4 @@
+> openhorn@ check <project-root>
+> biome check .
+
+Checked 866 files in 2s. No fixes applied.

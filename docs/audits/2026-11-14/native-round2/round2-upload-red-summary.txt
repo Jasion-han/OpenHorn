@@ -1,0 +1,12 @@
+- Expected  - 1
++ Received  + 1
+
+      at <anonymous> (<audit-root>/verify/apps/desktop/src/components/library/LibraryUploadDialog.submit.test.ts:56:20)
+(fail) pending discard confirmation blocks form submission without touching the file draft [3.03ms]
+(pass) ordinary upload is one-shot while pending and keeps its file on rejection [0.43ms]
+(pass) accepted upload clears only after the real handler receives success [0.04ms]
+
+ 2 pass
+ 1 fail
+ 9 expect() calls
+Ran 3 tests across 1 file. [42.00ms]
