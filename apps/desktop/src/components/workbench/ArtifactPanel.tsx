@@ -227,7 +227,7 @@ export function ArtifactPanel({ refreshToken = 0, onContinue, onOpenSource }: Ar
     }
   };
   const saveVersion = () => {
-    if (!detail || !draft.trim()) return;
+    if (confirmDiscard || !detail || !draft.trim()) return;
     const owner = useArtifactDraftStore.getState().ownerId;
     void act("save", async () => {
       const result = await workbenchApi.artifacts.append(detail.artifact.id, {
@@ -606,7 +606,7 @@ export function ArtifactPanel({ refreshToken = 0, onContinue, onOpenSource }: Ar
                     id="artifact-edit-format"
                     className={selectClass}
                     value={draftFormat}
-                    disabled={!!busy}
+                    disabled={!!busy || confirmDiscard}
                     onChange={(event) =>
                       updateDraft({ format: event.target.value as ArtifactVersion["format"] })
                     }
@@ -622,7 +622,7 @@ export function ArtifactPanel({ refreshToken = 0, onContinue, onOpenSource }: Ar
                   aria-label={getWorkbenchLabel("workbench.artifacts.source")}
                   value={draft}
                   onChange={(event) => updateDraft({ content: event.target.value })}
-                  disabled={!!busy}
+                  disabled={!!busy || confirmDiscard}
                   className="min-h-80 font-mono text-sm"
                 />
                 <p className="text-xs text-muted-foreground">
@@ -631,14 +631,17 @@ export function ArtifactPanel({ refreshToken = 0, onContinue, onOpenSource }: Ar
                   })}
                 </p>
                 <div className="flex gap-2">
-                  <Button disabled={!!busy || !draft.trim() || !changed} onClick={saveVersion}>
+                  <Button
+                    disabled={!!busy || confirmDiscard || !draft.trim() || !changed}
+                    onClick={saveVersion}
+                  >
                     {busy === "save"
                       ? getWorkbenchLabel("workbench.artifacts.busy")
                       : getWorkbenchLabel("workbench.artifacts.saveVersion")}
                   </Button>
                   <Button
                     variant="ghost"
-                    disabled={!!busy}
+                    disabled={!!busy || confirmDiscard}
                     onClick={() => (changed ? setConfirmDiscard(true) : discardDraft())}
                   >
                     {getWorkbenchLabel("workbench.artifacts.cancel")}

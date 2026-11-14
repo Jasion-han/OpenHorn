@@ -84,7 +84,7 @@ export function LibraryQuestionDialog({
           className="space-y-4"
           onSubmit={async (event) => {
             event.preventDefault();
-            if (lock.current || !question.trim() || !validModel) return;
+            if (lock.current || discard || !question.trim() || !validModel) return;
             const signature = JSON.stringify([scope, question.trim(), model]);
             const requestId =
               retry.current?.signature === signature
@@ -126,7 +126,7 @@ export function LibraryQuestionDialog({
               maxLength={LIBRARY_LIMITS.questionChars}
               placeholder={label("library.questionPlaceholder")}
               value={question}
-              disabled={busy}
+              disabled={busy || discard}
               onChange={(event) => {
                 setQuestion(event.target.value);
                 useLibraryDraftStore.getState().setQuestion({
@@ -150,7 +150,7 @@ export function LibraryQuestionDialog({
                 id="library-model"
                 className={`${reviewSelectClass} w-full`}
                 value={validModel ? model : ""}
-                disabled={busy}
+                disabled={busy || discard}
                 onChange={(event) => {
                   setModel(event.target.value);
                   useLibraryDraftStore.getState().setQuestion({
@@ -188,10 +188,10 @@ export function LibraryQuestionDialog({
             }}
           />
           <DialogFooter>
-            <Button type="button" variant="outline" disabled={busy} onClick={close}>
+            <Button type="button" variant="outline" disabled={busy || discard} onClick={close}>
               {label("library.cancel")}
             </Button>
-            <Button type="submit" disabled={busy || !question.trim() || !validModel}>
+            <Button type="submit" disabled={busy || discard || !question.trim() || !validModel}>
               {label(busy ? "library.working" : "library.prepare")}
             </Button>
           </DialogFooter>
