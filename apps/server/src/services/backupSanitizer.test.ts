@@ -36,6 +36,14 @@ test("safe MCP descriptions never copy arbitrary fields or malformed raw configu
 });
 
 test("safe settings validate both the known key and the bounded value", () => {
+  expect(isSafeBackupSetting({ key: "deepseek.toolsApiKey", value: "synthetic-tools-key" })).toBe(
+    false,
+  );
+  expect(isSafeBackupSetting({ key: "deepseek.nativeWebEnabled", value: "true" })).toBe(true);
+  expect(isSafeBackupSetting({ key: "liveSearch.provider", value: "deepseek" })).toBe(true);
+  expect(isSafeBackupSetting({ key: "liveSearch.provider", value: "synthetic-secret" })).toBe(
+    false,
+  );
   expect(isSafeBackupSetting({ key: "liveSearch.tavilyEnabled", value: "true" })).toBe(true);
   expect(isSafeBackupSetting({ key: "liveSearch.tavilyEnabled", value: "false" })).toBe(true);
   expect(isSafeBackupSetting({ key: "liveSearch.tavilyEnabled", value: "secret" })).toBe(false);

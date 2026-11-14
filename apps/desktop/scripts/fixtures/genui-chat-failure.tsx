@@ -4,11 +4,20 @@ import { Toaster, TooltipProvider } from "ui";
 import { DesktopChatArea } from "../../src/components/chat/DesktopChatArea";
 import { getChatLabel } from "../../src/lib/i18n/agent";
 import type { SidecarClient } from "../../src/lib/sidecarClient";
+import { useAuthStore } from "../../src/stores/authStore";
 import { useBackendStatusStore } from "../../src/stores/backendStatusStore";
 import { useChatStore } from "../../src/stores/chatStore";
 import { useGenUiStore } from "../../src/stores/genUiStore";
 import { useSidecarStore } from "../../src/stores/sidecarStore";
 import type { Message } from "../../src/types/chat";
+
+// Each fresh scenario realm owns its drafts/outbox; remounts within a scenario
+// retain the same identity and continue exercising real persistence ownership.
+const fixtureUserId = `fixture-user-${crypto.randomUUID()}`;
+useAuthStore.setState({
+  user: { id: fixtureUserId, username: "Synthetic", email: "fixture@test.invalid" },
+  ready: true,
+});
 
 type ChatInput = Parameters<SidecarClient["chatStream"]>[0];
 type AgentInput = Parameters<SidecarClient["runAgent"]>[0];
@@ -74,6 +83,7 @@ const api = {
     truncation: getChatLabel("chat.reply.truncated"),
     budget: getChatLabel("chat.reply.contextBudgetExceeded"),
     failed: getChatLabel("chat.reply.failed"),
+    refused: getChatLabel("chat.reply.refused"),
     empty: getChatLabel("chat.reply.empty"),
     truncationError: getChatLabel("chat.error.responseTruncated"),
     saveFailed: getChatLabel("chat.save.failedTitle"),
@@ -109,7 +119,7 @@ const api = {
       channels: [
         {
           id: "fixture-channel",
-          userId: "fixture-user",
+          userId: fixtureUserId,
           name: "Fixture",
           provider: "openai",
           protocol,
@@ -228,6 +238,10 @@ const api = {
     void active?.onEvent({ type: "execution_event", eventType: "text", content });
   },
   fail: () => active?.onError("fixture stream interrupted"),
+  refuse() {
+    void active?.onEvent({ type: "execution_event", eventType: "clear_streaming_text" });
+    active?.onError("fixture refusal", "response_refused");
+  },
   truncationCapture() {
     capturedTruncationRun = active;
   },
@@ -278,6 +292,10 @@ const api = {
   }),
   async reload() {
     await useChatStore.getState().loadMessages(conversation.id);
+  },
+  async clearForScenario() {
+    flushSync(() => root.render(null));
+    await useChatStore.getState().reset();
   },
   async navigateConversation(id: string) {
     await useChatStore.getState().loadConversations({ background: true });

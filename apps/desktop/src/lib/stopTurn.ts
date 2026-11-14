@@ -42,7 +42,12 @@ export function stopAgentRun(run: ApiAgentRun | undefined | null): ApiAgentRun {
 }
 
 /** Whether a reply message holds anything at all (text, steps, or an error). */
-export function replyHasOutput(message: Pick<Message, "content" | "agentRun">): boolean {
+export function replyHasOutput(
+  message: Pick<Message, "content" | "agentRun" | "finishReason">,
+): boolean {
+  // A refusal is a new provider decision. Unlike an empty failed retry it
+  // must replace the previous reply and retain its explicit terminal state.
+  if (message.finishReason === "refused") return true;
   if (message.content?.trim()) return true;
   return runHasOutput(message.agentRun);
 }

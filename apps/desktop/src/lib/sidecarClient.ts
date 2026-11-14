@@ -22,7 +22,14 @@
  *    (the sidecar is blocking the run waiting for `approvals.respond`).
  */
 
-import type { AttachmentPart, ChatStreamErrorCode, ModelContextMetadata } from "shared/types";
+import type {
+  AttachmentPart,
+  ChatStreamErrorCode,
+  ModelContextMetadata,
+  NativeWebOptions,
+  ProviderChatMetadata,
+  ProviderChatState,
+} from "shared/types";
 import type { AgentTaskStreamEvent } from "./agentTaskStream";
 
 /**
@@ -67,7 +74,8 @@ export interface SidecarChatStreamInput {
   model: string;
   contextWindow?: number | null;
   contextMetadata?: ModelContextMetadata | null;
-  messages: Array<{ role: string; content: unknown }>;
+  messages: Array<{ role: string; content: unknown; providerState?: ProviderChatState }>;
+  nativeWeb?: NativeWebOptions;
   onEvent: (event: AgentTaskStreamEvent) => void | Promise<void>;
   onError: (message: string, errorCode?: ChatStreamErrorCode) => void;
   onDone: (runId: string) => void;
@@ -88,6 +96,8 @@ export interface SidecarRunAgentInput {
   systemPrompt?: string;
   webSearchEnabled?: boolean;
   tavilyApiKey?: string;
+  deepseekApiKey?: string;
+  searchProvider?: "auto" | "tavily" | "deepseek" | "duckduckgo";
   /** Enabled MCP servers keyed by name, in the Claude Agent SDK shape. */
   mcpServers?: Record<string, Record<string, unknown>>;
   conversationHistory?: Array<{ role: "user" | "assistant"; content: string }>;
@@ -161,7 +171,9 @@ interface SidecarAgentEvent {
     | "tool_call_detail"
     | "plan"
     | "agent_info"
-    | "available_models";
+    | "available_models"
+    | "chat_metadata";
+  metadata?: ProviderChatMetadata;
   content?: string;
   errorCode?: ChatStreamErrorCode;
   toolName?: string;
@@ -215,6 +227,14 @@ export function projectSidecarAgentEvent(runId: string, raw: unknown): AgentTask
   const event = raw as unknown as SidecarAgentEvent;
 
   switch (event.type) {
+    case "chat_metadata":
+      return {
+        type: "execution_event",
+        taskId: runId,
+        runId,
+        eventType: "chat_metadata",
+        metadata: event.metadata,
+      };
     case "text":
       return {
         type: "execution_event",
@@ -345,7 +365,8 @@ export function projectSidecarAgentEvent(runId: string, raw: unknown): AgentTask
         runId,
         content: typeof event.content === "string" ? event.content : "Agent error",
         ...(event.errorCode === "response_truncated" ||
-        event.errorCode === "chat_context_budget_exceeded"
+        event.errorCode === "chat_context_budget_exceeded" ||
+        event.errorCode === "response_refused"
           ? { errorCode: event.errorCode }
           : {}),
       };
@@ -490,6 +511,8 @@ export class SidecarClient {
       systemPrompt,
       webSearchEnabled,
       tavilyApiKey,
+      deepseekApiKey,
+      searchProvider,
       mcpServers,
       conversationHistory,
       attachments,
@@ -517,6 +540,8 @@ export class SidecarClient {
       ...(systemPrompt ? { systemPrompt } : {}),
       ...(webSearchEnabled !== undefined ? { webSearchEnabled } : {}),
       ...(tavilyApiKey ? { tavilyApiKey } : {}),
+      ...(deepseekApiKey ? { deepseekApiKey } : {}),
+      ...(searchProvider ? { searchProvider } : {}),
       ...(mcpServers && Object.keys(mcpServers).length > 0 ? { mcpServers } : {}),
       ...(conversationHistory && conversationHistory.length > 0 ? { conversationHistory } : {}),
       ...(attachments && attachments.length > 0 ? { attachments } : {}),
@@ -545,6 +570,7 @@ export class SidecarClient {
       contextWindow,
       contextMetadata,
       messages,
+      nativeWeb,
       onEvent,
       onError,
       onDone,
@@ -556,6 +582,7 @@ export class SidecarClient {
       ...(contextWindow != null ? { contextWindow } : {}),
       ...(contextMetadata ? { contextMetadata } : {}),
       messages,
+      ...(nativeWeb ? { nativeWeb } : {}),
       ...(baseUrl ? { baseUrl } : {}),
     })) as { runId: string };
     const runId = result.runId;

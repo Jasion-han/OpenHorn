@@ -10,6 +10,9 @@ export type SearchCitation = {
   url: string;
   snippet?: string;
   publishedDate?: string;
+  summary?: string;
+  content?: string;
+  sourceName?: string;
 };
 
 export type SearchRoute = "web_search" | "research";

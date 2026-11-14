@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { parseAppendSystemPrompt } from "../services/appendSystemPrompt";
+import { SidecarSaveConflictError } from "../services/messageSaveToken";
 import {
   AgentModeUnsupportedError,
   ChatModeUnsupportedError,
@@ -265,9 +266,16 @@ messages.post("/chat/complete", async (c) => {
       model: body.model,
       usage: parseUsagePayload(body.usage),
       finishReason: body.finishReason,
+      providerState: body.providerState,
+      citations: body.citations,
+      liveMetadata: body.liveMetadata,
+      nativeMetadata: body.nativeMetadata,
+      saveToken: body.saveToken,
     });
     return c.json({ success: true });
   } catch (error) {
+    if (error instanceof SidecarSaveConflictError)
+      return c.json({ error: error.message, errorCode: error.code }, 409);
     return c.json(
       { error: error instanceof Error ? error.message : "Failed to complete chat" },
       400,

@@ -15,6 +15,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { validateProviderChatState } from "adapters";
 import {
   attachments,
   backupRestoreConversations,
@@ -768,6 +769,12 @@ async function applyOpenHornBackup(
   }
   const messageValues = (original: Row, conversationId: string) => {
     const row = reviveDates(original);
+    const providerState =
+      row.role === "assistant" && !row.agentRun && row.mode !== "agent"
+        ? validateProviderChatState(row.providerState)
+        : null;
+    if (row.providerState && !providerState)
+      result.errors.push(`Message ${original.id}: invalid provider continuation state was omitted`);
     if (row.role === "assistant" && typeof row.agentRun === "string")
       Object.assign(
         row,
@@ -790,6 +797,7 @@ async function applyOpenHornBackup(
     }
     return {
       ...importedRow(messages, row),
+      providerState: providerState ? JSON.stringify(providerState) : null,
       attachments: reboundAttachments,
       id: messageIds.map.get(original.id),
       conversationId,

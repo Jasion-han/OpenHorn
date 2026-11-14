@@ -1,11 +1,16 @@
 import {
   buildTavilyPayload,
+  fetchDeepSeek,
+  formatUntrustedWebSources,
   isNewsQuery,
   normalizeCitations,
   normalizeSearchQuery,
+  type ResolveWebHostname,
   rerankCitations,
   type SearchCitation,
+  searchDeepSeek,
   searchDuckDuckGo,
+  selectSearchProvider,
   type TavilyResult,
 } from "shared/search";
 import { decisionEnhancements } from "./decisionEnhancements";
@@ -18,7 +23,16 @@ export type { SearchCitation };
 export const TAVILY_API_KEY_SETTING = "liveSearch.tavilyApiKey";
 export const TAVILY_ENABLED_SETTING = "liveSearch.tavilyEnabled";
 
-export type SearchProvider = "tavily" | "duckduckgo" | "none";
+export const DEEPSEEK_TOOLS_API_KEY_SETTING = "deepseek.toolsApiKey";
+export const SEARCH_PROVIDER_SETTING = "liveSearch.provider";
+export const SEARCH_SETTINGS_KEYS = [
+  TAVILY_API_KEY_SETTING,
+  TAVILY_ENABLED_SETTING,
+  DEEPSEEK_TOOLS_API_KEY_SETTING,
+  SEARCH_PROVIDER_SETTING,
+] as const;
+
+export type SearchProvider = "tavily" | "deepseek" | "duckduckgo" | "none";
 
 export type SearchContextResult = {
   status: "live" | "offline";
@@ -37,11 +51,12 @@ export type BuildSearchContextInput = {
   envKey?: string | null;
   fetchImpl?: FetchFn;
   timeoutMs?: number;
+  signal?: AbortSignal;
   /** Clock override for deterministic freshness re-ranking in tests. */
   now?: () => number;
 };
 
-type FetchFn = (
+export type FetchFn = (
   input: Parameters<typeof fetch>[0],
   init?: Parameters<typeof fetch>[1],
 ) => ReturnType<typeof fetch>;
@@ -95,6 +110,7 @@ function pickApiKey(input: BuildSearchContextInput) {
 
 const PROVIDER_DISPLAY_NAME: Record<Exclude<SearchProvider, "none">, string> = {
   tavily: "Tavily",
+  deepseek: "DeepSeek",
   duckduckgo: "DuckDuckGo",
 };
 
@@ -110,24 +126,12 @@ function buildSystemContext(
       ? `${providerName} live research results:`
       : `${providerName} live search results:`;
 
-  const lines = citations
-    .flatMap((citation, index) => {
-      const prefix = `[${index + 1}]`;
-      return [
-        `${prefix} title: ${citation.title}`,
-        `${prefix} url: ${citation.url}`,
-        citation.publishedDate ? `${prefix} published_date: ${citation.publishedDate}` : null,
-        citation.snippet ? `${prefix} snippet: ${citation.snippet}` : null,
-      ];
-    })
-    .filter((line): line is string => Boolean(line));
-
   const instruction =
     route === "research"
       ? "Synthesize across sources, mention uncertainty when sources disagree, and cite sources inline with [n] only. Do not append a final References, Sources, or 引用 section."
       : "Answer using only these search results, stay concise, and cite sources inline with [n] only. Do not append a final References, Sources, or 引用 section.";
 
-  return [header, `Query: ${prompt}`, ...lines, instruction].join("\n");
+  return [header, `Query: ${prompt}`, instruction, formatUntrustedWebSources(citations)].join("\n");
 }
 
 function buildOfflineResult(
@@ -148,16 +152,131 @@ function buildOfflineResult(
 export async function buildSearchContext(
   input: BuildSearchContextInput,
 ): Promise<SearchContextResult> {
-  // Provider selection: a configured Tavily key (user > server env) wins for
-  // quality, but only when Tavily is enabled (pickApiKey returns null when the
-  // "启用 Tavily" toggle is off). Otherwise fall back to the keyless DuckDuckGo
-  // provider so search still works for users who disabled Tavily or never
-  // configured a key.
-  const apiKey = pickApiKey(input);
-  if (apiKey) {
-    return runTavilySearch(input, apiKey);
+  const selected = selectSearchProvider({
+    searchProvider: input.userSettings?.[SEARCH_PROVIDER_SETTING],
+    tavilyApiKey: pickApiKey(input),
+    deepseekApiKey: input.userSettings?.[DEEPSEEK_TOOLS_API_KEY_SETTING],
+  });
+  if (selected.provider === "none") {
+    return buildOfflineResult(
+      buildFailureLabel(
+        input.route,
+        selected.reason === "not_configured" ? "not_configured" : "failed",
+      ),
+      "Live search is not configured. Do not claim you searched the web or cite sources.",
+      { degradedToDirectModel: true },
+    );
   }
+  if (selected.provider === "deepseek") return runDeepSeekSearch(input, selected.apiKey);
+  if (selected.provider === "tavily") return runTavilySearch(input, selected.apiKey);
   return runDuckDuckGoSearch(input);
+}
+
+async function runDeepSeekSearch(
+  input: BuildSearchContextInput,
+  apiKey: string,
+): Promise<SearchContextResult> {
+  try {
+    const sources = await searchDeepSeek(normalizeSearchQuery(input.prompt), {
+      apiKey,
+      fetchImpl: input.fetchImpl,
+      signal: input.signal,
+      timeoutMs:
+        input.timeoutMs ??
+        (input.route === "research" ? DEFAULT_RESEARCH_TIMEOUT_MS : DEFAULT_SEARCH_TIMEOUT_MS),
+      maxResults: input.route === "research" ? 8 : 5,
+    });
+    if (!sources.length) {
+      return buildOfflineResult(
+        buildFailureLabel(input.route, "no_results"),
+        "Live search returned no usable sources. Do not claim you searched the web or cite sources.",
+        { degradedToDirectModel: true },
+      );
+    }
+    const ordered = rerankCitations(sources, isNewsQuery(input.prompt), input.now);
+    const citations = input.userId
+      ? await decisionEnhancements.rerank(
+          input.userId,
+          input.prompt,
+          ordered,
+          (item) => `${item.title}\n${item.summary ?? item.snippet ?? ""}`,
+        )
+      : ordered;
+    return {
+      status: "live",
+      label: input.route === "research" ? "已使用研究搜索" : "已使用实时搜索",
+      provider: "deepseek",
+      citations,
+      systemContext: buildSystemContext(input.route, input.prompt, citations, "deepseek"),
+    };
+  } catch (error) {
+    const timeout = error instanceof Error && error.message === "timeout";
+    return buildOfflineResult(
+      buildFailureLabel(input.route, timeout ? "timeout" : "failed"),
+      `Live search ${timeout ? "timed out" : "failed"}. Do not claim you searched the web or cite sources.`,
+      { degradedToDirectModel: true },
+    );
+  }
+}
+
+export type BuildLinkContextInput = {
+  urls: string[];
+  webSearchEnabled?: boolean;
+  userSettings?: Record<string, string>;
+  fetchImpl?: FetchFn;
+  timeoutMs?: number;
+  signal?: AbortSignal;
+  resolveHostname?: ResolveWebHostname;
+};
+
+/** Main/Native Chat preparation supplies explicit URLs only after its data-only/network gate. */
+export async function buildLinkContext(input: BuildLinkContextInput): Promise<SearchContextResult> {
+  const apiKey = input.userSettings?.[DEEPSEEK_TOOLS_API_KEY_SETTING]?.trim();
+  if (input.webSearchEnabled !== true || !apiKey || !input.urls.length || input.signal?.aborted) {
+    return buildOfflineResult(
+      "链接未读取",
+      "Web pages were not read. Do not claim to have read their contents.",
+    );
+  }
+  const citations: SearchCitation[] = [];
+  let failed = 0;
+  for (const url of [...new Set(input.urls)].slice(0, 3)) {
+    if (input.signal?.aborted) break;
+    try {
+      citations.push(
+        await fetchDeepSeek(url, {
+          apiKey,
+          fetchImpl: input.fetchImpl,
+          timeoutMs: input.timeoutMs,
+          signal: input.signal,
+          resolveHostname: input.resolveHostname,
+        }),
+      );
+    } catch {
+      failed++;
+    }
+  }
+  if (input.signal?.aborted || !citations.length) {
+    return buildOfflineResult(
+      "链接未读取",
+      "Web page reading failed. Do not claim to have read the pages or cite their contents.",
+    );
+  }
+  return {
+    status: "live",
+    label: "已读取链接",
+    provider: "deepseek",
+    citations,
+    systemContext: [
+      "Web page reading results. Cite only pages present in the following source data.",
+      failed || new Set(input.urls).size > 3
+        ? "Some requested pages were not read. Do not claim to have read all requested pages."
+        : "",
+      formatUntrustedWebSources(citations),
+    ]
+      .filter(Boolean)
+      .join("\n"),
+  };
 }
 
 async function runDuckDuckGoSearch(input: BuildSearchContextInput): Promise<SearchContextResult> {

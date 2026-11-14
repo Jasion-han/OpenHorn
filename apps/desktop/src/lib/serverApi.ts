@@ -8,16 +8,21 @@ import type {
   LocalImportServerSource,
   MessageFinishReason,
   ModelContextMetadata,
+  NativeWebOptions,
   PromptTemplate,
+  ProviderChatMetadata,
+  ProviderChatState,
 } from "shared/types";
 import { useBackendStatusStore } from "../stores/backendStatusStore";
 import type {
   ApiAgentCheckResult,
   ApiChannel,
   ApiChannelModel,
+  ApiCitation,
   ApiConversation,
   ApiImportRecord,
   ApiImportRecordListResult,
+  ApiLiveMetadata,
   ApiMessage,
   ApiProject,
   ApiSettingsMap,
@@ -44,17 +49,27 @@ export class ChatPreparationFailure extends Error {
 }
 
 export const UNAUTHORIZED_EVENT = "openhorn:unauthorized";
+export class SidecarSaveConflict extends Error {
+  constructor() {
+    super("sidecar_save_conflict");
+    this.name = "SidecarSaveConflict";
+  }
+}
 
 type FetchLike = typeof fetch;
 
 export interface ChatPrepareResult {
+  saveToken?: string;
   apiKey: string;
   baseUrl: string | null;
   protocol: string;
   model: string;
   contextWindow?: number | null;
   contextMetadata?: ModelContextMetadata | null;
-  messages: Array<{ role: string; content: unknown }>;
+  messages: Array<{ role: string; content: unknown; providerState?: ProviderChatState }>;
+  nativeWeb?: NativeWebOptions;
+  citations?: ApiCitation[];
+  liveMetadata?: ApiLiveMetadata;
   userMessageId: string;
   assistantMessageId: string;
 }
@@ -120,6 +135,7 @@ export interface ServerApi {
       attachments?: string[];
     }) => Promise<ChatPrepareResult>;
     chatComplete: (data: {
+      saveToken?: string;
       assistantMessageId: string;
       conversationId: string;
       content: string;
@@ -127,6 +143,10 @@ export interface ServerApi {
       usage?: { promptTokens: number; completionTokens: number; totalTokens: number };
       /** Chat terminal state; absent clears an earlier stop, limit or failure. */
       finishReason?: MessageFinishReason;
+      providerState?: ProviderChatState;
+      citations?: ApiCitation[];
+      liveMetadata?: ApiLiveMetadata;
+      nativeMetadata?: ProviderChatMetadata;
     }) => Promise<{ success: boolean }>;
   };
   channels: {
@@ -394,6 +414,16 @@ async function fetchJson<T>(
         .json()
         .catch(() => null);
       if (body?.errorCode === "backup_size_limit") throw new BackupSizeLimitError();
+    }
+    if (
+      (path === "/messages/sync-sidecar" || path === "/messages/chat/complete") &&
+      response.status === 409
+    ) {
+      const body = await response
+        .clone()
+        .json()
+        .catch(() => null);
+      if (body?.errorCode === "sidecar_save_conflict") throw new SidecarSaveConflict();
     }
     // Only the prepare endpoint owns this saved pair. Do not interpret arbitrary
     // response bodies as permission to rename messages in another operation.

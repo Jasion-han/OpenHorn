@@ -53,6 +53,7 @@ describe("resolveBubbleEndLabel", () => {
     resolveBubbleEndLabel({ message: { ...reply, ...message }, isStreaming });
 
   test("persisted safe errors render outside both empty and partial replies", () => {
+    expect(label({ finishReason: "refused" })).toBe("chat.reply.refused");
     for (const content of ["", "```openui-lang\nroot = Card("]) {
       expect(label({ content, finishReason: "context_budget_exceeded" })).toBe(
         "chat.reply.contextBudgetExceeded",

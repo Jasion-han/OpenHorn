@@ -31,6 +31,20 @@ import path from "node:path";
 // Never inherit paid decision credentials from the developer profile in tests.
 delete process.env.OPENHORN_JEV_API_KEY;
 process.env.OPENHORN_JEV_ENABLED = "false";
+// Test fixtures must neither need the developer's encryption secret nor send
+// an unmocked optional classifier/search request to a paid or public service.
+process.env.ENCRYPTION_KEY = "openhorn-isolated-tests-synthetic-encryption-key";
+const fixtureFetch = globalThis.fetch;
+globalThis.fetch = Object.assign(
+  async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+    const url = new URL(typeof input === "string" || input instanceof URL ? input : input.url);
+    if (url.protocol === "http:" && ["127.0.0.1", "[::1]", "localhost"].includes(url.hostname)) {
+      return fixtureFetch(input, init);
+    }
+    throw new Error("External network is disabled in tests; provide a synthetic fetch response");
+  },
+  { preconnect() {} },
+);
 
 const explicit = process.env.OPENHORN_TEST_DATABASE_URL;
 if (explicit) {

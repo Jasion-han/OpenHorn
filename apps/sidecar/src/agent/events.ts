@@ -1,4 +1,4 @@
-import type { ChatStreamErrorCode } from "shared/types";
+import type { ChatStreamErrorCode, ProviderChatMetadata } from "shared/types";
 
 /** A file location referenced by a tool call (ACP `locations[]`). */
 export interface AgentToolLocation {
@@ -14,6 +14,7 @@ export interface AgentToolDiff {
 }
 
 export type AgentEvent =
+  | { type: "chat_metadata"; metadata: ProviderChatMetadata }
   | { type: "text"; content: string }
   | { type: "final_text"; content: string }
   | { type: "reasoning"; content: string }

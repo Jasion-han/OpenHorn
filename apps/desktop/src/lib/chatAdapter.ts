@@ -145,6 +145,7 @@ function mapMessage(message: ApiMessage): Message {
     liveRoute: liveMetadata?.route,
     liveLabel: liveMetadata?.label,
     citations,
+    nativeMetadata: liveMetadata?.native,
     usage,
     finishReason: assistantFinishReason(message.finishReason, agentRun) ?? undefined,
     createdAt: new Date(message.createdAt),

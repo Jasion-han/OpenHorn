@@ -4,6 +4,40 @@ import { and, eq } from "drizzle-orm";
 import { db } from "../db";
 import { deleteSettingValue, getSettingValues, setSettingValue } from "./settingsService";
 
+test("DeepSeek tools credentials are encrypted at rest, isolated and validated", async () => {
+  const previousKey = process.env.ENCRYPTION_KEY;
+  process.env.ENCRYPTION_KEY = "deepseek-tools-settings-synthetic-key";
+  const userId = crypto.randomUUID();
+  await db.insert(users).values({
+    id: userId,
+    email: `${userId}@test.local`,
+    username: "tools",
+    passwordHash: "x",
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
+  try {
+    await setSettingValue(userId, "deepseek.toolsApiKey", "synthetic-tools-key");
+    const [stored] = await db
+      .select()
+      .from(settings)
+      .where(and(eq(settings.userId, userId), eq(settings.key, "deepseek.toolsApiKey")));
+    expect(stored.value.startsWith("v2:")).toBe(true);
+    expect(stored.value.includes("synthetic-tools-key")).toBe(false);
+    expect(await getSettingValues(userId, ["deepseek.toolsApiKey"])).toEqual({
+      "deepseek.toolsApiKey": "synthetic-tools-key",
+    });
+    expect(await getSettingValues("another-user", ["deepseek.toolsApiKey"])).toEqual({});
+    await expect(setSettingValue(userId, "liveSearch.provider", "unknown")).rejects.toThrow();
+    await expect(setSettingValue(userId, "deepseek.nativeWebEnabled", "yes")).rejects.toThrow();
+  } finally {
+    await deleteSettingValue(userId, "deepseek.toolsApiKey");
+    await db.delete(users).where(eq(users.id, userId));
+    if (previousKey === undefined) delete process.env.ENCRYPTION_KEY;
+    else process.env.ENCRYPTION_KEY = previousKey;
+  }
+});
+
 test("settings: set/get/delete value by key", async () => {
   const userId = crypto.randomUUID();
   const key = "chat.systemPrompt";

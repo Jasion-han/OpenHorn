@@ -7,6 +7,7 @@ import { createServerApi } from "../../lib/serverApi";
 import { BACKEND_UP_EVENT } from "../../stores/backendStatusStore";
 import type { ApiChannel, Channel } from "../../types/chat";
 import { DesktopProviderLogo } from "../chat/DesktopProviderLogo";
+import { DeepSeekToolSettings } from "./DeepSeekToolSettings";
 import { JevSettings } from "./JevSettings";
 
 const api = createServerApi();
@@ -271,6 +272,7 @@ export function AgentSettings() {
           </div>
         </SettingsCard>
       </SettingsSection>
+      <DeepSeekToolSettings />
       <JevSettings />
     </div>
   );

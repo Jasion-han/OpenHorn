@@ -7,7 +7,7 @@ import {
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { fileKey } from "shared/format";
 import { chatFailureFinishReason } from "shared/message-text";
-import type { ChatStreamErrorCode, RecipeRequirements } from "shared/types";
+import type { ChatStreamErrorCode, ProviderChatMetadata, RecipeRequirements } from "shared/types";
 import {
   Button,
   cn,
@@ -52,7 +52,12 @@ import {
   type MessageRoundGroup,
 } from "../../lib/messageGroups";
 import { notifyWarning } from "../../lib/notify";
-import { ChatPreparationFailure, createServerApi, readErrorMessage } from "../../lib/serverApi";
+import {
+  ChatPreparationFailure,
+  createServerApi,
+  readErrorMessage,
+  SidecarSaveConflict,
+} from "../../lib/serverApi";
 import { sidecarPersistence } from "../../lib/sidecarPersistence";
 import { resolveRunSettings } from "../../lib/sidecarRunSupport";
 import {
@@ -88,7 +93,7 @@ const COMPOSER_PAD_BOTTOM = "env(safe-area-inset-bottom, 0px)";
 
 type DesktopSearchStatus = {
   configured: boolean;
-  source: "user" | "server" | "none" | "disabled";
+  source: "user" | "server" | "none" | "disabled" | "deepseek" | "duckduckgo";
 };
 
 async function fetchDesktopSearchStatus(): Promise<DesktopSearchStatus> {
@@ -787,7 +792,9 @@ export function DesktopChatArea() {
         throw new ChatStreamFailure(
           terminalEvent.errorCode === "response_truncated"
             ? getChatLabel("chat.error.responseTruncated")
-            : terminalEvent.message || "Stream error",
+            : terminalEvent.errorCode === "response_refused"
+              ? getChatLabel("chat.error.responseRefused")
+              : terminalEvent.message || "Stream error",
           failedMessageId,
           terminalEvent.errorCode,
         );
@@ -1226,10 +1233,12 @@ export function DesktopChatArea() {
           .messages.filter((m) => m.conversationId === conversationId && !m.id.startsWith("draft-"))
           .filter((m) => m.id !== userMessageId && m.id !== assistantMessageId);
         const conversationHistory = buildConversationHistory(historyMsgs);
-        const { systemPrompt: globalSystemPrompt, tavilyApiKey } = await resolveRunSettings(
-          chatAreaApi,
-          forceWebSearch,
-        );
+        const {
+          systemPrompt: globalSystemPrompt,
+          tavilyApiKey,
+          deepseekApiKey,
+          searchProvider,
+        } = await resolveRunSettings(chatAreaApi, forceWebSearch);
         const sendGenUiSection = await loadCurrentGenUiSection();
         if (turn.stopped || activeTurnRef.current !== turn) {
           await turn.stopping;
@@ -1249,6 +1258,8 @@ export function DesktopChatArea() {
           systemPrompt: withGenUiPrompt(globalSystemPrompt, sendGenUiSection),
           webSearchEnabled: forceWebSearch,
           tavilyApiKey,
+          deepseekApiKey,
+          searchProvider,
           targetMcpServer,
           conversationHistory: conversationHistory.length > 0 ? conversationHistory : undefined,
           attachments: attachmentParts,
@@ -1294,6 +1305,14 @@ export function DesktopChatArea() {
 
       updateMessage(userMessageId, { id: prepared.userMessageId });
       updateMessage(assistantMessageId, { id: prepared.assistantMessageId });
+      if (prepared.citations || prepared.liveMetadata) {
+        updateMessage(prepared.assistantMessageId, {
+          citations: prepared.citations,
+          liveStatus: prepared.liveMetadata?.status,
+          liveRoute: prepared.liveMetadata?.route,
+          liveLabel: prepared.liveMetadata?.label,
+        });
+      }
       liveAssistantMessageId = prepared.assistantMessageId;
       if (!turn.stopped && activeTurnRef.current === turn)
         setStreamingAssistantId(prepared.assistantMessageId);
@@ -1304,6 +1323,7 @@ export function DesktopChatArea() {
       }
 
       let chatContent = "";
+      let chatMetadata: ProviderChatMetadata | undefined;
       let streamFailure: Error | null = null;
       let chatErrorCode: ChatStreamErrorCode | undefined;
       let chatTruncated = false;
@@ -1343,11 +1363,29 @@ export function DesktopChatArea() {
               model: prepared.model,
               contextWindow: prepared.contextWindow,
               contextMetadata: prepared.contextMetadata,
+              nativeWeb: prepared.nativeWeb,
               messages: withGenUiMessages(prepared.messages, genUiSection),
               onEvent: (event) => {
                 // Late chunks after Stop are dropped: the reply is what was on
                 // screen when the user stopped it.
                 if (turn.stopped || settled) return;
+                if (
+                  event.type === "execution_event" &&
+                  event.eventType === "clear_streaming_text"
+                ) {
+                  chatContent = "";
+                  applyStreamEvent(prepared.assistantMessageId, { type: "clear_streaming_text" });
+                  return;
+                }
+                if (event.type === "execution_event" && event.eventType === "chat_metadata") {
+                  chatMetadata = event.metadata as ProviderChatMetadata;
+                  if (chatMetadata.refused) chatContent = "";
+                  applyStreamEvent(prepared.assistantMessageId, {
+                    type: "chat_metadata",
+                    metadata: chatMetadata,
+                  });
+                  return;
+                }
                 if (event.type === "execution_event" && event.eventType === "text") {
                   chatContent += event.content || "";
                   useChatStore
@@ -1370,13 +1408,26 @@ export function DesktopChatArea() {
               },
               onError: (message, errorCode) => {
                 if (turn.stopped || settled) return;
+                if (errorCode === "response_refused") {
+                  chatContent = "";
+                  updateMessage(prepared.assistantMessageId, {
+                    content: "",
+                    streamTail: undefined,
+                    citations: [],
+                    finishReason: "refused",
+                  });
+                }
                 // An error ends generation, not ownership of the reply. Keep
                 // its exact Markdown and persist it before surfacing failure.
                 chatErrorCode = errorCode;
                 chatTruncated = errorCode === "response_truncated";
                 settle(
                   new ChatStreamFailure(
-                    chatTruncated ? getChatLabel("chat.error.responseTruncated") : message,
+                    errorCode === "response_refused"
+                      ? getChatLabel("chat.error.responseRefused")
+                      : chatTruncated
+                        ? getChatLabel("chat.error.responseTruncated")
+                        : message,
                     prepared.assistantMessageId,
                     errorCode,
                   ),
@@ -1394,12 +1445,18 @@ export function DesktopChatArea() {
         });
       }
 
+      const { providerState: continuation, ...displayMetadata } = chatMetadata ?? {};
       await chatAreaApi.messages.chatComplete({
+        saveToken: prepared.saveToken,
         assistantMessageId: prepared.assistantMessageId,
         conversationId,
         content: chatContent,
         model: prepared.model,
         usage: chatUsage ?? undefined,
+        providerState: continuation,
+        citations: chatMetadata?.refused ? [] : (chatMetadata?.citations ?? prepared.citations),
+        liveMetadata: prepared.liveMetadata,
+        nativeMetadata: chatMetadata ? displayMetadata : undefined,
         // Chat keeps its terminal state here because it has no Agent run.
         finishReason: turn.stopped
           ? "stopped"
@@ -1465,11 +1522,13 @@ export function DesktopChatArea() {
         liveAssistantMessageId = error.assistantMessageId;
       }
       const message =
-        error instanceof ChatPreparationFailure && error.code === "chat_context_budget_exceeded"
-          ? getChatLabel("chat.reply.contextBudgetExceeded")
-          : error instanceof Error
-            ? error.message
-            : "Stream error";
+        error instanceof SidecarSaveConflict
+          ? getChatLabel("chat.save.conflictBody")
+          : error instanceof ChatPreparationFailure && error.code === "chat_context_budget_exceeded"
+            ? getChatLabel("chat.reply.contextBudgetExceeded")
+            : error instanceof Error
+              ? error.message
+              : "Stream error";
       useChatStore.getState().failStreamingMessage(liveAssistantMessageId, message);
       setError(message);
     } finally {
@@ -1673,6 +1732,7 @@ export function DesktopChatArea() {
       streamTail: undefined,
       streamPulseKey: 0,
       citations: undefined,
+      nativeMetadata: undefined,
       liveStatus: undefined,
       liveRoute: undefined,
       liveLabel: undefined,
@@ -1696,8 +1756,12 @@ export function DesktopChatArea() {
           )
           .filter((m) => m.id !== userMessage.id && m.id !== messageId);
         const conversationHistory = buildConversationHistory(historyMsgs);
-        const { systemPrompt: retrySystemPrompt, tavilyApiKey: retryTavilyApiKey } =
-          await resolveRunSettings(chatAreaApi, forceWebSearch);
+        const {
+          systemPrompt: retrySystemPrompt,
+          tavilyApiKey: retryTavilyApiKey,
+          deepseekApiKey: retryDeepseekApiKey,
+          searchProvider: retrySearchProvider,
+        } = await resolveRunSettings(chatAreaApi, forceWebSearch);
         // Re-parse the original message so a retried `/server` (or `/skill`)
         // invocation behaves exactly like the original send: the model gets the
         // instruction wrapper, the run targets that single MCP server, and the
@@ -1731,6 +1795,8 @@ export function DesktopChatArea() {
           systemPrompt: withGenUiPrompt(retrySystemPrompt, retryGenUiSection),
           webSearchEnabled: forceWebSearch,
           tavilyApiKey: retryTavilyApiKey,
+          deepseekApiKey: retryDeepseekApiKey,
+          searchProvider: retrySearchProvider,
           targetMcpServer: retryTargetMcpServer,
           conversationHistory: conversationHistory.length > 0 ? conversationHistory : undefined,
           attachmentsMeta: toSyncAttachmentsMeta(userMessage.attachmentsMeta),
@@ -1861,6 +1927,7 @@ export function DesktopChatArea() {
         streamTail: undefined,
         streamPulseKey: 0,
         citations: undefined,
+        nativeMetadata: undefined,
         liveStatus: undefined,
         liveRoute: undefined,
         liveLabel: undefined,
@@ -1913,8 +1980,12 @@ export function DesktopChatArea() {
           )
           .filter((m) => m.id !== userMessage.id && m.id !== assistantMessageId);
         const conversationHistory = buildConversationHistory(historyMsgs);
-        const { systemPrompt: editSystemPrompt, tavilyApiKey: editTavilyApiKey } =
-          await resolveRunSettings(chatAreaApi, forceWebSearch);
+        const {
+          systemPrompt: editSystemPrompt,
+          tavilyApiKey: editTavilyApiKey,
+          deepseekApiKey: editDeepseekApiKey,
+          searchProvider: editSearchProvider,
+        } = await resolveRunSettings(chatAreaApi, forceWebSearch);
         const editGenUiSection = await loadCurrentGenUiSection();
         if (turn.stopped || activeTurnRef.current !== turn) {
           await turn.stopping;
@@ -1938,6 +2009,8 @@ export function DesktopChatArea() {
           systemPrompt: withGenUiPrompt(editSystemPrompt, editGenUiSection),
           webSearchEnabled: forceWebSearch,
           tavilyApiKey: editTavilyApiKey,
+          deepseekApiKey: editDeepseekApiKey,
+          searchProvider: editSearchProvider,
           targetMcpServer: editTargetMcpServer,
           conversationHistory: conversationHistory.length > 0 ? conversationHistory : undefined,
           attachmentsMeta: toSyncAttachmentsMeta(userMessage.attachmentsMeta),

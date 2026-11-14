@@ -171,6 +171,9 @@ describe("resolveRunEndState", () => {
 });
 
 describe("replyHasOutput", () => {
+  test("a refused retry is a new terminal result even without answer text", () => {
+    expect(replyHasOutput({ content: "", finishReason: "refused" })).toBe(true);
+  });
   test("text, steps and errors count; whitespace does not", () => {
     expect(replyHasOutput({ content: "partial" })).toBe(true);
     expect(replyHasOutput({ content: "", agentRun: run({ error: "x" }) })).toBe(true);

@@ -1,5 +1,4 @@
 import { execFile } from "node:child_process";
-import { lookup } from "node:dns/promises";
 import { mkdir, readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import {
@@ -18,16 +17,28 @@ import {
 } from "@earendil-works/pi-ai";
 import { resolveContextPolicy } from "shared/context-policy";
 import {
+  assertPublicWebUrl,
   buildTavilyPayload,
+  fetchDeepSeek,
+  formatUntrustedWebSources,
   isNewsQuery,
   normalizeCitations,
   normalizeSearchQuery,
+  type PreferredSearchProvider,
+  type ResolveWebHostname,
+  readBoundedWebResponse,
   rerankCitations,
   type SearchCitation,
+  searchDeepSeek,
   searchDuckDuckGo,
+  selectSearchProvider,
   type TavilyResult,
 } from "shared/search";
 import type { AttachmentPart, ModelContextMetadata } from "shared/types";
+
+export type { PreferredSearchProvider } from "shared/search";
+export { isBlockedIpAddress } from "shared/search";
+
 import { modelSupportsVision } from "shared/vision";
 import {
   createCheckpointSession,
@@ -78,6 +89,8 @@ export type RunDirectAgentInput = {
   systemPrompt?: string;
   webSearchEnabled?: boolean;
   tavilyApiKey?: string;
+  deepseekApiKey?: string;
+  searchProvider?: PreferredSearchProvider;
   /** Enabled MCP servers keyed by name (`{ type, command/url, args, env }`). */
   mcpServers?: Record<string, Record<string, unknown>>;
   attachments?: AttachmentPart[];
@@ -117,104 +130,20 @@ const SUBPROCESS_TIMEOUT_MS = 15_000;
 /** Max redirect hops re-validated for web_fetch before giving up. */
 const WEB_FETCH_MAX_HOPS = 5;
 
-function parseIpv4Parts(host: string): number[] | null {
-  const parts = host.split(".");
-  if (parts.length !== 4) return null;
-  const nums: number[] = [];
-  for (const part of parts) {
-    if (!/^\d{1,3}$/.test(part)) return null;
-    const n = Number(part);
-    if (n > 255) return null;
-    nums.push(n);
-  }
-  return nums;
-}
-
-function isBlockedIpv4Parts([a, b]: number[]): boolean {
-  // 0.0.0.0/8 ("this host"), loopback, RFC1918 private, and link-local
-  // (169.254/16, which includes the 169.254.169.254 cloud-metadata address).
-  return (
-    a === 0 ||
-    a === 127 ||
-    a === 10 ||
-    (a === 172 && b >= 16 && b <= 31) ||
-    (a === 192 && b === 168) ||
-    (a === 169 && b === 254)
-  );
-}
-
-/**
- * Pure classifier: true when `host` is an IP literal in a non-public range
- * (loopback, private, link-local, IPv4-mapped/unique-local/link-local IPv6).
- * Non-IP inputs (hostnames) return false — those are resolved via DNS and each
- * resolved address is classified separately. Exported for unit testing without
- * network access.
- */
-export function isBlockedIpAddress(host: string): boolean {
-  const v4 = parseIpv4Parts(host);
-  if (v4) return isBlockedIpv4Parts(v4);
-
-  let h = host.toLowerCase();
-  const zone = h.indexOf("%");
-  if (zone !== -1) h = h.slice(0, zone);
-  if (!h.includes(":")) return false; // not an IPv6 literal
-  if (h === "::1" || h === "::") return true; // loopback / unspecified
-
-  // IPv4-mapped/embedded (e.g. ::ffff:169.254.169.254): classify the tail v4.
-  const tail = h.slice(h.lastIndexOf(":") + 1);
-  if (tail.includes(".")) {
-    const mapped = parseIpv4Parts(tail);
-    if (mapped) return isBlockedIpv4Parts(mapped);
-  }
-
-  const firstGroup = h.split(":")[0];
-  const val = firstGroup ? Number.parseInt(firstGroup, 16) : NaN;
-  if (Number.isNaN(val)) return false;
-  const hiByte = val >> 8;
-  if (hiByte === 0xfc || hiByte === 0xfd) return true; // fc00::/7 unique-local
-  if ((val & 0xffc0) === 0xfe80) return true; // fe80::/10 link-local
-  return false;
-}
-
-/**
- * Validates a web_fetch target: rejects non-http(s) schemes and any host that
- * resolves (or is) a non-public address, to block SSRF against loopback /
- * private / link-local (cloud-metadata) endpoints. Returns a tool-error string
- * when the URL must not be fetched, or null when it is safe.
- */
-async function assertFetchableUrl(rawUrl: string): Promise<string | null> {
-  let parsed: URL;
-  try {
-    parsed = new URL(rawUrl);
-  } catch {
-    return "Error: invalid URL";
-  }
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    return `Error: unsupported URL scheme: ${parsed.protocol}`;
-  }
-  const hostname = parsed.hostname.replace(/^\[|\]$/g, ""); // strip IPv6 brackets
-  if (isBlockedIpAddress(hostname)) {
-    return "Error: refusing to fetch a non-public address";
-  }
-  try {
-    const resolved = await lookup(hostname, { all: true });
-    if (resolved.some(({ address }) => isBlockedIpAddress(address))) {
-      return "Error: refusing to fetch a non-public address";
-    }
-  } catch {
-    return "Error: could not resolve host";
-  }
-  return null;
-}
-
 // ---------------------------------------------------------------------------
 // Tool execution
 // ---------------------------------------------------------------------------
 
-interface ExecuteToolOptions {
+export interface ExecuteToolOptions {
   signal?: AbortSignal;
   permissionMode?: "default" | "full-access";
   tavilyApiKey?: string;
+  deepseekApiKey?: string;
+  searchProvider?: PreferredSearchProvider;
+  webSearchEnabled?: boolean;
+  fetchImpl?: WebSearchFetchFn;
+  resolveHostname?: ResolveWebHostname;
+  timeoutMs?: number;
   /**
    * Extra roots that READ tools may reach outside the workspace — the enabled
    * skills' real folders. The system prompt tells the model to read each
@@ -472,30 +401,57 @@ export async function executeTool(
 
   if (name === "web_search") {
     const query = typeof input.query === "string" ? input.query : "";
-    return runWebSearch(query, { tavilyApiKey: options?.tavilyApiKey });
+    if (options?.webSearchEnabled !== true) return "Error: web access is disabled";
+    return runWebSearch(query, options);
   }
 
   if (name === "web_fetch") {
+    if (options?.webSearchEnabled !== true) return "Error: web access is disabled";
     const url = typeof input.url === "string" ? input.url.trim() : "";
     if (!url) return "Error: url is required";
 
+    if (options.searchProvider === "deepseek" && !options.deepseekApiKey?.trim()) {
+      return "Fetch error: not_configured. Page content was not read.";
+    }
+    if (options.deepseekApiKey?.trim()) {
+      try {
+        const page = await fetchDeepSeek(url, {
+          apiKey: options.deepseekApiKey,
+          fetchImpl: options.fetchImpl,
+          resolveHostname: options.resolveHostname,
+          signal: options.signal,
+          timeoutMs: options.timeoutMs,
+        });
+        return formatUntrustedWebSources([page]);
+      } catch (error) {
+        return `Fetch error: ${error instanceof Error ? error.message : "failed"}. Page content was not read.`;
+      }
+    }
     try {
+      const signal = options.signal
+        ? AbortSignal.any([
+            options.signal,
+            AbortSignal.timeout(options.timeoutMs ?? SUBPROCESS_TIMEOUT_MS),
+          ])
+        : AbortSignal.timeout(options.timeoutMs ?? SUBPROCESS_TIMEOUT_MS);
       // Follow redirects manually so each hop is re-validated against the SSRF
       // guard — a public URL that 30x-redirects to 169.254.169.254 or localhost
       // must not slip through.
       let currentUrl = url;
       let resp: Response | undefined;
       for (let hop = 0; hop < WEB_FETCH_MAX_HOPS; hop++) {
-        const blocked = await assertFetchableUrl(currentUrl);
-        if (blocked) return blocked;
-        resp = await fetch(currentUrl, {
+        signal.throwIfAborted();
+        await assertPublicWebUrl(currentUrl, options.resolveHostname);
+        signal.throwIfAborted();
+        resp = await (options.fetchImpl ?? fetch)(currentUrl, {
           headers: { "User-Agent": "OpenHorn/1.0 (compatible; bot)" },
-          signal: AbortSignal.timeout(SUBPROCESS_TIMEOUT_MS),
+          signal,
           redirect: "manual",
         });
         if (resp.status < 300 || resp.status >= 400) break;
         const location = resp.headers.get("location");
         if (!location) break;
+        void resp.body?.cancel().catch(() => {});
         currentUrl = new URL(location, currentUrl).toString();
         resp = undefined;
       }
@@ -509,18 +465,24 @@ export async function executeTool(
       ) {
         return `Error: unsupported content type: ${contentType}`;
       }
-      const html = await resp.text();
+      const html = await readBoundedWebResponse(resp, undefined, signal);
+      const formatPage = (content: string) =>
+        formatUntrustedWebSources([
+          {
+            title: currentUrl,
+            url: currentUrl,
+            content: content.slice(0, MAX_READ_CHARS),
+          },
+        ]);
       if (contentType.includes("text/plain") || contentType.includes("application/json")) {
-        return html.length > MAX_READ_CHARS
-          ? `${html.slice(0, MAX_READ_CHARS)}\n...(truncated)`
-          : html;
+        return formatPage(html);
       }
       // HTML -> Markdown via turndown
       const TurndownService = (await import("turndown")).default;
       const td = new TurndownService({ headingStyle: "atx", codeBlockStyle: "fenced" });
       td.remove(["script", "style", "nav", "footer", "header", "aside", "iframe", "noscript"]);
       const md = td.turndown(html);
-      return md.length > MAX_READ_CHARS ? `${md.slice(0, MAX_READ_CHARS)}\n...(truncated)` : md;
+      return formatPage(md);
     } catch (err) {
       return `Fetch error: ${err instanceof Error ? err.message : "failed"}`;
     }
@@ -539,8 +501,11 @@ type WebSearchFetchFn = (
 ) => ReturnType<typeof fetch>;
 
 export interface WebSearchOptions {
-  /** Tavily key — present means use Tavily, absent means DuckDuckGo. */
+  /** Dedicated provider keys; auto keeps the legacy Tavily → DuckDuckGo order. */
   tavilyApiKey?: string;
+  deepseekApiKey?: string;
+  searchProvider?: PreferredSearchProvider;
+  signal?: AbortSignal;
   /** Injectable fetch for tests; defaults to global fetch. */
   fetchImpl?: WebSearchFetchFn;
   /** Clock override for deterministic re-ranking in tests. */
@@ -552,12 +517,13 @@ export interface WebSearchOptions {
 
 /** Format normalized citations into the sidecar's plain-text tool output. */
 function formatSearchResults(citations: SearchCitation[], answer?: string): string {
-  const parts: string[] = [];
-  if (answer?.trim()) parts.push(answer.trim());
-  for (const c of citations) {
-    parts.push(`### ${c.title}\n${c.url}\n${c.snippet ?? ""}`);
-  }
-  return parts.length > 0 ? parts.join("\n\n") : "No results found.";
+  if (!citations.length) return "No results found.";
+  return [
+    formatUntrustedWebSources(citations),
+    answer?.trim() ? `Untrusted provider summary (JSON): ${JSON.stringify(answer.trim())}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 /**
@@ -607,18 +573,34 @@ async function duckDuckGoWebSearch(query: string, options: WebSearchOptions): Pr
 }
 
 /**
- * Provider-agnostic web search for the sidecar `web_search` tool. A Tavily key
- * (when configured) is used for quality; otherwise — or when Tavily fails — the
- * keyless DuckDuckGo provider runs so search always works without a key.
+ * Explicit DeepSeek requires its dedicated key and returns honest failure.
+ * Auto preserves legacy Tavily → DuckDuckGo; DeepSeek is never selected implicitly.
  */
 export async function runWebSearch(query: string, options: WebSearchOptions = {}): Promise<string> {
   const trimmed = query.trim();
   if (!trimmed) return "Error: query is required";
 
-  if (options.tavilyApiKey) {
-    const result = await tavilyWebSearch(trimmed, options.tavilyApiKey, options);
+  if (options.signal?.aborted) return "Error: web search aborted";
+  const selected = selectSearchProvider(options);
+  if (selected.provider === "none")
+    return `Error: ${selected.reason}. Web search was not performed.`;
+  if (selected.provider === "deepseek") {
+    try {
+      const citations = await searchDeepSeek(normalizeSearchQuery(trimmed), {
+        apiKey: selected.apiKey,
+        fetchImpl: options.fetchImpl,
+        signal: options.signal,
+        timeoutMs: options.timeoutMs,
+      });
+      return formatSearchResults(rerankCitations(citations, isNewsQuery(trimmed), options.now));
+    } catch (error) {
+      return `Search error: ${error instanceof Error ? error.message : "failed"}. No usable sources; do not claim you searched the web.`;
+    }
+  }
+  if (selected.provider === "tavily") {
+    const result = await tavilyWebSearch(trimmed, selected.apiKey, options);
     if (result !== null) return result;
-    // Tavily failed — degrade to DuckDuckGo.
+    if (options.signal?.aborted) return "Error: web search aborted";
   }
   return duckDuckGoWebSearch(trimmed, options);
 }
@@ -654,7 +636,7 @@ interface BuildToolsOptions extends ExecuteToolOptions {
   webSearchEnabled?: boolean;
 }
 
-function buildTools(cwd: string, options?: BuildToolsOptions): AgentTool<TSchema>[] {
+export function buildTools(cwd: string, options?: BuildToolsOptions): AgentTool<TSchema>[] {
   const tools: AgentTool<TSchema>[] = [
     makeAgentTool(
       "bash",
@@ -742,8 +724,8 @@ function buildTools(cwd: string, options?: BuildToolsOptions): AgentTool<TSchema
     ),
   ];
 
-  // Only include web tools when webSearchEnabled is not explicitly false
-  if (options?.webSearchEnabled !== false) {
+  // Web tools require explicit per-run network consent.
+  if (options?.webSearchEnabled === true) {
     tools.push(
       makeAgentTool(
         "web_search",
@@ -893,6 +875,8 @@ export async function runDirectAgent(input: RunDirectAgentInput): Promise<void> 
   let tools = buildTools(input.cwd, {
     permissionMode: input.permissionMode,
     tavilyApiKey: input.tavilyApiKey,
+    deepseekApiKey: input.deepseekApiKey,
+    searchProvider: input.searchProvider,
     requestApproval: input.requestApproval,
     webSearchEnabled: input.webSearchEnabled,
     checkpoint,
@@ -938,7 +922,7 @@ export async function runDirectAgent(input: RunDirectAgentInput): Promise<void> 
       cwd: input.cwd,
       permissionMode: input.permissionMode,
       // Same condition `buildTools` uses to register `web_fetch`.
-      webFetchAvailable: input.webSearchEnabled !== false,
+      webFetchAvailable: input.webSearchEnabled === true,
       extra: buildSkillsPromptSection(input.skills ?? [], "read_file"),
     }),
     buildReActBehaviorSection(),

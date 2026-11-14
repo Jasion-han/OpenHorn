@@ -148,6 +148,8 @@ export const AgentRunParamsSchema = z.object({
     .optional(),
   webSearchEnabled: z.boolean().optional(),
   tavilyApiKey: z.string().optional(),
+  deepseekApiKey: z.string().max(4096).optional(),
+  searchProvider: z.enum(["auto", "tavily", "deepseek", "duckduckgo"]).optional(),
   // Enabled MCP servers keyed by name. Zod strips unknown keys, so this field
   // must be declared here or the desktop's mcpServers never reaches the run.
   mcpServers: z.record(z.record(z.unknown())).optional(),
@@ -182,7 +184,12 @@ export const ChatStreamParamsSchema = z.object({
   model: z.string().min(1),
   contextWindow: ContextWindowSchema,
   contextMetadata: ContextMetadataSchema,
-  messages: z.array(z.object({ role: z.string(), content: z.unknown() })),
+  nativeWeb: z
+    .object({ search: z.boolean(), readUrls: z.boolean(), thinking: z.boolean() })
+    .optional(),
+  messages: z.array(
+    z.object({ role: z.string(), content: z.unknown(), providerState: z.unknown().optional() }),
+  ),
 });
 
 export const CheckpointRollbackParamsSchema = z.object({

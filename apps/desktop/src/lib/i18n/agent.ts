@@ -750,8 +750,12 @@ export const chatLabels = {
   "chat.reply.empty": "没有生成回复内容",
   "chat.reply.contextBudgetExceeded": "本次内容超出上下文预算，请缩短问题、附件或系统提示后重试。",
   "chat.reply.failed": "回答未能完成，已保留收到的内容。请重试。",
+  "chat.reply.refused": "模型未能提供本次回答。你可以调整问题后重试。",
+  "chat.error.responseRefused": "模型未能提供本次回答。你可以调整问题后重试。",
   "chat.save.failedTitle": "回复尚未保存",
   "chat.save.failedBody": "生成结果已保留在当前应用中。请重试保存，重试不会重新生成回复。",
+  "chat.save.conflictBody":
+    "这轮对话的保存版本无法确认或已有更新。为避免覆盖，已保留本地副本；你可以先复制内容，再选择是否放弃本地副本。",
   "chat.save.retry": "重试保存",
   "chat.save.inProgress": "回复正在生成或保存，请稍后再删除。",
   "chat.reply.truncated": "回答达到长度上限，已保留内容。可重试或要求缩小回答范围。",
@@ -2003,6 +2007,46 @@ const libraryLabels = {
   "library.errors.input": "输入不符合要求，请检查问题长度与范围。",
   "library.errors.unavailable": "操作未完成，请检查后端连接后重试。",
 } as const;
+export const deepSeekLabels = {
+  title: "搜索来源与 DeepSeek 工具",
+  description: "为不同聊天模型共用搜索与网页读取，也可开启 DeepSeek 原生联网体验。",
+  provider: "搜索来源",
+  "provider.auto": "自动 · Tavily 优先，DuckDuckGo 备用",
+  "provider.tavily": "Tavily",
+  "provider.deepseek": "DeepSeek",
+  "provider.duckduckgo": "DuckDuckGo · 无需密钥",
+  providerHint:
+    "仅在对话允许联网且需要外部信息时搜索。自动模式和 Tavily 可使用 DuckDuckGo 备用来源；DeepSeek 不可用时会明确提示。",
+  toolsKey: "DeepSeek 工具 API Key",
+  toolsHint:
+    "仅用于独立搜索、网页读取和主动发起的 OCR，发送至 DeepSeek 官方 API。加密保存，不随备份导出；搜索、抓取和 OCR 按实际调用计费。",
+  native: "启用 DeepSeek 原生联网",
+  nativeHint:
+    "仅在对话开启联网、使用官方 DeepSeek 渠道和支持的 Flash 模型时生效。使用该渠道的密钥，可展示搜索过程与引用；其他模型仍使用上方搜索来源。",
+  loading: "正在加载工具设置…",
+  saved: "工具设置已保存。",
+  loadError: "无法加载工具设置，请重新加载。已有草稿会保留。",
+  saveError: "部分设置未保存，请重试。已确认保存的项目会保留。",
+  needsKey: "选择 DeepSeek 搜索前，请填写工具 API Key。",
+  retry: "重新加载",
+  cancel: "取消修改",
+  saving: "保存中…",
+  save: "保存工具设置",
+  sources: "来源",
+  process: "联网过程",
+  search: "搜索",
+  read_link: "阅读链接",
+  open_page: "打开网页",
+  find_in_page: "页内查找",
+  pending: "进行中",
+  completed: "已完成",
+  failed: "未完成",
+  toolUsage: "本轮调用：搜索 {search} 次 · 网页读取 {fetch} 次 · 图片搜索 {imageSearch} 次",
+} as const;
+export function getDeepSeekLabel(key: keyof typeof deepSeekLabels): string {
+  return deepSeekLabels[key];
+}
+
 export type LibraryLabelKey = keyof typeof libraryLabels;
 export function getLibraryLabel(key: LibraryLabelKey): string {
   return libraryLabels[key];

@@ -56,5 +56,10 @@ export function sanitizeBackupMcp<
 export function isSafeBackupSetting(row: { key: string; value: string }): boolean {
   // Every additional setting needs its own bounded value schema. In particular,
   // free-form prompts/templates and unknown keys cannot be assumed secret-free.
-  return row.key === "liveSearch.tavilyEnabled" && (row.value === "true" || row.value === "false");
+  if (row.key === "liveSearch.tavilyEnabled" || row.key === "deepseek.nativeWebEnabled")
+    return row.value === "true" || row.value === "false";
+  return (
+    row.key === "liveSearch.provider" &&
+    ["auto", "tavily", "deepseek", "duckduckgo"].includes(row.value)
+  );
 }

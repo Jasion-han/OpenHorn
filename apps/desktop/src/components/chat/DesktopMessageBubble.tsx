@@ -15,6 +15,7 @@ import { LiveStatusBadge } from "./DesktopLiveStatusBadge";
 import { stripLeadingThematicBreak } from "./DesktopMarkdownMessage";
 import { MessageActionBar } from "./DesktopMessageActionBar";
 import { DesktopMessageAttachments } from "./DesktopMessageAttachments";
+import { DesktopNativeWebActivity } from "./DesktopNativeWebActivity";
 import { DesktopStreamingMarkdownMessage } from "./DesktopStreamingMarkdownMessage";
 import { TypingIndicator } from "./DesktopTypingIndicator";
 import { DesktopUserMessageContent } from "./DesktopUserMessageContent";
@@ -56,12 +57,14 @@ export function resolveBubbleEndLabel(input: {
   | "chat.reply.truncated"
   | "chat.reply.contextBudgetExceeded"
   | "chat.reply.failed"
+  | "chat.reply.refused"
   | null {
   const { message } = input;
   if (message.role !== "assistant" || input.isStreaming || message.agentRun) return null;
   if (message.finishReason === "length") return "chat.reply.truncated";
   if (message.finishReason === "context_budget_exceeded") return "chat.reply.contextBudgetExceeded";
   if (message.finishReason === "error") return "chat.reply.failed";
+  if (message.finishReason === "refused") return "chat.reply.refused";
   const state = resolvePlainReplyEndState(message);
   if (state === "stopped") return "chat.agent.stopped";
   if (state === "cancelled") return "chat.agent.cancelled";
@@ -178,6 +181,7 @@ function MessageBubbleImpl({
               route={message.liveRoute}
               label={message.liveLabel}
             />
+            <DesktopNativeWebActivity metadata={message.nativeMetadata} />
             <div
               className="text-sm leading-6"
               style={{

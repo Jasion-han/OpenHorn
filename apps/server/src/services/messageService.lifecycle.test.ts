@@ -7,6 +7,9 @@ import { client, db } from "../db";
 import * as channelsNamespace from "./channelService";
 import {
   completeChatFromSidecar,
+  editUserMessage,
+  prepareChatForSidecar,
+  regenerateMessage,
   searchMessages,
   sendMessage,
   streamMessage,
@@ -131,6 +134,42 @@ async function indexRows(id: string) {
       args: [id],
     })
   ).rows;
+}
+
+for (const replacement of ["retry", "edit"] as const) {
+  test(`a delayed prepared completion cannot overwrite a newer ${replacement}`, async () => {
+    const f = await fixture();
+    try {
+      const prepared = await prepareChatForSidecar(f.userId, {
+        conversationId: f.conversationId,
+        content: "prepared question",
+      });
+      expect(typeof prepared.saveToken).toBe("string");
+      const stream =
+        replacement === "retry"
+          ? await regenerateMessage(f.userId, prepared.assistantMessageId)
+          : await editUserMessage(f.userId, prepared.userMessageId, "edited question");
+      await new Response(stream).text();
+      await expect(
+        completeChatFromSidecar(f.userId, {
+          conversationId: f.conversationId,
+          assistantMessageId: prepared.assistantMessageId,
+          saveToken: prepared.saveToken,
+          content: "stale stopped answer",
+          finishReason: "stopped",
+        }),
+      ).rejects.toThrow("saved message changed");
+      const [row] = await db
+        .select()
+        .from(messages)
+        .where(eq(messages.id, prepared.assistantMessageId));
+      expect(row.content).toBe("fixture answer");
+      expect(row.finishReason).toBe(null);
+      expect((await indexRows(prepared.assistantMessageId))[0]?.content).toBe("fixture answer");
+    } finally {
+      await f.close();
+    }
+  });
 }
 
 for (const failure of [false, true]) {

@@ -1020,6 +1020,17 @@ export function createDesktopChatStore(
     },
 
     applyStreamEvent(messageId, event) {
+      if (event.type === "chat_metadata") {
+        const { providerState: _continuation, ...displayMetadata } = event.metadata;
+        get().updateMessage(messageId, {
+          nativeMetadata: displayMetadata,
+          ...(event.metadata.citations ? { citations: event.metadata.citations } : {}),
+          ...(event.metadata.refused
+            ? { content: "", streamTail: undefined, citations: [], finishReason: "refused" }
+            : {}),
+        });
+        return;
+      }
       if (event.type === "delta") {
         const content = event.content || "";
         if (!content) return;

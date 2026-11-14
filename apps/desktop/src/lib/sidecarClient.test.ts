@@ -105,6 +105,27 @@ async function connectClient() {
 }
 
 describe("projectSidecarAgentEvent", () => {
+  test("native web metadata and structured refusal survive projection", () => {
+    const metadata = {
+      citations: [{ title: "Source", url: "https://example.com/" }],
+      refused: true,
+    };
+    expect(projectSidecarAgentEvent("native", { type: "chat_metadata", metadata })).toMatchObject({
+      type: "execution_event",
+      eventType: "chat_metadata",
+      metadata,
+    });
+    expect(
+      projectSidecarAgentEvent("native", {
+        type: "error",
+        content: "refused",
+        errorCode: "response_refused",
+      }),
+    ).toMatchObject({
+      type: "error",
+      errorCode: "response_refused",
+    });
+  });
   test("projects only recognized structured output-limit codes", () => {
     expect(
       projectSidecarAgentEvent("run-limit", {

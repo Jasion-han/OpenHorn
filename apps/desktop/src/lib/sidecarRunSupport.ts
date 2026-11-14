@@ -106,7 +106,12 @@ const GLOBAL_SYSTEM_PROMPT_KEY = "chat.systemPrompt";
 export async function resolveRunSettings(
   api: ServerApi,
   forceWebSearch: boolean,
-): Promise<{ systemPrompt: string | undefined; tavilyApiKey: string | undefined }> {
+): Promise<{
+  systemPrompt: string | undefined;
+  tavilyApiKey: string | undefined;
+  deepseekApiKey?: string;
+  searchProvider?: "auto" | "tavily" | "deepseek" | "duckduckgo";
+}> {
   let systemPrompt: string | undefined;
   try {
     const { settings } = await api.settings.get([GLOBAL_SYSTEM_PROMPT_KEY]);
@@ -115,20 +120,38 @@ export async function resolveRunSettings(
     systemPrompt = undefined;
   }
   let tavilyApiKey: string | undefined;
+  let deepseekApiKey: string | undefined;
+  let searchProvider: "auto" | "tavily" | "deepseek" | "duckduckgo" | undefined;
   if (forceWebSearch) {
     try {
       const { settings } = await api.settings.get([
         "liveSearch.tavilyApiKey",
         "liveSearch.tavilyEnabled",
+        "deepseek.toolsApiKey",
+        "liveSearch.provider",
       ]);
       if (settings["liveSearch.tavilyEnabled"] !== "false") {
         tavilyApiKey = settings["liveSearch.tavilyApiKey"] || undefined;
       }
+      deepseekApiKey = settings["deepseek.toolsApiKey"] || undefined;
+      const provider = settings["liveSearch.provider"];
+      if (
+        provider === "auto" ||
+        provider === "tavily" ||
+        provider === "deepseek" ||
+        provider === "duckduckgo"
+      )
+        searchProvider = provider;
     } catch {
       // ignore
     }
   }
-  return { systemPrompt, tavilyApiKey };
+  return {
+    systemPrompt,
+    tavilyApiKey,
+    ...(deepseekApiKey ? { deepseekApiKey } : {}),
+    ...(searchProvider ? { searchProvider } : {}),
+  };
 }
 
 export interface RunUsage {

@@ -61,6 +61,8 @@ export interface SidecarAgentRunInput {
   systemPrompt?: string;
   webSearchEnabled?: boolean;
   tavilyApiKey?: string;
+  deepseekApiKey?: string;
+  searchProvider?: "auto" | "tavily" | "deepseek" | "duckduckgo";
   // Set when the user invoked an MCP server via `/server`: the run connects to
   // that single server only (case-insensitive name match) instead of the full
   // enabled roster — faster startup and its tools can't fall past the tool cap.
@@ -678,6 +680,8 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
         systemPrompt: input.systemPrompt,
         webSearchEnabled: input.webSearchEnabled,
         tavilyApiKey: input.tavilyApiKey,
+        deepseekApiKey: input.deepseekApiKey,
+        searchProvider: input.searchProvider,
         mcpServers,
         skills: skillMetas,
         conversationHistory: input.conversationHistory,

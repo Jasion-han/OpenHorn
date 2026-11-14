@@ -307,21 +307,30 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
         return;
       }
       case "chat.stream": {
-        const { apiKey, baseUrl, protocol, model, contextWindow, contextMetadata, messages } =
-          params as {
-            apiKey: string;
-            baseUrl?: string;
-            protocol: string;
-            model: string;
-            contextWindow?: number | null;
-            contextMetadata?: ModelContextMetadata | null;
-            // Asserted straight to the shape runChatStream needs. The wire payload
-            // is already being asserted here, so widening it to
-            // `{ role: string; content: unknown }` bought no safety — it only
-            // forced an `as any` at the call site, which switched checking off for
-            // every field rather than just the two that are genuinely unverified.
-            messages: ChatMessage[];
-          };
+        const {
+          apiKey,
+          baseUrl,
+          protocol,
+          model,
+          contextWindow,
+          contextMetadata,
+          messages,
+          nativeWeb,
+        } = params as {
+          apiKey: string;
+          baseUrl?: string;
+          protocol: string;
+          model: string;
+          contextWindow?: number | null;
+          contextMetadata?: ModelContextMetadata | null;
+          // Asserted straight to the shape runChatStream needs. The wire payload
+          // is already being asserted here, so widening it to
+          // `{ role: string; content: unknown }` bought no safety — it only
+          // forced an `as any` at the call site, which switched checking off for
+          // every field rather than just the two that are genuinely unverified.
+          messages: ChatMessage[];
+          nativeWeb?: import("shared/types").NativeWebOptions;
+        };
 
         let resolvedApiKey = apiKey;
         let useCodexResponses = false;
@@ -400,6 +409,7 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
             contextWindow,
             contextMetadata,
             messages,
+            nativeWeb,
             abortController,
             onEvent,
           })
@@ -443,6 +453,8 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
           conversationHistory,
           webSearchEnabled,
           tavilyApiKey,
+          deepseekApiKey,
+          searchProvider,
           mcpServers,
           attachments,
           skills,
@@ -462,6 +474,8 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
           conversationHistory?: Array<{ role: "user" | "assistant"; content: string }>;
           webSearchEnabled?: boolean;
           tavilyApiKey?: string;
+          deepseekApiKey?: string;
+          searchProvider?: "auto" | "tavily" | "deepseek" | "duckduckgo";
           mcpServers?: Record<string, Record<string, unknown>>;
           attachments?: import("shared/types").AttachmentPart[];
           skills?: import("./agent/skills").SkillMeta[];
@@ -727,6 +741,8 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
               systemPrompt,
               webSearchEnabled,
               tavilyApiKey,
+              deepseekApiKey,
+              searchProvider,
               mcpServers,
               attachments,
               skills: materializedSkills,

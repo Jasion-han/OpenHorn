@@ -504,7 +504,10 @@ async function executeRun(run: ScheduledTaskRun, task: ScheduledTask) {
       }
     }
     const conversationHistory = await loadConversationHistory(conversationId);
-    const { systemPrompt, tavilyApiKey } = await resolveRunSettings(api, forceWebSearch);
+    const { systemPrompt, tavilyApiKey, deepseekApiKey, searchProvider } = await resolveRunSettings(
+      api,
+      forceWebSearch,
+    );
     if (recipeSpec) {
       const spec = recipeSpec;
       const localExtensions =
@@ -566,6 +569,8 @@ async function executeRun(run: ScheduledTaskRun, task: ScheduledTask) {
           systemPrompt,
           webSearchEnabled: conversation.forceWebSearch,
           tavilyApiKey,
+          deepseekApiKey,
+          searchProvider,
           mcpServers,
           skills,
           conversationHistory: conversationHistory.length > 0 ? conversationHistory : undefined,

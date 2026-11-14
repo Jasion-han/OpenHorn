@@ -1,12 +1,14 @@
 import {
   type ChatMessage,
+  ChatResponseRefusedError,
   ChatStreamTruncatedError,
   createAdapter,
+  filterChatProviderState,
   isAnthropicOAuthToken,
 } from "adapters";
 import { boundChatContext, ChatContextBudgetError } from "shared/context-budget";
 import { resolveContextPolicy } from "shared/context-policy";
-import type { ModelContextMetadata } from "shared/types";
+import type { ModelContextMetadata, NativeWebOptions } from "shared/types";
 import { resolveClaudeBillingMarker } from "./anthropic-billing";
 import type { AgentEvent } from "./events";
 
@@ -18,6 +20,7 @@ export type RunChatStreamInput = {
   contextWindow?: number | null;
   contextMetadata?: ModelContextMetadata | null;
   messages: ChatMessage[];
+  nativeWeb?: NativeWebOptions;
   abortController: AbortController;
   onEvent: (event: AgentEvent) => void;
 };
@@ -28,10 +31,13 @@ export async function runChatStream(input: RunChatStreamInput): Promise<void> {
   try {
     // The desktop appends its response-format schema after server preparation.
     // Recheck the final payload so those instructions also consume the budget.
-    messages = boundChatContext(input.messages, {
-      maxTokens: policy.maxInputTokens,
-      maxMessages: policy.maxMessages,
-    });
+    messages = boundChatContext(
+      filterChatProviderState(input.messages, input.protocol, input.baseUrl, input.model),
+      {
+        maxTokens: policy.maxInputTokens,
+        maxMessages: policy.maxMessages,
+      },
+    );
   } catch (error) {
     input.onEvent({
       type: "error",
@@ -49,12 +55,20 @@ export async function runChatStream(input: RunChatStreamInput): Promise<void> {
     anthropic: { billingMarker },
   });
 
+  let refused = false;
   try {
     const stream = adapter.chatStream({
       model: input.model,
       messages,
       maxTokens: policy.maxOutputTokens,
       signal: input.abortController.signal,
+      nativeWeb: input.nativeWeb,
+      onMetadata: (metadata) => {
+        if (input.abortController.signal.aborted) return;
+        if (metadata.refused && !refused) input.onEvent({ type: "clear_streaming_text" });
+        refused = metadata.refused === true;
+        input.onEvent({ type: "chat_metadata", metadata });
+      },
     });
 
     // Drive the iterator by hand: chatStream reports token usage through the
@@ -83,6 +97,12 @@ export async function runChatStream(input: RunChatStreamInput): Promise<void> {
       return;
     }
     if (error instanceof ChatStreamTruncatedError) {
+      if (error.usage) input.onEvent({ type: "usage", ...error.usage });
+      input.onEvent({ type: "error", content: error.message, errorCode: error.code });
+      return;
+    }
+    if (error instanceof ChatResponseRefusedError) {
+      if (!refused) input.onEvent({ type: "clear_streaming_text" });
       if (error.usage) input.onEvent({ type: "usage", ...error.usage });
       input.onEvent({ type: "error", content: error.message, errorCode: error.code });
       return;

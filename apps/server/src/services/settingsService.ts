@@ -1,7 +1,9 @@
 import { settings } from "db";
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "../db";
-import { generateId } from "../utils";
+import { decrypt, encrypt, generateId } from "../utils";
+
+const TOOLS_KEY = "deepseek.toolsApiKey";
 
 export async function getSettingValues(userId: string, keys: string[]) {
   if (!Array.isArray(keys) || keys.length === 0) return {};
@@ -19,7 +21,7 @@ export async function getSettingValues(userId: string, keys: string[]) {
 
   const out: Record<string, string> = {};
   for (const row of rows) {
-    out[row.key] = row.value;
+    out[row.key] = row.key === TOOLS_KEY ? decrypt(row.value) : row.value;
   }
   return out;
 }
@@ -30,7 +32,16 @@ export async function setSettingValue(userId: string, key: string, value: string
     throw new Error("key is required");
   }
 
-  const normalizedValue = value;
+  if (
+    normalizedKey === "liveSearch.provider" &&
+    !["auto", "tavily", "deepseek", "duckduckgo"].includes(value)
+  )
+    throw new Error("Invalid search provider");
+  if (normalizedKey === "deepseek.nativeWebEnabled" && value !== "true" && value !== "false")
+    throw new Error("Invalid native web setting");
+  if (normalizedKey === TOOLS_KEY && (!value.trim() || value.length > 4096 || /\s/.test(value)))
+    throw new Error("Invalid tools API key");
+  const normalizedValue = normalizedKey === TOOLS_KEY ? encrypt(value) : value;
   const now = new Date();
 
   // Upsert against the (user_id, key) unique index so concurrent writes can't

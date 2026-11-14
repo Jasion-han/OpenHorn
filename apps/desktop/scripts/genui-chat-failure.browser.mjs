@@ -14,6 +14,7 @@ const { build } = createRequire(require.resolve("vite"))("esbuild");
 const files = new Map();
 const requests = [];
 const rows = [];
+const pendingResponses = new Set();
 let prepares = 0;
 let completes = 0;
 let retries = 0;
@@ -50,6 +51,10 @@ const json = (response, value, status = 200) => {
   response.end(JSON.stringify(value));
 };
 const server = http.createServer(async (request, response) => {
+  pendingResponses.add(response);
+  const finished = () => pendingResponses.delete(response);
+  response.once("finish", finished);
+  response.once("close", finished);
   const url = new URL(request.url, "http://fixture");
   const path = url.pathname;
   if (files.has(path)) {
@@ -135,12 +140,14 @@ const server = http.createServer(async (request, response) => {
       assistantMessageId,
       apiKey: "fixture-only",
       baseUrl: "http://fixture.invalid",
+      saveToken: "fixture-prepared-snapshot",
       protocol,
       model: "fixture-model",
       messages: [{ role: "user", content: data.content }],
     });
   }
   if (path === "/messages/chat/complete") {
+    assert.equal(data.saveToken, "fixture-prepared-snapshot");
     completes++;
     const held = holdComplete;
     holdComplete = null;
@@ -160,6 +167,7 @@ const server = http.createServer(async (request, response) => {
   }
   if (path === "/messages/sync-sidecar") {
     syncedPreparations++;
+    server.emit("fixture-agent-save-observed");
     if (failAgentSaveOnce) {
       failAgentSaveOnce = false;
       return json(response, { error: "fixture save is unavailable" }, 500);
@@ -217,6 +225,7 @@ const server = http.createServer(async (request, response) => {
         usage: truncated ? JSON.stringify(truncationUsage) : null,
       });
     }
+    if (retryMode === "refused") Object.assign(row, { content: "", finishReason: "refused" });
     response.writeHead(200, { "Content-Type": "text/event-stream" });
     const terminal = truncated
       ? {
@@ -233,6 +242,7 @@ const server = http.createServer(async (request, response) => {
         : {
             type: "error",
             message: "fixture retry interrupted",
+            ...(retryMode === "refused" ? { content: "", errorCode: "response_refused" } : {}),
             messageId: id,
             model: "fixture-model",
           };
@@ -320,6 +330,17 @@ try {
   await page.waitForFunction(() => !!window.failureChat);
   const snapshot = () => page.evaluate(() => window.failureChat.snapshot());
   const reset = async () => {
+    // Discard this scenario's durable work before reusing backend message IDs.
+    await page.evaluate(() => window.failureChat.clearForScenario());
+    await Promise.all(
+      [...pendingResponses].map(
+        (response) =>
+          new Promise((resolve) => {
+            response.once("finish", resolve);
+            response.once("close", resolve);
+          }),
+      ),
+    );
     rows.length = 0;
     prepares = 0;
     completes = 0;
@@ -342,7 +363,16 @@ try {
   const send = async () => {
     await page.locator("textarea").fill("test failure");
     await page.locator("textarea").press("Enter");
-    await page.waitForFunction(() => window.failureChat.ready());
+    await page
+      .waitForFunction(() => window.failureChat.ready())
+      .catch(async (error) => {
+        console.error("Fixture send state", JSON.stringify(await snapshot()));
+        console.error(
+          "Fixture request paths",
+          requests.slice(-8).map((request) => request.path),
+        );
+        throw error;
+      });
   };
   const emit = (content) => page.evaluate((content) => window.failureChat.emit(content), content);
   const fail = async () => {
@@ -968,6 +998,10 @@ try {
       await page.evaluate(() => window.failureChat.agentApproval());
       await page.getByTestId("sidecar-approval-allow").waitFor();
     }
+    const stoppedSave =
+      mode === "agent"
+        ? once(server, "fixture-agent-save-observed", { signal: AbortSignal.timeout(10_000) })
+        : null;
     await page.getByRole("button", { name: "Stop", exact: true }).click();
     await page.waitForFunction(() => !window.failureChat.snapshot().streaming);
     const stopped = await snapshot();
@@ -987,6 +1021,7 @@ try {
       contents,
     );
     assert.equal(await page.getByTestId("sidecar-approval-allow").count(), 0);
+    if (stoppedSave) await stoppedSave;
     assert.equal(mode === "agent" ? syncedPreparations : completes, 1);
     await page.evaluate(() => window.failureChat.mode("chat"));
     await page.locator("textarea").fill("usable after remounted Stop");
@@ -1689,6 +1724,35 @@ try {
   console.log(
     "PASS empty and partial provider failures: exact Markdown plus localized durable reason after reload",
   );
+
+  await reset();
+  await send();
+  await emit("This streamed text must be withdrawn.");
+  await page.evaluate(() => window.failureChat.refuse());
+  await page.waitForFunction(() => !window.failureChat.snapshot().streaming);
+  assert.equal(rows.at(-1).content, "");
+  assert.equal(rows.at(-1).finishReason, "refused");
+  const refusedLabel = await page.evaluate(() => window.failureChat.labels.refused);
+  await page.getByText(refusedLabel, { exact: true }).first().waitFor();
+  assert.equal((await snapshot()).messages.at(-1).content, "");
+  console.log(
+    "PASS ordinary OpenAI refusal withdraws streamed text and forwards prepared save token",
+  );
+
+  await reset();
+  await send();
+  await emit("Previous answer must not return after a refused retry.");
+  await page.evaluate(() => window.failureChat.done());
+  await page.waitForFunction(() => !window.failureChat.snapshot().streaming);
+  retryMode = "refused";
+  await page.getByRole("button", { name: retryLabel, exact: true }).click();
+  await page.getByText(refusedLabel, { exact: true }).first().waitFor();
+  assert.equal((await snapshot()).messages.at(-1).content, "");
+  assert.equal((await snapshot()).messages.at(-1).finishReason, "refused");
+  await page.evaluate(() => window.failureChat.reload());
+  await page.getByText(refusedLabel, { exact: true }).first().waitFor();
+  assert.equal((await snapshot()).messages.at(-1).content, "");
+  console.log("PASS refused retry replaces old answer consistently before and after reload");
 
   assert.deepEqual(errors, []);
   console.log("GenUI actual Chat failure browser regressions passed.");

@@ -5,6 +5,7 @@ import type {
   LibraryImportCounts,
   MessageFinishReason,
   ModelContextConfig,
+  ProviderChatMetadata,
   RecipeRequirements,
 } from "shared/types";
 
@@ -159,6 +160,7 @@ export interface ApiLiveMetadata {
   route: ApiLiveRoute;
   label?: string;
   sourceType: "local" | "weather" | "web_search" | "none";
+  native?: ProviderChatMetadata;
 }
 
 export interface ApiCitation {
@@ -193,6 +195,7 @@ export interface ApiMessage {
   agentRun: string | null;
   liveMetadata: string | null;
   citations: string | null;
+  providerState?: string | null;
   /** JSON blob of ApiMessageUsage, or null when the provider reported none. */
   usage: string | null;
   /** Explicit Stop or Chat output-limit state; absent on older rows. */
@@ -284,6 +287,7 @@ export interface Message {
   liveRoute?: ApiLiveRoute;
   liveLabel?: string;
   citations?: ApiCitation[];
+  nativeMetadata?: ProviderChatMetadata;
   /** Token counts for the turn; absent when the provider did not report them. */
   usage?: ApiMessageUsage;
   /**
@@ -306,6 +310,7 @@ export interface Message {
 }
 
 export type ChatStreamEvent =
+  | { type: "chat_metadata"; metadata: ProviderChatMetadata }
   | { type: "live_status"; status: ApiLiveStatus; route: ApiLiveRoute; label?: string }
   | { type: "citations"; citations: ApiCitation[] }
   | { type: "delta"; content: string }

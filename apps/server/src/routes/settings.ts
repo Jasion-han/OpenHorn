@@ -38,10 +38,23 @@ settings.get("/welcome-suggestions", async (c) => {
 settings.get("/search-status", async (c) => {
   const user = c.get("user");
 
-  const values = await getSettingValues(user.id, [TAVILY_API_KEY_SETTING, TAVILY_ENABLED_SETTING]);
+  const values = await getSettingValues(user.id, [
+    TAVILY_API_KEY_SETTING,
+    TAVILY_ENABLED_SETTING,
+    "liveSearch.provider",
+    "deepseek.toolsApiKey",
+  ]);
+  const provider = values["liveSearch.provider"];
+  if (provider === "deepseek") {
+    return c.json({
+      configured: Boolean(values["deepseek.toolsApiKey"]?.trim()),
+      source: "deepseek",
+    });
+  }
+  if (provider === "duckduckgo") return c.json({ configured: true, source: "duckduckgo" });
   const enabledRaw = values[TAVILY_ENABLED_SETTING];
   if (typeof enabledRaw === "string" && enabledRaw.trim().toLowerCase() === "false") {
-    return c.json({ configured: false, source: "disabled" });
+    return c.json({ configured: true, source: "duckduckgo" });
   }
 
   const userKey = values[TAVILY_API_KEY_SETTING];
@@ -54,7 +67,7 @@ settings.get("/search-status", async (c) => {
     return c.json({ configured: true, source: "server" });
   }
 
-  return c.json({ configured: false, source: "none" });
+  return c.json({ configured: true, source: "duckduckgo" });
 });
 
 settings.put("/:key", async (c) => {
