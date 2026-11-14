@@ -1,5 +1,5 @@
 import { Download, HardDrive } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Badge,
   Button,
@@ -13,8 +13,10 @@ import {
 import { importErrorLabel } from "../../../lib/dataTransferError";
 import { formatDataTransferLabel, getDataTransferLabel } from "../../../lib/i18n/agent";
 import { notifyError, notifySuccess, notifyWarning } from "../../../lib/notify";
+import { refreshImportedResources } from "../../../lib/refreshImportedResources";
 import { createServerApi } from "../../../lib/serverApi";
 import { isDesktopRuntime } from "../../../lib/tauriBridge";
+import { useDesktopShellStore } from "../../../stores/desktopShellStore";
 import type { ImportResult } from "../../../types/chat";
 
 const api = createServerApi();
@@ -70,8 +72,24 @@ export function BackupFileImportRow({ onImported }: { onImported?: () => void })
   const [detectedFormat, setDetectedFormat] = useState<string | null>(null);
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [importResultDialogOpen, setImportResultDialogOpen] = useState(false);
+  const selectionEpoch = useRef(0);
+  const selecting = useRef(false);
+  const submission = useRef(false);
+  const completed = useRef(false);
+  const activeView = useDesktopShellStore((state) => state.activeView);
+  const settingsTab = useDesktopShellStore((state) => state.settingsTab);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: shell navigation invalidates pending pick/detect/result dialogs
+  useEffect(() => {
+    selectionEpoch.current++;
+    setImportDialogOpen(false);
+    setImportResultDialogOpen(false);
+    return () => {
+      selectionEpoch.current++;
+    };
+  }, [activeView, settingsTab]);
 
   const handleImport = useCallback(async () => {
+    if (selecting.current || submission.current) return;
     if (!isDesktopRuntime()) {
       notifyWarning(
         getDataTransferLabel("settings.data.notify.cancelled"),
@@ -80,15 +98,19 @@ export function BackupFileImportRow({ onImported }: { onImported?: () => void })
       return;
     }
 
+    selecting.current = true;
+    const epoch = ++selectionEpoch.current;
+    setDetecting(true);
     try {
       const { pickImportFile } = await import("../../../lib/tauriBridge");
       const filePath = await pickImportFile();
-      if (!filePath) return;
+      if (!filePath || epoch !== selectionEpoch.current) return;
 
       setImportFilePath(filePath);
       setDetecting(true);
 
       const { format } = await api.dataTransfer.detectFormat(filePath);
+      if (epoch !== selectionEpoch.current) return;
       setDetectedFormat(format);
       setDetecting(false);
 
@@ -100,25 +122,35 @@ export function BackupFileImportRow({ onImported }: { onImported?: () => void })
         return;
       }
 
+      completed.current = false;
       setImportDialogOpen(true);
     } catch (err) {
-      setDetecting(false);
+      if (epoch !== selectionEpoch.current) return;
       notifyError(
         getDataTransferLabel("settings.data.import.failedTitle"),
         getDataTransferLabel(importErrorLabel(err)),
       );
+    } finally {
+      selecting.current = false;
+      setDetecting(false);
     }
   }, []);
 
   const confirmImport = useCallback(async () => {
-    if (!importFilePath || !detectedFormat) return;
+    if (!importFilePath || !detectedFormat || submission.current || completed.current) return;
 
+    submission.current = true;
+    const epoch = selectionEpoch.current;
     setImporting(true);
     try {
       const result = await api.dataTransfer.importData(importFilePath, detectedFormat);
-      setImportResult(result);
-      setImportDialogOpen(false);
-      setImportResultDialogOpen(true);
+      completed.current = true;
+      void refreshImportedResources();
+      if (epoch === selectionEpoch.current) {
+        setImportResult(result);
+        setImportDialogOpen(false);
+        setImportResultDialogOpen(true);
+      }
       (result.backupFailure === "validation"
         ? notifyError
         : hasWarnings(result)
@@ -132,11 +164,13 @@ export function BackupFileImportRow({ onImported }: { onImported?: () => void })
       );
       onImported?.();
     } catch (err) {
+      if (epoch !== selectionEpoch.current) return;
       notifyError(
         getDataTransferLabel("settings.data.import.failedTitle"),
         getDataTransferLabel(importErrorLabel(err)),
       );
     } finally {
+      submission.current = false;
       setImporting(false);
     }
   }, [importFilePath, detectedFormat, onImported]);
@@ -168,7 +202,12 @@ export function BackupFileImportRow({ onImported }: { onImported?: () => void })
       </div>
 
       {/* Import confirmation dialog */}
-      <Dialog open={importDialogOpen} onOpenChange={setImportDialogOpen}>
+      <Dialog
+        open={importDialogOpen}
+        onOpenChange={(open) => {
+          if (!submission.current) setImportDialogOpen(open);
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{getDataTransferLabel("settings.data.import.confirmTitle")}</DialogTitle>
@@ -187,6 +226,9 @@ export function BackupFileImportRow({ onImported }: { onImported?: () => void })
               </span>
             </div>
           ) : null}
+          <p className="break-all text-xs text-muted-foreground">
+            {getDataTransferLabel("settings.data.import.fileLabel")} {importFilePath}
+          </p>
 
           <DialogFooter>
             <Button
@@ -300,7 +342,7 @@ export function BackupFileImportRow({ onImported }: { onImported?: () => void })
 
           <DialogFooter>
             <Button onClick={() => setImportResultDialogOpen(false)}>
-              {getDataTransferLabel("settings.data.export.cancel")}
+              {getDataTransferLabel("settings.data.import.done")}
             </Button>
           </DialogFooter>
         </DialogContent>

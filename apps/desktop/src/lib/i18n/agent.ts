@@ -1180,6 +1180,8 @@ export function getScheduledTaskLabel(key: ScheduledTaskLabelKey): string {
  * Templates use `{name}` placeholders resolved via `formatDataTransferLabel`.
  */
 export const dataTransferLabels = {
+  "settings.data.import.fileLabel": "所选文件：",
+  "settings.data.import.done": "完成",
   "settings.data.import.error.invalidRequest": "导入参数不完整，请重新选择文件。",
   "settings.data.import.error.fileNotFound": "文件已移动或删除，请重新选择导出文件。",
   "settings.data.import.error.fileUnreadable":
