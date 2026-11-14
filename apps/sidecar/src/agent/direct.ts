@@ -266,7 +266,8 @@ export async function executeTool(
     const content = typeof input.content === "string" ? input.content : "";
     try {
       if (options?.checkpoint) {
-        await ensureCheckpointBackup(options.checkpoint, filePath).catch(() => {});
+        const relative = toWorkspaceRelative(options.checkpoint.workspaceRoot, filePath);
+        await ensureCheckpointBackup(options.checkpoint, relative).catch(() => {});
       }
       const resolved = await resolveWritePathInWorkspace(cwd, filePath);
       await mkdir(path.dirname(resolved), { recursive: true });
@@ -286,7 +287,8 @@ export async function executeTool(
     if (!oldStr) return "Error: old_string must not be empty";
     try {
       if (options?.checkpoint) {
-        await ensureCheckpointBackup(options.checkpoint, filePath).catch(() => {});
+        const relative = toWorkspaceRelative(options.checkpoint.workspaceRoot, filePath);
+        await ensureCheckpointBackup(options.checkpoint, relative).catch(() => {});
       }
       const resolved = await resolveWritePathInWorkspace(cwd, filePath);
       const content = await readFile(resolved, "utf-8");
