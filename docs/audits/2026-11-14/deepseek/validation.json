@@ -1,0 +1,100 @@
+{
+  "date": "2026-11-14",
+  "status": "passed",
+  "unit_and_integration": {
+    "shared_adapters": {
+      "command": "bun --no-env-file test packages/shared/src packages/adapters/src",
+      "passed": 171,
+      "failed": 0
+    },
+    "server": {
+      "command": "OPENHORN_TEST_DATABASE_URL=file:<unique-temp-dir>/test.db pnpm --filter server exec bun --no-env-file test",
+      "passed": 576,
+      "failed": 0
+    },
+    "desktop": {
+      "command": "pnpm --filter desktop exec bun --no-env-file test",
+      "passed": 698,
+      "failed": 0
+    },
+    "sidecar": {
+      "command": "pnpm --filter sidecar exec bun --no-env-file test",
+      "passed": 342,
+      "failed": 0
+    }
+  },
+  "total_bun_tests": 1787,
+  "vector_stress": {
+    "rounds": 10,
+    "passed": 30,
+    "failed": 0
+  },
+  "browser": {
+    "settings_and_references_ocr": [
+      "failed initial load is retryable and cannot overwrite settings",
+      "expanded provider menu, hover, selected and keyboard states remain light",
+      "missing key validation, failed save draft and successful retry",
+      "cancel returns to acknowledged baseline without discarding saved configuration",
+      "native process and citations expand; unsafe URL is not rendered",
+      "OCR needs per-dialog consent, keeps failure visible and never automatically retries"
+    ],
+    "library_workflow_checks": 19,
+    "actual_chat_scenario_groups": 58,
+    "actual_chat_final_result": "passed",
+    "unexpected_requests": [],
+    "page_errors": []
+  },
+  "engineering": {
+    "pnpm_typecheck": "passed",
+    "pnpm_check": "passed",
+    "git_diff_check": "passed",
+    "desktop_ui_build": "passed",
+    "sidecar_host_compile": "passed",
+    "offline_frozen_lockfile": "passed"
+  },
+  "limitations": [
+    "Provider responses are synthetic; no real paid API quality, latency, permissions or billing test.",
+    "Browser workflows and host binary compilation do not constitute a full Tauri native end-to-end test.",
+    "Legacy Chat clients omitting prepare saveToken remain compatible but lack completion snapshot protection.",
+    "ASR/TTS and Files API rich-layout parsing remain deferred."
+  ],
+  "context": "Implementation-phase workspace including pre-existing uncommitted work; shipping tree validation is recorded separately below.",
+  "publication_at_implementation_validation": {
+    "git_committed": false,
+    "pushed": false,
+    "deployed": false
+  },
+  "isolated_shipping_validation": {
+    "base_commit": "ac148453d4aa9afab87ae0f793d53fcfb173d150",
+    "scope": "Isolated shipping tree; unrelated pre-existing working changes excluded.",
+    "bun": {
+      "shared": {
+        "passed": 171,
+        "failed": 0
+      },
+      "server": {
+        "passed": 529,
+        "failed": 0
+      },
+      "desktop": {
+        "passed": 664,
+        "failed": 0
+      },
+      "sidecar": {
+        "passed": 342,
+        "failed": 0
+      }
+    },
+    "total": 1706,
+    "typecheck": "passed",
+    "biome": "passed",
+    "desktop_build": "passed",
+    "sidecar_host_compile": "passed",
+    "browser": {
+      "settings_groups": 6,
+      "library_checks": 19,
+      "chat_groups": 58
+    },
+    "real_desktop_validation": "scheduled after push; browser verification is not a native desktop result"
+  }
+}
