@@ -37,6 +37,7 @@ export function LibraryUploadDialog({
     [busy, setBusy] = useState(false),
     [discard, setDiscard] = useState(false);
   const lock = useRef(false);
+  const fileInput = useRef<HTMLInputElement>(null);
   const close = () => {
     if (lock.current) return;
     if (file) setDiscard(true);
@@ -58,7 +59,7 @@ export function LibraryUploadDialog({
           className="space-y-5"
           onSubmit={async (event) => {
             event.preventDefault();
-            if (!file || lock.current) return;
+            if (!file || lock.current || discard) return;
             lock.current = true;
             setBusy(true);
             try {
@@ -76,14 +77,22 @@ export function LibraryUploadDialog({
             {label("library.destination")} · {scopeName}
           </p>
           <div className="space-y-2">
-            <Label htmlFor="library-upload-file">{label("library.file")}</Label>
+            <Label htmlFor="library-upload-file" className="sr-only">
+              {label("library.file")}
+            </Label>
             <Input
+              ref={fileInput}
               id="library-upload-file"
               type="file"
-              disabled={busy}
+              className="hidden"
+              disabled={busy || discard}
               onChange={(event) => {
-                setError("");
                 const next = event.target.files?.[0] ?? null;
+                // The File draft owns the selection, including after navigation.
+                // Canceling the system picker must not discard an existing File.
+                event.target.value = "";
+                if (!next) return;
+                setError("");
                 if (
                   next &&
                   (!next.size ||
@@ -109,6 +118,14 @@ export function LibraryUploadDialog({
                   .setUpload(next ? { scope: libraryScopeKey(scope), file: next } : null);
               }}
             />
+            <Button
+              type="button"
+              variant="outline"
+              disabled={busy || discard}
+              onClick={() => fileInput.current?.click()}
+            >
+              {label("library.file")}
+            </Button>
             {file && (
               <p className="break-all text-xs text-muted-foreground">
                 {file.name} · {Math.ceil(file.size / 1024)} KB
@@ -130,10 +147,10 @@ export function LibraryUploadDialog({
             }}
           />
           <DialogFooter>
-            <Button type="button" variant="outline" disabled={busy} onClick={close}>
+            <Button type="button" variant="outline" disabled={busy || discard} onClick={close}>
               {label("library.cancel")}
             </Button>
-            <Button type="submit" disabled={!file || busy}>
+            <Button type="submit" disabled={!file || busy || discard}>
               {label(busy ? "library.working" : "library.import")}
             </Button>
           </DialogFooter>
