@@ -147,6 +147,8 @@ const SCHEMA_DDL: string[] = [
 	    context_paths TEXT,
 	    live_metadata TEXT,
 	    citations TEXT,
+	    provider_state TEXT,
+	    completion_version TEXT,
 	    usage TEXT,
 	    finish_reason TEXT,
 	    created_at INTEGER NOT NULL,
@@ -1007,6 +1009,16 @@ async function ensureMessageUsageColumn(): Promise<void> {
   }
 }
 
+async function ensureMessageProviderStateColumn(): Promise<void> {
+  const result = await client.execute(`PRAGMA table_info('messages');`);
+  if (!hasColumnNamed(getRows(result), "provider_state")) {
+    await client.execute(`ALTER TABLE messages ADD COLUMN provider_state TEXT;`);
+  }
+  if (!hasColumnNamed(getRows(result), "completion_version")) {
+    await client.execute(`ALTER TABLE messages ADD COLUMN completion_version TEXT;`);
+  }
+}
+
 // Additive and nullable: existing rows read as "ran to completion", which is
 // what they were as far as anything recorded — no backfill, so no backup.
 async function ensureMessageFinishReasonColumn(): Promise<void> {
@@ -1697,6 +1709,7 @@ export async function bootstrapDatabase(options: BootstrapOptions = {}): Promise
   await ensureMessageContextPathsColumn();
   await ensureMessageLiveMetadataColumn();
   await ensureMessageCitationsColumn();
+  await ensureMessageProviderStateColumn();
   await ensureMessageUsageColumn();
   await ensureMessageUpdatedAtColumn();
   await ensureMessageFinishReasonColumn();

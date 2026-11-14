@@ -2,6 +2,25 @@ import { describe, expect, test } from "bun:test";
 import { modelSupportsVision } from "./index";
 
 describe("modelSupportsVision", () => {
+  test("recognizes documented DeepSeek flash vision models without upgrading pro or legacy text ids", () => {
+    for (const id of [
+      "deepseek-flash",
+      "DeepSeek-FLASH",
+      "deepseek-v4-flash",
+      "deepseek-v4-flash-vision-exp",
+      "deepseek/deepseek-flash",
+    ]) {
+      expect(modelSupportsVision(id)).toBe(true);
+    }
+    for (const id of [
+      "deepseek-v4-pro",
+      "deepseek-chat",
+      "deepseek-reasoner",
+      "deepseek-flash-fictional",
+    ]) {
+      expect(modelSupportsVision(id)).toBe(false);
+    }
+  });
   test("recognizes known vision-capable models (case-insensitive)", () => {
     const visionIds = [
       "gpt-4o",

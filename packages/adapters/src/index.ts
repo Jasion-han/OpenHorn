@@ -32,7 +32,16 @@ export {
   normalizeAnthropicModelId,
   VERIFIED_CLAUDE_CODE_VERSION,
 } from "./anthropic-oauth";
-export { ChatStreamTruncatedError } from "./chatStreamError";
+export { ChatResponseRefusedError, ChatStreamTruncatedError } from "./chatStreamError";
+export {
+  deepseekNativeWebIdentity,
+  filterChatProviderState,
+  PROVIDER_CHAT_STATE_MAX_BYTES,
+  safeCitationUrl,
+  supportsDeepSeekNativeWeb,
+  validateChatCitations,
+  validateProviderChatState,
+} from "./deepseek-native-web";
 export type {
   AgentCapabilityMode,
   GenericAgentConversationMessage,

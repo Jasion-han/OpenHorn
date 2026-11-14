@@ -13,8 +13,8 @@ export const PROVIDERS = {
   },
   deepseek: {
     name: "DeepSeek",
-    models: ["deepseek-chat", "deepseek-coder"],
-    defaultModel: "deepseek-chat",
+    models: ["deepseek-flash", "deepseek-v4-pro"],
+    defaultModel: "deepseek-flash",
     baseUrl: "https://api.deepseek.com/v1",
   },
   google: {

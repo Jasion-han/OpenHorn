@@ -8,6 +8,20 @@ import {
 
 type Message = { role: "system" | "user" | "assistant"; content: string };
 
+test("provider continuation data consumes budget and is omitted with its whole historical turn", () => {
+  const state = { provider: "deepseek", serverToolCalls: [{ signature: "s".repeat(5000) }] };
+  const answer = { role: "assistant" as const, content: "short", providerState: state };
+  expect(estimateContextMessageTokens(answer) > 1000).toBe(true);
+  const bounded = boundChatContext(
+    [{ role: "user" as const, content: "old" }, answer, { role: "user" as const, content: "new" }],
+    { maxTokens: 100 },
+  );
+  expect(bounded).toEqual([
+    { role: "system", content: "[2 earlier messages omitted]" },
+    { role: "user", content: "new" },
+  ]);
+});
+
 test("a current request is never silently removed to satisfy the budget", () => {
   expect(() =>
     boundChatContext([

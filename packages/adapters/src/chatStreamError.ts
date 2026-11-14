@@ -27,3 +27,22 @@ export function finishChatStream(
   }
   return usage;
 }
+
+/** A late safety verdict retracts all text already yielded for this turn. */
+export class ChatResponseRefusedError extends Error {
+  readonly code = "response_refused";
+  constructor(readonly usage?: ChatUsage) {
+    super("Response refused by provider");
+    this.name = "ChatResponseRefusedError";
+  }
+}
+
+export function finishOpenAIChatStream(
+  finishReason: string | undefined,
+  usage: ChatUsage | undefined,
+  signal?: AbortSignal,
+) {
+  if (!signal?.aborted && finishReason === "content_filter")
+    throw new ChatResponseRefusedError(usage);
+  return finishChatStream(finishReason, usage, signal);
+}

@@ -189,6 +189,10 @@ export const messages = sqliteTable(
     contextPaths: text("context_paths"),
     liveMetadata: text("live_metadata"),
     citations: text("citations"),
+    /** Bounded provider-specific continuation state, isolated by endpoint/model. */
+    providerState: text("provider_state"),
+    /** Invalidates prepared sidecar Chat completions when another attempt starts. */
+    completionVersion: text("completion_version"),
     /** JSON: { promptTokens, completionTokens, totalTokens }. Null when the provider reported none. */
     usage: text("usage"),
     /**

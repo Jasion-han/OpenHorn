@@ -78,6 +78,9 @@ const NON_VISION_MODEL_MARKERS: readonly string[] = [
 export function modelSupportsVision(modelId: string): boolean {
   if (!modelId) return false;
   const id = modelId.toLowerCase();
+  // Current official aliases route to V4.1 Flash (2026-11). Match a complete
+  // model segment so a future text-only variant is not silently opted in.
+  if (/^(?:deepseek\/)?deepseek-(?:flash|v4-flash|v4-flash-vision-exp)$/.test(id)) return true;
 
   for (const marker of NON_VISION_MODEL_MARKERS) {
     if (id.includes(marker)) return false;

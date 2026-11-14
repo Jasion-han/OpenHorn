@@ -247,6 +247,10 @@ importers:
         version: 5.9.3
 
   packages/adapters:
+    dependencies:
+      shared:
+        specifier: workspace:*
+        version: link:../shared
     devDependencies:
       bun-types:
         specifier: ^1.3.10

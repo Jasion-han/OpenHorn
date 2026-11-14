@@ -4,7 +4,11 @@ export const CHAT_MAX_CONTEXT_TOKENS = 32_000;
 const MESSAGE_OVERHEAD_TOKENS = 10;
 const IMAGE_ESTIMATE_TOKENS = 1_024;
 
-type ContextMessage = { role: "system" | "user" | "assistant"; content: unknown };
+type ContextMessage = {
+  role: "system" | "user" | "assistant";
+  content: unknown;
+  providerState?: unknown;
+};
 type OmissionMessage = { role: "system"; content: string };
 
 /** Conservative text estimate; CJK/emoji must not use the ASCII chars ratio. */
@@ -33,6 +37,9 @@ export class ChatContextBudgetError extends Error {
 export function estimateContextMessageTokens(message: ContextMessage): number {
   const estimateText = estimateContextTextTokens;
   let tokens = MESSAGE_OVERHEAD_TOKENS;
+  // A provider's opaque webpage signatures are replayed with the assistant
+  // message. Include their serialized size before choosing whole old turns.
+  if (message.providerState) tokens += estimateText(JSON.stringify(message.providerState));
   if (typeof message.content === "string") return tokens + estimateText(message.content);
   if (!Array.isArray(message.content)) return tokens;
   for (const part of message.content) {

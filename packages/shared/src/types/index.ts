@@ -9,6 +9,7 @@ export type {
   SavedArtifact,
   UpdateArtifactInput,
 } from "./artifacts";
+export type { NativeWebOptions, ProviderChatMetadata, ProviderChatState } from "./provider-chat";
 export type { UnifiedSearchKind, UnifiedSearchResult } from "./search";
 
 // "acp" is a local-agent channel: it stores an ACP agent launch config
@@ -89,8 +90,16 @@ export interface Project {
  * raw error messages are never stored as generated reply text.
  * Chat has no run record, so this column preserves its end state after reload.
  */
-export type MessageFinishReason = "stopped" | "length" | "context_budget_exceeded" | "error";
-export type ChatStreamErrorCode = "response_truncated" | "chat_context_budget_exceeded";
+export type MessageFinishReason =
+  | "stopped"
+  | "length"
+  | "context_budget_exceeded"
+  | "refused"
+  | "error";
+export type ChatStreamErrorCode =
+  | "response_truncated"
+  | "chat_context_budget_exceeded"
+  | "response_refused";
 
 export interface Message {
   id: string;

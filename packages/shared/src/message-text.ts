@@ -56,6 +56,7 @@ export function assistantFinishReason(
   if (run?.status === "cancelled") return "stopped";
   if (run) return null;
   return finishReason === "length" ||
+    finishReason === "refused" ||
     finishReason === "context_budget_exceeded" ||
     finishReason === "error"
     ? finishReason
@@ -91,6 +92,7 @@ function textSteps(agentRun: unknown): string[] {
 /** Safe persisted termination state; raw provider errors never become reply text. */
 export function chatFailureFinishReason(errorCode: unknown): MessageFinishReason {
   if (errorCode === "response_truncated") return "length";
+  if (errorCode === "response_refused") return "refused";
   if (errorCode === "chat_context_budget_exceeded") return "context_budget_exceeded";
   return "error";
 }

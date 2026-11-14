@@ -1,4 +1,14 @@
-import { finishChatStream } from "./chatStreamError";
+import type { NativeWebOptions, ProviderChatMetadata, ProviderChatState } from "shared/types";
+import {
+  ChatResponseRefusedError,
+  finishChatStream,
+  finishOpenAIChatStream,
+} from "./chatStreamError";
+import {
+  DeepSeekChatMetadata,
+  deepseekNativeWebIdentity,
+  validateProviderChatState,
+} from "./deepseek-native-web";
 import {
   disposeResponseReader,
   readErrorResponseText,
@@ -14,11 +24,14 @@ export type ChatContentPart =
 export interface ChatMessage {
   role: "user" | "assistant" | "system";
   content: string | ChatContentPart[];
+  providerState?: ProviderChatState;
 }
 
 export interface ChatOptions {
   model: string;
   messages: ChatMessage[];
+  nativeWeb?: NativeWebOptions;
+  onMetadata?: (metadata: ProviderChatMetadata) => void;
   stream?: boolean;
   temperature?: number;
   maxTokens?: number;
@@ -616,25 +629,53 @@ export class OpenAIAdapter implements ProviderAdapter {
     this.baseUrl = `${normalizeBaseUrl(raw)}/v1`;
   }
 
+  private chatMessages(options: ChatOptions) {
+    const identity = deepseekNativeWebIdentity(this.baseUrl, options.model);
+    return options.messages.map((m) => {
+      const state =
+        identity && m.role === "assistant"
+          ? validateProviderChatState(m.providerState, identity)
+          : null;
+      return {
+        role: m.role,
+        content:
+          typeof m.content === "string"
+            ? m.content
+            : m.content.map((p) =>
+                p.type === "text"
+                  ? { type: "text", text: p.text }
+                  : {
+                      type: "image_url",
+                      image_url: { url: `data:${p.mediaType};base64,${p.dataBase64}` },
+                    },
+              ),
+        ...(state?.serverToolCalls.length ? { server_tool_calls: state.serverToolCalls } : {}),
+      };
+    });
+  }
+
+  private nativeParameters(options: ChatOptions) {
+    if (!options.nativeWeb || !deepseekNativeWebIdentity(this.baseUrl, options.model)) return {};
+    return {
+      tools: [
+        ...(options.nativeWeb.search ? [{ type: "deepseek_web_search" }] : []),
+        ...(options.nativeWeb.readUrls ? [{ type: "deepseek_read_url" }] : []),
+      ],
+      thinking: { type: options.nativeWeb.thinking ? "enabled" : "disabled" },
+    };
+  }
+
+  private metadataCollector(options: ChatOptions) {
+    const identity = deepseekNativeWebIdentity(this.baseUrl, options.model);
+    return identity ? new DeepSeekChatMetadata(identity, options.onMetadata, options.signal) : null;
+  }
+
   async chat(options: ChatOptions): Promise<ChatResponse> {
     const url = `${this.baseUrl}/chat/completions`;
     const body = JSON.stringify({
       model: options.model,
-      messages: options.messages.map((m) => {
-        if (typeof m.content === "string") return m;
-        return {
-          role: m.role,
-          content: m.content.map((p) => {
-            if (p.type === "text") {
-              return { type: "text", text: p.text };
-            }
-            return {
-              type: "image_url",
-              image_url: { url: `data:${p.mediaType};base64,${p.dataBase64}` },
-            };
-          }),
-        };
-      }),
+      messages: this.chatMessages(options),
+      ...this.nativeParameters(options),
       temperature: options.temperature,
       max_tokens: options.maxTokens,
     });
@@ -645,10 +686,12 @@ export class OpenAIAdapter implements ProviderAdapter {
     );
     let response: Response;
     try {
-      response = await fetchWithRetry(
+      response = await (this.nativeParameters(options).tools ? fetch : fetchWithRetry)(
         url,
         {
           method: "POST",
+          signal: timeout.signal,
+          ...(this.nativeParameters(options).tools ? { redirect: "error" as const } : {}),
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${this.apiKey}`,
@@ -664,6 +707,16 @@ export class OpenAIAdapter implements ProviderAdapter {
     const data = await consumeJsonResponse(response, timeout);
     if (!isRecord(data)) {
       throw new Error(formatProviderApiError(undefined, "Invalid JSON response"));
+    }
+    const metadata = this.metadataCollector(options);
+    const rawChoice = Array.isArray(data.choices) ? data.choices[0] : undefined;
+    metadata?.consume(rawChoice, data.usage);
+    if (
+      isRecord(rawChoice) &&
+      rawChoice.finish_reason === "content_filter" &&
+      !options.signal?.aborted
+    ) {
+      throw new ChatResponseRefusedError();
     }
     const id = typeof data.id === "string" ? data.id : "";
     const model = typeof data.model === "string" ? data.model : options.model;
@@ -691,26 +744,25 @@ export class OpenAIAdapter implements ProviderAdapter {
   }
 
   async *chatStream(options: ChatOptions): AsyncGenerator<string, ChatUsage | undefined> {
+    const metadata = this.metadataCollector(options);
     let streamUsage: ChatUsage | undefined;
     let finishReason: string | undefined;
+    const finish = () => {
+      if (
+        options.nativeWeb &&
+        deepseekNativeWebIdentity(this.baseUrl, options.model) &&
+        !finishReason &&
+        !options.signal?.aborted
+      ) {
+        throw new Error("Native web response ended before completion");
+      }
+      return finishOpenAIChatStream(finishReason, streamUsage, options.signal);
+    };
     const url = `${this.baseUrl}/chat/completions`;
     const body = JSON.stringify({
       model: options.model,
-      messages: options.messages.map((m) => {
-        if (typeof m.content === "string") return m;
-        return {
-          role: m.role,
-          content: m.content.map((p) => {
-            if (p.type === "text") {
-              return { type: "text", text: p.text };
-            }
-            return {
-              type: "image_url",
-              image_url: { url: `data:${p.mediaType};base64,${p.dataBase64}` },
-            };
-          }),
-        };
-      }),
+      messages: this.chatMessages(options),
+      ...this.nativeParameters(options),
       temperature: options.temperature,
       max_tokens: options.maxTokens,
       stream: true,
@@ -727,10 +779,12 @@ export class OpenAIAdapter implements ProviderAdapter {
     });
     let response: Response;
     try {
-      response = await fetchWithRetry(
+      response = await (this.nativeParameters(options).tools ? fetch : fetchWithRetry)(
         url,
         {
           method: "POST",
+          signal: timeout.signal,
+          ...(this.nativeParameters(options).tools ? { redirect: "error" as const } : {}),
           headers: {
             "Content-Type": "application/json",
             Accept: "text/event-stream",
@@ -812,6 +866,7 @@ export class OpenAIAdapter implements ProviderAdapter {
             : null;
         const message = choice && isRecord(choice.message) ? choice.message : null;
         const delta = choice && isRecord(choice.delta) ? choice.delta : null;
+        metadata?.consume(choice, isRecord(data) ? data.usage : undefined);
         const content = message?.content ?? delta?.content ?? "";
         finishReason = typeof choice?.finish_reason === "string" ? choice.finish_reason : undefined;
         const u = isRecord(data) && isRecord(data.usage) ? data.usage : null;
@@ -822,8 +877,9 @@ export class OpenAIAdapter implements ProviderAdapter {
               toFiniteNumber(u.total_tokens),
             ) ?? streamUsage)
           : streamUsage;
-        if (typeof content === "string" && content.length > 0) yield content;
-        return finishChatStream(finishReason, streamUsage, options.signal);
+        if (finishReason !== "content_filter" && typeof content === "string" && content.length > 0)
+          yield content;
+        return finish();
       }
 
       const emitPayload = function* (data: string): Generator<string> {
@@ -856,8 +912,14 @@ export class OpenAIAdapter implements ProviderAdapter {
         const first = isRecord(choices[0]) ? (choices[0] as Record<string, unknown>) : null;
         if (typeof first?.finish_reason === "string") finishReason = first.finish_reason;
         const delta = first && isRecord(first.delta) ? first.delta : null;
+        options.signal?.throwIfAborted();
+        metadata?.consume(first, parsed.usage);
         const content = delta?.content;
-        if (typeof content === "string" && content.length > 0) {
+        if (
+          finishReason !== "content_filter" &&
+          typeof content === "string" &&
+          content.length > 0
+        ) {
           yield content;
         }
       };
@@ -867,7 +929,7 @@ export class OpenAIAdapter implements ProviderAdapter {
         for (const data of payloads) {
           yield* emitPayload(data);
         }
-        if (sseDone) return finishChatStream(finishReason, streamUsage, options.signal);
+        if (sseDone) return finish();
 
         const { done: streamDone, value } = await readResponseChunk(reader, timeout.signal);
         if (streamDone) {
@@ -876,19 +938,22 @@ export class OpenAIAdapter implements ProviderAdapter {
           for (const data of remaining.payloads) {
             yield* emitPayload(data);
           }
-          if (remaining.done) return finishChatStream(finishReason, streamUsage, options.signal);
+          if (remaining.done) return finish();
           break;
         }
         timeout.markChunk();
         buffer += decoder.decode(value, { stream: true });
       }
     } catch (error) {
+      // A verdict already received cannot be downgraded by a lost usage trailer.
+      if (!options.signal?.aborted && finishReason === "content_filter")
+        throw new ChatResponseRefusedError(streamUsage);
       rethrowAbortReason(timeout.signal, error);
     } finally {
       disposeResponseReader(reader);
       timeout.cleanup();
     }
-    return finishChatStream(finishReason, streamUsage, options.signal);
+    return finish();
   }
 
   async runToolCallingTurn(options: ToolCallingOptions): Promise<GenericAgentTurnResult> {
