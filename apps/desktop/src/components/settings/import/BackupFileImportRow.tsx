@@ -26,6 +26,8 @@ function getFormatLabel(format: string): string {
       return getDataTransferLabel("settings.data.format.chatgpt");
     case "claude":
       return getDataTransferLabel("settings.data.format.claude");
+    case "deepseek":
+      return getDataTransferLabel("settings.data.format.deepseek");
     default:
       return getDataTransferLabel("settings.data.format.unknown");
   }
@@ -44,15 +46,20 @@ const resultTitle = (result: ImportResult) =>
       ? "settings.data.import.validationFailedTitle"
       : result.backupFailure === "interrupted"
         ? "settings.data.import.interruptedTitle"
-        : hasWarnings(result)
-          ? "settings.data.import.partialTitle"
-          : "settings.data.import.successTitle",
+        : result.format === "deepseek" &&
+            result.errors.length > 0 &&
+            result.conversations.imported === 0 &&
+            result.conversations.skipped === 0
+          ? "settings.data.import.failedTitle"
+          : hasWarnings(result)
+            ? "settings.data.import.partialTitle"
+            : "settings.data.import.successTitle",
   );
 
 /**
  * The always-present "import from a backup / export file" source row shown at
  * the bottom of the import source list, plus its confirm and result dialogs.
- * Covers OpenHorn backups and ChatGPT / Claude export files.
+ * Covers OpenHorn backups and ChatGPT / Claude / DeepSeek export files.
  */
 export function BackupFileImportRow({ onImported }: { onImported?: () => void }) {
   const [importDialogOpen, setImportDialogOpen] = useState(false);

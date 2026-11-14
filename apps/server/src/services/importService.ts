@@ -13,7 +13,7 @@
  * conversations / MCP servers it created with `imported_from` / `imported_at`.
  */
 import { createHash } from "node:crypto";
-import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { validateProviderChatState } from "adapters";
 import {
@@ -47,6 +47,12 @@ import yauzl from "yauzl";
 import { db } from "../db";
 import { normalizeStoredAgentReply } from "./agentReplyNormalization";
 import { BACKUP_ARCHIVE_LIMITS } from "./backupArchiveBudget";
+import {
+  deepseekConversationId,
+  isDeepSeekManifest,
+  prepareDeepSeekArchive,
+} from "./deepseekImport";
+import { deepseekTransaction, retryDeepSeekBusy } from "./deepseekImportTransaction";
 import type { ExportManifest } from "./exportService";
 import { addPartItem, createImportRecord, createPart, IMPORT_DETAIL } from "./importRecordsService";
 import {
@@ -62,7 +68,7 @@ import { libraryTransaction } from "./libraryService";
 const FILE_IMPORT_SOURCE = "file";
 
 export interface ImportResult {
-  format: "openhorn" | "chatgpt" | "claude";
+  format: "openhorn" | "chatgpt" | "claude" | "deepseek";
   conversations: { imported: number; skipped: number };
   messages: { imported: number };
   attachments: { imported: number; missing: number };
@@ -104,6 +110,7 @@ const IMPORT_KIND_BY_FORMAT: Record<ImportResult["format"], ImportKind> = {
   openhorn: "backup",
   chatgpt: "chatgpt",
   claude: "claude-export",
+  deepseek: "deepseek-export",
 };
 
 class PartCollector {
@@ -145,12 +152,16 @@ async function finishImport(
   const parts = collector.list();
   if (parts.length === 0 && result.errors.length === 0) return result;
   try {
-    const record = await createImportRecord(userId, {
-      source: FILE_IMPORT_SOURCE,
-      kind: IMPORT_KIND_BY_FORMAT[result.format],
-      parts,
-      errors: result.errors,
-    });
+    const writeRecord = () =>
+      createImportRecord(userId, {
+        source: FILE_IMPORT_SOURCE,
+        kind: IMPORT_KIND_BY_FORMAT[result.format],
+        parts,
+        errors: result.errors,
+      });
+    const record = await (result.format === "deepseek"
+      ? retryDeepSeekBusy(writeRecord)
+      : writeRecord());
     result.recordId = record.id;
   } catch (error) {
     result.errors.push(
@@ -266,21 +277,68 @@ function parseJsonEntry<T>(entries: Map<string, Buffer>, name: string): T | null
 // Format detection
 // ---------------------------------------------------------------------------
 
-export type DetectedFormat = "openhorn" | "chatgpt" | "claude" | "unknown";
+export type DetectedFormat = ImportResult["format"] | "unknown";
+
+function isOpenHornManifest(value: unknown): value is ExportManifest {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const manifest = value as Record<string, unknown>;
+  // A foreign or ambiguous manifest must never enter the backup restore path.
+  if ("export_format_version" in manifest || typeof manifest.formatVersion !== "string")
+    return false;
+  const version = /^(1)(?:\.(\d+)\.(\d+))?$/.exec(manifest.formatVersion);
+  if (
+    !version ||
+    Number(version[2] ?? 0) > 3 ||
+    (Number(version[2]) === 3 && Number(version[3]) > 0)
+  )
+    return false;
+  // Older backups/tests can carry just the supported version. Validate optional
+  // metadata whenever present; rows are independently preflighted before writes.
+  if (
+    manifest.exportedAt !== undefined &&
+    (typeof manifest.exportedAt !== "string" || !Number.isFinite(Date.parse(manifest.exportedAt)))
+  )
+    return false;
+  if (
+    manifest.appVersion !== undefined &&
+    (typeof manifest.appVersion !== "string" || !manifest.appVersion.trim())
+  )
+    return false;
+  if (manifest.contents === undefined) return true;
+  if (
+    !manifest.contents ||
+    typeof manifest.contents !== "object" ||
+    Array.isArray(manifest.contents)
+  )
+    return false;
+  return Object.values(manifest.contents).every((n) => Number.isSafeInteger(n) && n >= 0);
+}
+
+function detectConversationJson(parsed: unknown): DetectedFormat {
+  if (!Array.isArray(parsed) || !parsed.length) return "unknown";
+  if (parsed[0]?.mapping) return "chatgpt";
+  if (parsed[0]?.chat_messages) return "claude";
+  return "unknown";
+}
 
 export async function detectFormat(filePath: string): Promise<DetectedFormat> {
   const ext = path.extname(filePath).toLowerCase();
 
   if (ext === ".zip") {
     const entries = await extractZipEntries(filePath);
-    if (entries.has("manifest.json")) return "openhorn";
+    if (entries.has("manifest.json")) {
+      const manifest = parseJsonEntry<unknown>(entries, "manifest.json");
+      if (isOpenHornManifest(manifest)) return "openhorn";
+      if (isDeepSeekManifest(manifest)) return "deepseek";
+      return "unknown";
+    }
     if (entries.has("conversations.json")) {
       const raw = entries.get("conversations.json")?.toString("utf8").trim() ?? "";
       if (!raw) return "unknown";
-      if (raw.startsWith("[")) {
-        const first = JSON.parse(raw)[0];
-        if (first?.mapping) return "chatgpt";
-        if (first?.chat_messages) return "claude";
+      try {
+        return detectConversationJson(JSON.parse(raw));
+      } catch {
+        return "unknown";
       }
     }
     return "unknown";
@@ -288,12 +346,11 @@ export async function detectFormat(filePath: string): Promise<DetectedFormat> {
 
   if (ext === ".json") {
     const raw = await readFile(filePath, "utf8");
-    const parsed = JSON.parse(raw);
-    const arr = Array.isArray(parsed) ? parsed : null;
-    if (!arr || arr.length === 0) return "unknown";
-    if (arr[0]?.mapping) return "chatgpt";
-    if (arr[0]?.chat_messages) return "claude";
-    return "unknown";
+    try {
+      return detectConversationJson(JSON.parse(raw));
+    } catch {
+      return "unknown";
+    }
   }
 
   return "unknown";
@@ -363,7 +420,7 @@ async function applyOpenHornBackup(
     );
   const checkpointBySource = new Map(checkpoints.map((row) => [row.sourceId, row]));
   const manifest = parseJsonEntry<ExportManifest>(entries, "manifest.json");
-  if (!manifest) throw new Error("Invalid manifest");
+  if (!isOpenHornManifest(manifest)) throw new Error("Invalid manifest");
   // Incoming JSON is external. Only owner-checked maps may become references.
   // biome-ignore lint/suspicious/noExplicitAny: legacy backup row schemas vary by version
   type Row = Record<string, any>;
@@ -1158,6 +1215,179 @@ async function applyOpenHornBackup(
       .values({ ...importedRow(settings, row), id: settingIds.map.get(row.id), userId });
     collector.add("settings", { label: String(row.key), status: "imported" });
   }
+}
+
+// ---------------------------------------------------------------------------
+// DeepSeek import — merge by a durable per-user source identity, never restore.
+// ---------------------------------------------------------------------------
+
+export async function importDeepSeek(userId: string, filePath: string): Promise<ImportResult> {
+  const result = emptyResult("deepseek");
+  const collector = new PartCollector();
+  let prepared: ReturnType<typeof prepareDeepSeekArchive>;
+  try {
+    prepared = prepareDeepSeekArchive(await extractZipEntries(filePath));
+  } catch {
+    result.errors.push("Invalid DeepSeek archive: validation failed; no conversations imported");
+    return finishImport(userId, result, collector);
+  }
+  const importedAt = new Date();
+  for (const conversation of prepared) {
+    const id = deepseekConversationId(userId, conversation.sourceId);
+    const writtenFiles: { id: string; filePath: string }[] = [];
+    try {
+      // This queue reduces local LibSQL contention. SQL's PK + the transaction,
+      // rather than the queue, enforce identity even across processes/restarts.
+      const outcome = await deepseekTransaction(async (tx) => {
+        const inserted = await tx
+          .insert(conversations)
+          .values({
+            id,
+            userId,
+            title: conversation.title,
+            isPinned: conversation.isPinned,
+            defaultMode: "chat",
+            lastMode: "chat",
+            contextLength: 4096,
+            importedFrom: FILE_IMPORT_SOURCE,
+            importedAt,
+            createdAt: conversation.createdAt,
+            updatedAt: conversation.updatedAt,
+          })
+          .onConflictDoNothing({ target: conversations.id })
+          .returning({ id: conversations.id });
+        if (!inserted.length) {
+          const [existing] = await tx
+            .select({ userId: conversations.userId })
+            .from(conversations)
+            .where(eq(conversations.id, id))
+            .limit(1);
+          if (!existing || existing.userId !== userId)
+            throw new Error("DeepSeek identity collision");
+          return { skipped: true, attachmentCount: 0 };
+        }
+        let attachmentCount = 0;
+        for (const message of conversation.messages) {
+          const messageId = crypto.randomUUID();
+          const agentRun =
+            message.role === "assistant"
+              ? buildImportedAgentRun(message.steps, message.content)
+              : null;
+          // Imported failures/stops must not masquerade as a completed run.
+          const storedRun =
+            agentRun && message.finishReason
+              ? JSON.stringify({
+                  ...JSON.parse(agentRun),
+                  status: message.finishReason === "stopped" ? "stopped" : "error",
+                })
+              : agentRun;
+          await tx.insert(messages).values({
+            id: messageId,
+            conversationId: id,
+            role: message.role,
+            content: assistantMessageContent(message.content, storedRun),
+            model: null,
+            mode: storedRun ? "agent" : "chat",
+            agentRun: storedRun,
+            finishReason: message.finishReason,
+            createdAt: message.createdAt,
+          });
+          const attachmentIds: string[] = [];
+          for (const attachment of message.attachments) {
+            if (!attachment.data || !attachment.mime) continue;
+            const attachmentId = crypto.randomUUID();
+            const dir = path.resolve(
+              process.env.OPENHORN_DATA_DIR || path.join(process.cwd(), "data"),
+              "uploads",
+            );
+            await mkdir(dir, { recursive: true });
+            // Never use an archive-supplied name as a destination path.
+            const destination = path.join(dir, `deepseek-${attachmentId}`);
+            const handle = await open(destination, "wx");
+            writtenFiles.push({ id: attachmentId, filePath: destination });
+            try {
+              await handle.writeFile(attachment.data);
+            } finally {
+              await handle.close();
+            }
+            await tx.insert(attachments).values({
+              id: attachmentId,
+              conversationId: id,
+              messageId,
+              fileName: attachment.source.file_name,
+              filePath: destination,
+              fileType: attachment.mime,
+              fileSize: attachment.data.length,
+              createdAt: new Date(attachment.source.inserted_at),
+            });
+            attachmentIds.push(attachmentId);
+            attachmentCount++;
+          }
+          if (attachmentIds.length)
+            await tx
+              .update(messages)
+              .set({ attachments: JSON.stringify(attachmentIds) })
+              .where(eq(messages.id, messageId));
+        }
+        return { skipped: false, attachmentCount };
+      });
+      if (outcome.skipped) {
+        result.conversations.skipped++;
+        collector.add("conversations", {
+          label: conversation.title,
+          status: "skipped",
+          detail: IMPORT_DETAIL.alreadyExists,
+          link: { kind: "conversation", id },
+        });
+        continue;
+      }
+      result.conversations.imported++;
+      result.messages.imported += conversation.messages.length;
+      result.attachments.imported += outcome.attachmentCount;
+      if (outcome.attachmentCount)
+        collector.count("attachments", "imported", outcome.attachmentCount);
+      result.errors.push(...conversation.warnings);
+      collector.add("conversations", {
+        label: conversation.title,
+        status: "imported",
+        detail: IMPORT_DETAIL.messageCount(conversation.messages.length),
+        link: { kind: "conversation", id },
+      });
+      for (const message of conversation.messages) {
+        for (const attachment of message.attachments) {
+          if (attachment.data) continue;
+          result.attachments.missing++;
+          collector.add("attachments", {
+            label: attachment.source.file_name,
+            status: "needsAction",
+            detail:
+              attachment.unavailableReason === "unsupported"
+                ? IMPORT_DETAIL.attachmentUnsupported
+                : IMPORT_DETAIL.attachmentMissing,
+          });
+        }
+      }
+      if (conversation.warnings.length) {
+        collector.part("conversations").needsAction++;
+        collector.part("conversations").note = conversation.warnings.join("\n");
+      }
+    } catch {
+      // A failed acknowledgement is ambiguous. Delete only blobs whose absence
+      // from SQL is confirmed; otherwise retain them for the committed rows.
+      for (const file of writtenFiles) {
+        const rows = await db
+          .select({ id: attachments.id })
+          .from(attachments)
+          .where(eq(attachments.id, file.id))
+          .catch(() => null);
+        if (rows?.length === 0) await rm(file.filePath, { force: true }).catch(() => {});
+      }
+      result.errors.push(`DeepSeek conversation not imported: ${conversation.sourceId}`);
+      collector.add("conversations", { label: conversation.title, status: "needsAction" });
+    }
+  }
+  collector.noteMessages(result.messages.imported);
+  return finishImport(userId, result, collector);
 }
 
 // ---------------------------------------------------------------------------

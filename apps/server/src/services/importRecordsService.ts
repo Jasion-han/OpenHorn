@@ -43,6 +43,7 @@ const IMPORT_KINDS: ReadonlySet<string> = new Set<ImportKind>([
   "backup",
   "chatgpt",
   "claude-export",
+  "deepseek-export",
 ]);
 
 const IMPORT_PART_TYPES: ReadonlySet<string> = new Set<ImportPartType>([
@@ -110,6 +111,7 @@ export const IMPORT_DETAIL = {
   channelKeyMissing: "缺少 API Key，需补填",
   projectFolderMissing: (rootPath: string) => `目录不存在：${rootPath}`,
   attachmentMissing: "备份中缺少该文件",
+  attachmentUnsupported: "归档原件格式不支持或超过附件大小限制，未导入",
   scheduledTaskDisabled: "已导入，默认禁用",
   fileNotFound: "文件不存在",
   fileEmpty: "文件为空",

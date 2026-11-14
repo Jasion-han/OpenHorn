@@ -1206,7 +1206,8 @@ export const dataTransferLabels = {
   // Import area
   "settings.data.import.heading": "导入",
   "settings.data.import.title": "备份 / 导出文件",
-  "settings.data.import.description": "OpenHorn 备份、ChatGPT / Claude 导出（ZIP、JSON）",
+  "settings.data.import.description":
+    "OpenHorn 备份、ChatGPT / Claude / DeepSeek 导出（ZIP、JSON）",
   "settings.data.import.button": "选择文件",
   // Import states
   "settings.data.import.detecting": "正在识别文件格式...",
@@ -1237,6 +1238,7 @@ export const dataTransferLabels = {
   "settings.data.format.openhorn": "OpenHorn 备份",
   "settings.data.format.chatgpt": "ChatGPT 导出",
   "settings.data.format.claude": "Claude 导出",
+  "settings.data.format.deepseek": "DeepSeek 导出",
   "settings.data.format.unknown": "未知格式",
   // Toasts
   "settings.data.notify.noTauri": "文件选择仅在桌面端可用",
@@ -1360,6 +1362,7 @@ export const importLabels = {
   "import.history.kind.backup": "备份文件",
   "import.history.kind.chatgpt": "ChatGPT 导出",
   "import.history.kind.claude-export": "Claude.ai 导出",
+  "import.history.kind.deepseek-export": "DeepSeek 导出",
   "import.history.partSummary": "已导入 {imported} · 跳过 {skipped}",
   "import.history.partNeedsAction": "{count} 项需处理",
   "import.history.itemsTruncated": "仅显示前 {shown} 条，其余 {rest} 条未列出",

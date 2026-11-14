@@ -7,6 +7,7 @@ import {
   detectFormat,
   importChatGPT,
   importClaude,
+  importDeepSeek,
   importOpenHornBackup,
 } from "../services/importService";
 import { requireUser, type UserEnv } from "../utils/requestUser";
@@ -51,8 +52,12 @@ router.post("/import/detect", async (c) => {
     return c.json({ error: "文件不存在" }, 400);
   }
 
-  const format = await detectFormat(body.filePath);
-  return c.json({ format });
+  try {
+    const format = await detectFormat(body.filePath);
+    return c.json({ format });
+  } catch {
+    return c.json({ error: "Invalid import archive" }, 400);
+  }
 });
 
 router.post("/import", async (c) => {
@@ -60,7 +65,16 @@ router.post("/import", async (c) => {
   const body = await c.req.json<{ filePath: string; format?: string }>();
   if (!body.filePath) return c.json({ error: "filePath is required" }, 400);
 
-  const format = body.format || (await detectFormat(body.filePath));
+  // `format` is a UI hint, never authorization to enter a different importer.
+  let format: Awaited<ReturnType<typeof detectFormat>>;
+  try {
+    format = await detectFormat(body.filePath);
+  } catch {
+    return c.json({ error: "Invalid import archive" }, 400);
+  }
+  if (body.format !== undefined && body.format !== format) {
+    return c.json({ error: "Import format does not match file contents" }, 400);
+  }
 
   switch (format) {
     case "openhorn":
@@ -69,9 +83,11 @@ router.post("/import", async (c) => {
       return c.json(await importChatGPT(user.id, body.filePath));
     case "claude":
       return c.json(await importClaude(user.id, body.filePath));
+    case "deepseek":
+      return c.json(await importDeepSeek(user.id, body.filePath));
     default:
       return c.json(
-        { error: "无法识别文件格式，支持 OpenHorn 备份、ChatGPT 或 Claude 导出文件" },
+        { error: "无法识别文件格式，支持 OpenHorn 备份、ChatGPT、Claude 或 DeepSeek 导出文件" },
         400,
       );
   }

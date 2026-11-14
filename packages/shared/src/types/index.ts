@@ -268,7 +268,7 @@ export type ImportSource =
   | "continue"
   | "file";
 
-export type ImportKind = "local" | "backup" | "chatgpt" | "claude-export";
+export type ImportKind = "local" | "backup" | "chatgpt" | "claude-export" | "deepseek-export";
 
 /**
  * Top-level import units. Messages are never a part of their own — a

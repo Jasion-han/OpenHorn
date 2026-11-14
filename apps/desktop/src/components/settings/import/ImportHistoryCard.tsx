@@ -22,6 +22,8 @@ function kindLabel(kind: ApiImportRecord["kind"]): string {
       return getImportLabel("import.history.kind.chatgpt");
     case "claude-export":
       return getImportLabel("import.history.kind.claude-export");
+    case "deepseek-export":
+      return getImportLabel("import.history.kind.deepseek-export");
   }
 }
 

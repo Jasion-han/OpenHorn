@@ -403,7 +403,7 @@ export interface ImportResult {
   library?: LibraryImportCounts;
   recipes?: { imported: number; skipped: number };
   artifacts?: { imported: number; skipped: number };
-  format: "openhorn" | "chatgpt" | "claude";
+  format: "openhorn" | "chatgpt" | "claude" | "deepseek";
   conversations: { imported: number; skipped: number };
   messages: { imported: number };
   attachments: { imported: number; missing: number };
