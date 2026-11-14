@@ -573,6 +573,16 @@ export function getAgentActionLabel(action: AgentActionKey): string {
  * server/user values are never routed through here.
  */
 export const chatLabels = {
+  "chat.checkpoint.hint": "本次 Agent 执行修改了文件，可还原到本次执行前的快照。",
+  "chat.checkpoint.action": "还原文件快照",
+  "chat.checkpoint.title": "还原本次文件修改？",
+  "chat.checkpoint.description":
+    "将还原本次执行备份的文件，之后对这些文件的修改也可能被覆盖。终端命令产生的修改不在快照范围内。",
+  "chat.checkpoint.cancel": "保留当前文件",
+  "chat.checkpoint.confirm": "确认还原文件",
+  "chat.checkpoint.busy": "正在还原文件，请稍候。",
+  "chat.checkpoint.failed": "还原失败，请检查工作目录和本地运行状态后重试。",
+
   "chat.draft.preservedTitle": "已保留未发送的草稿",
   "chat.draft.preservedBody": "这次输入已与原草稿放在一起，请核对后再发送。",
   // Live status route badges

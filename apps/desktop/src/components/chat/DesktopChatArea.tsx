@@ -81,6 +81,7 @@ import { useImportStore } from "../../stores/importStore";
 import { useSidecarStore } from "../../stores/sidecarStore";
 import type { ChatStreamEvent, Message, MessageAttachmentMeta } from "../../types/chat";
 import { DesktopChatHeader } from "./DesktopChatHeader";
+import { DesktopCheckpointNotice } from "./DesktopCheckpointNotice";
 import { DesktopComposer, type SlashHighlightRange, type SlashPanelItem } from "./DesktopComposer";
 import { MessageBubble } from "./DesktopMessageBubble";
 import { DesktopModelPickerModal } from "./DesktopModelPickerModal";
@@ -322,6 +323,7 @@ export function DesktopChatArea() {
     !isLoading &&
     !isStreaming &&
     !sidecarRun.isBusy &&
+    !sidecarRun.isRollingBack &&
     !isUploading &&
     (hasInput || hasFiles);
   // Memoized: during streaming `messages` changes on every token, and without
@@ -2317,6 +2319,16 @@ export function DesktopChatArea() {
           onApprove={(toolUseId) => void sidecarRun.respondToApproval(toolUseId, true)}
           onReject={(toolUseId) => void sidecarRun.respondToApproval(toolUseId, false)}
           onCancel={() => void sidecarRun.cancel()}
+        />
+        <DesktopCheckpointNotice
+          key={`${currentConversation?.id}:${sidecarRun.lastFinishedRunId}`}
+          conversationId={currentConversation?.id ?? null}
+          checkpointConversationId={sidecarRun.lastFinishedConversationId}
+          runId={sidecarRun.lastFinishedRunId}
+          busy={sidecarRun.isBusy || sidecarRun.isRollingBack}
+          rollingBack={sidecarRun.isRollingBack}
+          error={!!sidecarRun.rollbackError}
+          onRollback={sidecarRun.rollbackLast}
         />
         {error ? (
           <div role="alert" className="mb-2 px-2 text-sm text-destructive">

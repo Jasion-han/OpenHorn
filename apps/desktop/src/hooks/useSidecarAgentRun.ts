@@ -93,6 +93,7 @@ export interface SidecarAgentRunApi {
   /** Synchronous ownership check, including preparation before React renders. */
   hasActiveRun: () => boolean;
   lastFinishedRunId: string | null;
+  lastFinishedConversationId: string | null;
   isRollingBack: boolean;
   rollbackError: string | null;
   sdkSessionId: string | null;
@@ -123,7 +124,7 @@ export interface SidecarAgentRunApi {
   cancel: () => Promise<void>;
 
   /** Rolls back the most recently finished sidecar run's checkpoint. */
-  rollbackLast: () => Promise<void>;
+  rollbackLast: (conversationId: string) => Promise<void>;
 
   /** Clears the last error (e.g. when switching conversations). */
   clearError: () => void;
@@ -154,6 +155,7 @@ interface AgentRunState {
   lastError: string | null;
   isBusy: boolean;
   lastFinishedRunId: string | null;
+  lastFinishedConversationId: string | null;
   isRollingBack: boolean;
   rollbackError: string | null;
   sdkSession: { id: string; protocol: string; conversationId: string | null } | null;
@@ -170,6 +172,7 @@ const useAgentRunState = create<AgentRunState>(() => ({
   lastError: null,
   isBusy: false,
   lastFinishedRunId: null,
+  lastFinishedConversationId: null,
   isRollingBack: false,
   rollbackError: null,
   sdkSession: null,
@@ -187,6 +190,7 @@ const setPendingApproval = stateSetter("pendingApproval");
 const setLastError = stateSetter("lastError");
 const setIsBusy = stateSetter("isBusy");
 const setLastFinishedRunId = stateSetter("lastFinishedRunId");
+const setLastFinishedConversationId = stateSetter("lastFinishedConversationId");
 const setIsRollingBack = stateSetter("isRollingBack");
 const setRollbackError = stateSetter("rollbackError");
 const setSdkSession = stateSetter("sdkSession");
@@ -203,6 +207,7 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
     lastError,
     isBusy,
     lastFinishedRunId,
+    lastFinishedConversationId,
     isRollingBack,
     rollbackError,
     sdkSession,
@@ -225,6 +230,7 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
       // sidecar reported a checkpoint manifest for it (see checkpointRunIdsRef).
       if (checkpointRunIdsRef.current.has(runRef.current.runId)) {
         setLastFinishedRunId(runRef.current.runId);
+        setLastFinishedConversationId(runRef.current.conversationId);
       }
     }
     runRef.current = run;
@@ -232,6 +238,9 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
   };
 
   const startRun = async (input: SidecarAgentRunInput): Promise<void> => {
+    if (useAgentRunState.getState().isRollingBack) {
+      throw new Error(getChatLabel("chat.checkpoint.busy"));
+    }
     const recipeRequirements =
       input.recipeRequirements ??
       input.previousReply?.agentRun?.recipeRequirements ??
@@ -273,7 +282,6 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
     const shouldPersist = createRunPersistGuard(input.assistantMessageId, ownerToken);
     let runId: string | null = null;
     let runModel = input.modelId;
-    let runProtocol: string | null = null;
     let streamingMessageId = input.assistantMessageId;
     // Token counts for the turn. The SDK reports them once, on its terminal
     // `result` message, so they land here shortly before `done` — captured in
@@ -448,7 +456,7 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
         message?.agentRun,
         runModel,
       ).finally(finishRun);
-      if (runProtocol !== "anthropic" && runProtocol !== "acp") setLastFinishedRunId(null);
+      // syncRun exposes only checkpoints actually published by the sidecar.
     };
 
     // Install before any await so Stop reaches a run that is still being set up.
@@ -471,6 +479,7 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
     // run's checkpoint still lives on disk but we no longer surface
     // the button — you should roll back before running a new task.
     setLastFinishedRunId(null);
+    setLastFinishedConversationId(null);
     setRollbackError(null);
     useChatStore.getState().markMessagesActive(activeRunIds);
 
@@ -518,7 +527,6 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
       return;
     }
     runModel = input.modelId || credentials.modelId;
-    runProtocol = credentials.protocol;
 
     if (
       credentials.protocol !== "anthropic" &&
@@ -815,8 +823,16 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
     await controlRef.current?.stop();
   };
 
-  const rollbackLast = async (): Promise<void> => {
-    if (!lastFinishedRunId) return;
+  const rollbackLast = async (conversationId: string): Promise<void> => {
+    const state = useAgentRunState.getState();
+    const targetRunId = state.lastFinishedRunId;
+    if (
+      !targetRunId ||
+      state.lastFinishedConversationId !== conversationId ||
+      state.isBusy ||
+      state.isRollingBack
+    )
+      return;
     const client = useSidecarStore.getState().client;
     if (!client) {
       setRollbackError("本地运行尚未就绪");
@@ -825,8 +841,11 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
     setIsRollingBack(true);
     setRollbackError(null);
     try {
-      await client.rollbackCheckpoint(lastFinishedRunId);
-      setLastFinishedRunId(null);
+      await client.rollbackCheckpoint(targetRunId);
+      if (useAgentRunState.getState().lastFinishedRunId === targetRunId) {
+        setLastFinishedRunId(null);
+        setLastFinishedConversationId(null);
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "回滚失败";
       setRollbackError(message);
@@ -954,8 +973,9 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
     pendingApproval,
     lastError,
     isBusy,
-    hasActiveRun: () => controlRef.current !== null,
+    hasActiveRun: () => controlRef.current !== null || useAgentRunState.getState().isRollingBack,
     lastFinishedRunId,
+    lastFinishedConversationId,
     isRollingBack,
     rollbackError,
     sdkSessionId,
