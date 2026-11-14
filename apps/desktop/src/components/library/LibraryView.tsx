@@ -568,7 +568,7 @@ function LibrarySession({ userId }: { userId: string }) {
                         })}
                       </p>
                     </div>
-                    {document.errorCode && (
+                    {document.errorCode && document.errorCode !== "library_cloud_required" && (
                       <p role="alert" className="text-sm text-destructive">
                         {libraryError(new LibraryApiError(document.errorCode))}
                       </p>
