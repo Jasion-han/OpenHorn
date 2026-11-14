@@ -19,14 +19,13 @@ import {
 } from "ui";
 import { formatGeneralSettingsLabel, getGeneralSettingsLabel } from "../../lib/i18n/agent";
 import { notifySuccess } from "../../lib/notify";
-import { createServerApi } from "../../lib/serverApi";
 import { isDesktopRuntime, pickEditorApp } from "../../lib/tauriBridge";
 import { useAuthStore } from "../../stores/authStore";
+import { BACKEND_UP_EVENT } from "../../stores/backendStatusStore";
 import { editorNameFromAppPath, useExternalEditorStore } from "../../stores/externalEditorStore";
+import { useGeneralSettingsStore } from "../../stores/generalSettingsStore";
 import { useGenUiStore } from "../../stores/genUiStore";
-
-const api = createServerApi();
-const SYSTEM_PROMPT_KEY = "chat.systemPrompt";
+import { DiscardChangesDialog } from "../workbench/DiscardChangesDialog";
 
 // Radix Select forbids empty-string values, so the non-editor rows use sentinels.
 const EDITOR_UNSET = "__unset";
@@ -36,12 +35,23 @@ const EDITOR_DETECTED_PREFIX = "detected:";
 
 export function GeneralSettings() {
   const user = useAuthStore((state) => state.user);
-  const [username, setUsername] = useState(user?.username || "");
-  const [email] = useState(user?.email || "");
-  const [systemPrompt, setSystemPrompt] = useState("");
-  const [savedPrompt, setSavedPrompt] = useState("");
-  const [editing, setEditing] = useState(false);
-  const [savingPrompt, setSavingPrompt] = useState(false);
+  const username = user?.username ?? "";
+  const email = user?.email ?? "";
+  const {
+    value: systemPrompt,
+    savedValue: savedPrompt,
+    editing,
+    saving: savingPrompt,
+    loading: loadingPrompt,
+    loaded: promptLoaded,
+    error: promptError,
+    setValue: setSystemPrompt,
+    edit: editPrompt,
+    cancel: cancelPrompt,
+    load: loadPrompt,
+    save: savePrompt,
+  } = useGeneralSettingsStore();
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
   const editorPreference = useExternalEditorStore((state) => state.preference);
   const detectedEditors = useExternalEditorStore((state) => state.detected);
   const setEditorPreference = useExternalEditorStore((state) => state.setPreference);
@@ -84,38 +94,29 @@ export function GeneralSettings() {
     [setEditorPreference],
   );
 
+  // Mount load, repeated after a server reconnect: opened while the server was
+  // down, the panel would otherwise keep the empty prompt for good.
   useEffect(() => {
-    api.settings
-      .get([SYSTEM_PROMPT_KEY])
-      .then(({ settings }) => {
-        const value = settings[SYSTEM_PROMPT_KEY] || "";
-        setSystemPrompt(value);
-        setSavedPrompt(value);
-        setEditing(!value);
-      })
-      .catch(() => {});
-  }, []);
+    const load = () => {
+      void loadPrompt();
+    };
+    load();
+    window.addEventListener(BACKEND_UP_EVENT, load);
+    return () => window.removeEventListener(BACKEND_UP_EVENT, load);
+  }, [loadPrompt]);
 
   const handleSavePrompt = async () => {
-    setSavingPrompt(true);
-    try {
-      await api.settings.set(SYSTEM_PROMPT_KEY, systemPrompt || null);
-      setSavedPrompt(systemPrompt);
-      setEditing(false);
+    if (await savePrompt()) {
       notifySuccess(
         getGeneralSettingsLabel("settings.general.notify.savedTitle"),
         getGeneralSettingsLabel("settings.general.notify.promptSavedBody"),
       );
-    } catch {
-      // Keep behavior aligned with web for now.
-    } finally {
-      setSavingPrompt(false);
     }
   };
 
   const handleCancelEdit = () => {
-    setSystemPrompt(savedPrompt);
-    setEditing(false);
+    if (systemPrompt !== savedPrompt) setConfirmDiscard(true);
+    else cancelPrompt();
   };
 
   return (
@@ -126,7 +127,7 @@ export function GeneralSettings() {
       >
         <SettingsCard divided={false} className="p-4">
           <div className="mb-4 flex items-center gap-3">
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-primary text-xl font-bold text-primary-foreground">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-amber-100 text-xl font-bold text-stone-900">
               {username?.charAt(0).toUpperCase() || "U"}
             </div>
             <div>
@@ -141,23 +142,22 @@ export function GeneralSettings() {
 
           <div className="flex flex-col gap-3">
             <div className="flex flex-col gap-1.5">
-              <Label>{getGeneralSettingsLabel("settings.general.account.usernameLabel")}</Label>
-              <Input value={username} onChange={(event) => setUsername(event.target.value)} />
+              <Label htmlFor="account-username">
+                {getGeneralSettingsLabel("settings.general.account.usernameLabel")}
+              </Label>
+              <Input id="account-username" value={username} readOnly />
             </div>
             {email && !email.endsWith("@openhorn.local") && (
               <div className="flex flex-col gap-1.5">
-                <Label>{getGeneralSettingsLabel("settings.general.account.emailLabel")}</Label>
-                <Input value={email} disabled />
+                <Label htmlFor="account-email">
+                  {getGeneralSettingsLabel("settings.general.account.emailLabel")}
+                </Label>
+                <Input id="account-email" value={email} readOnly />
                 <p className="text-xs text-muted-foreground">
                   {getGeneralSettingsLabel("settings.general.account.emailReadonly")}
                 </p>
               </div>
             )}
-            <div>
-              <Button type="button">
-                {getGeneralSettingsLabel("settings.general.account.save")}
-              </Button>
-            </div>
           </div>
         </SettingsCard>
       </SettingsSection>
@@ -220,31 +220,78 @@ export function GeneralSettings() {
               </div>
             </div>
             {!editing && (
-              <Button size="sm" variant="ghost" onClick={() => setEditing(true)}>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={editPrompt}
+                disabled={!promptLoaded || savingPrompt}
+              >
                 <Pencil size={13} />
                 {getGeneralSettingsLabel("settings.general.instructions.edit")}
               </Button>
             )}
           </div>
 
+          {loadingPrompt ? (
+            <output className="block text-sm text-muted-foreground">
+              {getGeneralSettingsLabel("settings.general.instructions.loading")}
+            </output>
+          ) : null}
+          {promptError ? (
+            <div
+              role="alert"
+              className="flex items-center justify-between gap-3 text-sm text-destructive"
+            >
+              <p>
+                {getGeneralSettingsLabel(
+                  promptError === "load"
+                    ? "settings.general.instructions.loadFailed"
+                    : "settings.general.instructions.saveFailed",
+                )}
+              </p>
+              {promptError === "load" ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => void loadPrompt()}
+                  disabled={loadingPrompt}
+                >
+                  {getGeneralSettingsLabel("settings.general.instructions.retry")}
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
+          <Label htmlFor="general-system-prompt" className="sr-only">
+            {getGeneralSettingsLabel("settings.general.instructions.title")}
+          </Label>
           <Textarea
+            id="general-system-prompt"
             placeholder={getGeneralSettingsLabel("settings.general.instructions.placeholder")}
             value={editing ? systemPrompt : savedPrompt || ""}
             onChange={(event) => setSystemPrompt(event.target.value)}
             readOnly={!editing}
+            disabled={!promptLoaded || savingPrompt}
             className={cn(
               "mt-2 h-[min(460px,50vh)] min-h-[320px] resize-y font-mono text-sm leading-relaxed",
               !editing && "cursor-default bg-muted text-muted-foreground",
             )}
             rows={14}
           />
+          {editing && systemPrompt !== savedPrompt ? (
+            <p className="mt-2 text-xs text-muted-foreground">
+              {getGeneralSettingsLabel("settings.general.instructions.draftHint")}
+            </p>
+          ) : null}
 
           {editing ? (
             <div className="mt-3 flex justify-end gap-2">
               <Button variant="ghost" onClick={handleCancelEdit} disabled={savingPrompt}>
                 {getGeneralSettingsLabel("settings.general.instructions.cancel")}
               </Button>
-              <Button onClick={() => void handleSavePrompt()} disabled={savingPrompt}>
+              <Button
+                onClick={() => void handleSavePrompt()}
+                disabled={savingPrompt || !promptLoaded || systemPrompt === savedPrompt}
+              >
                 {savingPrompt
                   ? getGeneralSettingsLabel("settings.general.instructions.saving")
                   : getGeneralSettingsLabel("settings.general.instructions.save")}
@@ -259,6 +306,14 @@ export function GeneralSettings() {
           )}
         </SettingsCard>
       </SettingsSection>
+      <DiscardChangesDialog
+        open={confirmDiscard}
+        onKeep={() => setConfirmDiscard(false)}
+        onDiscard={() => {
+          cancelPrompt();
+          setConfirmDiscard(false);
+        }}
+      />
 
       <SettingsSection
         title={getGeneralSettingsLabel("settings.general.editor.title")}

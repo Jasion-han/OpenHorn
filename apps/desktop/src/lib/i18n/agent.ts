@@ -934,9 +934,16 @@ export function formatSidebarLabel(
  * `formatGeneralSettingsLabel`.
  */
 export const generalSettingsLabels = {
+  "settings.general.instructions.loading": "正在加载自定义指令…",
+  "settings.general.instructions.loadFailed": "无法加载自定义指令，请重试；本地草稿会保留。",
+  "settings.general.instructions.saveFailed": "保存失败，修改尚未生效。请重试保存。",
+  "settings.general.instructions.retry": "重新加载",
+  "settings.general.instructions.draftHint":
+    "修改尚未保存。本次登录期间切换页面会保留草稿，退出登录或重启后清除。",
+
   // Section: account info
   "settings.general.account.title": "账户信息",
-  "settings.general.account.description": "管理你的账号显示信息（本地展示）。",
+  "settings.general.account.description": "查看当前账户信息，此处暂不支持修改。",
   "settings.general.account.usernameFallback": "未设置用户名",
   "settings.general.account.usernameLabel": "用户名",
   "settings.general.account.emailLabel": "邮箱",
