@@ -1,0 +1,16 @@
+{
+  "scope": "original working directory including preserved existing WIP",
+  "typecheck": "passed",
+  "biome": {
+    "result": "passed",
+    "checkedFiles": 864
+  },
+  "desktopTests": {
+    "pass": 711,
+    "fail": 0,
+    "files": 79
+  },
+  "committedTreeDesktopTests": 681,
+  "unrelatedWipPathsPreservedByteIdentical": 269,
+  "stagedScope": "task-specific patches only; committed tree matched isolated candidate"
+}
