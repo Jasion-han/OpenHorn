@@ -108,9 +108,9 @@ export function SettingsView({ initialTab = "channels" }: { initialTab?: Setting
                 aria-current={resolvedTab === tab.id ? "page" : undefined}
                 onClick={() => handleTabClick(tab.id)}
                 className={cn(
-                  "flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors titlebar-no-drag focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-600",
+                  "flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors titlebar-no-drag focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                   resolvedTab === tab.id
-                    ? "bg-amber-50 text-stone-900 font-medium"
+                    ? "bg-muted text-foreground font-medium"
                     : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
                 )}
               >

@@ -40,10 +40,10 @@ export function SettingsSegmentedControl({
             disabled={disabled}
             onClick={() => onValueChange(option.value)}
             className={cn(
-              "px-3 py-1.5 rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-600",
+              "px-3 py-1.5 rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
               "disabled:cursor-not-allowed disabled:opacity-50",
               value === option.value
-                ? "bg-amber-50 text-stone-900 shadow-sm"
+                ? "bg-background text-foreground shadow-sm"
                 : "text-muted-foreground hover:text-foreground",
             )}
           >
