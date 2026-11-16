@@ -1,5 +1,18 @@
 import { describe, expect, test } from "bun:test";
-import { extractToolUrls, summarizeToolInput } from "./agentToolSummary";
+import { extractToolUrls, presentSearchToolLabel, summarizeToolInput } from "./agentToolSummary";
+
+test("search labels show per-call provenance, preserve history and distinguish fallback from MCP", () => {
+  expect(presentSearchToolLabel("web_search", { provider: "tavily" })).toBe("Search · Tavily");
+  expect(presentSearchToolLabel("WebSearch", { provider: "openrouter" })).toBe(
+    "Search · OpenRouter",
+  );
+  expect(
+    presentSearchToolLabel("web_search", { provider: "duckduckgo", fallbackFrom: "tavily" }),
+  ).toBe("Search · DuckDuckGo（由 Tavily 降级）");
+  expect(presentSearchToolLabel("web_search", undefined)).toBe(undefined);
+  expect(presentSearchToolLabel("mcp__exa__web_search", { provider: "tavily" })).toBe(undefined);
+  expect(presentSearchToolLabel("web_fetch", { provider: "tavily" })).toBe(undefined);
+});
 
 describe("extractToolUrls", () => {
   test("returns every url of a batched fetch so the panel can give each its own row", () => {

@@ -5,6 +5,7 @@ import {
   type Virtualizer,
 } from "@tanstack/react-virtual";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { answerModelMetadata } from "shared/answer-metadata";
 import { fileKey } from "shared/format";
 import { chatFailureFinishReason } from "shared/message-text";
 import type { ChatStreamErrorCode, ProviderChatMetadata, RecipeRequirements } from "shared/types";
@@ -94,7 +95,15 @@ const COMPOSER_PAD_BOTTOM = "env(safe-area-inset-bottom, 0px)";
 
 type DesktopSearchStatus = {
   configured: boolean;
-  source: "user" | "server" | "none" | "disabled" | "deepseek" | "duckduckgo";
+  source:
+    | "user"
+    | "server"
+    | "none"
+    | "disabled"
+    | "deepseek"
+    | "deepseek-native"
+    | "openrouter"
+    | "duckduckgo";
 };
 
 async function fetchDesktopSearchStatus(): Promise<DesktopSearchStatus> {
@@ -1239,6 +1248,9 @@ export function DesktopChatArea() {
           systemPrompt: globalSystemPrompt,
           tavilyApiKey,
           deepseekApiKey,
+          toolConnection,
+          nativeSearchConnection,
+          openRouterSearchConnection,
           searchProvider,
         } = await resolveRunSettings(chatAreaApi, forceWebSearch);
         const sendGenUiSection = await loadCurrentGenUiSection();
@@ -1261,6 +1273,9 @@ export function DesktopChatArea() {
           webSearchEnabled: forceWebSearch,
           tavilyApiKey,
           deepseekApiKey,
+          toolConnection,
+          nativeSearchConnection,
+          openRouterSearchConnection,
           searchProvider,
           targetMcpServer,
           conversationHistory: conversationHistory.length > 0 ? conversationHistory : undefined,
@@ -1276,35 +1291,87 @@ export function DesktopChatArea() {
         return;
       }
 
-      if (files.length > 0) {
-        setIsUploading(true);
-        const upload = await uploadAttachments({
+      const preparationToken = crypto.randomUUID();
+      let finishPreparation = () => {};
+      const preparationDone = new Promise<void>((resolve) => {
+        finishPreparation = resolve;
+      });
+      let cancellation: Promise<void> | undefined;
+      let cancellationFailed = false;
+      let stoppedUploadFailed = false;
+      const cancelPreparation = () =>
+        (cancellation ??= chatAreaApi.messages
+          .cancelChatPreparation({ conversationId, preparationToken })
+          .then(() => {})
+          .catch(() => {
+            cancellationFailed = true;
+          }));
+      // Keep ownership until the stopped question has a persisted identity. A newer send
+      // must not be overtaken by a late preparation inserting the older question afterward.
+      turn.abort = () => Promise.all([cancelPreparation(), preparationDone]).then(() => {});
+      if (turn.stopped) await cancelPreparation();
+      let prepared: Awaited<ReturnType<typeof chatAreaApi.messages.chatPrepare>>;
+      try {
+        if (files.length > 0) {
+          setIsUploading(true);
+          try {
+            const upload = await uploadAttachments({
+              conversationId,
+              files,
+            });
+            attachmentIds = upload.attachments.map((attachment) => attachment.id);
+            updateMessage(userMessageId, {
+              attachments: attachmentIds,
+              attachmentsMeta: localAttachmentMeta.map((local, index) => {
+                const server = upload.attachments[index];
+                return {
+                  ...local,
+                  id: server?.id ?? local.id,
+                  fileName: server?.fileName ?? local.fileName,
+                  fileType: server?.fileType ?? local.fileType,
+                  fileSize: server?.fileSize ?? local.fileSize,
+                };
+              }),
+            });
+            setPendingAttachments((current) => current.filter((file) => !files.includes(file)));
+          } catch (error) {
+            if (!turn.stopped) throw error;
+            stoppedUploadFailed = true;
+          }
+        }
+
+        prepared = await chatAreaApi.messages.chatPrepare({
+          preparationToken,
           conversationId,
-          files,
-        });
-        attachmentIds = upload.attachments.map((attachment) => attachment.id);
-        updateMessage(userMessageId, {
+          stoppedBeforeStart: turn.stopped,
+          stoppedAttachmentMeta: stoppedUploadFailed
+            ? toSyncAttachmentsMeta(localAttachmentMeta)
+            : undefined,
+          content: sendContent,
           attachments: attachmentIds,
-          attachmentsMeta: localAttachmentMeta.map((local, index) => {
-            const server = upload.attachments[index];
-            return {
-              ...local,
-              id: server?.id ?? local.id,
-              fileName: server?.fileName ?? local.fileName,
-              fileType: server?.fileType ?? local.fileType,
-              fileSize: server?.fileSize ?? local.fileSize,
-            };
-          }),
         });
-        setPendingAttachments((current) => current.filter((file) => !files.includes(file)));
+      } finally {
+        finishPreparation();
       }
 
-      const prepared = await chatAreaApi.messages.chatPrepare({
-        conversationId,
-        content: sendContent,
-        attachments: attachmentIds,
-      });
-
+      if (prepared.preparationStopped) {
+        turn.stopped = true;
+        if (activeTurnRef.current === turn) {
+          setStreaming(false);
+          setStreamingAssistantId(null);
+        }
+      }
+      if (stoppedUploadFailed)
+        notifyWarning(
+          getChatLabel("chat.attachments.stoppedUploadTitle"),
+          getChatLabel("chat.attachments.stoppedUploadBody"),
+        );
+      if (turn.stopped && !prepared.preparationStopped && cancellation) await cancellation;
+      if (cancellationFailed && turn.stopped && !prepared.preparationStopped)
+        notifyWarning(
+          getChatLabel("chat.search.stopUnconfirmedTitle"),
+          getChatLabel("chat.search.stopUnconfirmedBody"),
+        );
       updateMessage(userMessageId, { id: prepared.userMessageId });
       updateMessage(assistantMessageId, { id: prepared.assistantMessageId });
       if (prepared.citations || prepared.liveMetadata) {
@@ -1380,7 +1447,9 @@ export function DesktopChatArea() {
                   return;
                 }
                 if (event.type === "execution_event" && event.eventType === "chat_metadata") {
-                  chatMetadata = event.metadata as ProviderChatMetadata;
+                  chatMetadata = prepared.nativeWeb
+                    ? (event.metadata as ProviderChatMetadata)
+                    : answerModelMetadata(event.metadata as ProviderChatMetadata);
                   if (chatMetadata.refused) chatContent = "";
                   applyStreamEvent(prepared.assistantMessageId, {
                     type: "chat_metadata",
@@ -1762,6 +1831,9 @@ export function DesktopChatArea() {
           systemPrompt: retrySystemPrompt,
           tavilyApiKey: retryTavilyApiKey,
           deepseekApiKey: retryDeepseekApiKey,
+          toolConnection: retryToolConnection,
+          nativeSearchConnection: retryNativeSearchConnection,
+          openRouterSearchConnection: retryOpenRouterSearchConnection,
           searchProvider: retrySearchProvider,
         } = await resolveRunSettings(chatAreaApi, forceWebSearch);
         // Re-parse the original message so a retried `/server` (or `/skill`)
@@ -1798,6 +1870,9 @@ export function DesktopChatArea() {
           webSearchEnabled: forceWebSearch,
           tavilyApiKey: retryTavilyApiKey,
           deepseekApiKey: retryDeepseekApiKey,
+          toolConnection: retryToolConnection,
+          nativeSearchConnection: retryNativeSearchConnection,
+          openRouterSearchConnection: retryOpenRouterSearchConnection,
           searchProvider: retrySearchProvider,
           targetMcpServer: retryTargetMcpServer,
           conversationHistory: conversationHistory.length > 0 ? conversationHistory : undefined,
@@ -1986,6 +2061,9 @@ export function DesktopChatArea() {
           systemPrompt: editSystemPrompt,
           tavilyApiKey: editTavilyApiKey,
           deepseekApiKey: editDeepseekApiKey,
+          toolConnection: editToolConnection,
+          nativeSearchConnection: editNativeSearchConnection,
+          openRouterSearchConnection: editOpenRouterSearchConnection,
           searchProvider: editSearchProvider,
         } = await resolveRunSettings(chatAreaApi, forceWebSearch);
         const editGenUiSection = await loadCurrentGenUiSection();
@@ -2012,6 +2090,9 @@ export function DesktopChatArea() {
           webSearchEnabled: forceWebSearch,
           tavilyApiKey: editTavilyApiKey,
           deepseekApiKey: editDeepseekApiKey,
+          toolConnection: editToolConnection,
+          nativeSearchConnection: editNativeSearchConnection,
+          openRouterSearchConnection: editOpenRouterSearchConnection,
           searchProvider: editSearchProvider,
           targetMcpServer: editTargetMcpServer,
           conversationHistory: conversationHistory.length > 0 ? conversationHistory : undefined,

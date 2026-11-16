@@ -1,3 +1,16 @@
+import {
+  NATIVE_SEARCH_RUNTIME,
+  type NativeSearchConnection,
+  readNativeSearchRuntime,
+} from "shared/deepseek-native-search";
+import { DEEPSEEK_SEARCH_RUNTIME, readDeepSeekSearchRuntime } from "shared/deepseek-search";
+import {
+  OPENROUTER_SEARCH_RUNTIME,
+  type OpenRouterSearchConnection,
+  readOpenRouterSearchRuntime,
+} from "shared/openrouter-search";
+import { readSearchExecutionSource, TAVILY_SEARCH_RUNTIME_KEY } from "shared/search-settings";
+import { TOOL_RUNTIME_SETTING, type ToolConnection } from "shared/tool-connection";
 import { useChatStore } from "../stores/chatStore";
 import type { AgentTaskStreamEvent } from "./agentTaskStream";
 import { decisionApi } from "./decisionApi";
@@ -114,7 +127,10 @@ export async function resolveRunSettings(
   systemPrompt: string | undefined;
   tavilyApiKey: string | undefined;
   deepseekApiKey?: string;
-  searchProvider?: "auto" | "tavily" | "deepseek" | "duckduckgo";
+  toolConnection?: ToolConnection;
+  nativeSearchConnection?: NativeSearchConnection;
+  openRouterSearchConnection?: OpenRouterSearchConnection;
+  searchProvider?: "auto" | "tavily" | "deepseek" | "deepseek-native" | "openrouter" | "duckduckgo";
 }> {
   let systemPrompt: string | undefined;
   try {
@@ -125,7 +141,17 @@ export async function resolveRunSettings(
   }
   let tavilyApiKey: string | undefined;
   let deepseekApiKey: string | undefined;
-  let searchProvider: "auto" | "tavily" | "deepseek" | "duckduckgo" | undefined;
+  let toolConnection: ToolConnection | undefined;
+  let nativeSearchConnection: NativeSearchConnection | undefined;
+  let openRouterSearchConnection: OpenRouterSearchConnection | undefined;
+  let searchProvider:
+    | "auto"
+    | "tavily"
+    | "deepseek"
+    | "deepseek-native"
+    | "openrouter"
+    | "duckduckgo"
+    | undefined;
   if (forceWebSearch) {
     try {
       const { settings } = await api.settings.get([
@@ -133,27 +159,62 @@ export async function resolveRunSettings(
         "liveSearch.tavilyEnabled",
         "deepseek.toolsApiKey",
         "liveSearch.provider",
+        TOOL_RUNTIME_SETTING,
+        DEEPSEEK_SEARCH_RUNTIME,
+        NATIVE_SEARCH_RUNTIME,
+        OPENROUTER_SEARCH_RUNTIME,
+        TAVILY_SEARCH_RUNTIME_KEY,
       ]);
       if (settings["liveSearch.tavilyEnabled"] !== "false") {
-        tavilyApiKey = settings["liveSearch.tavilyApiKey"] || undefined;
+        tavilyApiKey =
+          (Object.hasOwn(settings, TAVILY_SEARCH_RUNTIME_KEY)
+            ? settings[TAVILY_SEARCH_RUNTIME_KEY]
+            : settings["liveSearch.tavilyApiKey"]) || undefined;
       }
-      deepseekApiKey = settings["deepseek.toolsApiKey"] || undefined;
+      toolConnection = readDeepSeekSearchRuntime(settings);
+      // Modern runtimes receive one bound connection, never a second fallback Key.
+      deepseekApiKey =
+        Object.hasOwn(settings, DEEPSEEK_SEARCH_RUNTIME) ||
+        Object.hasOwn(settings, TOOL_RUNTIME_SETTING)
+          ? undefined
+          : settings["deepseek.toolsApiKey"] || undefined;
       const provider = settings["liveSearch.provider"];
       if (
         provider === "auto" ||
         provider === "tavily" ||
         provider === "deepseek" ||
+        provider === "deepseek-native" ||
+        provider === "openrouter" ||
         provider === "duckduckgo"
       )
         searchProvider = provider;
+      else if (provider !== undefined) throw new Error("invalid_search_provider");
+      if (searchProvider === "deepseek-native")
+        nativeSearchConnection = readNativeSearchRuntime(settings);
+      if (searchProvider === "openrouter")
+        openRouterSearchConnection = readOpenRouterSearchRuntime(settings);
+      if (searchProvider === "openrouter") tavilyApiKey = undefined;
+      if (searchProvider !== "deepseek") {
+        toolConnection = undefined;
+        deepseekApiKey = undefined;
+      }
     } catch {
-      // ignore
+      // Unknown tool settings must not silently select a different provider.
+      searchProvider = "deepseek";
+      tavilyApiKey = undefined;
+      deepseekApiKey = undefined;
+      toolConnection = undefined;
+      nativeSearchConnection = undefined;
+      openRouterSearchConnection = undefined;
     }
   }
   return {
     systemPrompt,
     tavilyApiKey,
     ...(deepseekApiKey ? { deepseekApiKey } : {}),
+    ...(toolConnection ? { toolConnection } : {}),
+    ...(nativeSearchConnection ? { nativeSearchConnection } : {}),
+    ...(openRouterSearchConnection ? { openRouterSearchConnection } : {}),
     ...(searchProvider ? { searchProvider } : {}),
   };
 }
@@ -283,6 +344,9 @@ export function applySidecarEventToChat(
         toolName: event.toolName,
         toolInput: useMetadata ? event.metadata : event.toolInput,
         toolCallId,
+        searchSource: readSearchExecutionSource(
+          (event.metadata as { searchSource?: unknown } | undefined)?.searchSource,
+        ),
       },
     });
     return { kind: "handled" };

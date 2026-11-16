@@ -1,4 +1,5 @@
 import { assistantMessageContent, chatFailureFinishReason } from "shared/message-text";
+import { readSearchExecutionSource } from "shared/search-settings";
 import { create } from "zustand";
 import { type ChatAdapter, createChatAdapter } from "../lib/chatAdapter";
 import { migrateBlockStateScope } from "../lib/genui/blockState";
@@ -106,6 +107,7 @@ export function applyAgentEventToRun(
   const base = run || createPartialAgentRun();
 
   const now = Date.now();
+  const searchSource = readSearchExecutionSource(event.searchSource);
 
   if (event.type === "tool_start" && event.toolCallId) {
     // The runtime emits tool_start twice per call: once the moment the model
@@ -122,6 +124,7 @@ export function applyAgentEventToRun(
         ...existing,
         toolName: event.toolName || existing.toolName,
         toolInput: event.toolInput ?? existing.toolInput,
+        ...(searchSource ? { searchSource: searchSource } : {}),
       };
       return { ...base, summary: "Working", steps: updatedSteps };
     }
@@ -132,7 +135,15 @@ export function applyAgentEventToRun(
       ...base,
       summary: "Working",
       steps: [
-        ...base.steps,
+        ...base.steps.map((step) =>
+          event.type === "tool_result" &&
+          event.toolCallId &&
+          step.type === "tool_start" &&
+          step.toolCallId === event.toolCallId &&
+          searchSource
+            ? { ...step, searchSource: searchSource }
+            : step,
+        ),
         {
           type: event.type,
           toolName: event.toolName,
@@ -140,6 +151,7 @@ export function applyAgentEventToRun(
           toolInput: event.toolInput,
           toolCallId: event.toolCallId,
           timestamp: now,
+          ...(searchSource ? { searchSource: searchSource } : {}),
         },
       ],
     };

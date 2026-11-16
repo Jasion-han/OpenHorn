@@ -11,6 +11,7 @@ import {
 } from "adapters";
 import { attachments, conversations, messages } from "db";
 import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { answerModelMetadata } from "shared/answer-metadata";
 import {
   boundChatContext,
   CHAT_MAX_CONTEXT_MESSAGES,
@@ -26,6 +27,7 @@ import {
   chatFailureFinishReason,
 } from "shared/message-text";
 import type {
+  ChatPreparationRequest,
   ModelContextMetadata,
   NativeWebOptions,
   ProviderChatMetadata,
@@ -52,6 +54,10 @@ import {
   ownsChatMutation,
   releaseChatMutation,
 } from "./chatMutationOwnership";
+import {
+  beginChatPreparation,
+  cancelChatPreparation as cancelOwnedPreparation,
+} from "./chatPreparationCancellation";
 import { recordChannelFailure, recordChannelSuccess } from "./circuitBreaker";
 import { buildLiveContext, type LiveContextResult, toStoredLiveMetadata } from "./liveCapabilities";
 import { classifyLiveRouteWithModel } from "./liveRouteClassifier";
@@ -64,36 +70,17 @@ import { getSettingValues } from "./settingsService";
 import { getRecentSummaries, maybeSummarize } from "./summaryService";
 
 const GLOBAL_SYSTEM_PROMPT_KEY = "chat.systemPrompt";
-const DEEPSEEK_NATIVE_WEB_SETTING = "deepseek.nativeWebEnabled";
 
 type ChatLiveContext = LiveContextResult & {
   native?: ProviderChatMetadata;
   providerState?: ProviderChatState;
 };
-function nativeWebForTurn(
-  conversation: { forceWebSearch?: boolean | null },
-  settings: Record<string, string>,
-  resolved: Awaited<ReturnType<typeof resolveChatChannelForConversation>>,
-  effectiveSystemPrompt?: string | null,
-): NativeWebOptions | undefined {
-  if (
-    !conversation.forceWebSearch ||
-    settings[DEEPSEEK_NATIVE_WEB_SETTING] !== "true" ||
-    isDataOnlyPrompt(effectiveSystemPrompt) ||
-    !resolved ||
-    !supportsDeepSeekNativeWeb(
-      resolved.channel.protocol,
-      resolved.channel.baseUrl,
-      resolved.modelId,
-    )
-  )
-    return undefined;
-  return { search: true, readUrls: true, thinking: true };
-}
 async function buildExternalChatContext(
   input: Parameters<typeof buildLiveContext>[0],
 ): Promise<LiveContextResult> {
+  input.signal?.throwIfAborted();
   const live = await buildLiveContext(input);
+  input.signal?.throwIfAborted();
   if (input.dataOnly || !input.forceWebSearch) return live;
   const urls = [
     ...new Set(
@@ -107,6 +94,7 @@ async function buildExternalChatContext(
     urls,
     webSearchEnabled: true,
     userSettings: input.userSettings,
+    signal: input.signal,
     fetchImpl: input.fetchImpl,
   });
   if (links.status !== "live")
@@ -124,28 +112,18 @@ async function buildExternalChatContext(
   };
 }
 
-function initialNativeLiveContext(): ChatLiveContext {
-  return {
-    status: "offline",
-    route: "web_search",
-    source: { type: "web_search", provider: "deepseek" },
-    citations: [],
-  };
-}
 function updateNativeMetadata(
   liveContext: ChatLiveContext,
   send?: (event: { type: string; [key: string]: unknown }) => void,
 ) {
   return (metadata: ProviderChatMetadata) => {
-    const { providerState, ...display } = metadata;
+    const filtered = answerModelMetadata(metadata);
+    const { providerState, ...display } = filtered;
     liveContext.native = display;
     if (providerState) liveContext.providerState = providerState;
-    if (metadata.citations !== undefined) liveContext.citations = metadata.citations;
-    if (metadata.steps?.some((step) => step.status === "completed") || metadata.citations?.length)
-      liveContext.status = "live";
+    if (filtered.refused) liveContext.citations = [];
     send?.({ type: "chat_metadata", metadata: display });
-    if (metadata.citations !== undefined)
-      send?.({ type: "citations", citations: metadata.citations });
+    if (filtered.refused) send?.({ type: "citations", citations: [] });
   };
 }
 function serializeProviderState(liveContext: ChatLiveContext) {
@@ -895,7 +873,6 @@ export async function sendMessage(userId: string, input: SendMessageInput) {
   const settings = await getSettingValues(userId, [
     GLOBAL_SYSTEM_PROMPT_KEY,
     ...SEARCH_SETTINGS_KEYS,
-    DEEPSEEK_NATIVE_WEB_SETTING,
   ]);
   const baseSystemPrompt = conversation.systemPrompt || settings[GLOBAL_SYSTEM_PROMPT_KEY] || null;
   const classifier = resolvedChannel
@@ -910,18 +887,16 @@ export async function sendMessage(userId: string, input: SendMessageInput) {
     : undefined;
 
   const conversationMessages = await getMessages(input.conversationId);
-  const nativeWeb = nativeWebForTurn(conversation, settings, resolvedChannel, baseSystemPrompt);
-  const liveContext: ChatLiveContext = nativeWeb
-    ? initialNativeLiveContext()
-    : await buildExternalChatContext({
-        userId,
-        prompt: input.content,
-        userSettings: settings,
-        tavilyEnvKey: process.env.TAVILY_API_KEY ?? null,
-        forceWebSearch: Boolean(conversation.forceWebSearch),
-        dataOnly: isDataOnlyPrompt(baseSystemPrompt),
-        classifier,
-      });
+
+  const liveContext: ChatLiveContext = await buildExternalChatContext({
+    userId,
+    prompt: input.content,
+    userSettings: settings,
+    tavilyEnvKey: process.env.TAVILY_API_KEY ?? null,
+    forceWebSearch: Boolean(conversation.forceWebSearch),
+    dataOnly: isDataOnlyPrompt(baseSystemPrompt),
+    classifier,
+  });
   const assistantMessageId = generateId();
   const chatMessages = await buildChatMessagesForTurn(
     userId,
@@ -960,7 +935,7 @@ export async function sendMessage(userId: string, input: SendMessageInput) {
       const stream = await adapter.chatStream({
         model: resolvedChannel.modelId,
         messages: chatMessages,
-        nativeWeb,
+        nativeWeb: undefined,
         onMetadata: (metadata) => {
           updateNativeMetadata(liveContext)(metadata);
           if (metadata.refused) responseContent = "";
@@ -1158,7 +1133,7 @@ export async function streamMessage(
 
     const settings = await getSettingValues(userId, [
       GLOBAL_SYSTEM_PROMPT_KEY,
-      DEEPSEEK_NATIVE_WEB_SETTING,
+
       ...SEARCH_SETTINGS_KEYS,
     ]);
     const baseSystemPrompt =
@@ -1171,20 +1146,20 @@ export async function streamMessage(
             baseUrl: resolvedChannel.channel.baseUrl,
             modelId: resolvedChannel.modelId,
             prompt,
+            signal: ctx.signal,
           })
       : undefined;
-    const nativeWeb = nativeWebForTurn(conversation, settings, resolvedChannel, baseSystemPrompt);
-    const liveContext: ChatLiveContext = nativeWeb
-      ? initialNativeLiveContext()
-      : await buildExternalChatContext({
-          userId,
-          prompt: input.content,
-          userSettings: settings,
-          tavilyEnvKey: process.env.TAVILY_API_KEY ?? null,
-          forceWebSearch: Boolean(conversation.forceWebSearch),
-          dataOnly: isDataOnlyPrompt(baseSystemPrompt),
-          classifier,
-        });
+
+    const liveContext: ChatLiveContext = await buildExternalChatContext({
+      userId,
+      prompt: input.content,
+      userSettings: settings,
+      tavilyEnvKey: process.env.TAVILY_API_KEY ?? null,
+      forceWebSearch: Boolean(conversation.forceWebSearch),
+      dataOnly: isDataOnlyPrompt(baseSystemPrompt),
+      classifier,
+      signal: ctx.signal,
+    });
     const effectiveSystemPrompt = buildEffectiveSystemPrompt(baseSystemPrompt, liveContext);
     send(buildLiveStatusPayload(liveContext));
     const citationsPayload = buildCitationsPayload(liveContext.citations);
@@ -1277,7 +1252,7 @@ export async function streamMessage(
         model: resolvedChannel.modelId,
         messages: chatMessages,
         signal: ctx.signal,
-        nativeWeb,
+        nativeWeb: undefined,
         onMetadata: updateNativeMetadata(liveContext, send),
         contextWindow: resolvedChannel.contextWindow,
         contextMetadata: resolvedChannel.contextMetadata,
@@ -1548,7 +1523,7 @@ async function editUserMessageWithMutation(
       .map((m) => (m.id === userMessageId ? { ...m, content: newContent.trim() } : m));
     const settings = await getSettingValues(userId, [
       GLOBAL_SYSTEM_PROMPT_KEY,
-      DEEPSEEK_NATIVE_WEB_SETTING,
+
       ...SEARCH_SETTINGS_KEYS,
     ]);
     requireChatMutation(mutation);
@@ -1563,20 +1538,20 @@ async function editUserMessageWithMutation(
             baseUrl: resolvedChannel.channel.baseUrl,
             modelId: resolvedChannel.modelId,
             prompt,
+            signal: ctx.signal,
           })
       : undefined;
-    const nativeWeb = nativeWebForTurn(conversation, settings, resolvedChannel, baseSystemPrompt);
-    const liveContext: ChatLiveContext = nativeWeb
-      ? initialNativeLiveContext()
-      : await buildExternalChatContext({
-          userId,
-          prompt: newContent.trim(),
-          userSettings: settings,
-          tavilyEnvKey: process.env.TAVILY_API_KEY ?? null,
-          forceWebSearch: Boolean(conversation.forceWebSearch),
-          dataOnly: isDataOnlyPrompt(baseSystemPrompt),
-          classifier,
-        });
+
+    const liveContext: ChatLiveContext = await buildExternalChatContext({
+      userId,
+      prompt: newContent.trim(),
+      userSettings: settings,
+      tavilyEnvKey: process.env.TAVILY_API_KEY ?? null,
+      forceWebSearch: Boolean(conversation.forceWebSearch),
+      dataOnly: isDataOnlyPrompt(baseSystemPrompt),
+      classifier,
+      signal: ctx.signal,
+    });
     requireChatMutation(mutation);
     if (ctx.signal.aborted) return;
     const effectiveSystemPrompt = withAppendedSystemPrompt(
@@ -1656,7 +1631,7 @@ async function editUserMessageWithMutation(
         model: resolvedChannel.modelId,
         messages: chatMessages,
         signal: ctx.signal,
-        nativeWeb,
+        nativeWeb: undefined,
         onMetadata: updateNativeMetadata(liveContext, send),
         contextWindow: resolvedChannel.contextWindow,
         contextMetadata: resolvedChannel.contextMetadata,
@@ -1779,7 +1754,7 @@ async function regenerateMessageWithMutation(
     const contextMsgs = idx > 0 ? allMsgs.slice(0, idx) : allMsgs;
     const settings = await getSettingValues(userId, [
       GLOBAL_SYSTEM_PROMPT_KEY,
-      DEEPSEEK_NATIVE_WEB_SETTING,
+
       ...SEARCH_SETTINGS_KEYS,
     ]);
     const baseSystemPrompt =
@@ -1798,20 +1773,20 @@ async function regenerateMessageWithMutation(
             baseUrl: resolvedChannel.channel.baseUrl,
             modelId: resolvedChannel.modelId,
             prompt,
+            signal: ctx.signal,
           })
       : undefined;
-    const nativeWeb = nativeWebForTurn(conversation, settings, resolvedChannel, baseSystemPrompt);
-    const liveContext: ChatLiveContext = nativeWeb
-      ? initialNativeLiveContext()
-      : await buildExternalChatContext({
-          userId,
-          prompt: lastUserMessage?.content || "",
-          userSettings: settings,
-          tavilyEnvKey: process.env.TAVILY_API_KEY ?? null,
-          forceWebSearch: Boolean(conversation.forceWebSearch),
-          dataOnly: isDataOnlyPrompt(baseSystemPrompt),
-          classifier,
-        });
+
+    const liveContext: ChatLiveContext = await buildExternalChatContext({
+      userId,
+      prompt: lastUserMessage?.content || "",
+      userSettings: settings,
+      tavilyEnvKey: process.env.TAVILY_API_KEY ?? null,
+      forceWebSearch: Boolean(conversation.forceWebSearch),
+      dataOnly: isDataOnlyPrompt(baseSystemPrompt),
+      classifier,
+      signal: ctx.signal,
+    });
     requireChatMutation(mutation);
     if (ctx.signal.aborted) return;
     const effectiveSystemPrompt = withAppendedSystemPrompt(
@@ -1866,7 +1841,7 @@ async function regenerateMessageWithMutation(
         model: resolvedChannel.modelId,
         messages: chatMessages,
         signal: ctx.signal,
-        nativeWeb,
+        nativeWeb: undefined,
         onMetadata: updateNativeMetadata(liveContext, send),
         contextWindow: resolvedChannel.contextWindow,
         contextMetadata: resolvedChannel.contextMetadata,
@@ -2177,13 +2152,21 @@ export async function syncSidecarMessages(
   return { userMessageId: result.userMessageId, assistantMessageId: result.assistantMessageId };
 }
 
-export interface PrepareChatInput {
-  conversationId: string;
-  content: string;
-  attachments?: string[];
+export async function stopChatPreparation(
+  userId: string,
+  conversationId: string,
+  token: string,
+): Promise<void> {
+  await getConversationForUser(userId, conversationId);
+  cancelOwnedPreparation(userId, conversationId, token);
+}
+
+export interface PrepareChatInput extends ChatPreparationRequest {
+  signal?: AbortSignal;
 }
 
 export interface PrepareChatResult {
+  preparationStopped?: boolean;
   saveToken?: string;
   contextWindow: number | null;
   contextMetadata?: ModelContextMetadata | null;
@@ -2204,124 +2187,195 @@ export async function prepareChatForSidecar(
   input: PrepareChatInput,
 ): Promise<PrepareChatResult> {
   const conversation = await getConversationForUser(userId, input.conversationId);
-  const resolvedChannel = await resolveChatChannelForConversation(userId, conversation);
-  if (!resolvedChannel) {
-    const message = conversation.channelId
-      ? "该对话选择的渠道/模型不可用（可能已被禁用或已删除）。请在对话中重新选择模型。"
-      : "未配置可用的默认渠道/默认模型。请先在设置中完成配置后再开始对话。";
-    throw new Error(message);
-  }
+  if (
+    input.stoppedAttachmentMeta &&
+    (input.stoppedBeforeStart !== true ||
+      !Array.isArray(input.stoppedAttachmentMeta) ||
+      input.stoppedAttachmentMeta.length > 50 ||
+      input.stoppedAttachmentMeta.some(
+        (item) =>
+          !item ||
+          typeof item.fileName !== "string" ||
+          !item.fileName.trim() ||
+          item.fileName.length > 255 ||
+          (item.fileType !== undefined &&
+            (typeof item.fileType !== "string" || item.fileType.length > 255)) ||
+          (item.fileSize !== undefined &&
+            (!Number.isSafeInteger(item.fileSize) || item.fileSize < 0)),
+      ))
+  )
+    throw new Error("invalid_stopped_attachment_metadata");
+  const preparation = beginChatPreparation(userId, conversation.id, input.preparationToken);
+  if (input.stoppedBeforeStart === true) preparation.stop();
+  try {
+    const preparationSignal = input.signal
+      ? AbortSignal.any([input.signal, preparation.signal])
+      : preparation.signal;
+    const resolvedChannel = await resolveChatChannelForConversation(userId, conversation);
+    if (!resolvedChannel) {
+      const message = conversation.channelId
+        ? "该对话选择的渠道/模型不可用（可能已被禁用或已删除）。请在对话中重新选择模型。"
+        : "未配置可用的默认渠道/默认模型。请先在设置中完成配置后再开始对话。";
+      throw new Error(message);
+    }
 
-  const settings = await getSettingValues(userId, [
-    GLOBAL_SYSTEM_PROMPT_KEY,
-    DEEPSEEK_NATIVE_WEB_SETTING,
-    ...SEARCH_SETTINGS_KEYS,
-  ]);
-  const baseSystemPrompt = conversation.systemPrompt || settings[GLOBAL_SYSTEM_PROMPT_KEY] || null;
-  const nativeWeb = nativeWebForTurn(conversation, settings, resolvedChannel, baseSystemPrompt);
-  const liveContext: ChatLiveContext = nativeWeb
-    ? initialNativeLiveContext()
-    : await buildExternalChatContext({
+    const settings = await getSettingValues(userId, [
+      GLOBAL_SYSTEM_PROMPT_KEY,
+
+      ...SEARCH_SETTINGS_KEYS,
+    ]);
+    const baseSystemPrompt =
+      conversation.systemPrompt || settings[GLOBAL_SYSTEM_PROMPT_KEY] || null;
+
+    let liveContext: ChatLiveContext;
+    try {
+      liveContext = await buildExternalChatContext({
         userId,
+        signal: preparationSignal,
         prompt: input.content,
         userSettings: settings,
         tavilyEnvKey: process.env.TAVILY_API_KEY ?? null,
         forceWebSearch: Boolean(conversation.forceWebSearch),
         dataOnly: isDataOnlyPrompt(baseSystemPrompt),
       });
-  // Freeze supported official identity even with tools off: a regular response
-  // can still be refused, and its metadata must complete under the same source.
-  const identity = supportsDeepSeekNativeWeb(
-    resolvedChannel.channel.protocol,
-    resolvedChannel.channel.baseUrl,
-    resolvedChannel.modelId,
-  )
-    ? deepseekNativeWebIdentity(resolvedChannel.channel.baseUrl, resolvedChannel.modelId)
-    : null;
-  const now = new Date();
-  const userMessageId = generateId();
-  await db.insert(messages).values({
-    id: userMessageId,
-    conversationId: input.conversationId,
-    role: "user",
-    content: input.content,
-    mode: "chat",
-    attachments: input.attachments ? JSON.stringify(input.attachments) : null,
-    agentRun: null,
-    createdAt: now,
-  });
-  await ftsUpsert(userMessageId, input.conversationId, input.content);
-
-  if (input.attachments?.length) {
-    await linkAttachmentsToMessage(input.attachments, userMessageId, userId);
-  }
-
-  const assistantMessageId = generateId();
-  const assistantCreatedAt = new Date(now.getTime() + 1);
-
-  await db
-    .update(conversations)
-    .set({
-      updatedAt: now,
-      lastMode: modeForLatestUserRequest(input.conversationId, userMessageId, "chat"),
-      runStatus: null,
-    })
-    .where(eq(conversations.id, input.conversationId));
-
-  const [preparedAssistant] = await db
-    .insert(messages)
-    .values({
-      id: assistantMessageId,
+    } catch (error) {
+      if (!preparation.signal.aborted || input.signal?.aborted) throw error;
+      liveContext = { status: "offline", route: "direct_model", source: { type: "none" } };
+    }
+    input.signal?.throwIfAborted();
+    // Freeze supported official identity even with tools off: a regular response
+    // can still be refused, and its metadata must complete under the same source.
+    const identity = supportsDeepSeekNativeWeb(
+      resolvedChannel.channel.protocol,
+      resolvedChannel.channel.baseUrl,
+      resolvedChannel.modelId,
+    )
+      ? deepseekNativeWebIdentity(resolvedChannel.channel.baseUrl, resolvedChannel.modelId)
+      : null;
+    const now = new Date();
+    const userMessageId = generateId();
+    await db.insert(messages).values({
+      id: userMessageId,
       conversationId: input.conversationId,
-      role: "assistant",
-      content: "",
-      model: resolvedChannel.modelId,
+      role: "user",
+      content: input.content,
       mode: "chat",
-      attachments: null,
+      attachments: input.attachments ? JSON.stringify(input.attachments) : null,
       agentRun: null,
-      liveMetadata: serializeLiveMetadata(liveContext),
-      citations: serializeCitations(liveContext.citations),
-      providerState: identity
-        ? JSON.stringify({ provider: "deepseek", ...identity, serverToolCalls: [] })
-        : null,
-      completionVersion: generateId(),
-      createdAt: assistantCreatedAt,
-    })
-    .returning();
+      createdAt: now,
+    });
+    await ftsUpsert(userMessageId, input.conversationId, input.content);
+    if (input.stoppedBeforeStart && input.stoppedAttachmentMeta?.length)
+      await insertSidecarAttachmentMeta(
+        input.conversationId,
+        userMessageId,
+        input.stoppedAttachmentMeta,
+        now,
+      );
 
-  const conversationMessages = await getMessages(input.conversationId);
-  const chatMessages = await buildChatMessagesForTurn(
-    userId,
-    conversationMessages,
-    buildEffectiveSystemPrompt(baseSystemPrompt, liveContext),
-    input.conversationId,
-    {
+    if (input.attachments?.length) {
+      await linkAttachmentsToMessage(input.attachments, userMessageId, userId);
+    }
+
+    const assistantMessageId = generateId();
+    const assistantCreatedAt = new Date(now.getTime() + 1);
+
+    await db
+      .update(conversations)
+      .set({
+        updatedAt: now,
+        lastMode: modeForLatestUserRequest(input.conversationId, userMessageId, "chat"),
+        runStatus: null,
+      })
+      .where(eq(conversations.id, input.conversationId));
+
+    let [preparedAssistant] = await db
+      .insert(messages)
+      .values({
+        id: assistantMessageId,
+        conversationId: input.conversationId,
+        role: "assistant",
+        content: "",
+        model: resolvedChannel.modelId,
+        mode: "chat",
+        attachments: null,
+        agentRun: null,
+        liveMetadata: serializeLiveMetadata(liveContext),
+        citations: serializeCitations(liveContext.citations),
+        providerState: identity
+          ? JSON.stringify({ provider: "deepseek", ...identity, serverToolCalls: [] })
+          : null,
+        completionVersion: generateId(),
+        finishReason: preparation.signal.aborted ? "stopped" : null,
+        createdAt: assistantCreatedAt,
+      })
+      .returning();
+
+    let chatMessages: ChatMessage[] = [];
+    if (!preparation.signal.aborted) {
+      try {
+        const conversationMessages = await getMessages(input.conversationId);
+        chatMessages = await buildChatMessagesForTurn(
+          userId,
+          conversationMessages,
+          buildEffectiveSystemPrompt(baseSystemPrompt, liveContext),
+          input.conversationId,
+          {
+            userMessageId,
+            assistantMessageId,
+            model: resolvedChannel.modelId,
+            contextWindow: resolvedChannel.contextWindow,
+            contextMetadata: resolvedChannel.contextMetadata,
+            protocol: resolvedChannel.channel.protocol,
+            baseUrl: resolvedChannel.channel.baseUrl,
+            createdAt: assistantCreatedAt,
+          },
+        );
+      } catch (error) {
+        if (!preparation.signal.aborted || input.signal?.aborted) throw error;
+      }
+    }
+    if (preparation.signal.aborted) {
+      const [stopped] = await db
+        .update(messages)
+        .set({
+          content: "",
+          finishReason: "stopped",
+          usage: null,
+          liveMetadata: serializeLiveMetadata(liveContext),
+          citations: serializeCitations(liveContext.citations),
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(messages.id, preparedAssistant.id),
+            eq(messages.conversationId, input.conversationId),
+          ),
+        )
+        .returning();
+      if (!stopped) throw new Error("chat_preparation_superseded");
+      preparedAssistant = stopped;
+      chatMessages = [];
+    }
+
+    return {
+      preparationStopped: preparation.signal.aborted,
+      saveToken: messageSaveToken(preparedAssistant),
+      contextWindow: resolvedChannel.contextWindow ?? null,
+      contextMetadata: resolvedChannel.contextMetadata ?? null,
+      apiKey: resolvedChannel.apiKey,
+      baseUrl: resolvedChannel.channel.baseUrl || null,
+      protocol: resolvedChannel.channel.protocol,
+      model: resolvedChannel.modelId,
+      messages: chatMessages,
+      ...(liveContext.citations?.length ? { citations: liveContext.citations } : {}),
+      liveMetadata: JSON.parse(serializeLiveMetadata(liveContext)),
       userMessageId,
       assistantMessageId,
-      model: resolvedChannel.modelId,
-      contextWindow: resolvedChannel.contextWindow,
-      contextMetadata: resolvedChannel.contextMetadata,
-      protocol: resolvedChannel.channel.protocol,
-      baseUrl: resolvedChannel.channel.baseUrl,
-      createdAt: assistantCreatedAt,
-    },
-  );
-
-  return {
-    saveToken: messageSaveToken(preparedAssistant),
-    contextWindow: resolvedChannel.contextWindow ?? null,
-    contextMetadata: resolvedChannel.contextMetadata ?? null,
-    apiKey: resolvedChannel.apiKey,
-    baseUrl: resolvedChannel.channel.baseUrl || null,
-    protocol: resolvedChannel.channel.protocol,
-    model: resolvedChannel.modelId,
-    messages: chatMessages,
-    ...(nativeWeb ? { nativeWeb } : {}),
-    ...(liveContext.citations?.length ? { citations: liveContext.citations } : {}),
-    liveMetadata: JSON.parse(serializeLiveMetadata(liveContext)),
-    userMessageId,
-    assistantMessageId,
-  };
+    };
+  } finally {
+    preparation.finish();
+  }
 }
 
 export interface CompleteChatInput {

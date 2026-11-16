@@ -3,6 +3,7 @@ import {
   MIN_CONTEXT_WINDOW,
   normalizeModelContextMetadata,
 } from "shared/context-policy";
+import { OPENROUTER_SEARCH_MODELS } from "shared/openrouter-search";
 import { z } from "zod";
 
 export const WsRequestSchema = z.object({
@@ -149,10 +150,40 @@ export const AgentRunParamsSchema = z.object({
   webSearchEnabled: z.boolean().optional(),
   tavilyApiKey: z.string().optional(),
   deepseekApiKey: z.string().max(4096).optional(),
-  searchProvider: z.enum(["auto", "tavily", "deepseek", "duckduckgo"]).optional(),
+  toolConnection: z
+    .object({
+      kind: z.enum(["deepseek", "openrouter"]),
+      baseUrl: z.string().min(1).max(2048),
+      apiKey: z.string().min(1).max(4096),
+      model: z.string().max(200).optional(),
+    })
+    .optional(),
+  nativeSearchConnection: z
+    .object({
+      baseUrl: z.literal("https://api.deepseek.com/v1"),
+      model: z.literal("deepseek-v4-pro"),
+      apiKey: z.string().min(1).max(4096),
+    })
+    .optional(),
+  openRouterSearchConnection: z
+    .object({
+      baseUrl: z.literal("https://openrouter.ai/api/v1"),
+      model: z.enum(OPENROUTER_SEARCH_MODELS),
+      engine: z.literal("exa"),
+      apiKey: z
+        .string()
+        .min(1)
+        .max(4096)
+        .refine((key) => !/\s/.test(key) && !key.startsWith("__cli_oauth__:")),
+    })
+    .optional(),
+  searchProvider: z
+    .enum(["auto", "tavily", "deepseek", "deepseek-native", "openrouter", "duckduckgo"])
+    .optional(),
   // Enabled MCP servers keyed by name. Zod strips unknown keys, so this field
   // must be declared here or the desktop's mcpServers never reaches the run.
   mcpServers: z.record(z.record(z.unknown())).optional(),
+  targetMcpServer: z.string().trim().min(1).max(200).optional(),
   attachments: z.array(AttachmentPartSchema).optional(),
   skills: z.array(SkillMetaSchema).optional(),
 });

@@ -504,10 +504,15 @@ async function executeRun(run: ScheduledTaskRun, task: ScheduledTask) {
       }
     }
     const conversationHistory = await loadConversationHistory(conversationId);
-    const { systemPrompt, tavilyApiKey, deepseekApiKey, searchProvider } = await resolveRunSettings(
-      api,
-      forceWebSearch,
-    );
+    const {
+      systemPrompt,
+      tavilyApiKey,
+      deepseekApiKey,
+      toolConnection,
+      nativeSearchConnection,
+      openRouterSearchConnection,
+      searchProvider,
+    } = await resolveRunSettings(api, forceWebSearch);
     if (recipeSpec) {
       const spec = recipeSpec;
       const localExtensions =
@@ -570,6 +575,9 @@ async function executeRun(run: ScheduledTaskRun, task: ScheduledTask) {
           webSearchEnabled: conversation.forceWebSearch,
           tavilyApiKey,
           deepseekApiKey,
+          toolConnection,
+          nativeSearchConnection,
+          openRouterSearchConnection,
           searchProvider,
           mcpServers,
           skills,

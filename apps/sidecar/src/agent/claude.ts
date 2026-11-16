@@ -2,7 +2,7 @@ import path from "node:path";
 import Anthropic from "@anthropic-ai/sdk";
 import { buildAnthropicSystem, isAnthropicOAuthToken, normalizeAnthropicModelId } from "adapters";
 import { resolveContextPolicy } from "shared/context-policy";
-import type { AttachmentPart, ModelContextMetadata } from "shared/types";
+import type { AttachmentPart, ModelContextMetadata, SearchExecutionSource } from "shared/types";
 import { modelSupportsVision } from "shared/vision";
 import { type CheckpointSession, ensureCheckpointBackup, finalizeCheckpoint } from "../checkpoints";
 import { classifyBashCommandRisk } from "../shell-risk";
@@ -22,7 +22,7 @@ import {
 } from "./attachments";
 import { buildHistoryMessages, type HistoryMessage } from "./context";
 import { assertAgentContext, boundAgentHistory } from "./contextPolicy";
-import { executeTool } from "./direct";
+import { executeTool, initialSearchSource } from "./direct";
 import { type AgentEvent, buildUsageEvent, toCount } from "./events";
 import { buildIntentContext } from "./intent-context";
 import { buildSkillsPromptSection, type MaterializedSkill } from "./skills";
@@ -46,6 +46,12 @@ export type RunClaudeAgentInput = {
   permissionMode?: "default" | "full-access";
   systemPrompt?: string;
   webSearchEnabled?: boolean;
+  tavilyApiKey?: string;
+  deepseekApiKey?: string;
+  toolConnection?: import("shared/tool-connection").ToolConnection;
+  nativeSearchConnection?: import("shared/deepseek-native-search").NativeSearchConnection;
+  openRouterSearchConnection?: import("shared/openrouter-search").OpenRouterSearchConnection;
+  searchProvider?: import("shared/search").PreferredSearchProvider;
   /**
    * Enabled MCP servers, keyed by name, already in the Claude Agent SDK's
    * shape (`{ type, command, args, env }` for stdio; `{ type, url, headers }`
@@ -468,6 +474,7 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
       cwd: input.cwd,
       permissionMode: input.permissionMode ?? "full-access",
       webFetchAvailable: input.webSearchEnabled !== false,
+      webSearchTool: input.webSearchEnabled !== false ? "WebSearch" : undefined,
       extra: buildSkillsPromptSection(input.skills ?? [], "Read"),
     }),
     buildReActBehaviorSection(),
@@ -652,12 +659,14 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
         input.abortController.signal.throwIfAborted();
         const toolInput = (block.input || {}) as Record<string, unknown>;
 
+        let searchSource: SearchExecutionSource | undefined;
         // Emit tool_start so the UI shows the tool being invoked
         input.onEvent({
           type: "tool_start",
           toolName: block.name,
           toolInput,
           toolCallId: block.id,
+          ...(block.name === "WebSearch" ? { searchSource: initialSearchSource(input) } : {}),
         });
 
         // --- Workspace boundary check for fs tools (Read/Write/Edit) ---
@@ -735,6 +744,16 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
         const mapped = mapToolForExecution(block.name, toolInput);
         const result = await executeTool(mapped.executorName, mapped.executorInput, input.cwd, {
           permissionMode: "full-access",
+          webSearchEnabled: input.webSearchEnabled,
+          tavilyApiKey: input.tavilyApiKey,
+          deepseekApiKey: input.deepseekApiKey,
+          toolConnection: input.toolConnection,
+          nativeSearchConnection: input.nativeSearchConnection,
+          openRouterSearchConnection: input.openRouterSearchConnection,
+          searchProvider: input.searchProvider,
+          onSearchSource: (source) => {
+            searchSource = source;
+          },
           checkpoint: input.checkpoint,
           readAllowRoots: skillRoots,
           signal: input.abortController.signal,
@@ -746,6 +765,7 @@ export async function runClaudeAgent(input: RunClaudeAgentInput): Promise<void> 
           content: result.length > 8000 ? `${result.slice(0, 8000)}...` : result,
           toolName: block.name,
           toolCallId: block.id,
+          ...(searchSource ? { searchSource } : {}),
         });
         toolResults.push({ type: "tool_result", tool_use_id: block.id, content: result });
       }

@@ -2,7 +2,11 @@ import { ChevronRight, CornerDownRight, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { cn } from "ui";
 import { keyedAgentSteps } from "../../lib/agentStepKeys";
-import { extractToolUrls, summarizeToolInput } from "../../lib/agentToolSummary";
+import {
+  extractToolUrls,
+  presentSearchToolLabel,
+  summarizeToolInput,
+} from "../../lib/agentToolSummary";
 import { formatChatLabel, getChatLabel } from "../../lib/i18n/agent";
 import { resolveRunEndState } from "../../lib/stopTurn";
 import type { ApiAgentRun, ApiAgentRunStep } from "../../types/chat";
@@ -369,7 +373,7 @@ export function AgentRunPanel({
     );
   }
 
-  const presentToolLabel = (toolName: string | null | undefined) => {
+  const presentToolLabel = (toolName: string | null | undefined, searchSource?: unknown) => {
     const raw = (toolName ?? "").trim();
     const normalized = raw.toLowerCase();
     if (!normalized) return "Tool";
@@ -380,6 +384,8 @@ export function AgentRunPanel({
       const tool = toolParts.join("__");
       return server && tool ? `${server} · ${tool}` : "MCP";
     }
+    const searchLabel = presentSearchToolLabel(raw, searchSource);
+    if (searchLabel) return searchLabel;
     if (normalized.includes("bash") || normalized.includes("terminal") || normalized === "shell") {
       return "Bash";
     }
@@ -479,7 +485,7 @@ function ProcessGroupSection({
   isLast: boolean;
   isRunning: boolean;
   endTimestamp?: number;
-  presentToolLabel: (name: string | null | undefined) => string;
+  presentToolLabel: (name: string | null | undefined, searchSource?: unknown) => string;
 }) {
   const isActive = isLast && isRunning;
   const [expanded, setExpanded] = useState(false);
@@ -552,7 +558,9 @@ function ProcessGroupSection({
     }
   }
   // ACP `tool_detail` steps store their human title in `toolName` too.
-  const previewLabel = currentTool ? presentToolLabel(currentTool.toolName) : null;
+  const previewLabel = currentTool
+    ? presentToolLabel(currentTool.toolName, currentTool.searchSource)
+    : null;
   const previewDetail =
     currentTool?.type === "tool_start" ? summarizeToolInput(currentTool.toolInput) : null;
   const showPreview = isActive && !expanded && previewLabel;
@@ -605,7 +613,8 @@ function ProcessGroupSection({
                 />
               );
             }
-            const label = step.type === "error" ? "Error" : presentToolLabel(step.toolName);
+            const label =
+              step.type === "error" ? "Error" : presentToolLabel(step.toolName, step.searchSource);
             const detail =
               step.type === "tool_start"
                 ? summarizeToolInput(step.toolInput)
@@ -689,7 +698,7 @@ function TimelineSegments({
 }: {
   run: ApiAgentRun;
   isStreaming: boolean;
-  presentToolLabel: (name: string | null | undefined) => string;
+  presentToolLabel: (name: string | null | undefined, searchSource?: unknown) => string;
   genUiScope?: string | null;
 }) {
   const segments = segmentSteps(run.steps);

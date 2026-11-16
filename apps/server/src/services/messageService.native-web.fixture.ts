@@ -2,6 +2,7 @@ import { expect, mock } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { OPENROUTER_SEARCH_MODEL } from "shared/openrouter-search";
 
 function required<T>(value: T | null | undefined): T {
   if (value === null || value === undefined) throw new Error("Expected fixture value");
@@ -10,22 +11,126 @@ function required<T>(value: T | null | undefined): T {
 
 const dir = mkdtempSync(path.join(tmpdir(), "openhorn-native-chat-"));
 process.env.NODE_ENV = "test";
+delete process.env.TAVILY_API_KEY;
 process.env.DATABASE_URL = `file:${path.join(dir, "fixture.db")}`;
+const independentRouterKey = "fixture-router-independent";
+globalThis.fetch = (async (url, init) => {
+  if (String(url) === "https://openrouter.ai/api/v1/chat/completions") {
+    routerRequests++;
+    expect(new Headers(init?.headers).get("Authorization")).toBe(`Bearer ${independentRouterKey}`);
+    const body = JSON.parse(String(init?.body));
+    expect(body.model).toBe(OPENROUTER_SEARCH_MODEL);
+    expect(body.reasoning).toEqual({ enabled: false });
+    expect(body.tool_choice).toBe("auto");
+    expect(body.tools[0].parameters.engine).toBe("exa");
+    if (retrievalHold) {
+      retrievalHold.signal = init?.signal ?? undefined;
+      retrievalHold.entered();
+      return new Promise<Response>(() => {});
+    }
+    return Response.json({
+      choices: [
+        {
+          finish_reason: "stop",
+          message: {
+            role: "assistant",
+            content: "Synthetic independent OpenRouter retrieval summary",
+            reasoning: "private-router-reasoning",
+            annotations: [
+              {
+                type: "url_citation",
+                url_citation: { url: "https://example.com/", title: "Example" },
+              },
+            ],
+          },
+        },
+      ],
+    });
+  }
+  if (String(url) === "https://api.tavily.com/search") {
+    searchRequests++;
+    return Response.json({ results: [{ url: "https://example.com/", title: "Example" }] });
+  }
+  if (String(url) === "https://api.deepseek.com/v1/responses") {
+    nativeRequests++;
+    expect((init?.headers as Record<string, string>).Authorization).toBe(
+      "Bearer synthetic-independent-native",
+    );
+    const body = JSON.parse(String(init?.body));
+    expect(body.model).toBe("deepseek-v4-pro");
+    expect(body.tools).toEqual([{ type: "web_search" }]);
+    if (retrievalHold) {
+      retrievalHold.signal = init?.signal ?? undefined;
+      retrievalHold.entered();
+      return new Promise<Response>(() => {});
+    }
+    return Response.json({
+      status: "completed",
+      usage: { server_tool_use: { tool_search: 1, tool_fetch: 0 } },
+      output: [
+        { type: "web_search_call", status: "completed" },
+        {
+          type: "message",
+          role: "assistant",
+          content: [
+            {
+              type: "output_text",
+              text: "Synthetic independent retrieval summary",
+              annotations: [
+                { type: "url_citation", url: "https://example.com/", title: "Example" },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+  }
+  if (!String(url).endsWith("/chat/completions"))
+    throw new Error(`Unexpected external request: ${url}`);
+  const body = JSON.parse(String(init?.body));
+  requests.push(body);
+  const frames = [
+    ...(output ? [{ choices: [{ delta: { content: output } }] }] : []),
+    {
+      choices: [
+        {
+          delta: {
+            server_tool_calls: toolCalls,
+            annotations: [{ type: "url_citation", url_citation: citations[0] }],
+          },
+          finish_reason: reason,
+        },
+      ],
+    },
+    { choices: [], usage: { prompt_tokens: 10, completion_tokens: 4, total_tokens: 14 } },
+  ];
+  return new Response(
+    `${frames.map((f) => `data: ${JSON.stringify(f)}\n\n`).join("")}data: [DONE]\n\n`,
+  );
+}) as typeof fetch;
+
 const { db, client } = await import("../db");
 const realChannel = { ...(await import("./channelService")) };
 let baseUrl = "https://api.deepseek.com/v1";
+let answerModel = "deepseek-flash";
+let answerProtocol = "openai";
+let answerContextWindow: number | undefined;
+let searchRequests = 0;
+let nativeRequests = 0;
+let routerRequests = 0;
+let retrievalHold: { entered(): void; signal?: AbortSignal } | undefined;
 mock.module("./channelService", () => ({
   ...realChannel,
   getResolvedChannelForConversation: async () => ({
-    channel: { id: "native-fixture", protocol: "openai", baseUrl },
+    channel: { id: "native-fixture", protocol: answerProtocol, baseUrl },
     apiKey: "synthetic-key",
-    modelId: "deepseek-flash",
+    modelId: answerModel,
+    contextWindow: answerContextWindow,
   }),
 }));
-const { users, conversations, messages } = await import("db");
+const { users, conversations, messages, settings, attachments } = await import("db");
 const { eq } = await import("drizzle-orm");
 const { setSettingValue } = await import("./settingsService");
-const service = await import("./messageService");
 const { LIBRARY_SYSTEM_TAG } = await import("shared/library");
 let requests: Record<string, unknown>[] = [];
 let reason = "stop";
@@ -54,30 +159,7 @@ const state = {
   serverToolCalls: toolCalls,
 };
 const citations = [{ url: "https://example.com/", title: "Example" }];
-globalThis.fetch = (async (url, init) => {
-  if (!String(url).endsWith("/chat/completions"))
-    throw new Error(`Unexpected external request: ${url}`);
-  const body = JSON.parse(String(init?.body));
-  requests.push(body);
-  const frames = [
-    ...(output ? [{ choices: [{ delta: { content: output } }] }] : []),
-    {
-      choices: [
-        {
-          delta: {
-            server_tool_calls: toolCalls,
-            annotations: [{ type: "url_citation", url_citation: citations[0] }],
-          },
-          finish_reason: reason,
-        },
-      ],
-    },
-    { choices: [], usage: { prompt_tokens: 10, completion_tokens: 4, total_tokens: 14 } },
-  ];
-  return new Response(
-    `${frames.map((f) => `data: ${JSON.stringify(f)}\n\n`).join("")}data: [DONE]\n\n`,
-  );
-}) as typeof fetch;
+const service = await import("./messageService");
 try {
   const { bootstrapDatabase } = await import("../db/bootstrap");
   await bootstrapDatabase();
@@ -101,12 +183,35 @@ try {
     createdAt: now,
     updatedAt: now,
   });
-  await setSettingValue(userId, "deepseek.nativeWebEnabled", "true");
+  await db.insert(settings).values({
+    id: crypto.randomUUID(),
+    userId,
+    key: "deepseek.nativeWebEnabled",
+    value: "true",
+    updatedAt: now,
+  });
+  await setSettingValue(userId, "liveSearch.tavilyApiKey", "synthetic-tavily");
+  const { verifyAndActivateSearch, getSearchSettingsStatus } = await import(
+    "./searchSettingsService"
+  );
+  expect(
+    (
+      await verifyAndActivateSearch(userId, {
+        provider: "tavily",
+        revision: (await getSearchSettingsStatus(userId)).revision,
+      })
+    ).success,
+  ).toBe(true);
+  searchRequests = 0;
   const prepared = await service.prepareChatForSidecar(userId, {
     conversationId,
-    content: "hello",
+    content: "请联网搜索最新 DeepSeek 官方 API 文档",
   });
-  expect(prepared.nativeWeb).toEqual({ search: true, readUrls: true, thinking: true });
+  expect(prepared.nativeWeb).toBeUndefined();
+  expect(searchRequests).toBe(1);
+  expect(prepared.citations?.map((citation) => citation.url)).toEqual(
+    citations.map((citation) => citation.url),
+  );
   expect(requests.length).toBe(0);
   const rows = () => db.select().from(messages).where(eq(messages.conversationId, conversationId));
   const row = () =>
@@ -346,7 +451,7 @@ try {
   const edited = await service.editUserMessage(
     userId,
     second.userMessageId,
-    "edited native question",
+    "请联网搜索最新官方说明",
   );
   const editedWire = await new Response(edited).text();
   expect(editedWire.includes('"type":"chat_metadata"')).toBe(true);
@@ -363,7 +468,7 @@ try {
   expect(nonstream.assistantMessage.content).toBe("");
   expect(nonstream.assistantMessage.finishReason).toBe("refused");
   expect(nonstream.errorCode).toBe("response_refused");
-  expect(requests.every((request) => request.tools !== undefined)).toBe(true);
+  expect(requests.every((request) => request.tools === undefined)).toBe(true);
   await setSettingValue(userId, "chat.systemPrompt", LIBRARY_SYSTEM_TAG);
   requests = [];
   const dataOnly = await service.prepareChatForSidecar(userId, {
@@ -385,7 +490,236 @@ try {
   expect(requests[0].tools).toBeUndefined();
   // A failed URL fetch must still constrain what the model may claim about reading it.
   await setSettingValue(userId, "chat.systemPrompt", "");
-  await setSettingValue(userId, "deepseek.nativeWebEnabled", "false");
+  const { NATIVE_SEARCH_CONFIG } = await import("shared/deepseek-native-search");
+  await setSettingValue(
+    userId,
+    NATIVE_SEARCH_CONFIG,
+    JSON.stringify({ source: "manual", apiKey: "synthetic-independent-native" }),
+  );
+  const nativeActivation = await verifyAndActivateSearch(
+    userId,
+    { provider: "deepseek-native", revision: (await getSearchSettingsStatus(userId)).revision },
+    { resolveHostname: async () => ["93.184.216.34"] },
+  );
+  if (nativeActivation.success === false)
+    throw new Error(`Synthetic native activation failed: ${nativeActivation.errorCode}`);
+  for (const [protocol, model] of [
+    ["openai", "gpt-6-astra"],
+    ["anthropic", "claude-opus-4-6"],
+  ]) {
+    answerProtocol = protocol;
+    answerModel = model;
+    baseUrl = "https://answer-model.example.com/v1";
+    const beforeNativeRequests = nativeRequests;
+    const independent = await service.prepareChatForSidecar(userId, {
+      conversationId,
+      content: "请联网搜索最新官方文档",
+    });
+    expect(nativeRequests).toBe(beforeNativeRequests + 1);
+    expect(independent.model).toBe(model);
+    expect(independent.protocol).toBe(protocol);
+    expect(independent.apiKey).toBe("synthetic-key");
+    expect(independent.nativeWeb).toBeUndefined();
+
+    expect(independent.citations).toEqual(citations);
+    expect(
+      JSON.stringify(independent.messages).includes("Synthetic independent retrieval summary"),
+    ).toBe(true);
+    expect(JSON.stringify(independent.messages).includes("synthetic-independent-native")).toBe(
+      false,
+    );
+  }
+  const { OPENROUTER_SEARCH_CONFIG } = await import("shared/openrouter-search");
+  await setSettingValue(
+    userId,
+    OPENROUTER_SEARCH_CONFIG,
+    JSON.stringify({ apiKey: independentRouterKey }),
+  );
+  const routerActivation = await verifyAndActivateSearch(userId, {
+    provider: "openrouter",
+    revision: (await getSearchSettingsStatus(userId)).revision,
+  });
+  expect(routerActivation.success).toBe(true);
+  for (const [protocol, model] of [
+    ["openai", "gpt-6-astra"],
+    ["anthropic", "claude-opus-4-6"],
+  ]) {
+    answerProtocol = protocol;
+    answerModel = model;
+    baseUrl = "https://answer-model.example.com/v1";
+    const before = routerRequests;
+    const independent = await service.prepareChatForSidecar(userId, {
+      conversationId,
+      content: "请联网搜索最新官方文档",
+    });
+    expect(routerRequests).toBe(before + 1);
+    expect(independent.model).toBe(model);
+    expect(independent.protocol).toBe(protocol);
+    expect(independent.apiKey).toBe("synthetic-key");
+    expect(independent.citations).toEqual(citations);
+    const answerContext = JSON.stringify(independent.messages);
+    expect(answerContext.includes("Synthetic independent OpenRouter retrieval summary")).toBe(true);
+    expect(answerContext.includes(independentRouterKey)).toBe(false);
+    expect(answerContext.includes("private-router-reasoning")).toBe(false);
+    await service.completeChatFromSidecar(userId, {
+      conversationId,
+      assistantMessageId: independent.assistantMessageId,
+      saveToken: independent.saveToken,
+      content: "Source-backed answer",
+      model,
+      citations: independent.citations,
+      liveMetadata: independent.liveMetadata,
+    });
+    const completed = required((await rows()).find((m) => m.id === independent.assistantMessageId));
+    expect(JSON.parse(completed.citations ?? "null")).toEqual(citations);
+  }
+  await db
+    .update(conversations)
+    .set({ forceWebSearch: false })
+    .where(eq(conversations.id, conversationId));
+  const routerDisabledBefore = routerRequests;
+  await service.prepareChatForSidecar(userId, {
+    conversationId,
+    content: "请联网搜索最新官方文档",
+  });
+  expect(routerRequests).toBe(routerDisabledBefore);
+  await db
+    .update(conversations)
+    .set({ forceWebSearch: true })
+    .where(eq(conversations.id, conversationId));
+  expect(
+    (
+      await verifyAndActivateSearch(userId, {
+        provider: "deepseek-native",
+        revision: (await getSearchSettingsStatus(userId)).revision,
+      })
+    ).success,
+  ).toBe(true);
+  answerProtocol = "openai";
+  answerModel = "deepseek-flash";
+  baseUrl = "https://api.deepseek.com/v1";
+  // Disabled web access must gate the real Chat preparation path, even with a valid Native profile.
+  await db
+    .update(conversations)
+    .set({ forceWebSearch: false })
+    .where(eq(conversations.id, conversationId));
+  const disabledCount = nativeRequests;
+  const disabledTurn = await service.prepareChatForSidecar(userId, {
+    conversationId,
+    content: "最近AI圈有什么新闻",
+  });
+  expect(nativeRequests).toBe(disabledCount);
+  expect(disabledTurn.citations).toBeUndefined();
+  await db
+    .update(conversations)
+    .set({ forceWebSearch: true })
+    .where(eq(conversations.id, conversationId));
+  for (const stopProvider of ["deepseek-native", "openrouter"]) {
+    await setSettingValue(userId, "liveSearch.provider", stopProvider);
+    // Both independent providers must honor Stop through real SSE edit/retry and preparation routes.
+    for (const kind of ["retry", "edit"]) {
+      let entered!: () => void;
+      const started = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      const held = { entered, signal: undefined as AbortSignal | undefined };
+      retrievalHold = held;
+      const modelCount = requests.length;
+      const response =
+        kind === "retry"
+          ? await service.regenerateMessage(userId, second.assistantMessageId)
+          : await service.editUserMessage(userId, second.userMessageId, "请联网搜索最新的API说明");
+      const reader = response.getReader();
+      await started;
+      await reader.cancel();
+      expect(held.signal?.aborted).toBe(true);
+      expect(requests.length).toBe(modelCount);
+      retrievalHold = undefined;
+    }
+    // A scoped preparation Stop aborts retrieval while returning persisted ids for the stopped question.
+    let entered!: () => void;
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const held = { entered, signal: undefined as AbortSignal | undefined };
+    retrievalHold = held;
+    const preparationToken = crypto.randomUUID();
+    const pendingPreparation = service.prepareChatForSidecar(userId, {
+      conversationId,
+      preparationToken,
+      content: "请联网搜索最新API动态",
+    });
+    await started;
+    await service.stopChatPreparation(userId, conversationId, preparationToken);
+    const stoppedPreparation = await pendingPreparation;
+    expect(stoppedPreparation.preparationStopped).toBe(true);
+    expect(held.signal?.aborted).toBe(true);
+    retrievalHold = undefined;
+    await service.completeChatFromSidecar(userId, {
+      conversationId,
+      assistantMessageId: stoppedPreparation.assistantMessageId,
+      saveToken: stoppedPreparation.saveToken,
+      content: "",
+      finishReason: "stopped",
+    });
+    expect(
+      (await rows()).find((message) => message.id === stoppedPreparation.assistantMessageId)
+        ?.finishReason,
+    ).toBe("stopped");
+    const earlyToken = crypto.randomUUID();
+    await service.stopChatPreparation(userId, conversationId, earlyToken);
+    const beforeEarly = nativeRequests + routerRequests;
+    answerContextWindow = 256;
+    const earlyStopped = await service.prepareChatForSidecar(userId, {
+      conversationId,
+      preparationToken: earlyToken,
+      content: `请联网搜索最新说明${"x".repeat(100_000)}`,
+    });
+    answerContextWindow = undefined;
+    expect(earlyStopped.messages).toEqual([]);
+    expect(
+      (await rows()).find((message) => message.id === earlyStopped.assistantMessageId)
+        ?.finishReason,
+    ).toBe("stopped");
+    expect(earlyStopped.preparationStopped).toBe(true);
+    expect(nativeRequests + routerRequests).toBe(beforeEarly);
+    const staleToken = crypto.randomUUID();
+    await service.stopChatPreparation(userId, conversationId, staleToken);
+    const actualNow = Date.now;
+    const beforeStale = nativeRequests + routerRequests;
+    try {
+      Date.now = () => actualNow() + 121_000;
+      const staleStopped = await service.prepareChatForSidecar(userId, {
+        conversationId,
+        preparationToken: staleToken,
+        stoppedBeforeStart: true,
+        content: "请联网搜索，上传结束时已停止",
+      });
+      expect(staleStopped.preparationStopped).toBe(true);
+      expect(nativeRequests + routerRequests).toBe(beforeStale);
+    } finally {
+      Date.now = actualNow;
+    }
+    const metadataStopped = await service.prepareChatForSidecar(userId, {
+      conversationId,
+      stoppedBeforeStart: true,
+      content: "",
+      stoppedAttachmentMeta: [
+        { fileName: "unconfirmed-upload.txt", fileType: "text/plain", fileSize: 16 },
+      ],
+    });
+    expect(metadataStopped.preparationStopped).toBe(true);
+    const attachmentRows = await db
+      .select()
+      .from(attachments)
+      .where(eq(attachments.messageId, metadataStopped.userMessageId));
+    expect(attachmentRows.map((item) => item.fileName)).toEqual(["unconfirmed-upload.txt"]);
+    expect(nativeRequests + routerRequests).toBe(beforeStale);
+    await expect(
+      service.stopChatPreparation("other-user", conversationId, earlyToken),
+    ).rejects.toThrow();
+  }
+  await setSettingValue(userId, "liveSearch.provider", "tavily");
   const liveNs = { ...(await import("./liveCapabilities")) };
   const searchNs = { ...(await import("./searchService")) };
   let linkUrls: string[] = [];
@@ -441,7 +775,9 @@ try {
     (await rows()).find((message) => message.id === linksFailed.assistantMessageId)?.content,
   ).toBe("");
   // Exercise the real central HTTP transport against the same isolated database.
-  await setSettingValue(userId, "deepseek.nativeWebEnabled", "true");
+  await expect(setSettingValue(userId, "deepseek.nativeWebEnabled", "true")).rejects.toThrow(
+    "deprecated_native_web_setting",
+  );
   const { Hono } = await import("hono");
   const { default: routes } = await import("../routes/messages");
   const app = new Hono();
@@ -463,7 +799,7 @@ try {
     liveMetadata: unknown;
     nativeWeb: unknown;
   };
-  expect(httpTurn.nativeWeb).toEqual({ search: true, readUrls: true, thinking: true });
+  expect(httpTurn.nativeWeb).toBeUndefined();
   const httpCompleted = await post("/messages/chat/complete", {
     conversationId,
     assistantMessageId: httpTurn.assistantMessageId,
@@ -502,6 +838,8 @@ try {
   console.log(
     JSON.stringify({
       prepare: true,
+      nativeIndependent: true,
+      openRouterIndependent: true,
       replay: true,
       ownership: true,
       refusal: true,

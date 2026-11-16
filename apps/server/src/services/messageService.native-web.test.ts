@@ -17,6 +17,8 @@ test("native Chat end-to-end uses temporary SQLite and synthetic provider respon
   if (child.exitCode !== 0) throw new Error(child.stderr.toString() + child.stdout.toString());
   expect(JSON.parse(child.stdout.toString())).toMatchObject({
     prepare: true,
+    nativeIndependent: true,
+    openRouterIndependent: true,
     replay: true,
     ownership: true,
     refusal: true,

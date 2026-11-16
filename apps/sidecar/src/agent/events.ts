@@ -1,4 +1,8 @@
-import type { ChatStreamErrorCode, ProviderChatMetadata } from "shared/types";
+import type {
+  ChatStreamErrorCode,
+  ProviderChatMetadata,
+  SearchExecutionSource,
+} from "shared/types";
 
 /** A file location referenced by a tool call (ACP `locations[]`). */
 export interface AgentToolLocation {
@@ -20,8 +24,20 @@ export type AgentEvent =
   | { type: "reasoning"; content: string }
   | { type: "clear_streaming_text" }
   | { type: "thinking"; content: string }
-  | { type: "tool_start"; toolName?: string; toolInput?: unknown; toolCallId?: string }
-  | { type: "tool_result"; content?: string; toolName?: string; toolCallId?: string }
+  | {
+      type: "tool_start";
+      toolName?: string;
+      toolInput?: unknown;
+      toolCallId?: string;
+      searchSource?: SearchExecutionSource;
+    }
+  | {
+      type: "tool_result";
+      content?: string;
+      toolName?: string;
+      toolCallId?: string;
+      searchSource?: SearchExecutionSource;
+    }
   | { type: "user_message"; userMessageId: string }
   /** Token counts for the turn, emitted just before `done` when the provider reported them. */
   | {

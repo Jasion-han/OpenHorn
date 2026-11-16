@@ -13,6 +13,7 @@ import {
   regenerateMessage,
   searchMessages,
   sendMessage,
+  stopChatPreparation,
   streamMessage,
   syncSidecarMessages,
 } from "../services/messageService";
@@ -212,6 +213,25 @@ messages.post("/:id/edit", async (c) => {
   }
 });
 
+messages.post("/chat/prepare/cancel", async (c) => {
+  const body: unknown = await c.req.json().catch(() => null);
+  if (
+    !body ||
+    typeof body !== "object" ||
+    !("conversationId" in body) ||
+    !("preparationToken" in body) ||
+    typeof body.conversationId !== "string" ||
+    typeof body.preparationToken !== "string"
+  )
+    return c.json({ error: "invalid_chat_preparation_cancel" }, 400);
+  try {
+    await stopChatPreparation(c.get("user").id, body.conversationId, body.preparationToken);
+    return c.json({ success: true });
+  } catch {
+    return c.json({ error: "chat_preparation_cancel_failed" }, 400);
+  }
+});
+
 messages.post("/chat/prepare", async (c) => {
   const user = c.get("user");
   try {
@@ -221,13 +241,21 @@ messages.post("/chat/prepare", async (c) => {
     }
     const hasContent = typeof body.content === "string" && body.content.trim().length > 0;
     const hasAttachments = Array.isArray(body.attachments) && body.attachments.length > 0;
-    if (!hasContent && !hasAttachments) {
+    const hasStoppedAttachments =
+      body.stoppedBeforeStart === true &&
+      Array.isArray(body.stoppedAttachmentMeta) &&
+      body.stoppedAttachmentMeta.length > 0;
+    if (!hasContent && !hasAttachments && !hasStoppedAttachments) {
       return c.json({ error: "content or attachments are required" }, 400);
     }
     const result = await prepareChatForSidecar(user.id, {
       conversationId: body.conversationId,
-      content: body.content.trim(),
+      content: typeof body.content === "string" ? body.content.trim() : "",
       attachments: body.attachments,
+      preparationToken: body.preparationToken,
+      stoppedBeforeStart: body.stoppedBeforeStart === true,
+      stoppedAttachmentMeta: body.stoppedAttachmentMeta,
+      signal: c.req.raw.signal,
     });
     return c.json(result);
   } catch (error) {

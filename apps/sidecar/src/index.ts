@@ -454,8 +454,12 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
           webSearchEnabled,
           tavilyApiKey,
           deepseekApiKey,
+          toolConnection,
+          nativeSearchConnection,
+          openRouterSearchConnection,
           searchProvider,
           mcpServers,
+          targetMcpServer,
           attachments,
           skills,
           acpAgent,
@@ -475,8 +479,18 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
           webSearchEnabled?: boolean;
           tavilyApiKey?: string;
           deepseekApiKey?: string;
-          searchProvider?: "auto" | "tavily" | "deepseek" | "duckduckgo";
+          toolConnection?: import("shared/tool-connection").ToolConnection;
+          nativeSearchConnection?: import("shared/deepseek-native-search").NativeSearchConnection;
+          openRouterSearchConnection?: import("shared/openrouter-search").OpenRouterSearchConnection;
+          searchProvider?:
+            | "auto"
+            | "tavily"
+            | "deepseek"
+            | "deepseek-native"
+            | "openrouter"
+            | "duckduckgo";
           mcpServers?: Record<string, Record<string, unknown>>;
+          targetMcpServer?: string;
           attachments?: import("shared/types").AttachmentPart[];
           skills?: import("./agent/skills").SkillMeta[];
           acpAgent?: { command: string; args?: string[]; env?: Record<string, string> };
@@ -679,6 +693,12 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
               permissionMode,
               systemPrompt,
               webSearchEnabled,
+              tavilyApiKey,
+              deepseekApiKey,
+              toolConnection,
+              nativeSearchConnection,
+              openRouterSearchConnection,
+              searchProvider,
               mcpServers,
               conversationHistory,
               attachments,
@@ -742,9 +762,13 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
               webSearchEnabled,
               tavilyApiKey,
               deepseekApiKey,
+              toolConnection,
+              nativeSearchConnection,
+              openRouterSearchConnection,
               searchProvider,
               mcpServers,
               attachments,
+              targetMcpServer,
               skills: materializedSkills,
               tokenBudgetPerRun,
               requestApproval: async (approvalInput) => {

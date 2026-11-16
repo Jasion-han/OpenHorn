@@ -2,6 +2,26 @@ import { expect, test } from "bun:test";
 import type { ServerApi } from "./serverApi";
 import { resolveEnabledMcpServers } from "./sidecarRunSupport";
 
+test("special MCP names remain own serialized keys instead of object prototype setters", async () => {
+  const api = {
+    mcp: {
+      listServers: async () => ({
+        servers: [
+          {
+            name: "__proto__",
+            type: "stdio",
+            config: { command: "synthetic-not-executed" },
+            isEnabled: true,
+          },
+        ],
+      }),
+    },
+  } as unknown as ServerApi;
+  const roster = await resolveEnabledMcpServers(api);
+  expect(!!roster && Object.hasOwn(roster, "__proto__")).toBe(true);
+  expect(JSON.parse(JSON.stringify(roster)).__proto__.command).toBe("synthetic-not-executed");
+});
+
 const servers = ["__proto__", "constructor", "toString", "regular"].map((name) => ({
   name,
   type: "stdio",

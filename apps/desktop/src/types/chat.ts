@@ -7,6 +7,7 @@ import type {
   ModelContextConfig,
   ProviderChatMetadata,
   RecipeRequirements,
+  SearchExecutionSource,
 } from "shared/types";
 
 export type ChatMode = "chat" | "agent";
@@ -90,6 +91,7 @@ export interface ApiProject {
 }
 
 export interface ApiAgentRunStep {
+  searchSource?: SearchExecutionSource;
   type:
     | "tool_start"
     | "tool_result"
@@ -185,6 +187,7 @@ export interface ApiMessageUsage {
 }
 
 export interface ApiMessage {
+  saveToken?: string;
   id: string;
   conversationId: string;
   role: "user" | "assistant";
@@ -272,6 +275,7 @@ export interface MessageAttachmentMeta {
 }
 
 export interface Message {
+  saveToken?: string;
   id: string;
   /** Frontend-only mounted identity, retained when an optimistic id is persisted. */
   renderKey?: string;
@@ -330,6 +334,7 @@ export type ChatStreamEvent =
         toolName?: string;
         toolInput?: unknown;
         toolCallId?: string;
+        searchSource?: SearchExecutionSource;
       };
     }
   | {

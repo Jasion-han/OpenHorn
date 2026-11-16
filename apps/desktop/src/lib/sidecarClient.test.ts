@@ -597,3 +597,19 @@ describe("SidecarClient", () => {
     expect(errorMessage).toBe("sidecar connection closed");
   });
 });
+
+test("projects verified per-call search source and fallback metadata without passing credentials", () => {
+  const event = projectSidecarAgentEvent("run-source", {
+    type: "tool_result",
+    toolName: "web_search",
+    toolCallId: "s1",
+    content: "results",
+    searchSource: { provider: "duckduckgo", fallbackFrom: "tavily" },
+  });
+  expect(event).toMatchObject({
+    metadata: {
+      toolCallId: "s1",
+      searchSource: { provider: "duckduckgo", fallbackFrom: "tavily" },
+    },
+  });
+});

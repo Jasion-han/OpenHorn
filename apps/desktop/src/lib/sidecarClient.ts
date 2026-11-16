@@ -22,6 +22,7 @@
  *    (the sidecar is blocking the run waiting for `approvals.respond`).
  */
 
+import { readSearchExecutionSource } from "shared/search-settings";
 import type {
   AttachmentPart,
   ChatStreamErrorCode,
@@ -29,6 +30,7 @@ import type {
   NativeWebOptions,
   ProviderChatMetadata,
   ProviderChatState,
+  SearchExecutionSource,
 } from "shared/types";
 import type { AgentTaskStreamEvent } from "./agentTaskStream";
 
@@ -97,9 +99,13 @@ export interface SidecarRunAgentInput {
   webSearchEnabled?: boolean;
   tavilyApiKey?: string;
   deepseekApiKey?: string;
-  searchProvider?: "auto" | "tavily" | "deepseek" | "duckduckgo";
+  toolConnection?: import("shared/tool-connection").ToolConnection;
+  nativeSearchConnection?: import("shared/deepseek-native-search").NativeSearchConnection;
+  openRouterSearchConnection?: import("shared/openrouter-search").OpenRouterSearchConnection;
+  searchProvider?: "auto" | "tavily" | "deepseek" | "deepseek-native" | "openrouter" | "duckduckgo";
   /** Enabled MCP servers keyed by name, in the Claude Agent SDK shape. */
   mcpServers?: Record<string, Record<string, unknown>>;
+  targetMcpServer?: string;
   conversationHistory?: Array<{ role: "user" | "assistant"; content: string }>;
   /** Normalized attachment parts (image base64 / extracted file text). */
   attachments?: AttachmentPart[];
@@ -177,6 +183,7 @@ interface SidecarAgentEvent {
   content?: string;
   errorCode?: ChatStreamErrorCode;
   toolName?: string;
+  searchSource?: SearchExecutionSource;
   toolInput?: unknown;
   userMessageId?: string;
   promptTokens?: number;
@@ -298,6 +305,9 @@ export function projectSidecarAgentEvent(runId: string, raw: unknown): AgentTask
         toolInput: event.toolInput,
         metadata: {
           toolCallId: typeof event.toolCallId === "string" ? event.toolCallId : undefined,
+          ...(readSearchExecutionSource(event.searchSource)
+            ? { searchSource: readSearchExecutionSource(event.searchSource) }
+            : {}),
         },
       };
     case "tool_result":
@@ -310,6 +320,9 @@ export function projectSidecarAgentEvent(runId: string, raw: unknown): AgentTask
         toolName: typeof event.toolName === "string" ? event.toolName : undefined,
         metadata: {
           toolCallId: typeof event.toolCallId === "string" ? event.toolCallId : undefined,
+          ...(readSearchExecutionSource(event.searchSource)
+            ? { searchSource: readSearchExecutionSource(event.searchSource) }
+            : {}),
         },
       };
     case "tool_call_detail":
@@ -512,8 +525,12 @@ export class SidecarClient {
       webSearchEnabled,
       tavilyApiKey,
       deepseekApiKey,
+      toolConnection,
+      nativeSearchConnection,
+      openRouterSearchConnection,
       searchProvider,
       mcpServers,
+      targetMcpServer,
       conversationHistory,
       attachments,
       skills,
@@ -541,8 +558,12 @@ export class SidecarClient {
       ...(webSearchEnabled !== undefined ? { webSearchEnabled } : {}),
       ...(tavilyApiKey ? { tavilyApiKey } : {}),
       ...(deepseekApiKey ? { deepseekApiKey } : {}),
+      ...(toolConnection ? { toolConnection } : {}),
+      ...(nativeSearchConnection ? { nativeSearchConnection } : {}),
+      ...(openRouterSearchConnection ? { openRouterSearchConnection } : {}),
       ...(searchProvider ? { searchProvider } : {}),
       ...(mcpServers && Object.keys(mcpServers).length > 0 ? { mcpServers } : {}),
+      ...(targetMcpServer ? { targetMcpServer } : {}),
       ...(conversationHistory && conversationHistory.length > 0 ? { conversationHistory } : {}),
       ...(attachments && attachments.length > 0 ? { attachments } : {}),
       ...(skills && skills.length > 0 ? { skills } : {}),

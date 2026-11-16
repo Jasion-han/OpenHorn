@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { __clearDuckDuckGoCache } from "shared/search";
+import type { SearchExecutionSource } from "shared/types";
 import { canonicalizeWorkspaceRoot } from "../workspace";
 import { buildModel, executeTool, isBlockedIpAddress, runWebSearch } from "./direct";
 
@@ -322,6 +323,32 @@ test("runWebSearch explicit DeepSeek without key makes no requests", async () =>
   });
   expect(calls).toBe(0);
   expect(result).toContain("not_configured");
+});
+
+test("DeepSeek Search refuses an OpenRouter search connection without spending either credential", async () => {
+  let calls = 0;
+  const options = {
+    toolConnection: {
+      kind: "openrouter" as const,
+      baseUrl: "https://openrouter.ai/api/v1",
+      apiKey: "router-only",
+      model: "test/model",
+    },
+    searchProvider: "deepseek" as const,
+    deepseekApiKey: "official-only",
+    fetchImpl: async () => {
+      calls++;
+      return new Response();
+    },
+  };
+  expect(await runWebSearch("release", options)).toContain("deepseek_search_source_required");
+  expect(
+    await executeTool("web_fetch", { url: "https://example.com" }, "/tmp", {
+      ...options,
+      webSearchEnabled: true,
+    }),
+  ).toContain("does not expose DeepSeek");
+  expect(calls).toBe(0);
 });
 
 test("web tools are exposed only with explicit network consent", async () => {

@@ -1,6 +1,36 @@
 import { describe, expect, test } from "bun:test";
 import { applyAgentEventToRun } from "./chatStore";
 
+test("per-call search provenance survives merging, fallback and JSON persistence without relabeling history", () => {
+  const start = applyAgentEventToRun(undefined, {
+    type: "tool_start",
+    toolName: "web_search",
+    toolCallId: "search1",
+    searchSource: { provider: "tavily" },
+  });
+  const merged = applyAgentEventToRun(start, {
+    type: "tool_start",
+    toolName: "web_search",
+    toolCallId: "search1",
+    toolInput: { query: "docs" },
+  });
+  expect(merged.steps[0]?.searchSource).toEqual({ provider: "tavily" });
+  const fallback = { provider: "duckduckgo" as const, fallbackFrom: "tavily" as const };
+  const ended = applyAgentEventToRun(merged, {
+    type: "tool_result",
+    toolName: "web_search",
+    toolCallId: "search1",
+    content: "results",
+    searchSource: fallback,
+  });
+  expect(ended.steps[0]?.searchSource).toEqual(fallback);
+  expect(JSON.parse(JSON.stringify(ended)).steps[1].searchSource).toEqual(fallback);
+  expect(
+    applyAgentEventToRun(undefined, { type: "tool_start", toolName: "web_search" }).steps[0]
+      ?.searchSource,
+  ).toBe(undefined);
+});
+
 describe("applyAgentEventToRun tool_start merge by toolCallId", () => {
   test("early name-only tool_start and later tool_start with input collapse into one step", () => {
     const afterEarly = applyAgentEventToRun(undefined, {

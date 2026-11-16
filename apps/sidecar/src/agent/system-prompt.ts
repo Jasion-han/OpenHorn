@@ -29,6 +29,8 @@ export function buildAgentSystemPrompt(opts?: {
    * read a page it never opened.
    */
   webFetchAvailable?: boolean;
+  /** Only supplied when the product-owned search tool is actually registered. */
+  webSearchTool?: "web_search" | "WebSearch";
   /** Extra runtime-specific lines appended after the shared rules. */
   extra?: string;
 }): string {
@@ -75,6 +77,9 @@ export function buildAgentSystemPrompt(opts?: {
     "- Do not fabricate. If you don't know or couldn't confirm, say so plainly instead of inventing facts, file contents, command output, links, dates, or `file:line` references.",
     "",
     "# Web search & freshness",
+    opts?.webSearchTool
+      ? `- For general web search, use ${opts.webSearchTool}: it follows the user's selected OpenHorn search source. Do not substitute an MCP search engine or bypass that choice through shell/HTTP. A user's explicit /server invocation may use that named MCP server.`
+      : null,
     opts?.webFetchAvailable
       ? "- When the user's message contains a URL, open and read it before answering. A link the user took the trouble to paste is part of the question, not decoration — answering from the domain name, the URL slug, or what you remember about that page is a failure even when your general knowledge is right. Let what you actually read correct you where it disagrees with what you would have said."
       : null,

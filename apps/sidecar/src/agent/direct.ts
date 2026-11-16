@@ -19,7 +19,9 @@ import { resolveContextPolicy } from "shared/context-policy";
 import {
   assertPublicWebUrl,
   buildTavilyPayload,
-  fetchDeepSeek,
+  fetchToolService,
+  formatNativeSearchResult,
+  formatOpenRouterSearchResult,
   formatUntrustedWebSources,
   isNewsQuery,
   normalizeCitations,
@@ -29,16 +31,30 @@ import {
   readBoundedWebResponse,
   rerankCitations,
   type SearchCitation,
-  searchDeepSeek,
+  searchDeepSeekNative,
   searchDuckDuckGo,
+  searchOpenRouter,
+  searchToolService,
   selectSearchProvider,
   type TavilyResult,
 } from "shared/search";
+import { type ToolConnection, toolBaseUrl } from "shared/tool-connection";
 import type { AttachmentPart, ModelContextMetadata } from "shared/types";
+
+const effectiveToolConnection = (options: {
+  toolConnection?: ToolConnection;
+  deepseekApiKey?: string;
+}): ToolConnection | undefined =>
+  options.toolConnection ??
+  (options.deepseekApiKey?.trim()
+    ? { kind: "deepseek", baseUrl: toolBaseUrl("deepseek"), apiKey: options.deepseekApiKey }
+    : undefined);
 
 export type { PreferredSearchProvider } from "shared/search";
 export { isBlockedIpAddress } from "shared/search";
 
+import { readSearchExecutionSource } from "shared/search-settings";
+import type { SearchExecutionSource } from "shared/types";
 import { modelSupportsVision } from "shared/vision";
 import {
   createCheckpointSession,
@@ -63,6 +79,7 @@ import { buildHistoryMessages, type HistoryMessage } from "./context";
 import { assertAgentContext, boundAgentHistory } from "./contextPolicy";
 import { type AgentEvent, buildUsageEvent, toCount } from "./events";
 import { buildIntentContext } from "./intent-context";
+import { applyMcpSearchPolicy } from "./mcp-search-policy";
 import { capMcpTools, connectMcpTools } from "./mcp-tools";
 import { runShellCommand } from "./shell";
 import { buildSkillsPromptSection, type MaterializedSkill } from "./skills";
@@ -90,9 +107,14 @@ export type RunDirectAgentInput = {
   webSearchEnabled?: boolean;
   tavilyApiKey?: string;
   deepseekApiKey?: string;
+  toolConnection?: import("shared/tool-connection").ToolConnection;
+  nativeSearchConnection?: import("shared/deepseek-native-search").NativeSearchConnection;
+  openRouterSearchConnection?: import("shared/openrouter-search").OpenRouterSearchConnection;
   searchProvider?: PreferredSearchProvider;
   /** Enabled MCP servers keyed by name (`{ type, command/url, args, env }`). */
   mcpServers?: Record<string, Record<string, unknown>>;
+  /** Explicit /server invocation; ordinary searches use the configured product source. */
+  targetMcpServer?: string;
   attachments?: AttachmentPart[];
   checkpoint?: import("../checkpoints").CheckpointSession;
   /** Enabled skills materialized to the workspace; read on demand via `read_file`. */
@@ -135,10 +157,14 @@ const WEB_FETCH_MAX_HOPS = 5;
 // ---------------------------------------------------------------------------
 
 export interface ExecuteToolOptions {
+  onSearchSource?: (source: SearchExecutionSource) => void;
   signal?: AbortSignal;
   permissionMode?: "default" | "full-access";
   tavilyApiKey?: string;
   deepseekApiKey?: string;
+  toolConnection?: import("shared/tool-connection").ToolConnection;
+  nativeSearchConnection?: import("shared/deepseek-native-search").NativeSearchConnection;
+  openRouterSearchConnection?: import("shared/openrouter-search").OpenRouterSearchConnection;
   searchProvider?: PreferredSearchProvider;
   webSearchEnabled?: boolean;
   fetchImpl?: WebSearchFetchFn;
@@ -412,13 +438,18 @@ export async function executeTool(
     const url = typeof input.url === "string" ? input.url.trim() : "";
     if (!url) return "Error: url is required";
 
-    if (options.searchProvider === "deepseek" && !options.deepseekApiKey?.trim()) {
+    const toolConnection =
+      options.searchProvider === "openrouter" ? undefined : effectiveToolConnection(options);
+    if (options.searchProvider === "deepseek" && toolConnection?.kind === "openrouter") {
+      return "Fetch error: this connection does not expose DeepSeek tools. Another provider cannot replace the requested source.";
+    }
+    if (options.searchProvider === "deepseek" && !toolConnection) {
       return "Fetch error: not_configured. Page content was not read.";
     }
-    if (options.deepseekApiKey?.trim()) {
+    if (toolConnection) {
       try {
-        const page = await fetchDeepSeek(url, {
-          apiKey: options.deepseekApiKey,
+        const page = await fetchToolService(url, {
+          connection: toolConnection,
           fetchImpl: options.fetchImpl,
           resolveHostname: options.resolveHostname,
           signal: options.signal,
@@ -503,9 +534,13 @@ type WebSearchFetchFn = (
 ) => ReturnType<typeof fetch>;
 
 export interface WebSearchOptions {
+  onSearchSource?: (source: SearchExecutionSource) => void;
   /** Dedicated provider keys; auto keeps the legacy Tavily → DuckDuckGo order. */
   tavilyApiKey?: string;
   deepseekApiKey?: string;
+  toolConnection?: import("shared/tool-connection").ToolConnection;
+  nativeSearchConnection?: import("shared/deepseek-native-search").NativeSearchConnection;
+  openRouterSearchConnection?: import("shared/openrouter-search").OpenRouterSearchConnection;
   searchProvider?: PreferredSearchProvider;
   signal?: AbortSignal;
   /** Injectable fetch for tests; defaults to global fetch. */
@@ -515,6 +550,7 @@ export interface WebSearchOptions {
   /** Sleep hook (ms) — overridable in tests to avoid real DDG backoff delays. */
   sleep?: (ms: number) => Promise<void>;
   timeoutMs?: number;
+  resolveHostname?: ResolveWebHostname;
 }
 
 /** Format normalized citations into the sidecar's plain-text tool output. */
@@ -545,9 +581,15 @@ async function tavilyWebSearch(
       headers: { "Content-Type": "application/json" },
       // Sidecar keeps Tavily's legacy body-based auth (`api_key`).
       body: JSON.stringify({ api_key: apiKey, ...payload }),
-      signal: AbortSignal.timeout(options.timeoutMs ?? SUBPROCESS_TIMEOUT_MS),
+      signal: options.signal
+        ? AbortSignal.any([
+            options.signal,
+            AbortSignal.timeout(options.timeoutMs ?? SUBPROCESS_TIMEOUT_MS),
+          ])
+        : AbortSignal.timeout(options.timeoutMs ?? SUBPROCESS_TIMEOUT_MS),
     });
     if (!resp.ok) return null;
+    options.signal?.throwIfAborted();
     const data = (await resp.json()) as { answer?: string; results?: TavilyResult[] };
     const citations = rerankCitations(
       normalizeCitations(data.results),
@@ -568,6 +610,7 @@ async function duckDuckGoWebSearch(query: string, options: WebSearchOptions): Pr
     timeoutMs: options.timeoutMs,
     now: options.now,
     sleep: options.sleep,
+    signal: options.signal,
   });
   if (rawCitations.length === 0) return "No results found.";
   const citations = rerankCitations(rawCitations, isNewsQuery(query), options.now);
@@ -578,31 +621,84 @@ async function duckDuckGoWebSearch(query: string, options: WebSearchOptions): Pr
  * Explicit DeepSeek requires its dedicated key and returns honest failure.
  * Auto preserves legacy Tavily → DuckDuckGo; DeepSeek is never selected implicitly.
  */
+export function initialSearchSource(options: WebSearchOptions): SearchExecutionSource | undefined {
+  const selected = selectSearchProvider({
+    ...options,
+    deepseekApiKey: effectiveToolConnection(options)?.apiKey,
+    nativeSearchApiKey: options.nativeSearchConnection?.apiKey,
+    openRouterSearchApiKey: options.openRouterSearchConnection?.apiKey,
+  });
+  return selected.provider === "none" ? undefined : { provider: selected.provider };
+}
+
 export async function runWebSearch(query: string, options: WebSearchOptions = {}): Promise<string> {
   const trimmed = query.trim();
   if (!trimmed) return "Error: query is required";
 
   if (options.signal?.aborted) return "Error: web search aborted";
-  const selected = selectSearchProvider(options);
+  const toolConnection = effectiveToolConnection(options);
+  const selected = selectSearchProvider({
+    ...options,
+    deepseekApiKey: toolConnection?.apiKey,
+    nativeSearchApiKey: options.nativeSearchConnection?.apiKey,
+    openRouterSearchApiKey: options.openRouterSearchConnection?.apiKey,
+  });
   if (selected.provider === "none")
     return `Error: ${selected.reason}. Web search was not performed.`;
+  options.onSearchSource?.({ provider: selected.provider });
+  if (selected.provider === "openrouter") {
+    try {
+      if (!options.openRouterSearchConnection) throw new Error("not_configured");
+      return formatOpenRouterSearchResult(
+        await searchOpenRouter(trimmed, {
+          connection: options.openRouterSearchConnection,
+          fetchImpl: options.fetchImpl,
+          resolveHostname: options.resolveHostname,
+          signal: options.signal,
+          timeoutMs: options.timeoutMs,
+        }),
+      );
+    } catch {
+      return "Search error: OpenRouter retrieval failed. Do not claim a search or substitute another search engine.";
+    }
+  }
+  if (selected.provider === "deepseek-native") {
+    try {
+      if (!options.nativeSearchConnection) throw new Error("not_configured");
+      return formatNativeSearchResult(
+        await searchDeepSeekNative(normalizeSearchQuery(trimmed), {
+          connection: options.nativeSearchConnection,
+          fetchImpl: options.fetchImpl,
+          resolveHostname: options.resolveHostname,
+          signal: options.signal,
+          timeoutMs: options.timeoutMs,
+        }),
+      );
+    } catch (error) {
+      return `Search error: ${error instanceof Error ? error.message : "failed"}. Native retrieval failed; do not claim a search or substitute another search engine.`;
+    }
+  }
   if (selected.provider === "deepseek") {
     try {
-      const citations = await searchDeepSeek(normalizeSearchQuery(trimmed), {
-        apiKey: selected.apiKey,
+      if (!toolConnection) throw new Error("not_configured");
+      if (toolConnection.kind !== "deepseek") throw new Error("deepseek_search_source_required");
+      const citations = await searchToolService(normalizeSearchQuery(trimmed), {
+        connection: toolConnection,
+        resolveHostname: options.resolveHostname,
         fetchImpl: options.fetchImpl,
         signal: options.signal,
         timeoutMs: options.timeoutMs,
       });
       return formatSearchResults(rerankCitations(citations, isNewsQuery(trimmed), options.now));
     } catch (error) {
-      return `Search error: ${error instanceof Error ? error.message : "failed"}. No usable sources; do not claim you searched the web.`;
+      return `Search error: ${error instanceof Error ? error.message : "failed"}. The configured route must expose DeepSeek Search; do not substitute another search engine or claim you searched the web.`;
     }
   }
   if (selected.provider === "tavily") {
     const result = await tavilyWebSearch(trimmed, selected.apiKey, options);
     if (result !== null) return result;
     if (options.signal?.aborted) return "Error: web search aborted";
+    options.onSearchSource?.({ provider: "duckduckgo", fallbackFrom: "tavily" });
   }
   return duckDuckGoWebSearch(trimmed, options);
 }
@@ -625,11 +721,19 @@ function makeAgentTool<T extends TSchema>(
     description,
     parameters,
     execute: async (_toolCallId, params, signal) => {
+      let searchSource: SearchExecutionSource | undefined;
       const result = await executeTool(name, params as Record<string, unknown>, cwd, {
         ...options,
         signal,
+        onSearchSource: (source) => {
+          searchSource = source;
+          options?.onSearchSource?.(source);
+        },
       });
-      return { content: [{ type: "text", text: result }], details: undefined };
+      return {
+        content: [{ type: "text", text: result }],
+        details: searchSource ? { searchSource } : undefined,
+      };
     },
   };
 }
@@ -732,7 +836,7 @@ export function buildTools(cwd: string, options?: BuildToolsOptions): AgentTool<
       makeAgentTool(
         "web_search",
         "Web Search",
-        "Search the web for information. Use this when you need current/real-time data.",
+        "Search the web using the user's selected OpenHorn search connection. Use this for current or real-time information; do not substitute another search backend.",
         Type.Object({
           query: Type.String({ description: "The search query" }),
         }),
@@ -878,6 +982,9 @@ export async function runDirectAgent(input: RunDirectAgentInput): Promise<void> 
     permissionMode: input.permissionMode,
     tavilyApiKey: input.tavilyApiKey,
     deepseekApiKey: input.deepseekApiKey,
+    toolConnection: input.toolConnection,
+    nativeSearchConnection: input.nativeSearchConnection,
+    openRouterSearchConnection: input.openRouterSearchConnection,
     searchProvider: input.searchProvider,
     requestApproval: input.requestApproval,
     webSearchEnabled: input.webSearchEnabled,
@@ -893,7 +1000,10 @@ export async function runDirectAgent(input: RunDirectAgentInput): Promise<void> 
   let mcpCleanup: (() => Promise<void>) | null = null;
   if (input.mcpServers && Object.keys(input.mcpServers).length > 0) {
     const connected = await connectMcpTools(input.mcpServers);
-    const mcpTools = capMcpTools(tools.length, connected.toolsByServer);
+    const mcpTools = capMcpTools(
+      tools.length,
+      applyMcpSearchPolicy(connected.toolsByServer, input),
+    );
     if (mcpTools.length > 0) tools = [...tools, ...mcpTools];
     mcpCleanup = connected.cleanup;
   }
@@ -925,6 +1035,7 @@ export async function runDirectAgent(input: RunDirectAgentInput): Promise<void> 
       permissionMode: input.permissionMode,
       // Same condition `buildTools` uses to register `web_fetch`.
       webFetchAvailable: input.webSearchEnabled === true,
+      webSearchTool: input.webSearchEnabled === true ? "web_search" : undefined,
       extra: buildSkillsPromptSection(input.skills ?? [], "read_file"),
     }),
     buildReActBehaviorSection(),
@@ -1067,6 +1178,7 @@ export async function runDirectAgent(input: RunDirectAgentInput): Promise<void> 
           toolName: event.toolName,
           toolInput: event.args,
           toolCallId: event.toolCallId,
+          ...(event.toolName === "web_search" ? { searchSource: initialSearchSource(input) } : {}),
         });
         break;
       case "tool_execution_end": {
@@ -1083,6 +1195,9 @@ export async function runDirectAgent(input: RunDirectAgentInput): Promise<void> 
           content: text.length > 8000 ? `${text.slice(0, 8000)}...` : text,
           toolName: event.toolName,
           toolCallId: event.toolCallId,
+          ...(event.toolName === "web_search"
+            ? { searchSource: readSearchExecutionSource(event.result?.details?.searchSource) }
+            : {}),
         });
         break;
       }

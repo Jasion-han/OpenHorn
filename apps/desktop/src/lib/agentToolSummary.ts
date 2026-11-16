@@ -1,3 +1,28 @@
+import { readSearchExecutionSource } from "shared/search-settings";
+import { formatChatLabel } from "./i18n/agent";
+
+const searchProviderNames = {
+  tavily: "Tavily",
+  openrouter: "OpenRouter",
+  "deepseek-native": "DeepSeek Native",
+  deepseek: "DeepSeek",
+  duckduckgo: "DuckDuckGo",
+};
+
+/** Historical steps without runtime provenance retain their generic label. */
+export function presentSearchToolLabel(
+  toolName: string | null | undefined,
+  metadata: unknown,
+): string | undefined {
+  if (!toolName || !["web_search", "websearch"].includes(toolName.toLowerCase())) return undefined;
+  const source = readSearchExecutionSource(metadata);
+  if (!source) return undefined;
+  const provider = searchProviderNames[source.provider];
+  return source.fallbackFrom
+    ? formatChatLabel("chat.agent.search.fallback", { provider, from: "Tavily" })
+    : `Search · ${provider}`;
+}
+
 /**
  * One-line (or few-line) summary of a tool call's input, shown under the tool
  * name in the agent run panel.

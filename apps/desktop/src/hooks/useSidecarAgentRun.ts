@@ -62,7 +62,10 @@ export interface SidecarAgentRunInput {
   webSearchEnabled?: boolean;
   tavilyApiKey?: string;
   deepseekApiKey?: string;
-  searchProvider?: "auto" | "tavily" | "deepseek" | "duckduckgo";
+  toolConnection?: import("shared/tool-connection").ToolConnection;
+  nativeSearchConnection?: import("shared/deepseek-native-search").NativeSearchConnection;
+  openRouterSearchConnection?: import("shared/openrouter-search").OpenRouterSearchConnection;
+  searchProvider?: "auto" | "tavily" | "deepseek" | "deepseek-native" | "openrouter" | "duckduckgo";
   // Set when the user invoked an MCP server via `/server`: the run connects to
   // that single server only (case-insensitive name match) instead of the full
   // enabled roster — faster startup and its tools can't fall past the tool cap.
@@ -689,8 +692,12 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
         webSearchEnabled: input.webSearchEnabled,
         tavilyApiKey: input.tavilyApiKey,
         deepseekApiKey: input.deepseekApiKey,
+        toolConnection: input.toolConnection,
+        nativeSearchConnection: input.nativeSearchConnection,
+        openRouterSearchConnection: input.openRouterSearchConnection,
         searchProvider: input.searchProvider,
         mcpServers,
+        targetMcpServer: input.targetMcpServer,
         skills: skillMetas,
         conversationHistory: input.conversationHistory,
         attachments: input.attachments,

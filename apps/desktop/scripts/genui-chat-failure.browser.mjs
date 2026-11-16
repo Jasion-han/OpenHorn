@@ -26,6 +26,12 @@ let failAgentSaveOnce = false;
 let retryMode = "success";
 let truncationEdit = false;
 let budgetPrepare = false;
+let holdChatPreparation = null;
+let holdUpload = null;
+let uploadFailure = false;
+let cancelPreparationFailure = false;
+let holdCancelResponse = null;
+const cancelledPreparations = new Set();
 let protocol = "openai";
 const conversation = {
   id: "failure-conversation",
@@ -71,6 +77,28 @@ const server = http.createServer(async (request, response) => {
     );
     return;
   }
+  if (path === "/attachments/upload") {
+    for await (const _chunk of request) {
+      /* Discard synthetic multipart bytes. */
+    }
+    const held = holdUpload;
+    if (held) {
+      server.emit("fixture-upload-started");
+      await held;
+      holdUpload = null;
+    }
+    if (uploadFailure) return json(response, { error: "Synthetic upload not confirmed" }, 413);
+    return json(response, {
+      attachments: [
+        {
+          id: "fixture-uploaded-file",
+          fileName: "native-stop.txt",
+          fileType: "text/plain",
+          fileSize: 16,
+        },
+      ],
+    });
+  }
   let body = "";
   for await (const chunk of request) body += chunk;
   const data = body ? JSON.parse(body) : {};
@@ -105,7 +133,25 @@ const server = http.createServer(async (request, response) => {
         protocol,
       },
     });
+  if (path === "/messages/chat/prepare/cancel") {
+    if (holdCancelResponse) {
+      server.emit("fixture-cancel-response-held");
+      await holdCancelResponse;
+    }
+    if (cancelPreparationFailure)
+      return json(response, { error: "Synthetic temporary cancel failure" }, 500);
+    cancelledPreparations.add(data.preparationToken);
+    holdChatPreparation?.release();
+    return json(response, { success: true });
+  }
   if (path === "/messages/chat/prepare") {
+    const held = holdChatPreparation;
+    if (held) {
+      server.emit("fixture-native-preparation-started");
+      await held.promise;
+      if (holdChatPreparation === held) holdChatPreparation = null;
+    }
+
     prepares++;
     const userMessageId = `saved-user-${prepares}`;
     const assistantMessageId = `saved-assistant-${prepares}`;
@@ -136,6 +182,8 @@ const server = http.createServer(async (request, response) => {
       );
     }
     return json(response, {
+      preparationStopped:
+        data.stoppedBeforeStart === true || cancelledPreparations.has(data.preparationToken),
       userMessageId,
       assistantMessageId,
       apiKey: "fixture-only",
@@ -379,6 +427,180 @@ try {
     await page.evaluate(() => window.failureChat.fail());
     await page.waitForFunction(() => !window.failureChat.snapshot().streaming);
   };
+  await reset();
+  let releasePreparation;
+  holdChatPreparation = {
+    promise: new Promise((resolve) => {
+      releasePreparation = resolve;
+    }),
+    release: () => releasePreparation(),
+  };
+  const preparingNative = once(server, "fixture-native-preparation-started", {
+    signal: AbortSignal.timeout(10_000),
+  });
+  await page.locator("textarea").fill("Stop while independent native retrieval is preparing");
+  await page.locator("textarea").press("Enter");
+  await preparingNative;
+  await page.getByRole("button", { name: "Stop", exact: true }).click();
+  await page.waitForFunction(() =>
+    window.failureChat
+      .snapshot()
+      .messages.some(
+        (message) => message.finishReason === "stopped" && message.id === "saved-assistant-1",
+      ),
+  );
+  assert.equal(completes, 1);
+  assert.equal(rows.length, 2);
+  assert.equal(rows.find((row) => row.role === "assistant").content, "");
+  const cancellation = requests.findLast(
+    (request) => request.path === "/messages/chat/prepare/cancel",
+  );
+  const preparation = requests.findLast((request) => request.path === "/messages/chat/prepare");
+  assert.equal(cancellation.data.preparationToken, preparation.data.preparationToken);
+  assert.equal((await snapshot()).error, null);
+  console.log(
+    "PASS Chat Stop during retrieval preparation cancels the owned request, persists the question and stopped reply, and never starts answer generation",
+  );
+  await reset();
+
+  let releaseUpload;
+  holdUpload = new Promise((resolve) => {
+    releaseUpload = resolve;
+  });
+  const uploading = once(server, "fixture-upload-started", { signal: AbortSignal.timeout(10_000) });
+  await page.locator('input[type="file"]').setInputFiles({
+    name: "native-stop.txt",
+    mimeType: "text/plain",
+    buffer: Buffer.from("Synthetic file"),
+  });
+  await page.locator("textarea").fill("Old question stopped during upload");
+  await page.locator("textarea").press("Enter");
+  await uploading;
+  await page.getByRole("button", { name: "Stop", exact: true }).click();
+  await page.evaluate(() => window.failureChat.remount());
+  await page.locator("textarea").fill("Newer question must not overtake stopped upload");
+  await page.locator("textarea").press("Enter");
+  assert.equal(
+    prepares,
+    0,
+    "the stopped upload still owns preparation until its identity is saved",
+  );
+  releaseUpload();
+  await page.waitForFunction(() =>
+    window.failureChat
+      .snapshot()
+      .messages.some(
+        (message) => message.id === "saved-assistant-1" && message.finishReason === "stopped",
+      ),
+  );
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].content, "Old question stopped during upload");
+  await page.locator("textarea").press("Enter");
+  await page.waitForFunction(() => window.failureChat.ready());
+  assert.equal(prepares, 2);
+  assert.equal(
+    rows.filter((row) => row.role === "user")[1].content,
+    "Newer question must not overtake stopped upload",
+  );
+  await fail();
+  console.log(
+    "PASS upload-stage Chat Stop retains global preparation ownership across remount and prevents late old questions from overtaking a newer send",
+  );
+  await reset();
+
+  // Upload failure and a missed early cancel must still persist a stopped, non-generating turn.
+  uploadFailure = true;
+  cancelPreparationFailure = true;
+  let releaseFailedUpload;
+  holdUpload = new Promise((resolve) => {
+    releaseFailedUpload = resolve;
+  });
+  const failedUploading = once(server, "fixture-upload-started", {
+    signal: AbortSignal.timeout(10_000),
+  });
+  await page.locator('input[type="file"]').setInputFiles({
+    name: "native-stop.txt",
+    mimeType: "text/plain",
+    buffer: Buffer.from("Synthetic file"),
+  });
+  await page.locator("textarea").fill("Stopped upload must remain saved on failure");
+  await page.locator("textarea").press("Enter");
+  await failedUploading;
+  await page.getByRole("button", { name: "Stop", exact: true }).click();
+  releaseFailedUpload();
+  await page.waitForFunction(() =>
+    window.failureChat
+      .snapshot()
+      .messages.some(
+        (message) => message.id === "saved-assistant-1" && message.finishReason === "stopped",
+      ),
+  );
+  const failedPreparation = requests.findLast(
+    (request) => request.path === "/messages/chat/prepare",
+  );
+  assert.equal(failedPreparation.data.stoppedBeforeStart, true);
+  assert.equal(failedPreparation.data.stoppedAttachmentMeta[0].fileName, "native-stop.txt");
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].content, "Stopped upload must remain saved on failure");
+  await page.getByText("附件上传未确认", { exact: true }).waitFor();
+  uploadFailure = false;
+  cancelPreparationFailure = false;
+  console.log(
+    "PASS stopped upload failures preserve the question and attachment metadata, report the failure, and explicitly prevent retrieval even if early cancellation failed",
+  );
+  await reset();
+
+  let releaseLatePrepare, releaseLateCancel;
+  holdChatPreparation = {
+    promise: new Promise((resolve) => {
+      releaseLatePrepare = resolve;
+    }),
+    release: () => releaseLatePrepare(),
+  };
+  holdCancelResponse = new Promise((resolve) => {
+    releaseLateCancel = resolve;
+  });
+  cancelPreparationFailure = true;
+  const latePreparing = once(server, "fixture-native-preparation-started", {
+    signal: AbortSignal.timeout(10_000),
+  });
+  await page.locator("textarea").fill("Prepare can finish before a rejected cancellation");
+  await page.locator("textarea").press("Enter");
+  await latePreparing;
+  const cancelHeld = once(server, "fixture-cancel-response-held", {
+    signal: AbortSignal.timeout(10_000),
+  });
+  await page.getByRole("button", { name: "Stop", exact: true }).click();
+  await cancelHeld;
+  const latePreparedResponse = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === "/messages/chat/prepare",
+  );
+  releaseLatePrepare();
+  await (await latePreparedResponse).finished();
+  await page.evaluate(
+    () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+  );
+  assert.equal(
+    completes,
+    0,
+    "unconfirmed cancellation is reconciled before completing the stopped preparation",
+  );
+  releaseLateCancel();
+  holdCancelResponse = null;
+  await page.getByText("停止检索未确认", { exact: true }).waitFor();
+  await page.waitForFunction(() =>
+    window.failureChat
+      .snapshot()
+      .messages.some(
+        (message) => message.id === "saved-assistant-1" && message.finishReason === "stopped",
+      ),
+  );
+  cancelPreparationFailure = false;
+  console.log(
+    "PASS a late rejected cancellation still reports the unconfirmed retrieval stop after preparation completes",
+  );
+  await reset();
+
   const closed =
     '```openui-lang\nroot=Input($amount,"Persist amount","number")\n$amount=5\n```\n\nPartial reply.';
   await send();

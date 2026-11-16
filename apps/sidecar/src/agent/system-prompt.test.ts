@@ -5,6 +5,16 @@ const LINK_RULE = "When the user's message contains a URL, open and read it befo
 const EVERY_RULE = "Fetch EVERY URL in the message";
 const FAILURE_RULE = "Never state or imply you read a page you did not fetch";
 
+test("registered search tools explicitly follow the selected product source", () => {
+  for (const webSearchTool of ["web_search", "WebSearch"] as const) {
+    const prompt = buildAgentSystemPrompt({ webSearchTool });
+    expect(prompt.includes(`use ${webSearchTool}:`)).toBe(true);
+    expect(prompt.includes("user's selected OpenHorn search source")).toBe(true);
+    expect(prompt.includes("explicit /server invocation")).toBe(true);
+  }
+  expect(buildAgentSystemPrompt().includes("substitute an MCP search engine")).toBe(false);
+});
+
 describe("buildAgentSystemPrompt link-reading rule", () => {
   test("instructs the agent to open links the user pasted when a fetch tool exists", () => {
     const prompt = buildAgentSystemPrompt({ webFetchAvailable: true });
