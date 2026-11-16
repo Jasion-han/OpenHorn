@@ -399,3 +399,30 @@ test("link helper deduplicates, caps paid requests and describes partial failure
   expect(result.citations).toHaveLength(2);
   expect(result.systemContext).toContain("Some requested pages were not read");
 });
+
+test("Tavily Stop aborts its request and never falls back to DuckDuckGo", async () => {
+  const controller = new AbortController();
+  let entered!: () => void;
+  const started = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  let requests = 0;
+  const pending = buildSearchContext({
+    route: "web_search",
+    prompt: "Synthetic cancellable Tavily query",
+    signal: controller.signal,
+    userSettings: { "liveSearch.provider": "tavily", [TAVILY_API_KEY_SETTING]: "synthetic-key" },
+    fetchImpl: async (url, init) => {
+      requests++;
+      expect(String(url)).toBe("https://api.tavily.com/search");
+      entered();
+      return new Promise<Response>((_resolve, reject) =>
+        init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true }),
+      );
+    },
+  });
+  await started;
+  controller.abort();
+  await expect(pending).rejects.toThrow();
+  expect(requests).toBe(1);
+});

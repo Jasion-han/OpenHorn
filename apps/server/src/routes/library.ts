@@ -100,9 +100,16 @@ router.get("/:id", async (c) =>
 router.post("/:id/index", async (c) =>
   c.json({ document: await indexLibraryDocument(c.get("user").id, c.req.param("id")) }),
 );
-router.post("/:id/ocr", async (c) =>
-  c.json({ document: await ocrLibraryDocument(c.get("user").id, c.req.param("id")) }),
-);
+router.post("/:id/ocr", async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  return c.json({
+    document: await ocrLibraryDocument(
+      c.get("user").id,
+      c.req.param("id"),
+      typeof body?.connectionToken === "string" ? body.connectionToken : undefined,
+    ),
+  });
+});
 router.delete("/:id", async (c) => {
   const { expectedRevision } = await c.req.json();
   if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1)

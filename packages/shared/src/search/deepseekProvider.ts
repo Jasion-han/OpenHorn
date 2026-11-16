@@ -1,3 +1,4 @@
+import { normalizeToolBaseUrl } from "../tool-connection";
 import type { SearchCitation } from "./types";
 import { assertPublicWebUrl, parsePublicWebUrl, type ResolveWebHostname } from "./webSafety";
 
@@ -9,6 +10,7 @@ export type WebToolsFetchFn = (
 export type DeepSeekToolsOptions = {
   /** Only the dedicated deepseek.toolsApiKey; never a model or Tavily key. */
   apiKey: string;
+  baseUrl?: string;
   fetchImpl?: WebToolsFetchFn;
   timeoutMs?: number;
   signal?: AbortSignal;
@@ -97,11 +99,16 @@ async function request(
       signal.addEventListener("abort", abortListener, { once: true });
     });
     const work = async () => {
+      const target = options.baseUrl
+        ? `${normalizeToolBaseUrl(options.baseUrl)}/tools/${endpoint === SEARCH_ENDPOINT ? "search" : "fetch"}`
+        : endpoint;
+      if (options.baseUrl && target !== endpoint)
+        await assertPublicWebUrl(target, options.resolveHostname);
       if (endpoint === FETCH_ENDPOINT) {
         await assertPublicWebUrl(String(body.url), options.resolveHostname);
       }
       signal.throwIfAborted();
-      const response = await (options.fetchImpl ?? fetch)(endpoint, {
+      const response = await (options.fetchImpl ?? fetch)(target, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
         body: JSON.stringify(body),

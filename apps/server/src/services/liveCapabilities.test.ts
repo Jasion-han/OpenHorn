@@ -70,3 +70,61 @@ test("getWebSearchPolicy treats current interview-practice comparisons as resear
     "always_research",
   );
 });
+
+test("an explicitly disabled conversation cannot initiate any paid search or weather lookup", async () => {
+  let calls = 0;
+  for (const prompt of ["最近 AI 圈有什么新闻", "调研最近的AI技术", "上海天气怎么样"]) {
+    const result = await buildLiveContext({
+      prompt,
+      forceWebSearch: false,
+      userSettings: {
+        "liveSearch.provider": "deepseek-native",
+        "deepseek.nativeSearchRuntime": JSON.stringify({
+          baseUrl: "https://api.deepseek.com/v1",
+          model: "deepseek-v4-pro",
+          apiKey: "synthetic-native-key",
+        }),
+      },
+      classifier: async () => {
+        calls++;
+        return "web_search";
+      },
+      fetchImpl: async () => {
+        calls++;
+        throw new Error("must not fetch");
+      },
+    });
+    expect(result.status).toBe("offline");
+    expect(result.source.type).toBe("none");
+  }
+  expect(calls).toBe(0);
+});
+
+test("Stop during semantic classification prevents a later paid retrieval even when the classifier ignores cancellation", async () => {
+  const controller = new AbortController();
+  let release!: (route: "web_search") => void, entered!: () => void;
+  const waiting = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  let calls = 0;
+  const pending = buildLiveContext({
+    prompt: "给我一些建议",
+    forceWebSearch: true,
+    signal: controller.signal,
+    classifier: async () => {
+      entered();
+      return new Promise<"web_search">((resolve) => {
+        release = resolve;
+      });
+    },
+    fetchImpl: async () => {
+      calls++;
+      throw new Error("must not fetch");
+    },
+  });
+  await waiting;
+  controller.abort();
+  release("web_search");
+  await expect(pending).rejects.toThrow();
+  expect(calls).toBe(0);
+});

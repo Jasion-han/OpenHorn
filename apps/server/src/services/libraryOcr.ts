@@ -1,4 +1,6 @@
 import { LIBRARY_LIMITS, utf8Bytes } from "shared/library";
+import { assertPublicWebUrl, type ResolveWebHostname, type WebToolsFetchFn } from "shared/search";
+import { normalizeToolBaseUrl } from "shared/tool-connection";
 import { LibraryParseError } from "./libraryParser";
 
 const OCR_ENDPOINT = "https://api.deepseek.com/v1/tools/ocr";
@@ -89,6 +91,11 @@ export async function requestLibraryOcr(
   fileType: string,
   apiKey: string,
   expectedPages?: number,
+  options: {
+    baseUrl?: string;
+    resolveHostname?: ResolveWebHostname;
+    fetchImpl?: WebToolsFetchFn;
+  } = {},
 ): Promise<string> {
   const signal = AbortSignal.timeout(LIBRARY_LIMITS.ocrTimeoutMs);
   let reader:
@@ -104,16 +111,23 @@ export async function requestLibraryOcr(
     return await Promise.race([
       aborted,
       (async () => {
+        const baseUrl = normalizeToolBaseUrl(options.baseUrl ?? "https://api.deepseek.com/v1");
+        if (baseUrl !== "https://api.deepseek.com/v1")
+          await assertPublicWebUrl(`${baseUrl}/tools/ocr`, options.resolveHostname);
+        signal.throwIfAborted();
         const form = new FormData();
         form.set("purpose", "text_recognition");
         form.set("file", new File([new Uint8Array(bytes)], fileName, { type: fileType }));
-        const response = await fetch(OCR_ENDPOINT, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${apiKey}` },
-          body: form,
-          signal,
-          redirect: "error",
-        });
+        const response = await (options.fetchImpl ?? fetch)(
+          baseUrl === "https://api.deepseek.com/v1" ? OCR_ENDPOINT : `${baseUrl}/tools/ocr`,
+          {
+            method: "POST",
+            headers: { Authorization: `Bearer ${apiKey}` },
+            body: form,
+            signal,
+            redirect: "error",
+          },
+        );
         if (signal.aborted) {
           void response.body?.cancel().catch(() => {});
           throw new LibraryParseError("library_ocr_timeout");

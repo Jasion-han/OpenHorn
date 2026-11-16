@@ -42,6 +42,7 @@ export type LiveContextResult = {
 
 export type BuildLiveContextInput = {
   userId?: string;
+  signal?: AbortSignal;
   /** Structured dataset tasks must not route text inside their untrusted data. */
   dataOnly?: boolean;
   prompt: string;
@@ -363,7 +364,9 @@ async function resolveWeatherContext(input: BuildLiveContextInput): Promise<Live
   url.searchParams.set("forecast_days", "1");
 
   try {
-    const response = await (input.fetchImpl || DEFAULT_FETCH)(url.toString());
+    const response = await (input.fetchImpl || DEFAULT_FETCH)(url.toString(), {
+      signal: input.signal,
+    });
     if (!response.ok) {
       return buildOfflineResult(
         "structured_live",
@@ -476,8 +479,21 @@ function routeFromType(type: LiveRouteType): LiveRoute {
 }
 
 export async function buildLiveContext(input: BuildLiveContextInput): Promise<LiveContextResult> {
+  input.signal?.throwIfAborted();
   if (input.dataOnly) return { status: "offline", route: "direct_model", source: { type: "none" } };
   let route = routeLiveQuery(input.prompt);
+  if (
+    input.forceWebSearch === false &&
+    ["structured_live", "web_search", "research"].includes(route.type)
+  ) {
+    return {
+      status: "offline",
+      route: route.type,
+      source: { type: "none" },
+      systemContext:
+        "Web access is disabled for this conversation. Do not request external services, claim a live search, or invent current sources. State when live information is unavailable.",
+    };
+  }
   const timezone = inferTimezone(input.timezone);
   const webSearchPolicy = getWebSearchPolicy(input.prompt);
   const allowSemanticWebRouting = webSearchPolicy === "defer_to_router";
@@ -501,6 +517,7 @@ export async function buildLiveContext(input: BuildLiveContextInput): Promise<Li
     input.classifier
   ) {
     const classified = await input.classifier(input.prompt);
+    input.signal?.throwIfAborted();
     if (classified) {
       route = routeFromType(classified);
     }
@@ -543,8 +560,10 @@ export async function buildLiveContext(input: BuildLiveContextInput): Promise<Li
       userSettings: input.userSettings,
       envKey: input.tavilyEnvKey,
       fetchImpl: input.fetchImpl,
+      signal: input.signal,
     });
 
+    input.signal?.throwIfAborted();
     return {
       status: searchContext.status,
       route: route.type,

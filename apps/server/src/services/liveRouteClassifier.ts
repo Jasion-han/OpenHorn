@@ -11,6 +11,7 @@ export async function classifyLiveRouteWithModel(params: {
   baseUrl?: string | null;
   modelId: string;
   prompt: string;
+  signal?: AbortSignal;
 }): Promise<LiveRouteType | null> {
   const trimmed = params.prompt.trim();
   if (!trimmed) return null;
@@ -19,6 +20,7 @@ export async function classifyLiveRouteWithModel(params: {
     const adapter = createAdapter(params.protocol, params.apiKey, params.baseUrl || undefined);
     const response = await adapter.chat({
       model: params.modelId,
+      signal: params.signal,
       temperature: 0,
       maxTokens: 8,
       requestTimeoutMs: LIVE_ROUTE_CLASSIFIER_TIMEOUT_MS,
@@ -35,6 +37,7 @@ export async function classifyLiveRouteWithModel(params: {
       ],
     });
 
+    params.signal?.throwIfAborted();
     const text = response.content.toLowerCase();
     const labels: LiveRouteType[] = [
       "local",

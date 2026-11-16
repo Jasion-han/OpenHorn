@@ -49,8 +49,8 @@ export const libraryApi = {
   },
   index: (documentId: string) =>
     request<{ document: LibraryDocument }>(`/${id(documentId)}/index`, "POST"),
-  ocr: (documentId: string) =>
-    request<{ document: LibraryDocument }>(`/${id(documentId)}/ocr`, "POST"),
+  ocr: (documentId: string, connectionToken?: string) =>
+    request<{ document: LibraryDocument }>(`/${id(documentId)}/ocr`, "POST", { connectionToken }),
   delete: (documentId: string, expectedRevision: number) =>
     request<{ success: boolean }>(`/${id(documentId)}`, "DELETE", { expectedRevision }),
   search: (scope: LibraryFilter, query: string) =>

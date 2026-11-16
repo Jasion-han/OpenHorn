@@ -1,6 +1,11 @@
+import { NATIVE_SEARCH_RUNTIME, readNativeSearchRuntime } from "shared/deepseek-native-search";
+import { DEEPSEEK_SEARCH_RUNTIME, readDeepSeekSearchRuntime } from "shared/deepseek-search";
+import { OPENROUTER_SEARCH_RUNTIME, readOpenRouterSearchRuntime } from "shared/openrouter-search";
 import {
   buildTavilyPayload,
-  fetchDeepSeek,
+  fetchToolService,
+  formatNativeSearchResult,
+  formatOpenRouterSearchResult,
   formatUntrustedWebSources,
   isNewsQuery,
   normalizeCitations,
@@ -8,9 +13,12 @@ import {
   type ResolveWebHostname,
   rerankCitations,
   type SearchCitation,
-  searchDeepSeek,
+  searchDeepSeekNative,
   searchDuckDuckGo,
+  searchOpenRouter,
+  searchToolService,
   selectSearchProvider,
+  TAVILY_SEARCH_RUNTIME_KEY,
   type TavilyResult,
 } from "shared/search";
 import { decisionEnhancements } from "./decisionEnhancements";
@@ -30,9 +38,19 @@ export const SEARCH_SETTINGS_KEYS = [
   TAVILY_ENABLED_SETTING,
   DEEPSEEK_TOOLS_API_KEY_SETTING,
   SEARCH_PROVIDER_SETTING,
+  DEEPSEEK_SEARCH_RUNTIME,
+  TAVILY_SEARCH_RUNTIME_KEY,
+  NATIVE_SEARCH_RUNTIME,
+  OPENROUTER_SEARCH_RUNTIME,
 ] as const;
 
-export type SearchProvider = "tavily" | "deepseek" | "duckduckgo" | "none";
+export type SearchProvider =
+  | "tavily"
+  | "deepseek"
+  | "deepseek-native"
+  | "openrouter"
+  | "duckduckgo"
+  | "none";
 
 export type SearchContextResult = {
   status: "live" | "offline";
@@ -52,6 +70,7 @@ export type BuildSearchContextInput = {
   fetchImpl?: FetchFn;
   timeoutMs?: number;
   signal?: AbortSignal;
+  resolveHostname?: ResolveWebHostname;
   /** Clock override for deterministic freshness re-ranking in tests. */
   now?: () => number;
 };
@@ -101,6 +120,8 @@ function pickApiKey(input: BuildSearchContextInput) {
   if (!isTavilyEnabled(input)) {
     return null;
   }
+  if (Object.hasOwn(input.userSettings ?? {}, TAVILY_SEARCH_RUNTIME_KEY))
+    return input.userSettings?.[TAVILY_SEARCH_RUNTIME_KEY]?.trim() || null;
   const userKey = input.userSettings?.[TAVILY_API_KEY_SETTING]?.trim();
   if (userKey) return userKey;
   const envKey = input.envKey?.trim();
@@ -111,6 +132,8 @@ function pickApiKey(input: BuildSearchContextInput) {
 const PROVIDER_DISPLAY_NAME: Record<Exclude<SearchProvider, "none">, string> = {
   tavily: "Tavily",
   deepseek: "DeepSeek",
+  "deepseek-native": "DeepSeek native web search",
+  openrouter: "OpenRouter",
   duckduckgo: "DuckDuckGo",
 };
 
@@ -152,10 +175,13 @@ function buildOfflineResult(
 export async function buildSearchContext(
   input: BuildSearchContextInput,
 ): Promise<SearchContextResult> {
+  input.signal?.throwIfAborted();
   const selected = selectSearchProvider({
     searchProvider: input.userSettings?.[SEARCH_PROVIDER_SETTING],
     tavilyApiKey: pickApiKey(input),
-    deepseekApiKey: input.userSettings?.[DEEPSEEK_TOOLS_API_KEY_SETTING],
+    deepseekApiKey: readDeepSeekSearchRuntime(input.userSettings ?? {})?.apiKey,
+    nativeSearchApiKey: readNativeSearchRuntime(input.userSettings ?? {})?.apiKey,
+    openRouterSearchApiKey: readOpenRouterSearchRuntime(input.userSettings ?? {})?.apiKey,
   });
   if (selected.provider === "none") {
     return buildOfflineResult(
@@ -167,9 +193,73 @@ export async function buildSearchContext(
       { degradedToDirectModel: true },
     );
   }
+  if (selected.provider === "openrouter") return runOpenRouterSearch(input);
+  if (selected.provider === "deepseek-native") return runNativeSearch(input);
   if (selected.provider === "deepseek") return runDeepSeekSearch(input, selected.apiKey);
   if (selected.provider === "tavily") return runTavilySearch(input, selected.apiKey);
   return runDuckDuckGoSearch(input);
+}
+
+async function runOpenRouterSearch(input: BuildSearchContextInput): Promise<SearchContextResult> {
+  try {
+    const connection = readOpenRouterSearchRuntime(input.userSettings ?? {});
+    if (!connection) throw new Error("not_configured");
+    const result = await searchOpenRouter(input.prompt, {
+      connection,
+      fetchImpl: input.fetchImpl,
+      resolveHostname: input.resolveHostname,
+      signal: input.signal,
+      timeoutMs: input.timeoutMs,
+    });
+    input.signal?.throwIfAborted();
+    return {
+      status: "live",
+      label: input.route === "research" ? "已使用研究搜索" : "已使用实时搜索",
+      provider: "openrouter",
+      citations: result.citations,
+      systemContext: [
+        buildSystemContext(input.route, input.prompt, result.citations, "openrouter"),
+        formatOpenRouterSearchResult(result),
+      ].join("\n\n"),
+    };
+  } catch (error) {
+    if (input.signal?.aborted) throw error;
+    return buildOfflineResult(
+      buildFailureLabel(input.route, "failed"),
+      "The selected OpenRouter retrieval channel failed. Do not claim a successful search, invent sources, or substitute another search engine.",
+      { degradedToDirectModel: true },
+    );
+  }
+}
+
+async function runNativeSearch(input: BuildSearchContextInput): Promise<SearchContextResult> {
+  const connection = readNativeSearchRuntime(input.userSettings ?? {});
+  try {
+    if (!connection) throw new Error("not_configured");
+    const result = await searchDeepSeekNative(normalizeSearchQuery(input.prompt), {
+      connection,
+      fetchImpl: input.fetchImpl,
+      resolveHostname: input.resolveHostname,
+      signal: input.signal,
+      timeoutMs: input.timeoutMs ?? 45_000,
+    });
+    return {
+      status: "live",
+      label: input.route === "research" ? "已使用研究搜索" : "已使用实时搜索",
+      provider: "deepseek-native",
+      citations: result.citations,
+      systemContext: [
+        buildSystemContext(input.route, input.prompt, result.citations, "deepseek-native"),
+        formatNativeSearchResult(result),
+      ].join("\n\n"),
+    };
+  } catch {
+    return buildOfflineResult(
+      buildFailureLabel(input.route, "failed"),
+      "The selected DeepSeek native retrieval channel failed. Do not claim a successful search, invent sources, or substitute another search engine.",
+      { degradedToDirectModel: true },
+    );
+  }
 }
 
 async function runDeepSeekSearch(
@@ -177,8 +267,11 @@ async function runDeepSeekSearch(
   apiKey: string,
 ): Promise<SearchContextResult> {
   try {
-    const sources = await searchDeepSeek(normalizeSearchQuery(input.prompt), {
-      apiKey,
+    const connection = readDeepSeekSearchRuntime(input.userSettings ?? {});
+    if (!connection || connection.apiKey !== apiKey) throw new Error("not_configured");
+    const sources = await searchToolService(normalizeSearchQuery(input.prompt), {
+      connection,
+      resolveHostname: input.resolveHostname,
       fetchImpl: input.fetchImpl,
       signal: input.signal,
       timeoutMs:
@@ -205,15 +298,15 @@ async function runDeepSeekSearch(
     return {
       status: "live",
       label: input.route === "research" ? "已使用研究搜索" : "已使用实时搜索",
-      provider: "deepseek",
+      provider: connection.kind,
       citations,
-      systemContext: buildSystemContext(input.route, input.prompt, citations, "deepseek"),
+      systemContext: buildSystemContext(input.route, input.prompt, citations, connection.kind),
     };
   } catch (error) {
     const timeout = error instanceof Error && error.message === "timeout";
     return buildOfflineResult(
       buildFailureLabel(input.route, timeout ? "timeout" : "failed"),
-      `Live search ${timeout ? "timed out" : "failed"}. Do not claim you searched the web or cite sources.`,
+      `DeepSeek Search ${timeout ? "timed out" : "failed"}. The configured route must expose DeepSeek Search. Do not claim you searched the web or cite sources. Do not substitute another search engine.`,
       { degradedToDirectModel: true },
     );
   }
@@ -231,8 +324,15 @@ export type BuildLinkContextInput = {
 
 /** Main/Native Chat preparation supplies explicit URLs only after its data-only/network gate. */
 export async function buildLinkContext(input: BuildLinkContextInput): Promise<SearchContextResult> {
-  const apiKey = input.userSettings?.[DEEPSEEK_TOOLS_API_KEY_SETTING]?.trim();
-  if (input.webSearchEnabled !== true || !apiKey || !input.urls.length || input.signal?.aborted) {
+  const connection = readDeepSeekSearchRuntime(input.userSettings ?? {});
+  const preferred = input.userSettings?.[SEARCH_PROVIDER_SETTING];
+  if (
+    (preferred !== undefined && preferred !== "deepseek") ||
+    input.webSearchEnabled !== true ||
+    !connection ||
+    !input.urls.length ||
+    input.signal?.aborted
+  ) {
     return buildOfflineResult(
       "链接未读取",
       "Web pages were not read. Do not claim to have read their contents.",
@@ -244,8 +344,8 @@ export async function buildLinkContext(input: BuildLinkContextInput): Promise<Se
     if (input.signal?.aborted) break;
     try {
       citations.push(
-        await fetchDeepSeek(url, {
-          apiKey,
+        await fetchToolService(url, {
+          connection,
           fetchImpl: input.fetchImpl,
           timeoutMs: input.timeoutMs,
           signal: input.signal,
@@ -265,7 +365,7 @@ export async function buildLinkContext(input: BuildLinkContextInput): Promise<Se
   return {
     status: "live",
     label: "已读取链接",
-    provider: "deepseek",
+    provider: connection.kind,
     citations,
     systemContext: [
       "Web page reading results. Cite only pages present in the following source data.",
@@ -282,6 +382,7 @@ export async function buildLinkContext(input: BuildLinkContextInput): Promise<Se
 async function runDuckDuckGoSearch(input: BuildSearchContextInput): Promise<SearchContextResult> {
   const rawCitations = await searchDuckDuckGo(normalizeSearchQuery(input.prompt), {
     fetchImpl: input.fetchImpl,
+    signal: input.signal,
     timeoutMs: input.timeoutMs,
     maxResults: input.route === "research" ? 8 : 5,
     now: input.now,
@@ -321,6 +422,7 @@ async function runDuckDuckGoSearch(input: BuildSearchContextInput): Promise<Sear
 async function degradeToDuckDuckGo(
   input: BuildSearchContextInput,
 ): Promise<SearchContextResult | null> {
+  input.signal?.throwIfAborted();
   const result = await runDuckDuckGoSearch(input);
   return result.status === "live" ? result : null;
 }
@@ -336,6 +438,9 @@ async function runTavilySearch(
   try {
     const timeoutMs =
       input.timeoutMs ?? (isResearch ? DEFAULT_RESEARCH_TIMEOUT_MS : DEFAULT_SEARCH_TIMEOUT_MS);
+    input.signal?.throwIfAborted();
+    const deadline = AbortSignal.timeout(timeoutMs);
+    const signal = input.signal ? AbortSignal.any([input.signal, deadline]) : deadline;
     const response = await (input.fetchImpl || DEFAULT_FETCH)("https://api.tavily.com/search", {
       method: "POST",
       headers: {
@@ -343,9 +448,10 @@ async function runTavilySearch(
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(timeoutMs),
+      signal,
     });
 
+    input.signal?.throwIfAborted();
     if (!response.ok) {
       const fallback = await degradeToDuckDuckGo(input);
       if (fallback) return fallback;
@@ -357,6 +463,7 @@ async function runTavilySearch(
     }
 
     const data = (await response.json()) as { results?: TavilyResult[] };
+    input.signal?.throwIfAborted();
     const ordered = rerankCitations(normalizeCitations(data.results), isNews, input.now);
     const citations = input.userId
       ? await decisionEnhancements.rerank(
@@ -384,6 +491,7 @@ async function runTavilySearch(
       provider: "tavily",
     };
   } catch (error) {
+    if (input.signal?.aborted) throw error;
     const fallback = await degradeToDuckDuckGo(input);
     if (fallback) return fallback;
     const isTimeout = error instanceof Error && error.name === "TimeoutError";

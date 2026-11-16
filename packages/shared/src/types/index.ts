@@ -411,6 +411,7 @@ export interface PromptTemplate {
   importedAt: number;
 }
 
+export type { ChatPreparationCancelRequest, ChatPreparationRequest } from "./chat-preparation";
 export * from "./decisions";
 export * from "./library";
 export type {
@@ -426,3 +427,4 @@ export type {
   TaskRecipe,
 } from "./recipes";
 export * from "./reviews";
+export * from "./search-settings";

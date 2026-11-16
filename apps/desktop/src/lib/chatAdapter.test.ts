@@ -133,6 +133,7 @@ function createStubServerApi() {
         return new Response("ok", { status: 200 });
       },
       syncSidecar: async () => ({ userMessageId: "u1", assistantMessageId: "a1" }),
+      cancelChatPreparation: async () => ({ success: true }),
       chatPrepare: async () => ({
         apiKey: "sk-test",
         baseUrl: null,
@@ -250,6 +251,31 @@ function createStubServerApi() {
       }),
     },
     settings: {
+      setNativeSearchConnection: async () => ({ success: true }),
+      setOpenRouterSearchConnection: async () => ({ success: true }),
+      searchConfiguration: async () => ({
+        settings: {},
+        status: {
+          configured: true,
+          source: "duckduckgo",
+          selectedProvider: "auto",
+          effectiveProvider: "duckduckgo",
+          verification: "not_required",
+          pendingProviders: [],
+          revision: "fixture",
+        },
+      }),
+      searchStatus: async () => ({
+        configured: true,
+        source: "duckduckgo",
+        selectedProvider: "auto",
+        effectiveProvider: "duckduckgo",
+        verification: "not_required",
+        pendingProviders: [],
+        revision: "fixture",
+      }),
+      verifyAndActivateSearch: async () => ({ success: false, errorCode: "search_not_configured" }),
+      toolStatus: async () => ({ configured: false }),
       get: async () => ({
         settings: {
           desktop_theme: "system",

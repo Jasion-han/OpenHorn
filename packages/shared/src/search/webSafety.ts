@@ -82,10 +82,17 @@ const defaultResolve: ResolveWebHostname = async (hostname) => {
   return (await lookup(hostname, { all: true })).map(({ address }) => address);
 };
 
-/** All DNS answers must be public; unresolved hosts fail closed. No target HTTP request. */
-export async function assertPublicWebUrl(
+const TRUSTED_DOCUMENTATION_ORIGIN = "https://api-docs.deepseek.com";
+const isProxyFakeIp = (address: string) => {
+  if (isIP(address) !== 4) return false;
+  const [a, b] = address.split(".").map(Number);
+  return a === 198 && (b === 18 || b === 19);
+};
+
+async function assertWebUrl(
   raw: string,
   resolveHostname: ResolveWebHostname = defaultResolve,
+  allowOfficialDocumentationProxy = false,
 ): Promise<void> {
   const url = parsePublicWebUrl(raw);
   const hostname = url.hostname.replace(/^\[|\]$/g, "");
@@ -107,10 +114,27 @@ export async function assertPublicWebUrl(
   } catch {
     throw new Error("unsafe_url");
   }
+  // This static vendor documentation origin is authenticated by HTTPS/TLS, like
+  // our fixed official API endpoints. Never apply its proxy exception to an
+  // arbitrary host, HTTP URL, mixed DNS answers, literal IP, or local interface.
+  const officialDocumentationProxy =
+    allowOfficialDocumentationProxy &&
+    url.origin === TRUSTED_DOCUMENTATION_ORIGIN &&
+    addresses.length > 0 &&
+    addresses.every(isProxyFakeIp);
   if (
     !addresses.length ||
-    addresses.some((a) => !isIP(a) || isBlockedIpAddress(a) || localAddresses.has(canonicalIp(a)))
+    addresses.some((a) => !isIP(a) || localAddresses.has(canonicalIp(a))) ||
+    (!officialDocumentationProxy && addresses.some(isBlockedIpAddress))
   ) {
     throw new Error("unsafe_url");
   }
 }
+
+/** All DNS answers must be public; paid tools and arbitrary targets fail closed. */
+export const assertPublicWebUrl = (raw: string, resolveHostname?: ResolveWebHostname) =>
+  assertWebUrl(raw, resolveHostname);
+
+/** Page reads may use a fake-IP proxy only for the fixed official HTTPS docs origin. */
+export const assertPublicPageUrl = (raw: string, resolveHostname?: ResolveWebHostname) =>
+  assertWebUrl(raw, resolveHostname, true);

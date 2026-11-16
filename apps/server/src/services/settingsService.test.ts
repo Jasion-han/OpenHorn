@@ -166,3 +166,29 @@ test("settings: user isolation", async () => {
     await db.delete(users).where(eq(users.id, u2));
   }
 });
+
+test("settings: special object keys remain own string values through JSON", async () => {
+  const userId = crypto.randomUUID();
+  await db.insert(users).values({
+    id: userId,
+    email: `${userId}@test.local`,
+    username: "u",
+    passwordHash: "x",
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
+  const keys = ["__proto__", "constructor", "toString", "normal"];
+  try {
+    for (const key of keys) await setSettingValue(userId, key, `value-${key}`);
+    const values = await getSettingValues(userId, [...keys, "missing"]);
+    const roundTrip = JSON.parse(JSON.stringify(values));
+    for (const key of keys) {
+      expect(Object.hasOwn(values, key)).toBe(true);
+      expect(roundTrip[key]).toBe(`value-${key}`);
+    }
+    expect(Object.hasOwn(values, "missing")).toBe(false);
+  } finally {
+    await db.delete(settings).where(eq(settings.userId, userId));
+    await db.delete(users).where(eq(users.id, userId));
+  }
+});

@@ -100,3 +100,53 @@ test("searchDuckDuckGo returns empty array on network error", async () => {
   });
   expect(result).toEqual([]);
 });
+
+test("DuckDuckGo Stop aborts an active request without another retry", async () => {
+  const controller = new AbortController();
+  let entered!: () => void;
+  const started = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  let requests = 0;
+  const pending = searchDuckDuckGo(`cancel-active-${crypto.randomUUID()}`, {
+    signal: controller.signal,
+    fetchImpl: async (_url, init) => {
+      requests++;
+      entered();
+      return new Promise<Response>((_resolve, reject) =>
+        init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true }),
+      );
+    },
+  });
+  await started;
+  controller.abort();
+  await expect(pending).rejects.toThrow();
+  expect(requests).toBe(1);
+});
+
+test("DuckDuckGo Stop interrupts backoff and cannot launch the next retry", async () => {
+  const controller = new AbortController();
+  let entered!: () => void, finishSleep!: () => void;
+  const sleeping = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  let requests = 0;
+  const pending = searchDuckDuckGo(`cancel-backoff-${crypto.randomUUID()}`, {
+    signal: controller.signal,
+    fetchImpl: async () => {
+      requests++;
+      return new Response("", { status: 202 });
+    },
+    sleep: async () => {
+      entered();
+      return new Promise<void>((resolve) => {
+        finishSleep = resolve;
+      });
+    },
+  });
+  await sleeping;
+  controller.abort();
+  await expect(pending).rejects.toThrow();
+  finishSleep();
+  expect(requests).toBe(1);
+});

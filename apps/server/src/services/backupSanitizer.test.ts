@@ -50,3 +50,14 @@ test("safe settings validate both the known key and the bounded value", () => {
   expect(isSafeBackupSetting({ key: "unrecognizedHarmlessName", value: "secret" })).toBe(false);
   expect(isSafeBackupSetting({ key: "chat.systemPrompt", value: "secret" })).toBe(false);
 });
+
+test("native search preference is safe while its connection, active credential and derived runtime are never backed up", () => {
+  expect(isSafeBackupSetting({ key: "liveSearch.provider", value: "deepseek-native" })).toBe(true);
+  for (const key of [
+    "deepseek.nativeSearchConnection",
+    "deepseek.activeNativeSearchConnection",
+    "deepseek.nativeSearchRuntime",
+    "liveSearch.verification.deepseek-native",
+  ])
+    expect(isSafeBackupSetting({ key, value: "synthetic-secret" })).toBe(false);
+});

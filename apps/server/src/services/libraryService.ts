@@ -19,6 +19,7 @@ import {
   packLibrarySources,
   utf8Bytes,
 } from "shared/library";
+import { readToolRuntime } from "shared/tool-connection";
 import type {
   LibraryDocument,
   LibraryDocumentDetail,
@@ -32,13 +33,14 @@ import { db } from "../db";
 import { generateId } from "../utils";
 import { getChannelById, resolveModelIdFromChannelItem } from "./channelService";
 import { chunkText } from "./chunkingService";
-import { requestLibraryOcr } from "./libraryOcr";
 import {
   LibraryParseError,
   parseLibraryOriginal,
   validateLibraryOcrOriginal,
 } from "./libraryParser";
+import { requestLibraryToolParse } from "./libraryToolParser";
 import { getSettingValues } from "./settingsService";
+import { toolConnectionFingerprint } from "./toolConnectionService";
 
 export class LibraryError extends Error {
   constructor(
@@ -426,19 +428,28 @@ export async function indexLibraryDocument(
   }
   return getLibraryDocument(userId, id);
 }
-export async function ocrLibraryDocument(userId: string, id: string): Promise<LibraryDocument> {
+export async function ocrLibraryDocument(
+  userId: string,
+  id: string,
+  connectionToken?: string,
+): Promise<LibraryDocument> {
   // Ownership is checked before credentials; the claim repeats all mutable eligibility checks.
   await getLibraryDocument(userId, id);
-  const values = await getSettingValues(userId, ["deepseek.toolsApiKey"]);
-  const apiKey = values["deepseek.toolsApiKey"]?.trim();
-  if (!apiKey) throw new LibraryError("library_ocr_key_required");
+  const values = await getSettingValues(userId, ["tools.runtime", "tools.connection"]);
+  const connection = readToolRuntime(values);
+  if (!connection) throw new LibraryError("library_ocr_key_required");
+  if (
+    (connectionToken || values["tools.connection"] !== undefined) &&
+    connectionToken !== toolConnectionFingerprint(connection)
+  )
+    throw new LibraryError("library_conflict", 409);
   return indexLibraryDocument(
     userId,
     id,
     async (bytes, fileType, expectedPages) => {
       // Fetch the immutable owned filename; a deletion here fails without an upstream request.
       const original = await getLibraryOriginal(userId, id);
-      return requestLibraryOcr(bytes, original.fileName, fileType, apiKey, expectedPages);
+      return requestLibraryToolParse(bytes, original.fileName, fileType, connection, expectedPages);
     },
     { cloudOcr: true },
   );

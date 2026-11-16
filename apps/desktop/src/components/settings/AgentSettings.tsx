@@ -1,8 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Badge, Button, Input, Label, SettingsCard, SettingsSection, Switch } from "ui";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Badge, Button, SettingsCard, SettingsSection } from "ui";
 import { getGlobalDefaultChannel } from "../../lib/defaultChannel";
 import { getAgentSettingsLabel } from "../../lib/i18n/agent";
-import { notifyError, notifySuccess } from "../../lib/notify";
 import { createServerApi } from "../../lib/serverApi";
 import { BACKEND_UP_EVENT } from "../../stores/backendStatusStore";
 import type { ApiChannel, Channel } from "../../types/chat";
@@ -12,8 +11,7 @@ import { JevSettings } from "./JevSettings";
 
 const api = createServerApi();
 
-const TAVILY_API_KEY_SETTING = "liveSearch.tavilyApiKey";
-const TAVILY_ENABLED_SETTING = "liveSearch.tavilyEnabled";
+const SETTINGS_UPDATED_EVENT = "openhorn:agent-settings-updated";
 
 function mapChannel(channel: ApiChannel): Channel {
   return {
@@ -45,110 +43,58 @@ function mapChannel(channel: ApiChannel): Channel {
 
 export function AgentSettings() {
   const [channels, setChannels] = useState<Channel[]>([]);
-  const [, setLoading] = useState(false);
-
-  const [tavilyApiKey, setTavilyApiKey] = useState("");
-  const [savedTavilyApiKey, setSavedTavilyApiKey] = useState("");
-  const [savingTavilyApiKey, setSavingTavilyApiKey] = useState(false);
-  const [tavilyEnabled, setTavilyEnabled] = useState(true);
-  const [savingTavilyEnabled, setSavingTavilyEnabled] = useState(false);
-
+  const [loading, setLoading] = useState(true);
+  const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const lifecycle = useRef({ mounted: false, request: 0, loaded: false });
   const defaultChannel = useMemo(() => getGlobalDefaultChannel(channels), [channels]);
 
   const loadAll = useCallback(async () => {
+    const request = ++lifecycle.current.request;
+    const current = () => lifecycle.current.mounted && lifecycle.current.request === request;
     setLoading(true);
+    setLoadError(false);
     try {
-      const [{ channels }, { settings }] = await Promise.all([
-        api.channels.list(),
-        api.settings.get([TAVILY_API_KEY_SETTING, TAVILY_ENABLED_SETTING]),
-      ]);
-
+      const { channels } = await api.channels.list();
+      if (!current()) return;
       setChannels(channels.map(mapChannel));
-
-      const currentKey = settings[TAVILY_API_KEY_SETTING] || "";
-      const enabledRaw = settings[TAVILY_ENABLED_SETTING];
-      setTavilyApiKey(currentKey);
-      setSavedTavilyApiKey(currentKey);
-      setTavilyEnabled(
-        enabledRaw == null ? true : String(enabledRaw).trim().toLowerCase() !== "false",
-      );
-    } catch (error) {
-      notifyError(
-        getAgentSettingsLabel("settings.agent.notify.loadFailedTitle"),
-        error instanceof Error
-          ? error.message
-          : getAgentSettingsLabel("settings.agent.notify.loadFailedBody"),
-      );
+      lifecycle.current.loaded = true;
+      setLoaded(true);
+    } catch {
+      if (current()) setLoadError(true);
     } finally {
-      setLoading(false);
+      if (current()) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
+    lifecycle.current.mounted = true;
     void loadAll();
-  }, [loadAll]);
-
-  useEffect(() => {
-    const onUp = () => {
-      void loadAll();
-    };
-
+    const onUp = () => void loadAll();
     window.addEventListener(BACKEND_UP_EVENT, onUp);
+    window.addEventListener(SETTINGS_UPDATED_EVENT, onUp);
     return () => {
+      lifecycle.current.mounted = false;
+      lifecycle.current.request++;
       window.removeEventListener(BACKEND_UP_EVENT, onUp);
+      window.removeEventListener(SETTINGS_UPDATED_EVENT, onUp);
     };
   }, [loadAll]);
-
-  const handleSaveTavilyApiKey = async () => {
-    setSavingTavilyApiKey(true);
-    try {
-      await api.settings.set(TAVILY_API_KEY_SETTING, tavilyApiKey.trim() || null);
-      setSavedTavilyApiKey(tavilyApiKey.trim());
-      notifySuccess(
-        getAgentSettingsLabel("settings.agent.notify.savedTitle"),
-        tavilyApiKey.trim()
-          ? getAgentSettingsLabel("settings.agent.notify.tavilyKeyUpdatedBody")
-          : getAgentSettingsLabel("settings.agent.notify.tavilyKeyClearedBody"),
-      );
-    } catch (error) {
-      notifyError(
-        getAgentSettingsLabel("settings.agent.notify.saveFailedTitle"),
-        error instanceof Error
-          ? error.message
-          : getAgentSettingsLabel("settings.agent.notify.saveTavilyKeyFailedBody"),
-      );
-    } finally {
-      setSavingTavilyApiKey(false);
-    }
-  };
-
-  const handleToggleTavilyEnabled = async () => {
-    const next = !tavilyEnabled;
-    setTavilyEnabled(next);
-    setSavingTavilyEnabled(true);
-    try {
-      await api.settings.set(TAVILY_ENABLED_SETTING, next ? "true" : "false");
-      notifySuccess(
-        getAgentSettingsLabel("settings.agent.notify.updatedTitle"),
-        next
-          ? getAgentSettingsLabel("settings.agent.notify.tavilyEnabledBody")
-          : getAgentSettingsLabel("settings.agent.notify.tavilyDisabledBody"),
-      );
-    } catch (error) {
-      setTavilyEnabled(!next);
-      notifyError(
-        getAgentSettingsLabel("settings.agent.notify.updateFailedTitle"),
-        error instanceof Error
-          ? error.message
-          : getAgentSettingsLabel("settings.agent.notify.updateTavilyFailedBody"),
-      );
-    } finally {
-      setSavingTavilyEnabled(false);
-    }
-  };
 
   return (
     <div className="flex flex-col gap-8">
+      {loadError ? (
+        <div role="alert" className="flex items-center justify-between gap-3 text-sm">
+          <span>{getAgentSettingsLabel("settings.agent.notify.loadFailedBody")}</span>
+          <Button variant="outline" size="sm" onClick={() => void loadAll()} disabled={loading}>
+            {getAgentSettingsLabel("settings.agent.retry")}
+          </Button>
+        </div>
+      ) : !loaded ? (
+        <output className="text-sm text-muted-foreground">
+          {getAgentSettingsLabel("settings.agent.loading")}
+        </output>
+      ) : null}
       <SettingsSection
         title={getAgentSettingsLabel("settings.agent.networking.title")}
         description={getAgentSettingsLabel("settings.agent.networking.description")}
@@ -185,93 +131,16 @@ export function AgentSettings() {
                   <span className="sr-only">{defaultChannel.provider}</span>
                   <span>{defaultChannel.modelId}</span>
                 </Badge>
-              ) : (
+              ) : loaded ? (
                 <p className="text-sm text-muted-foreground">
                   {getAgentSettingsLabel("settings.agent.defaultChannel.unset")}
                 </p>
-              )}
+              ) : null}
             </div>
           </div>
         </SettingsCard>
       </SettingsSection>
 
-      <SettingsSection
-        title={getAgentSettingsLabel("settings.agent.tavily.title")}
-        description={getAgentSettingsLabel("settings.agent.tavily.description")}
-      >
-        <SettingsCard divided={false} className="p-4">
-          <div className="flex flex-col gap-3">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-sm font-medium">
-                  {getAgentSettingsLabel("settings.agent.tavily.userKeyTitle")}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  {getAgentSettingsLabel("settings.agent.tavily.userKeyDescription")}
-                </p>
-              </div>
-              {!tavilyEnabled ? (
-                <Badge variant="outline">
-                  {getAgentSettingsLabel("settings.agent.tavily.badge.disabled")}
-                </Badge>
-              ) : savedTavilyApiKey ? (
-                <Badge variant="secondary">
-                  {getAgentSettingsLabel("settings.agent.tavily.badge.userOverride")}
-                </Badge>
-              ) : (
-                <Badge variant="outline">
-                  {getAgentSettingsLabel("settings.agent.tavily.badge.serverDefault")}
-                </Badge>
-              )}
-            </div>
-
-            <div className="flex items-center justify-between rounded-xl border border-border/50 bg-background/60 p-3">
-              <div>
-                <p className="text-sm font-medium">
-                  {getAgentSettingsLabel("settings.agent.tavily.enableTitle")}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  {getAgentSettingsLabel("settings.agent.tavily.enableDescription")}
-                </p>
-              </div>
-              <Switch
-                checked={tavilyEnabled}
-                onCheckedChange={() => void handleToggleTavilyEnabled()}
-                disabled={savingTavilyEnabled}
-              />
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              <Label>Tavily API Key</Label>
-              <Input
-                type="password"
-                value={tavilyApiKey}
-                onChange={(event) => setTavilyApiKey(event.target.value)}
-                placeholder="tvly-..."
-                autoComplete="off"
-              />
-            </div>
-
-            <div className="flex justify-end gap-2">
-              <Button
-                variant="ghost"
-                onClick={() => setTavilyApiKey(savedTavilyApiKey)}
-                disabled={savingTavilyApiKey}
-              >
-                {getAgentSettingsLabel("settings.agent.cancel")}
-              </Button>
-              <Button
-                onClick={() => void handleSaveTavilyApiKey()}
-                disabled={savingTavilyApiKey || tavilyApiKey === savedTavilyApiKey}
-              >
-                {savingTavilyApiKey
-                  ? getAgentSettingsLabel("settings.agent.saving")
-                  : getAgentSettingsLabel("settings.agent.save")}
-              </Button>
-            </div>
-          </div>
-        </SettingsCard>
-      </SettingsSection>
       <DeepSeekToolSettings />
       <JevSettings />
     </div>

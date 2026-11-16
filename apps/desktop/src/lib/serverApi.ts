@@ -1,5 +1,7 @@
 import { PROMPT_TEMPLATES_SETTING_KEY } from "shared/constants";
 import type {
+  ChatPreparationCancelRequest,
+  ChatPreparationRequest,
   CreateImportRecordInput,
   LocalImportConversationListResult,
   LocalImportRunRequest,
@@ -12,6 +14,10 @@ import type {
   PromptTemplate,
   ProviderChatMetadata,
   ProviderChatState,
+  SearchActivationRequest,
+  SearchActivationResult,
+  SearchSettingsConfiguration,
+  SearchSettingsStatus,
 } from "shared/types";
 import { useBackendStatusStore } from "../stores/backendStatusStore";
 import type {
@@ -63,6 +69,7 @@ export class SidecarSaveConflict extends Error {
 type FetchLike = typeof fetch;
 
 export interface ChatPrepareResult {
+  preparationStopped?: boolean;
   saveToken?: string;
   apiKey: string;
   baseUrl: string | null;
@@ -133,11 +140,8 @@ export interface ServerApi {
       /** Same desktop session only; retries reuse the original revision. */
       syncRevision?: { sessionId: string; sequence: number };
     }) => Promise<{ userMessageId: string; assistantMessageId: string }>;
-    chatPrepare: (data: {
-      conversationId: string;
-      content: string;
-      attachments?: string[];
-    }) => Promise<ChatPrepareResult>;
+    cancelChatPreparation: (data: ChatPreparationCancelRequest) => Promise<{ success: boolean }>;
+    chatPrepare: (data: ChatPreparationRequest) => Promise<ChatPrepareResult>;
     chatComplete: (data: {
       saveToken?: string;
       assistantMessageId: string;
@@ -225,6 +229,12 @@ export interface ServerApi {
     }>;
   };
   settings: {
+    setNativeSearchConnection: (value: string | null) => Promise<{ success: boolean }>;
+    setOpenRouterSearchConnection: (value: string | null) => Promise<{ success: boolean }>;
+    searchConfiguration: () => Promise<SearchSettingsConfiguration>;
+    searchStatus: () => Promise<SearchSettingsStatus>;
+    verifyAndActivateSearch: (input: SearchActivationRequest) => Promise<SearchActivationResult>;
+    toolStatus: () => Promise<import("shared/tool-connection").ToolServiceStatus>;
     get: (keys: string[]) => Promise<{ settings: ApiSettingsMap }>;
     set: (key: string, value: string | null) => Promise<{ success: boolean }>;
   };
@@ -583,6 +593,11 @@ export function createServerApi(options?: { baseUrl?: string; fetch?: FetchLike 
           method: "POST",
           body: JSON.stringify(data),
         }),
+      cancelChatPreparation: (data) =>
+        fetchJson(fetchImpl, baseUrl, "/messages/chat/prepare/cancel", {
+          method: "POST",
+          body: JSON.stringify(data),
+        }),
       chatPrepare: (data) =>
         fetchJson(fetchImpl, baseUrl, "/messages/chat/prepare", {
           method: "POST",
@@ -658,6 +673,24 @@ export function createServerApi(options?: { baseUrl?: string; fetch?: FetchLike 
     },
 
     settings: {
+      setOpenRouterSearchConnection: (value) =>
+        fetchJson(fetchImpl, baseUrl, "/settings/search/openrouter-connection", {
+          method: "PUT",
+          body: JSON.stringify({ value }),
+        }),
+      setNativeSearchConnection: (value) =>
+        fetchJson(fetchImpl, baseUrl, "/settings/search/native-connection", {
+          method: "PUT",
+          body: JSON.stringify({ value }),
+        }),
+      searchConfiguration: () => fetchJson(fetchImpl, baseUrl, "/settings/search-configuration"),
+      searchStatus: () => fetchJson(fetchImpl, baseUrl, "/settings/search-status"),
+      verifyAndActivateSearch: (input) =>
+        fetchJson(fetchImpl, baseUrl, "/settings/search/verify-and-activate", {
+          method: "POST",
+          body: JSON.stringify(input),
+        }),
+      toolStatus: () => fetchJson(fetchImpl, baseUrl, "/settings/tool-status"),
       get: (keys) => {
         const query = encodeURIComponent((keys || []).join(","));
         return fetchJson(fetchImpl, baseUrl, `/settings?keys=${query}`);

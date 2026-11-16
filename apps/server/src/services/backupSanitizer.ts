@@ -60,6 +60,8 @@ export function isSafeBackupSetting(row: { key: string; value: string }): boolea
     return row.value === "true" || row.value === "false";
   return (
     row.key === "liveSearch.provider" &&
-    ["auto", "tavily", "deepseek", "duckduckgo"].includes(row.value)
+    ["auto", "tavily", "deepseek", "deepseek-native", "openrouter", "duckduckgo"].includes(
+      row.value,
+    )
   );
 }

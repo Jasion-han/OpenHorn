@@ -16,6 +16,7 @@ export type DuckDuckGoFetchFn = (
 
 export type SearchDuckDuckGoOptions = {
   fetchImpl?: DuckDuckGoFetchFn;
+  signal?: AbortSignal;
   timeoutMs?: number;
   maxResults?: number;
   /** Override for tests; defaults to the real clock. */
@@ -38,6 +39,29 @@ const DEFAULT_SLEEP = (ms: number) => new Promise<void>((resolve) => setTimeout(
 
 type CacheEntry = { at: number; citations: SearchCitation[] };
 const responseCache = new Map<string, CacheEntry>();
+
+async function abortableSleep(
+  ms: number,
+  sleep: (ms: number) => Promise<void>,
+  signal?: AbortSignal,
+) {
+  signal?.throwIfAborted();
+  if (!signal) return sleep(ms);
+  let abort: (() => void) | undefined;
+  try {
+    await Promise.race([
+      sleep(ms),
+      new Promise<never>((_, reject) => {
+        abort = () => reject(signal.reason ?? new DOMException("Search stopped", "AbortError"));
+        if (signal.aborted) abort();
+        else signal.addEventListener("abort", abort, { once: true });
+      }),
+    ]);
+    signal.throwIfAborted();
+  } finally {
+    if (abort) signal.removeEventListener("abort", abort);
+  }
+}
 
 /** Exposed for tests that need a clean slate. */
 export function __clearDuckDuckGoCache() {
@@ -129,6 +153,7 @@ export async function searchDuckDuckGo(
   query: string,
   options: SearchDuckDuckGoOptions = {},
 ): Promise<SearchCitation[]> {
+  options.signal?.throwIfAborted();
   const trimmed = query.trim();
   if (!trimmed) return [];
 
@@ -146,7 +171,10 @@ export async function searchDuckDuckGo(
   }
 
   for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+    options.signal?.throwIfAborted();
     try {
+      const deadline = AbortSignal.timeout(timeoutMs);
+      const signal = options.signal ? AbortSignal.any([options.signal, deadline]) : deadline;
       const response = await fetchImpl(DDG_LITE_ENDPOINT, {
         method: "POST",
         headers: {
@@ -156,13 +184,18 @@ export async function searchDuckDuckGo(
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
         },
         body: new URLSearchParams({ q: trimmed }).toString(),
-        signal: AbortSignal.timeout(timeoutMs),
+        signal,
       });
 
+      options.signal?.throwIfAborted();
       if (isSoftRateLimited(response.status)) {
         if (attempt < maxRetries) {
           // Exponential backoff with jitter to ride out `202` soft-blocks.
-          await sleep(150 * 2 ** attempt + Math.floor(Math.random() * 120));
+          await abortableSleep(
+            150 * 2 ** attempt + Math.floor(Math.random() * 120),
+            sleep,
+            options.signal,
+          );
           continue;
         }
         return [];
@@ -171,13 +204,19 @@ export async function searchDuckDuckGo(
       if (!response.ok) return [];
 
       const html = await response.text();
+      options.signal?.throwIfAborted();
       const citations = parseDuckDuckGoLiteHtml(html, maxResults);
       responseCache.set(cacheKey, { at: now(), citations });
       return citations;
-    } catch {
+    } catch (error) {
+      if (options.signal?.aborted) throw error;
       // Timeout / network error — try again if we still have budget.
       if (attempt < maxRetries) {
-        await sleep(150 * 2 ** attempt + Math.floor(Math.random() * 120));
+        await abortableSleep(
+          150 * 2 ** attempt + Math.floor(Math.random() * 120),
+          sleep,
+          options.signal,
+        );
         continue;
       }
       return [];
