@@ -1,0 +1,107 @@
+{
+  "status": "complete",
+  "completedAt": "2026-11-16T04:18:47.746210+00:00",
+  "model": "deepseek/deepseek-v4-flash",
+  "policy": {
+    "reasoning": false,
+    "providerSort": "latency",
+    "automaticRetries": 0,
+    "legacyProRetainedUntilSuccessfulVerification": true,
+    "legacyModelDisplayAndKeyEditPreserved": true,
+    "requestedSummaryBullets": 3
+  },
+  "live": {
+    "successfulActivationProbe": true,
+    "activationProbeTiming": "unavailable: local result collection failed after successful activation",
+    "timedVerificationProbe": {
+      "elapsedSeconds": 4.76,
+      "success": true,
+      "errorCode": null
+    },
+    "totalExplicitProbeCount": 2,
+    "automaticRetries": 0,
+    "actualModel": "deepseek/deepseek-v4-flash",
+    "effectiveProvider": "openrouter",
+    "verification": "verified",
+    "availableProviders": ["tavily", "openrouter"],
+    "configuredProviders": ["tavily", "openrouter"],
+    "pendingProviders": [],
+    "protectedSettingsUnchangedDuringTimedProbe": true,
+    "sameCandidateAndActiveKey": true,
+    "environmentFilesUnchanged": true
+  },
+  "tests": {
+    "shared": {
+      "pass": 128,
+      "fail": 0
+    },
+    "server": {
+      "pass": 646,
+      "fail": 0,
+      "timeoutMs": 30000
+    },
+    "desktop": {
+      "pass": 734,
+      "fail": 0
+    },
+    "sidecar": {
+      "pass": 357,
+      "fail": 0
+    },
+    "browserChecks": 23,
+    "typecheck": "passed again on final source",
+    "biome": {
+      "passed": true,
+      "checkedFiles": 935
+    }
+  },
+  "recoveredChecks": [
+    "Initial parallel server run had 2 fixture timeout failures and 1 stale Pro model assertion; corrected the stale fixture and re-ran the full isolated suite with 30s timeout: 646 passed.",
+    "Legacy-model browser scenario initially did not restore fixture verification state; fixed state restoration. Final browser check passed.",
+    "One browser attempt exceeded navigation timeout during heavy local build load; final navigation allows 120s and all 23 checks passed."
+  ],
+  "build": {
+    "sidecarHost": "passed",
+    "tauriDebugApp": "passed",
+    "binarySha256": "7818140c0e9f24d0a0e80317c9d03032cd9dd206f8e68e1ccafafc08c3280f5d"
+  },
+  "native": {
+    "performed": true,
+    "relaunchedFinalBundle": true,
+    "actualModelObserved": true,
+    "expandedTavilyAndOpenRouterWithoutDuplicates": true,
+    "tavilyMaskedKeyObserved": true,
+    "restoredOpenRouterViewWithoutActivation": true,
+    "menuLightPaletteObserved": true,
+    "screenshots": {
+      "native/01-active-flash.png": "78773941a7b66d21e1ab8d6561af28dd940947943b0d213e3f3b80da5847ab34",
+      "native/02-sources-menu.png": "0b40ac17843cffd25b733e8d73ec4317a3daf71124c335cbff726ed08afc96b8"
+    }
+  },
+  "preservation": {
+    "baselineFiles": 291,
+    "changedBaselineFiles": [
+      "apps/desktop/src/components/settings/OpenRouterSearchFields.tsx",
+      "apps/server/src/services/openRouterSearchSettings.test.ts",
+      "packages/shared/src/openrouter-search.test.ts",
+      "packages/shared/src/openrouter-search.ts",
+      "packages/shared/src/search/openRouterSearchProvider.test.ts",
+      "packages/shared/src/search/openRouterSearchProvider.ts",
+      ".trellis/spec/desktop/frontend/component-guidelines.md",
+      "apps/desktop/scripts/deepseek-capabilities.browser.mjs",
+      "apps/desktop/src/components/settings/DeepSeekToolSettings.tsx",
+      "apps/server/src/services/messageService.native-web.fixture.ts",
+      "apps/sidecar/src/protocol.test.ts",
+      "apps/sidecar/src/protocol.ts"
+    ],
+    "missingBaselineFiles": [],
+    "noStagingOrCommit": true
+  },
+  "cleanup": {
+    "complete": true,
+    "temporaryDirectoryRemoved": "/var/folders/2b/0vr77k3j1yv2m83zxdkpx48c0000gn/T/openhorn-flash-84mabhf_",
+    "resumePointerRemoved": true,
+    "closedIsolatedTestDatabasesRemoved": true,
+    "kept": "running desktop/backend, user settings, unrelated WIP and formal audit evidence"
+  }
+}

@@ -1,0 +1,120 @@
+{
+  "date": "2026-11-15",
+  "scope": "Current workspace integration including pre-existing uncommitted work",
+  "status": "implemented-and-verified-without-live-paid-search-validation",
+  "searchContract": {
+    "fixedSource": "deepseek",
+    "manualOrOwnedChannel": true,
+    "modelRequired": false,
+    "connectionAndActivationAtomic": true,
+    "transactionFailureRollbackTested": true,
+    "openRouterSearchSubstitutionAllowed": false,
+    "silentProviderFallbackAllowed": false,
+    "arbitraryRelayCompatibilityClaimed": false
+  },
+  "ui": {
+    "defaultFields": ["access-channel"],
+    "manualFields": ["api-key"],
+    "endpoint": "official default; optional disclosure for relay address",
+    "sourceAndModelSelectors": false,
+    "nativeNetworking": "separate folded advanced section",
+    "browserChecks": 10,
+    "nativeObserved": [
+      "default channel selector and save button without extra fields",
+      "expanded channel menu includes a manual Key entry",
+      "manual entry shows only Key with endpoint disclosure folded",
+      "endpoint disclosure shows the official default address",
+      "final rebuilt app correctly restores the empty channel placeholder after cancel"
+    ],
+    "regression": {
+      "before": "cancel restored fields but left stale manual-entry selection text",
+      "testBeforeFix": "failed: expected empty channel placeholder; received manual entry label",
+      "fix": "keep Radix Select root controlled with a string value",
+      "after": "browser regression and final native screenshot passed"
+    },
+    "nativeCaptureRecovery": "One final launch returned cgWindowNotFound; AX remained available and native Window Zoom/restore recovered the visible window"
+  },
+  "tests": {
+    "desktop": {
+      "pass": 721,
+      "fail": 0
+    },
+    "server": {
+      "pass": 598,
+      "fail": 0
+    },
+    "sidecar": {
+      "pass": 346,
+      "fail": 0
+    },
+    "sharedAndAdapters": {
+      "pass": 178,
+      "fail": 0
+    },
+    "totalPass": 1843,
+    "typecheck": "passed across all workspaces; desktop rechecked after final control fix",
+    "biome": "passed; 887 files before this evidence file",
+    "hostSidecarBuild": "passed",
+    "tauriDebugAppBuild": "passed; rebuilt after final control fix"
+  },
+  "boundaries": {
+    "realUserSettingWritesForValidation": 0,
+    "paidSearchRequestsForValidation": 0,
+    "realDocumentUploads": 0,
+    "committed": false
+  },
+  "cleanup": {
+    "taskDirectoryRemoved": true,
+    "pointerRemoved": true,
+    "fixedTestDatabaseRemoved": true,
+    "userAppAndServerRetained": true
+  },
+  "preservation": {
+    "baselineDirtyPaths": 309,
+    "unchangedBaselinePaths": 291,
+    "changedRelatedBaselinePaths": [
+      ".trellis/spec/desktop/frontend/component-guidelines.md",
+      ".trellis/workspace/han/index.md",
+      ".trellis/workspace/han/journal-1.md",
+      "apps/desktop/scripts/deepseek-capabilities.browser.mjs",
+      "apps/desktop/src/components/settings/AgentSettings.tsx",
+      "apps/desktop/src/components/settings/DeepSeekToolSettings.tsx",
+      "apps/desktop/src/lib/i18n/agent.ts",
+      "apps/desktop/src/lib/sidecarRunSupport.ts",
+      "apps/server/src/routes/settings.ts",
+      "apps/server/src/services/searchService.ts",
+      "apps/server/src/services/settingsService.ts",
+      "apps/sidecar/src/agent/direct.test.ts",
+      "apps/sidecar/src/agent/direct.ts",
+      "packages/shared/package.json",
+      "apps/desktop/src/components/settings/ToolConnectionFields.tsx",
+      "apps/desktop/src/components/settings/toolConnectionDraft.test.ts",
+      "apps/desktop/src/components/settings/toolConnectionDraft.ts",
+      "apps/server/src/services/toolConnectionService.ts"
+    ]
+  },
+  "sourceHashes": {
+    "apps/desktop/scripts/deepseek-capabilities.browser.mjs": "674abdd0c8ceaa542572a3a0d36fe493c41e92c1bb33226485b0e4a317a87980",
+    "apps/desktop/src/components/settings/AgentSettings.tsx": "ef05d65ad88ed0fa0c6a3d9a3743c144069c4f325ef42edca15147096d7ea2f7",
+    "apps/desktop/src/components/settings/DeepSeekToolSettings.tsx": "d22cac5ba632b9e9e8e4d40ce720d2ea5e97909f761502fc09e99fbbd466645c",
+    "apps/desktop/src/lib/i18n/agent.ts": "0f5a1f883373b96ae37115eb3adcd419a5f4a541dab71e2d16706e61ad4b2310",
+    "apps/desktop/src/lib/sidecarRunSupport.ts": "ef35c8884c0d8988c44cc9782379fed924990ad84bf1ae43871919ae3e3342e1",
+    "apps/desktop/tests/deepseek-capabilities.tsx": "4ebc5e13272b3e9ba6ef8109e199d4e7bd05ccf762aca92cc4e41249b0d8106b",
+    "apps/server/src/routes/settings.ts": "96e602983ec6235a76cae9014d1e546dc54aacd8c4311359eee342d38586ceca",
+    "apps/server/src/services/searchService.ts": "9f24bd7d869c1a66d6ff0f5e58b9b532478bd4da9b40019805a1cecd4addbdda",
+    "apps/server/src/services/settingsService.ts": "f193aaba2e26372f5531b8354a3a8d4110b41e5c09f4c9fa4e83c967b1ed644c",
+    "apps/sidecar/src/agent/direct.test.ts": "0c9ded1daff24456679a342031a7c44474ef74433d09f73bd999c66b5f595a1e",
+    "apps/sidecar/src/agent/direct.ts": "c23ae9fa533e4333b2f125897bdc7ccf7830cbdb30d9130f11ce11ce4c904855",
+    "packages/shared/package.json": "a3836070c920243d302e6d1cfbae7e5d88d8de27ebb57dd1945414288c43c99c",
+    "apps/desktop/src/components/settings/DeepSeekNativeWebSettings.tsx": "7a2cc440c963f422328e660ac055c6e1de6d28caef50ea4b12da797c1703118d",
+    "apps/desktop/src/components/settings/ToolConnectionFields.tsx": "66463b42bc43a70d8c7c404a4bca0c1d0b3b2270afc75c72b3727502a47be2f7",
+    "apps/desktop/src/components/settings/toolConnectionDraft.test.ts": "655c7f88fea39e30caecc18b1e9dd832033b6269b0b05ad29e3924f8222a656c",
+    "apps/desktop/src/components/settings/toolConnectionDraft.ts": "e7158cd45e3667ad0860e5ebca2ccbb4e2e92989fd258ded23e5003e5da9ce8a",
+    "apps/server/src/services/deepseekSearchSettings.test.ts": "54dbdc16a9c576625b7ce30791299056de569e1d06906f45b8d8f37c93f0ee7e",
+    "apps/server/src/services/deepseekSearchSettings.ts": "91aeb77f32a22d52662d6fe7e43cba941301696f0f41893f10096ceb29bb6620",
+    "apps/server/src/services/toolConnectionService.ts": "94412fa622094808822ef3b2732f99de4f2c884e87381eaad5199947dd326a4c",
+    "packages/shared/src/deepseek-search.test.ts": "556317d05dcbe6abc80b0fbd1ee256bae55a4d7489bc8253f840849893f852e4",
+    "packages/shared/src/deepseek-search.ts": "271684125c1180bc1e854439ab75d550ebd82a96b6c11788c49436a0e00dd2d5"
+  },
+  "nativeAppSha256": "51924a0e2c2ee1d4b0b2bdcb08dd754745ff884a4402daaeb8a9a592b51e0934"
+}

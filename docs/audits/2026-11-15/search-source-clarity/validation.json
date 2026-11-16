@@ -1,0 +1,180 @@
+{
+  "generatedAt": "2026-11-15T09:39:56.497473+00:00",
+  "git": {
+    "head": "dc820f0ffce670b4e4acb00f1eac8276d91d1186",
+    "committed": false,
+    "scope": "Current integration workspace with pre-existing unrelated WIP; no staging, commit or push performed."
+  },
+  "officialReferences": [
+    "https://api-docs.deepseek.com/api/search/",
+    "https://api-docs.deepseek.com/guides/search/"
+  ],
+  "implementation": {
+    "singleSource": true,
+    "saveDoesNotActivate": true,
+    "manualDeepSeekOnly": true,
+    "atomicConfigurationSnapshot": true,
+    "fingerprintRevocationEnforcedAtRuntime": true,
+    "legacyPaidActivationWritesProtected": true,
+    "candidateCredentialsSeparatedFromActive": true
+  },
+  "tests": {
+    "server": 623,
+    "desktop": 724,
+    "sidecar": 346,
+    "shared": 84,
+    "adapters": 94,
+    "total": 1871,
+    "failed": 0,
+    "browserChecks": 12,
+    "browserErrors": [],
+    "typecheck": "passed (all workspace tasks)",
+    "biome": "passed (896 files)",
+    "tauriDebugBuild": "passed"
+  },
+  "nativeVerification": {
+    "performed": true,
+    "observed": [
+      "Opened the rebuilt native app and Agent settings.",
+      "Saw current Tavily source unchanged while selecting DeepSeek.",
+      "Expanded the source menu: only Tavily, DeepSeek, DuckDuckGo.",
+      "Observed light selected and keyboard focus states.",
+      "DeepSeek default had one Key field and folded official address.",
+      "Typed only a synthetic unsaved UI fixture string.",
+      "Expanded address, changed to example relay, saw the old Key cleared and save/verify disabled.",
+      "Clicked cancel and visually observed official address and empty Key restored.",
+      "Final native build: selected DuckDuckGo without enabling it, saw the Key fields disappear while current source stayed Tavily.",
+      "Final native build: selected DeepSeek, saw the folded address and empty Key, typed a synthetic unsaved draft, saw Save enabled and Verify disabled, canceled it and restored Tavily."
+    ],
+    "afterward": "After the desktop was unlocked, relaunched the final rebuilt native app, opened Agent settings, visually checked all three source forms and unchanged current Tavily, canceled the synthetic unsaved Key draft, and restored the Tavily view.",
+    "realKeysUsedForProbes": false,
+    "realConfigurationSaved": false,
+    "paidRequestsPerformed": false,
+    "actualCurrentSource": "tavily",
+    "actualVerification": "unverified",
+    "providerAndLegacySwitchUnchanged": true,
+    "finalBuildRelaunched": true
+  },
+  "preservation": {
+    "baselineRecordedFileCount": 166,
+    "unchangedRecordedFiles": 145,
+    "changedRecordedFiles": [
+      ".trellis/spec/desktop/frontend/component-guidelines.md",
+      ".trellis/workspace/han/index.md",
+      ".trellis/workspace/han/journal-1.md",
+      "apps/desktop/scripts/deepseek-capabilities.browser.mjs",
+      "apps/desktop/src/components/settings/AgentSettings.tsx",
+      "apps/desktop/src/components/settings/DeepSeekToolSettings.tsx",
+      "apps/desktop/src/lib/chatAdapter.test.ts",
+      "apps/desktop/src/lib/i18n/agent.ts",
+      "apps/desktop/src/lib/serverApi.ts",
+      "apps/desktop/src/lib/sidecarRunSupport.ts",
+      "apps/server/src/routes/settings.ts",
+      "apps/server/src/services/searchService.ts",
+      "apps/server/src/services/settingsService.ts",
+      "packages/shared/package.json",
+      "packages/shared/src/types/index.ts",
+      "apps/desktop/src/components/settings/ToolConnectionFields.tsx",
+      "apps/desktop/src/components/settings/toolConnectionDraft.test.ts",
+      "apps/desktop/src/components/settings/toolConnectionDraft.ts",
+      "apps/server/src/services/deepseekSearchSettings.test.ts",
+      "apps/server/src/services/deepseekSearchSettings.ts",
+      "packages/shared/src/deepseek-search.ts"
+    ],
+    "missingRecordedFiles": [],
+    "limitation": "Initial git porcelain baseline records existing files only; untracked directory contents were not individually hashed. No claim of complete byte coverage for all pre-existing untracked contents."
+  },
+  "sourceSha256": {
+    "apps/server/src/services/searchSettingsService.ts": "7af31afa800d8da575275b6a8c0ed782fd326f950577c6f70d42e059f1b2fba4",
+    "apps/server/src/services/searchSettingsService.test.ts": "4b7841e478d22637e6de1915050e19b0af2aa04516df94d2563a82f893b615e8",
+    "apps/server/src/services/deepseekSearchSettings.ts": "409ed45fb0093f254260187e91b67442fa34cd5dff2bb864f2b7478b079d4c66",
+    "apps/server/src/services/settingsService.ts": "af0ec01615337a2f49f02e61b985e3b5862fc8955510033ff29198e8af154ad6",
+    "apps/server/src/services/searchService.ts": "af2f3dcabcff3e18816a5f5aaea7a5722d1d680830adf26a26938c34cf4b6f43",
+    "apps/server/src/routes/settings.ts": "b8d2be719fac45c8bb23445a626cefdc4622657b9c1b79a3318af88d03b52b93",
+    "apps/desktop/src/components/settings/DeepSeekToolSettings.tsx": "45ec515b1059c1fb279552046c27de6b511957371e8dfe9d4b4716bc4b76000e",
+    "apps/desktop/src/components/settings/ToolConnectionFields.tsx": "bea606b16ba4e30f83c059f8cbb3044df1454425690459a101029ed008d9630f",
+    "apps/desktop/src/components/settings/AgentSettings.tsx": "c7a1042e69319c29244c65b8e47499148db10db7417435862eafa3283ee2536a",
+    "apps/desktop/src/components/settings/toolConnectionDraft.ts": "b9a51028d9c56b71bc1979695cecccd3acc473b50e00859139917678dd1a401d",
+    "apps/desktop/src/lib/sidecarRunSupport.ts": "6fab867cd116ebacc963c03754ffcf5dac4b3c2e57b5496b04f91439f52116de",
+    "apps/desktop/src/lib/serverApi.ts": "bf5cdcedfc75fa6557299768de4fe42d15dc15c9b005c5c7ef5b8db08e51523e",
+    "apps/desktop/src/lib/i18n/agent.ts": "6b3cd5b0490a6e72a47eb03b725ac18e0d2e8c0b41d13096b1d516eec080ebc9",
+    "packages/shared/src/types/search-settings.ts": "d32d9b8f7202e0f3d4438703f995ebcb7e310fddf02b6d3b8adb59707ba0cef5",
+    "packages/shared/src/search-settings.ts": "a0c7efda9477574495d3c00fc5a00c325b70ca5ef7aac25c19d5086a5abb1898",
+    "packages/shared/src/deepseek-search.ts": "43224f6371c3905d9414ae90db2d6c34c9c6ee4867ac6cd3fbf615bb5d47bc7a",
+    "packages/shared/src/search/providerSelection.ts": "12adddb05f277e19ecfbfe9217f7888db130b94cbe1375cf6c3b707a5ade27ca",
+    "packages/shared/package.json": "c9e16aec66e3a9110bbe5c2f39305ca39ee92097fd598db3d3d06398880934f8",
+    "apps/server/src/services/searchSettingsTransaction.ts": "3420535504c162b0a4bdac36f2d958f0ec61d90e57c06d4f77cc4c5f28639944",
+    "apps/server/src/services/deepseekSearchSettings.test.ts": "aef6e9332b44c8c628d70e2a8512dcddd982bdca9566b50e4b718d82da805176",
+    "apps/desktop/src/lib/sidecarRunSupport.search.test.ts": "ab170969665e21e892734aa08c6bb5765a32a20cefca5fc48428af76b45d0d51",
+    "apps/desktop/src/components/settings/toolConnectionDraft.test.ts": "75bf6af642b6d336734922e785166b7006965271f577583391a14fe4dca92bbd",
+    "apps/desktop/src/lib/chatAdapter.test.ts": "2014fa9c0d2707b67a0ce2329ac395a0b8ceb012c62f0726b81051b1d3c04870",
+    "apps/desktop/scripts/deepseek-capabilities.browser.mjs": "f7832674786fa8e9d6b39c60d2dfc0ec3fe2ee01d3891e59dba4947e9e2af1cf",
+    "packages/shared/src/types/index.ts": "fa5605e47266fcd4975c9c0cbd8b663ff335ecaae9d6399cc7111272d2034c67"
+  },
+  "nativeBinarySha256": "3224c668dc16a2ae39c835e3abc9eca09402b72e981f18f01e2b85444bf666a6",
+  "limitations": [
+    "Search verification uses synthetic credentials/responses in automated tests; actual user relay capability remains untested until explicit user action.",
+    "A previous successful probe is not a guarantee of future upstream availability."
+  ],
+  "cleanup": {
+    "status": "complete",
+    "removed": [
+      "task fixture directory",
+      "openhorn-search-clarity-server-tests.log",
+      "openhorn-search-clarity-desktop-tests.log",
+      "openhorn-search-clarity-shared-tests.log",
+      "openhorn-search-clarity-adapters-tests.log",
+      "openhorn-search-clarity-sidecar-tests.log",
+      "openhorn-search-clarity-typecheck.log",
+      "openhorn-search-clarity-biome.log",
+      "openhorn-search-clarity-build.log",
+      "openhorn-search-clarity-browser.log",
+      "openhorn-search-clarity-focused.log",
+      "openhorn-search-clarity-concurrency-red.log",
+      "openhorn-search-clarity-concurrency-green.log",
+      "openhorn-search-clarity-browser-red.log",
+      "openhorn-search-clarity-delete-red.log",
+      "openhorn-search-clarity-current",
+      "openhorn-search-clarity-server-pid",
+      "openhorn-search-clarity-real-source-before.json",
+      "openhorn-search-status-before.txt"
+    ],
+    "preserved": [
+      "Running native app and loopback backend",
+      "User data and all existing provider credentials",
+      "Pre-existing unrelated WIP",
+      "Synthetic audit screenshots and validation summary"
+    ],
+    "taskTempPointerExists": false,
+    "taskFixtureDirectoryExists": false
+  },
+  "regressions": {
+    "lateRefreshRevision": {
+      "before": "Browser failed: submitted revision 3 while form displayed revision 2.",
+      "after": "Activation revision changes only when applying the displayed saved baseline; browser regression passed."
+    },
+    "concurrentLegacySelectors": {
+      "before": "Both provider=auto and tavilyEnabled=true writes fulfilled and bypassed verification.",
+      "after": "Check and mutation share a serialized short DB transaction; concurrent regression passed."
+    },
+    "inactiveDeepSeekFetch": "Inactive candidates are not exposed to default-mode URL reading.",
+    "legacyToolCredentials": "Old tool-setting writes preserve the active search connection or unavailable sentinel.",
+    "candidateDeletion": {
+      "before": "Test expected no runtime but received different-legacy-route.",
+      "after": "Deletion preserves the old active route or an unavailable sentinel within the same transaction; both invalid and valid legacy states covered."
+    }
+  },
+  "review": {
+    "status": "passed",
+    "mode": "Independent read-only review with follow-up fixes; reviewer did not edit files.",
+    "closedFindings": [
+      "Runtime revocation after channel changes",
+      "Legacy unavailable-source candidate revival",
+      "Atomic form/configuration snapshot",
+      "Paid-source activation through generic settings",
+      "Late refresh revision binding",
+      "Concurrent legacy selector writes",
+      "Dedicated candidate deletion fallback"
+    ]
+  }
+}

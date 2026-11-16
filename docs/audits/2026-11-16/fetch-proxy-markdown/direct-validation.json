@@ -1,0 +1,27 @@
+{
+  "rootCause": {
+    "hostname": "api-docs.deepseek.com",
+    "systemDnsAddresses": ["198.18.0.25"],
+    "previousFailure": "unsafe_url",
+    "secondFailurePrevented": "text/markdown was not accepted by built-in Fetch"
+  },
+  "realDirectToolReads": [
+    {
+      "url": "https://api-docs.deepseek.com/guides/responses_api.md",
+      "elapsedSeconds": 2.43,
+      "success": true,
+      "characters": 33477,
+      "originalHeadingPresent": true
+    },
+    {
+      "url": "https://api-docs.deepseek.com/quick_start/pricing.md",
+      "elapsedSeconds": 0.59,
+      "success": true,
+      "characters": 15575,
+      "originalHeadingPresent": true
+    }
+  ],
+  "scope": "Fixed official HTTPS documentation origin only, pure fake-IP DNS only; arbitrary hosts and paid tool targets retain strict public-address checks.",
+  "transport": "Domain HTTPS with explicit rejectUnauthorized=true; manually revalidate redirects. Does not claim generic pinned-IP networking.",
+  "dependenciesAdded": false
+}

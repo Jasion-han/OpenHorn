@@ -1,0 +1,113 @@
+{
+  "status": "complete",
+  "recordedAt": "2026-11-16T05:38:20.413306+00:00",
+  "rootCause": "Direct Agent merged enabled MCP web-search tools beside its configured built-in search, allowing the model to bypass the selected search provider. Not an OpenRouter failure fallback.",
+  "fix": {
+    "recognizedGeneralMcpSearchToolsHiddenInOrdinaryRuns": true,
+    "selectedBuiltInSearchPreserved": true,
+    "explicitSlashTargetForwardedDesktopToWsToDirectRuntime": true,
+    "targetOnlyOverridesOwnServerWithNetworkConsent": true,
+    "missingOrSingleServerDoesNotImplyExplicitTarget": true,
+    "unrelatedMcpAndUrlReadersPreserved": true,
+    "configuredMcpServersNotDeleted": true,
+    "scope": "OpenHorn Direct Agent tool registry; shared guidance also covers Claude built-in search. External CLI/ACP tool inventories are unchanged.",
+    "classification": "Known general-web-search tool names and explicit web-search descriptions; this does not classify arbitrary opaque custom MCP tools."
+  },
+  "tests": {
+    "sidecar": {
+      "pass": 363,
+      "fail": 0
+    },
+    "desktop": {
+      "pass": 734,
+      "fail": 0
+    },
+    "focusedFinal": {
+      "pass": 24,
+      "fail": 0
+    },
+    "types": "passed",
+    "biome": {
+      "passed": true,
+      "filesChecked": 938
+    },
+    "runtimeFixture": "Direct runtime sees web_search and URL reader but not MCP tavily_search; a real tool round calls the controlled OpenRouter endpoint once with the independent Flash Key; competing MCP calls remain zero."
+  },
+  "build": {
+    "sidecarHost": "passed",
+    "tauriDebugApp": "passed",
+    "appSha256": "fe6f8ab790187763061ee854d28da7c91ce6c848faeca79a170fc063cc9b0c0a"
+  },
+  "native": {
+    "beforeFixObserved": true,
+    "beforeFixTools": ["mcp__tavily-hikari__tavily_search", "mcp__tavily-hikari__tavily_extract"],
+    "newBundleLaunchRequested": true,
+    "afterFixTestPerformed": true,
+    "next": null,
+    "notificationTriggered": true,
+    "deliveredUrgency": "time-sensitive",
+    "screenshots": {
+      "native/01-before-mcp-bypass.png": "523891c8e4407f70081db083b6d63a44ff9a1bb908ccc14f5cfba4bad1a6de2c",
+      "native/02-after-agent-sent.png": "5f86aca3077ba931dda6d2f73f4ecfe64717c526c762fbafa184a8e71900eb58"
+    },
+    "afterFixPassed": true,
+    "resolvedPreviousBlocker": "Mac IOConsoleLocked=true and CGSSessionScreenIsLocked=true; native CUA reports cgWindowNotFound. No unlock bypass attempted.",
+    "remainingBlocker": null,
+    "evidence": "native-agent-validation.json",
+    "newConversationId": "827102b3-8a37-4be4-91e7-655eac594cc9",
+    "newConversationTitle": "核实联网搜索支持模型",
+    "toolTraceExpandedAndLeftVisible": true
+  },
+  "preservation": {
+    "searchSettingsUnchanged": true,
+    "mcpConfigurationsUnchanged": true,
+    "environmentFilesUnchanged": true,
+    "effectiveProvider": "openrouter",
+    "actualSearchModel": "deepseek/deepseek-v4-flash",
+    "availableProviders": ["tavily", "openrouter"],
+    "changedBaselineFiles": [
+      "apps/desktop/src/lib/sidecarClient.openrouter.test.ts",
+      "apps/sidecar/src/agent/openrouter-search.runtime.fixture.ts",
+      "apps/desktop/src/hooks/useSidecarAgentRun.ts",
+      "apps/desktop/src/lib/sidecarClient.ts",
+      "apps/sidecar/src/agent/claude.ts",
+      "apps/sidecar/src/agent/direct.ts",
+      "apps/sidecar/src/index.ts",
+      "apps/sidecar/src/protocol.test.ts",
+      "apps/sidecar/src/protocol.ts"
+    ],
+    "missingBaselineFiles": [],
+    "noStagingOrCommit": true,
+    "currentAvailableProviders": ["tavily", "openrouter"]
+  },
+  "cleanup": {
+    "complete": true,
+    "ownedTemporaryDirectoryRemoved": "/var/folders/2b/0vr77k3j1yv2m83zxdkpx48c0000gn/T/openhorn-agent-search-dyxa8zue",
+    "resumePointerRemoved": true,
+    "kept": "formal evidence, user conversations/settings, running app/backend and unrelated WIP"
+  },
+  "sourceSha256": {
+    "apps/desktop/src/lib/sidecarClient.openrouter.test.ts": "33058544f2d6af819bf2a73d02860596ec2ffb7d7c2bc2c91f888786ede9393a",
+    "apps/sidecar/src/agent/openrouter-search.runtime.fixture.ts": "ad9eb4ff182da9f8d0d8c699d9ca73e73f611e94ec23179e90e5bb8868cdf6d9",
+    "apps/desktop/src/hooks/useSidecarAgentRun.ts": "7d70ba2844fe69df48fae506f358375b9c4333067da634b0d732141a21898a39",
+    "apps/desktop/src/lib/sidecarClient.ts": "77c966440adf9abbae5dc7d91777c5a9e991c7cd87c83cabd81297cf8076f16b",
+    "apps/sidecar/src/agent/claude.ts": "ed13625236dd64a753525ab809dfaa6d4731334ffe6f29c9d89b89cf1c50c2a4",
+    "apps/sidecar/src/agent/direct.ts": "2baf7c5a78e9f0a4cd05bcda4521e25caeeda0aa974e64b04564a0516b66e463",
+    "apps/sidecar/src/index.ts": "fa0215dc1a47c5483c9e05b22452d3746520d61fce40c0f37bbda3bef6daab9e",
+    "apps/sidecar/src/protocol.test.ts": "4cc7b119a195f5766a9d073e01cb850328a67e07142ae651d9363d5be771298b",
+    "apps/sidecar/src/protocol.ts": "de70e1e97ac1604e0020436e22a6240a2fbfecd96d724c8c41f0f08ef81fde33",
+    "apps/sidecar/src/agent/mcp-search-policy.ts": "b5a7fdba88df2042898ff3933046821370682787a09e7f7d5ad2732ad7e047ce",
+    "apps/sidecar/src/agent/mcp-search-policy.test.ts": "b0e2015972f58edef6eba2acbe8f494000dc0b6720c1d79dcc196ff0c18cb399"
+  },
+  "completedAt": "2026-11-16T05:56:48.466678+00:00",
+  "knownFollowUps": [
+    {
+      "area": "built-in URL reading",
+      "observed": "Two web_fetch calls to DeepSeek official .md URLs returned unsafe_url; Exa MCP URL reading recovered original text.",
+      "rootCause": "Fake-IP DNS rejection for fixed official docs and missing Markdown MIME support.",
+      "scope": "Original search-routing fix passed separately. Follow-up page-reading fix now also passed native Agent acceptance.",
+      "status": "resolved",
+      "resolvedBy": "../fetch-proxy-markdown/native-validation.json"
+    }
+  ]
+}

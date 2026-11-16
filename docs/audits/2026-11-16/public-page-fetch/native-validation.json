@@ -1,0 +1,66 @@
+{
+  "recordedAt": "2026-11-16T11:20:04.014216+00:00",
+  "conversationId": "1ef03a10-17c1-43f3-9c7d-99530d972315",
+  "conversationTitle": "验证联网与网页读取",
+  "projectRoot": "/Users/han/Project/OpenHorn",
+  "mode": "Agent",
+  "status": "completed",
+  "searchCalls": 1,
+  "searchProvider": "tavily",
+  "fetchCalls": 3,
+  "mcpCalls": 0,
+  "localToolCalls": 0,
+  "toolErrors": 0,
+  "observedProcessLabel": "4 个步骤 · 30s",
+  "steps": [
+    {
+      "tool": "web_search",
+      "searchSource": {
+        "provider": "tavily"
+      },
+      "input": {
+        "query": "Tavily official Search API documentation"
+      },
+      "elapsedSecondsFromStoredStepTimestamps": 8.41,
+      "resultExcerptCharacters": 7540,
+      "hasOriginalSource": true
+    },
+    {
+      "tool": "web_fetch",
+      "searchSource": null,
+      "input": {
+        "url": "https://claude.com/pricing"
+      },
+      "elapsedSecondsFromStoredStepTimestamps": 3.11,
+      "resultExcerptCharacters": 8003,
+      "hasOriginalSource": true
+    },
+    {
+      "tool": "web_fetch",
+      "searchSource": null,
+      "input": {
+        "url": "https://ai.google.dev/gemini-api/docs/pricing"
+      },
+      "elapsedSecondsFromStoredStepTimestamps": 3.68,
+      "resultExcerptCharacters": 8003,
+      "hasOriginalSource": true
+    },
+    {
+      "tool": "web_fetch",
+      "searchSource": null,
+      "input": {
+        "url": "https://developers.openai.com/api/docs/pricing.md"
+      },
+      "elapsedSecondsFromStoredStepTimestamps": 1.75,
+      "resultExcerptCharacters": 8003,
+      "hasOriginalSource": true
+    }
+  ],
+  "googleMarkdownAlternativeObserved": true,
+  "pageContentLimitStillApplies": true,
+  "geminiResultWasBoundedExcerpt": true,
+  "appQuitRelaunchedAndSavedConversationOpened": true,
+  "searchSourceVisibleAfterRelaunch": true,
+  "expandedStepsLeftVisible": true,
+  "testConversationRetained": true
+}

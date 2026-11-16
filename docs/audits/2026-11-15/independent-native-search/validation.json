@@ -1,0 +1,280 @@
+{
+  "generatedAt": "2026-11-15T12:49:11.299966+00:00",
+  "status": "implementation_automated_verification_and_native_settings_acceptance_complete",
+  "git": {
+    "head": "dc820f0ffce670b4e4acb00f1eac8276d91d1186",
+    "committed": false,
+    "pushed": false,
+    "scope": "Current integration workspace includes prior related rounds and unrelated WIP. No staging, commits or push in this task."
+  },
+  "officialReferences": [
+    "https://api-docs.deepseek.com/guides/responses_api/",
+    "https://api-docs.deepseek.com/api/create-response/"
+  ],
+  "implementation": {
+    "singleEffectiveSource": true,
+    "nativeSourceIndependentOfAnswerModel": true,
+    "legacyOverrideRemoved": true,
+    "candidateSeparatedFromActive": true,
+    "saveDoesNotActivate": true,
+    "nativeModel": "deepseek-v4-pro",
+    "nativeEndpoint": "https://api.deepseek.com/v1/responses",
+    "dedicatedOrEligibleOfficialChannelCredentials": true,
+    "explicitPaidValidationOnly": true,
+    "nativeAutomaticPaidRetryOrFallback": false,
+    "stopBeforeUploadRegistered": true,
+    "stoppedBeforeStartExplicit": true,
+    "failedStoppedUploadPersistsMetadataOnly": true,
+    "delayedCancelFailureReported": true
+  },
+  "tests": {
+    "units": {
+      "server": {
+        "passed": 633,
+        "failed": 0
+      },
+      "desktop": {
+        "passed": 726,
+        "failed": 0
+      },
+      "sidecar": {
+        "passed": 351,
+        "failed": 0
+      },
+      "shared": {
+        "passed": 102,
+        "failed": 0
+      },
+      "adapters": {
+        "passed": 94,
+        "failed": 0
+      }
+    },
+    "totalPassed": 1906,
+    "totalFailed": 0,
+    "searchSettingsBrowserChecks": 14,
+    "actualChatComponentBrowserChecks": 62,
+    "typecheck": "passed",
+    "biome": "passed (913 files, including final audit artifacts)",
+    "hostSidecarCompile": "passed",
+    "tauriDebugBuild": "passed",
+    "scope": "Automated tests and browser fixtures use synthetic credentials and controlled upstream responses; not real-account API validation."
+  },
+  "backendHealth": {
+    "api": {
+      "message": "OpenHorn API",
+      "version": "1.0.0"
+    },
+    "configuration": {
+      "nativeSearchAvailable": true,
+      "nativeChannelCount": 0,
+      "status": {
+        "selectedProvider": "auto",
+        "effectiveProvider": "tavily",
+        "verification": "unverified"
+      }
+    },
+    "status": {
+      "selectedProvider": "auto",
+      "effectiveProvider": "tavily",
+      "verification": "unverified"
+    },
+    "sourceFlags": {
+      "settings": {
+        "deepseek.nativeWebEnabled": "true",
+        "liveSearch.tavilyEnabled": "true"
+      }
+    },
+    "sourceFlagsUnchanged": true
+  },
+  "nativeVerification": {
+    "finalBuildRelaunched": true,
+    "finalNativeInteractionsPassed": true,
+    "state": "completed",
+    "observed": [
+      "Confirmed IOConsoleLocked=No. Used CUA Cmd+Q to quit old app, then launched final bundle by absolute path.",
+      "Agent settings displayed four peer search sources and no advanced native override.",
+      "Source menu default/selected/keyboard focus remained light. Independent hover was covered by browser fixtures; native drag attempt did not retain a hover frame and is not counted as hover proof.",
+      "Selected DeepSeek native while actual source remained Tavily. Saw official Key, Pro model, official endpoint, and explicit independent Key provenance.",
+      "Entered only a non-credential synthetic draft; Save enabled, Verify disabled. Cancel restored empty Key and disabled Save/Verify.",
+      "Entered only a non-credential synthetic draft; Save enabled, Verify disabled. Cancel restored empty Key and disabled Save/Verify.",
+      "Expanded standalone DeepSeek search relay address; inspected DuckDuckGo without activation.",
+      "Restored Tavily view with unchanged masked Key and disabled Save. Backend read-only comparison confirmed source flags unchanged."
+    ],
+    "currentRunningDesktopPid": 2398,
+    "backendPid": 59852,
+    "paidRequestsPerformed": false,
+    "realConfigurationSaved": false,
+    "blockingNotificationAlreadyTriggered": true,
+    "notificationRepeated": false,
+    "completedOn": "2026-11-16",
+    "sourceFlagsUnchanged": true,
+    "historicalBlocker": [
+      "IOConsoleLocked=Yes and cgWindowNotFound on 2026-11-15; resolved after user resumed on 2026-11-16."
+    ]
+  },
+  "review": {
+    "boundedFinalStaticReview": "No new issue found after cancellation notice ordering fix; no claim of independent rerun of tests.",
+    "agent": "Planck"
+  },
+  "preservation": {
+    "baselineRecordedFileCount": 209,
+    "unchangedRecordedFiles": 175,
+    "changedRecordedFiles": [
+      "apps/desktop/src/lib/sidecarRunSupport.search.test.ts",
+      "apps/server/src/services/searchSettingsService.ts",
+      "packages/shared/src/search/toolTransport.ts",
+      "packages/shared/src/types/search-settings.ts",
+      ".trellis/spec/desktop/frontend/component-guidelines.md",
+      ".trellis/workspace/han/index.md",
+      ".trellis/workspace/han/journal-1.md",
+      "apps/desktop/scripts/deepseek-capabilities.browser.mjs",
+      "apps/desktop/scripts/genui-chat-failure.browser.mjs",
+      "apps/desktop/src/components/chat/DesktopChatArea.tsx",
+      "apps/desktop/src/components/settings/AgentSettings.tsx",
+      "apps/desktop/src/components/settings/DeepSeekToolSettings.tsx",
+      "apps/desktop/src/hooks/useSidecarAgentRun.ts",
+      "apps/desktop/src/lib/backgroundTaskRunner.ts",
+      "apps/desktop/src/lib/chatAdapter.test.ts",
+      "apps/desktop/src/lib/i18n/agent.ts",
+      "apps/desktop/src/lib/serverApi.ts",
+      "apps/desktop/src/lib/sidecarClient.ts",
+      "apps/desktop/src/lib/sidecarRunSupport.ts",
+      "apps/desktop/tests/deepseek-capabilities.tsx",
+      "apps/server/src/routes/messages.ts",
+      "apps/server/src/routes/settings.ts",
+      "apps/server/src/services/messageService.ts",
+      "apps/server/src/services/searchService.ts",
+      "apps/server/src/services/settingsService.ts",
+      "apps/sidecar/src/agent/direct.ts",
+      "apps/sidecar/src/index.ts",
+      "apps/sidecar/src/protocol.test.ts",
+      "apps/sidecar/src/protocol.ts",
+      "packages/shared/package.json",
+      "packages/shared/src/search/index.ts",
+      "packages/shared/src/search/providerSelection.ts",
+      "packages/shared/src/types/index.ts"
+    ],
+    "missingRecordedFiles": ["apps/desktop/src/components/settings/DeepSeekNativeWebSettings.tsx"],
+    "expectedDeletion": "apps/desktop/src/components/settings/DeepSeekNativeWebSettings.tsx",
+    "limitation": "Initial baseline covers recorded existing dirty files, not complete contents of every pre-existing untracked directory. Changed paths include related WIP; no broad reset or cleanup performed."
+  },
+  "sourceSha256": {
+    "packages/shared/src/deepseek-native-search.ts": "67585564586518da912a4a0244e98eab6aab04befb94318c92475b34bd967e93",
+    "packages/shared/src/search/deepseekNativeProvider.ts": "9f8d69865d4b76dd1b9b49d743c8884e33ea5938edf6c3f40ce0324aea170158",
+    "packages/shared/src/search/deepseekNativeProvider.test.ts": "f50f9025fb08391b17f05cda63a09751a44b3448f78ea962ac3c67d8f724c89e",
+    "packages/shared/src/search/toolTransport.ts": "bbe722dd91e0cbfbcd1d658ba5419d6f6b11cd1ece321a53e49990b9a27e0a88",
+    "packages/shared/src/search/providerSelection.ts": "a0c26836be0955f0877bfe996233cf1d5808d67e92c97cb151570f9c058f58dc",
+    "packages/shared/src/search/index.ts": "4a10847baa077697446031f688134eec6d22495fabe7cdc54c9ddd7aa07cfba9",
+    "packages/shared/src/types/search-settings.ts": "1af8db6feae8e6e15d61497cbffecdc62b40c912c0fd95c228e9d31fdfe5a20f",
+    "packages/shared/src/answer-metadata.ts": "7a2bf3e7085a407e2abdceeededfd4d90fc170c6cbb50fa3accce20d17ca2dda",
+    "packages/shared/src/answer-metadata.test.ts": "3434b8464b1d81f7ac47df954159c71830e4948c9691157eee55a6df22a3d3ca",
+    "packages/shared/package.json": "371b8efa94cdf1192bee69657dac811345df02314904809ab6d8821e76cc4c4c",
+    "apps/server/src/services/nativeSearchSettings.ts": "241346f6ef6a75e4241ec9afafbbfae64e70ee563878d032c0b5f44b044eefed",
+    "apps/server/src/services/nativeSearchSettings.test.ts": "16aee13906ad6b04edf78a2c1786b16149d47ef40d4ff47d69cb0c0a7210a650",
+    "apps/server/src/services/searchSettingsService.ts": "b839ea1df2f5f979835b5d58fedbc4831da3e725a7ced86658d85c3107fa35b5",
+    "apps/server/src/services/settingsService.ts": "8d6f5ccb810ed9d97c6afcb3ff8db07d14db4e140c4068ecc6b4fa7a83da27bf",
+    "apps/server/src/services/searchService.ts": "c7c44e2f96acdb8e7bc19a8461ac3b6a4e660033e7c8f7fc08e3cd9d384d57f4",
+    "apps/server/src/services/messageService.ts": "c1f49b39a1944ec2804d3a2ea850bdc2739fdbd81b8ad418cef2e8464861c63b",
+    "apps/server/src/services/messageService.native-web.fixture.ts": "ba23bd8ee895ad27d1d1ed1ad016841353f7f0c511be0b4d12da556b3b280eab",
+    "apps/server/src/services/messageService.native-web.test.ts": "ff4d9e31e48561af8f27070ffba590cc18c6fd7d5d928012874bea1e4af92bcd",
+    "apps/server/src/services/backupSanitizer.ts": "b6de32f07f5ad1f22d16791947ff6c1a795ea4f90d06d1cb24c8d3719551538a",
+    "apps/server/src/services/backupSanitizer.test.ts": "39d4e739939ba607c79eaad92d7d751f5091b1a9053be8ee0cbb42acb8824db2",
+    "apps/server/src/routes/settings.ts": "44a55d9a3e19e439b422f845e8d040703dc93ef90469f0d29044d3e0a9b90949",
+    "apps/desktop/src/components/settings/DeepSeekToolSettings.tsx": "01a7f300546512f067704efd735f104c2f81b01be33db056cfe4391456ad7ff9",
+    "apps/desktop/src/components/settings/NativeSearchFields.tsx": "5a19f79825c34c9c06f2cfbd55c9dc55c86a04e2a6bfdef0983cc4fa2f4041eb",
+    "apps/desktop/src/components/settings/AgentSettings.tsx": "b50ca7c8fa25896290a7f76a743906159643e149cd6db855a67d4c2bd13c09cc",
+    "apps/desktop/src/components/chat/DesktopChatArea.tsx": "811dd3aa67401ecd0a16f63d5370d0603860226d0fa5ef6efdf2d6ac47d6df17",
+    "apps/desktop/src/lib/i18n/agent.ts": "f8e085182f4dca9452f6254b7a88bb60e05e67d387013e1fe9db99377f4c6d1c",
+    "apps/desktop/src/lib/serverApi.ts": "e507bc6e92a8a996d88d2f5415fc39a5531dcbfbac7f8601afcafb301612ca51",
+    "apps/desktop/src/lib/sidecarRunSupport.ts": "07bb828c04b1f389d0c34d009a48e9f57d7b72c2bb3ad849130b6ed7ae35069f",
+    "apps/desktop/src/lib/sidecarClient.ts": "2c59e9fbcfef119412dbe55ce8001ae28aaef2e88a837dcf01d60edd671e5d8b",
+    "apps/desktop/src/hooks/useSidecarAgentRun.ts": "d791987a9aac17b9ebaf175b0f00abf1bbaff9f410940a3264bfba22ab95705b",
+    "apps/desktop/src/lib/backgroundTaskRunner.ts": "eeed1f63829b8ff98c84bd752f4d1bbb0ea53e606fe7fee5b8a4ae944cd5e1b0",
+    "apps/desktop/src/lib/sidecarRunSupport.search.test.ts": "98dacf81b22d32390a8e0db8bb6eec81ffb60305208349df7c7313a5bb4fe555",
+    "apps/desktop/src/lib/nativeSearchApi.test.ts": "0898e14d744a0dcd4c616b20a968c4ab6f475bfe2682df32dacb0ac767bddd52",
+    "apps/desktop/src/lib/chatAdapter.test.ts": "eb6bba1465c77535a73cc8602646dfe3644fd296e8e6b31253bff4da0ea26b70",
+    "apps/desktop/tests/deepseek-capabilities.tsx": "e5193c2d98e2fda791e4ec1cfad8e4e36cbb348e884b25684f3761b91411f8e7",
+    "apps/desktop/scripts/deepseek-capabilities.browser.mjs": "813eb6cc64d4c3678a41d1cce89866a7cb07f7c2b973f809cda05fe9e606b244",
+    "apps/sidecar/src/protocol.ts": "9480d00c49529d57aa4a3a1cce4e46a72e551350bdb5fe723fac6484c73cc9c8",
+    "apps/sidecar/src/protocol.test.ts": "eaa46dee4deee64d9472d4504af410c6fe01c1a3485d2babb525db7514dcd61c",
+    "apps/sidecar/src/index.ts": "25a54d0297775817224a7487f2da9f8ea5e12b77c06ed910dd7ce2712269fc3e",
+    "apps/sidecar/src/agent/direct.ts": "e4ce8d3e2539b0678f101977237e095fc1ccdb4cf2da0f9d23802737d929b1de",
+    "apps/sidecar/src/agent/claude.ts": "4e8a8e39aece1341a04f56b24d430634776380b4470c4299770736734843ba5a",
+    "apps/sidecar/src/agent/direct.native-search.test.ts": "2a37f3cef66dc357f61e00f32dbaf9df17d3f797e7a821f2c27b0080f2a788e3",
+    "apps/sidecar/src/agent/claude.native-search.test.ts": "45f0416757aa28dc22591789c240b7f94e43539d5bc5de73ae1bdf7bf3ed616e",
+    "apps/sidecar/src/agent/claude.native-search.fixture.ts": "9308be12723149c14d2542f83f7ae41565e298bfbceb60f7802c3ccf7015d97c",
+    "packages/shared/src/types/chat-preparation.ts": "e7e3bee4698ccdd164df3efe13b845a698f16b1032db46c47763fdd602169fc4",
+    "packages/shared/src/types/index.ts": "7f1b82c00108aa0ae7b2b1bd51ee711b920709922818d7a6b93c134affafc8a3",
+    "packages/shared/src/search/duckduckgoProvider.ts": "766cbf20b3474c910c1848a599cb5f25951eba734e28814b3ec4c5c9cd12dd27",
+    "packages/shared/src/search/duckduckgoProvider.test.ts": "62f90752f4bd9e5fb6a791158dd32947562f424d54730891748f749c16950d13",
+    "apps/server/src/services/chatPreparationCancellation.ts": "32bb2adfd535da2669d7b4203d01abc0fa10a571033923773c6f90c2a339b30a",
+    "apps/server/src/services/liveCapabilities.ts": "8e1f3bc9a5644d20576d3702862daac00041280eb4269028fc71b195c4d93891",
+    "apps/server/src/services/liveCapabilities.test.ts": "2df16827337f9c3a18c66ed3f6db551f5b6ad1add4b87fd4fea130261ea9e4f9",
+    "apps/server/src/services/liveRouteClassifier.ts": "e09775d3de2ac0ed7ea13b08b80df4861aec1900c4b8a78350c2d9a8643fffe1",
+    "apps/server/src/routes/messages.ts": "cd703ccad3be724b245b4066b5cb6249692c8064986d02d6a419ea564ced167d",
+    "apps/desktop/scripts/genui-chat-failure.browser.mjs": "87aca71bc5aa0f2f3c0d26cbff9975396cd93819bda2494c024bb3334db7b78e",
+    "apps/desktop/src/components/settings/DeepSeekNativeWebSettings.tsx": null
+  },
+  "nativeBinarySha256": "1a489496d74fc886e7d8f7baae468db04b345fc59179ce5839ffd8c4350514b1",
+  "hostSidecarSha256": "728b96099d4ac0f2864808e7b786f48ee5196e72ddfaf89461732858bc0bc416",
+  "cleanup": {
+    "status": "complete",
+    "complete": true,
+    "removedTaskDirectory": "/var/folders/2b/0vr77k3j1yv2m83zxdkpx48c0000gn/T/openhorn-native-search-l5m71fp7",
+    "removedResumePointer": "/tmp/openhorn-native-search-current",
+    "removedFiles": [
+      "/tmp/openhorn-native-server-tests.log",
+      "/tmp/openhorn-native-desktop-tests.log",
+      "/tmp/openhorn-native-sidecar-tests.log",
+      "/tmp/openhorn-native-shared-tests.log",
+      "/tmp/openhorn-native-adapters-tests.log",
+      "/tmp/openhorn-native-typecheck.log",
+      "/tmp/openhorn-native-biome.log",
+      "/tmp/openhorn-native-compile-sidecar.log",
+      "/tmp/openhorn-native-build.log",
+      "/tmp/openhorn-native-browser.log",
+      "/tmp/openhorn-native-chat-browser.log",
+      "/tmp/openhorn-native-cancel-tests.log",
+      "/tmp/openhorn-native-cancel-upload.log",
+      "/tmp/openhorn-native-chat-test.log",
+      "/tmp/openhorn-native-ddg-cancel.log",
+      "/tmp/openhorn-native-final-cancel.log",
+      "/tmp/openhorn-native-server-type.log",
+      "/tmp/openhorn-native-settings-test.log",
+      "/tmp/openhorn-native-sidecar-focused.log",
+      "/var/folders/2b/0vr77k3j1yv2m83zxdkpx48c0000gn/T/openhorn-server-test.db"
+    ],
+    "retainedOlderLogs": ["/tmp/openhorn-native-chat-core-tests.log"],
+    "preserved": [
+      "Formal validation evidence and native screenshots under docs/audits/2026-11-15/independent-native-search/",
+      "Running native app and loopback backend",
+      "Existing /tmp/openhorn-local-server.log",
+      "User data, real configuration and unrelated workspace WIP"
+    ],
+    "testDatabaseClosedBeforeDeletion": true,
+    "actualTestDatabasePath": "/var/folders/2b/0vr77k3j1yv2m83zxdkpx48c0000gn/T/openhorn-server-test.db",
+    "checkedTestDatabasePaths": [
+      "/tmp/openhorn-server-test.db",
+      "/var/folders/2b/0vr77k3j1yv2m83zxdkpx48c0000gn/T/openhorn-server-test.db"
+    ]
+  },
+  "limitations": [
+    "No real official-account or compatible-relay paid capability validation was performed; explicit user verification remains necessary.",
+    "Native desktop screenshots cover source selection, Key/model/provenance, cancellation, relay address and keyboard states. Independent hover color is covered by browser fixture only.",
+    "One Responses request may incur multiple server-search operations.",
+    "All related changes remain uncommitted and depend on prior uncommitted search/tool work."
+  ],
+  "completedAt": "2026-11-16T01:46:16.295788+00:00",
+  "nativeScreenshots": {
+    "native/01-tavily-default.png": "a51174bbebc127aa71ef135b24fb9d09ef8f399e42b0297fae8516fdfdf3244e",
+    "native/02-source-menu.png": "19137b1539c3196ec6533acb78a1dd99aaf34820d97e687caaa7b003c432b20a",
+    "native/03-keyboard-focus.png": "d14ca34b7559aa848626f7d5297d7c64d82fa85d9fcf755809a49a35affef326",
+    "native/04-native-empty.png": "ccd9742d56dd357a86b9d8d3d5b9e87bcd35bb0af5fb8aea94303516167b2be6",
+    "native/05-unsaved-draft.png": "576e4172bc5c3cede0d2edf6184001f7a73471e2774a38d337412f5fac5ab5f3",
+    "native/06-draft-canceled.png": "89dc3c207cb7dcd35167f96e43328684dc6222f9164bc127e7014b45b13a641e",
+    "native/07-native-selected-menu.png": "9c9e8a28b65df734d8df39a17d13519293ce5a5055857553846d97bc42359c2d",
+    "native/08-relay-address.png": "5496042211e8a764c8eae45b4052e41390ec33329e821c97447d4e5b7a7a2a92",
+    "native/09-duckduckgo-not-activated.png": "546c08494c78e3368c5d045189509e52243ecabd6b9c42be56b6a0d66011cc42"
+  }
+}

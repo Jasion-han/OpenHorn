@@ -1,0 +1,121 @@
+{
+  "status": "complete",
+  "recordedAt": "2026-11-16T09:49:56.235448+00:00",
+  "investigation": "investigation.json",
+  "conclusion": "Original user conversation used Tavily on all four built-in Search calls; the generic Search display hid provider identity. No evidence of OpenRouter or MCP web-search routing in that run.",
+  "fix": {
+    "runtimeSourceMetadata": "SearchExecutionSource",
+    "safeIdentifiersOnly": true,
+    "directAndClaude": true,
+    "earlyNameOnlyThenExecutionStartMerged": true,
+    "actualFallbackUpdatesStartAndResultByToolCallId": true,
+    "knownSourceInActivePreviewAndExpandedRows": true,
+    "metadataPersistsWithSteps": true,
+    "historicalStepsWithoutMetadataRemainGeneric": true,
+    "noProviderInferenceFromCurrentSettingsOrModelOutput": true,
+    "mcpNamesAndPageReadLabelsRemainSeparate": true
+  },
+  "tests": {
+    "shared": {
+      "pass": 132,
+      "fail": 0
+    },
+    "desktop": {
+      "pass": 737,
+      "fail": 0
+    },
+    "sidecar": {
+      "pass": 368,
+      "fail": 0
+    },
+    "focusedRuntimeCases": [
+      "Direct OpenRouter",
+      "Direct Tavily",
+      "Claude OpenRouter",
+      "Claude Tavily"
+    ],
+    "fallback": "Controlled Tavily failure reports DuckDuckGo with fallbackFrom=tavily; desktop reducer updates matching start and result, serializes round-trip, historical rows stay untagged.",
+    "typecheck": "passed",
+    "biome": {
+      "passed": true,
+      "filesChecked": 946
+    }
+  },
+  "build": {
+    "sidecarHost": "passed",
+    "tauriDebugApp": "passed",
+    "appSha256": "4614eebd82ac9e9dbe3546eb856ed87a0bbc49460ebd4d0002ded64adb9a8e76",
+    "bundledSidecarSha256": "30aeb20e9734ec304aaa06ed362c30b1aac08f51665d49d3a0e7f927b049a247"
+  },
+  "native": {
+    "originalConversationExpandedAndObserved": true,
+    "newBundleRestarted": true,
+    "testQuestionSent": true,
+    "newSourceLabelObserved": true,
+    "notificationTriggered": true,
+    "deliveredUrgency": "time-sensitive",
+    "next": null,
+    "testQuestion": "请联网搜索 Tavily 官方 Search API 文档，只搜索一次，不读取网页或本地文件。用一句话说明它的用途，并给出官方文档链接。",
+    "screenshots": {
+      "native/01-original-generic-search.png": "a30c6ef6eeaf46b7acf7942a026860975e2647578244b55f0f116e4e950d7fcc"
+    },
+    "resolvedPreviousBlocker": "After final bundle startup and before creating the test conversation, Mac locked. CUA returned cgWindowNotFound; IOConsoleLocked and CGSSessionScreenIsLocked confirmed true.",
+    "remainingBlocker": null,
+    "newSourceLabelVisibleAfterRelaunch": true,
+    "evidence": "../public-page-fetch/native-validation.json",
+    "conversationId": "1ef03a10-17c1-43f3-9c7d-99530d972315",
+    "conversationTitle": "验证联网与网页读取"
+  },
+  "preservation": {
+    "searchSettingsUnchanged": true,
+    "mcpConfigurationsUnchanged": true,
+    "environmentFilesUnchanged": true,
+    "currentEffectiveProvider": "tavily",
+    "availableProviders": ["tavily", "openrouter"],
+    "changedBaselineFiles": [
+      "apps/sidecar/src/agent/openrouter-search.runtime.fixture.ts",
+      "apps/sidecar/src/agent/openrouter-search.runtime.test.ts",
+      "packages/shared/src/search-settings.ts",
+      "packages/shared/src/types/search-settings.ts",
+      "apps/desktop/src/lib/i18n/agent.ts",
+      "apps/desktop/src/lib/sidecarClient.ts",
+      "apps/desktop/src/lib/sidecarRunSupport.ts",
+      "apps/desktop/src/stores/chatStore.ts",
+      "apps/desktop/src/types/chat.ts",
+      "apps/sidecar/src/agent/claude.ts",
+      "apps/sidecar/src/agent/direct.test.ts",
+      "apps/sidecar/src/agent/direct.ts"
+    ],
+    "missingBaselineFiles": [],
+    "noStagingOrCommit": true
+  },
+  "knownOtherIssue": "General fake-IP URL reading, larger HTML and JavaScript documentation shells were addressed in the follow-up public-page-fetch audit. Original OpenAI legacy pricing URL still returns external HTTP 403; current developer docs were verified.",
+  "sourceSha256": {
+    "packages/shared/src/types/search-settings.ts": "f04d2969bda4aadc44aec7d75c700815dbde3fd144dfb95bc12c4c7e13379fd0",
+    "packages/shared/src/search-settings.ts": "a10721f2cd874595afdba15157d39d1fd473b106abf69e2a47faf1797c2ea84f",
+    "packages/shared/src/search-settings.test.ts": "7d126451a55fe8fa9bf618901b87f89df49c525ab571b05fba4d7b4e668e54c1",
+    "apps/sidecar/src/agent/direct.ts": "a5d43fa482e04911aa3588c319f628588813878951038f9c2061398938251e09",
+    "apps/sidecar/src/agent/direct.test.ts": "33756007e492da6d7215821402b64843a386508058ead98d91d58d3d9fbd7e7e",
+    "apps/sidecar/src/agent/claude.ts": "69c0235ad4624fe2b3a2b7865f3cda9b9c0c182e0853d00f5604c04feeceb177",
+    "apps/sidecar/src/agent/events.ts": "be06f32e75ebb9f94d5c5a4ec0ee36867093384ccffa35abfb1c6541d81a1c9d",
+    "apps/sidecar/src/agent/openrouter-search.runtime.fixture.ts": "94969010149142a43d17c8d13a9da2a44697ec5d67b833cf0dbf3fe883072b4f",
+    "apps/sidecar/src/agent/openrouter-search.runtime.test.ts": "5640771bc877bb8675b13568d036dc7fda1a4fbad83d54c72bd0902ec72c122d",
+    "apps/desktop/src/types/chat.ts": "aef08330f4b0667dd38910f710accf0471a8d9ccc4e8cd45d463ad6f9816959d",
+    "apps/desktop/src/lib/sidecarClient.ts": "2a6128165c47990ff54a66138373caea22b0e4e9342841b03594c0ffcc749fae",
+    "apps/desktop/src/lib/sidecarClient.test.ts": "dc6a478353127485134b1550ac1544384e53e1f47062fd006d5ad888841b8e2b",
+    "apps/desktop/src/lib/sidecarRunSupport.ts": "b46f82caa563f406f171a28a8318241a3fd039b91e56b1b66e559d226a193f99",
+    "apps/desktop/src/stores/chatStore.ts": "742f344ec35fb703866574caa986752284437c54115ac1168f87681e096a17a0",
+    "apps/desktop/src/stores/chatStore.toolStartMerge.test.ts": "8205fec40e48ccc0f2253359da5376e230fc5a54450cff3bbd0c66365ccbe251",
+    "apps/desktop/src/lib/agentToolSummary.ts": "d4b2379fd6b2b6400eb9db2f5ea217b42bde8df282394d463f64d4db9cc60d0c",
+    "apps/desktop/src/lib/agentToolSummary.test.ts": "fd27265d854c841d65e29b89f134ecd55db9aa0e93260b2dbf236929e89b359f",
+    "apps/desktop/src/lib/i18n/agent.ts": "6d79427287c5041786f3cb8b40435caa3db50823772c7769735fd8f9d7259e7a",
+    "apps/desktop/src/components/chat/DesktopAgentRunPanel.tsx": "d535c4da93caf152de8336d676db4b7b2e85e201ae53ad38908e6f89f9e0cb60"
+  },
+  "cleanup": {
+    "complete": true,
+    "ownedTaskDirectoryRemoved": "/var/folders/2b/0vr77k3j1yv2m83zxdkpx48c0000gn/T/openhorn-search-label-jz9jxtmx",
+    "resumePointerRemoved": true,
+    "kept": "formal evidence, rebuilt app/backend, user keys/settings/conversations and unrelated WIP"
+  },
+  "completedAt": "2026-11-16T11:20:04.014216+00:00"
+}

@@ -1,0 +1,70 @@
+{
+  "date": "2026-11-15",
+  "scope": "Current workspace integration; includes pre-existing uncommitted work",
+  "status": "implemented-and-verified-without-live-paid-provider-calls",
+  "ui": {
+    "supplierSelector": false,
+    "singleConnectionForm": true,
+    "sources": ["manual", "owned-channel-reference"],
+    "model": "optional for standalone tools; required for model-tool protocol",
+    "browserChecks": 9,
+    "nativeObserved": [
+      "single manual endpoint/key/model form",
+      "existing-channel form without copied credential field",
+      "OpenRouter channel selection populates address and default model",
+      "generated key cleared after changing endpoint in preceding native build",
+      "original draft restored and save/cancel disabled"
+    ],
+    "nativeLimitations": [
+      "Some screenshot/menu frames were delayed and coordinate operations returned noWindowsAvailable",
+      "Native Window Zoom and size restoration recovered visible form captures",
+      "Not every menu frame is claimed as full native visual acceptance"
+    ]
+  },
+  "tests": {
+    "desktop": {
+      "pass": 721,
+      "fail": 0
+    },
+    "server": {
+      "pass": 596,
+      "fail": 0
+    },
+    "sidecar": {
+      "pass": 346,
+      "fail": 0
+    },
+    "sharedAndAdapters": {
+      "pass": 176,
+      "fail": 0
+    },
+    "totalPass": 1839,
+    "typecheck": "passed for all workspaces; desktop rechecked after final UI revision",
+    "biome": "passed; 881 files",
+    "hostSidecarBuild": "passed",
+    "tauriDebugAppBuild": "passed",
+    "transientFailure": "One existing deepseekImport lock-contention fixture returned SQLITE_BUSY during a full run; isolated 10 tests and subsequent full server 596 tests passed without weakening tests"
+  },
+  "boundaries": {
+    "livePaidProviderRequests": 0,
+    "realUserSettingWrites": 0,
+    "realDocumentUploads": 0,
+    "arbitraryRelayCompatibilityClaimed": false,
+    "nativeDeepSeekOriginGateRelaxed": false,
+    "modelProseAcceptedAsOcrOrSource": false,
+    "openRouterDocumentInput": "PDF only; parser file annotations required",
+    "committed": false
+  },
+  "preservation": {
+    "baselineDirtyPaths": 274,
+    "unrelatedPathsByteIdentical": 267,
+    "relatedPreviouslyDirtyPathsChanged": 5,
+    "journalPathsUpdated": 2
+  },
+  "cleanup": {
+    "taskDirectoryRemoved": true,
+    "pointerRemoved": true,
+    "fixedTestDatabaseRemoved": true,
+    "userAppAndServerRetained": true
+  }
+}

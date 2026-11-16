@@ -1,0 +1,35 @@
+{
+  "recordedAt": "2026-11-16T08:51:48.216517+00:00",
+  "conversationId": "0c8a0101-15de-47af-a7a5-4b79eda58a53",
+  "conversationTitle": "读取官方文档并核实",
+  "projectRoot": "/Users/han/Project/OpenHorn",
+  "mode": "Agent",
+  "runStatus": "completed",
+  "messageCount": 2,
+  "reads": [
+    {
+      "url": "https://api-docs.deepseek.com/guides/responses_api.md",
+      "tool": "web_fetch",
+      "success": true,
+      "elapsedSeconds": 1.42,
+      "originalHeadingPresent": true,
+      "persistedResultExcerptCharacters": 8003
+    },
+    {
+      "url": "https://api-docs.deepseek.com/quick_start/pricing.md",
+      "tool": "web_fetch",
+      "success": true,
+      "elapsedSeconds": 0.32,
+      "originalHeadingPresent": true,
+      "persistedResultExcerptCharacters": 8003
+    }
+  ],
+  "toolCallCount": 2,
+  "mcpCalls": 0,
+  "searchCalls": 0,
+  "localFileOrShellToolCalls": 0,
+  "fetchErrors": 0,
+  "observedProcessLabel": "2 个步骤 · 11s",
+  "toolTraceExpandedAndLeftVisible": true,
+  "testConversationRetained": true
+}

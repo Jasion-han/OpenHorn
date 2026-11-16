@@ -1,0 +1,22 @@
+{
+  "server": {
+    "sha256": "8f31967c3ee466257a7ec5982fddd5ce262f5309d22502fb40d7fcda4e5d36e2",
+    "summary": "\n 643 pass\n 0 fail\n 3248 expect() calls\nRan 643 tests across 104 files. [28.82s]"
+  },
+  "desktop": {
+    "sha256": "21676e7bcea0da3844767f31fee1bb1e10db0596d115882b29669ba61cda511e",
+    "summary": "\n 733 pass\n 0 fail\n 2940 expect() calls\nRan 733 tests across 86 files. [6.76s]"
+  },
+  "sidecar": {
+    "sha256": "cf8a62ba74c704b60c6635214ef8f47f5cf10339353d31ed62660e92f9f591b3",
+    "summary": "\n 357 pass\n 0 fail\n 960 expect() calls\nRan 357 tests across 44 files. [16.03s]"
+  },
+  "shared": {
+    "sha256": "8e8f9a27ab4cff412b4cab85b29553ed8ab18a992589ddc218a9a7d412b761d7",
+    "summary": "\n 126 pass\n 0 fail\n 605 expect() calls\nRan 126 tests across 18 files. [299.00ms]"
+  },
+  "adapters": {
+    "sha256": "72c959d143aeb4b3ff3ec7a89febff885736adf444e9ecf64fce2b016050548e",
+    "summary": "\n 94 pass\n 0 fail\n 443 expect() calls\nRan 94 tests across 5 files. [921.00ms]"
+  }
+}

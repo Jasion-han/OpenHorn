@@ -1,0 +1,37 @@
+[
+  {
+    "url": "https://claude.com/pricing",
+    "seconds": 2.64,
+    "success": true,
+    "sourceUrl": "https://claude.com/pricing",
+    "contentCharacters": 25262,
+    "meaningfulOriginalContent": true,
+    "hasPricingText": true
+  },
+  {
+    "url": "https://ai.google.dev/gemini-api/docs/pricing",
+    "seconds": 3.44,
+    "success": true,
+    "sourceUrl": "https://aistudio.google.com/docs/pricing.md",
+    "contentCharacters": 50000,
+    "meaningfulOriginalContent": true,
+    "hasPricingText": true
+  },
+  {
+    "url": "https://developers.openai.com/api/docs/pricing.md",
+    "seconds": 1.81,
+    "success": true,
+    "sourceUrl": "https://developers.openai.com/api/docs/pricing.md",
+    "contentCharacters": 21200,
+    "meaningfulOriginalContent": true,
+    "hasPricingText": true
+  },
+  {
+    "url": "https://openai.com/api/pricing/",
+    "seconds": 2.15,
+    "success": false,
+    "meaningfulOriginalContent": false,
+    "hasPricingText": false,
+    "error": "Error: HTTP 403 "
+  }
+]

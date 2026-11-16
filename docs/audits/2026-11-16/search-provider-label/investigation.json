@@ -1,0 +1,59 @@
+{
+  "conversationId": "9eae8ef4-13bd-4de9-9c5b-dbb163eb042f",
+  "title": "主流模型价格能力对比",
+  "runStatus": "completed",
+  "currentEffectiveSearchProvider": "tavily",
+  "conclusion": "All four searches used the built-in Tavily branch; generic Search UI hid the provider. Exa web_fetch_exa and Tavily extract were subsequent URL reads, not search-source replacement.",
+  "sourceEvidence": "Each of the four persisted search results contains the Untrusted provider summary (JSON) section emitted only by tavilyWebSearch in the examined implementation; none carries the OpenRouter marker. Historical events did not have structured source metadata and are not rewritten.",
+  "searches": [
+    {
+      "query": "AI model API pricing official OpenAI GPT-5.1 Anthropic Claude Gemini DeepSeek pricing November 2026",
+      "elapsedSeconds": 10.52,
+      "tavilyOnlySummarySection": true,
+      "openRouterMarker": false,
+      "sourceMetadataRecorded": false
+    },
+    {
+      "query": "site.alibabacloud.com qwen model pricing qwen3.5 plus max per million tokens",
+      "elapsedSeconds": 2.01,
+      "tavilyOnlySummarySection": true,
+      "openRouterMarker": false,
+      "sourceMetadataRecorded": false
+    },
+    {
+      "query": "site.artificialanalysis.ai intelligence index GPT-6 Claude Sonnet 5.5 Gemini November 2026",
+      "elapsedSeconds": 7.71,
+      "tavilyOnlySummarySection": true,
+      "openRouterMarker": false,
+      "sourceMetadataRecorded": false
+    },
+    {
+      "query": "site.ai.google.dev/gemini-api/docs/pricing \"Hydrogen\" \"Argon\"",
+      "elapsedSeconds": 2.19,
+      "tavilyOnlySummarySection": true,
+      "openRouterMarker": false,
+      "sourceMetadataRecorded": false
+    }
+  ],
+  "searchCallCount": 4,
+  "mcpSearchCallCount": 0,
+  "mcpUrlReadTools": ["mcp__exa__web_fetch_exa", "mcp__tavily-hikari__tavily_extract"],
+  "pageReadErrors": [
+    {
+      "tool": "web_fetch",
+      "url": "https://ai.google.dev/gemini-api/docs/pricing",
+      "error": "unsafe_url"
+    },
+    {
+      "tool": "web_fetch",
+      "url": "https://openai.com/api/pricing/",
+      "error": "unsafe_url"
+    },
+    {
+      "tool": "web_fetch",
+      "url": "https://claude.com/pricing",
+      "error": "unsafe_url"
+    }
+  ],
+  "otherIssue": "Generic direct Fetch still rejects fake-IP DNS for arbitrary origins; previous documented exception covered only fixed DeepSeek official docs. MCP readers recovered the affected vendor pages. This search-label change does not broaden that networking policy."
+}

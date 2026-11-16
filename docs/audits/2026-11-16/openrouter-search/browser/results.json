@@ -1,0 +1,29 @@
+{
+  "checks": [
+    "unverified or unconfigured sources are absent from the default available menu and configuration is explicit",
+    "one effective source is shown; failed initial loads are readonly and retryable",
+    "source menu lists engines only; choosing one does not activate it; hover/selected/keyboard states stay light",
+    "manual DeepSeek has only Key and folded address; save preserves source and never triggers a paid probe",
+    "unsupported endpoints and chat replies show explicit failure while keeping the working source",
+    "only successful explicit verification activates DeepSeek; duplicate submissions and edits are blocked",
+    "a late refresh cannot bind an unseen connection revision to the displayed form after a source switch",
+    "reconnect preserves drafts and cancel restores the acknowledged saved configuration",
+    "switching to keyless DuckDuckGo is explicit and preserves the saved DeepSeek configuration",
+    "an older or incomplete backend response blocks edits without crashing or overwriting configuration",
+    "native retrieval is a peer source with explicit dedicated Key/model, no legacy override, and real-search verification required",
+    "native credential reuse lists only the eligible retrieval channel and makes the actual active Key source visible without copying its secret",
+    "OpenRouter is a peer source with dedicated search Key, explicit DeepSeek model and Exa engine, isolated from Jev and chat credentials",
+    "OpenRouter failed saves preserve drafts and successful candidate saves never make a paid probe or change the active source",
+    "OpenRouter only activates after a source-backed explicit verification and failure preserves the original source",
+    "OpenRouter reconnect keeps an unsaved draft and cancel restores the last acknowledged Key without touching Jev",
+    "a backend without the OpenRouter capability cannot accept its search Key through generic plaintext settings",
+    "the main menu retains only verified OpenRouter, removes duplicate entries and hides unused source types",
+    "two verified DeepSeek protocols are represented by one main-menu entry",
+    "older backend capabilities fail closed and cannot accept new credentials through generic unencrypted settings",
+    "native process and citations expand; unsafe URL is not rendered",
+    "OCR needs per-dialog consent, keeps failure visible and never automatically retries"
+  ],
+  "errors": [],
+  "unexpected": [],
+  "limitations": "Local browser fixture with intercepted settings and OCR callbacks; no real paid API calls."
+}

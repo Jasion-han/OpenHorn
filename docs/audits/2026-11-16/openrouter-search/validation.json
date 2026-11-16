@@ -1,0 +1,318 @@
+{
+  "generatedAt": "2026-11-16T02:41:23.860949+00:00",
+  "status": "complete",
+  "git": {
+    "head": "dc820f0ffce670b4e4acb00f1eac8276d91d1186",
+    "committed": false,
+    "pushed": false,
+    "scope": "Related prior WIP remains uncommitted; no broad staging/reset/cleanup."
+  },
+  "officialReferences": [
+    "https://github.com/openrouterteam/docs/blob/main/guides/features/server-tools/web-search.mdx",
+    "https://github.com/openrouterteam/docs/blob/main/guides/routing/model-variants/online.mdx",
+    "https://github.com/openrouterteam/docs/blob/main/guides/features/server-tools.mdx",
+    "https://openrouter.ai/api/v1/models"
+  ],
+  "implementation": {
+    "provider": "openrouter",
+    "model": "deepseek/deepseek-v4-pro",
+    "endpoint": "https://openrouter.ai/api/v1",
+    "engine": "exa",
+    "nativeDeepSeekClaimed": false,
+    "dedicatedEncryptedCredentials": true,
+    "jevCredentialsReused": false,
+    "candidateActiveSeparation": true,
+    "atomicSnapshotAndRevisionActivation": true,
+    "dedicatedSaveRoute": "/settings/search/openrouter-connection",
+    "oldBackendCapabilityGuard": true,
+    "allSendEditRetryBackgroundPathsWired": true,
+    "directAndClaudeSearchWired": true,
+    "automaticPaidRetries": false,
+    "automaticFallback": false,
+    "generatedSummaryLabeled": true,
+    "structuredPublicCitationsRequired": true,
+    "mainMenuOnlyVerifiedConnections": true,
+    "duplicateDeepSeekProtocolsMerged": true,
+    "unverifiedTypesRequireExplicitConfiguration": true,
+    "alreadyEnabledReverificationDisabled": true,
+    "duplicateModelEngineSummaryRemoved": true
+  },
+  "tests": {
+    "workspace": {
+      "server": {
+        "exitCode": 0,
+        "pass": 643,
+        "fail": 0
+      },
+      "desktop": {
+        "exitCode": 0,
+        "pass": 733,
+        "fail": 0
+      },
+      "sidecar": {
+        "exitCode": 0,
+        "pass": 357,
+        "fail": 0
+      },
+      "shared": {
+        "exitCode": 0,
+        "pass": 126,
+        "fail": 0
+      },
+      "adapters": {
+        "exitCode": 0,
+        "pass": 94,
+        "fail": 0
+      }
+    },
+    "totalPassed": 1953,
+    "totalFailed": 0,
+    "settingsBrowserChecks": 22,
+    "typecheck": "passed (all workspace tasks)",
+    "biome": "passed (930 files)",
+    "sidecarCompile": "passed",
+    "tauriDebugBuild": "passed",
+    "chatIntegration": "GPT+Claude prepare/complete and both native/OpenRouter SSE edit/retry/preparation Stop; no real credentials in tests"
+  },
+  "reviews": [
+    {
+      "scope": "settings/storage/UI",
+      "result": "No concrete P1/P2 finding",
+      "independentTestRerun": false
+    },
+    {
+      "scope": "runtime and integration",
+      "result": "No concrete P1/P2 finding; Chat cancellation coverage extended afterward",
+      "independentTestRerun": false
+    },
+    {
+      "scope": "verified-only menu, deduplication, draft/old backend safety",
+      "result": "No concrete P1/P2 findings; 2 helper tests passed",
+      "independentFullTestRerun": false
+    }
+  ],
+  "realConfiguration": {
+    "backendPid": 80188,
+    "backendHealthy": true,
+    "candidateSaved": true,
+    "storedEncrypted": true,
+    "activeSourceUnchanged": false,
+    "currentStatus": {
+      "selectedProvider": "openrouter",
+      "effectiveProvider": "openrouter",
+      "verification": "verified",
+      "availableProviders": ["openrouter"],
+      "pendingProviders": []
+    },
+    "candidateModel": "deepseek/deepseek-v4-pro",
+    "candidateEngine": "exa",
+    "independentRuntimeAvailable": true,
+    "realPaidValidationPerformed": true,
+    "candidatePending": false,
+    "sourceSwitchedAfterSuccessfulVerification": true,
+    "jevEnvironmentFilesUnchanged": true
+  },
+  "nativeVerification": {
+    "performed": true,
+    "finalBuildRelaunched": true,
+    "nativeAppPid": 81441,
+    "observed": [
+      "Relaunched the final simplified bundle through CUA after exiting the old process.",
+      "Observed OpenRouter active and last verification passed.",
+      "Expanded the actual main menu and saw exactly one OpenRouter entry; no unconfigured or duplicate entries.",
+      "Observed light default/selected/keyboard states; independent hover color is covered by browser fixture, not claimed as a separate native capture.",
+      "Edited a non-credential unsaved draft; Save enabled and verification stayed disabled.",
+      "Cancel restored the real masked saved Key and disabled Save/Already enabled; no real key was saved or replaced in the UI."
+    ],
+    "historicalBlocker": "macOS lock resolved after user resumed. One time-sensitive unlock notice had been delivered.",
+    "successNotificationSent": true,
+    "successNotificationDeliveredUrgency": "time-sensitive"
+  },
+  "preservation": {
+    "recordedExistingDirtyFiles": 249,
+    "unchangedRecordedFiles": 217,
+    "changedRecordedFiles": [
+      "apps/desktop/src/lib/nativeSearchApi.test.ts",
+      "apps/desktop/src/lib/sidecarRunSupport.search.test.ts",
+      "apps/server/src/services/searchSettingsService.ts",
+      "packages/shared/src/search/toolTransport.ts",
+      "packages/shared/src/types/search-settings.ts",
+      ".trellis/spec/desktop/frontend/component-guidelines.md",
+      ".trellis/workspace/han/index.md",
+      ".trellis/workspace/han/journal-1.md",
+      "apps/desktop/scripts/deepseek-capabilities.browser.mjs",
+      "apps/desktop/src/components/chat/DesktopChatArea.tsx",
+      "apps/desktop/src/components/settings/DeepSeekToolSettings.tsx",
+      "apps/desktop/src/hooks/useSidecarAgentRun.ts",
+      "apps/desktop/src/lib/backgroundTaskRunner.ts",
+      "apps/desktop/src/lib/chatAdapter.test.ts",
+      "apps/desktop/src/lib/i18n/agent.ts",
+      "apps/desktop/src/lib/serverApi.ts",
+      "apps/desktop/src/lib/sidecarClient.ts",
+      "apps/desktop/src/lib/sidecarRunSupport.ts",
+      "apps/server/src/routes/settings.ts",
+      "apps/server/src/services/backupSanitizer.ts",
+      "apps/server/src/services/messageService.native-web.fixture.ts",
+      "apps/server/src/services/messageService.native-web.test.ts",
+      "apps/server/src/services/searchService.ts",
+      "apps/server/src/services/settingsService.ts",
+      "apps/sidecar/src/agent/claude.ts",
+      "apps/sidecar/src/agent/direct.ts",
+      "apps/sidecar/src/index.ts",
+      "apps/sidecar/src/protocol.test.ts",
+      "apps/sidecar/src/protocol.ts",
+      "packages/shared/package.json",
+      "packages/shared/src/search/index.ts",
+      "packages/shared/src/search/providerSelection.ts"
+    ],
+    "missingRecordedFiles": [],
+    "newFiles": [
+      "apps/desktop/src/components/settings/OpenRouterSearchFields.tsx",
+      "apps/desktop/src/components/settings/availableSearchProviders.test.ts",
+      "apps/desktop/src/components/settings/availableSearchProviders.ts",
+      "apps/desktop/src/lib/sidecarClient.openrouter.test.ts",
+      "apps/server/src/services/openRouterSearchSettings.test.ts",
+      "apps/server/src/services/openRouterSearchSettings.ts",
+      "apps/server/src/services/searchService.openrouter.test.ts",
+      "apps/sidecar/src/agent/direct.openrouter-search.test.ts",
+      "apps/sidecar/src/agent/openrouter-search.runtime.fixture.ts",
+      "apps/sidecar/src/agent/openrouter-search.runtime.test.ts",
+      "docs/audits/2026-11-16/openrouter-search/README.md",
+      "docs/audits/2026-11-16/openrouter-search/browser/ocr-consent-and-error.png",
+      "docs/audits/2026-11-16/openrouter-search/browser/openrouter-search.png",
+      "docs/audits/2026-11-16/openrouter-search/browser/results.json",
+      "docs/audits/2026-11-16/openrouter-search/browser/settings-and-references.png",
+      "docs/audits/2026-11-16/openrouter-search/native/01-peer-sources.png",
+      "docs/audits/2026-11-16/openrouter-search/native/02-keyboard-focus.png",
+      "docs/audits/2026-11-16/openrouter-search/native/03-saved-candidate.png",
+      "docs/audits/2026-11-16/openrouter-search/native/04-unsaved-draft.png",
+      "docs/audits/2026-11-16/openrouter-search/native/05-draft-canceled.png",
+      "docs/audits/2026-11-16/openrouter-search/native/06-final-default.png",
+      "docs/audits/2026-11-16/openrouter-search/native/07-only-verified-source.png",
+      "docs/audits/2026-11-16/openrouter-search/native/08-final-draft.png",
+      "docs/audits/2026-11-16/openrouter-search/native/09-enabled-and-restored.png",
+      "docs/audits/2026-11-16/openrouter-search/test-summaries.json",
+      "docs/audits/2026-11-16/openrouter-search/validation.json",
+      "docs/superpowers/plans/2026-11-16-openrouter-search.md",
+      "docs/superpowers/specs/2026-11-16-openrouter-search-design.md",
+      "packages/shared/src/openrouter-search.test.ts",
+      "packages/shared/src/openrouter-search.ts",
+      "packages/shared/src/search/openRouterSearchProvider.test.ts",
+      "packages/shared/src/search/openRouterSearchProvider.ts"
+    ],
+    "environmentFilesUnchanged": true,
+    "limit": "Baseline covers existing dirty files reported by git, including individually enumerated untracked contents; not a full repository or ignored-file backup."
+  },
+  "sourceSha256": {
+    "apps/desktop/scripts/deepseek-capabilities.browser.mjs": "edc0fe7d4bbbc49678f89843cad3d71a5c473b195f0c4d88035180d85699fe72",
+    "apps/desktop/src/components/chat/DesktopChatArea.tsx": "726a3f341eb62ae9a4b0966dcb7a1b0a51cee6098395139ce6d99323301ba023",
+    "apps/desktop/src/components/settings/DeepSeekToolSettings.tsx": "46491f18a9c5e723fa6875fa76f1b4e98431ce4eaa151bfeaa2a2ef683b4b8b6",
+    "apps/desktop/src/components/settings/OpenRouterSearchFields.tsx": "863118a2733939c120567cae7d3c9d20b892f36862335f233355b248ee783ca9",
+    "apps/desktop/src/components/settings/availableSearchProviders.test.ts": "52147a990eaba8d04129c6cecc56839079e86e9f4bce365f0fe10a5026ec1824",
+    "apps/desktop/src/components/settings/availableSearchProviders.ts": "8e70d61134f95ac8c02bbcfffc409101fbdd2d8abfd5ec70ed1378d01eefff31",
+    "apps/desktop/src/hooks/useSidecarAgentRun.ts": "60d40ff6ab6a33a7fae5eb1e0e524c3f21efd24466450505fc21cff573ae5db8",
+    "apps/desktop/src/lib/backgroundTaskRunner.ts": "2ee68b481df5133281e7763285e1b23b1a9faba219daf7a099267d774faf963c",
+    "apps/desktop/src/lib/chatAdapter.test.ts": "02ea3614bacc0d84d118914882574f132cf804e55ddf0c50a7c4417f57534e8e",
+    "apps/desktop/src/lib/i18n/agent.ts": "fb1df41f99a5b6182be86fc90b4f4d435216a6cda8489a9a75e137a0eaf5b91b",
+    "apps/desktop/src/lib/nativeSearchApi.test.ts": "e4d68e1788232ad5c90bdb9e85f1da5167919915b289c3e4a5f0f499fc33b15e",
+    "apps/desktop/src/lib/serverApi.ts": "243f86d663f4074ae5dae1b2be0977b83663b848ea65c98db3dfdde9e9015c4a",
+    "apps/desktop/src/lib/sidecarClient.openrouter.test.ts": "6fdb5b49ec8ee1c6f4f387b14a1722463a2fe106a481016ed991a8846b280bc6",
+    "apps/desktop/src/lib/sidecarClient.ts": "4cf7ee6bfff36a00b110b639e111c87a7cf17e2522d8d78bbfe70c54fdba86dc",
+    "apps/desktop/src/lib/sidecarRunSupport.search.test.ts": "1248ca53f4e04d0dd2d8f2d0e57ccdb7a39e4e7ba94eb50fcf682fbf640c0ea3",
+    "apps/desktop/src/lib/sidecarRunSupport.ts": "a7141c2f38cbb36063640c46ac3e2c263f898ff895b75eef3561cda2f12b6dd2",
+    "apps/server/src/routes/settings.ts": "9865d86a19110647abe48bcff14672adff704c058fe3a3207b0fd259c3853a89",
+    "apps/server/src/services/backupSanitizer.ts": "4b9889b23fb755f10bce72ef42a401c7844696f3a3fd60689f7838cee0e02473",
+    "apps/server/src/services/messageService.native-web.fixture.ts": "5233dbdd3447b5e3f3c91ac0e1d168b5ababca7b8ea614ea168e129f25c8c6eb",
+    "apps/server/src/services/messageService.native-web.test.ts": "c8466a76b52b8630deca2bf182c6173dca1b3e4796b36f53fd87f5a2ddb4a8ff",
+    "apps/server/src/services/openRouterSearchSettings.test.ts": "ec981fa8d4de0b0b3278120a198d35f9f6905c1ba68b416a517c99842d0c5c6e",
+    "apps/server/src/services/openRouterSearchSettings.ts": "3218447f383a71085a48649fba4660f3002650f55319691158577f37a3828e3e",
+    "apps/server/src/services/searchService.openrouter.test.ts": "f17170c49aee7a37a080634be975baf1967cad42d6d7e2f06cb97bd92ab0b8ff",
+    "apps/server/src/services/searchService.ts": "c5288b6ee5e1649d47f15e97f32209cc1c4b5227b326c9ec9f3904befd414fcc",
+    "apps/server/src/services/searchSettingsService.ts": "ddd308db1b2a0db3d8c5691703efe2aecc95c98ae277b982702400c156d1226e",
+    "apps/server/src/services/settingsService.ts": "a97292f79b3655daa7329295ae79fdb32a4bde724d75ea0c2a97ea2f018aee43",
+    "apps/sidecar/src/agent/claude.ts": "c49dbd8551214cf97b8b37bcfe15fc669abbe3e52f518b4b17d5a57f4b8d3dca",
+    "apps/sidecar/src/agent/direct.openrouter-search.test.ts": "27f1897a5b2f7dbe81cd38b701b7f5cee65b5d194a593cf4ed231e011caf9a1c",
+    "apps/sidecar/src/agent/direct.ts": "3a087c25bd29a9b0edfd0b7ea8d48454aa7cef7cf1cb22765b3d380c76c14e42",
+    "apps/sidecar/src/agent/openrouter-search.runtime.fixture.ts": "8687c3931337ce394d507daf6ec01d66d39e6e48f1c55f3afe18c1845fd28b99",
+    "apps/sidecar/src/agent/openrouter-search.runtime.test.ts": "0097a26dd0fcc16c734f2bfd834846808a9985885bc27cab396db063197ba632",
+    "apps/sidecar/src/index.ts": "e25451541163e0f2fb4023f3a1a52900bfea782668a8af71e5bcbcb10908ea3e",
+    "apps/sidecar/src/protocol.test.ts": "c632e10fda0a1a15e48179247a7981255fe267fa8847311526b93787affccd2b",
+    "apps/sidecar/src/protocol.ts": "9ac734d4326eaac4c60b9ae0768e08e263f1e210f748b32d1257f386ed5f85b7",
+    "packages/shared/package.json": "fa90017ea85e35ddc97a0310ba8c083acd93356802f7d89f8f548954bd72f20c",
+    "packages/shared/src/openrouter-search.test.ts": "a811ff72fa52df03dbfd166a308b533174a5161dd6c690e1b2acf6ce5e7b9781",
+    "packages/shared/src/openrouter-search.ts": "6f2f5c02fd200ba45dcb85d792f368096acf474a9b40bff56595b63ff37f9bb3",
+    "packages/shared/src/search/index.ts": "29bc3c4cfce3bc3bfe033184c0acc884a6ac41817cfe35a3dd717f6f63133132",
+    "packages/shared/src/search/openRouterSearchProvider.test.ts": "7a092c62219eb06022913b971be126ee2f92bee16629248c4fed4d1f7898e6e4",
+    "packages/shared/src/search/openRouterSearchProvider.ts": "a19cecf73443225d280382aecc3799262c3b07b18a7fd5b289324722f566cce9",
+    "packages/shared/src/search/providerSelection.ts": "5e6fa117f58fa5fbe788bd74693eef72de3135dbb2410dcd6e04b1edfde142ef",
+    "packages/shared/src/search/toolTransport.ts": "b772597c3402780311d7f2b3a8648cb90680f9020c23ed53ed7b1340b6c89c31",
+    "packages/shared/src/types/search-settings.ts": "cc9a2c22a01dc5b0de0e8ef11260054451c2e0761d88eda2b56351933722a604"
+  },
+  "nativeBinarySha256": "ad896903dd3ad56a594fdb41da39a96bf8c7b83ebf1074b4e9a1d0b0f6aaf54b",
+  "sidecarBinarySha256": "5192bc818a90684dfebaa69141a6763f95f3ea88f5ecb54cf3a5f9f24060192e",
+  "cleanup": {
+    "complete": true,
+    "status": "complete",
+    "removedTaskDirectory": "/var/folders/2b/0vr77k3j1yv2m83zxdkpx48c0000gn/T/openhorn-openrouter-search-euv50os2",
+    "removedResumePointer": "/tmp/openhorn-openrouter-search-current",
+    "removedClosedTestFiles": [
+      "/var/folders/2b/0vr77k3j1yv2m83zxdkpx48c0000gn/T/openhorn-openrouter-search-euv50os2/cancellation-tests.db",
+      "/var/folders/2b/0vr77k3j1yv2m83zxdkpx48c0000gn/T/openhorn-openrouter-search-euv50os2/final-server-tests.db",
+      "/var/folders/2b/0vr77k3j1yv2m83zxdkpx48c0000gn/T/openhorn-openrouter-search-euv50os2/final-full-server.db",
+      "/var/folders/2b/0vr77k3j1yv2m83zxdkpx48c0000gn/T/openhorn-openrouter-search-euv50os2/coverage-final-server.db",
+      "/var/folders/2b/0vr77k3j1yv2m83zxdkpx48c0000gn/T/openhorn-openrouter-search-euv50os2/full-server-tests.db",
+      "/var/folders/2b/0vr77k3j1yv2m83zxdkpx48c0000gn/T/openhorn-openrouter-search-euv50os2/settings-tests.db",
+      "/var/folders/2b/0vr77k3j1yv2m83zxdkpx48c0000gn/T/openhorn-openrouter-search-euv50os2/available-final-server.db"
+    ],
+    "preserved": [
+      "Formal evidence under docs/audits/2026-11-16/openrouter-search/",
+      "User data, dedicated encrypted candidate/active configuration and prior provider configurations",
+      "Running final native app and backend; /tmp/openhorn-local-server.log",
+      "Unrelated source WIP"
+    ]
+  },
+  "limitations": [
+    "No single automated test spans the live WS handler through Search; desktop serialization and direct/Claude runtime paths are separately tested.",
+    "Native independent hover was not separately captured; browser fixtures cover hover/selected/keyboard styles.",
+    "Server Chat explicit-link reading retains its existing guard; search summaries are never presented as raw page text.",
+    "Verification proves the source worked at that time; it does not guarantee permanent upstream availability.",
+    "Product verification does not return its cost; no amount is invented. One explicit product validation request was issued, without retries."
+  ],
+  "journalSession": 74,
+  "completedAt": "2026-11-16T03:18:02.442068+00:00",
+  "realActivation": {
+    "verificationRequests": 1,
+    "automaticRetries": 0,
+    "elapsedSeconds": 17.05,
+    "success": true,
+    "errorCode": null,
+    "transportErrorType": null,
+    "paidRequestMayHaveOccurred": true,
+    "costReportedByProduct": null,
+    "finalStatus": {
+      "selectedProvider": "openrouter",
+      "effectiveProvider": "openrouter",
+      "verification": "verified",
+      "pendingProviders": [],
+      "openRouterConnection": {
+        "model": "deepseek/deepseek-v4-pro",
+        "endpoint": "https://openrouter.ai/api/v1",
+        "engine": "exa"
+      }
+    },
+    "runtimeMatchesDedicatedUserKey": true,
+    "candidateAndActiveEncrypted": true,
+    "structuredSourcesRequiredByVerifiedProvider": true
+  },
+  "nativeScreenshots": {
+    "native/01-peer-sources.png": "ef36e69da4aed6288165c1c734e64822c5791a24a47c9c03683cb37ef7fb990b",
+    "native/02-keyboard-focus.png": "81c70fe7120c520e00e661d873446a7fddb1b44b821e274275a43fe99b114e4f",
+    "native/03-saved-candidate.png": "d2e2c87c3b05a69bc7840227afec49ceee99dd247c0c8e8eb56f2f7357573acf",
+    "native/04-unsaved-draft.png": "8354fc0afcd10078eae2e7f80a10b2daa40a9defab6d3733d943491fdd9ceb79",
+    "native/05-draft-canceled.png": "16dcba2823cfc60c1c372eca9ab228dd19963551d0310fa3da7e3a2aad54ce00",
+    "native/06-final-default.png": "d5b2069b63ce4153a138750e9970da85172311795b9a35424bc1c1e746e4c9f1",
+    "native/07-only-verified-source.png": "3baee909985eba13e4e425513fe44dab434dacd98225b633dff2d0c936a2dd52",
+    "native/08-final-draft.png": "d21f0cc1fb24a358a950e7e20cced6d9a7cec147bdbf0bb3ec27a3d9e5617e5d",
+    "native/09-enabled-and-restored.png": "2aa35b73df5208e8ab1860ac00fcc0eb5de1e1187d640f9b2fedcd098a1b1dd3"
+  }
+}

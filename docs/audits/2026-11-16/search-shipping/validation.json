@@ -1,0 +1,61 @@
+{
+  "date": "2026-11-16T23:24:18.344368+08:00",
+  "validationContext": "isolated shipping worktree at dc820f0; pnpm frozen offline install; workspace symlinks resolve inside isolated tree; turbo typecheck forced without cached results",
+  "scope": [
+    "shared search providers and verified encrypted connection configuration",
+    "peer search selector retaining configured Tavily and OpenRouter connections",
+    "Agent routing and actual search-source projection",
+    "Chat preparation cancellation and independent retrieval metadata",
+    "tool-service document parsing prerequisite",
+    "safe public page transport, redirects, and actual Markdown fallback"
+  ],
+  "excluded": [
+    "unrelated long-lived UI, workbench, import/export, indexing and circuit breaker changes",
+    "sidecar outbox / cross-client save changes",
+    "mini-trellis migration, local memory and temporary files"
+  ],
+  "tests": {
+    "shared": {
+      "pass": 132,
+      "fail": 0
+    },
+    "desktop": {
+      "pass": 708,
+      "fail": 0
+    },
+    "sidecar": {
+      "pass": 378,
+      "fail": 0
+    },
+    "server": {
+      "pass": 600,
+      "fail": 0
+    },
+    "adapters": {
+      "pass": 94,
+      "fail": 0
+    }
+  },
+  "browser": {
+    "settingsScenariosPassed": 23,
+    "chatFailureStopScenariosPassed": 62,
+    "usesSyntheticCredentials": true
+  },
+  "checks": {
+    "typecheck": "passed, forced",
+    "biome": "903 files passed including audit JSON",
+    "sidecarHostCompile": "passed",
+    "desktopUiBuild": "passed, chunk-size warning remains"
+  },
+  "nativeEvidence": {
+    "path": "../public-page-fetch/native-validation.json",
+    "note": "Historical actual desktop run of full working tree; isolated shipping tree separately validated above. No new paid search calls during shipping."
+  },
+  "currentExpectedProvider": "tavily",
+  "legacyAuditNotes": "Earlier audits are dated historical snapshots. Later records supersede earlier Pro default, one-option selector and pending native verification. Final lightweight model is Flash; Tavily and OpenRouter retained. Native evidence and prior uncommitted status are not rewritten as shipping results.",
+  "agentBatchBeforePageTransport": {
+    "typecheck": "passed",
+    "testsPassed": 45,
+    "testsFailed": 0
+  }
+}

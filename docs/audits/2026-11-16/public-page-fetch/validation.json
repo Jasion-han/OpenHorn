@@ -1,0 +1,117 @@
+{
+  "status": "complete",
+  "completedAt": "2026-11-16T11:22:49.267842+00:00",
+  "problem": "General direct Fetch rejected public vendor pages under system fake-IP DNS; Google client shell was reported as title-only data, and Claude HTML exceeded the previous direct-read limit.",
+  "fix": {
+    "newModule": "apps/sidecar/src/agent/public-page-fetch.ts",
+    "fakeIpResolution": "Only pure 198.18/15 system DNS answers trigger independent A/AAAA lookup at fixed https://dns.google/resolve; host syntax checked first; all returned addresses must be public and not local interfaces.",
+    "pinnedTransport": "System curl invoked as an argument array using --resolve, retaining original Host/SNI/TLS certificate verification. --disable ignores user curlrc, --noproxy=* ignores proxy environment, no automatic redirect following, sanitized child env, no page credentials.",
+    "dnsRebinding": "Both ordinary public answers and independently resolved fake-IP targets connect to their checked literal IP; direct loop rechecks each redirect.",
+    "curlAvailability": "No npm dependency added; systems without curl fail explicitly with page_transport_unavailable. macOS system curl verified in this run.",
+    "existingDocsException": "Fixed DeepSeek HTTPS documentation keeps its earlier TLS-authenticated direct proxy compatibility path.",
+    "limits": {
+      "directPageBytes": 2097152,
+      "paidToolJsonBytesUnchanged": 1048576,
+      "returnedPageCharacters": 50000,
+      "headersBytes": 65536,
+      "redirectHopsPerUrl": 5,
+      "markdownAlternativeAttempts": 1,
+      "curlMaxSeconds": 30,
+      "agentFetchDefaultDeadlineSeconds": 15
+    },
+    "javascriptShell": "A short HTML app shell with scripts is not valid page evidence. Attempt one real .md representation at the final origin, revalidate it and use its actual URL; if still a shell, report page_requires_javascript. Same outer cancellation/deadline is retained.",
+    "failuresRemainHonest": "HTTP 403, size limits, invalid DNS and TLS failures remain errors; no hidden MCP or paid extraction fallback.",
+    "searchSourceLabels": "Previous source-label fix is included; persisted Tavily source observed after full app restart."
+  },
+  "tests": {
+    "shared": {
+      "pass": 132,
+      "fail": 0
+    },
+    "desktop": {
+      "pass": 737,
+      "fail": 0
+    },
+    "sidecar": {
+      "pass": 378,
+      "fail": 0
+    },
+    "focused": {
+      "pass": 48,
+      "fail": 0
+    },
+    "typecheck": "passed",
+    "biome": {
+      "passed": true,
+      "filesChecked": 951
+    },
+    "securityCoverage": [
+      "Private, mixed, literal and non-public independent DNS never reach page transport",
+      "DNS deadline/Stop prevents late request",
+      "Real pinned local HTTP test preserves original Host while reaching checked address",
+      "HTTPS refuses a non-TLS peer",
+      "Declared and streamed 2 MiB limits",
+      "Actual owned curl request cancels without hanging",
+      "Every redirect is revalidated",
+      "JavaScript shell Markdown alternative is bounded and cannot loop or be claimed read on failure"
+    ]
+  },
+  "directRealValidation": "direct-validation.json",
+  "nativeRealValidation": "native-validation.json",
+  "native": {
+    "performed": true,
+    "newConversationId": "1ef03a10-17c1-43f3-9c7d-99530d972315",
+    "newConversationTitle": "验证联网与网页读取",
+    "searchLabelObserved": "Search · Tavily",
+    "threeFetchesSucceeded": true,
+    "mcpCalls": 0,
+    "restartedAndReloadedSavedConversation": true,
+    "sourceLabelStillVisible": true,
+    "expandedStepsLeftOnDesktop": true,
+    "screenshots": {
+      "native/02-reloaded-tavily-source.png": "d441d4514888468b20a01db62222e3f2c9c9da7a9f2a63105ef0d9b438edecc4",
+      "native/01-tavily-three-fetch.png": "d98b920beace9459700634d7adc5ad842f8beade554d8c13d06c6b7458faa765"
+    }
+  },
+  "build": {
+    "hostSidecar": "passed",
+    "tauriDebugApp": "passed",
+    "appSha256": "9c37c463f85b6237cea3989d5f84e6f4dd297dbfb52cbe66252c57809cffe7e9",
+    "sidecarSha256": "21b00f252e3d49d4c76109c02b841dc64c9030c4ba835e8bffc40e86c920573f"
+  },
+  "preservation": {
+    "searchSettingsUnchanged": true,
+    "mcpSettingsUnchanged": true,
+    "envFilesUnchanged": true,
+    "dependencyFilesUnchanged": {
+      "apps/sidecar/package.json": true,
+      "pnpm-lock.yaml": true
+    },
+    "currentProvider": "tavily",
+    "availableProviders": ["tavily", "openrouter"],
+    "changedBaselineFiles": [
+      "docs/audits/2026-11-16/search-provider-label/validation.json",
+      "apps/sidecar/src/agent/direct.test.ts",
+      "apps/sidecar/src/agent/direct.ts"
+    ],
+    "missingBaselineFiles": [],
+    "noStagingOrCommit": true
+  },
+  "limitations": [
+    "Old https://openai.com/api/pricing/ returns external HTTP 403. No bypass attempted; current official developers.openai.com pricing.md successfully read.",
+    "Long page content remains a bounded excerpt, not a promise to return full documents; persisted tool events are additionally clipped by existing event limits."
+  ],
+  "sourceSha256": {
+    "apps/sidecar/src/agent/public-page-fetch.ts": "afd57daf8e407c727c94165b1664d42e3581129165a27e37f99ad7af1b4666db",
+    "apps/sidecar/src/agent/public-page-fetch.test.ts": "3a3225f7a25e6c05b526dac900e92965820a0906b26ed3e7d9372ad9844498a6",
+    "apps/sidecar/src/agent/direct.ts": "b4f8e6f12521aeb493435407de42c18f438a1c8dc5062775b72d1f2e6bfa8707",
+    "apps/sidecar/src/agent/direct.test.ts": "272927c047ed95da047e54befa9a4ac823679dfe4656d5baeec7cbb16f51224b"
+  },
+  "cleanup": {
+    "complete": true,
+    "ownedTemporaryDirectoryRemoved": "/var/folders/2b/0vr77k3j1yv2m83zxdkpx48c0000gn/T/openhorn-page-read-m8_a0_4w",
+    "resumePointerRemoved": true,
+    "ownedHangingTransportProbeStopped": true,
+    "kept": "running final app/backend, formal audits and screenshots, saved test conversation, user keys/settings/MCP and unrelated WIP"
+  }
+}

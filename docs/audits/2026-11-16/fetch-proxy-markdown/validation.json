@@ -1,0 +1,98 @@
+{
+  "status": "complete",
+  "recordedAt": "2026-11-16T08:33:54.844989+00:00",
+  "problem": "Official DeepSeek Markdown pages rejected by built-in Fetch with unsafe_url.",
+  "rootCause": [
+    "System fake-IP proxy resolves api-docs.deepseek.com to 198.18.0.25, classified as reserved by general SSRF rules.",
+    "text/markdown was absent from direct Fetch content types, so removing only the DNS refusal would still fail."
+  ],
+  "fix": {
+    "newPageOnlyGuard": "assertPublicPageUrl",
+    "trustedOrigin": "https://api-docs.deepseek.com",
+    "allowedProxyDns": "All answers exclusively within 198.18.0.0/15 and no answer equals a local network interface.",
+    "retainedChecks": [
+      "URL syntax, credentials, private/literal addresses",
+      "Mixed/private/empty/failed DNS remain blocked",
+      "Arbitrary origins and paid tool endpoint/target validation remain strict",
+      "HTTPS rejectUnauthorized=true",
+      "Each redirect revalidates origin/address before request",
+      "Bounded response and existing timeout/cancellation",
+      "No authorization credentials sent when reading pages"
+    ],
+    "contentTypesAdded": ["text/markdown", "text/x-markdown"],
+    "additionalProviderOrKey": false,
+    "scope": "Targeted vendor documentation compatibility, not generic fake-IP support for arbitrary web hosts."
+  },
+  "tests": {
+    "shared": {
+      "pass": 131,
+      "fail": 0
+    },
+    "sidecar": {
+      "pass": 365,
+      "fail": 0
+    },
+    "typecheck": "passed",
+    "biome": {
+      "passed": true,
+      "filesChecked": 943
+    }
+  },
+  "realDirectReads": "direct-validation.json",
+  "build": {
+    "sidecarHost": "passed",
+    "tauriDebugApp": "passed",
+    "appSha256": "6f0ef8431a757fe701591d4f6dc37f1ad8caad52b84e837862e44aeb5c310423",
+    "bundledSidecarMatchesBuiltHost": true,
+    "bundledSidecarSha256": "02325ca2a77a93cde326526cf1451b921f831dfc4cff943299175b15665eefbb"
+  },
+  "native": {
+    "newBundleRestartedAndProjectMenuObserved": true,
+    "agentTestSent": true,
+    "afterFixTestPerformed": true,
+    "notificationTriggered": true,
+    "deliveredUrgency": "time-sensitive",
+    "next": null,
+    "testQuestion": "请用内置 Fetch 实际读取以下两个官方 Markdown 页面，不要用 MCP，也不要搜索或读写本地文件：\nhttps://api-docs.deepseek.com/guides/responses_api.md\nhttps://api-docs.deepseek.com/quick_start/pricing.md\n读取后分别列出页面标题，并根据原文简短回答 Responses API 的 web_search 是否支持 Flash。若读取失败请明确报告，不要凭记忆回答。",
+    "afterFixTestPassed": true,
+    "resolvedPreviousBlocker": "While preparing to paste the test question, native UI returned cgWindowNotFound. Confirmed IOConsoleLocked=true and CGSSessionScreenIsLocked=true. No locked-session input bypass.",
+    "remainingBlocker": null,
+    "evidence": "native-validation.json",
+    "conversationId": "0c8a0101-15de-47af-a7a5-4b79eda58a53",
+    "conversationTitle": "读取官方文档并核实",
+    "observedProcessLabel": "2 个步骤 · 11s",
+    "screenshots": {
+      "native/02-two-fetch-success.png": "7d380547758bc22c167d0604d67658119619772bd099361a2af9d81b40154d76",
+      "native/01-agent-reading.png": "30a9e6e43bd2727db3549166dd396f442e85991f9f4cf462c74beceeb298a9c9"
+    }
+  },
+  "preservation": {
+    "searchSettingsUnchanged": true,
+    "mcpConfigurationsUnchanged": true,
+    "environmentFilesUnchanged": true,
+    "dependencyFilesPreserved": {
+      "apps/sidecar/package.json": true,
+      "pnpm-lock.yaml": true
+    },
+    "changedBaselineFiles": [
+      "apps/sidecar/src/agent/direct.test.ts",
+      "apps/sidecar/src/agent/direct.ts"
+    ],
+    "missingBaselineFiles": [],
+    "noStagingOrCommit": true,
+    "currentAvailableProviders": ["tavily", "openrouter"]
+  },
+  "sourceSha256": {
+    "packages/shared/src/search/webSafety.ts": "f5f74727c167b8548ef8ccf3826e299fa4c0b992abb8700b2a566b337a903f3d",
+    "packages/shared/src/search/webSafety.page.test.ts": "49b8142597cb376c3d17b219b8f8515ccd77a920d053daf670d8ab7a338fb14a",
+    "apps/sidecar/src/agent/direct.ts": "f4450b004b6803e064909f840fcd087d979fe8e7f03fe341d9a008d2fb65e419",
+    "apps/sidecar/src/agent/direct.test.ts": "e931192668cbeec9798be0dc7614c1e53645abef3b9f668f1b3b1505d976b42b"
+  },
+  "cleanup": {
+    "complete": true,
+    "ownedTemporaryDirectoryRemoved": "/var/folders/2b/0vr77k3j1yv2m83zxdkpx48c0000gn/T/openhorn-fetch-1e40ryg1",
+    "resumePointerRemoved": true,
+    "kept": "newly built running app/backend, formal evidence, original conversations, settings, keys and unrelated WIP"
+  },
+  "completedAt": "2026-11-16T08:51:48.216517+00:00"
+}

@@ -1,0 +1,20 @@
+{
+  "successfulActivationProbe": true,
+  "activationProbeTiming": "unavailable: local result collection failed after successful activation",
+  "timedVerificationProbe": {
+    "elapsedSeconds": 4.76,
+    "success": true,
+    "errorCode": null
+  },
+  "totalExplicitProbeCount": 2,
+  "automaticRetries": 0,
+  "actualModel": "deepseek/deepseek-v4-flash",
+  "effectiveProvider": "openrouter",
+  "verification": "verified",
+  "availableProviders": ["tavily", "openrouter"],
+  "configuredProviders": ["tavily", "openrouter"],
+  "pendingProviders": [],
+  "protectedSettingsUnchangedDuringTimedProbe": true,
+  "sameCandidateAndActiveKey": true,
+  "environmentFilesUnchanged": true
+}

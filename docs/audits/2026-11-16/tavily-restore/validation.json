@@ -1,0 +1,125 @@
+{
+  "status": "complete",
+  "completedAt": "2026-11-16T03:45:45.318122+00:00",
+  "problem": "Existing Tavily was incorrectly hidden by requiring a new verification marker. No key or configuration was deleted.",
+  "changes": {
+    "configuredSeparateFromVerified": true,
+    "legacyConnectionsRemainVisible": true,
+    "missingVerificationLabeled": true,
+    "TavilyAndOpenRouterDistinct": true,
+    "verificationOnlyRoute": "/settings/search/verify",
+    "currentSourceNotSwitched": true
+  },
+  "tests": {
+    "server": {
+      "exitCode": 0,
+      "pass": 645,
+      "fail": 0
+    },
+    "desktop": {
+      "exitCode": 0,
+      "pass": 734,
+      "fail": 0
+    },
+    "typecheck": {
+      "exitCode": 0
+    },
+    "biome": {
+      "exitCode": 0,
+      "filesChecked": 933
+    },
+    "browser": {
+      "exitCode": 0
+    }
+  },
+  "browserChecks": 22,
+  "build": "Finished debug macOS app bundle and relaunched it via CUA.",
+  "realValidation": {
+    "backendPid": 12398,
+    "success": true,
+    "errorCode": null,
+    "transportErrorType": null,
+    "verificationRequests": 1,
+    "automaticRetries": 0,
+    "elapsedSeconds": 7.28,
+    "sourcePreserved": "openrouter",
+    "protectedSourceAndCredentialRowsUnchanged": true,
+    "jevEnvironmentFilesUnchanged": true,
+    "status": {
+      "effectiveProvider": "openrouter",
+      "verification": "verified",
+      "availableProviders": ["tavily", "openrouter"],
+      "configuredProviders": ["tavily", "openrouter"],
+      "pendingProviders": []
+    },
+    "tavilyRuntimeRetainsOriginalKey": true
+  },
+  "currentStatus": {
+    "effectiveProvider": "openrouter",
+    "verification": "verified",
+    "configuredProviders": ["tavily", "openrouter"],
+    "availableProviders": ["tavily", "openrouter"]
+  },
+  "native": {
+    "performed": true,
+    "appPid": 14309,
+    "observed": [
+      "Expanded actual source menu with Tavily and OpenRouter, no duplicate entries.",
+      "Selected Tavily, observed original masked Key, did not save or re-verify.",
+      "Returned form to OpenRouter; actual current source remained unchanged."
+    ],
+    "screenshots": {
+      "native/01-both-connections.png": "770604d219cbfd176d48cac1fee16a9746330f507bfaace0b956887e2f0a3437",
+      "native/02-original-tavily-key.png": "21762bcef17355a8e0f65bce28cc220960d52cf53123fd08bf65ab156b44f4cc",
+      "native/03-restored-default.png": "ceb61eea4939d61eb2f1b5d97c8ceb4f14957cd995baf51012b4786d9623de9a"
+    }
+  },
+  "sourceSha256": {
+    "apps/desktop/src/components/settings/availableSearchProviders.test.ts": "2526a6e432af13cf66cce413080a7b81272a89848417e06868ceca2f3a0eef69",
+    "apps/desktop/src/components/settings/availableSearchProviders.ts": "fdb6cf6af335fb6c6bb552549f364ffd9cc252fe2bf463ab0b79ba0f638e1ad6",
+    "apps/server/src/services/searchSettingsService.test.ts": "5dd0f7b0b4e6d0a3e9d752a7cd8b193b53dbf37382c470c427321740a168cbdf",
+    "apps/server/src/services/searchSettingsService.ts": "69c069c6f18d80457fe92d35d0833b2e0eebbae1f30f5b0b6ab654066b655a43",
+    "packages/shared/src/types/search-settings.ts": "4a9275d8d5df6333d5cff1018a0abccd115d6e6598c81ed6b0af3a1452aa2f03",
+    "apps/desktop/scripts/deepseek-capabilities.browser.mjs": "8d07e177e1fedb5a20202ba74ab11e8152084a9849605912c6dc9cc374845901",
+    "apps/desktop/src/components/settings/DeepSeekToolSettings.tsx": "627b413a8a3e6406abd401c177cde79b917b658c96a3e6c13d37b7be75eb78ab",
+    "apps/desktop/src/lib/i18n/agent.ts": "712824898220aa28606d4c792be86374b9732a67eb1b0b5116031dcfcb60cb27",
+    "apps/server/src/routes/settings.ts": "60ae60094dcde8b183d8e3672c14dc8ce76a56d8c0e51c0137c9db705a07f280"
+  },
+  "nativeBinarySha256": "5e2daaab0879e1b759b086860d407d72425033a8a5b45cb896de04221c5805cc",
+  "preservation": {
+    "recordedExistingDirtyFiles": 281,
+    "unchangedRecordedFiles": 270,
+    "changedRecordedFiles": [
+      "apps/desktop/src/components/settings/availableSearchProviders.test.ts",
+      "apps/desktop/src/components/settings/availableSearchProviders.ts",
+      "apps/server/src/services/searchSettingsService.test.ts",
+      "apps/server/src/services/searchSettingsService.ts",
+      "docs/audits/2026-11-16/openrouter-search/README.md",
+      "packages/shared/src/types/search-settings.ts",
+      ".trellis/spec/desktop/frontend/component-guidelines.md",
+      "apps/desktop/scripts/deepseek-capabilities.browser.mjs",
+      "apps/desktop/src/components/settings/DeepSeekToolSettings.tsx",
+      "apps/desktop/src/lib/i18n/agent.ts",
+      "apps/server/src/routes/settings.ts"
+    ],
+    "missingRecordedFiles": [],
+    "noStagingOrCommit": true
+  },
+  "cleanup": {
+    "complete": true,
+    "removedTaskDirectory": "/var/folders/2b/0vr77k3j1yv2m83zxdkpx48c0000gn/T/openhorn-tavily-restore-75vs0f98",
+    "removedResumePointer": "/tmp/openhorn-tavily-restore-current",
+    "closedTestDatabasePaths": [
+      "/var/folders/2b/0vr77k3j1yv2m83zxdkpx48c0000gn/T/openhorn-tavily-restore-75vs0f98/server-tests.db"
+    ],
+    "preserved": [
+      "Running app/backend and /tmp/openhorn-local-server.log",
+      "User keys/settings and unrelated WIP",
+      "Formal evidence under docs/audits/2026-11-16/tavily-restore/"
+    ]
+  },
+  "elapsedSecondsLowerBound": 1036.3,
+  "completionNotificationTriggered": true,
+  "completionNotificationDeliveredUrgency": "time-sensitive",
+  "journalSession": 75
+}

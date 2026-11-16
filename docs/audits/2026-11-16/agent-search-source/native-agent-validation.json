@@ -1,0 +1,64 @@
+{
+  "conversationId": "827102b3-8a37-4be4-91e7-655eac594cc9",
+  "conversationTitle": "核实联网搜索支持模型",
+  "projectId": "5ae0f163-98b3-4d2d-9db1-739a02994ec8",
+  "projectRoot": "/Users/han/Project/OpenHorn",
+  "mode": "Agent",
+  "assistantRunStatus": "completed",
+  "messageCount": 2,
+  "searchProvider": "openrouter",
+  "searchModelFromVerifiedRuntimeStatus": "deepseek/deepseek-v4-flash",
+  "searchTool": "web_search",
+  "searchDurationSecondsFromToolTimestamps": 10.46,
+  "searchResultEvidence": "Untrusted retrieval data from OpenRouter web search (Exa).",
+  "tavilySearchCallCount": 0,
+  "explicitMcpTargetUsed": false,
+  "toolCalls": [
+    {
+      "toolName": "web_search",
+      "toolInput": {
+        "query": "site.api-docs.deepseek.com Responses API web_search Flash supported models"
+      },
+      "timestamp": 1794808322171
+    },
+    {
+      "toolName": "web_fetch",
+      "toolInput": {
+        "url": "https://api-docs.deepseek.com/guides/responses_api.md"
+      },
+      "timestamp": 1794808337682
+    },
+    {
+      "toolName": "web_fetch",
+      "toolInput": {
+        "url": "https://api-docs.deepseek.com/quick_start/pricing.md"
+      },
+      "timestamp": 1794808337688
+    },
+    {
+      "toolName": "mcp__exa__web_fetch_exa",
+      "toolInput": {
+        "urls": [
+          "https://api-docs.deepseek.com/guides/responses_api",
+          "https://api-docs.deepseek.com/quick_start/pricing"
+        ],
+        "maxCharacters": 14000
+      },
+      "timestamp": 1794808341928
+    }
+  ],
+  "webFetchFailures": [
+    {
+      "toolName": "web_fetch",
+      "error": "unsafe_url"
+    },
+    {
+      "toolName": "web_fetch",
+      "error": "unsafe_url"
+    }
+  ],
+  "urlReadRecoveryTool": "mcp__exa__web_fetch_exa",
+  "urlReadRecoveryReturnedOriginalPageText": true,
+  "observedProcessLabel": "4 个步骤 · 27s",
+  "retainedTestConversation": true
+}
