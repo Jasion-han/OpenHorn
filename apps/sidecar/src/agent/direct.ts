@@ -17,7 +17,6 @@ import {
 } from "@earendil-works/pi-ai";
 import { resolveContextPolicy } from "shared/context-policy";
 import {
-  assertPublicWebUrl,
   buildTavilyPayload,
   fetchToolService,
   formatNativeSearchResult,
@@ -28,7 +27,6 @@ import {
   normalizeSearchQuery,
   type PreferredSearchProvider,
   type ResolveWebHostname,
-  readBoundedWebResponse,
   rerankCitations,
   type SearchCitation,
   searchDeepSeekNative,
@@ -81,6 +79,7 @@ import { type AgentEvent, buildUsageEvent, toCount } from "./events";
 import { buildIntentContext } from "./intent-context";
 import { applyMcpSearchPolicy } from "./mcp-search-policy";
 import { capMcpTools, connectMcpTools } from "./mcp-tools";
+import { fetchPublicPage, readDirectPageBody } from "./public-page-fetch";
 import { runShellCommand } from "./shell";
 import { buildSkillsPromptSection, type MaterializedSkill } from "./skills";
 import { buildAgentSystemPrompt, buildReActBehaviorSection } from "./system-prompt";
@@ -157,6 +156,7 @@ const WEB_FETCH_MAX_HOPS = 5;
 // ---------------------------------------------------------------------------
 
 export interface ExecuteToolOptions {
+  resolvePublicHostname?: ResolveWebHostname;
   onSearchSource?: (source: SearchExecutionSource) => void;
   signal?: AbortSignal;
   permissionMode?: "default" | "full-access";
@@ -474,12 +474,11 @@ export async function executeTool(
       let resp: Response | undefined;
       for (let hop = 0; hop < WEB_FETCH_MAX_HOPS; hop++) {
         signal.throwIfAborted();
-        await assertPublicWebUrl(currentUrl, options.resolveHostname);
-        signal.throwIfAborted();
-        resp = await (options.fetchImpl ?? fetch)(currentUrl, {
-          headers: { "User-Agent": "OpenHorn/1.0 (compatible; bot)" },
+        resp = await fetchPublicPage(currentUrl, {
           signal,
-          redirect: "manual",
+          resolveHostname: options.resolveHostname,
+          resolvePublicHostname: options.resolvePublicHostname,
+          fetchImpl: options.fetchImpl,
         });
         if (resp.status < 300 || resp.status >= 400) break;
         const location = resp.headers.get("location");
@@ -490,15 +489,16 @@ export async function executeTool(
       }
       if (!resp) return "Error: too many redirects";
       if (!resp.ok) return `Error: HTTP ${resp.status} ${resp.statusText}`;
-      const contentType = resp.headers.get("content-type") || "";
-      if (
-        !contentType.includes("text/html") &&
-        !contentType.includes("text/plain") &&
-        !contentType.includes("application/json")
-      ) {
+      const contentType = (resp.headers.get("content-type") || "").toLowerCase();
+      const plainText =
+        contentType.includes("text/plain") ||
+        contentType.includes("text/markdown") ||
+        contentType.includes("text/x-markdown") ||
+        contentType.includes("application/json");
+      if (!contentType.includes("text/html") && !plainText) {
         return `Error: unsupported content type: ${contentType}`;
       }
-      const html = await readBoundedWebResponse(resp, undefined, signal);
+      const html = await readDirectPageBody(resp, signal);
       const formatPage = (content: string) =>
         formatUntrustedWebSources([
           {
@@ -507,7 +507,7 @@ export async function executeTool(
             content: content.slice(0, MAX_READ_CHARS),
           },
         ]);
-      if (contentType.includes("text/plain") || contentType.includes("application/json")) {
+      if (plainText) {
         return formatPage(html);
       }
       // HTML -> Markdown via turndown
@@ -515,6 +515,20 @@ export async function executeTool(
       const td = new TurndownService({ headingStyle: "atx", codeBlockStyle: "fenced" });
       td.remove(["script", "style", "nav", "footer", "header", "aside", "iframe", "noscript"]);
       const md = td.turndown(html);
+      // A client-rendered documentation shell is not the requested page text.
+      // Try one real Markdown representation at the final origin, then fail honestly.
+      if (
+        md.trim().length < 160 &&
+        /<script\b/i.test(html) &&
+        /<(?:app-root|[a-z][\w-]*-app)\b|\bid=["'](?:root|app|__next)["']/i.test(html)
+      ) {
+        const target = new URL(currentUrl);
+        if (!new URL(url).pathname.endsWith(".md") && !target.pathname.endsWith(".md")) {
+          target.pathname = `${target.pathname.replace(/\/$/, "")}.md`;
+          return executeTool("web_fetch", { url: target.href }, cwd, { ...options, signal });
+        }
+        return "Fetch error: page_requires_javascript. Original page content was not read.";
+      }
       return formatPage(md);
     } catch (err) {
       return `Fetch error: ${err instanceof Error ? err.message : "failed"}`;

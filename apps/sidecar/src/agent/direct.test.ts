@@ -454,7 +454,116 @@ test("legacy web_fetch rejects redirect to private host and credentials and boun
   const result = await executeTool("web_fetch", { url: "https://example.com" }, "/tmp", {
     ...options,
     fetchImpl: async () =>
-      new Response("x".repeat(1024 * 1024 + 1), { headers: { "Content-Type": "text/plain" } }),
+      new Response("x".repeat(2 * 1024 * 1024 + 1), { headers: { "Content-Type": "text/plain" } }),
   });
   expect(result).toContain("response_too_large");
+});
+
+test("official documentation Fetch works with fake-IP proxies and preserves Markdown as original text", async () => {
+  let calls = 0;
+  const page = "# Official documentation\n\n**Original Markdown**, not a generated summary.";
+  const result = await executeTool(
+    "web_fetch",
+    { url: "https://api-docs.deepseek.com/guides/responses_api.md" },
+    "/tmp",
+    {
+      webSearchEnabled: true,
+      searchProvider: "openrouter",
+      resolveHostname: async () => ["198.18.0.25"],
+      fetchImpl: async (url, init) => {
+        calls++;
+        expect(String(url)).toBe("https://api-docs.deepseek.com/guides/responses_api.md");
+        expect(init?.redirect).toBe("manual");
+        expect(init).toMatchObject({ tls: { rejectUnauthorized: true } });
+        expect(new Headers(init?.headers).has("Authorization")).toBe(false);
+        return new Response(page, { headers: { "Content-Type": "text/markdown; charset=utf-8" } });
+      },
+    },
+  );
+  expect(calls).toBe(1);
+  expect(result.includes(JSON.stringify(page))).toBe(true);
+  expect(result.includes("untrusted")).toBe(true);
+});
+
+test("official-documentation redirects revalidate every target and cannot extend the proxy exception", async () => {
+  for (const location of [
+    "http://127.0.0.1/private",
+    "https://example.com/docs",
+    "http://api-docs.deepseek.com/docs",
+  ]) {
+    let calls = 0;
+    const result = await executeTool(
+      "web_fetch",
+      { url: "https://api-docs.deepseek.com/guides/responses_api.md" },
+      "/tmp",
+      {
+        webSearchEnabled: true,
+        resolveHostname: async () => ["198.18.0.25"],
+        resolvePublicHostname: async () => ["10.0.0.1"],
+        fetchImpl: async () => {
+          calls++;
+          return new Response(null, { status: 302, headers: { location } });
+        },
+      },
+    );
+    expect(result.includes("unsafe_url")).toBe(true);
+    expect(calls).toBe(1);
+  }
+});
+
+test("search provenance reports Tavily fallback from the actual branch without changing selection", async () => {
+  __clearDuckDuckGoCache();
+  const sources: SearchExecutionSource[] = [];
+  await runWebSearch("runtime source fallback fixture", {
+    searchProvider: "tavily",
+    tavilyApiKey: "synthetic-tavily-key",
+    sleep: noSleep,
+    onSearchSource: (source) => sources.push(source),
+    fetchImpl: async (url) =>
+      String(url).includes("api.tavily.com")
+        ? new Response(null, { status: 503 })
+        : new Response(DDG_LITE_HTML),
+  });
+  expect(sources).toEqual([
+    { provider: "tavily" },
+    { provider: "duckduckgo", fallbackFrom: "tavily" },
+  ]);
+});
+
+test("a JavaScript documentation shell uses one actual Markdown representation with its real source URL", async () => {
+  const requests: string[] = [];
+  const result = await executeTool("web_fetch", { url: "https://docs.example/pricing" }, "/tmp", {
+    webSearchEnabled: true,
+    resolveHostname: async () => ["93.184.216.34"],
+    fetchImpl: async (url) => {
+      requests.push(String(url));
+      return String(url).endsWith(".md")
+        ? new Response("# Original pricing\nActual source content.", {
+            headers: { "content-type": "text/markdown" },
+          })
+        : new Response('<title>Docs</title><div id="root"></div><script src="app.js"></script>', {
+            headers: { "content-type": "text/html" },
+          });
+    },
+  });
+  expect(requests).toEqual(["https://docs.example/pricing", "https://docs.example/pricing.md"]);
+  expect(result.includes("https://docs.example/pricing.md")).toBe(true);
+  expect(result.includes("# Original pricing")).toBe(true);
+});
+
+test("an unreadable Markdown candidate cannot loop or be reported as successfully read", async () => {
+  let requests = 0;
+  const result = await executeTool("web_fetch", { url: "https://docs.example/pricing" }, "/tmp", {
+    webSearchEnabled: true,
+    resolveHostname: async () => ["93.184.216.34"],
+    fetchImpl: async () => {
+      requests++;
+      return new Response(
+        '<title>Docs</title><app-root></app-root><script src="app.js"></script>',
+        { headers: { "content-type": "text/html" } },
+      );
+    },
+  });
+  expect(requests).toBe(2);
+  expect(result.includes("page_requires_javascript")).toBe(true);
 });
