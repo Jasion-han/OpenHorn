@@ -1,0 +1,111 @@
+{
+  "method": "production UI, fresh Chrome contexts, CPU throttle4, 3 repetitions per mode/size",
+  "comparison": [
+    {
+      "mode": "app",
+      "conversations": 344,
+      "readyMs": {
+        "before": 1332.9,
+        "after": 593.1
+      },
+      "elements": {
+        "before": 2499,
+        "after": 333
+      },
+      "rows": {
+        "before": 332,
+        "after": 20
+      },
+      "jsBytes": {
+        "before": 1866813,
+        "after": 1216264
+      },
+      "frameP95Ms": {
+        "before": 19,
+        "after": 18.3
+      }
+    },
+    {
+      "mode": "app",
+      "conversations": 5000,
+      "readyMs": {
+        "before": 4250.9,
+        "after": 639
+      },
+      "elements": {
+        "before": 35095,
+        "after": 333
+      },
+      "rows": {
+        "before": 4988,
+        "after": 20
+      },
+      "jsBytes": {
+        "before": 1866813,
+        "after": 1216264
+      },
+      "frameP95Ms": {
+        "before": 32.9,
+        "after": 18.7
+      }
+    },
+    {
+      "mode": "sidebar",
+      "conversations": 344,
+      "readyMs": {
+        "before": 1179.8,
+        "after": 439.3
+      },
+      "elements": {
+        "before": 2424,
+        "after": 258
+      },
+      "rows": {
+        "before": 332,
+        "after": 20
+      },
+      "jsBytes": {
+        "before": 1866813,
+        "after": 1216264
+      },
+      "frameP95Ms": {
+        "before": 17.5,
+        "after": 18.5
+      },
+      "selectionMs": {
+        "before": 31.2,
+        "after": 32.5
+      }
+    },
+    {
+      "mode": "sidebar",
+      "conversations": 5000,
+      "readyMs": {
+        "before": 3221.1,
+        "after": 462.5
+      },
+      "elements": {
+        "before": 35020,
+        "after": 258
+      },
+      "rows": {
+        "before": 4988,
+        "after": 20
+      },
+      "jsBytes": {
+        "before": 1866813,
+        "after": 1216264
+      },
+      "frameP95Ms": {
+        "before": 34.4,
+        "after": 18.4
+      },
+      "selectionMs": {
+        "before": 105.1,
+        "after": 31.6
+      }
+    }
+  ],
+  "browserChecks": 4,
+  "desktopTests": 657
+}

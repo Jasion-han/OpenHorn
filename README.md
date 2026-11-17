@@ -5,7 +5,7 @@ OpenHorn is a self-hostable AI workspace for chat, agent execution, provider rou
 It combines:
 - a Tauri desktop client
 - a Bun + Hono API server
-- an Agent mode backed by the Claude Agent SDK
+- Agent runtimes for Claude, Codex, direct model tools, and ACP agents
 - a local sidecar runtime for workspace-bounded agent execution
 
 ## What It Does
@@ -17,6 +17,9 @@ It combines:
 - Attachment support
 - Inline message edit and regenerate flows
 - Conversation auto-titling
+- Versioned task recipes with parameters, project bindings, capability checks, and scheduled runs
+- An artifact workbench for saved replies, interactive previews, immutable versions, and export
+- Durable local recovery for final Agent replies that have not reached the server
 
 ## Apps
 
@@ -119,6 +122,42 @@ Current behavior:
 - The first implementation keeps the latest bounded conversation window instead of replaying the entire session.
 - Historical tool traces are not re-injected into the prompt.
 
+## Workbench
+
+Open **工作台** in the desktop sidebar. **任务配方** includes competitor research,
+CSV analysis, and code review templates. Save a recipe, fill its parameters, and
+run it immediately or create a scheduled task. CSV and code templates read files
+from a bound local project. Scheduled recipes currently use Markdown output and
+need the desktop sidecar to be online; an expired execution is reported as failed
+instead of automatically repeating its tools.
+
+Use the action beneath a saved assistant reply to collect an independent
+**已保存成果**. Review its versions, preview Markdown/HTML/OpenUI with the existing
+sandbox, export its original text, or continue editing in a new conversation.
+Deleting the source conversation preserves the saved artifact. This first release
+stores text and interactive page content; it does not copy arbitrary generated
+binary files from local paths.
+
+The existing sidebar search now groups conversation titles/messages, saved results,
+recipes, projects and review projects. It uses local keyword queries without model
+calls and shows at most eight results per type. Search covers current saved-result
+content and recipe task text; review projects are matched by name.
+
+Open version history from the workbench's More menu to compare an older result or
+recipe with the current version. Confirming restore creates a new version and
+preserves existing history and frozen scheduled tasks. Large comparisons use a
+bounded plain-text view; restoration always copies the complete saved content.
+
+Agent result saving retries only persistence. Final payloads are retained in the
+app profile under the current server/user, with stable identities and save
+preconditions. Conflicts preserve the local result and offer explicit copy/discard
+actions rather than overwriting a newer server message.
+
+Backups include recipes and artifact version history. Access credentials and
+sensitive configuration are omitted; imported MCP connections require setup and
+manual enabling. Missing attachment originals are listed in the backup manifest
+and desktop export result.
+
 ## Docker
 
 A basic server container is included:
@@ -139,7 +178,7 @@ The compose file mounts:
 
 ## Repository Notes
 
-- Design and implementation notes are kept under `docs/plans/`.
+- Design and implementation notes are kept under `docs/superpowers/`.
 - This repository is organized as a workspace monorepo.
 - Some agent features depend on Anthropic-compatible configuration.
 

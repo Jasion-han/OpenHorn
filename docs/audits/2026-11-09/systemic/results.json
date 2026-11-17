@@ -1,0 +1,24 @@
+{
+  "unitTests": {
+    "server": 465,
+    "desktop": 657,
+    "sidecar": 331,
+    "shared": 53
+  },
+  "totalUnitTests": 1506,
+  "browserScenarios": {
+    "settingsImportMcp": 12,
+    "workbench": 25,
+    "chatFailure": 56
+  },
+  "typecheck": "passed",
+  "format": "passed",
+  "desktopBundle": "passed",
+  "dockerBuild": "passed",
+  "containerSmoke": "container-smoke.json",
+  "liveDataBeforeAfter": {
+    "conversations": 344,
+    "scheduledTasks": 2,
+    "enabledTasks": 0
+  }
+}

@@ -1,0 +1,3 @@
+{"check":"backup-export","exported":false,"error":"archiver is not a function. (In 'archiver(\"zip\", { zlib: { level: 6 } })', 'archiver' is an instance of Module)"}
+{"check":"run-ownership","claimed":true,"otherClientFinished":true,"statusAfterOtherClient":"failed","lateOwnerFinished":true}
+{"check":"breaker","openAllowed":false,"state":"half_open","probes":[true,true,true]}

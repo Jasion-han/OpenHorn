@@ -1,0 +1,13 @@
+{
+  "checks": [
+    "research menu keeps the question and exposes a light keyboard-focus state",
+    "real PDF.js keeps page text and transmits the selected graphics-only page as actual JPEG bytes",
+    "IndexedDB restores exact image/text inputs across reload and rejects a different account scope",
+    "invalid ranges retain the draft/file, and an incompatible model can turn off an existing layout selection"
+  ],
+  "errors": [],
+  "unexpectedNetwork": [],
+  "graphPixels": 184792,
+  "images": 1,
+  "sourcePages": [2]
+}

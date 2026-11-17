@@ -1,0 +1,25 @@
+{
+  "unitTests": {
+    "server": 469,
+    "desktop": 663,
+    "sidecar": 331,
+    "shared": 53
+  },
+  "unitTotal": 1516,
+  "browserChecks": {
+    "settingsImportEditor": 16,
+    "workbench": 25,
+    "chatFailure": 56
+  },
+  "typecheck": "passed",
+  "format": "passed",
+  "macosDebugBundle": "passed",
+  "nativeInspection": "editor rescan and history delete cancellation passed",
+  "liveData": {
+    "conversations": 344,
+    "scheduledTasks": 2,
+    "enabled": 0
+  },
+  "realHistoryDeleted": false,
+  "realFilesUploaded": false
+}

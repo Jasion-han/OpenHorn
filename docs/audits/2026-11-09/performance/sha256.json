@@ -1,0 +1,7 @@
+{
+  "before.json": "f409c851e521f0f54cdf3ee96eed9e808790edf3c6ec0ca7527d3e47ccf3db34",
+  "after.json": "c9c54b2c73ef5adfdaa9747e088648281c2953654584dc02137c8497f140f2ca",
+  "comparison.json": "4af16930e30d4f3d5049d86689b9b9916177ed270a0e24325f4fd5f4b685e8b1",
+  "after-build.json": "34617d7c1c577d1ead2bfc3f3c22ec8b1cbb838a19ba8d311f6a1113dadec924",
+  "before-build.json": "3cc97d98864d028bab5d99ca7b9496b5d350be82958d77c01288c0cd2bbfc803"
+}

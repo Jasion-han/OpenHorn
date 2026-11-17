@@ -1,0 +1,57 @@
+{
+  "date": "2026-11-17",
+  "scope": ["local PDF page image input", "bounded web research", "binary-safe attachment upload"],
+  "tests": {
+    "shared": { "pass": 134, "fail": 0 },
+    "adapters": { "pass": 100, "fail": 0 },
+    "desktop": { "pass": 764, "fail": 0 },
+    "sidecar": { "pass": 403, "fail": 0 },
+    "server": { "pass": 653, "fail": 0 },
+    "total": { "pass": 2054, "fail": 0 }
+  },
+  "browser": {
+    "documentResearchChecks": 4,
+    "pageErrors": 0,
+    "unexpectedNetworkRequests": 0,
+    "graphPixels": 184792,
+    "selectedPdfPages": [2],
+    "chatRegression": "passed"
+  },
+  "protocol": {
+    "openai": "passed",
+    "anthropic": "passed",
+    "google": "passed",
+    "noRetryForBudgetedCalls": true,
+    "citationsMustBeStructured": true
+  },
+  "upload": {
+    "parser": "busboy",
+    "binaryNulRoundTrip": true,
+    "repeatedFilesPreserved": true,
+    "clientReceiptIdentityCheck": true,
+    "requestBytesLimit": 67108864,
+    "fileBytesLimit": 20971520
+  },
+  "desktop": {
+    "nativeModeMenuObserved": true,
+    "lightMenu": true,
+    "screenshot": "native/01-mode-menu.png",
+    "finalAppBuilt": true
+  },
+  "runtime": {
+    "originalDatabaseRetained": true,
+    "originalEncryptionEnvironmentRetained": true,
+    "serverRestartedWithNewParser": true,
+    "currentSearchStatusVerified": {
+      "effectiveProvider": "tavily",
+      "verification": "verified",
+      "availableProviders": ["tavily", "openrouter"]
+    }
+  },
+  "notMeasured": [
+    "real DeepSeek Files API",
+    "real paid OCR",
+    "real paid search quality",
+    "real external research report quality"
+  ]
+}

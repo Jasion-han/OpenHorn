@@ -1,0 +1,10 @@
+{
+  "apiBoot": true,
+  "initialConversations": 0,
+  "concurrentProjectRequests": 6,
+  "canonicalProjects": 1,
+  "mcpTransportEdit": "http",
+  "invalidConfigStatus": 400,
+  "hostDataMounted": false,
+  "providersInvoked": false
+}

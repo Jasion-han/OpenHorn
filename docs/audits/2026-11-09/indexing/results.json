@@ -1,0 +1,40 @@
+{
+  "task": "文档索引与后台取消检查",
+  "tests": {
+    "server": 493,
+    "desktop": 668,
+    "total": 1161,
+    "failed": 0
+  },
+  "browser": {
+    "workbench": 25,
+    "chat": 56,
+    "total": 81,
+    "serial_exit": "both zero"
+  },
+  "checks": {
+    "typecheck": "passed",
+    "biome": "passed",
+    "macos_debug_app": "passed"
+  },
+  "reproductions": {
+    "chunking": "oversized single paragraphs and Markdown sections",
+    "vectors": "6 concurrent first writes: 5 rejected, 1 row retained before fix",
+    "runner": "timeout before run ACK did not cancel the late run",
+    "settings": "__proto__ is not an own property before fix"
+  },
+  "intermediate_issue": "A concurrent test batch exceeded the existing 5s HTTP CAS timeout and browser teardown stalled. Owned test processes were stopped; isolated CAS and serial full Server / browser runs passed without raising timeouts.",
+  "activation": "Built only this round; desktop/server not restarted",
+  "real_data_at_check": {
+    "conversations": 345,
+    "scheduled_tasks": 2,
+    "enabled_tasks": 0
+  },
+  "limitations": [
+    "历史索引未重算，路径/模型/维度沿用原约定。",
+    "分块上限是UTF-16代码单元，不是精确token预算。",
+    "取消RPC尽力发送；断网时不能保证远端工具立即停止。",
+    "新后台取消逻辑需重启桌面端，服务修复需重启服务加载。",
+    "本轮开始344会话，核对345，不推断新增来源且未清理新增记录。"
+  ]
+}

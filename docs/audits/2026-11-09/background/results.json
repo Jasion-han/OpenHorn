@@ -1,0 +1,37 @@
+{
+  "task": "后台请求与设置同步优化",
+  "tests": {
+    "server": 483,
+    "desktop": 666,
+    "failed": 0,
+    "total": 1149
+  },
+  "browser": {
+    "settings": 21,
+    "workbench": 25,
+    "chat": 56,
+    "failed": 0
+  },
+  "checks": {
+    "typecheck": "passed",
+    "biome": "passed",
+    "macos_debug_bundle": "passed"
+  },
+  "native": {
+    "service": "restarted on loopback:3002",
+    "desktop": "restarted",
+    "ui_acceptance": "not completed: CUA cgWindowNotFound"
+  },
+  "real_data": {
+    "conversations": 344,
+    "scheduled_tasks": 2,
+    "enabled_tasks": 0
+  },
+  "limits": [
+    "未请求真实embedding服务；超时包含响应体读取，以本机HTTP流验证。",
+    "取消信号为embedding辅助接口能力；未改上层任务取消链。",
+    "推荐缓存seed和12小时TTL保持原有格式；失败后每用户60秒冷却。",
+    "Tavily草稿仅当前组件内存，不承诺切页或重启恢复。",
+    "未Git提交、推送或外部部署。"
+  ]
+}

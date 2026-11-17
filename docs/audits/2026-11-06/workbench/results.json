@@ -1,0 +1,194 @@
+{
+  "checks": [
+    "template save, parameter form and target-bound immediate run",
+    "recipe schedule uses the dedicated endpoint and does not send a chat turn",
+    "multiple capability requirements remain editable and missing tools block preparation",
+    "late recipe preparation cannot hand off after navigation",
+    "saved message retains complete text and uses the existing interactive sandbox",
+    "version conflict preserves draft, immutable history loads and original export matches bytes",
+    "late artifact continuation cannot send after changing workbench tabs",
+    "artifact workspace fits narrow/dark and desktop/light viewports",
+    "actual Agent startup refuses recipe requirements missing from its freshly loaded roster",
+    "real chat composer rejects a wrong target and dispatches a matching handoff once"
+  ],
+  "errors": [],
+  "unexpected": [],
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/recipes"
+    },
+    {
+      "method": "POST",
+      "path": "/recipes"
+    },
+    {
+      "method": "GET",
+      "path": "/recipes"
+    },
+    {
+      "method": "GET",
+      "path": "/mcp/servers"
+    },
+    {
+      "method": "POST",
+      "path": "/recipes/recipe-1/prepare"
+    },
+    {
+      "method": "GET",
+      "path": "/conversations"
+    },
+    {
+      "method": "GET",
+      "path": "/messages/prepared-1"
+    },
+    {
+      "method": "GET",
+      "path": "/recipes"
+    },
+    {
+      "method": "GET",
+      "path": "/mcp/servers"
+    },
+    {
+      "method": "POST",
+      "path": "/recipes/recipe-1/schedule"
+    },
+    {
+      "method": "GET",
+      "path": "/scheduled-tasks"
+    },
+    {
+      "method": "PUT",
+      "path": "/recipes/recipe-1"
+    },
+    {
+      "method": "GET",
+      "path": "/recipes"
+    },
+    {
+      "method": "GET",
+      "path": "/mcp/servers"
+    },
+    {
+      "method": "PUT",
+      "path": "/recipes/recipe-1"
+    },
+    {
+      "method": "GET",
+      "path": "/recipes"
+    },
+    {
+      "method": "GET",
+      "path": "/mcp/servers"
+    },
+    {
+      "method": "POST",
+      "path": "/recipes/recipe-1/prepare"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts"
+    },
+    {
+      "method": "POST",
+      "path": "/artifacts"
+    },
+    {
+      "method": "GET",
+      "path": "/recipes"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts/artifact-1"
+    },
+    {
+      "method": "POST",
+      "path": "/artifacts/artifact-1/versions"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts/artifact-1"
+    },
+    {
+      "method": "POST",
+      "path": "/artifacts/artifact-1/versions"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts/artifact-1"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts/artifact-1"
+    },
+    {
+      "method": "POST",
+      "path": "/conversations"
+    },
+    {
+      "method": "GET",
+      "path": "/recipes"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts"
+    },
+    {
+      "method": "GET",
+      "path": "/artifacts/artifact-1"
+    },
+    {
+      "method": "GET",
+      "path": "/mcp/servers"
+    },
+    {
+      "method": "GET",
+      "path": "/settings"
+    },
+    {
+      "method": "GET",
+      "path": "/settings"
+    },
+    {
+      "method": "GET",
+      "path": "/channels/fixture-channel/credentials"
+    },
+    {
+      "method": "GET",
+      "path": "/mcp/servers"
+    },
+    {
+      "method": "POST",
+      "path": "/messages/sync-sidecar"
+    },
+    {
+      "method": "GET",
+      "path": "/conversations"
+    },
+    {
+      "method": "GET",
+      "path": "/settings"
+    },
+    {
+      "method": "GET",
+      "path": "/channels/fixture-channel/credentials"
+    },
+    {
+      "method": "GET",
+      "path": "/mcp/servers"
+    }
+  ]
+}

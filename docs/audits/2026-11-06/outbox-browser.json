@@ -1,0 +1,56 @@
+{
+  "observedAt": "2026-11-06T07:51:30.256Z",
+  "browser": "157.0.8103.38",
+  "passed": true,
+  "elapsedMs": 2947,
+  "checks": [
+    {
+      "name": "real IndexedDB survives page reload with exact Date and UTF-8 payload bytes",
+      "passed": true,
+      "elapsedMs": 41
+    },
+    {
+      "name": "backend and user scopes isolate records with the same message IDs",
+      "passed": true,
+      "elapsedMs": 4
+    },
+    {
+      "name": "old ACK removal cannot delete a newer revision in another connection",
+      "passed": true,
+      "elapsedMs": 5
+    },
+    {
+      "name": "message, conversation and scope invalidations resolve only after transaction commit",
+      "passed": true,
+      "elapsedMs": 7
+    },
+    {
+      "name": "malformed, unknown-version and missing-ID writes reject without persisting",
+      "passed": true,
+      "elapsedMs": 2
+    },
+    {
+      "name": "persisted corruption rejects recovery without silently deleting either record",
+      "passed": true,
+      "elapsedMs": 3
+    },
+    {
+      "name": "record limit rejects new saves without eviction while existing revisions can update",
+      "passed": true,
+      "elapsedMs": 317
+    },
+    {
+      "name": "UTF-8 byte limit rejects oversized data and preserves previous unsaved records",
+      "passed": true,
+      "elapsedMs": 139
+    },
+    {
+      "name": "unavailable IndexedDB rejects clearly and a later restored storage can retry",
+      "passed": true,
+      "elapsedMs": 3
+    }
+  ],
+  "browserErrors": [],
+  "blockedExternalRequests": [],
+  "requestedPaths": ["/__sidecar_outbox_test__", "/src/lib/sidecarOutbox.ts"]
+}
