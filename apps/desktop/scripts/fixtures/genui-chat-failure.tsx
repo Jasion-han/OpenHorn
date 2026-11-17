@@ -9,6 +9,7 @@ import type { SidecarClient } from "../../src/lib/sidecarClient";
 import { useAuthStore } from "../../src/stores/authStore";
 import { useBackendStatusStore } from "../../src/stores/backendStatusStore";
 import { useChatStore } from "../../src/stores/chatStore";
+import { useDesktopShellStore } from "../../src/stores/desktopShellStore";
 import { useGenUiStore } from "../../src/stores/genUiStore";
 import { useSidecarStore } from "../../src/stores/sidecarStore";
 import type { Message } from "../../src/types/chat";
@@ -203,15 +204,17 @@ const api = {
   },
   reloadMessages: () => useChatStore.getState().loadMessages("failure-conversation"),
   network(enabled: boolean) {
-    useChatStore.setState((state) => ({
-      currentConversation: state.currentConversation
-        ? { ...state.currentConversation, forceWebSearch: enabled }
-        : null,
-    }));
+    const state = useChatStore.getState();
+    return state.currentConversation
+      ? state.updateConversation(state.currentConversation.id, { forceWebSearch: enabled })
+      : Promise.resolve();
   },
   researchReady(ready: boolean) {
     Object.defineProperty(client, "supportsResearch", { configurable: true, value: ready });
     useSidecarStore.setState({ client, status: "ready" });
+  },
+  fullAccess(enabled: boolean) {
+    useDesktopShellStore.setState({ fullAccessEnabled: enabled });
   },
   agentReady: () => activeAgent !== null,
   agentEmit(content: string) {
@@ -360,6 +363,7 @@ const api = {
           prompt: activeAgent.prompt,
           systemPrompt: activeAgent.systemPrompt,
           permissionMode: activeAgent.permissionMode,
+          webSearchEnabled: activeAgent.webSearchEnabled,
         }
       : null,
   }),

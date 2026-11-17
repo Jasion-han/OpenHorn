@@ -1903,6 +1903,11 @@ export function DesktopChatArea() {
   };
 
   const handleRetryMessage = async (messageId: string) => {
+    // MessageBubble memoizes callbacks. Read mutable run preferences at action
+    // time so changing Web Search/Full Access cannot reuse an older policy.
+    const currentConversation = useChatStore.getState().currentConversation;
+    const forceWebSearch = currentConversation?.forceWebSearch ?? true;
+    const fullAccessEnabled = useDesktopShellStore.getState().fullAccessEnabled;
     if (!currentConversation || hasRunningTurn()) return;
 
     // Same stale-closure hazard as getEditableMessageRound: read live state.
@@ -1967,6 +1972,7 @@ export function DesktopChatArea() {
               status: "partial",
               summary: "Thinking",
               steps: [],
+              research: assistantMessage.agentRun?.research,
             }
           : undefined,
     });
@@ -2118,6 +2124,9 @@ export function DesktopChatArea() {
   };
 
   const handleSaveEdit = async (messageId: string) => {
+    const currentConversation = useChatStore.getState().currentConversation;
+    const forceWebSearch = currentConversation?.forceWebSearch ?? true;
+    const fullAccessEnabled = useDesktopShellStore.getState().fullAccessEnabled;
     const nextContent = editingContent.trim();
     if (!currentConversation || !nextContent || hasRunningTurn()) return;
 
@@ -2177,6 +2186,7 @@ export function DesktopChatArea() {
                 status: "partial",
                 summary: "Thinking",
                 steps: [],
+                research: existingAssistantMessage.agentRun?.research,
               }
             : undefined,
       });

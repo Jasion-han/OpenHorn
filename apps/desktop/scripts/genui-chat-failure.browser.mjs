@@ -104,6 +104,10 @@ const server = http.createServer(async (request, response) => {
   for await (const chunk of request) body += chunk;
   const data = body ? JSON.parse(body) : {};
   requests.push({ method: request.method, path, data });
+  if (path === "/conversations/failure-conversation" && request.method === "PUT") {
+    Object.assign(conversation, data);
+    return json(response, { success: true });
+  }
   if (path === "/conversations")
     return json(response, {
       conversations: [conversation, { ...conversation, id: "other-conversation" }],
@@ -408,6 +412,7 @@ try {
     failAgentSaveOnce = false;
     protocol = "openai";
     conversation.modelId = "fixture-model";
+    conversation.forceWebSearch = false;
     // A finished HTTP request can still have application continuations queued.
     // Reusing the realm and the same message IDs would let a previous case's
     // late history reload repopulate the next case after store.reset(). A new
@@ -444,8 +449,8 @@ try {
   await page.getByText("深度研究需要联网，请先开启 Web Search。", { exact: true }).waitFor();
   assert.equal(prepares, 0);
   assert.equal((await snapshot()).messages.length, 0);
-  await page.evaluate(() => {
-    window.failureChat.network(true);
+  await page.evaluate(async () => {
+    await window.failureChat.network(true);
     window.failureChat.researchReady(false);
   });
   await page.locator("textarea").press("Enter");
@@ -500,7 +505,21 @@ try {
       clickable: getComputedStyle(button).pointerEvents !== "none",
     }));
   assert.deepEqual(retryAppearance, { visible: true, clickable: true });
+  let releaseRetrySettings;
+  holdSettings = new Promise((resolve) => {
+    releaseRetrySettings = resolve;
+  });
   await page.getByRole("button", { name: earlyRetryLabel, exact: true }).last().click();
+  await page.waitForFunction(() =>
+    window.failureChat
+      .snapshot()
+      .messages.some((message) => message.agentRun?.status === "partial"),
+  );
+  assert.equal(
+    (await snapshot()).messages.find((message) => message.role === "assistant").agentRun.research,
+    true,
+  );
+  releaseRetrySettings();
   await page.waitForFunction(() => window.failureChat.agentCalls() === 2);
   assert.equal((await page.evaluate(() => window.failureChat.researchInput())).research, true);
   const retriedResearchSaved = page.waitForResponse(
@@ -519,6 +538,47 @@ try {
   const priorResearch = structuredClone(rows.find((row) => row.role === "assistant"));
   const syncCount = () =>
     requests.filter((request) => request.path === "/messages/sync-sidecar").length;
+  await page.evaluate(async () => {
+    await window.failureChat.network(true);
+    window.failureChat.fullAccess(false);
+    window.failureChat.remount();
+  });
+  await page.waitForFunction(
+    (label) =>
+      [...document.querySelectorAll("button")].some(
+        (button) => button.title === label && !button.disabled,
+      ),
+    earlyRetryLabel,
+  );
+  for (const enabled of [false, true]) {
+    await page.evaluate(async (enabled) => {
+      await window.failureChat.network(enabled);
+      window.failureChat.fullAccess(!enabled);
+    }, enabled);
+    const calls = await page.evaluate(() => window.failureChat.agentCalls());
+    await page.getByRole("button", { name: earlyRetryLabel, exact: true }).last().click();
+    await page.waitForFunction((count) => window.failureChat.agentCalls() === count + 1, calls);
+    const actual = (await snapshot()).agentRequest;
+    assert.equal(
+      actual.webSearchEnabled,
+      enabled,
+      "cached retry callbacks must read the current network preference",
+    );
+    assert.equal(
+      actual.permissionMode,
+      enabled ? "default" : "full-access",
+      "retry must read the current permission preference",
+    );
+    await page.evaluate(() => window.failureChat.agentFail());
+    await page.waitForFunction(() => !window.failureChat.snapshot().streaming);
+    assert.deepEqual(
+      rows.find((row) => row.role === "assistant"),
+      priorResearch,
+    );
+  }
+  console.log(
+    "PASS cached research retry callbacks honor live network and Full Access preferences without replacing the old report",
+  );
   for (const ending of ["failure", "stop", "empty-done"]) {
     await page.evaluate(() => window.failureChat.reloadMessages());
     const calls = await page.evaluate(() => window.failureChat.agentCalls());
@@ -605,9 +665,9 @@ try {
 
   await reset();
   protocol = "google";
-  await page.evaluate(() => {
+  await page.evaluate(async () => {
     window.failureChat.start("google");
-    window.failureChat.network(true);
+    await window.failureChat.network(true);
   });
   await page.getByRole("button", { name: "Mode", exact: true }).click();
   await page.getByRole("button", { name: "深度研究", exact: true }).click();

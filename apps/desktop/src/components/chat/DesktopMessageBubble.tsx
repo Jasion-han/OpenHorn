@@ -257,8 +257,9 @@ function MessageBubbleImpl({
 // Memoized: during streaming, the messages array changes on every token, which
 // re-renders the list. Message updates use `.map` that returns the SAME object for
 // unchanged rows, so a reference check on `message` lets every non-streaming bubble
-// bail out — only the streaming message re-renders. Callbacks are ignored (stable
-// per message); all render-affecting scalar props are compared.
+// bail out — only the streaming message re-renders. Callbacks are ignored, so
+// action handlers must read mutable run preferences from live stores when invoked;
+// all render-affecting scalar props are compared.
 export const MessageBubble = memo(
   MessageBubbleImpl,
   (prev, next) =>
