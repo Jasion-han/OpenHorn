@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 for (const scenario of [
+  "research-dispatch",
   "disconnect-agent",
   "disconnect-chat",
   "approval",
@@ -41,7 +42,17 @@ for (const scenario of [
       expect(await child.exited).toBe(0);
       expect(await errors).toBe("");
       const result = JSON.parse(await readFile(path.join(owned, "result.json"), "utf8"));
-      if (scenario === "cancel-checkpoint")
+      if (scenario === "research-dispatch")
+        expect(result).toEqual({
+          accepted: true,
+          runtimeCalls: 1,
+          skillLookups: 0,
+          checkpointCalls: 0,
+          selectedSourcePreserved: true,
+          modelKeyPreserved: true,
+          noMcpOrSkills: true,
+        });
+      else if (scenario === "cancel-checkpoint")
         expect(result).toEqual({
           runtimeCalls: 0,
           discarded: 1,

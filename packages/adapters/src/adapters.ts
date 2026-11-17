@@ -85,6 +85,8 @@ import type {
 } from "./types";
 
 export interface ToolCallingOptions {
+  /** Explicitly disable retry for budgeted or charge-sensitive operations. */
+  noRetry?: boolean;
   model: string;
   messages: GenericAgentConversationMessage[];
   tools: GenericToolDefinition[];
@@ -165,12 +167,14 @@ async function fetchWithRetry(
   url: string,
   init: RequestInit,
   signal?: AbortSignal,
+  retry = true,
 ): Promise<Response> {
-  for (let attempt = 0; attempt <= MAX_RETRY_ATTEMPTS; attempt++) {
+  const attempts = retry ? MAX_RETRY_ATTEMPTS : 0;
+  for (let attempt = 0; attempt <= attempts; attempt++) {
     signal?.throwIfAborted();
     const response = await fetch(url, { ...init, signal });
     if (response.ok) return response;
-    if (!shouldRetryStatus(response.status) || attempt === MAX_RETRY_ATTEMPTS) return response;
+    if (!shouldRetryStatus(response.status) || attempt === attempts) return response;
     // This response is being discarded; it must not keep a pooled connection
     // alive after the retry moves on. A stalled cancellation cannot block retry.
     try {
@@ -958,8 +962,9 @@ export class OpenAIAdapter implements ProviderAdapter {
 
   async runToolCallingTurn(options: ToolCallingOptions): Promise<GenericAgentTurnResult> {
     const url = `${this.baseUrl}/chat/completions`;
-    const body = JSON.stringify({
+    const payload: Record<string, unknown> = {
       model: options.model,
+      ...(options.maxTokens ? { max_tokens: options.maxTokens } : {}),
       messages: options.messages.map((message) => {
         if (message.role === "system" || message.role === "user") {
           return {
@@ -1012,7 +1017,13 @@ export class OpenAIAdapter implements ProviderAdapter {
               function: { name: options.toolChoice.name },
             }
           : "auto",
-    });
+    };
+    if (!options.tools.length) {
+      delete payload.tools;
+      delete payload.tool_choice;
+      delete payload.toolConfig;
+    }
+    const body = JSON.stringify(payload);
 
     const timeout = createRequestTimeoutSignal(
       options.signal,
@@ -1031,6 +1042,7 @@ export class OpenAIAdapter implements ProviderAdapter {
           body,
         },
         timeout.signal,
+        options.noRetry !== true,
       );
     } catch (error) {
       timeout.cleanup();
@@ -1120,6 +1132,7 @@ export class OpenAIAdapter implements ProviderAdapter {
           body,
         },
         timeout.signal,
+        options.noRetry !== true,
       );
     } catch (error) {
       timeout.cleanup();
@@ -1655,7 +1668,7 @@ export class AnthropicAdapter implements ProviderAdapter {
       }
     }
 
-    const body = JSON.stringify({
+    const payload: Record<string, unknown> = {
       model: this.requestModel(options.model),
       ...this.systemField(system),
       messages: mappedMessages,
@@ -1669,7 +1682,13 @@ export class AnthropicAdapter implements ProviderAdapter {
           ? { type: "tool", name: options.toolChoice.name }
           : { type: "auto" },
       max_tokens: options.maxTokens || 8192,
-    });
+    };
+    if (!options.tools.length) {
+      delete payload.tools;
+      delete payload.tool_choice;
+      delete payload.toolConfig;
+    }
+    const body = JSON.stringify(payload);
 
     const timeout = createRequestTimeoutSignal(
       options.signal,
@@ -1689,6 +1708,7 @@ export class AnthropicAdapter implements ProviderAdapter {
           body,
         },
         timeout.signal,
+        options.noRetry !== true,
       );
     } catch (error) {
       timeout.cleanup();
@@ -1700,6 +1720,7 @@ export class AnthropicAdapter implements ProviderAdapter {
     } catch (error) {
       if (
         error instanceof ProviderResponseError &&
+        !options.noRetry &&
         options.toolChoice &&
         options.toolChoice !== "auto" &&
         shouldRetryWithoutForcedToolChoice(error.detail)
@@ -2111,7 +2132,7 @@ export class GoogleAdapter implements ToolCallingAdapter {
       },
     ];
 
-    const body = JSON.stringify({
+    const payload: Record<string, unknown> = {
       ...(systemInstruction ? { systemInstruction } : {}),
       contents: buildGeminiToolCallingContents(options.messages),
       tools,
@@ -2124,7 +2145,14 @@ export class GoogleAdapter implements ToolCallingAdapter {
               },
             }
           : { functionCallingConfig: { mode: "AUTO" } },
-    });
+    };
+    if (!options.tools.length) {
+      delete payload.tools;
+      delete payload.tool_choice;
+      delete payload.toolConfig;
+    }
+    if (options.maxTokens) payload.generationConfig = { maxOutputTokens: options.maxTokens };
+    const body = JSON.stringify(payload);
 
     const timeout = createRequestTimeoutSignal(
       options.signal,
@@ -2140,6 +2168,7 @@ export class GoogleAdapter implements ToolCallingAdapter {
           body,
         },
         timeout.signal,
+        options.noRetry !== true,
       );
     } catch (error) {
       timeout.cleanup();

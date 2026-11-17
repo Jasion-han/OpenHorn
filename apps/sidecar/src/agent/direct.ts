@@ -1030,6 +1030,11 @@ export async function runDirectAgent(input: RunDirectAgentInput): Promise<void> 
   // Inject file attachment text (works for every model regardless of vision).
   const fileContext = buildFileContext(input.attachments);
   if (fileContext) effectivePrompt += fileContext;
+  const pageNames = injectable
+    .filter((image) => /\[page \d+\]\.jpg$/i.test(image.fileName ?? ""))
+    .map((image) => image.fileName);
+  if (pageNames.length)
+    effectivePrompt += `\nPDF page images, in attachment order: ${JSON.stringify(injectable.map((image, index) => ({ image: index + 1, fileName: image.fileName ?? "image" })))}. Refer to these actual page numbers when describing figures.`;
   // Non-vision models can't receive images: degrade to a textual placeholder.
   // Vision models still degrade images whose format the provider rejects.
   if (!supportsVision && images.length > 0) {

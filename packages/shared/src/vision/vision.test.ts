@@ -83,3 +83,10 @@ describe("modelSupportsVision", () => {
     expect(modelSupportsVision("gpt-3.5-turbo-instruct")).toBe(false);
   });
 });
+
+test("the documented GPT-6 Astra accepts PDF page images without enabling unknown variants", () => {
+  expect(modelSupportsVision("gpt-6-astra")).toBe(true);
+  expect(modelSupportsVision("openai/gpt-6-astra")).toBe(true);
+  expect(modelSupportsVision("gpt-6-astra-text")).toBe(false);
+  expect(modelSupportsVision("future-gpt-6-astra")).toBe(false);
+});

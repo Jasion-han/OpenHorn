@@ -37,10 +37,18 @@ mock.module("./auth", () => ({
   },
   detectAllCredentials: async () => [],
 }));
-mock.module("./agent/skills", () => ({ resolveSkills: async () => [] }));
+let skillLookups = 0;
+mock.module("./agent/skills", () => ({
+  resolveSkills: async () => {
+    skillLookups++;
+    return [];
+  },
+}));
 let discarded = 0;
+let checkpointCalls = 0;
 mock.module("./checkpoints", () => ({
   createCheckpointSession: async () => {
+    checkpointCalls++;
     if (scenario === "checkpoint-failure") throw new Error("Synthetic checkpoint failure");
     if (scenario === "cancel-checkpoint" || scenario === "disconnect-checkpoint") {
       held();
@@ -77,6 +85,14 @@ const runtime = async (input: { onEvent: (event: unknown) => void }) => {
   runtimeCalls++;
   input.onEvent({ type: "done" });
 };
+let researchSeen: Record<string, unknown> | undefined;
+mock.module("./agent/research", () => ({
+  runResearchAgent: async (input: Record<string, unknown> & { onEvent(event: unknown): void }) => {
+    researchSeen = input;
+    runtimeCalls++;
+    input.onEvent({ type: "done" });
+  },
+}));
 mock.module("./agent/direct", () => ({ runDirectAgent: runtime }));
 mock.module("./agent/chat", () => ({ runChatStream: runtime }));
 mock.module("./agent/chatCodex", () => ({ runCodexChat: runtime }));
@@ -151,7 +167,30 @@ const params = {
   workspaceRoot: cwd,
 };
 let result: Record<string, unknown>;
-if (scenario === "cancel-checkpoint" || scenario === "disconnect-checkpoint") {
+if (scenario === "research-dispatch") {
+  const response = await rpc("agent.run", {
+    ...params,
+    protocol: "openai",
+    research: true,
+    webSearchEnabled: true,
+    searchProvider: "tavily",
+    tavilyApiKey: "synthetic-search",
+    mcpServers: { competing: { command: "synthetic" } },
+  });
+  await waitUntil(() => !!researchSeen);
+  result = {
+    accepted: response.ok,
+    runtimeCalls,
+    skillLookups,
+    checkpointCalls,
+    selectedSourcePreserved:
+      researchSeen?.searchProvider === "tavily" &&
+      researchSeen?.tavilyApiKey === "synthetic-search",
+    modelKeyPreserved: researchSeen?.apiKey === "synthetic-only",
+    noMcpOrSkills: researchSeen?.mcpServers === undefined && researchSeen?.skills === undefined,
+  };
+  socket.close();
+} else if (scenario === "cancel-checkpoint" || scenario === "disconnect-checkpoint") {
   const response = await rpc("agent.run", { ...params, protocol: "openai" });
   const runId = response.result?.runId;
   if (!runId) throw new Error("Router did not accept checkpoint fixture run");

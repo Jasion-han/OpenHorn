@@ -116,6 +116,8 @@ const ContextMetadataSchema = z
   .optional();
 
 export const AgentRunParamsSchema = z.object({
+  research: z.boolean().optional(),
+  documentInput: z.boolean().optional(),
   prompt: z.string().min(1),
   apiKey: z.string().default(""),
   model: z.string().min(1),

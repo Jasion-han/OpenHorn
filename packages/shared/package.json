@@ -30,7 +30,8 @@
     "./decisions": "./src/decisions.ts",
     "./decision-questions": "./src/decision-questions.ts",
     "./library": "./src/library.ts",
-    "./data-only": "./src/data-only.ts"
+    "./data-only": "./src/data-only.ts",
+    "./research": "./src/research.ts"
   },
   "devDependencies": {
     "typescript": "^5.0.0"

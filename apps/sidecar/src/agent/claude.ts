@@ -414,6 +414,8 @@ export function buildClaudeInitialMessages(
   if (images.length > 0) {
     const blocks: Array<Record<string, unknown>> = [{ type: "text", text: prompt }];
     for (const img of images) {
+      if (img.fileName && /\[page \d+\]\.jpg$/i.test(img.fileName))
+        blocks.push({ type: "text", text: `PDF page image: ${JSON.stringify(img.fileName)}` });
       blocks.push({
         type: "image",
         source: { type: "base64", media_type: img.mediaType, data: img.dataBase64 },

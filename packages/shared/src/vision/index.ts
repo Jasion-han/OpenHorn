@@ -78,6 +78,9 @@ const NON_VISION_MODEL_MARKERS: readonly string[] = [
 export function modelSupportsVision(modelId: string): boolean {
   if (!modelId) return false;
   const id = modelId.toLowerCase();
+  // https://developers.openai.com/api/docs/models/gpt-6-astra — Text/Image input.
+  // Exact aliases only; future or text-only variants need their own capability evidence.
+  if (/^(?:openai\/)?gpt-6-astra$/.test(id)) return true;
   // Current official aliases route to V4.1 Flash (2026-11). Match a complete
   // model segment so a future text-only variant is not silently opted in.
   if (/^(?:deepseek\/)?deepseek-(?:flash|v4-flash|v4-flash-vision-exp)$/.test(id)) return true;

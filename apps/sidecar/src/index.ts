@@ -1,4 +1,5 @@
 import type { ModelContextMetadata } from "shared/types";
+import { modelSupportsVision } from "shared/vision";
 
 // The SDK's embedded Claude CLI refuses to launch inside a Claude Code session
 // (CLAUDECODE=1, AI_AGENT). When pnpm dev is started from a Claude Code
@@ -246,7 +247,14 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
         return;
       }
       state.authed = true;
-      ws.send(JSON.stringify(buildOkResponse(request.requestId, { ok: true })));
+      ws.send(
+        JSON.stringify(
+          buildOkResponse(request.requestId, {
+            ok: true,
+            features: { research: 1, documentInput: 1 },
+          }),
+        ),
+      );
       return;
     }
 
@@ -440,6 +448,8 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
           : await resolveDefaultWorkspaceRoot();
         if (!(await stat(cwd)).isDirectory()) throw new Error("Workspace root must be a directory");
         const {
+          research,
+          documentInput,
           prompt,
           apiKey,
           model,
@@ -465,6 +475,8 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
           acpAgent,
           tokenBudgetPerRun: rawTokenBudget,
         } = params as {
+          research?: boolean;
+          documentInput?: boolean;
           prompt: string;
           apiKey: string;
           model: string;
@@ -563,6 +575,52 @@ async function onRequest(ws: import("bun").ServerWebSocket<unknown>, request: Ws
           };
           return { runId, onEvent, guard, prepareCheckpoint };
         };
+
+        if (research) {
+          const { runResearchAgent } = await import("./agent/research");
+          if (state.closed) return;
+          const { onEvent, guard } = initRun("research");
+          guard(
+            "Research",
+            runResearchAgent({
+              prompt,
+              apiKey: resolvedApiKey,
+              model,
+              protocol: protocol ?? "openai",
+              baseUrl,
+              contextWindow,
+              contextMetadata,
+              cwd,
+              abortController,
+              onEvent,
+              conversationHistory,
+              systemPrompt,
+              webSearchEnabled,
+              tavilyApiKey,
+              deepseekApiKey,
+              toolConnection,
+              nativeSearchConnection,
+              openRouterSearchConnection,
+              searchProvider,
+              targetMcpServer,
+              attachments,
+            }),
+          );
+          return;
+        }
+        if (
+          documentInput &&
+          (forceCodexCli ||
+            protocol === "codex_cli" ||
+            protocol === "acp" ||
+            !modelSupportsVision(model))
+        ) {
+          const { runId, onEvent } = initRun("document");
+          onEvent({ type: "error", content: "document_vision", errorCode: "document_vision" });
+          onEvent({ type: "done" });
+          state.agentRuns.delete(runId);
+          return;
+        }
 
         // Skills are read IN PLACE from their real folders (Claude-style): the
         // run carries each skill's name/description + absolute folder path. Each

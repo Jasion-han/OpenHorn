@@ -98,6 +98,8 @@ export type MessageFinishReason =
   | "refused"
   | "error";
 export type ChatStreamErrorCode =
+  | import("../research").ResearchErrorCode
+  | "document_vision"
   | "response_truncated"
   | "chat_context_budget_exceeded"
   | "response_refused";
@@ -428,3 +430,4 @@ export type {
 } from "./recipes";
 export * from "./reviews";
 export * from "./search-settings";
+export type { SidecarSavePreconditions, SidecarSaveResult } from "./sidecar-save";
