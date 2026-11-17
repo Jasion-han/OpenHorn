@@ -1,4 +1,4 @@
-import { assistantMessageContent } from "shared/message-text";
+import { agentRunReplyText, assistantMessageContent } from "shared/message-text";
 import type { ApiAgentRun, Message } from "../types/chat";
 
 /**
@@ -68,7 +68,13 @@ export function resolveStoppedAgentReply(input: {
   previousReply?: Message;
 }): StoppedReplyOutcome {
   const agentRun = stopAgentRun(input.current?.agentRun);
-  if (!runHasOutput(agentRun) && input.previousReply) {
+  // Research tools only gather evidence. A failed/stopped search is not a new
+  // report and must not replace a previously paid-for, successful answer.
+  const researchWithoutNewReport =
+    input.previousReply?.agentRun?.research === true &&
+    !!agentRunReplyText(input.previousReply.agentRun) &&
+    !agentRunReplyText(agentRun);
+  if (input.previousReply && (!runHasOutput(agentRun) || researchWithoutNewReport)) {
     return { kind: "restore", reply: input.previousReply };
   }
   return {

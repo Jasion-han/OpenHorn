@@ -55,6 +55,35 @@ describe("stopAgentRun", () => {
 });
 
 describe("resolveStoppedAgentReply", () => {
+  test("a research retry with only search/read progress preserves its previous successful report", () => {
+    const report = { ...previous, agentRun: run({ ...previous.agentRun, research: true }) };
+    const outcome = resolveStoppedAgentReply({
+      current: {
+        content: "",
+        agentRun: run({
+          research: true,
+          steps: [
+            { type: "tool_start", toolName: "web_search" },
+            { type: "tool_result", toolName: "web_search", content: "New search evidence" },
+          ],
+        }),
+      },
+      previousReply: report,
+    });
+    expect(outcome).toEqual({ kind: "restore", reply: report });
+  });
+
+  test("a research retry with a new formal report can replace the old report", () => {
+    const outcome = resolveStoppedAgentReply({
+      current: {
+        content: "",
+        agentRun: run({ research: true, steps: [{ type: "text", content: "New report" }] }),
+      },
+      previousReply: { ...previous, agentRun: run({ ...previous.agentRun, research: true }) },
+    });
+    expect(outcome).toMatchObject({ kind: "persist", assistantContent: "New report" });
+  });
+
   test("partial output is persisted as the reply, content derived from text steps", () => {
     const outcome = resolveStoppedAgentReply({
       current: {

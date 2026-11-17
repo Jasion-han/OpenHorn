@@ -1,3 +1,4 @@
+import { agentRunReplyText } from "shared/message-text";
 import { missingRecipeCapabilities } from "shared/recipes";
 import { isResearchErrorCode, isResearchProtocol } from "shared/research";
 import type {
@@ -411,6 +412,11 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
         const { id: _id, conversationId: _conversationId, ...previous } = outcome.reply;
         useChatStore.getState().updateMessage(input.assistantMessageId, previous);
         useChatStore.getState().unmarkMessagesActive(activeRunIds);
+        if (research) {
+          const notice = formatChatLabel("chat.research.retry_preserved", { reason: message });
+          setLastError(notice);
+          useChatStore.getState().setError(notice);
+        }
         terminalPersistence = Promise.resolve().finally(finishRun);
         return;
       }
@@ -483,6 +489,20 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
     // before onEvent(done); either order must persist and complete exactly once.
     const completeRun = () => {
       if (!isLive()) return;
+      if (
+        research &&
+        !agentRunReplyText(
+          useChatStore.getState().findMessageAnywhere(input.assistantMessageId)?.agentRun,
+        )
+      ) {
+        const message = getChatLabel("chat.research_report_empty");
+        useChatStore.getState().applyStreamEvent(input.assistantMessageId, {
+          type: "error",
+          message,
+        });
+        persistFailure(message, runModel);
+        return;
+      }
       useChatStore.getState().applyStreamEvent(input.assistantMessageId, {
         type: "done",
         messageId: input.assistantMessageId,

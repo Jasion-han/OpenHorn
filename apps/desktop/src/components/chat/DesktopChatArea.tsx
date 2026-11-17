@@ -1151,6 +1151,10 @@ export function DesktopChatArea() {
     const research = question !== null;
     const mode = research ? "agent" : composerMode;
     const trimmed = input.trim();
+    // Enter must honor the same prerequisite gate as the disabled Send button.
+    // The composer already explains the issue; do not add a duplicate toast or
+    // create an optimistic turn for an unsupported runtime.
+    if (research && researchIssue) return;
     if (
       research &&
       (!question ||

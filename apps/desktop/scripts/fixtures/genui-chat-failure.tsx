@@ -209,6 +209,10 @@ const api = {
         : null,
     }));
   },
+  researchReady(ready: boolean) {
+    Object.defineProperty(client, "supportsResearch", { configurable: true, value: ready });
+    useSidecarStore.setState({ client, status: "ready" });
+  },
   agentReady: () => activeAgent !== null,
   agentEmit(content: string) {
     activeAgent?.onEvent({ type: "execution_event", eventType: "text", content });
@@ -220,6 +224,22 @@ const api = {
     if (!eventFirst) activeAgent?.onEvent({ type: "done" });
   },
   agentFail: () => activeAgent?.onError("fixture Agent failed"),
+  agentProgress() {
+    activeAgent?.onEvent({
+      type: "execution_event",
+      eventType: "tool_start",
+      toolName: "web_search",
+      toolInput: { query: "Controlled retry evidence" },
+      metadata: { toolCallId: "retry-search" },
+    });
+    activeAgent?.onEvent({
+      type: "execution_event",
+      eventType: "tool_result",
+      toolName: "web_search",
+      content: "Controlled search evidence only, no formal report",
+      metadata: { toolCallId: "retry-search", searchSource: { provider: "tavily" } },
+    });
+  },
   workspaceUnavailable() {
     workspaceUnavailable = true;
     useSidecarStore.setState({ workspaceRoot: "/fixture/previous-project" });

@@ -9,6 +9,10 @@ export const RESEARCH_ERRORS = [
   "research_network_required",
   "research_no_sources",
   "research_timeout",
+  "research_model_timeout",
+  "research_invalid_sources",
+  "research_output_limit",
+  "research_report_empty",
   "research_failed",
   "research_attachments_unsupported",
 ] as const;

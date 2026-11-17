@@ -109,6 +109,21 @@ function isCompleteReport(
   );
 }
 
+function reportFailure(
+  report: Awaited<ReturnType<ToolCallingAdapter["runToolCallingTurn"]>>,
+  sources: string[],
+): ResearchErrorCode {
+  if (
+    report.finishReason === "length" ||
+    report.finishReason === "max_tokens" ||
+    report.finishReason === "MAX_TOKENS"
+  )
+    return "research_output_limit";
+  if (!report.text.trim()) return "research_report_empty";
+  if (!validResearchReportSources(report.text, sources)) return "research_invalid_sources";
+  return "research_failed";
+}
+
 /** Dedicated API runtime: no MCP, local tools, SDK session, or checkpoint is mounted. */
 export async function runResearchAgent(
   input: RunDirectAgentInput,
@@ -216,7 +231,12 @@ async function executeResearch(input: RunDirectAgentInput, deps: ResearchDepende
           signal,
           noRetry: true,
           maxTokens: Math.min(1600, policy.maxOutputTokens),
-          requestTimeoutMs: Math.min(30_000, RESEARCH_LIMITS.milliseconds - (now() - started)),
+          requestTimeoutMs: Math.min(
+            successfulSearches >= 2 && [...sources.values()].some((entry) => entry.kind === "page")
+              ? 60_000
+              : 30_000,
+            RESEARCH_LIMITS.milliseconds - (now() - started),
+          ),
           ...(round === 0 ? { toolChoice: { type: "tool" as const, name: "web_search" } } : {}),
         }),
         signal,
@@ -381,17 +401,24 @@ async function executeResearch(input: RunDirectAgentInput, deps: ResearchDepende
         evidence.map((entry) => entry.url),
       )
     ) {
-      fail("research_failed");
+      fail(
+        reportFailure(
+          report,
+          evidence.map((entry) => entry.url),
+        ),
+      );
       return;
     }
     phase(3);
     emit({ type: "text", content: report.text });
-  } catch {
+  } catch (error) {
     if (!input.abortController.signal.aborted)
       fail(
         deadline.aborted || now() - started >= RESEARCH_LIMITS.milliseconds
           ? "research_timeout"
-          : "research_failed",
+          : error instanceof Error && error.name === "TimeoutError"
+            ? "research_model_timeout"
+            : "research_failed",
       );
   } finally {
     signal.removeEventListener("abort", relayAbort);

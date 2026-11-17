@@ -444,7 +444,18 @@ try {
   await page.getByText("深度研究需要联网，请先开启 Web Search。", { exact: true }).waitFor();
   assert.equal(prepares, 0);
   assert.equal((await snapshot()).messages.length, 0);
-  await page.evaluate(() => window.failureChat.network(true));
+  await page.evaluate(() => {
+    window.failureChat.network(true);
+    window.failureChat.researchReady(false);
+  });
+  await page.locator("textarea").press("Enter");
+  assert.equal(
+    (await snapshot()).messages.length,
+    0,
+    "Enter must not write a turn for an old Sidecar",
+  );
+  assert.equal(await page.evaluate(() => window.failureChat.agentCalls()), 0);
+  await page.evaluate(() => window.failureChat.researchReady(true));
   await page.locator("textarea").press("Enter");
   await page.waitForFunction(() => window.failureChat.agentReady());
   assert.deepEqual(await page.evaluate(() => window.failureChat.researchInput()), {
@@ -480,16 +491,59 @@ try {
 
   await page.evaluate(() => window.failureChat.reloadMessages());
   const earlyRetryLabel = await page.evaluate(() => window.failureChat.labels.retry);
+  await page.mouse.move(0, 0);
+  const retryAppearance = await page
+    .getByRole("button", { name: earlyRetryLabel, exact: true })
+    .last()
+    .evaluate((button) => ({
+      visible: Number(getComputedStyle(button.parentElement).opacity) > 0,
+      clickable: getComputedStyle(button).pointerEvents !== "none",
+    }));
+  assert.deepEqual(retryAppearance, { visible: true, clickable: true });
   await page.getByRole("button", { name: earlyRetryLabel, exact: true }).last().click();
   await page.waitForFunction(() => window.failureChat.agentCalls() === 2);
   assert.equal((await page.evaluate(() => window.failureChat.researchInput())).research, true);
+  const retriedResearchSaved = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === "/messages/sync-sidecar",
+  );
   await page.evaluate(() => {
     window.failureChat.agentEmit("Second synthetic cited report");
     window.failureChat.agentDone();
   });
   await page.waitForFunction(() => !window.failureChat.snapshot().streaming);
+  await (await retriedResearchSaved).finished();
   console.log(
     "PASS saved research retry retains the per-turn research policy rather than current composer mode",
+  );
+
+  const priorResearch = structuredClone(rows.find((row) => row.role === "assistant"));
+  const syncCount = () =>
+    requests.filter((request) => request.path === "/messages/sync-sidecar").length;
+  for (const ending of ["failure", "stop", "empty-done"]) {
+    await page.evaluate(() => window.failureChat.reloadMessages());
+    const calls = await page.evaluate(() => window.failureChat.agentCalls());
+    const saves = syncCount();
+    await page.getByRole("button", { name: earlyRetryLabel, exact: true }).last().click();
+    await page.waitForFunction((count) => window.failureChat.agentCalls() === count + 1, calls);
+    await page.evaluate(() => window.failureChat.agentProgress());
+    if (ending === "stop") await page.getByRole("button", { name: "Stop", exact: true }).click();
+    else if (ending === "failure") await page.evaluate(() => window.failureChat.agentFail());
+    else await page.evaluate(() => window.failureChat.agentDone());
+    await page.waitForFunction(() => !window.failureChat.snapshot().streaming);
+    assert.equal(
+      (await snapshot()).messages.find((row) => row.role === "assistant").content,
+      priorResearch.content,
+    );
+    assert.equal(syncCount(), saves, "an incomplete retry must not overwrite the saved report");
+    assert.deepEqual(
+      rows.find((row) => row.role === "assistant"),
+      priorResearch,
+    );
+    if (ending !== "stop")
+      await page.getByRole("alert").filter({ hasText: "上次成功的报告已保留" }).waitFor();
+  }
+  console.log(
+    "PASS failed, stopped and empty-done research retries preserve the original report and saved row after search progress",
   );
 
   await reset();

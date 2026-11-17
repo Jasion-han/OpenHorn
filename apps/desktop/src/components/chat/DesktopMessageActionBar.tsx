@@ -24,6 +24,7 @@ function IconActionButton({
     <button
       type="button"
       title={title}
+      aria-label={title}
       onClick={onClick}
       disabled={disabled}
       className={cn(
@@ -90,7 +91,7 @@ export function MessageActionBar({
         message.role === "assistant" ? "justify-start" : "justify-end",
         isStreaming
           ? "pointer-events-none opacity-0"
-          : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100",
+          : "opacity-60 group-hover:opacity-100 focus-within:opacity-100",
       )}
     >
       {message.role === "user" && (

@@ -583,8 +583,13 @@ export const chatLabels = {
     "深度研究需要支持工具调用的 API 渠道，暂不支持 CLI、ACP、登录令牌或点名 MCP。请切换模型渠道。",
   "chat.research_network_required": "深度研究需要联网，请先开启 Web Search。",
   "chat.research_no_sources": "本次未取得可验证的搜索来源，研究已停止。请检查搜索连接后重试。",
-  "chat.research_timeout": "研究达到总时间上限，已停止后续调用。已完成的检索步骤保留。",
-  "chat.research_failed": "研究未能完成，已取得的步骤仍保留。请检查模型与搜索连接后重试。",
+  "chat.research_timeout": "研究达到总时间上限，已停止后续调用。",
+  "chat.research_model_timeout": "模型单次响应超时，研究已停止。可更换响应较快的模型后重试。",
+  "chat.research_invalid_sources": "报告含有无法从本次检索核验的来源，已停止发布。",
+  "chat.research_output_limit": "报告达到模型输出上限，未取得完整结果。可缩小问题范围后重试。",
+  "chat.research_report_empty": "模型未返回完整研究报告。可调整问题后重试。",
+  "chat.research.retry_preserved": "{reason} 上次成功的报告已保留，未被本次重试覆盖。",
+  "chat.research_failed": "研究未能完成。请检查模型与搜索连接后重试。",
   "chat.research_attachments_unsupported":
     "请先在 Chat 或 Agent 中分析附件，再将研究问题发起为深度研究；本轮研究不读取附件。",
   "chat.document.layout": "读取 PDF 图表",
@@ -600,7 +605,8 @@ export const chatLabels = {
     "PDF 页面无法解析或读取超时，原文件与草稿已保留。请检查文件后重试。",
   "chat.document.document_vision":
     "当前模型或运行方式不支持 PDF 图文输入，请切换到支持视觉的 API 模型。",
-  "chat.document.document_cache": "无法保存或恢复本轮图文输入。请保留原文件并重新附加后再试。",
+  "chat.document.document_cache":
+    "无法保存或恢复本轮图文输入，可能已过期或本地存储空间不足。请重新附加原文件，必要时减少图表页数。",
   "chat.document.document_missing":
     "这轮 PDF 尚未上传完成，请重新附加原文件后发送，不能只凭文件名重试。",
   "chat.document.document_upload":

@@ -255,7 +255,7 @@ test("a final report cannot add model-invented source links", async () => {
   expect(f.events.some((event) => event.type === "text")).toBe(false);
   expect(f.events.find((event) => event.type === "error")).toMatchObject({
     type: "error",
-    errorCode: "research_failed",
+    errorCode: "research_invalid_sources",
   });
 });
 
@@ -345,6 +345,34 @@ test("all early research failures emit one terminal transport event after the er
   const f = fixture([], { webSearchEnabled: false });
   await runResearchAgent(f.input, f);
   expect(f.events.map((event) => event.type)).toEqual(["error", "done"]);
+});
+
+test("a single model request timeout is distinct from the total research deadline", async () => {
+  const f = fixture([]);
+  f.adapter.runToolCallingTurn = async () => {
+    const error = new Error("Synthetic timeout");
+    error.name = "TimeoutError";
+    throw error;
+  };
+  await runResearchAgent(f.input, f);
+  expect(f.events.find((event) => event.type === "error")).toMatchObject({
+    errorCode: "research_model_timeout",
+  });
+  expect(f.events.at(-1)?.type).toBe("done");
+});
+
+test("a truncated final report explains the output limit instead of blaming search settings", async () => {
+  const f = fixture([call("web_search", { query: "evidence" })]);
+  const original = f.adapter.runToolCallingTurn;
+  f.adapter.runToolCallingTurn = async (options) =>
+    options.tools.length
+      ? original(options)
+      : { text: `Incomplete [Evidence](${source})`, toolCalls: [], finishReason: "length" };
+  await runResearchAgent(f.input, f);
+  expect(f.events.find((event) => event.type === "error")).toMatchObject({
+    errorCode: "research_output_limit",
+  });
+  expect(f.events.some((event) => event.type === "text")).toBe(false);
 });
 
 test("an elapsed total deadline cannot start a late report even before the timer callback fires", async () => {
