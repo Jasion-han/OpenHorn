@@ -8,7 +8,7 @@ OpenHorn is a self-hostable AI workspace for chat, agent execution, and provider
 
 | App | Stack | Port | Runtime |
 |-----|-------|------|---------|
-| `apps/server` | Hono 4, Drizzle ORM, LibSQL | 3000 | Bun |
+| `apps/server` | Hono 4, Drizzle ORM, LibSQL | 3002 | Bun |
 | `apps/desktop` | Tauri 2, React 19, Vite | — | Rust + Bun |
 | `apps/sidecar` | WebSocket agent runtime | dynamic | Bun |
 

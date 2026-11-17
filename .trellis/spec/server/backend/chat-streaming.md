@@ -1,5 +1,10 @@
 # Chat Streaming Failure Persistence
 
+Provider-specific web state, refusal and prepared-completion version contracts
+are in [Provider Tools](./provider-tools.md). Chat refusal is persisted as
+`refused` (`response_refused` on the wire), clears withdrawn text/citations and
+replaces a previous reply even when no new text remains; Stop takes precedence.
+
 ## 1. Scope / Trigger
 
 Apply when changing Chat send/edit/regenerate streams or sidecar completion.

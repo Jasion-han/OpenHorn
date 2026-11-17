@@ -322,3 +322,13 @@ Wrong: trust a snapshot path because its string starts inside the workspace, or
 clear a native slot whenever an old event has the same port. Correct: validate
 physical boundaries and manifest identity, use atomic leaf replacement, and bind
 all lifecycle continuations to their exact owner.
+
+
+## Product Search and MCP Tool Selection
+
+- Direct Agent registers ordinary web search through its built-in `web_search`, which follows the selected product search connection. Before applying the tool cap, filter recognized general web-search MCP tools from ordinary runs; do not mutate the pooled tool list, delete MCP configuration, or remove unrelated local/database search and URL readers.
+- Desktop forwards an explicit `/server` target as optional `targetMcpServer` through `agent.run` validation and dispatch. Only that matching server may retain its MCP search tools, and only with `webSearchEnabled=true`. One enabled server or an unmatched target is not an explicit override.
+- Recognition uses known web-search tool names and explicit web-search descriptions; arbitrary opaque custom tools are not guaranteed to be classified. External CLI/ACP tool inventories are outside this policy.
+- Cover the registered model tool inventory and a complete controlled Search round with a competing MCP present, plus explicit-target, missing-target, disabled-network and pooled-list preservation cases. Chat-only verification is not Agent acceptance. Current native follow-up is recorded in `docs/audits/2026-11-16/agent-search-source/validation.json`.
+
+- Direct and Claude built-in Search emit safe per-call `SearchExecutionSource` metadata from the actual runtime branch, including Tavily-to-DuckDuckGo fallback. Keep it separate from model arguments, credentials and tool identity. Metadata-less historical calls cannot be relabeled from current settings; page-reading MCP tools do not prove a search-source override. Current display acceptance is tracked in `docs/audits/2026-11-16/search-provider-label/validation.json`.

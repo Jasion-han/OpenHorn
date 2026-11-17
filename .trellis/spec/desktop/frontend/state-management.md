@@ -45,6 +45,21 @@ Questions to answer:
   that choice changes while the refresh is pending.
 - Explicit conversation selection and creation restore the selected
   conversation's saved mode. A metadata refresh is not a selection event.
+- Serialize metadata writes per conversation. On failure, roll back only fields
+  that operation still owns; never restore an entire old conversation row over
+  another accepted change or newer runtime metadata. Reset cancels queued writes.
+- Conversation refreshes preserve metadata created/updated/deleted while the
+  request was pending. Latest-list guards must also settle a superseded
+  foreground loading indicator when a newer background refresh finishes.
+- Project list refreshes carry both request and mutation revisions, so late
+  reads cannot resurrect removed projects or erase accepted changes. Regressions:
+  `chatStore.metadata.test.ts` and `projectStore.test.ts`.
+- Import history refresh/paging uses request and deletion revisions. Old pages
+  cannot append to a newly refreshed list or overwrite its cursor, and old reads
+  cannot restore deleted records. Picked MCP additions must not mutate an earlier
+  scan snapshot. Regressions: `importStore.lifecycle.test.ts`.
+- MCP rosters treat configured names as own data keys, including `__proto__`;
+  mapping and JSON serialization must not silently lose such entries.
 - Keep the `chatStore.test.ts` regressions for both saved modes, foreground and
   background refreshes, and a deferred refresh resolved after a local mode
   change. Assert that metadata is refreshed and explicit selection still
@@ -157,11 +172,18 @@ never invoke the model, repeat tools, or create another foreground turn.
   pair must either exist in full or be entirely new; partial pairs and ID collisions
   reject. Legacy calls without stable IDs remain supported.
 - Each application session supplies a UUID `syncRevision.sessionId` and a positive
-  safe-integer sequence. The server privately records `_syncRevision` in the run
-  JSON and ignores duplicate or older saves from the same session. This orders
-  requests within one running desktop session; it is not cross-client conflict
-  detection or a global revision protocol.
-- Release retained snapshots only for the matching successful save. A late ACK
+  safe-integer sequence. The server transaction stores a durable receipt scoped to
+  user, session, sequence and message identity. Confirmed duplicates and older
+  same-message sequences remain no-ops even after another session writes a result
+  or the messages are deleted. Receipts cascade with conversation deletion.
+- Public message reads return opaque `saveToken` hashes of stored fields. Modern
+  final saves carry the original user/assistant baselines (`null` means absent).
+  Cross-session changes reject with HTTP 409; same-session intentional increasing
+  sequences retain their ordering contract. Capture missing baselines before the
+  model starts, not after generation. Legacy unguarded callers remain supported;
+  restart recovery may not use that compatibility path without a confirmed receipt.
+- Automatically release retained snapshots only for the matching successful save;
+  explicit discard/deletion may invalidate them after durable cleanup. A late ACK
   cannot clear a newer token or a currently active replacement run. Markers for
   active generation must be cleared for the stable IDs too; they are independent
   of unsaved-result protection. A read started before the successful ACK must
@@ -178,9 +200,18 @@ never invoke the model, repeat tools, or create another foreground turn.
   server treats an absent message as already deleted; it still checks ownership
   of every existing row and never converts a network failure into local success.
 
-Recovery is held only in the current application session's memory. This does not
-provide an offline credential queue, durable restart recovery, or automatic model
-retries. Keep this limit explicit in user-facing save-failure copy and tests.
+Final payloads and clean snapshots now use a versioned IndexedDB outbox scoped by
+backend/user. Write before HTTP; do not silently evict unsaved output at its count
+or byte limit. Storage failure must be explicit while an online save remains
+possible. Reconnect/restart replays persistence only, with original IDs/revision
+and `recovery:true`; it cannot hold the backend ready gate or repeat model/tools.
+Replayed receipts refresh canonical server messages rather than preserving a stale
+local snapshot. A conflict retains local content and requires explicit copy/discard.
+
+Delete/reset await persistent invalidation and invalidate pending recovery reads.
+Identity changes clear only the old user's queue; their memory-only reset must
+preserve the next user's queue. Active replacement runs fence old callbacks.
+This is not an offline credential queue, automatic tool retry, or a global lock.
 
 Required regressions cover fresh streaming IDs, persisted edits against stale DB
 rows, more than 20 nonempty conversations, lost ACK retries, duplicate clicks,
@@ -188,6 +219,20 @@ older ACKs/revisions, deletion/reset, stale pending reads, opaque historical IDs
 user-only replies, transaction rollback and invalid role/ownership/ID shapes.
 
 ---
+
+## Background recommendation and settings reads
+
+Welcome suggestions load after identity bootstrap and reset on identity changes.
+Reset cancels scheduled rechecks
+and fences pending responses; an old request's cleanup must not clear a newer
+in-flight request. Empty/offline reads preserve the current identity's cached set.
+
+Agent/Tavily settings keep secret drafts in component memory. Until the initial
+read succeeds, writes are disabled and failures expose retry. Reconnect preserves
+a dirty draft while updating its saved baseline. Read/mutation revisions fence
+late loads; pending writes disable duplicate edits, failures retain the key draft
+or roll back the switch. A successful write after unmount signals the current
+settings mount to refresh. This does not promise draft recovery across navigation.
 
 ## Common Mistakes
 
@@ -371,3 +416,43 @@ URLs reject; no test may call the normal server, real model or user task list.
 
 Wrong: create `temp-${Date.now()}` and submit without workspaceRoot.
 Correct: allocate a UUID turn and submit only after resolving its explicit root.
+
+## Conversation composer drafts
+
+- Existing-conversation composer text and pending File handles live in
+  conversationDraftStore under backend/account/conversation identity, in memory
+  only. Page and conversation navigation restore the corresponding contents;
+  logout, backend changes and restart clear them. Restoring a draft never sends it.
+- Editable source handoffs retain user-edited composer text and pending files.
+  An automatic handoff colliding with a different unfinished draft becomes a
+  reviewable merged input rather than overwriting or sending the old contents.
+- Setters capture an account generation and per-conversation revision. Successful
+  conversation/project deletion releases the corresponding text and File handles
+  and fences old asynchronous callbacks; failed deletion preserves the draft.
+  Account ABA changes must not reactivate writers from a previous login lifetime.
+- A completed attachment operation removes only its original files in its
+  original conversation; it must not clear files added later or another chat.
+  Imported conversation IDs are treated as own data keys, including __proto__.
+
+Verification: docs/2026-11-11_backup-drafts-results.md.
+
+## Welcome creation and required server state
+
+- Welcome queues a prompt only after create resolves an explicit conversation ID,
+  synchronously before adopting that target. Chat rejects unbound queued prompts.
+  Conversation selection/new-chat/reset fence pending creation responses.
+  Abandoned creations can appear in history with an unsent draft, but never
+  select themselves, auto-send, or overwrite a newer draft.
+- A blank conversation with retained unsent input is not an empty reusable target.
+  New navigation must settle loading owned by superseded message reads.
+- Required startup groups load after identity; HTTP/schema/group errors block
+  ready as well as transport errors. A retry keeps successful groups only within
+  the same interrupted load and identity generation, and retries failed groups.
+  The next clean reload refreshes every group.
+- Optional recommendations/templates run independently of ready; a hanging
+  optional request cannot block the composer. Template responses use request,
+  backend and identity-generation guards; account changes clear visible templates.
+  Persistence recovery and scheduled-run synchronization start only after the
+  required groups load successfully.
+
+Evidence: docs/2026-11-11_restore-handoff-readiness-results.md.

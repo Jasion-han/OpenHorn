@@ -15,12 +15,13 @@ This directory contains guidelines for frontend development. Fill in each file w
 | Guide | Description | Status |
 |-------|-------------|--------|
 | [Directory Structure](./directory-structure.md) | Module organization and file layout | To fill |
-| [Component Guidelines](./component-guidelines.md) | Component patterns; user links and local-path preview contracts | Partial |
+| [Component Guidelines](./component-guidelines.md) | Component patterns; links/previews, search, settings and export interaction contracts | Partial |
 | [Hook Guidelines](./hook-guidelines.md) | Custom hooks, data fetching patterns | To fill |
-| [State Management](./state-management.md) | Local state, global state, server state | To fill |
+| [State Management](./state-management.md) | Draft/metadata ownership, refresh races and save recovery | Partial |
 | [Quality Guidelines](./quality-guidelines.md) | Code standards, forbidden patterns | To fill |
 | [Type Safety](./type-safety.md) | Type patterns, validation | To fill |
 | [Generative UI](./generative-ui.md) | `openui-lang` / `html-ui` answer blocks, prompt contract, sandbox boundaries | Filled |
+| [Workbench](./workbench.md) | Recipe snapshots, task leases, artifact versions, review datasets and backup contracts | Filled |
 
 ---
 
