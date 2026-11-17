@@ -329,6 +329,7 @@ export interface ChatState {
   streamingMessageId: string | null;
   error: string | null;
   savingMessageIds: ReadonlySet<string>;
+  sidecarSaveInvalidation: { sequence: number; conversationId?: string; messageId?: string } | null;
 
   loadChannels: () => Promise<void>;
   loadConversations: (options?: { background?: boolean }) => Promise<void>;
@@ -343,6 +344,7 @@ export interface ChatState {
       forceWebSearch?: boolean;
       /** Sidebar project to file the conversation under (null = plain list). */
       projectId?: string | null;
+      /** Runs synchronously just before adopting a created row; false keeps current navigation. */
       beforeSelect?: (conversation: Conversation) => boolean;
     },
   ) => Promise<Conversation>;
@@ -402,8 +404,13 @@ export interface ChatState {
     assistantId: string,
     token: symbol,
   ) => { userMessageId: string; assistantMessageId: string } | null;
-  isMessageUnsaved: (messageId: string) => boolean;
+  restoreSidecarTurn: (user: Message, assistant: Message, token: symbol) => boolean;
+  setSidecarSaveInvalidator: (
+    handler: ((filter: { conversationId?: string; messageId?: string }) => Promise<void>) | null,
+  ) => void;
+  refreshConversationMessages: (conversationId: string) => Promise<void>;
   isSidecarTurnRetained: (assistantId: string, token: symbol) => boolean;
+  isMessageUnsaved: (messageId: string) => boolean;
   releaseSidecarTurn: (assistantId: string, token: symbol) => void;
   isMessageActive: (messageId: string) => boolean;
   setSidecarSavePending: (ids: string[], token: symbol, pending: boolean) => void;
@@ -423,7 +430,7 @@ export interface ChatState {
     messageId?: string | null,
   ) => void;
   setError: (error: string | null) => void;
-  reset: () => void;
+  reset: (options?: { preserveSaveOutbox?: boolean }) => Promise<void>;
 }
 
 const INITIAL_STATE = {
@@ -439,6 +446,7 @@ const INITIAL_STATE = {
   streamingMessageId: null as string | null,
   error: null as string | null,
   savingMessageIds: new Set<string>() as ReadonlySet<string>,
+  sidecarSaveInvalidation: null as ChatState["sidecarSaveInvalidation"],
 };
 
 export interface DesktopChatStoreOptions {
@@ -457,6 +465,13 @@ export function createDesktopChatStore(
 ) {
   const canWrite = options.canWrite ?? (() => true);
   let selectConversationRequestId = 0;
+  let conversationListRequest = 0;
+  let foregroundListRequest = 0;
+  let metadataEpoch = 0;
+  let metadataRevision = 0;
+  const metadataRevisions = new Map<string, number>();
+  const metadataWrites = new Map<string, Promise<void>>();
+  const markMetadataChanged = (id: string) => metadataRevisions.set(id, ++metadataRevision);
   // Bounded LRU of per-conversation message lists. Purpose (from 05-20):
   //   A. instant, flicker-free re-open of recently visited conversations;
   //   B. no lost content when switching away from a still-streaming conversation.
@@ -473,6 +488,10 @@ export function createDesktopChatStore(
   const unsaved = new Map<string, { token: symbol; message: Message }>();
   const pendingSaves = new Map<string, Set<symbol>>();
   let persistenceEpoch = 0;
+  let saveInvalidationSequence = 0;
+  let invalidateSidecarSaves:
+    | ((filter: { conversationId?: string; messageId?: string }) => Promise<void>)
+    | null = null;
   function trackUnsaved(message: Message): Message {
     const retained = unsaved.get(message.id);
     if (retained) unsaved.set(message.id, { ...retained, message });
@@ -576,11 +595,30 @@ export function createDesktopChatStore(
     },
 
     async loadConversations(options) {
+      const request = ++conversationListRequest;
+      const revision = metadataRevision;
+      const epoch = metadataEpoch;
       const background = options?.background === true;
-      if (!background) set({ isLoading: true, error: null });
+      if (!background) {
+        foregroundListRequest = request;
+        set({ isLoading: true, error: null });
+      }
       try {
-        const conversations = await adapter.listConversations();
+        const incoming = await adapter.listConversations();
+        if (request !== conversationListRequest || epoch !== metadataEpoch) return;
         set((state) => {
+          const local = new Map(state.conversations.map((row) => [row.id, row]));
+          const changed = (id: string) =>
+            (metadataRevisions.get(id) ?? 0) > revision || metadataWrites.has(id);
+          const conversations = incoming.flatMap((row) => {
+            if (!changed(row.id)) return [row];
+            const current = local.get(row.id);
+            return current ? [current] : [];
+          });
+          const known = new Set(conversations.map((row) => row.id));
+          conversations.push(
+            ...state.conversations.filter((row) => !known.has(row.id) && changed(row.id)),
+          );
           const currentConversation = state.currentConversation
             ? conversations.find(
                 (conversation) => conversation.id === state.currentConversation?.id,
@@ -597,8 +635,18 @@ export function createDesktopChatStore(
           };
         });
       } catch (error) {
-        if (!background) set({ isLoading: false, error: toErrorMessage(error) });
+        if (!background && request === conversationListRequest && epoch === metadataEpoch)
+          set({ isLoading: false, error: toErrorMessage(error) });
         throw error;
+      } finally {
+        if (
+          request === conversationListRequest &&
+          epoch === metadataEpoch &&
+          foregroundListRequest
+        ) {
+          foregroundListRequest = 0;
+          set({ isLoading: false });
+        }
       }
     },
 
@@ -715,7 +763,7 @@ export function createDesktopChatStore(
         return cur;
       }
       const requestId = ++selectConversationRequestId;
-      const ownerEpoch = useConversationDraftStore.getState().generation;
+      const ownerEpoch = metadataEpoch;
       const conversation = await adapter.createConversation({
         title,
         channelId: options?.channelId,
@@ -727,10 +775,11 @@ export function createDesktopChatStore(
         ...(hasUnsentBlank ? { forceNew: true } : {}),
       });
 
-      if (ownerEpoch !== useConversationDraftStore.getState().generation) return conversation;
+      if (ownerEpoch !== metadataEpoch) return conversation;
       const canSelect =
         requestId === selectConversationRequestId &&
         (options?.beforeSelect?.(conversation) ?? true);
+      markMetadataChanged(conversation.id);
       if (!canSelect) {
         set((state) => ({
           conversations: state.conversations.some((row) => row.id === conversation.id)
@@ -785,67 +834,95 @@ export function createDesktopChatStore(
     },
 
     async updateConversation(conversationId, updates) {
-      const state = get();
-      const previous =
-        state.conversations.find((conversation) => conversation.id === conversationId) || null;
-
-      set((nextState) => ({
-        conversations: nextState.conversations.map((conversation) =>
-          conversation.id === conversationId ? { ...conversation, ...updates } : conversation,
-        ),
-        currentConversation:
-          nextState.currentConversation?.id === conversationId
-            ? { ...nextState.currentConversation, ...updates }
-            : nextState.currentConversation,
-        selectedChannelId:
-          nextState.currentConversation?.id === conversationId && updates.channelId !== undefined
-            ? updates.channelId || null
-            : nextState.selectedChannelId,
-      }));
-
-      try {
-        await adapter.updateConversation(conversationId, {
-          title: updates.title,
-          channelId: updates.channelId,
-          modelId: updates.modelId,
-          systemPrompt: updates.systemPrompt,
-          contextLength: updates.contextLength,
-          isPinned: updates.isPinned,
-          forceWebSearch: updates.forceWebSearch,
-          projectId: updates.projectId,
-        });
-      } catch (error) {
-        if (previous) {
-          set((nextState) => ({
-            conversations: nextState.conversations.map((conversation) =>
-              conversation.id === conversationId ? previous : conversation,
-            ),
-            currentConversation:
-              nextState.currentConversation?.id === conversationId
-                ? previous
-                : nextState.currentConversation,
-            selectedChannelId:
-              nextState.currentConversation?.id === conversationId
-                ? previous.channelId || null
-                : nextState.selectedChannelId,
-            error: toErrorMessage(error),
-          }));
-        } else {
-          set({ error: toErrorMessage(error) });
+      // Serialize writes for one conversation; other conversations remain independent.
+      const predecessor = metadataWrites.get(conversationId);
+      const epoch = metadataEpoch;
+      const patch = { ...updates };
+      const operation = (async () => {
+        if (predecessor) await predecessor.catch(() => {});
+        if (epoch !== metadataEpoch) throw new Error("conversation_update_cancelled");
+        const previous = get().conversations.find((row) => row.id === conversationId) ?? null;
+        markMetadataChanged(conversationId);
+        const apply = (row: Conversation) => ({ ...row, ...patch });
+        set((state) => ({
+          conversations: state.conversations.map((row) =>
+            row.id === conversationId ? apply(row) : row,
+          ),
+          currentConversation:
+            state.currentConversation?.id === conversationId
+              ? apply(state.currentConversation)
+              : state.currentConversation,
+          selectedChannelId:
+            state.currentConversation?.id === conversationId && patch.channelId !== undefined
+              ? patch.channelId || null
+              : state.selectedChannelId,
+        }));
+        try {
+          await adapter.updateConversation(conversationId, {
+            title: patch.title,
+            channelId: patch.channelId,
+            modelId: patch.modelId,
+            systemPrompt: patch.systemPrompt,
+            contextLength: patch.contextLength,
+            isPinned: patch.isPinned,
+            forceWebSearch: patch.forceWebSearch,
+            projectId: patch.projectId,
+          });
+        } catch (error) {
+          if (epoch !== metadataEpoch) throw error;
+          // Roll back only fields this operation still owns, preserving newer runtime metadata.
+          const rollback = (row: Conversation): Conversation => {
+            if (!previous) return row;
+            const restored = Object.fromEntries(
+              Object.keys(patch)
+                .filter((key) =>
+                  Object.is(row[key as keyof Conversation], patch[key as keyof Conversation]),
+                )
+                .map((key) => [key, previous[key as keyof Conversation]]),
+            );
+            return { ...row, ...restored };
+          };
+          set((state) => {
+            const current =
+              state.currentConversation?.id === conversationId
+                ? rollback(state.currentConversation)
+                : state.currentConversation;
+            return {
+              conversations: state.conversations.map((row) =>
+                row.id === conversationId ? rollback(row) : row,
+              ),
+              currentConversation: current,
+              selectedChannelId:
+                state.currentConversation?.id === conversationId && patch.channelId !== undefined
+                  ? current?.channelId || null
+                  : state.selectedChannelId,
+              error: toErrorMessage(error),
+            };
+          });
+          throw error;
+        } finally {
+          if (epoch === metadataEpoch) markMetadataChanged(conversationId);
         }
-        throw error;
+      })();
+      metadataWrites.set(conversationId, operation);
+      try {
+        await operation;
+      } finally {
+        if (metadataWrites.get(conversationId) === operation) metadataWrites.delete(conversationId);
       }
     },
 
     async deleteConversation(conversationId) {
       const { owner, generation } = useConversationDraftStore.getState();
       await adapter.deleteConversation(conversationId);
+      markMetadataChanged(conversationId);
       messageCache.delete(conversationId);
       for (const [id, entry] of unsaved) {
         if (entry.message.conversationId === conversationId) unsaved.delete(id);
       }
       persistenceEpoch += 1;
       set((state) => ({
+        sidecarSaveInvalidation: { sequence: ++saveInvalidationSequence, conversationId },
         conversations: state.conversations.filter(
           (conversation) => conversation.id !== conversationId,
         ),
@@ -854,6 +931,7 @@ export function createDesktopChatStore(
         messages: state.currentConversation?.id === conversationId ? [] : state.messages,
       }));
       useConversationDraftStore.getState().discard(owner, conversationId, generation);
+      await invalidateSidecarSaves?.({ conversationId });
     },
 
     async autoTitleConversation(conversationId, prompt) {
@@ -866,6 +944,7 @@ export function createDesktopChatStore(
       // string, but that narrowing does not survive into a closure, which is why
       // both uses previously needed a non-null assertion.
       const nextTitle = result.title;
+      markMetadataChanged(conversationId);
       const nextUpdatedAt = new Date();
       set((state) => ({
         conversations: state.conversations.map((conversation) =>
@@ -1014,8 +1093,10 @@ export function createDesktopChatStore(
       }
       activeRunMessageIds.delete(messageId);
       set((state) => ({
+        sidecarSaveInvalidation: { sequence: ++saveInvalidationSequence, messageId },
         messages: state.messages.filter((message) => message.id !== messageId),
       }));
+      await invalidateSidecarSaves?.({ messageId });
     },
 
     async regenerateMessage(messageId, data) {
@@ -1248,11 +1329,48 @@ export function createDesktopChatStore(
       return null;
     },
 
+    isSidecarTurnRetained(assistantId, token) {
+      return unsaved.get(assistantId)?.token === token;
+    },
     isMessageUnsaved(messageId) {
       return unsaved.has(messageId);
     },
-    isSidecarTurnRetained(assistantId, token) {
-      return unsaved.get(assistantId)?.token === token;
+
+    restoreSidecarTurn(user, assistant, token) {
+      if (
+        user.role !== "user" ||
+        assistant.role !== "assistant" ||
+        user.conversationId !== assistant.conversationId ||
+        get().isMessageActive(user.id) ||
+        get().isMessageActive(assistant.id)
+      )
+        return false;
+      for (const message of [user, assistant]) unsaved.set(message.id, { token, message });
+      const conversationId = user.conversationId;
+      const current = get().currentConversation?.id === conversationId;
+      const rows = current ? get().messages : (messageCache.get(conversationId) ?? []);
+      const restored = mergeUnsaved(conversationId, rows);
+      cacheSet(conversationId, restored);
+      if (current) set({ messages: restored });
+      return true;
+    },
+
+    setSidecarSaveInvalidator(handler) {
+      invalidateSidecarSaves = handler;
+    },
+
+    async refreshConversationMessages(conversationId) {
+      const messages = await readMessages(conversationId);
+      const current = get().currentConversation?.id === conversationId;
+      const local = current ? get().messages : (messageCache.get(conversationId) ?? []);
+      const active = local.filter((message) => get().isMessageActive(message.id));
+      const activeById = new Map(active.map((message) => [message.id, message]));
+      const rows = messages.map((message) => activeById.get(message.id) ?? message);
+      const present = new Set(rows.map((message) => message.id));
+      for (const message of active) if (!present.has(message.id)) rows.push(message);
+      const merged = mergeUnsaved(conversationId, rows);
+      cacheSet(conversationId, merged);
+      if (current) set({ messages: merged });
     },
 
     releaseSidecarTurn(assistantId, token) {
@@ -1387,14 +1505,28 @@ export function createDesktopChatStore(
       set({ error });
     },
 
-    reset() {
+    reset(options) {
       selectConversationRequestId++;
+      metadataEpoch++;
+      conversationListRequest++;
+      foregroundListRequest = 0;
+      metadataWrites.clear();
+      metadataRevisions.clear();
+      metadataRevision = 0;
       messageCache.clear();
       unsaved.clear();
       pendingSaves.clear();
       activeRunMessageIds.clear();
       persistenceEpoch += 1;
-      set({ ...INITIAL_STATE });
+      set({
+        ...INITIAL_STATE,
+        sidecarSaveInvalidation: options?.preserveSaveOutbox
+          ? get().sidecarSaveInvalidation
+          : { sequence: ++saveInvalidationSequence },
+      });
+      return options?.preserveSaveOutbox
+        ? Promise.resolve()
+        : (invalidateSidecarSaves?.({}) ?? Promise.resolve());
     },
   }));
 }

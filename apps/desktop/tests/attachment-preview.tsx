@@ -3,7 +3,9 @@ import { createRoot } from "react-dom/client";
 import { DesktopAttachmentPreviewItem } from "../src/components/chat/DesktopAttachmentPreviewItem";
 import { DesktopMessageAttachments } from "../src/components/chat/DesktopMessageAttachments";
 import { DesktopPreviewPanel } from "../src/components/preview/DesktopPreviewPanel";
+import type { SidecarClient } from "../src/lib/sidecarClient";
 import { usePreviewPanelStore } from "../src/stores/previewPanelStore";
+import { useSidecarStore } from "../src/stores/sidecarStore";
 import "../src/styles/globals.css";
 
 function makePdf() {
@@ -126,5 +128,19 @@ function Fixture() {
   );
 }
 const root = document.getElementById("root");
+Object.assign(window, {
+  attachmentWorkspaceFixture: () => {
+    useSidecarStore.setState({
+      status: "ready",
+      workspaceRoot: "/synthetic",
+      client: {
+        readFile: async () => ({ content: "export const filePreview = true;" }),
+      } as unknown as SidecarClient,
+    });
+    usePreviewPanelStore
+      .getState()
+      .openFile({ path: "src/preview.ts", line: 1, conversationId: null });
+  },
+});
 if (!root) throw new Error("Missing fixture root");
 createRoot(root).render(<Fixture />);

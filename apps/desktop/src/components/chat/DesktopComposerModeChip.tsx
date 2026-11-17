@@ -22,7 +22,13 @@ export function DesktopComposerModeChip({
   disabled = false,
   agentAvailable = true,
   agentDisabledReason,
+  researchMode = false,
+  researchAvailable = false,
+  onResearch,
 }: {
+  researchMode?: boolean;
+  researchAvailable?: boolean;
+  onResearch?: () => void;
   mode: ChatMode;
   onModeChange: (mode: ChatMode) => void;
   disabled?: boolean;
@@ -32,9 +38,10 @@ export function DesktopComposerModeChip({
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
-
-  const alternateMode: ChatMode = mode === "chat" ? "agent" : "chat";
-  const alternateDisabled = alternateMode === "agent" && !agentAvailable;
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (disabled) setOpen(false);
+  }, [disabled]);
 
   useEffect(() => {
     if (!open) return;
@@ -43,7 +50,10 @@ export function DesktopComposerModeChip({
       if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
     };
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
+      if (event.key === "Escape") {
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
     };
 
     document.addEventListener("mousedown", handlePointerDown);
@@ -57,36 +67,51 @@ export function DesktopComposerModeChip({
   return (
     <div ref={rootRef} className="relative inline-flex shrink-0 flex-col items-center">
       {open && !disabled && (
-        <div className="pointer-events-none absolute bottom-full left-0 right-0 z-20 mb-1 flex justify-center">
-          <button
-            type="button"
-            onClick={() => {
-              if (alternateDisabled) return;
-              onModeChange(alternateMode);
-              setOpen(false);
-            }}
-            disabled={alternateDisabled}
-            className={cn(
-              "pointer-events-auto flex w-full items-center justify-center gap-1.5 rounded-[10px] px-2.5 py-1 text-xs",
-              alternateDisabled
-                ? "cursor-not-allowed bg-muted/80 text-muted-foreground opacity-70 ring-1 ring-border/25"
-                : "bg-accent/88 text-foreground shadow-[0_10px_24px_rgba(15,23,42,0.12)] ring-1 ring-border/25 backdrop-blur-md transition-colors hover:bg-accent",
-            )}
-            title={
-              alternateDisabled
-                ? (agentDisabledReason ?? getChatLabel("chat.composer.modeUnavailable"))
-                : undefined
-            }
-          >
-            <span>{alternateMode === "chat" ? "Chat" : "Agent"}</span>
-            {/* Invisible, but it keeps this row the same width as the trigger so
-                the label does not shift as the menu opens. */}
-            <ChevronDown className="size-3 shrink-0 opacity-0" aria-hidden="true" />
-          </button>
+        <div className="absolute bottom-full left-0 z-30 mb-2 min-w-[160px] rounded-xl border border-border bg-popover p-1 shadow-lg">
+          {(["chat", "agent", ...(onResearch ? ["research"] : [])] as const).map((item) => {
+            const unavailable =
+              item === "research" ? !researchAvailable : item === "agent" && !agentAvailable;
+            const selected = item === "research" ? researchMode : !researchMode && mode === item;
+            return (
+              <button
+                key={item}
+                type="button"
+                disabled={unavailable}
+                className={cn(
+                  "flex w-full items-center rounded-lg px-3 py-2 text-left text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  selected ? "bg-accent text-foreground" : "hover:bg-accent",
+                  unavailable && "cursor-not-allowed text-muted-foreground opacity-60",
+                )}
+                title={
+                  item === "research"
+                    ? getChatLabel(
+                        researchAvailable ? "chat.research.hint" : "chat.research_unavailable",
+                      )
+                    : unavailable
+                      ? (agentDisabledReason ?? undefined)
+                      : undefined
+                }
+                aria-pressed={selected}
+                onClick={() => {
+                  if (item === "research") onResearch?.();
+                  else onModeChange(item as ChatMode);
+                  setOpen(false);
+                  queueMicrotask(() => triggerRef.current?.focus());
+                }}
+              >
+                {item === "research"
+                  ? getChatLabel("chat.research.title")
+                  : item === "chat"
+                    ? "Chat"
+                    : "Agent"}
+              </button>
+            );
+          })}
         </div>
       )}
 
       <button
+        ref={triggerRef}
         type="button"
         disabled={disabled}
         onClick={() => {
@@ -101,9 +126,12 @@ export function DesktopComposerModeChip({
           disabled && "pointer-events-none opacity-60",
         )}
         aria-label="Mode"
+        aria-expanded={open}
         title="Mode"
       >
-        <span className="truncate whitespace-nowrap">{mode === "chat" ? "Chat" : "Agent"}</span>
+        <span className="truncate whitespace-nowrap">
+          {researchMode ? getChatLabel("chat.research.title") : mode === "chat" ? "Chat" : "Agent"}
+        </span>
         <ChevronDown className={cn("size-3 transition-transform", open && "rotate-180")} />
       </button>
     </div>

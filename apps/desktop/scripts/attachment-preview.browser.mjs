@@ -268,6 +268,16 @@ try {
   console.log(
     "PASS sidebar default, chat editing/keyboard isolation, single-tab replacement, expand/Escape, resize/collapse and automatic narrow fallback",
   );
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.evaluate(() => window.attachmentWorkspaceFixture());
+  await page.waitForFunction(() =>
+    Array.from(document.querySelectorAll("code")).some((element) =>
+      element.textContent.includes("filePreview"),
+    ),
+  );
+  console.log(
+    "PASS workspace file preview loads its deferred renderer and highlights the original source",
+  );
   assert.deepEqual(errors, []);
   assert.deepEqual(external, []);
   console.log(

@@ -120,6 +120,24 @@ try {
     return route.continue();
   });
   const page = await context.newPage();
+  page.setDefaultTimeout(15_000);
+  const projectAction = async (name) => {
+    await page.getByRole("button", { name: "更多评论项目操作", exact: true }).click();
+    await page.getByRole("menuitem", { name, exact: true }).click();
+    await page.getByRole("menu").waitFor({ state: "hidden" });
+  };
+  const openSettings = async () => {
+    if ((await page.getByLabel("分析方式", { exact: true }).count()) === 0) {
+      await page.getByRole("button", { name: "更多分析操作", exact: true }).click();
+      await page.getByRole("menuitem", { name: "筛选与分析设置", exact: true }).click();
+    }
+  };
+  const selectMode = async (mode) => {
+    await openSettings();
+    await page.getByLabel("分析方式", { exact: true }).selectOption(mode);
+    await page.getByRole("button", { name: "收起设置", exact: true }).click();
+  };
+
   page.on("pageerror", (error) => errors.push(error.message));
   await page.goto(`${origin}/tests/jev-integration.html`);
   await page.getByText("已配置 OpenRouter · Jev 1.14", { exact: true }).waitFor();
@@ -140,6 +158,8 @@ try {
   );
   await page.getByRole("button", { name: "Reviews fixture", exact: true }).click();
   await page.getByRole("heading", { name: workspace.title, exact: true }).waitFor();
+  await selectMode("jev");
+  await page.getByRole("button", { name: "选择下一批未标注", exact: true }).click();
   assert.equal(
     await page.getByRole("button", { name: "Jev 快速标注", exact: true }).isDisabled(),
     true,
@@ -157,6 +177,18 @@ try {
   await page.getByRole("button", { name: "Reviews fixture", exact: true }).click();
   await page.getByRole("heading", { name: workspace.title, exact: true }).waitFor();
   await page.getByRole("button", { name: "选择下一批未标注", exact: true }).click();
+  await openSettings();
+  await page.getByLabel("聊天分析模型", { exact: true }).selectOption("");
+  assert.equal(
+    await page.getByRole("button", { name: "准备聊天分析", exact: true }).isDisabled(),
+    true,
+  );
+  await selectMode("jev");
+  assert.equal(
+    await page.getByRole("button", { name: "Jev 快速标注", exact: true }).isEnabled(),
+    true,
+  );
+  pass("Jev quick labeling remains available without selecting a chat analysis model");
   let release;
   const started = new Promise((done) => {
     entered = done;
@@ -168,14 +200,14 @@ try {
   await page.getByRole("button", { name: "Jev 快速标注", exact: true }).dblclick({ delay: 10 });
   await started;
   assert.equal(
-    await page.getByRole("button", { name: "Jev 快速标注", exact: true }).isDisabled(),
+    await page.getByRole("button", { name: "正在处理…", exact: true }).isDisabled(),
     true,
   );
   assert.equal(requests.filter((r) => r.path.endsWith("/jev-runs")).length, before + 1);
   release();
   held = null;
   entered = null;
-  await page.getByText("Jev 标注完成", { exact: false }).waitFor();
+  await page.locator("output").filter({ hasText: "Jev 标注完成" }).waitFor();
   await page.getByText("易用性", { exact: true }).first().waitFor();
   workspace = (await json(`/review-workspaces/${workspace.id}`)).workspace;
   assert.equal(workspace.annotatedCount, 2);
@@ -231,9 +263,10 @@ try {
     })
   ).workspace;
   await json("/__fixture/decision-budget", "POST", { limit: 0 });
-  await page.getByRole("button", { name: "刷新已保存数据", exact: true }).first().click();
+  await projectAction("刷新已保存数据");
   await page.getByRole("combobox", { name: "选择评论项目", exact: true }).selectOption(other.id);
   await page.getByRole("heading", { name: other.title, exact: true }).waitFor();
+  await selectMode("jev");
   await page.getByRole("checkbox", { name: "选择评论 r2", exact: true }).check();
   await page.getByRole("button", { name: "Jev 快速标注", exact: true }).click();
   await page.getByText("今日 Jev 可用额度不足；原标注已保留。", { exact: true }).waitFor();
@@ -246,9 +279,10 @@ try {
   );
   await json("/__fixture/decision-budget", "POST", { limit: 0.05 });
   const last = await create("Navigation synthetic project", "A final distinct comment");
-  await page.getByRole("button", { name: "刷新已保存数据", exact: true }).first().click();
+  await projectAction("刷新已保存数据");
   await page.getByRole("combobox", { name: "选择评论项目", exact: true }).selectOption(last.id);
   await page.getByRole("heading", { name: last.title, exact: true }).waitFor();
+  await selectMode("jev");
   await page.getByRole("button", { name: "选择下一批未标注", exact: true }).click();
   const lateStarted = new Promise((done) => {
     entered = done;

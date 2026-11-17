@@ -1,14 +1,20 @@
 import { missingRecipeCapabilities } from "shared/recipes";
+import { isResearchErrorCode, isResearchProtocol } from "shared/research";
 import type {
   AttachmentPart,
   MessageFinishReason,
   ModelContextMetadata,
   RecipeRequirements,
 } from "shared/types";
+import { modelSupportsVision } from "shared/vision";
 import { create } from "zustand";
+import { getDesktopBackendBase } from "../lib/backendBase";
+import { DocumentInputError } from "../lib/documentInput";
+import { readDocumentInput } from "../lib/documentInputCache";
 import { formatChatLabel, getChatLabel } from "../lib/i18n/agent";
 import { createServerApi } from "../lib/serverApi";
 import type { SidecarApprovalRequest, SidecarClient } from "../lib/sidecarClient";
+import { SidecarFeatureUnavailableError } from "../lib/sidecarClient";
 import { sidecarPersistence } from "../lib/sidecarPersistence";
 import {
   type AcpAvailableModel,
@@ -19,6 +25,7 @@ import {
   type SkillMeta,
 } from "../lib/sidecarRunSupport";
 import { resolveSidecarSyncIds, resolveStoppedAgentReply } from "../lib/stopTurn";
+import { useAuthStore } from "../stores/authStore";
 import { useChatStore } from "../stores/chatStore";
 import { resolveProjectRootForConversation } from "../stores/projectStore";
 import { useSidecarStore } from "../stores/sidecarStore";
@@ -42,6 +49,9 @@ interface ActiveSidecarRun {
 }
 
 export interface SidecarAgentRunInput {
+  research?: boolean;
+  documentInputKey?: string;
+  documentInputRequired?: boolean;
   recipeRequirements?: RecipeRequirements;
   conversationId: string;
   channelId: string;
@@ -77,6 +87,8 @@ export interface SidecarAgentRunInput {
    * user asked to stop the new attempt, not to lose the old answer.
    */
   previousReply?: Message;
+  previousUserContent?: string;
+  previousAssistantContent?: string;
   /**
    * The user pressed Stop while the caller was still preparing the run. The
    * turn is persisted as stopped (question kept) without contacting the agent.
@@ -256,6 +268,29 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
           agentRun: { ...message.agentRun, recipeRequirements },
         });
     }
+    const retainedRun = useChatStore
+      .getState()
+      .findMessageAnywhere(input.assistantMessageId)?.agentRun;
+    const research =
+      input.research ?? input.previousReply?.agentRun?.research ?? retainedRun?.research;
+    const documentInputKey =
+      input.documentInputKey ??
+      input.previousReply?.agentRun?.documentInputKey ??
+      retainedRun?.documentInputKey;
+    const documentInputRequired =
+      input.documentInputRequired ??
+      input.previousReply?.agentRun?.documentInputRequired ??
+      retainedRun?.documentInputRequired ??
+      !!documentInputKey;
+    if (retainedRun && (research || documentInputKey || documentInputRequired))
+      useChatStore.getState().updateMessage(input.assistantMessageId, {
+        agentRun: {
+          ...retainedRun,
+          ...(research ? { research: true } : {}),
+          ...(documentInputKey ? { documentInputKey } : {}),
+          ...(documentInputRequired ? { documentInputRequired: true } : {}),
+        },
+      });
     const sidecar = useSidecarStore.getState();
     const client = sidecar.client;
     // Run-ownership guard. Regenerate re-uses the SAME assistant message id:
@@ -504,6 +539,81 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
       return;
     }
 
+    // Older live Chat rows (notably Stop/error) may not have been reloaded yet.
+    // Capture their authoritative baselines before generation, never at final save time.
+    const stableIds = resolveSidecarSyncIds(input);
+    const baselineIds = [stableIds.userMessageId, stableIds.assistantMessageId].filter(
+      (id): id is string => !!id,
+    );
+    const needsBaseline = baselineIds.some((id) => {
+      const state = useChatStore.getState();
+      return !state.findMessageAnywhere(id)?.saveToken && !state.isMessageUnsaved(id);
+    });
+    if (needsBaseline) {
+      try {
+        const result = await api.messages.list(input.conversationId);
+        if (!isLive()) return;
+        for (const [id, expectedContent] of [
+          [stableIds.userMessageId, input.previousUserContent],
+          [
+            stableIds.assistantMessageId,
+            input.previousAssistantContent ?? input.previousReply?.content,
+          ],
+        ] as const) {
+          if (!id) continue;
+          const row = result.messages.find((message) => message.id === id);
+          if (!row?.saveToken || (expectedContent !== undefined && row.content !== expectedContent))
+            throw new Error("Message save baseline unavailable");
+          useChatStore.getState().updateMessage(id, { saveToken: row.saveToken });
+        }
+      } catch {
+        if (!isLive()) return;
+        const message = getChatLabel("chat.run.saveBaselineUnavailable");
+        setLastError(message);
+        useChatStore
+          .getState()
+          .applyStreamEvent(input.assistantMessageId, { type: "error", message });
+        persistFailure(message, input.modelId);
+        return;
+      }
+    }
+
+    if (documentInputRequired && !documentInputKey && !input.attachments?.length) {
+      const message = getChatLabel("chat.document.document_cache");
+      setLastError(message);
+      useChatStore
+        .getState()
+        .applyStreamEvent(input.assistantMessageId, { type: "error", message });
+      persistFailure(message, input.modelId);
+      return;
+    }
+    if (documentInputKey && !input.attachments) {
+      try {
+        if (!modelSupportsVision(input.modelId ?? ""))
+          throw new DocumentInputError("document_vision");
+        const owner = useAuthStore.getState().user?.id;
+        if (!owner) throw new Error("document_cache");
+        const attachments = await readDocumentInput(
+          JSON.stringify([getDesktopBackendBase(), owner]),
+          documentInputKey,
+        );
+        if (!isLive()) return;
+        input = { ...input, attachments };
+      } catch (error) {
+        if (!isLive()) return;
+        const message = getChatLabel(
+          error instanceof DocumentInputError
+            ? `chat.document.${error.code}`
+            : "chat.document.document_cache",
+        );
+        setLastError(message);
+        useChatStore
+          .getState()
+          .applyStreamEvent(input.assistantMessageId, { type: "error", message });
+        persistFailure(message, input.modelId);
+        return;
+      }
+    }
     let credentials: {
       apiKey: string;
       baseUrl: string | null;
@@ -534,7 +644,8 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
     if (
       credentials.protocol !== "anthropic" &&
       credentials.protocol !== "openai" &&
-      credentials.protocol !== "acp"
+      credentials.protocol !== "acp" &&
+      !(research && isResearchProtocol(credentials.protocol))
     ) {
       // Same as above: skip entirely if a newer run took over during the await.
       if (!isLive()) return;
@@ -584,9 +695,10 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
     let mcpServers: Record<string, Record<string, unknown>> | undefined;
     // ACP agents also consume MCP servers (passed through session/new).
     if (
-      credentials.protocol === "anthropic" ||
-      credentials.protocol === "openai" ||
-      credentials.protocol === "acp"
+      !research &&
+      (credentials.protocol === "anthropic" ||
+        credentials.protocol === "openai" ||
+        credentials.protocol === "acp")
     ) {
       try {
         // Slash-targeted run: keep only the invoked server (falls back to the
@@ -631,7 +743,7 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
     // the run carries each skill's name/description + absolute folder path;
     // nothing is copied and no workspace is required. Best-effort, never blocks.
     let skillMetas: SkillMeta[] | undefined;
-    if (credentials.protocol === "anthropic" || credentials.protocol === "openai") {
+    if (!research && (credentials.protocol === "anthropic" || credentials.protocol === "openai")) {
       try {
         const resolved = await resolveEnabledSkills({
           prompt: input.prompt,
@@ -675,6 +787,8 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
     try {
       acceptedRunId = await client.runAgent({
         prompt: input.prompt,
+        research,
+        documentInput: !!documentInputKey,
         workspaceRoot,
         // The acp config was already parsed into acpAgent — don't resend the
         // raw JSON in the apiKey slot.
@@ -685,8 +799,9 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
         baseUrl: credentials.baseUrl ?? undefined,
         protocol: credentials.protocol,
         acpAgent,
-        sdkSessionId:
-          input.sdkSessionId ?? resumableSessionId(credentials.protocol, input.conversationId),
+        sdkSessionId: research
+          ? undefined
+          : (input.sdkSessionId ?? resumableSessionId(credentials.protocol, input.conversationId)),
         permissionMode: input.permissionMode,
         systemPrompt: input.systemPrompt,
         webSearchEnabled: input.webSearchEnabled,
@@ -750,7 +865,13 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
           if (!isLive()) return;
           setPendingApproval(request);
         },
-        onError: (message) => {
+        onError: (rawMessage, code) => {
+          const message =
+            code === "document_vision"
+              ? getChatLabel("chat.document.document_vision")
+              : isResearchErrorCode(code)
+                ? getChatLabel(`chat.${code}`)
+                : rawMessage;
           // Ownership guard (see onEvent): a superseded run's failure must not
           // pollute the new run's message, UI state, or persistence.
           if (!isLive()) return;
@@ -772,7 +893,16 @@ export function useSidecarAgentRun(): SidecarAgentRunApi {
     } catch (error) {
       // Ownership guard (see above): don't clobber a newer run's state.
       if (!isLive()) return;
-      const message = error instanceof Error ? error.message : "启动本地运行失败";
+      const message =
+        error instanceof SidecarFeatureUnavailableError
+          ? getChatLabel(
+              error.feature === "research"
+                ? "chat.research_unavailable"
+                : "chat.document.document_vision",
+            )
+          : error instanceof Error
+            ? error.message
+            : "启动本地运行失败";
       setLastError(message);
       useChatStore.getState().applyStreamEvent(input.assistantMessageId, {
         type: "error",

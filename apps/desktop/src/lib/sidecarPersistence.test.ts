@@ -3,6 +3,13 @@ import { createDesktopChatStore } from "../stores/chatStore";
 import type { Conversation, Message } from "../types/chat";
 import type { ChatAdapter } from "./chatAdapter";
 import { getChatLabel } from "./i18n/agent";
+import { SidecarSaveConflict } from "./serverApi";
+import {
+  type OutboxRecord,
+  type SaveScope,
+  type SidecarOutbox,
+  sameSaveScope,
+} from "./sidecarOutbox";
 import { createSidecarPersistence } from "./sidecarPersistence";
 
 type Payload = Parameters<ReturnType<typeof createSidecarPersistence>["save"]>[1];
@@ -43,7 +50,10 @@ function message(
       : {}),
   };
 }
-function fixture(rows: Message[] = []) {
+function fixture(
+  rows: Message[] = [],
+  durable?: { outbox: SidecarOutbox; scope: () => SaveScope | null },
+) {
   const database = new Map<string, Message[]>([["conv-0", rows]]);
   const conversations: Conversation[] = Array.from({ length: 26 }, (_, i) => ({
     id: `conv-${i}`,
@@ -91,17 +101,24 @@ function fixture(rows: Message[] = []) {
   store.setState({ conversations, currentConversation: conversations[0], messages: rows });
   const notifications = new Map<string, () => Promise<void>>();
   const calls: Payload[] = [];
+  const failureReasons: string[] = [];
+  let recoveryFailures = 0;
   let sync: (payload: Payload) => Promise<Result> = async () => {
     throw new Error("offline");
   };
   const persistence = createSidecarPersistence({
+    ...durable,
     store,
     sync: async (payload) => {
       calls.push(structuredClone(payload));
       return sync(payload);
     },
-    failed: (id, retry) => {
+    failed: (id, retry, reason) => {
       notifications.set(id, retry);
+      failureReasons.push(reason ?? "sync");
+    },
+    recoveryFailed: () => {
+      recoveryFailures++;
     },
     saved: (id) => {
       notifications.delete(id);
@@ -127,6 +144,8 @@ function fixture(rows: Message[] = []) {
     persistence,
     calls,
     notifications,
+    failureReasons,
+    recoveryFailures: () => recoveryFailures,
     addTurn,
     payload,
     setSync: (fn: typeof sync) => {
@@ -413,4 +432,357 @@ describe("Agent result saving is independent from generation", () => {
     expect(f.calls[0].newAssistantMessageId).toBe(save.assistantMessageId);
     f.persistence.dispose();
   });
+});
+
+function memoryOutbox() {
+  const rows = new Map<string, OutboxRecord>();
+  const recordKey = (record: OutboxRecord) => JSON.stringify([record.scope, record.assistant.id]);
+  const outbox: SidecarOutbox = {
+    async put(record) {
+      rows.set(recordKey(record), structuredClone(record));
+    },
+    async list(scope) {
+      return [...rows.values()]
+        .filter((r) => sameSaveScope(r.scope, scope))
+        .map((r) => structuredClone(r));
+    },
+    async remove(record) {
+      const key = recordKey(record);
+      if (
+        JSON.stringify(rows.get(key)?.payload.syncRevision) ===
+        JSON.stringify(record.payload.syncRevision)
+      )
+        rows.delete(key);
+    },
+    async clear(scope) {
+      for (const [key, record] of rows) if (sameSaveScope(scope, record.scope)) rows.delete(key);
+    },
+    async invalidate(scope, filter) {
+      for (const [key, record] of rows) {
+        if (
+          sameSaveScope(scope, record.scope) &&
+          (!filter.conversationId || record.payload.conversationId === filter.conversationId) &&
+          (!filter.messageId ||
+            record.user.id === filter.messageId ||
+            record.assistant.id === filter.messageId)
+        )
+          rows.delete(key);
+      }
+    },
+  };
+  return { rows, outbox };
+}
+const saveScope: SaveScope = { backend: "http://fixture.invalid", userId: "user-a" };
+
+describe("durable Agent save recovery", () => {
+  test("restart restores final snapshots and retries only the original stable save", async () => {
+    const disk = memoryOutbox();
+    const durable = { outbox: disk.outbox, scope: () => saveScope };
+    const first = fixture([], durable);
+    first.addTurn();
+    const saved = required(first.persistence.save("temp-assistant", first.payload, () => true));
+    expect(await saved.completion).toBe(false);
+    const original = first.calls[0];
+    expect(disk.rows.size).toBe(1);
+    first.persistence.dispose();
+    const restarted = fixture([], durable);
+    restarted.setSync(async (payload) => ids(payload));
+    await restarted.persistence.recover();
+    expect(restarted.calls).toEqual([{ ...original, recovery: true }]);
+    expect(restarted.store.getState().messages.map((m) => m.content)).toEqual([
+      "question",
+      "answer",
+    ]);
+    expect(restarted.store.getState().messages[1].agentRun?.status).toBe("completed");
+    expect(disk.rows.size).toBe(0);
+    restarted.persistence.dispose();
+  });
+
+  test("a lost ACK is replayed with the same original session and sequence", async () => {
+    const disk = memoryOutbox();
+    const durable = { outbox: disk.outbox, scope: () => saveScope };
+    const first = fixture([], durable);
+    first.addTurn();
+    first.setSync(async () => {
+      throw new Error("ACK lost after commit");
+    });
+    await required(first.persistence.save("temp-assistant", first.payload, () => true)).completion;
+    const expected = structuredClone(first.calls[0]);
+    first.persistence.dispose();
+    const next = fixture([], durable);
+    next.setSync(async (payload) => ids(payload));
+    await next.persistence.recover();
+    expect(next.calls[0]).toEqual({ ...expected, recovery: true });
+    expect(next.calls).toHaveLength(1);
+    next.persistence.dispose();
+  });
+
+  test("other users and backends never see or send this scope's saves", async () => {
+    const disk = memoryOutbox();
+    const first = fixture([], { outbox: disk.outbox, scope: () => saveScope });
+    first.addTurn();
+    await required(first.persistence.save("temp-assistant", first.payload, () => true)).completion;
+    first.persistence.dispose();
+    for (const scope of [
+      { ...saveScope, userId: "user-b" },
+      { ...saveScope, backend: "http://other.invalid" },
+    ]) {
+      const other = fixture([], { outbox: disk.outbox, scope: () => scope });
+      await other.persistence.recover();
+      expect(other.calls).toHaveLength(0);
+      expect(other.store.getState().messages).toHaveLength(0);
+      other.persistence.dispose();
+    }
+    expect(disk.rows.size).toBe(1);
+  });
+
+  test("deleting a retained message clears its pair from disk before the next recovery", async () => {
+    const disk = memoryOutbox();
+    const durable = { outbox: disk.outbox, scope: () => saveScope };
+    const first = fixture([], durable);
+    first.addTurn();
+    const saved = required(first.persistence.save("temp-assistant", first.payload, () => true));
+    await saved.completion;
+    await first.store.getState().deleteMessage(saved.assistantMessageId);
+    expect(disk.rows.size).toBe(0);
+    first.persistence.dispose();
+    const next = fixture([], durable);
+    await next.persistence.recover();
+    expect(next.calls).toHaveLength(0);
+    next.persistence.dispose();
+  });
+
+  test("logout clears the old scope and fences an in-flight ACK", async () => {
+    const disk = memoryOutbox();
+    let scope: SaveScope | null = saveScope;
+    const f = fixture([], { outbox: disk.outbox, scope: () => scope });
+    f.addTurn();
+    const gate = deferred<Result>();
+    f.setSync(() => gate.promise);
+    const save = required(f.persistence.save("temp-assistant", f.payload, () => true));
+    await Promise.resolve();
+    await Promise.resolve();
+    scope = null;
+    await f.persistence.forgetScope(saveScope);
+    gate.resolve(ids(f.calls[0]));
+    expect(await save.completion).toBe(false);
+    expect(disk.rows.size).toBe(0);
+    f.persistence.dispose();
+  });
+
+  test("local storage failure still permits an online save and reports when both fail", async () => {
+    const disk = memoryOutbox();
+    disk.outbox.put = async () => {
+      throw new Error("quota exceeded");
+    };
+    const f = fixture([], { outbox: disk.outbox, scope: () => saveScope });
+    f.addTurn();
+    const save = required(f.persistence.save("temp-assistant", f.payload, () => true));
+    expect(await save.completion).toBe(false);
+    expect(f.failureReasons).toEqual(["storage"]);
+    f.setSync(async (payload) => ids(payload));
+    await required(f.notifications.get(save.assistantMessageId))();
+    expect(f.notifications.size).toBe(0);
+    expect(f.store.getState().messages[1].content).toBe("answer");
+    f.persistence.dispose();
+  });
+
+  test("corrupted records remain on disk and recovery reports the problem", async () => {
+    const disk = memoryOutbox();
+    disk.outbox.list = async () => [{ version: 99 } as unknown as OutboxRecord];
+    const f = fixture([], { outbox: disk.outbox, scope: () => saveScope });
+    await f.persistence.recover();
+    expect(f.recoveryFailures()).toBe(1);
+    expect(f.calls).toHaveLength(0);
+    f.persistence.dispose();
+  });
+
+  test("a running replacement is never overwritten by a recovered snapshot", async () => {
+    const disk = memoryOutbox();
+    const durable = { outbox: disk.outbox, scope: () => saveScope };
+    const first = fixture([], durable);
+    first.addTurn();
+    const save = required(first.persistence.save("temp-assistant", first.payload, () => true));
+    await save.completion;
+    first.persistence.dispose();
+    const second = fixture(
+      [
+        message(save.userMessageId, "user", "new"),
+        message(save.assistantMessageId, "assistant", "new"),
+      ],
+      durable,
+    );
+    second.store.getState().markMessagesActive([save.assistantMessageId]);
+    await second.persistence.recover();
+    expect(second.calls).toHaveLength(0);
+    expect(second.store.getState().messages[1].content).toBe("new");
+    second.persistence.dispose();
+  });
+});
+
+describe("save recovery invalidation races", () => {
+  for (const action of ["message", "conversation", "reset"] as const) {
+    test(`a delayed disk snapshot cannot resurrect a ${action} deletion`, async () => {
+      const disk = memoryOutbox();
+      const durable = { outbox: disk.outbox, scope: () => saveScope };
+      const first = fixture([], durable);
+      first.addTurn();
+      const save = required(first.persistence.save("temp-assistant", first.payload, () => true));
+      await save.completion;
+      const snapshot = await disk.outbox.list(saveScope);
+      first.persistence.dispose();
+      const gate = deferred<OutboxRecord[]>();
+      disk.outbox.list = () => gate.promise;
+      const next = fixture([], durable);
+      const recovery = next.persistence.recover();
+      if (action === "message") await next.store.getState().deleteMessage(save.assistantMessageId);
+      else if (action === "conversation") await next.store.getState().deleteConversation("conv-0");
+      else await next.store.getState().reset();
+      gate.resolve(snapshot);
+      await recovery;
+      expect(next.calls).toHaveLength(0);
+      expect(next.store.getState().messages).toHaveLength(0);
+      expect(disk.rows.size).toBe(0);
+      next.persistence.dispose();
+    });
+  }
+
+  test("explicit deletion awaits the durable invalidation commit", async () => {
+    const disk = memoryOutbox();
+    const gate = deferred<void>();
+    const original = disk.outbox.invalidate;
+    disk.outbox.invalidate = async (scope, filter) => {
+      await gate.promise;
+      await original(scope, filter);
+    };
+    const f = fixture([], { outbox: disk.outbox, scope: () => saveScope });
+    f.addTurn();
+    const save = required(f.persistence.save("temp-assistant", f.payload, () => true));
+    await save.completion;
+    let deleted = false;
+    const deletion = f.store
+      .getState()
+      .deleteMessage(save.assistantMessageId)
+      .then(() => {
+        deleted = true;
+      });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(deleted).toBe(false);
+    gate.resolve();
+    await deletion;
+    expect(deleted).toBe(true);
+    f.persistence.dispose();
+  });
+
+  test("a replayed ACK refreshes server truth instead of preserving an obsolete snapshot", async () => {
+    const disk = memoryOutbox();
+    const durable = { outbox: disk.outbox, scope: () => saveScope };
+    const first = fixture([], durable);
+    first.addTurn();
+    const save = required(first.persistence.save("temp-assistant", first.payload, () => true));
+    await save.completion;
+    first.persistence.dispose();
+    const next = fixture([], durable);
+    next.database.set("conv-0", [
+      message(save.userMessageId, "user", "question"),
+      message(save.assistantMessageId, "assistant", "newer session answer"),
+    ]);
+    next.setSync(async (payload) => ({ ...ids(payload), replayed: true }));
+    await next.persistence.recover();
+    expect(next.store.getState().messages[1].content).toBe("newer session answer");
+    next.persistence.dispose();
+  });
+});
+
+test("switching identity clears the previous scope without deleting the next user's outbox", async () => {
+  const disk = memoryOutbox();
+  const scopeB = { ...saveScope, userId: "user-b" };
+  const b = fixture([], { outbox: disk.outbox, scope: () => scopeB });
+  b.addTurn();
+  await required(
+    b.persistence.save(
+      "temp-assistant",
+      { ...b.payload, assistantContent: "B result" },
+      () => true,
+    ),
+  ).completion;
+  b.persistence.dispose();
+  let scope: SaveScope | null = saveScope;
+  const a = fixture([], { outbox: disk.outbox, scope: () => scope });
+  a.addTurn();
+  await required(a.persistence.save("temp-assistant", a.payload, () => true)).completion;
+  expect(disk.rows.size).toBe(2);
+  scope = scopeB;
+  const clearPrevious = a.persistence.forgetScope(saveScope);
+  await a.store.getState().reset({ preserveSaveOutbox: true });
+  await clearPrevious;
+  expect((await disk.outbox.list(scopeB)).length).toBe(1);
+  expect((await disk.outbox.list(saveScope)).length).toBe(0);
+  a.store.setState({
+    conversations: b.store.getState().conversations,
+    currentConversation: b.store.getState().currentConversation,
+  });
+  a.setSync(async (payload) => ids(payload));
+  await a.persistence.recover();
+  expect(a.calls).toHaveLength(2);
+  expect(a.calls[1].assistantContent).toBe("B result");
+  expect(disk.rows.size).toBe(0);
+  a.persistence.dispose();
+});
+
+test("conflicting restarted saves preserve local content until an explicit discard reloads server truth", async () => {
+  const disk = memoryOutbox();
+  const durable = { outbox: disk.outbox, scope: () => saveScope };
+  const first = fixture([], durable);
+  first.addTurn();
+  const save = required(first.persistence.save("temp-assistant", first.payload, () => true));
+  await save.completion;
+  first.persistence.dispose();
+  const next = fixture([], durable);
+  next.database.set("conv-0", [
+    message(save.userMessageId, "user", "remote question"),
+    message(save.assistantMessageId, "assistant", "remote result"),
+  ]);
+  next.setSync(async () => {
+    throw new SidecarSaveConflict();
+  });
+  await next.persistence.recover();
+  expect(next.failureReasons).toEqual(["conflict"]);
+  expect(next.store.getState().messages[1].content).toBe("answer");
+  expect(disk.rows.size).toBe(1);
+  await next.persistence.discard(save.assistantMessageId);
+  expect(disk.rows.size).toBe(0);
+  expect(next.store.getState().messages[1].content).toBe("remote result");
+  next.persistence.dispose();
+});
+
+test("a confirmed save carries the new compare-and-swap tokens into the next edit", async () => {
+  const f = fixture();
+  f.addTurn();
+  f.setSync(async (payload) => ({
+    ...ids(payload),
+    saveTokens: { user: "a".repeat(64), assistant: "b".repeat(64) },
+  }));
+  const first = required(f.persistence.save("temp-assistant", f.payload, () => true));
+  expect(await first.completion).toBe(true);
+  f.setSync(async () => {
+    throw new Error("offline next edit");
+  });
+  f.store.getState().updateMessage(first.assistantMessageId, { content: "edited" });
+  const second = required(
+    f.persistence.save(
+      first.assistantMessageId,
+      {
+        ...f.payload,
+        userMessageId: first.userMessageId,
+        assistantMessageId: first.assistantMessageId,
+      },
+      () => true,
+    ),
+  );
+  await second.completion;
+  expect(f.calls[1].expectedUserToken).toBe("a".repeat(64));
+  expect(f.calls[1].expectedAssistantToken).toBe("b".repeat(64));
+  f.persistence.dispose();
 });

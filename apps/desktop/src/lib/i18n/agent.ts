@@ -575,6 +575,37 @@ export function getAgentActionLabel(action: AgentActionKey): string {
  * server/user values are never routed through here.
  */
 export const chatLabels = {
+  "chat.research.title": "深度研究",
+  "chat.research.hint":
+    "多步搜索与原文核对；每次（含重试）使用当前搜索源，可能增加模型和检索用量。",
+  "chat.research.question": "请在 /research 后填写要研究的问题。",
+  "chat.research_unavailable":
+    "深度研究需要支持工具调用的 API 渠道，暂不支持 CLI、ACP、登录令牌或点名 MCP。请切换模型渠道。",
+  "chat.research_network_required": "深度研究需要联网，请先开启 Web Search。",
+  "chat.research_no_sources": "本次未取得可验证的搜索来源，研究已停止。请检查搜索连接后重试。",
+  "chat.research_timeout": "研究达到总时间上限，已停止后续调用。已完成的检索步骤保留。",
+  "chat.research_failed": "研究未能完成，已取得的步骤仍保留。请检查模型与搜索连接后重试。",
+  "chat.research_attachments_unsupported":
+    "请先在 Chat 或 Agent 中分析附件，再将研究问题发起为深度研究；本轮研究不读取附件。",
+  "chat.document.layout": "读取 PDF 图表",
+  "chat.document.pages": "图表页码",
+  "chat.document.range": "全部，或 1-3,5",
+  "chat.document.hint":
+    "读取全文文字与所选页面图像，每次最多6页图像，会增加图片用量。Chat 保存原件与页面；Agent 本地保留本轮图文输入7天用于重试。",
+  "chat.document.vision": "PDF 图文读取需要支持视觉的 API 模型，请切换模型；默认仍只提取文字。",
+  "chat.document.document_pages":
+    "PDF 页码无效或本次超过6页。请填写有效页码范围，例如 1-3,5；长文档不会自动截取。",
+  "chat.document.document_size": "PDF 页面图片超出读取上限。请减少页数或使用较小文档后重试。",
+  "chat.document.document_render":
+    "PDF 页面无法解析或读取超时，原文件与草稿已保留。请检查文件后重试。",
+  "chat.document.document_vision":
+    "当前模型或运行方式不支持 PDF 图文输入，请切换到支持视觉的 API 模型。",
+  "chat.document.document_cache": "无法保存或恢复本轮图文输入。请保留原文件并重新附加后再试。",
+  "chat.document.document_missing":
+    "这轮 PDF 尚未上传完成，请重新附加原文件后发送，不能只凭文件名重试。",
+  "chat.document.document_upload":
+    "附件上传结果不完整或文件身份不一致，已停止发送。请检查后端版本并重新上传，原文件与草稿已保留。",
+
   "chat.checkpoint.hint": "本次 Agent 执行修改了文件，可还原到本次执行前的快照。",
   "chat.checkpoint.action": "还原文件快照",
   "chat.checkpoint.title": "还原本次文件修改？",
@@ -666,10 +697,10 @@ export const chatLabels = {
   "chat.welcome.suggestion5": "帮我起草一封邮件",
   "chat.welcome.noModel": "选择模型",
   "chat.welcome.clearInput": "清空输入",
-  "chat.server.connecting": "正在连接服务端，连接后即可发送",
-  "chat.server.unavailable": "服务端不可用，恢复连接后即可发送",
   "chat.welcome.startFailedTitle": "无法开始会话",
   "chat.welcome.startFailedBody": "创建会话失败，请稍后重试",
+  "chat.server.connecting": "正在连接服务端，连接后即可发送",
+  "chat.server.unavailable": "服务端不可用，恢复连接后即可发送",
   // Inline edit buttons
   "chat.edit.cancel": "取消",
   "chat.edit.confirm": "确认",
@@ -774,11 +805,21 @@ export const chatLabels = {
   "chat.reply.refused": "模型未能提供本次回答。你可以调整问题后重试。",
   "chat.error.responseRefused": "模型未能提供本次回答。你可以调整问题后重试。",
   "chat.save.failedTitle": "回复尚未保存",
-  "chat.save.failedBody": "生成结果已保留在当前应用中。请重试保存，重试不会重新生成回复。",
+  "chat.save.failedBody":
+    "回复已保留本地恢复副本，重新连接或重启后会继续保存。重试不会重新生成回复。",
+  "chat.save.localFailedBody":
+    "回复暂未保存，本地恢复副本也未能写入。请保持应用打开并复制重要内容，然后重试保存。",
+  "chat.save.recoveryFailedBody":
+    "本地待保存回复暂时无法读取或清理。请保留应用数据，恢复存储后重试连接。",
   "chat.save.conflictBody":
     "这轮对话的保存版本无法确认或已有更新。为避免覆盖，已保留本地副本；你可以先复制内容，再选择是否放弃本地副本。",
+  "chat.run.saveBaselineUnavailable": "无法确认原消息的最新版本。请刷新会话，确认内容后重试。",
+  "chat.save.copyLocal": "复制本地回复",
+  "chat.save.discardLocal": "放弃本地副本",
   "chat.save.retry": "重试保存",
   "chat.save.inProgress": "回复正在生成或保存，请稍后再删除。",
+  "chat.run.recipeCapabilitiesMissing":
+    "任务配方所需能力当前不可用：{names}。请恢复所需配置后重试。",
   "chat.reply.truncated": "回答达到长度上限，已保留内容。可重试或要求缩小回答范围。",
   "chat.error.responseTruncated": "回答达到长度上限，已保留内容。可重试或要求缩小回答范围。",
   "chat.error.streamInterrupted": "连接中断，回答未完成。已保留收到的内容，请重试。",
@@ -792,8 +833,6 @@ export const chatLabels = {
   // Sidecar run refused: the conversation's project folder cannot be used as cwd
   "chat.run.projectRootUnavailable": "项目文件夹不可用，无法在该目录中运行：{root}",
   "chat.run.workspaceUnavailable": "工作目录不可用，无法启动本地运行。请重新选择工作目录后重试。",
-  "chat.run.recipeCapabilitiesMissing":
-    "任务配方所需能力当前不可用：{names}。请恢复所需配置后重试。",
 } as const;
 
 type ChatLabelKey = keyof typeof chatLabels;
@@ -885,6 +924,7 @@ export const sidebarLabels = {
   "sidebar.notify.saveFailedBody": "无法更新标题",
   "sidebar.notify.reconnectedTitle": "连接已恢复",
   "sidebar.notify.reconnectedBody": "已重新连接后端",
+  // Connection state shown in place of data that has not been loaded yet
   "sidebar.connection.connecting": "正在连接服务端…",
   "sidebar.connection.unavailable": "服务端不可用，正在自动重连…",
   "sidebar.notify.backendDownTitle": "后端不可用",
@@ -953,13 +993,8 @@ export function formatSidebarLabel(
  * `formatGeneralSettingsLabel`.
  */
 export const generalSettingsLabels = {
-  "settings.general.instructions.loading": "正在加载自定义指令…",
-  "settings.general.instructions.loadFailed": "无法加载自定义指令，请重试；本地草稿会保留。",
-  "settings.general.instructions.saveFailed": "保存失败，修改尚未生效。请重试保存。",
-  "settings.general.instructions.retry": "重新加载",
-  "settings.general.instructions.draftHint":
-    "修改尚未保存。本次登录期间切换页面会保留草稿，退出登录或重启后清除。",
-
+  "settings.general.editor.rescan": "重新检测编辑器",
+  "settings.general.editor.detectFailed": "暂时无法检测编辑器，可重新检测；已有选择会保留。",
   // Section: account info
   "settings.general.account.title": "账户信息",
   "settings.general.account.description": "查看当前账户信息，此处暂不支持修改。",
@@ -988,6 +1023,12 @@ export const generalSettingsLabels = {
   "settings.general.instructions.saving": "保存中...",
   "settings.general.instructions.save": "保存",
   "settings.general.instructions.emptyState": "暂未设置，点击右上角「编辑」添加。",
+  "settings.general.instructions.loading": "正在加载自定义指令…",
+  "settings.general.instructions.loadFailed": "无法加载自定义指令，请重试；本地草稿会保留。",
+  "settings.general.instructions.saveFailed": "保存失败，修改尚未生效。请重试保存。",
+  "settings.general.instructions.retry": "重新加载",
+  "settings.general.instructions.draftHint":
+    "修改尚未保存。本次登录期间切换页面会保留草稿，退出登录或重启后清除。",
   // Section: external editor (per-machine, stored locally)
   "settings.general.editor.title": "外部编辑器",
   "settings.general.editor.description":
@@ -1199,8 +1240,6 @@ export function getScheduledTaskLabel(key: ScheduledTaskLabelKey): string {
  * Templates use `{name}` placeholders resolved via `formatDataTransferLabel`.
  */
 export const dataTransferLabels = {
-  "settings.data.import.fileLabel": "所选文件：",
-  "settings.data.import.done": "完成",
   "settings.data.import.error.invalidRequest": "导入参数不完整，请重新选择文件。",
   "settings.data.import.error.fileNotFound": "文件已移动或删除，请重新选择导出文件。",
   "settings.data.import.error.fileUnreadable":
@@ -1220,7 +1259,7 @@ export const dataTransferLabels = {
   "settings.data.export.heading": "导出",
   "settings.data.export.backupTitle": "导出备份",
   "settings.data.export.backupDescription":
-    "导出 OpenHorn 全量数据（对话、消息、附件、渠道配置等），用于迁移到新设备。不含 API Key。",
+    "备份对话、消息、可用附件原件和基本配置。访问凭据与敏感设置不随包导出，连接器导入后需重新配置。",
   "settings.data.export.backupButton": "导出备份",
   "settings.data.export.dtiTitle": "导出通用格式 (DTI)",
   "settings.data.export.dtiDescription":
@@ -1232,7 +1271,10 @@ export const dataTransferLabels = {
   "settings.data.export.estimateInfo":
     "{conversations} 个对话、{messages} 条消息、{attachments} 个附件，预计 {size}",
   "settings.data.export.confirmTitle": "确认导出",
-  "settings.data.export.confirmBackup": "将导出以上数据为 OpenHorn 备份文件。",
+  "settings.data.export.estimateDtiInfo":
+    "将导出 {conversations} 个会话、{messages} 条消息。附件仅包含元信息，原文件请使用完整备份。",
+  "settings.data.export.confirmBackup":
+    "将备份以上数据。仅在本机临时附加或已丢失的原文件无法入包，完成后会列出缺失数量。",
   "settings.data.export.confirmDti": "将导出对话为 DTI 标准 JSON 文件。",
   "settings.data.export.selectDir": "选择保存位置",
   "settings.data.export.cancel": "取消",
@@ -1243,6 +1285,11 @@ export const dataTransferLabels = {
   "settings.data.export.sizeLimit":
     "备份内容超出可恢复上限（单项 128 MB、合计 512 MB 或 20000 个文件），本次未保留不完整备份。请保留原数据，可先使用通用格式导出会话，附件原件另行保留。",
   "settings.data.export.failedTitle": "导出失败",
+  "settings.data.export.missingFiles":
+    "备份未包含 {count} 个附件原件。请保留原文件，详细清单已记录在备份中。",
+  "settings.data.export.connectorsNeedSetup":
+    "{count} 个连接器导入后需要重新配置并启用，访问凭据未包含在备份中。",
+  "settings.data.export.omittedSettings": "{count} 项设置未包含在备份中，迁移后需要重新设置。",
   // Import area
   "settings.data.import.heading": "导入",
   "settings.data.import.title": "备份 / 导出文件",
@@ -1258,10 +1305,12 @@ export const dataTransferLabels = {
   "settings.data.import.cancel": "取消",
   "settings.data.import.confirm": "开始导入",
   // Import result
+  "settings.data.import.successTitle": "导入完成",
   "settings.data.import.validationFailedTitle": "备份校验未通过，未导入数据",
   "settings.data.import.interruptedTitle": "恢复未完成，请核对已导入内容",
   "settings.data.import.partialTitle": "导入完成，有项目需要处理",
-  "settings.data.import.successTitle": "导入完成",
+  "settings.data.import.fileLabel": "所选文件：",
+  "settings.data.import.done": "完成",
   "settings.data.import.failedTitle": "导入失败",
   "settings.data.import.resultConversations": "对话：导入 {imported} 个，跳过 {skipped} 个",
   "settings.data.import.resultMessages": "消息：导入 {imported} 条",
@@ -1412,7 +1461,12 @@ export const importLabels = {
   "import.history.loading": "加载中…",
   "import.history.delete": "删除记录",
   "import.history.deleteFailed": "无法删除该记录。",
-  "import.history.loadFailed": "无法加载导入历史。",
+  "import.history.deleteFailedTitle": "删除失败",
+  "import.history.retry": "重新加载记录",
+  "import.history.deleteConfirmTitle": "删除导入记录？",
+  "import.history.deleteConfirmHint":
+    "仅删除这条历史记录，已导入的会话、文件和配置会保留。记录删除后无法恢复。",
+  "import.history.loadFailed": "暂时无法加载导入记录，请重试。已有记录会保留。",
   // Item actions (by link.kind)
   "import.action.conversation": "在会话中打开",
   "import.action.mcp": "在 MCP 中打开",

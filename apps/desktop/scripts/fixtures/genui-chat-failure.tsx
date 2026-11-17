@@ -2,6 +2,8 @@ import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { Toaster, TooltipProvider } from "ui";
 import { DesktopChatArea } from "../../src/components/chat/DesktopChatArea";
+import { getDesktopBackendBase } from "../../src/lib/backendBase";
+import { saveDocumentInput } from "../../src/lib/documentInputCache";
 import { getChatLabel } from "../../src/lib/i18n/agent";
 import type { SidecarClient } from "../../src/lib/sidecarClient";
 import { useAuthStore } from "../../src/stores/authStore";
@@ -36,6 +38,8 @@ let heldRerun = false;
 let settledRerun = false;
 let releaseRerun: (() => void) | null = null;
 const client = {
+  supportsResearch: true,
+  supportsDocumentInput: true,
   async runAgent(input: AgentInput) {
     activeAgent = input;
     agentWorkspaceRoots.push(input.workspaceRoot);
@@ -89,7 +93,7 @@ const api = {
     saveFailed: getChatLabel("chat.save.failedTitle"),
     retrySave: getChatLabel("chat.save.retry"),
   },
-  start(protocol: "openai" | "acp" = "openai", welcome = false) {
+  start(protocol: "openai" | "acp" | "google" = "openai", welcome = false) {
     flushSync(() => root.render(null));
     active = null;
     capturedTruncationRun = null;
@@ -156,6 +160,55 @@ const api = {
     );
   },
   ready: () => active !== null,
+  researchInput: () => ({
+    research: activeAgent?.research,
+    documentInput: activeAgent?.documentInput,
+    prompt: activeAgent?.prompt,
+  }),
+  capturedProtocol: () => activeAgent?.protocol,
+  capturedAttachments: () => activeAgent?.attachments,
+  agentCalls: () => agentRuns,
+  async documentSnapshot() {
+    const parts = [
+      {
+        kind: "file" as const,
+        fileName: "controlled.pdf",
+        mediaType: "application/pdf",
+        text: "[Page 2] Controlled page text",
+      },
+      {
+        kind: "image" as const,
+        fileName: "controlled.pdf [page 2].jpg",
+        mediaType: "image/jpeg",
+        dataBase64: "/9j/AA==",
+      },
+    ];
+    const key = await saveDocumentInput(
+      JSON.stringify([getDesktopBackendBase(), fixtureUserId]),
+      parts,
+    );
+    return { key, parts };
+  },
+  visionModel() {
+    useChatStore.setState((state) => ({
+      currentConversation: state.currentConversation
+        ? { ...state.currentConversation, modelId: "gpt-4o" }
+        : null,
+      channels: state.channels.map((channel) => ({
+        ...channel,
+        defaultModelId: "gpt-4o",
+        models: channel.models.map((model) => ({ ...model, modelId: "gpt-4o" })),
+      })),
+    }));
+  },
+  reloadMessages: () => useChatStore.getState().loadMessages("failure-conversation"),
+  network(enabled: boolean) {
+    useChatStore.setState((state) => ({
+      currentConversation: state.currentConversation
+        ? { ...state.currentConversation, forceWebSearch: enabled }
+        : null,
+    }));
+  },
   agentReady: () => activeAgent !== null,
   agentEmit(content: string) {
     activeAgent?.onEvent({ type: "execution_event", eventType: "text", content });

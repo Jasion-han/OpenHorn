@@ -1,3 +1,4 @@
+import { isResearchErrorCode } from "shared/research";
 /**
  * Desktop ↔ sidecar client.
  *
@@ -84,6 +85,8 @@ export interface SidecarChatStreamInput {
 }
 
 export interface SidecarRunAgentInput {
+  research?: boolean;
+  documentInput?: boolean;
   prompt: string;
   apiKey: string;
   model: string;
@@ -377,7 +380,9 @@ export function projectSidecarAgentEvent(runId: string, raw: unknown): AgentTask
         taskId: runId,
         runId,
         content: typeof event.content === "string" ? event.content : "Agent error",
-        ...(event.errorCode === "response_truncated" ||
+        ...(event.errorCode === "document_vision" ||
+        isResearchErrorCode(event.errorCode) ||
+        event.errorCode === "response_truncated" ||
         event.errorCode === "chat_context_budget_exceeded" ||
         event.errorCode === "response_refused"
           ? { errorCode: event.errorCode }
@@ -413,7 +418,19 @@ export interface SidecarClientOptions {
   createSocket?: SidecarWebSocketFactory;
 }
 
+export class SidecarFeatureUnavailableError extends Error {
+  constructor(readonly feature: "research" | "documentInput") {
+    super("sidecar_feature_unavailable");
+  }
+}
 export class SidecarClient {
+  private features: { research?: unknown; documentInput?: unknown } = {};
+  get supportsResearch() {
+    return this.features.research === 1;
+  }
+  get supportsDocumentInput() {
+    return this.features.documentInput === 1;
+  }
   private socket: SidecarWebSocketLike | null = null;
   private pending = new Map<string, PendingRequest>();
   private runHandlers = new Map<
@@ -446,6 +463,7 @@ export class SidecarClient {
    * or socket-level error.
    */
   async connect(): Promise<void> {
+    this.features = {};
     const url = `ws://${this.endpoint.host}:${this.endpoint.port}/`;
     const socket = this.createSocket(url);
     this.socket = socket;
@@ -484,7 +502,8 @@ export class SidecarClient {
       }
     });
 
-    await this.request("auth.handshake", { token: this.endpoint.token });
+    const handshake = await this.request("auth.handshake", { token: this.endpoint.token });
+    this.features = isRecord(handshake) && isRecord(handshake.features) ? handshake.features : {};
   }
 
   /** Sets the workspace root on the sidecar. */
@@ -510,7 +529,13 @@ export class SidecarClient {
    * callbacks fire asynchronously until the run terminates.
    */
   async runAgent(input: SidecarRunAgentInput): Promise<string> {
+    if (input.research && !this.supportsResearch)
+      throw new SidecarFeatureUnavailableError("research");
+    if (input.documentInput && !this.supportsDocumentInput)
+      throw new SidecarFeatureUnavailableError("documentInput");
     const {
+      research,
+      documentInput,
       prompt,
       apiKey,
       model,
@@ -544,6 +569,8 @@ export class SidecarClient {
       onCheckpointReady,
     } = input;
     const result = (await this.request("agent.run", {
+      ...(research ? { research: true } : {}),
+      ...(documentInput ? { documentInput: true } : {}),
       prompt,
       apiKey,
       model,
@@ -754,6 +781,7 @@ export class SidecarClient {
       }
       if (projected.type === "error") {
         handlers.onError(projected.content, projected.errorCode);
+        this.runHandlers.delete(runId);
         // Still surface the error into the event stream so the UI can
         // show it alongside whatever process rows have already landed.
         void handlers.onEvent(projected);
@@ -817,6 +845,7 @@ export class SidecarClient {
   }
 
   private handleSocketClose() {
+    this.features = {};
     this.socket = null;
     for (const handlers of this.runHandlers.values()) {
       handlers.onError("sidecar connection closed");

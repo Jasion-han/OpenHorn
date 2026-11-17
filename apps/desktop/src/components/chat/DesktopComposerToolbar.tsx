@@ -21,6 +21,9 @@ export function DesktopComposerToolbar({
   modeDisabled = false,
   agentAvailable = true,
   agentDisabledReason,
+  researchMode = false,
+  researchAvailable = false,
+  onResearch,
   modelProvider,
   modelLabel,
   modelTone = "normal",
@@ -33,6 +36,9 @@ export function DesktopComposerToolbar({
   onToggleFullAccess,
   children,
 }: {
+  researchMode?: boolean;
+  researchAvailable?: boolean;
+  onResearch?: () => void;
   onAttach: () => void;
   attachDisabled?: boolean;
   mode: ChatMode;
@@ -90,28 +96,39 @@ export function DesktopComposerToolbar({
           disabled={modeDisabled}
           agentAvailable={agentAvailable}
           agentDisabledReason={agentDisabledReason}
+          researchMode={researchMode}
+          researchAvailable={researchAvailable}
+          onResearch={onResearch}
         />
 
-        <button
-          type="button"
-          onClick={onOpenModelPicker}
-          disabled={modelInert}
-          className={cn(
-            "flex min-w-0 shrink items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-1 text-xs transition-colors",
-            modelTone === "warning"
-              ? "text-orange-600 hover:text-orange-700 hover:bg-orange-500/10"
-              : "text-muted-foreground hover:text-foreground hover:bg-accent",
-            modelInert && "opacity-60 pointer-events-none",
-          )}
-          aria-label="Model"
-          title="Model"
-        >
-          {modelProvider ? (
-            <DesktopProviderLogo provider={modelProvider} className="size-4" />
-          ) : null}
-          <span className={cn("truncate whitespace-nowrap", styles.modelLabel)}>{modelLabel}</span>
-          <ChevronDown className="size-3" />
-        </button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={onOpenModelPicker}
+              disabled={modelInert}
+              className={cn(
+                "flex min-w-0 shrink items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-1 text-xs transition-colors",
+                modelTone === "warning"
+                  ? "text-orange-600 hover:text-orange-700 hover:bg-orange-500/10"
+                  : "text-muted-foreground hover:text-foreground hover:bg-accent",
+                modelInert && "opacity-60 pointer-events-none",
+              )}
+              aria-label="Model"
+            >
+              {modelProvider ? (
+                <DesktopProviderLogo provider={modelProvider} className="size-4" />
+              ) : null}
+              <span className={cn("truncate whitespace-nowrap", styles.modelLabel)}>
+                {modelLabel}
+              </span>
+              <ChevronDown className="size-3" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="top">
+            <p>Model</p>
+          </TooltipContent>
+        </Tooltip>
 
         <Tooltip>
           <TooltipTrigger asChild>
@@ -127,7 +144,6 @@ export function DesktopComposerToolbar({
                 chipsDisabled && "pointer-events-none opacity-60",
               )}
               aria-label="Allow web search"
-              title="Allow web search"
             >
               <Globe className="size-3.5" />
               <span className={cn("whitespace-nowrap", styles.chipLabel)}>Web Search</span>
@@ -138,7 +154,7 @@ export function DesktopComposerToolbar({
           </TooltipContent>
         </Tooltip>
 
-        {mode === "agent" && onToggleFullAccess && (
+        {mode === "agent" && !researchMode && onToggleFullAccess && (
           <Tooltip>
             <TooltipTrigger asChild>
               <button
@@ -153,7 +169,6 @@ export function DesktopComposerToolbar({
                   chipsDisabled && "pointer-events-none opacity-60",
                 )}
                 aria-label="Full Access"
-                title="Full Access"
               >
                 <ShieldOff size={14} />
                 <span className={cn("whitespace-nowrap", styles.chipLabel)}>Full Access</span>

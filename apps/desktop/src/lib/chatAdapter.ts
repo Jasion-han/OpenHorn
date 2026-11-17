@@ -133,6 +133,7 @@ function mapMessage(message: ApiMessage): Message {
 
   return {
     id: message.id,
+    saveToken: message.saveToken,
     conversationId: message.conversationId,
     role: message.role,
     content: message.content,

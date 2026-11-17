@@ -99,7 +99,7 @@ async function fileToBase64(file: File): Promise<string> {
 
 let pdfWorkerConfigured = false;
 
-async function extractPdfText(file: File): Promise<string> {
+async function extractPdfText(file: File, signal?: AbortSignal): Promise<string> {
   const pdfjs = await import("pdfjs-dist");
   if (!pdfWorkerConfigured) {
     const worker = await import("pdfjs-dist/build/pdf.worker.min.mjs?url");
@@ -107,22 +107,34 @@ async function extractPdfText(file: File): Promise<string> {
     pdfWorkerConfigured = true;
   }
   const data = await file.arrayBuffer();
-  const doc = await pdfjs.getDocument({ data }).promise;
-  const pages: string[] = [];
-  for (let pageNum = 1; pageNum <= doc.numPages; pageNum++) {
-    const page = await doc.getPage(pageNum);
-    const content = await page.getTextContent();
-    const text = content.items
-      .map((item) => ("str" in item ? item.str : ""))
-      .join(" ")
-      .trim();
-    if (text) pages.push(`[第 ${pageNum} 页]\n${text}`);
+  const task = pdfjs.getDocument({ data, isEvalSupported: false });
+  const abort = () => {
+    void task.destroy();
+  };
+  signal?.addEventListener("abort", abort, { once: true });
+  try {
+    signal?.throwIfAborted();
+    const doc = await task.promise;
+    const pages: string[] = [];
+    for (let pageNum = 1; pageNum <= doc.numPages; pageNum++) {
+      signal?.throwIfAborted();
+      const page = await doc.getPage(pageNum);
+      const content = await page.getTextContent();
+      const text = content.items
+        .map((item) => ("str" in item ? item.str : ""))
+        .join(" ")
+        .trim();
+      if (text) pages.push(`[Page ${pageNum}]\n${text}`);
+      page.cleanup();
+    }
+    return pages.join("\n\n");
+  } finally {
+    signal?.removeEventListener("abort", abort);
+    await task.destroy();
   }
-  await doc.destroy();
-  return pages.join("\n\n");
 }
 
-async function fileToAttachmentPart(file: File): Promise<AttachmentPart> {
+async function fileToAttachmentPart(file: File, signal?: AbortSignal): Promise<AttachmentPart> {
   const mediaType = file.type || "application/octet-stream";
 
   if (mediaType.startsWith("image/")) {
@@ -136,7 +148,7 @@ async function fileToAttachmentPart(file: File): Promise<AttachmentPart> {
 
   if (mediaType === "application/pdf" || fileExtension(file.name) === "pdf") {
     try {
-      const text = await extractPdfText(file);
+      const text = await extractPdfText(file, signal);
       return {
         kind: "file",
         fileName: file.name,
@@ -166,12 +178,18 @@ async function fileToAttachmentPart(file: File): Promise<AttachmentPart> {
   };
 }
 
-export async function filesToAttachmentParts(files: File[]): Promise<AttachmentPart[]> {
+export async function filesToAttachmentParts(
+  files: File[],
+  signal?: AbortSignal,
+): Promise<AttachmentPart[]> {
   const parts: AttachmentPart[] = [];
   for (const file of files) {
+    signal?.throwIfAborted();
     try {
-      parts.push(await fileToAttachmentPart(file));
+      parts.push(await fileToAttachmentPart(file, signal));
+      signal?.throwIfAborted();
     } catch {
+      signal?.throwIfAborted();
       parts.push({
         kind: "file",
         fileName: file.name,

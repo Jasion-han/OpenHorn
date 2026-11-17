@@ -117,6 +117,9 @@ export interface ApiAgentRunStep {
 }
 
 export interface ApiAgentRun {
+  research?: boolean;
+  documentInputKey?: string;
+  documentInputRequired?: boolean;
   recipeRequirements?: RecipeRequirements;
   status: "running" | "awaiting_approval" | "completed" | "failed" | "cancelled" | "partial";
   summary: string;

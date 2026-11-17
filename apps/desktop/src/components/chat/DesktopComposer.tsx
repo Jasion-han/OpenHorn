@@ -5,14 +5,16 @@ import type {
   KeyboardEvent as ReactKeyboardEvent,
   RefObject,
 } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { fileKey } from "shared/format";
 import { Button, cn, Textarea } from "ui";
+import { useComposerTextarea } from "../../hooks/useComposerTextarea";
 import { usePlaceholderTypewriter } from "../../hooks/usePlaceholderTypewriter";
 import { getChatLabel } from "../../lib/i18n/agent";
 import type { ChatMode } from "../../types/chat";
 import { DesktopAttachmentPreviewItem } from "./DesktopAttachmentPreviewItem";
 import { DesktopComposerToolbar } from "./DesktopComposerToolbar";
+import { DesktopDocumentInputOptions } from "./DesktopDocumentInputOptions";
 
 export type SlashPanelItem = {
   type: "skill" | "mcp" | "command" | "prompt";
@@ -50,6 +52,10 @@ export function DesktopComposer({
   onAddAttachments,
   onRemoveAttachment,
   mode,
+  visionAvailable = false,
+  researchMode = false,
+  researchAvailable = false,
+  onResearch,
   onModeChange,
   agentModeAvailable = true,
   agentModeDisabledReason,
@@ -77,6 +83,10 @@ export function DesktopComposer({
   onSlashHover,
   onSlashClose,
 }: {
+  visionAvailable?: boolean;
+  researchMode?: boolean;
+  researchAvailable?: boolean;
+  onResearch?: () => void;
   value: string;
   onChange: (value: string) => void;
   onKeyDown: (event: ReactKeyboardEvent<HTMLTextAreaElement>) => void;
@@ -118,6 +128,15 @@ export function DesktopComposer({
   onSlashClose?: () => void;
 }) {
   const [dragActive, setDragActive] = useState(false);
+  const [composing, setComposing] = useState(false);
+  const fieldRef = useRef<HTMLTextAreaElement>(null);
+  const setInputRef = useCallback(
+    (field: HTMLTextAreaElement | null) => {
+      fieldRef.current = field;
+      if (inputRef) inputRef.current = field;
+    },
+    [inputRef],
+  );
   // Owned here rather than by the chat area on purpose: a tick lands every
   // ~21ms, and holding the state one level up re-rendered the whole message
   // list that often. Same loop as the welcome screen, so the two boxes animate
@@ -148,17 +167,30 @@ export function DesktopComposer({
 
   // Keep the highlight backdrop scrolled in lock-step with the textarea so the
   // painted (colored) text stays aligned with the caret on multi-line input.
-  const syncBackdropScroll = (target: HTMLTextAreaElement) => {
+  const syncBackdropScroll = useCallback((target: HTMLTextAreaElement) => {
     const backdrop = highlightBackdropRef.current;
     if (!backdrop) return;
+    backdrop.style.width = `${target.getBoundingClientRect().width - (target.offsetWidth - target.clientWidth)}px`;
+    backdrop.style.height = `${target.clientHeight}px`;
     backdrop.scrollTop = target.scrollTop;
     backdrop.scrollLeft = target.scrollLeft;
-  };
+  }, []);
+  useComposerTextarea({
+    fieldRef,
+    value,
+    minHeight: 36,
+    maxHeight: 160,
+    onLayout: syncBackdropScroll,
+  });
 
   // Clamp the highlighted token to the current value so a stale range from a
   // just-shortened input never paints out of bounds.
   const highlight =
-    slashHighlight && slashHighlight.len > 0 && slashHighlight.start < value.length
+    !composing &&
+    slashHighlight &&
+    slashHighlight.start >= 0 &&
+    slashHighlight.len > 0 &&
+    slashHighlight.start < value.length
       ? {
           start: slashHighlight.start,
           end: Math.min(slashHighlight.start + slashHighlight.len, value.length),
@@ -271,6 +303,12 @@ export function DesktopComposer({
           </div>
         )}
 
+        <DesktopDocumentInputOptions
+          files={attachments}
+          vision={visionAvailable}
+          disabled={disabled || streaming}
+        />
+
         <div ref={slashContainerRef} className="relative px-[15px] pb-2">
           {slashOpen && (
             <div className="absolute bottom-full left-0 right-0 z-30 mb-2 overflow-hidden rounded-[14px] border-[0.5px] border-border bg-popover/95 shadow-[0_16px_40px_rgba(15,23,42,0.18)] ring-1 ring-border/25 backdrop-blur-md">
@@ -332,17 +370,22 @@ export function DesktopComposer({
               )}
             </div>
           )}
-          {/* Highlight overlay: a backdrop div paints the text (with the /command
-              token in blue, wherever it sits) while the textarea on top stays
-              transparent but keeps a visible caret + native selection. Both layers
-              share identical box model + typography so the painted text aligns 1:1
-              with the caret. */}
+          {/* Ordinary text and IME use native painting so glyphs and the caret share
+              one layout. The mirror is only needed for a colored slash token. */}
           <div className="relative">
             <div
               ref={highlightBackdropRef}
               aria-hidden="true"
-              className="pointer-events-none absolute inset-0 z-0 overflow-hidden whitespace-pre-wrap break-words p-0 text-sm leading-5 text-foreground"
-              style={{ overflowWrap: "break-word", wordBreak: "break-word" }}
+              className={cn(
+                "pointer-events-none absolute left-0 top-0 z-0 overflow-hidden whitespace-pre-wrap break-words p-0 text-sm leading-5 text-foreground",
+                !highlight && "hidden",
+              )}
+              style={{
+                overflowWrap: "break-word",
+                wordBreak: "break-word",
+                fontVariantLigatures: "none",
+                tabSize: 8,
+              }}
             >
               {highlight ? (
                 <>
@@ -362,8 +405,10 @@ export function DesktopComposer({
             </div>
             <Textarea
               value={value}
-              ref={inputRef}
+              ref={setInputRef}
               disabled={disabled}
+              onCompositionStart={() => setComposing(true)}
+              onCompositionEnd={() => setComposing(false)}
               onChange={(event) => onChange(event.target.value)}
               onScroll={(event) => syncBackdropScroll(event.currentTarget)}
               onPaste={handlePaste}
@@ -377,7 +422,16 @@ export function DesktopComposer({
               }}
               placeholder={placeholderText}
               rows={1}
-              className="relative z-[1] min-h-[36px] max-h-[160px] resize-none border-0 bg-transparent p-0 text-sm leading-5 text-transparent caret-foreground shadow-none placeholder:text-muted-foreground/70 focus-visible:ring-0 disabled:cursor-default disabled:opacity-100"
+              style={{
+                overflowWrap: "break-word",
+                wordBreak: "break-word",
+                fontVariantLigatures: "none",
+                tabSize: 8,
+              }}
+              className={cn(
+                "relative z-[1] min-h-[36px] max-h-[160px] resize-none border-0 bg-transparent p-0 text-sm leading-5 caret-foreground shadow-none placeholder:text-muted-foreground/70 focus-visible:ring-0 disabled:cursor-default disabled:opacity-100",
+                highlight ? "text-transparent" : "text-foreground",
+              )}
               onKeyDown={onKeyDown}
             />
           </div>
@@ -394,6 +448,9 @@ export function DesktopComposer({
           onAttach={() => fileInputRef.current?.click()}
           attachDisabled={disabled}
           mode={mode}
+          researchMode={researchMode}
+          researchAvailable={researchAvailable}
+          onResearch={onResearch}
           onModeChange={onModeChange}
           modeDisabled={modeDisabled}
           agentAvailable={agentModeAvailable}

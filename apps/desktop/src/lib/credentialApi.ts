@@ -14,11 +14,11 @@ export interface ProviderPreset {
 }
 
 import { getDesktopBackendBase } from "./backendBase";
+import { fetchWithBackendStatus } from "./serverApi";
 
 async function credentialFetch(path: string, init?: RequestInit): Promise<Response> {
-  const base = await getDesktopBackendBase();
-  return fetch(`${base}${path}`, {
-    credentials: "include",
+  const base = getDesktopBackendBase();
+  return fetchWithBackendStatus(`${base}${path}`, {
     ...init,
     headers: { "Content-Type": "application/json", ...init?.headers },
   });

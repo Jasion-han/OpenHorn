@@ -2,8 +2,17 @@ import { CornerDownLeft, FolderOpen, MessageSquare, Sparkles, X } from "lucide-r
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useEffect, useRef, useState } from "react";
 import { fileKey } from "shared/format";
+import {
+  isResearchProtocol,
+  researchInputIssue,
+  researchQuestion,
+  withoutResearchCommand,
+  withResearchCommand,
+} from "shared/research";
+import { modelSupportsVision } from "shared/vision";
 import { Button, cn, Textarea } from "ui";
 import { useClockTick } from "../../hooks/useClockTick";
+import { useComposerTextarea } from "../../hooks/useComposerTextarea";
 import { usePlaceholderTypewriter } from "../../hooks/usePlaceholderTypewriter";
 import { useServerConnection } from "../../hooks/useServerConnection";
 import { chatModeUnavailableReason } from "../../lib/agentRerunRoute";
@@ -27,6 +36,7 @@ import { useWelcomeSuggestionStore } from "../../stores/welcomeSuggestionStore";
 import { DesktopAttachmentPreviewItem } from "./DesktopAttachmentPreviewItem";
 import { ACCEPT_FILES } from "./DesktopComposer";
 import { DesktopComposerToolbar } from "./DesktopComposerToolbar";
+import { DesktopDocumentInputOptions } from "./DesktopDocumentInputOptions";
 import { DesktopModelPickerModal } from "./DesktopModelPickerModal";
 
 const welcomeApi = createServerApi();
@@ -77,6 +87,9 @@ const WELCOME_PLACEHOLDERS = PLACEHOLDER_KEYS.map((key) => getChatLabel(key));
  * attachments, agent mode), so duplicating that here would drift.
  */
 export function DesktopWelcomeScreen() {
+  const researchRuntimeReady = useSidecarStore(
+    (state) => state.status === "ready" && state.client?.supportsResearch === true,
+  );
   const [draft, setDraft] = useState("");
   const [attachments, setAttachments] = useState<File[]>([]);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
@@ -112,6 +125,7 @@ export function DesktopWelcomeScreen() {
   >([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  useComposerTextarea({ fieldRef: textareaRef, value: draft, minHeight: 72, maxHeight: 200 });
 
   const user = useAuthStore((state) => state.user);
   // Starting creates the conversation on the server. While the server state is
@@ -205,10 +219,17 @@ export function DesktopWelcomeScreen() {
     (channel) => channel.id === selection?.channelId,
   )?.protocol;
   const modeUnavailableReason = chatModeUnavailableReason(selectedProtocol, composerMode);
+  const researchIssue = researchInputIssue({
+    text: draft,
+    webSearchEnabled: forceWebSearch,
+    hasAttachments: attachments.length > 0,
+    protocol: selectedProtocol,
+    runtimeAvailable: researchRuntimeReady,
+  });
 
   const start = async (prompt: string) => {
     const trimmed = prompt.trim();
-    if (modeUnavailableReason) return;
+    if (modeUnavailableReason || researchIssue) return;
     if ((!trimmed && attachments.length === 0) || submission.current || !serverConnection.ready)
       return;
     submission.current = true;
@@ -334,7 +355,8 @@ export function DesktopWelcomeScreen() {
     (Boolean(draft.trim()) || attachments.length > 0) &&
     !starting &&
     serverConnection.ready &&
-    !modeUnavailableReason;
+    !modeUnavailableReason &&
+    !researchIssue;
   const serverNotice =
     serverConnection.notice === "unavailable"
       ? getChatLabel("chat.server.unavailable")
@@ -415,6 +437,17 @@ export function DesktopWelcomeScreen() {
               </div>
             )}
 
+            <DesktopDocumentInputOptions
+              files={attachments}
+              vision={
+                modelSupportsVision(selection?.modelId ?? "") &&
+                isResearchProtocol(
+                  channels.find((channel) => channel.id === selection?.channelId)?.protocol ??
+                    "openai",
+                )
+              }
+              disabled={starting}
+            />
             <div className="relative px-[15px] pb-2">
               <Textarea
                 autoFocus
@@ -463,11 +496,36 @@ export function DesktopWelcomeScreen() {
                 {modeUnavailableReason}
               </p>
             ) : null}
+            {researchIssue ? (
+              <p className="px-[15px] pb-1 text-xs text-muted-foreground">
+                {getChatLabel(
+                  researchIssue === "research_question_required"
+                    ? "chat.research.question"
+                    : `chat.${researchIssue}`,
+                )}
+              </p>
+            ) : null}
 
             <DesktopComposerToolbar
               onAttach={() => fileInputRef.current?.click()}
               mode={composerMode}
-              onModeChange={setComposerMode}
+              onModeChange={(mode) => {
+                setDraft(withoutResearchCommand(draft));
+                setComposerMode(mode);
+              }}
+              researchMode={researchQuestion(draft) !== null}
+              researchAvailable={
+                !!selection &&
+                researchRuntimeReady &&
+                isResearchProtocol(
+                  channels.find((channel) => channel.id === selection.channelId)?.protocol ??
+                    "openai",
+                )
+              }
+              onResearch={() => {
+                setComposerMode("agent");
+                setDraft(withResearchCommand(draft));
+              }}
               modelProvider={selectedProvider}
               modelLabel={selection?.modelId ?? getChatLabel("chat.welcome.noModel")}
               modelTone={selection ? "normal" : "warning"}

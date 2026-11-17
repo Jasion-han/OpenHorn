@@ -18,6 +18,8 @@ import type {
   SearchActivationResult,
   SearchSettingsConfiguration,
   SearchSettingsStatus,
+  SidecarSavePreconditions,
+  SidecarSaveResult,
 } from "shared/types";
 import { useBackendStatusStore } from "../stores/backendStatusStore";
 import type {
@@ -117,29 +119,32 @@ export interface ServerApi {
       content: string,
       options?: { signal?: AbortSignal; appendSystemPrompt?: string },
     ) => Promise<Response>;
-    syncSidecar: (data: {
-      conversationId: string;
-      userContent: string;
-      assistantContent: string;
-      model?: string;
-      agentRun?: unknown;
-      /** Token counts for the turn. Absent when the runtime did not report them. */
-      usage?: { promptTokens: number; completionTokens: number; totalTokens: number };
-      /** "stopped" when the user stopped the run (the server also derives it from a cancelled run). */
-      finishReason?: MessageFinishReason;
-      // Local-run attachments never reach the server as files; this metadata is
-      // stored so the user's bubble keeps its attachment chips across reloads.
-      attachmentsMeta?: Array<{ fileName: string; fileType?: string; fileSize?: number }>;
-      // A complete stable pair updates existing rows or creates both atomically.
-      // Retrying the same IDs cannot duplicate the round. With only an existing
-      // userMessageId, the user is updated and its reply is inserted.
-      userMessageId?: string;
-      assistantMessageId?: string;
-      /** Stable reply id for an existing user message with no reply yet. */
-      newAssistantMessageId?: string;
-      /** Same desktop session only; retries reuse the original revision. */
-      syncRevision?: { sessionId: string; sequence: number };
-    }) => Promise<{ userMessageId: string; assistantMessageId: string }>;
+    syncSidecar: (
+      data: {
+        conversationId: string;
+        userContent: string;
+        assistantContent: string;
+        model?: string;
+        agentRun?: unknown;
+        /** Token counts for the turn. Absent when the runtime did not report them. */
+        usage?: { promptTokens: number; completionTokens: number; totalTokens: number };
+        /** "stopped" when the user stopped the run (the server also derives it from a cancelled run). */
+        finishReason?: MessageFinishReason;
+        // Local-run attachments never reach the server as files; this metadata is
+        // stored so the user's bubble keeps its attachment chips across reloads.
+        attachmentsMeta?: Array<{ fileName: string; fileType?: string; fileSize?: number }>;
+        // A complete stable pair updates existing rows or creates both atomically.
+        // Retrying the same IDs cannot duplicate the round. With only an existing
+        // userMessageId, the user is updated and its reply is inserted.
+        userMessageId?: string;
+        assistantMessageId?: string;
+        /** Stable reply id for an existing user message with no reply yet. */
+        newAssistantMessageId?: string;
+        /** Same desktop session only; retries reuse the original revision. */
+        syncRevision?: { sessionId: string; sequence: number };
+      } & SidecarSavePreconditions,
+      options?: { signal?: AbortSignal },
+    ) => Promise<SidecarSaveResult>;
     cancelChatPreparation: (data: ChatPreparationCancelRequest) => Promise<{ success: boolean }>;
     chatPrepare: (data: ChatPreparationRequest) => Promise<ChatPrepareResult>;
     chatComplete: (data: {
@@ -588,10 +593,11 @@ export function createServerApi(options?: { baseUrl?: string; fetch?: FetchLike 
           },
         );
       },
-      syncSidecar: (data) =>
+      syncSidecar: (data, options) =>
         fetchJson(fetchImpl, baseUrl, "/messages/sync-sidecar", {
           method: "POST",
           body: JSON.stringify(data),
+          signal: options?.signal,
         }),
       cancelChatPreparation: (data) =>
         fetchJson(fetchImpl, baseUrl, "/messages/chat/prepare/cancel", {

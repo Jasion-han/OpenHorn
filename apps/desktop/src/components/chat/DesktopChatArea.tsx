@@ -8,7 +8,15 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { answerModelMetadata } from "shared/answer-metadata";
 import { fileKey } from "shared/format";
 import { chatFailureFinishReason } from "shared/message-text";
+import {
+  isResearchProtocol,
+  researchInputIssue,
+  researchQuestion,
+  withoutResearchCommand,
+  withResearchCommand,
+} from "shared/research";
 import type { ChatStreamErrorCode, ProviderChatMetadata, RecipeRequirements } from "shared/types";
+import { modelSupportsVision } from "shared/vision";
 import {
   Button,
   cn,
@@ -43,6 +51,14 @@ import { COMPOSER_PLACEHOLDERS } from "../../lib/composerPlaceholder";
 import { deriveComposerRunState } from "../../lib/composerRunState";
 import { buildConversationHistory } from "../../lib/conversationHistory";
 import { isDefaultConversationTitle } from "../../lib/conversationTitle";
+import {
+  alignDocumentMetadata,
+  DocumentInputError,
+  expandDocumentFiles,
+  hasMissingPdfInput,
+  isPdfDocument,
+} from "../../lib/documentInput";
+import { saveDocumentInput } from "../../lib/documentInputCache";
 import { getEffectiveModelForConversation } from "../../lib/effectiveModel";
 import { type ActiveTurn, activeTurnRef, beginTurn, endTurn } from "../../lib/foregroundTurn";
 import { withGenUiMessages, withGenUiPrompt } from "../../lib/genui/promptMerge";
@@ -74,9 +90,11 @@ import {
   resolveStoppedAgentReply,
 } from "../../lib/stopTurn";
 import { discoverSkills, skillsDisabledList } from "../../lib/tauriBridge";
+import { useAuthStore } from "../../stores/authStore";
 import { useChatStore } from "../../stores/chatStore";
 import { mergeComposerHandoff, useConversationDraft } from "../../stores/conversationDraftStore";
 import { useDesktopShellStore } from "../../stores/desktopShellStore";
+import { useDocumentInputStore } from "../../stores/documentInputStore";
 import { useGenUiStore } from "../../stores/genUiStore";
 import { useImportStore } from "../../stores/importStore";
 import { useSidecarStore } from "../../stores/sidecarStore";
@@ -145,6 +163,9 @@ async function persistStoppedAgentPreparation(input: {
   assistantMessageId: string;
   userContent: string;
   model: string;
+  research?: boolean;
+  documentInputKey?: string;
+  documentInputRequired?: boolean;
   existingUserMessageId?: string;
   existingAssistantMessageId?: string;
   attachmentsMeta?: ReturnType<typeof toSyncAttachmentsMeta>;
@@ -154,6 +175,9 @@ async function persistStoppedAgentPreparation(input: {
     current: store.findMessageAnywhere(input.assistantMessageId),
   });
   if (outcome.kind !== "persist") return;
+  if (input.research) outcome.agentRun.research = true;
+  if (input.documentInputKey) outcome.agentRun.documentInputKey = input.documentInputKey;
+  if (input.documentInputRequired) outcome.agentRun.documentInputRequired = true;
   store.updateMessage(input.assistantMessageId, {
     content: outcome.assistantContent,
     agentRun: outcome.agentRun,
@@ -186,6 +210,9 @@ function toSyncAttachmentsMeta(
 }
 
 export function DesktopChatArea() {
+  const researchRuntimeReady = useSidecarStore(
+    (state) => state.status === "ready" && state.client?.supportsResearch === true,
+  );
   const ASSISTANT_BUBBLE_WIDTH = "92%";
   const USER_BUBBLE_MAX_WIDTH = "72%";
   const currentConversation = useChatStore((state) => state.currentConversation);
@@ -335,6 +362,14 @@ export function DesktopChatArea() {
     !sidecarRun.isRollingBack &&
     !isUploading &&
     (hasInput || hasFiles);
+  const researchIssue = researchInputIssue({
+    text: input,
+    webSearchEnabled: forceWebSearch,
+    hasAttachments: hasFiles,
+    protocol: selectedProtocol,
+    runtimeAvailable: researchRuntimeReady,
+  });
+  const canSendWithResearch = canSend && !researchIssue;
   // Memoized: during streaming `messages` changes on every token, and without
   // this the whole round-grouping array would be rebuilt each token even though
   // the grouping only depends on the message list.
@@ -1112,8 +1147,31 @@ export function DesktopChatArea() {
     }
 
     const conversationId = currentConversation.id;
-    const mode = composerMode;
+    const question = researchQuestion(input);
+    const research = question !== null;
+    const mode = research ? "agent" : composerMode;
     const trimmed = input.trim();
+    if (
+      research &&
+      (!question ||
+        !isResearchProtocol(selectedProtocol ?? "openai") ||
+        !forceWebSearch ||
+        pendingAttachments.length)
+    ) {
+      notifyWarning(
+        getChatLabel("chat.research.title"),
+        getChatLabel(
+          !question
+            ? "chat.research.question"
+            : !forceWebSearch
+              ? "chat.research_network_required"
+              : pendingAttachments.length
+                ? "chat.research_attachments_unsupported"
+                : "chat.research_unavailable",
+        ),
+      );
+      return;
+    }
 
     // Built-in slash commands (e.g. /新会话) run immediately and abort the send,
     // matching the same any-position token-boundary rule as skills/MCP.
@@ -1125,7 +1183,7 @@ export function DesktopChatArea() {
       builtinNames.set(c.name.toLowerCase(), "command");
       builtinNames.set(c.id.toLowerCase(), "command");
     }
-    const builtinToken = findKnownSlashToken(trimmed, builtinNames);
+    const builtinToken = research ? null : findKnownSlashToken(trimmed, builtinNames);
     if (builtinToken) {
       const typed = builtinToken.name.toLowerCase();
       const cmd = builtinCommands.find(
@@ -1142,10 +1200,18 @@ export function DesktopChatArea() {
     // `sendContent` is what we transmit to the model (may carry a strong skill
     // instruction); `displayContent` is what the user's bubble shows/stores
     // (their request with the normalized `/token` preserved for the chip).
-    const { sendContent, displayContent, titleContent, targetMcpServer } =
-      resolveSkillMcpSlash(trimmed);
-
-    const files = pendingAttachments;
+    const { sendContent, displayContent, titleContent, targetMcpServer } = resolveSkillMcpSlash(
+      research ? (question ?? "") : trimmed,
+    );
+    if (research && targetMcpServer) {
+      notifyWarning(getChatLabel("chat.research.title"), getChatLabel("chat.research_unavailable"));
+      return;
+    }
+    const sourceFiles = pendingAttachments;
+    const documentInputRequired = sourceFiles.some(
+      (file) => isPdfDocument(file) && useDocumentInputStore.getState().options.get(file)?.layout,
+    );
+    let files = [...sourceFiles];
     const autoTitleSeed =
       titleContent.length > 0
         ? titleContent
@@ -1174,6 +1240,27 @@ export function DesktopChatArea() {
 
     let attachmentIds: string[] | undefined;
     const turn = beginTurn();
+    const documentController = new AbortController();
+    let documentInputKey: string | undefined;
+    const prepareDocumentPages = async () => {
+      const expanded = await expandDocumentFiles(
+        sourceFiles,
+        (file) => useDocumentInputStore.getState().options.get(file),
+        effectiveModel.ok &&
+          modelSupportsVision(effectiveModel.modelId) &&
+          isResearchProtocol(selectedProtocol ?? "openai"),
+        documentController.signal,
+      );
+      if (turn.stopped || activeTurnRef.current !== turn) return;
+      const aligned = alignDocumentMetadata(expanded, sourceFiles, localAttachmentMeta, (file) => {
+        const previewUrl = URL.createObjectURL(file);
+        previewUrls.push(previewUrl);
+        return { fileName: file.name, fileType: file.type, fileSize: file.size, previewUrl };
+      });
+      localAttachmentMeta.splice(0, localAttachmentMeta.length, ...aligned);
+      files = expanded;
+      updateMessage(userMessageId, { attachmentsMeta: [...localAttachmentMeta] });
+    };
 
     try {
       addMessage({
@@ -1198,6 +1285,8 @@ export function DesktopChatArea() {
                 summary: "Thinking",
                 steps: [],
                 recipeRequirements,
+                ...(research ? { research: true } : {}),
+                ...(documentInputRequired ? { documentInputRequired: true } : {}),
               }
             : undefined,
         createdAt: new Date(),
@@ -1218,8 +1307,9 @@ export function DesktopChatArea() {
       }
 
       if (mode === "agent") {
-        turn.abort = () =>
-          persistStoppedAgentPreparation({
+        turn.abort = () => {
+          documentController.abort();
+          return persistStoppedAgentPreparation({
             ownsTurn: () => activeTurnRef.current === turn,
             conversationId,
             assistantMessageId,
@@ -1227,9 +1317,35 @@ export function DesktopChatArea() {
             model: effectiveModel.ok ? effectiveModel.modelId : "",
             attachmentsMeta: toSyncAttachmentsMeta(localAttachmentMeta),
           });
+        };
+        await prepareDocumentPages();
+        if (turn.stopped || activeTurnRef.current !== turn) {
+          await turn.stopping;
+          return;
+        }
         // Local (sidecar) runs read attachments client-side and inject them as
         // normalized parts: image base64 + extracted file/PDF text.
-        const attachmentParts = files.length > 0 ? await filesToAttachmentParts(files) : undefined;
+        const attachmentParts =
+          files.length > 0
+            ? await filesToAttachmentParts(files, documentController.signal)
+            : undefined;
+        if (files.length > sourceFiles.length && attachmentParts) {
+          const owner = useAuthStore.getState().user?.id;
+          if (!owner) throw new DocumentInputError("document_cache");
+          documentInputKey = await saveDocumentInput(
+            JSON.stringify([getDesktopBackendBase(), owner]),
+            attachmentParts,
+          );
+          if (turn.stopped || activeTurnRef.current !== turn) {
+            await turn.stopping;
+            return;
+          }
+          const message = useChatStore.getState().findMessageAnywhere(assistantMessageId);
+          if (message?.agentRun)
+            updateMessage(assistantMessageId, {
+              agentRun: { ...message.agentRun, documentInputKey },
+            });
+        }
         if (files.length > 0) {
           setPendingAttachments((current) => current.filter((file) => !files.includes(file)));
         }
@@ -1265,6 +1381,9 @@ export function DesktopChatArea() {
           modelId: effectiveModel.modelId,
           assistantMessageId,
           prompt: sendContent,
+          research,
+          documentInputKey,
+          documentInputRequired,
           recipeRequirements,
           displayContent,
           stoppedBeforeStart: turn.stopped,
@@ -1308,11 +1427,20 @@ export function DesktopChatArea() {
           }));
       // Keep ownership until the stopped question has a persisted identity. A newer send
       // must not be overtaken by a late preparation inserting the older question afterward.
-      turn.abort = () => Promise.all([cancelPreparation(), preparationDone]).then(() => {});
+      turn.abort = () => {
+        documentController.abort();
+        return Promise.all([cancelPreparation(), preparationDone]).then(() => {});
+      };
       if (turn.stopped) await cancelPreparation();
       let prepared: Awaited<ReturnType<typeof chatAreaApi.messages.chatPrepare>>;
       try {
-        if (files.length > 0) {
+        try {
+          if (!turn.stopped) await prepareDocumentPages();
+        } catch (error) {
+          if (!turn.stopped) throw error;
+          stoppedUploadFailed = true;
+        }
+        if (files.length > 0 && !stoppedUploadFailed) {
           setIsUploading(true);
           try {
             const upload = await uploadAttachments({
@@ -1592,14 +1720,31 @@ export function DesktopChatArea() {
         });
         liveAssistantMessageId = error.assistantMessageId;
       }
+      if (error instanceof DocumentInputError) {
+        setInput((current) => current || trimmed);
+        setPendingAttachments((current) => [...new Set([...sourceFiles, ...current])]);
+        const store = useChatStore.getState();
+        store.replaceMessages(
+          store.messages.filter(
+            (message) => message.id !== userMessageId && message.id !== assistantMessageId,
+          ),
+        );
+        for (const url of previewUrls) URL.revokeObjectURL(url);
+        pendingPreviewUrlsRef.current.delete(userMessageId);
+        setError(getChatLabel(`chat.document.${error.code}`));
+        return;
+      }
       const message =
-        error instanceof SidecarSaveConflict
-          ? getChatLabel("chat.save.conflictBody")
-          : error instanceof ChatPreparationFailure && error.code === "chat_context_budget_exceeded"
-            ? getChatLabel("chat.reply.contextBudgetExceeded")
-            : error instanceof Error
-              ? error.message
-              : "Stream error";
+        error instanceof DocumentInputError
+          ? getChatLabel(`chat.document.${error.code}`)
+          : error instanceof SidecarSaveConflict
+            ? getChatLabel("chat.save.conflictBody")
+            : error instanceof ChatPreparationFailure &&
+                error.code === "chat_context_budget_exceeded"
+              ? getChatLabel("chat.reply.contextBudgetExceeded")
+              : error instanceof Error
+                ? error.message
+                : "Stream error";
       useChatStore.getState().failStreamingMessage(liveAssistantMessageId, message);
       setError(message);
     } finally {
@@ -1773,6 +1918,10 @@ export function DesktopChatArea() {
 
     const route = routeRerun(assistantMessage.mode);
     if (!route) return;
+    if (route.kind === "server" && userMessage && hasMissingPdfInput(userMessage)) {
+      setError(getChatLabel("chat.document.document_missing"));
+      return;
+    }
     // An agent reply is re-run from its prompt; without one there is nothing to run.
     if (route.kind === "sidecar" && !userMessage) return;
     // The reply this attempt replaces. A regenerate stopped before it produced
@@ -1862,6 +2011,11 @@ export function DesktopChatArea() {
           existingUserMessageId: userMessage.id,
           existingAssistantMessageId: messageId,
           previousReply,
+          research: previousReply?.agentRun?.research,
+          documentInputKey: previousReply?.agentRun?.documentInputKey,
+          documentInputRequired: previousReply?.agentRun?.documentInputRequired,
+          previousUserContent: userMessage.content,
+          previousAssistantContent: previousReply?.content,
           stoppedBeforeStart: turn.stopped,
           prompt: retrySendContent,
           displayContent: userMessage.content,
@@ -1986,6 +2140,10 @@ export function DesktopChatArea() {
     // keeps the editor open with the draft intact.
     const route = routeRerun(userMessage.mode);
     if (!route) return;
+    if (route.kind === "server" && hasMissingPdfInput(userMessage)) {
+      setError(getChatLabel("chat.document.document_missing"));
+      return;
+    }
     const assistantMessageId = existingAssistantMessage?.id ?? `temp-assistant-edit-${Date.now()}`;
     const turn = beginTurn();
     turn.abort = () => {
@@ -2048,6 +2206,9 @@ export function DesktopChatArea() {
             model: route.modelId,
             existingUserMessageId: userMessage.id,
             existingAssistantMessageId: existingAssistantMessage?.id,
+            research: existingAssistantMessage?.agentRun?.research,
+            documentInputKey: existingAssistantMessage?.agentRun?.documentInputKey,
+            documentInputRequired: existingAssistantMessage?.agentRun?.documentInputRequired,
             attachmentsMeta: toSyncAttachmentsMeta(userMessage.attachmentsMeta),
           });
         const historyMsgs = useChatStore
@@ -2081,6 +2242,11 @@ export function DesktopChatArea() {
           displayContent: editDisplayContent,
           existingUserMessageId: userMessage.id,
           existingAssistantMessageId: existingAssistantMessage?.id,
+          research: existingAssistantMessage?.agentRun?.research,
+          documentInputKey: existingAssistantMessage?.agentRun?.documentInputKey,
+          documentInputRequired: existingAssistantMessage?.agentRun?.documentInputRequired,
+          previousUserContent: userMessage.content,
+          previousAssistantContent: existingAssistantMessage?.content,
           // No previousReply: the question changed, so the old reply no longer
           // answers it — a stop before any output keeps the edit and an empty,
           // explicitly stopped reply.
@@ -2419,6 +2585,15 @@ export function DesktopChatArea() {
         {modeUnavailableReason ? (
           <p className="mb-2 px-2 text-xs text-muted-foreground">{modeUnavailableReason}</p>
         ) : null}
+        {researchIssue ? (
+          <p className="mb-2 px-2 text-xs text-muted-foreground">
+            {getChatLabel(
+              researchIssue === "research_question_required"
+                ? "chat.research.question"
+                : `chat.${researchIssue}`,
+            )}
+          </p>
+        ) : null}
         <DesktopComposer
           value={input}
           onChange={handleInputChange}
@@ -2438,6 +2613,21 @@ export function DesktopChatArea() {
           onAddAttachments={handleAddAttachments}
           onRemoveAttachment={handleRemoveAttachment}
           mode={composerMode}
+          visionAvailable={
+            effectiveModel.ok &&
+            modelSupportsVision(effectiveModel.modelId) &&
+            isResearchProtocol(selectedProtocol ?? "openai")
+          }
+          researchMode={researchQuestion(input) !== null}
+          researchAvailable={
+            isResearchProtocol(selectedProtocol ?? "openai") &&
+            agentModeSupported &&
+            researchRuntimeReady
+          }
+          onResearch={() => {
+            setComposerMode("agent");
+            setInput(withResearchCommand(input));
+          }}
           onModeChange={(nextMode) => {
             if (nextMode === "agent" && !agentModeSupported) {
               notifyWarning(
@@ -2446,6 +2636,7 @@ export function DesktopChatArea() {
               );
               return;
             }
+            setInput(withoutResearchCommand(input));
             setComposerMode(nextMode);
           }}
           agentModeAvailable={agentModeSupported}
@@ -2474,7 +2665,7 @@ export function DesktopChatArea() {
                 ? getChatLabel("chat.server.connecting")
                 : null
           }
-          canSubmit={canSend}
+          canSubmit={canSendWithResearch}
           onStop={() => void handleStop()}
           inputRef={inputRef}
         />

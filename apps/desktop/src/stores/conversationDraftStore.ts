@@ -7,6 +7,7 @@ import { useAuthStore } from "./authStore";
 export interface ConversationDraft {
   text: string;
   files: File[];
+  research?: boolean;
 }
 interface DraftLease {
   generation: number;
@@ -36,7 +37,10 @@ export function mergeComposerHandoff(
   const collision = !!current.text.trim() && current.text !== incoming.text;
   const autoCollision =
     incoming.autoSend !== false &&
-    (collision || current.files.some((file) => !incoming.files.includes(file)));
+    (collision ||
+      current.files.some((file) => !incoming.files.includes(file)) ||
+      (!!current.text.trim() && !!current.research !== !!incoming.research));
+  const research = autoCollision ? current.research : incoming.research;
   return {
     text:
       incoming.autoSend === false && current.text.trim()
@@ -47,6 +51,7 @@ export function mergeComposerHandoff(
     files: [...new Set([...current.files, ...incoming.files])],
     autoSend: incoming.autoSend !== false && !autoCollision,
     needsReview: autoCollision,
+    ...(research ? { research: true } : {}),
   };
 }
 
@@ -99,8 +104,13 @@ export function createConversationDraftStore(owner: string | null = null) {
           emptyDrafts(),
           state.drafts,
         );
-        if (!next.text && next.files.length === 0) delete drafts[id];
-        else drafts[id] = { text: next.text, files: [...next.files] };
+        if (!next.text && next.files.length === 0 && !next.research) delete drafts[id];
+        else
+          drafts[id] = {
+            text: next.text,
+            files: [...next.files],
+            ...(next.research ? { research: true } : {}),
+          };
         return { drafts };
       }),
   }));
@@ -151,5 +161,19 @@ export function useConversationDraft(id: string | null) {
     },
     [owner, id, generation, revision],
   );
-  return { draft, setText, setFiles };
+  const setResearch: Dispatch<SetStateAction<boolean>> = useCallback(
+    (value) => {
+      useConversationDraftStore.getState().update(
+        owner,
+        id,
+        (current) => ({
+          ...current,
+          research: typeof value === "function" ? value(current.research === true) : value,
+        }),
+        { generation, revision },
+      );
+    },
+    [owner, id, generation, revision],
+  );
+  return { draft, setText, setFiles, setResearch };
 }

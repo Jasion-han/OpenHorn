@@ -78,9 +78,12 @@ const server = http.createServer(async (request, response) => {
     return;
   }
   if (path === "/attachments/upload") {
-    for await (const _chunk of request) {
-      /* Discard synthetic multipart bytes. */
-    }
+    const chunks = [];
+    for await (const chunk of request) chunks.push(chunk);
+    const incoming = await new Response(Buffer.concat(chunks), {
+      headers: { "content-type": request.headers["content-type"] },
+    }).formData();
+    const uploadedFiles = incoming.getAll("files");
     const held = holdUpload;
     if (held) {
       server.emit("fixture-upload-started");
@@ -89,14 +92,12 @@ const server = http.createServer(async (request, response) => {
     }
     if (uploadFailure) return json(response, { error: "Synthetic upload not confirmed" }, 413);
     return json(response, {
-      attachments: [
-        {
-          id: "fixture-uploaded-file",
-          fileName: "native-stop.txt",
-          fileType: "text/plain",
-          fileSize: 16,
-        },
-      ],
+      attachments: uploadedFiles.map((file, index) => ({
+        id: index === 0 ? "fixture-uploaded-file" : `fixture-uploaded-file-${index}`,
+        fileName: file.name,
+        fileType: file.type,
+        fileSize: file.size,
+      })),
     });
   }
   let body = "";
@@ -109,9 +110,16 @@ const server = http.createServer(async (request, response) => {
     });
   if (path === "/messages" || /^\/messages\/(?:failure|other)-conversation$/.test(path))
     return json(response, {
-      messages: rows.filter(
-        (row) => path === "/messages" || row.conversationId === path.split("/")[2],
-      ),
+      messages: rows
+        .filter((row) => path === "/messages" || row.conversationId === path.split("/")[2])
+        .map((row) => ({
+          ...row,
+          agentRun:
+            row.agentRun && typeof row.agentRun === "object"
+              ? JSON.stringify(row.agentRun)
+              : row.agentRun,
+          saveToken: "a".repeat(64),
+        })),
     });
   if (path === "/settings/search-status")
     return json(response, { configured: false, source: "none" });
@@ -399,6 +407,7 @@ try {
     syncedPreparations = 0;
     failAgentSaveOnce = false;
     protocol = "openai";
+    conversation.modelId = "fixture-model";
     // A finished HTTP request can still have application continuations queued.
     // Reusing the realm and the same message IDs would let a previous case's
     // late history reload repopulate the next case after store.reset(). A new
@@ -427,6 +436,144 @@ try {
     await page.evaluate(() => window.failureChat.fail());
     await page.waitForFunction(() => !window.failureChat.snapshot().streaming);
   };
+  await reset();
+  await page.getByRole("button", { name: "Mode", exact: true }).click();
+  await page.getByRole("button", { name: "深度研究", exact: true }).click();
+  await page.locator("textarea").fill("/research Verify synthetic evidence");
+  await page.locator("textarea").press("Enter");
+  await page.getByText("深度研究需要联网，请先开启 Web Search。", { exact: true }).waitFor();
+  assert.equal(prepares, 0);
+  assert.equal((await snapshot()).messages.length, 0);
+  await page.evaluate(() => window.failureChat.network(true));
+  await page.locator("textarea").press("Enter");
+  await page.waitForFunction(() => window.failureChat.agentReady());
+  assert.deepEqual(await page.evaluate(() => window.failureChat.researchInput()), {
+    research: true,
+    documentInput: false,
+    prompt: "Verify synthetic evidence",
+  });
+  const researchSaved = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === "/messages/sync-sidecar",
+  );
+  await page.evaluate(() => {
+    window.failureChat.agentEmit("Synthetic cited research report");
+    window.failureChat.agentDone();
+  });
+  await page.waitForFunction(() => !window.failureChat.snapshot().streaming);
+  await page.waitForFunction(() =>
+    window.failureChat
+      .snapshot()
+      .messages.some(
+        (message) =>
+          message.role === "assistant" &&
+          message.agentRun?.research === true &&
+          !message.id.startsWith("temp-"),
+      ),
+  );
+  await (await researchSaved).finished();
+  const savedResearch = rows.find((row) => row.role === "assistant");
+  assert.equal(savedResearch.agentRun.research, true);
+  assert.equal(rows.find((row) => row.role === "user").content, "Verify synthetic evidence");
+  console.log(
+    "PASS Research menu preserves question, blocks offline sends before writes, forwards the policy and persists research identity",
+  );
+
+  await page.evaluate(() => window.failureChat.reloadMessages());
+  const earlyRetryLabel = await page.evaluate(() => window.failureChat.labels.retry);
+  await page.getByRole("button", { name: earlyRetryLabel, exact: true }).last().click();
+  await page.waitForFunction(() => window.failureChat.agentCalls() === 2);
+  assert.equal((await page.evaluate(() => window.failureChat.researchInput())).research, true);
+  await page.evaluate(() => {
+    window.failureChat.agentEmit("Second synthetic cited report");
+    window.failureChat.agentDone();
+  });
+  await page.waitForFunction(() => !window.failureChat.snapshot().streaming);
+  console.log(
+    "PASS saved research retry retains the per-turn research policy rather than current composer mode",
+  );
+
+  await reset();
+  conversation.modelId = "gpt-4o";
+  await page.evaluate(() => window.failureChat.visionModel());
+  await page.getByRole("button", { name: "Mode", exact: true }).click();
+  await page.getByRole("button", { name: "Agent", exact: true }).click();
+  await page.locator("textarea").fill("Check the controlled document");
+  await page.locator("textarea").press("Enter");
+  await page.waitForFunction(() => window.failureChat.agentReady());
+  const documentSaved = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === "/messages/sync-sidecar",
+  );
+  await page.evaluate(() => {
+    window.failureChat.agentEmit("First document answer");
+    window.failureChat.agentDone();
+  });
+  await page.waitForFunction(() => !window.failureChat.snapshot().streaming);
+  await page.waitForFunction(() =>
+    window.failureChat
+      .snapshot()
+      .messages.some((message) => message.role === "assistant" && !message.id.startsWith("temp-")),
+  );
+  await (await documentSaved).finished();
+  const cachedDocument = await page.evaluate(() => window.failureChat.documentSnapshot());
+  rows.find((row) => row.role === "assistant").agentRun.documentInputKey = cachedDocument.key;
+  await page.evaluate(() => window.failureChat.reloadMessages());
+  await page.getByRole("button", { name: earlyRetryLabel, exact: true }).last().click();
+  await page.waitForFunction(() => window.failureChat.agentCalls() === 2);
+  assert.deepEqual(
+    await page.evaluate(() => window.failureChat.capturedAttachments()),
+    cachedDocument.parts,
+  );
+  assert.equal((await page.evaluate(() => window.failureChat.researchInput())).documentInput, true);
+  const restoredDocumentSaved = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === "/messages/sync-sidecar",
+  );
+  await page.evaluate(() => {
+    window.failureChat.agentEmit("Restored document answer");
+    window.failureChat.agentDone();
+  });
+  await page.waitForFunction(() => !window.failureChat.snapshot().streaming);
+  console.log(
+    "PASS Agent retry after message reload restores exact cached document text/images and the document capability flag",
+  );
+
+  await (await restoredDocumentSaved).finished();
+  const documentRow = rows.find((row) => row.role === "assistant");
+  delete documentRow.agentRun.documentInputKey;
+  documentRow.agentRun.documentInputRequired = true;
+  await page.evaluate(() => window.failureChat.reloadMessages());
+  const callsBeforeMissing = await page.evaluate(() => window.failureChat.agentCalls());
+  await page.getByRole("button", { name: earlyRetryLabel, exact: true }).last().click();
+  await page.getByRole("alert").filter({ hasText: "无法保存或恢复本轮图文输入" }).waitFor();
+  assert.equal(await page.evaluate(() => window.failureChat.agentCalls()), callsBeforeMissing);
+  console.log(
+    "PASS a stopped/incomplete PDF snapshot refuses retry and asks for reattachment instead of silently running without the document",
+  );
+
+  await reset();
+  protocol = "google";
+  await page.evaluate(() => {
+    window.failureChat.start("google");
+    window.failureChat.network(true);
+  });
+  await page.getByRole("button", { name: "Mode", exact: true }).click();
+  await page.getByRole("button", { name: "深度研究", exact: true }).click();
+  await page.locator("textarea").fill("/research Research with Google");
+  await page.locator("textarea").press("Enter");
+  await page.waitForFunction(() => window.failureChat.agentReady());
+  assert.equal(await page.evaluate(() => window.failureChat.capturedProtocol()), "google");
+  const googleSaved = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === "/messages/sync-sidecar",
+  );
+  await page.evaluate(() => {
+    window.failureChat.agentEmit("Controlled Google report");
+    window.failureChat.agentDone();
+  });
+  await (await googleSaved).finished();
+  await page.waitForFunction(() => !window.failureChat.snapshot().streaming);
+  console.log(
+    "PASS Google API research traverses the real credentials/run hook and retains its protocol",
+  );
+
   await reset();
   let releasePreparation;
   holdChatPreparation = {
