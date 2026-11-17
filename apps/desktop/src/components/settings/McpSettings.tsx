@@ -9,7 +9,7 @@ import {
   Trash2,
   XCircle,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ImportPartItem, ImportSource } from "shared/types";
 import {
   Button,
@@ -138,6 +138,8 @@ export function McpSettings() {
 
   const [testResults, setTestResults] = useState<Record<string, McpTestRowState>>({});
   const [testingAll, setTestingAll] = useState(false);
+  const testEpochs = useRef<Record<string, number>>({});
+  const configFingerprints = useRef<Record<string, string>>({});
   const sidecarStatus = useSidecarStore((s) => s.status);
   const sidecarReady = sidecarStatus === "ready";
 
@@ -145,7 +147,24 @@ export function McpSettings() {
     setLoading(true);
     try {
       const { servers } = await api.mcp.listServers();
-      setMcpServers((servers || []) as MCPServer[]);
+      const next = (servers || []) as MCPServer[];
+      const fingerprints = Object.fromEntries(
+        next.map((server) => [
+          server.id,
+          JSON.stringify([server.name, server.type, server.config]),
+        ]),
+      );
+      const changed = new Set(
+        Object.keys(configFingerprints.current).filter(
+          (id) => fingerprints[id] !== configFingerprints.current[id],
+        ),
+      );
+      for (const id of changed) testEpochs.current[id] = (testEpochs.current[id] ?? 0) + 1;
+      configFingerprints.current = fingerprints;
+      setTestResults((current) =>
+        Object.fromEntries(Object.entries(current).filter(([id]) => !changed.has(id))),
+      );
+      setMcpServers(next);
     } catch (error) {
       notifyError("加载失败", error instanceof Error ? error.message : "无法加载 MCP 配置。");
     } finally {
@@ -181,8 +200,13 @@ export function McpSettings() {
     let parsedConfig: Record<string, unknown>;
     try {
       parsedConfig = JSON.parse(mcpConfig);
+      if (!parsedConfig || typeof parsedConfig !== "object" || Array.isArray(parsedConfig))
+        throw new Error("invalid_mcp_config");
     } catch {
-      notifyError("配置错误", "MCP config 必须是合法 JSON。");
+      notifyError(
+        getMcpLabel("settings.mcp.invalidConfigTitle"),
+        getMcpLabel("settings.mcp.invalidConfigObject"),
+      );
       return;
     }
 
@@ -248,6 +272,8 @@ export function McpSettings() {
   const handleTestServer = useCallback(async (server: MCPServer) => {
     const client = useSidecarStore.getState().client;
     if (!client) return;
+    const epoch = (testEpochs.current[server.id] ?? 0) + 1;
+    testEpochs.current[server.id] = epoch;
     setTestResults((prev) => ({ ...prev, [server.id]: { status: "testing" } }));
     let next: McpTestRowState;
     try {
@@ -265,7 +291,12 @@ export function McpSettings() {
         error: error instanceof Error ? error.message : String(error),
       };
     }
-    setTestResults((prev) => ({ ...prev, [server.id]: next }));
+    if (
+      testEpochs.current[server.id] === epoch &&
+      configFingerprints.current[server.id] ===
+        JSON.stringify([server.name, server.type, server.config])
+    )
+      setTestResults((prev) => ({ ...prev, [server.id]: next }));
   }, []);
 
   const handleTestAll = async () => {
@@ -294,8 +325,13 @@ export function McpSettings() {
     let parsedConfig: Record<string, unknown>;
     try {
       parsedConfig = JSON.parse(editConfig);
+      if (!parsedConfig || typeof parsedConfig !== "object" || Array.isArray(parsedConfig))
+        throw new Error("invalid_mcp_config");
     } catch {
-      notifyError("配置错误", "MCP config 必须是合法 JSON。");
+      notifyError(
+        getMcpLabel("settings.mcp.invalidConfigTitle"),
+        getMcpLabel("settings.mcp.invalidConfigObject"),
+      );
       return;
     }
     if (!parsedConfig || typeof parsedConfig !== "object" || Array.isArray(parsedConfig)) {

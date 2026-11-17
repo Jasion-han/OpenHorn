@@ -49,6 +49,32 @@ function makeApi() {
 }
 
 describe("projectStore", () => {
+  test("a delayed project refresh cannot resurrect a removed folder", async () => {
+    const api = makeApi();
+    const store = createProjectStore({ api });
+    const added = await store
+      .getState()
+      .addProject({ name: "temporary", rootPath: "/tmp/temporary" });
+    let resolve!: (value: { projects: ApiProject[] }) => void;
+    api.projects.list = () =>
+      new Promise((done) => {
+        resolve = done;
+      });
+    const loading = store.getState().loadProjects();
+    await store.getState().removeProject(added.id);
+    resolve({
+      projects: [
+        {
+          ...added,
+          createdAt: added.createdAt.toISOString(),
+          updatedAt: added.updatedAt.toISOString(),
+        },
+      ],
+    });
+    await loading;
+    expect(store.getState().projects).toHaveLength(0);
+    expect(store.getState().loading).toBe(false);
+  });
   test("folderNameFromPath takes the last segment on either separator", () => {
     expect(folderNameFromPath("/Users/han/Project/OpenHorn")).toBe("OpenHorn");
     expect(folderNameFromPath("/Users/han/Project/OpenHorn/")).toBe("OpenHorn");

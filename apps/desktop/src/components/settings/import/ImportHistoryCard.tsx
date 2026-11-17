@@ -162,6 +162,7 @@ export function ImportHistoryCard({
   highlighted = false,
   onToggle,
   onDelete,
+  deleting = false,
 }: {
   record: ApiImportRecord;
   expanded: boolean;
@@ -169,6 +170,7 @@ export function ImportHistoryCard({
   highlighted?: boolean;
   onToggle: () => void;
   onDelete: () => void;
+  deleting?: boolean;
 }) {
   const summary =
     record.totalNeedsAction > 0
@@ -205,6 +207,7 @@ export function ImportHistoryCard({
           size="icon"
           className="text-muted-foreground"
           onClick={onDelete}
+          disabled={deleting}
           title={getImportLabel("import.history.delete")}
         >
           <Trash2 size={16} />

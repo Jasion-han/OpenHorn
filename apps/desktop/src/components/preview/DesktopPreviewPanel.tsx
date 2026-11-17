@@ -1,5 +1,5 @@
 import { FileCode2, Globe, PanelRightClose, Paperclip, X } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Button, cn } from "ui";
 import { getPreviewLabel } from "../../lib/i18n/agent";
 import { previewTabIdFromLabel } from "../../lib/previewWebview";
@@ -16,9 +16,12 @@ import {
   usePreviewPanelStore,
 } from "../../stores/previewPanelStore";
 import { DesktopAttachmentViewer } from "../chat/DesktopAttachmentViewer";
-import { DesktopFilePreview } from "./DesktopFilePreview";
 import { DesktopLocalPathPreview } from "./DesktopLocalPathPreview";
 import { DesktopWebPreview } from "./DesktopWebPreview";
+
+const DesktopFilePreview = lazy(() =>
+  import("./DesktopFilePreview").then((module) => ({ default: module.DesktopFilePreview })),
+);
 
 function tabTitle(tab: PreviewTab): string {
   if (tab.kind === "attachment")
@@ -242,7 +245,15 @@ export function DesktopPreviewPanel({ collapsed = false }: { collapsed?: boolean
               ) : tab.kind === "file" ? (
                 // Collapsed counts as inactive: the initial centre-on-line
                 // scroll must wait until the tab can actually be laid out.
-                <DesktopFilePreview tab={tab} active={isActive && !collapsed} />
+                <Suspense
+                  fallback={
+                    <output className="p-4 text-sm text-muted-foreground">
+                      {getPreviewLabel("preview.file.loading")}
+                    </output>
+                  }
+                >
+                  <DesktopFilePreview tab={tab} active={isActive && !collapsed} />
+                </Suspense>
               ) : (
                 <DesktopWebPreview tab={tab} active={isActive} />
               )}

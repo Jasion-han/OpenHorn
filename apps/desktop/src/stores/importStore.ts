@@ -375,6 +375,7 @@ export interface ImportState {
   records: ApiImportRecord[];
   recordsCursor: string | null;
   recordsLoading: boolean;
+  deletingRecords: Record<string, boolean>;
   recordsError: string | null;
 
   promptTemplates: PromptTemplate[];
@@ -405,6 +406,8 @@ let templateIdentityRevision = 0;
 
 export function createImportStore(deps: ImportStoreDeps = {}) {
   let templateRequest = 0;
+  let recordsRequest = 0;
+  let recordsRevision = 0;
   const api = deps.api ?? createServerApi();
   const discoverMcp = deps.discoverMcp ?? discoverMcpConfigs;
   const discoverSkillsImpl = deps.discoverSkills ?? discoverSkills;
@@ -429,6 +432,7 @@ export function createImportStore(deps: ImportStoreDeps = {}) {
     records: [],
     recordsCursor: null,
     recordsLoading: false,
+    deletingRecords: {},
     recordsError: null,
 
     promptTemplates: [],
@@ -475,7 +479,9 @@ export function createImportStore(deps: ImportStoreDeps = {}) {
         source: "file" as const,
         available: true,
       };
-      const part = current.mcp ?? { entries: [], newCount: 0 };
+      const part = current.mcp
+        ? { ...current.mcp, entries: [...current.mcp.entries] }
+        : { entries: [], newCount: 0 };
       const seen = new Set(part.entries.map((entry) => entry.signature));
       for (const server of found) {
         if (seen.has(server.signature)) continue;
@@ -731,21 +737,30 @@ export function createImportStore(deps: ImportStoreDeps = {}) {
     },
 
     async loadRecords() {
+      const request = ++recordsRequest,
+        revision = recordsRevision;
       set({ recordsLoading: true, recordsError: null });
       try {
         const { records, nextCursor } = await api.importRecords.list({ limit: 20 });
+        if (request !== recordsRequest || revision !== recordsRevision) return;
         set({ records, recordsCursor: nextCursor ?? null, recordsLoading: false });
       } catch (error) {
-        set({ recordsLoading: false, recordsError: errorMessage(error) });
+        if (request === recordsRequest && revision === recordsRevision)
+          set({ recordsError: errorMessage(error) });
+      } finally {
+        if (request === recordsRequest) set({ recordsLoading: false });
       }
     },
 
     async loadMoreRecords() {
       const cursor = get().recordsCursor;
       if (!cursor || get().recordsLoading) return;
+      const request = ++recordsRequest,
+        revision = recordsRevision;
       set({ recordsLoading: true, recordsError: null });
       try {
         const { records, nextCursor } = await api.importRecords.list({ limit: 20, cursor });
+        if (request !== recordsRequest || revision !== recordsRevision) return;
         set((state) => {
           const seen = new Set(state.records.map((record) => record.id));
           return {
@@ -755,19 +770,33 @@ export function createImportStore(deps: ImportStoreDeps = {}) {
           };
         });
       } catch (error) {
-        set({ recordsLoading: false, recordsError: errorMessage(error) });
+        if (request === recordsRequest && revision === recordsRevision)
+          set({ recordsError: errorMessage(error) });
+      } finally {
+        if (request === recordsRequest) set({ recordsLoading: false });
       }
     },
 
     async removeRecord(id) {
-      await api.importRecords.remove(id);
-      set((state) => ({ records: state.records.filter((record) => record.id !== id) }));
+      if (get().deletingRecords[id]) return;
+      set((state) => ({ deletingRecords: { ...state.deletingRecords, [id]: true } }));
+      try {
+        await api.importRecords.remove(id);
+        recordsRevision++;
+        set((state) => ({ records: state.records.filter((record) => record.id !== id) }));
+      } finally {
+        set((state) => {
+          const deletingRecords = { ...state.deletingRecords };
+          delete deletingRecords[id];
+          return { deletingRecords };
+        });
+      }
     },
 
     async loadPromptTemplates() {
-      const request = ++templateRequest,
-        identity = templateIdentityRevision,
-        backend = getDesktopBackendBase();
+      const request = ++templateRequest;
+      const identity = templateIdentityRevision;
+      const backend = getDesktopBackendBase();
       try {
         const promptTemplates = await api.prompts.templates();
         if (

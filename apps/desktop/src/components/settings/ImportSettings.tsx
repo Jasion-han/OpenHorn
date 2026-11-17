@@ -1,7 +1,17 @@
 import { Download, FileUp, Loader2, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ImportSource } from "shared/types";
-import { Button, SettingsCard, SettingsSection } from "ui";
+import {
+  Button,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  SettingsCard,
+  SettingsSection,
+} from "ui";
 import {
   formatImportLabel,
   getDataTransferLabel,
@@ -57,6 +67,8 @@ export function ImportSettings() {
   const loadRecords = useImportStore((state) => state.loadRecords);
   const loadMoreRecords = useImportStore((state) => state.loadMoreRecords);
   const removeRecord = useImportStore((state) => state.removeRecord);
+  const deletingRecords = useImportStore((state) => state.deletingRecords);
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
 
   const [dialogSource, setDialogSource] = useState<ImportSource | null>(null);
   const [expandedRecords, setExpandedRecords] = useState<Set<string>>(new Set());
@@ -138,9 +150,10 @@ export function ImportSettings() {
   const handleDelete = async (id: string) => {
     try {
       await removeRecord(id);
+      setDeleteTarget(null);
     } catch (error) {
       notifyError(
-        getImportLabel("import.dialog.failedTitle"),
+        getImportLabel("import.history.deleteFailedTitle"),
         error instanceof Error ? error.message : getImportLabel("import.history.deleteFailed"),
       );
     }
@@ -242,8 +255,22 @@ export function ImportSettings() {
         description={getImportLabel("import.history.description")}
       >
         {recordsError ? (
-          <p className="text-xs text-destructive">{recordsError}</p>
-        ) : records.length === 0 ? (
+          <div
+            role="alert"
+            className="flex items-center justify-between gap-3 text-sm text-destructive"
+          >
+            <p>{getImportLabel("import.history.loadFailed")}</p>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={recordsLoading}
+              onClick={() => void loadRecords()}
+            >
+              {getImportLabel("import.history.retry")}
+            </Button>
+          </div>
+        ) : null}
+        {records.length === 0 && !recordsError ? (
           <SettingsCard divided={false} className="p-4">
             <p className="text-sm text-muted-foreground">
               {recordsLoading
@@ -260,7 +287,8 @@ export function ImportSettings() {
                 expanded={expandedRecords.has(record.id)}
                 highlighted={highlightedRecords.has(record.id)}
                 onToggle={() => toggleRecord(record.id)}
-                onDelete={() => void handleDelete(record.id)}
+                deleting={!!deletingRecords[record.id]}
+                onDelete={() => setDeleteTarget(record.id)}
               />
             ))}
             {recordsCursor ? (
@@ -279,6 +307,39 @@ export function ImportSettings() {
           </div>
         )}
       </SettingsSection>
+      <Dialog
+        open={!!deleteTarget}
+        onOpenChange={(open) => {
+          if (!open && !deletingRecords[deleteTarget ?? ""]) setDeleteTarget(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{getImportLabel("import.history.deleteConfirmTitle")}</DialogTitle>
+            <DialogDescription>
+              {getImportLabel("import.history.deleteConfirmHint")}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              disabled={!!deletingRecords[deleteTarget ?? ""]}
+              onClick={() => setDeleteTarget(null)}
+            >
+              {getDataTransferLabel("settings.data.import.cancel")}
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={!!deletingRecords[deleteTarget ?? ""]}
+              onClick={() => {
+                if (deleteTarget) void handleDelete(deleteTarget);
+              }}
+            >
+              {getImportLabel("import.history.delete")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <ImportSourceDialog
         summary={dialogSummary}

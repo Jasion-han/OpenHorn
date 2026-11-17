@@ -21,14 +21,15 @@ export interface ResolvedEditor {
 }
 
 export const EXTERNAL_EDITOR_STORAGE_KEY = "openhorn.externalEditor";
+export const EDITOR_DETECTION_TTL_MS = 30_000;
 
 export interface ExternalEditorState {
   preference: ExternalEditorPreference;
   detected: DetectedEditor[];
-  detectStatus: "idle" | "loading" | "done";
+  detectStatus: "idle" | "loading" | "done" | "error";
 
-  /** Runs editor detection once and caches the result; later calls are no-ops. */
-  detect: () => Promise<DetectedEditor[]>;
+  /** Share in-flight detection, cache successful results briefly; force refresh is explicit. */
+  detect: (force?: boolean) => Promise<DetectedEditor[]>;
   setPreference: (preference: ExternalEditorPreference) => void;
   /**
    * The editor to launch, or null when nothing is chosen. A "detected"
@@ -95,11 +96,14 @@ export function createExternalEditorStore(options?: {
   storage?: EditorPreferenceStorage | null;
   detectEditors?: () => Promise<DetectedEditor[]>;
   openFile?: typeof openWorkspaceFile;
+  now?: () => number;
 }) {
   const storage = options?.storage === undefined ? defaultStorage() : options.storage;
   const detectEditors = options?.detectEditors ?? externalEditorsDetect;
   const openFile = options?.openFile ?? openWorkspaceFile;
   let detectPromise: Promise<DetectedEditor[]> | null = null;
+  let lastSuccessAt: number | null = null;
+  const now = options?.now ?? Date.now;
 
   const readPreference = (): ExternalEditorPreference => {
     try {
@@ -121,16 +125,28 @@ export function createExternalEditorStore(options?: {
     detected: [],
     detectStatus: "idle",
 
-    detect: () => {
+    detect: (force = false) => {
       if (detectPromise) return detectPromise;
+      const age = lastSuccessAt === null ? Infinity : now() - lastSuccessAt;
+      if (!force && get().detectStatus === "done" && age >= 0 && age < EDITOR_DETECTION_TTL_MS)
+        return Promise.resolve(get().detected);
       set({ detectStatus: "loading" });
-      detectPromise = detectEditors()
-        .catch(() => [] as DetectedEditor[])
+      const run = Promise.resolve()
+        .then(detectEditors)
         .then((detected) => {
+          lastSuccessAt = now();
           set({ detected, detectStatus: "done" });
           return detected;
+        })
+        .catch(() => {
+          set({ detectStatus: "error" });
+          return get().detected;
+        })
+        .finally(() => {
+          if (detectPromise === run) detectPromise = null;
         });
-      return detectPromise;
+      detectPromise = run;
+      return run;
     },
 
     setPreference: (preference) => {

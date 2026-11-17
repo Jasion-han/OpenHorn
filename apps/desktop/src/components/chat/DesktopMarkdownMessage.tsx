@@ -11,8 +11,6 @@ import {
 } from "react";
 import type { Components } from "react-markdown";
 import ReactMarkdown from "react-markdown";
-import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
-import { oneDark, oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import { captureLocalPathScrollAnchor } from "../../lib/chatScrollAnchor";
@@ -30,6 +28,7 @@ import { useExternalEditorStore } from "../../stores/externalEditorStore";
 import { usePreviewPanelStore } from "../../stores/previewPanelStore";
 import { resolveProjectRootForConversation } from "../../stores/projectStore";
 import { useSidecarStore } from "../../stores/sidecarStore";
+import { DeferredSyntaxCode } from "./DeferredSyntaxCode";
 import { DesktopLocalPathLink, LocalPathLinkContext } from "./DesktopLocalPathLink";
 import styles from "./desktop-markdown.module.css";
 import { HtmlUiBlock } from "./genui/HtmlUiBlock";
@@ -124,7 +123,7 @@ const CODE_CUSTOM_STYLE: React.CSSProperties = {
   lineHeight: 1.5,
 };
 
-// Small blocks highlight synchronously on the first frame: their Prism
+// Once the renderer is cached, small blocks highlight synchronously: their Prism
 // tokenize cost is negligible, so deferring them only produces a visible
 // plain-text -> colored flash. Only large blocks keep the "placeholder then
 // idle highlight" path that keeps conversation switching smooth. Line count is
@@ -221,7 +220,6 @@ type CodeBlockProps = {
   label: string;
   lineCount: number;
   isDark: boolean;
-  syntaxTheme: Record<string, React.CSSProperties>;
   codeProps: React.ComponentPropsWithoutRef<"code">;
 };
 
@@ -232,11 +230,11 @@ function CodeBlockImpl({
   accent,
   label,
   lineCount,
-  syntaxTheme,
+  isDark,
   codeProps,
 }: CodeBlockProps) {
   const showLineNumbers = lineCount > 1;
-  // Small blocks highlight on the first frame (no flash); large blocks render
+  // Cached small blocks highlight immediately; the first renderer load and large blocks render
   // the lightweight plain-text placeholder first and schedule the heavy Prism
   // tokenize for the next idle slice via startTransition. The props that decide
   // this (codeString/lineCount) are stable for a given block, so the lazy
@@ -254,6 +252,30 @@ function CodeBlockImpl({
     });
   }, [highlighted]);
 
+  const placeholder = (
+    <div className={styles.codeScroll} style={CODE_CUSTOM_STYLE}>
+      <code className={className} style={{ fontFamily: CODE_FONT_FAMILY }} {...codeProps}>
+        {showLineNumbers
+          ? codeString.split("\n").map((line, index, lines) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: line order is stable
+              <Fragment key={index}>
+                <span>
+                  <span
+                    className="comment linenumber react-syntax-highlighter-line-number"
+                    style={PLACEHOLDER_LINE_NUMBER_STYLE}
+                  >
+                    {index + 1}
+                  </span>
+                  {line}
+                </span>
+                {index < lines.length - 1 ? "\n" : null}
+              </Fragment>
+            ))
+          : codeString}
+      </code>
+    </div>
+  );
+
   return (
     <div className={styles.codeBlock} style={{ "--code-accent": accent } as React.CSSProperties}>
       <div className={styles.codeHeader}>
@@ -266,45 +288,20 @@ function CodeBlockImpl({
         <CopyButton code={codeString} />
       </div>
       {highlighted ? (
-        <SyntaxHighlighter
-          className={styles.codeScroll}
-          style={syntaxTheme}
+        <DeferredSyntaxCode
+          codeString={codeString}
+          className={className}
           language={language}
-          PreTag="div"
+          isDark={isDark}
           showLineNumbers={showLineNumbers}
-          wrapLongLines={false}
           customStyle={CODE_CUSTOM_STYLE}
           lineNumberStyle={LINE_NUMBER_STYLE}
-          codeTagProps={{
-            className,
-            style: { fontFamily: CODE_FONT_FAMILY },
-            ...codeProps,
-          }}
-        >
-          {codeString}
-        </SyntaxHighlighter>
+          fontFamily={CODE_FONT_FAMILY}
+          codeProps={codeProps}
+          fallback={placeholder}
+        />
       ) : (
-        <div className={styles.codeScroll} style={CODE_CUSTOM_STYLE}>
-          <code className={className} style={{ fontFamily: CODE_FONT_FAMILY }} {...codeProps}>
-            {showLineNumbers
-              ? codeString.split("\n").map((line, index, lines) => (
-                  // biome-ignore lint/suspicious/noArrayIndexKey: line order is stable
-                  <Fragment key={index}>
-                    <span>
-                      <span
-                        className="comment linenumber react-syntax-highlighter-line-number"
-                        style={PLACEHOLDER_LINE_NUMBER_STYLE}
-                      >
-                        {index + 1}
-                      </span>
-                      {line}
-                    </span>
-                    {index < lines.length - 1 ? "\n" : null}
-                  </Fragment>
-                ))
-              : codeString}
-          </code>
-        </div>
+        placeholder
       )}
     </div>
   );
@@ -361,11 +358,6 @@ function DesktopMarkdownMessageImpl({
       window.removeEventListener(THEME_MODE_CHANGE_EVENT, compute);
     };
   }, []);
-
-  const syntaxTheme = useMemo(
-    () => (isDark ? oneDark : oneLight) as unknown as Record<string, React.CSSProperties>,
-    [isDark],
-  );
 
   type CodeProps = React.ComponentPropsWithoutRef<"code"> & { inline?: boolean; node?: unknown };
   type PreProps = React.ComponentPropsWithoutRef<"pre"> & { node?: unknown };
@@ -537,7 +529,6 @@ function DesktopMarkdownMessageImpl({
               label={langMeta.label}
               lineCount={codeString.split("\n").length}
               isDark={isDark}
-              syntaxTheme={syntaxTheme}
               codeProps={props}
             />
           );
@@ -573,7 +564,6 @@ function DesktopMarkdownMessageImpl({
               label={langMeta.label}
               lineCount={lineCount}
               isDark={isDark}
-              syntaxTheme={syntaxTheme}
               codeProps={props}
             />
           );
@@ -595,7 +585,7 @@ function DesktopMarkdownMessageImpl({
         return <>{children}</>;
       },
     }),
-    [syntaxTheme, isDark],
+    [isDark],
   );
 
   return (

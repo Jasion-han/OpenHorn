@@ -32,6 +32,20 @@ const DETECTED: DetectedEditor[] = [
 const detectEditors = async () => DETECTED;
 
 describe("external editor store", () => {
+  test("failed detection can be retried without restarting the app", async () => {
+    let calls = 0;
+    const store = createExternalEditorStore({
+      storage: null,
+      detectEditors: async () => {
+        if (++calls === 1) throw new Error("temporary failure");
+        return DETECTED;
+      },
+    });
+    await store.getState().detect();
+    await store.getState().detect();
+    expect(calls).toBe(2);
+    expect(store.getState().detected).toEqual(DETECTED);
+  });
   test("starts unset with nothing detected", () => {
     const store = createExternalEditorStore({ storage: memoryStorage(), detectEditors });
     expect(store.getState().preference).toBe(null);
@@ -125,7 +139,34 @@ describe("external editor store", () => {
     });
     const detected = await store.getState().detect();
     expect(detected).toHaveLength(0);
-    expect(store.getState().detectStatus).toBe("done");
+    expect(store.getState().detectStatus).toBe("error");
+  });
+
+  test("successful scans expire, explicit refresh bypasses cache and failed refresh retains usable results", async () => {
+    let time = 0,
+      calls = 0,
+      fail = false;
+    const store = createExternalEditorStore({
+      storage: null,
+      now: () => time,
+      detectEditors: async () => {
+        calls++;
+        if (fail) throw new Error("temporary");
+        return DETECTED;
+      },
+    });
+    await store.getState().detect();
+    await store.getState().detect();
+    expect(calls).toBe(1);
+    time = 31_000;
+    await store.getState().detect();
+    expect(calls).toBe(2);
+    await store.getState().detect(true);
+    expect(calls).toBe(3);
+    fail = true;
+    await store.getState().detect(true);
+    expect(store.getState().detected).toEqual(DETECTED);
+    expect(store.getState().detectStatus).toBe("error");
   });
 
   test("works without any storage", () => {

@@ -64,6 +64,7 @@ import { useProjectStore } from "../../stores/projectStore";
 import { useScheduledTaskStore } from "../../stores/scheduledTaskStore";
 import { useWorkbenchStore } from "../../stores/workbenchStore";
 import type { Conversation } from "../../types/chat";
+import { SidebarConversationGroups } from "./SidebarConversationGroups";
 import { UnifiedSearchResults } from "./UnifiedSearchResults";
 
 // The shortcut hint next to the new-conversation button. The handler accepts both
@@ -157,6 +158,7 @@ const ConversationRow = memo(
     onTogglePin,
     onMoveToProject,
     onDelete,
+    onMenuOpenChange,
     pinLabel,
   }: {
     conversation: Conversation;
@@ -172,6 +174,7 @@ const ConversationRow = memo(
     onTogglePin: () => void;
     onMoveToProject: (projectId: string | null) => void;
     onDelete: () => void;
+    onMenuOpenChange: (open: boolean) => void;
     pinLabel: string;
   }) {
     const moveTargets = projects.filter((project) => project.id !== conversation.projectId);
@@ -201,7 +204,7 @@ const ConversationRow = memo(
         <span className="min-w-0 flex-1 truncate">
           {displayConversationTitle(conversation.title)}
         </span>
-        <DropdownMenu>
+        <DropdownMenu onOpenChange={onMenuOpenChange}>
           <DropdownMenuTrigger asChild onClick={(event) => event.stopPropagation()}>
             <Button
               variant="ghost"
@@ -308,6 +311,11 @@ export function DesktopLeftSidebar() {
   const [pinnedOpen, setPinnedOpen] = useState(true);
   const [taskGroupsOpen, setTaskGroupsOpen] = useState<Record<string, boolean>>({});
   const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [openConversationMenuId, setOpenConversationMenuId] = useState<string | null>(null);
+  const retainedConversationIds = useMemo(
+    () => [openConversationMenuId, renamingId].filter((id): id is string => !!id),
+    [openConversationMenuId, renamingId],
+  );
   const [renameValue, setRenameValue] = useState("");
   const [pendingDelete, setPendingDelete] = useState<Conversation | null>(null);
   const [projectRenamingId, setProjectRenamingId] = useState<string | null>(null);
@@ -355,6 +363,8 @@ export function DesktopLeftSidebar() {
   const backendBase = getDesktopBackendBase();
   const recentRuns = useScheduledTaskStore((state) => state.runs);
   const loadRuns = useScheduledTaskStore((state) => state.loadRuns);
+  const scheduledTasks = useScheduledTaskStore((state) => state.tasks);
+  const loadTasks = useScheduledTaskStore((state) => state.loadTasks);
 
   const [searchResults, setSearchResults] = useState<UnifiedSearchResult[] | null>(null);
   const searchNavigation = useRef(0);
@@ -362,10 +372,14 @@ export function DesktopLeftSidebar() {
   const [searchRetry, setSearchRetry] = useState(0);
 
   useEffect(() => {
-    if (!serverConnection.ready) return;
-    const timer = setInterval(() => void loadRuns(), 30_000);
+    void loadRuns();
+    void loadTasks();
+    const timer = setInterval(() => {
+      void loadRuns();
+      void loadTasks();
+    }, 30_000);
     return () => clearInterval(timer);
-  }, [loadRuns, serverConnection.ready]);
+  }, [loadRuns, loadTasks]);
 
   // ⌘N / Ctrl+N — the shortcut advertised next to the new-conversation button.
   useEffect(() => {
@@ -658,9 +672,15 @@ export function DesktopLeftSidebar() {
     () => partitionByProject(filteredConversations, projects),
     [filteredConversations, projects],
   );
-  const pinned = plain.filter((conversation) => conversation.isPinned);
-  const rest = plain.filter((conversation) => !conversation.isPinned);
-  const groups = groupByCreatedAt(rest, today);
+  const pinned = useMemo(() => plain.filter((conversation) => conversation.isPinned), [plain]);
+  const groups = useMemo(
+    () =>
+      groupByCreatedAt(
+        plain.filter((conversation) => !conversation.isPinned),
+        today,
+      ),
+    [plain, today],
+  );
 
   // One place decides how a conversation row renders (inline rename vs. row), so
   // the plain, pinned and project lists cannot drift apart in menu items.
@@ -698,6 +718,11 @@ export function DesktopLeftSidebar() {
         onTogglePin={() => void handleTogglePin(conversation)}
         onMoveToProject={(projectId) => void handleMoveToProject(conversation, projectId)}
         onDelete={() => setPendingDelete(conversation)}
+        onMenuOpenChange={(open) =>
+          setOpenConversationMenuId((current) =>
+            open ? conversation.id : current === conversation.id ? null : current,
+          )
+        }
         pinLabel={getSidebarLabel(
           conversation.isPinned ? "sidebar.action.unpin" : "sidebar.action.pin",
         )}
@@ -706,17 +731,14 @@ export function DesktopLeftSidebar() {
 
   const taskGroups = useMemo(() => {
     const map = new Map<string, { taskTitle: string; runs: typeof recentRuns }>();
+    for (const task of scheduledTasks) {
+      if (task.enabled) map.set(task.id, { taskTitle: task.title, runs: [] });
+    }
     for (const run of recentRuns) {
-      const key = run.taskId;
-      const existing = map.get(key);
-      if (existing) {
-        existing.runs.push(run);
-      } else {
-        map.set(key, { taskTitle: run.taskTitle ?? run.taskId.slice(0, 8), runs: [run] });
-      }
+      map.get(run.taskId)?.runs.push(run);
     }
     return Array.from(map.entries());
-  }, [recentRuns]);
+  }, [recentRuns, scheduledTasks]);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -1026,7 +1048,7 @@ export function DesktopLeftSidebar() {
                           ) : (
                             <div
                               className={cn(
-                                "group flex items-center gap-1 rounded-[10px] border border-transparent py-[6px] pl-1.5 pr-1 text-sm transition-colors duration-100 titlebar-no-drag",
+                                "group flex items-center gap-1 rounded-[10px] border border-transparent pl-1.5 pr-1 text-sm transition-colors duration-100 titlebar-no-drag",
                                 isScope
                                   ? "bg-foreground/[0.08] text-foreground"
                                   : "text-foreground/80 hover:bg-foreground/[0.04] hover:text-foreground",
@@ -1035,29 +1057,28 @@ export function DesktopLeftSidebar() {
                             >
                               <button
                                 type="button"
-                                className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground/60 hover:text-foreground"
-                                onClick={() => toggleProjectExpanded(project.id)}
+                                className="flex min-w-0 flex-1 items-center gap-1 py-2 text-left"
+                                onClick={() => {
+                                  if (open) toggleProjectExpanded(project.id);
+                                  else handleSelectProject(project);
+                                }}
                                 aria-expanded={open}
                               >
-                                {project.isStarred ? (
-                                  <Star
-                                    size={13}
-                                    className="shrink-0 fill-amber-400 text-amber-400"
-                                  />
-                                ) : open ? (
-                                  <FolderOpen
-                                    size={13}
-                                    className="shrink-0 text-muted-foreground"
-                                  />
-                                ) : (
-                                  <Folder size={13} className="shrink-0 text-muted-foreground" />
-                                )}
-                              </button>
-                              <button
-                                type="button"
-                                className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
-                                onClick={() => handleSelectProject(project)}
-                              >
+                                <span className="flex h-5 w-5 shrink-0 items-center justify-center text-muted-foreground/60">
+                                  {project.isStarred ? (
+                                    <Star
+                                      size={13}
+                                      className="shrink-0 fill-amber-400 text-amber-400"
+                                    />
+                                  ) : open ? (
+                                    <FolderOpen
+                                      size={13}
+                                      className="shrink-0 text-muted-foreground"
+                                    />
+                                  ) : (
+                                    <Folder size={13} className="shrink-0 text-muted-foreground" />
+                                  )}
+                                </span>
                                 <span className="min-w-0 flex-1 truncate font-medium">
                                   {project.name}
                                 </span>
@@ -1143,14 +1164,11 @@ export function DesktopLeftSidebar() {
                     </p>
                   )}
 
-                  {groups.map((group) => (
-                    <div key={group.label}>
-                      <p className="px-3 pb-1 pt-2 text-[11px] font-medium text-muted-foreground/80">
-                        {getSidebarLabel(group.label)}
-                      </p>
-                      {group.items.map((conversation) => renderConversation(conversation))}
-                    </div>
-                  ))}
+                  <SidebarConversationGroups
+                    groups={groups}
+                    renderConversation={renderConversation}
+                    retainedConversationIds={retainedConversationIds}
+                  />
 
                   {plain.length === 0 && (
                     <p className="py-8 text-center text-xs text-muted-foreground">

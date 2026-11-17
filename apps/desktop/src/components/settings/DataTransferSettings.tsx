@@ -1,5 +1,5 @@
 import { FileUp, Upload } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Button,
   Dialog,
@@ -11,11 +11,13 @@ import {
   SettingsCard,
   SettingsSection,
 } from "ui";
+import { saveAttachment } from "../../lib/attachmentPreview";
 import { dataTransferErrorMessage } from "../../lib/dataTransferError";
 import { formatDataTransferLabel, getDataTransferLabel } from "../../lib/i18n/agent";
 import { notifyError, notifySuccess, notifyWarning } from "../../lib/notify";
 import { createServerApi } from "../../lib/serverApi";
 import { isDesktopRuntime } from "../../lib/tauriBridge";
+import { useDesktopShellStore } from "../../stores/desktopShellStore";
 import type { ExportEstimate } from "../../types/chat";
 import { ImportSettings } from "./ImportSettings";
 
@@ -35,42 +37,66 @@ export function DataTransferSettings() {
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [exportType, setExportType] = useState<"backup" | "dti">("backup");
   const [exporting, setExporting] = useState(false);
+  const [exportNotes, setExportNotes] = useState<string[]>([]);
+  const submission = useRef(false);
+  const completedExport = useRef(false);
+  const estimatingRequest = useRef(0);
+  const view = useDesktopShellStore((state) => state.activeView);
+  const tab = useDesktopShellStore((state) => state.settingsTab);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: hidden settings tabs must not reopen an estimate dialog later
+  useEffect(() => {
+    estimatingRequest.current++;
+    setEstimating(false);
+    setExportDialogOpen(false);
+    return () => {
+      estimatingRequest.current++;
+    };
+  }, [view, tab]);
 
   const handleExportBackup = useCallback(async () => {
+    const request = ++estimatingRequest.current;
     setEstimating(true);
     try {
       const est = await api.dataTransfer.estimateExport();
+      if (request !== estimatingRequest.current) return;
       setEstimate(est);
+      completedExport.current = false;
       setExportType("backup");
       setExportDialogOpen(true);
     } catch (err) {
+      if (request !== estimatingRequest.current) return;
       notifyError(
         getDataTransferLabel("settings.data.export.failedTitle"),
         dataTransferErrorMessage(err),
       );
     } finally {
-      setEstimating(false);
+      if (request === estimatingRequest.current) setEstimating(false);
     }
   }, []);
 
   const handleExportDTI = useCallback(async () => {
+    const request = ++estimatingRequest.current;
     setEstimating(true);
     try {
       const est = await api.dataTransfer.estimateExport();
+      if (request !== estimatingRequest.current) return;
       setEstimate(est);
+      completedExport.current = false;
       setExportType("dti");
       setExportDialogOpen(true);
     } catch (err) {
+      if (request !== estimatingRequest.current) return;
       notifyError(
         getDataTransferLabel("settings.data.export.failedTitle"),
         dataTransferErrorMessage(err),
       );
     } finally {
-      setEstimating(false);
+      if (request === estimatingRequest.current) setEstimating(false);
     }
   }, []);
 
   const confirmExport = useCallback(async () => {
+    if (submission.current || completedExport.current) return;
     if (!isDesktopRuntime()) {
       notifyWarning(
         getDataTransferLabel("settings.data.notify.cancelled"),
@@ -79,18 +105,54 @@ export function DataTransferSettings() {
       return;
     }
 
+    submission.current = true;
+    const request = estimatingRequest.current;
     setExporting(true);
+    setExportNotes([]);
     try {
-      const { pickExportDir } = await import("../../lib/tauriBridge");
-      const dir = await pickExportDir();
-      if (!dir) {
-        setExportDialogOpen(false);
-        setExporting(false);
-        return;
-      }
-
       if (exportType === "backup") {
+        const { pickExportDir } = await import("../../lib/tauriBridge");
+        const dir = await pickExportDir();
+        if (request !== estimatingRequest.current) return;
+        if (!dir) {
+          completedExport.current = true;
+          setExportDialogOpen(false);
+          return;
+        }
         const result = await api.dataTransfer.exportBackup(dir);
+        const manifest = result.manifest as {
+          attachmentFiles?: { missing?: unknown[] };
+          configuration?: { mcpRequiresSetup?: unknown[]; omittedSettings?: number };
+        };
+        const notes: string[] = [];
+        if (
+          Array.isArray(manifest.attachmentFiles?.missing) &&
+          manifest.attachmentFiles.missing.length
+        ) {
+          notes.push(
+            formatDataTransferLabel("settings.data.export.missingFiles", {
+              count: manifest.attachmentFiles.missing.length,
+            }),
+          );
+        }
+        if (
+          Array.isArray(manifest.configuration?.mcpRequiresSetup) &&
+          manifest.configuration.mcpRequiresSetup.length
+        ) {
+          notes.push(
+            formatDataTransferLabel("settings.data.export.connectorsNeedSetup", {
+              count: manifest.configuration.mcpRequiresSetup.length,
+            }),
+          );
+        }
+        const omitted = manifest.configuration?.omittedSettings;
+        if (typeof omitted === "number" && Number.isSafeInteger(omitted) && omitted > 0) {
+          notes.push(
+            formatDataTransferLabel("settings.data.export.omittedSettings", { count: omitted }),
+          );
+        }
+        setExportNotes(notes);
+        completedExport.current = true;
         setExportDialogOpen(false);
         notifySuccess(
           getDataTransferLabel("settings.data.export.successTitle"),
@@ -100,26 +162,20 @@ export function DataTransferSettings() {
         );
       } else {
         const data = await api.dataTransfer.exportDTI();
-        // Write the DTI JSON to the chosen directory via the server's backup
-        // endpoint is not suitable here — instead we write it locally. Since
-        // DTI export returns JSON data, we send it back to the server for
-        // file writing by using the backup endpoint with the dir.
-        // Actually, the DTI data is already fetched. We need to save it.
-        // Use a Blob download approach as a fallback.
+        if (request !== estimatingRequest.current) return;
         const jsonStr = JSON.stringify(data, null, 2);
         const blob = new Blob([jsonStr], { type: "application/json" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `openhorn-conversations-${new Date().toISOString().slice(0, 10)}.json`;
-        a.click();
-        URL.revokeObjectURL(url);
-
+        const path = await saveAttachment(
+          blob,
+          `openhorn-conversations-${new Date().toISOString().slice(0, 10)}.json`,
+        );
+        completedExport.current = true;
         setExportDialogOpen(false);
+        if (!path) return;
         notifySuccess(
           getDataTransferLabel("settings.data.export.successTitle"),
           formatDataTransferLabel("settings.data.export.successBody", {
-            path: a.download,
+            path,
           }),
         );
       }
@@ -129,6 +185,7 @@ export function DataTransferSettings() {
         dataTransferErrorMessage(err),
       );
     } finally {
+      submission.current = false;
       setExporting(false);
     }
   }, [exportType]);
@@ -188,11 +245,27 @@ export function DataTransferSettings() {
         </SettingsCard>
       </SettingsSection>
 
+      {exportNotes.length > 0 ? (
+        <output
+          aria-live="polite"
+          className="block rounded-lg border p-4 text-sm text-muted-foreground space-y-2"
+        >
+          {exportNotes.map((note) => (
+            <p key={note}>{note}</p>
+          ))}
+        </output>
+      ) : null}
+
       {/* Import: local sources + backup file row + needs-action + history */}
       <ImportSettings />
 
       {/* Export confirmation dialog */}
-      <Dialog open={exportDialogOpen} onOpenChange={setExportDialogOpen}>
+      <Dialog
+        open={exportDialogOpen}
+        onOpenChange={(open) => {
+          if (!submission.current) setExportDialogOpen(open);
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{getDataTransferLabel("settings.data.export.confirmTitle")}</DialogTitle>
@@ -206,12 +279,17 @@ export function DataTransferSettings() {
           {estimate ? (
             <div className="py-2">
               <p className="text-sm text-muted-foreground">
-                {formatDataTransferLabel("settings.data.export.estimateInfo", {
-                  conversations: estimate.conversations,
-                  messages: estimate.messages,
-                  attachments: estimate.attachments,
-                  size: formatBytes(estimate.estimatedBytes),
-                })}
+                {formatDataTransferLabel(
+                  exportType === "backup"
+                    ? "settings.data.export.estimateInfo"
+                    : "settings.data.export.estimateDtiInfo",
+                  {
+                    conversations: estimate.conversations,
+                    messages: estimate.messages,
+                    attachments: estimate.attachments,
+                    size: formatBytes(estimate.estimatedBytes),
+                  },
+                )}
               </p>
             </div>
           ) : null}

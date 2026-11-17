@@ -644,9 +644,9 @@ function LibrarySession({ userId }: { userId: string }) {
               document={document}
               errorMessage={error}
               onClose={() => setDialog(null)}
-              onConfirm={() =>
+              onConfirm={(connectionToken) =>
                 act(async (valid) => {
-                  const result = await libraryApi.ocr(document.id);
+                  const result = await libraryApi.ocr(document.id, connectionToken);
                   if (!valid()) return;
                   setDocument((current) =>
                     current?.id === result.document.id

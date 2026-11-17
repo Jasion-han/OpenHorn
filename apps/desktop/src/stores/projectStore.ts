@@ -106,6 +106,8 @@ async function defaultPickFolder(): Promise<string | null> {
 export function createProjectStore(deps: ProjectStoreDeps = {}) {
   const api = deps.api ?? createServerApi();
   const pickFolder = deps.pickFolder ?? defaultPickFolder;
+  let revision = 0;
+  let loadRequest = 0;
 
   return create<ProjectState>((set, get) => ({
     projects: [],
@@ -115,12 +117,17 @@ export function createProjectStore(deps: ProjectStoreDeps = {}) {
     error: null,
 
     async loadProjects() {
+      const request = ++loadRequest;
+      const baseline = revision;
       set({ loading: true, error: null });
       try {
         const { projects } = await api.projects.list();
+        if (request !== loadRequest || baseline !== revision) return;
         set({ projects: sortProjects(projects.map(hydrate)), loading: false });
       } catch (error) {
-        set({ loading: false, error: toErrorMessage(error) });
+        if (request === loadRequest && baseline === revision) set({ error: toErrorMessage(error) });
+      } finally {
+        if (request === loadRequest) set({ loading: false });
       }
     },
 
@@ -133,6 +140,7 @@ export function createProjectStore(deps: ProjectStoreDeps = {}) {
     async addProject(input) {
       const { project } = await api.projects.create(input);
       const added = hydrate(project);
+      revision++;
       set((state) => {
         const known = state.projects.some((item) => item.id === added.id);
         const projects = known
@@ -152,6 +160,7 @@ export function createProjectStore(deps: ProjectStoreDeps = {}) {
       if (!nextName) return;
       const { project } = await api.projects.update(id, { name: nextName });
       const updated = hydrate(project);
+      revision++;
       set((state) => ({
         projects: sortProjects(
           state.projects.map((item) => (item.id === updated.id ? updated : item)),
@@ -164,6 +173,7 @@ export function createProjectStore(deps: ProjectStoreDeps = {}) {
       if (!current) return;
       const { project } = await api.projects.update(id, { isStarred: !current.isStarred });
       const updated = hydrate(project);
+      revision++;
       set((state) => ({
         projects: sortProjects(
           state.projects.map((item) => (item.id === updated.id ? updated : item)),
@@ -174,6 +184,7 @@ export function createProjectStore(deps: ProjectStoreDeps = {}) {
     async removeProject(id) {
       const { owner, generation } = useConversationDraftStore.getState();
       await api.projects.delete(id);
+      revision++;
       // Mirror the server's delete semantics locally: the project's conversations
       // are gone, so drop them from the list right away; if one of them was open,
       // fall back to the welcome screen.

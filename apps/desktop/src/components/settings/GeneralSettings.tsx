@@ -1,4 +1,4 @@
-import { Pencil, ScrollText } from "lucide-react";
+import { Pencil, RefreshCw, ScrollText } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import {
   Badge,
@@ -54,6 +54,7 @@ export function GeneralSettings() {
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const editorPreference = useExternalEditorStore((state) => state.preference);
   const detectedEditors = useExternalEditorStore((state) => state.detected);
+  const editorDetectStatus = useExternalEditorStore((state) => state.detectStatus);
   const setEditorPreference = useExternalEditorStore((state) => state.setPreference);
   const detectEditors = useExternalEditorStore((state) => state.detect);
   const genUiEnabled = useGenUiStore((state) => state.enabled);
@@ -127,7 +128,7 @@ export function GeneralSettings() {
       >
         <SettingsCard divided={false} className="p-4">
           <div className="mb-4 flex items-center gap-3">
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-amber-100 text-xl font-bold text-stone-900">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-primary text-xl font-bold text-primary-foreground">
               {username?.charAt(0).toUpperCase() || "U"}
             </div>
             <div>
@@ -328,37 +329,59 @@ export function GeneralSettings() {
                 : getGeneralSettingsLabel("settings.general.editor.desktopOnly")
             }
           >
-            <Select
-              value={editorSelectValue}
-              onValueChange={handleEditorChange}
-              disabled={!desktop}
-            >
-              <SelectTrigger className="w-56">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={EDITOR_UNSET}>
-                  {getGeneralSettingsLabel("settings.general.editor.unset")}
-                </SelectItem>
-                {detectedEditors.map((editor) => (
-                  <SelectItem key={editor.id} value={`${EDITOR_DETECTED_PREFIX}${editor.id}`}>
-                    {editor.name}
+            <div className="flex flex-wrap items-center gap-2">
+              <Select
+                value={editorSelectValue}
+                onValueChange={handleEditorChange}
+                disabled={!desktop || editorDetectStatus === "loading"}
+              >
+                <SelectTrigger
+                  className="w-56"
+                  aria-label={getGeneralSettingsLabel("settings.general.editor.rowLabel")}
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={EDITOR_UNSET}>
+                    {getGeneralSettingsLabel("settings.general.editor.unset")}
                   </SelectItem>
-                ))}
-                {editorPreference?.kind === "custom" ? (
-                  <SelectItem value={EDITOR_CUSTOM}>
-                    {formatGeneralSettingsLabel("settings.general.editor.customCurrent", {
-                      name: editorPreference.name,
-                    })}
+                  {detectedEditors.map((editor) => (
+                    <SelectItem key={editor.id} value={`${EDITOR_DETECTED_PREFIX}${editor.id}`}>
+                      {editor.name}
+                    </SelectItem>
+                  ))}
+                  {editorPreference?.kind === "custom" ? (
+                    <SelectItem value={EDITOR_CUSTOM}>
+                      {formatGeneralSettingsLabel("settings.general.editor.customCurrent", {
+                        name: editorPreference.name,
+                      })}
+                    </SelectItem>
+                  ) : null}
+                  <SelectSeparator />
+                  <SelectItem value={EDITOR_PICK}>
+                    {getGeneralSettingsLabel("settings.general.editor.custom")}
                   </SelectItem>
-                ) : null}
-                <SelectSeparator />
-                <SelectItem value={EDITOR_PICK}>
-                  {getGeneralSettingsLabel("settings.general.editor.custom")}
-                </SelectItem>
-              </SelectContent>
-            </Select>
+                </SelectContent>
+              </Select>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                disabled={!desktop || editorDetectStatus === "loading"}
+                aria-label={getGeneralSettingsLabel("settings.general.editor.rescan")}
+                title={getGeneralSettingsLabel("settings.general.editor.rescan")}
+                onClick={() => void detectEditors(true)}
+              >
+                <RefreshCw
+                  className={editorDetectStatus === "loading" ? "animate-spin" : undefined}
+                />
+              </Button>
+            </div>
           </SettingsRow>
+          {editorDetectStatus === "error" ? (
+            <p role="alert" className="px-4 pb-4 text-xs text-destructive">
+              {getGeneralSettingsLabel("settings.general.editor.detectFailed")}
+            </p>
+          ) : null}
         </SettingsCard>
       </SettingsSection>
     </div>

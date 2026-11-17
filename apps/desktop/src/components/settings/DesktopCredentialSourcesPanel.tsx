@@ -10,6 +10,7 @@ import {
 import { formatImportLabel, getCredentialLabel } from "../../lib/i18n/agent";
 import { createServerApi, type ServerApi } from "../../lib/serverApi";
 import type { DetectedCredential } from "../../lib/sidecarClient";
+import { BACKEND_UP_EVENT } from "../../stores/backendStatusStore";
 import { importSourceFromClientLabel, useImportStore } from "../../stores/importStore";
 import { useSidecarStore } from "../../stores/sidecarStore";
 
@@ -141,8 +142,13 @@ export function DesktopCredentialSourcesPanel() {
     setLoading(false);
   }, [sidecarClient, sidecarStatus]);
 
+  // Mount scan, repeated after a server reconnect: opened while the server was
+  // down, the panel would otherwise keep the empty list for good.
   useEffect(() => {
-    scan();
+    void scan();
+    const onUp = () => void scan();
+    window.addEventListener(BACKEND_UP_EVENT, onUp);
+    return () => window.removeEventListener(BACKEND_UP_EVENT, onUp);
   }, [scan]);
 
   const handleTest = async (sourceId: string) => {
