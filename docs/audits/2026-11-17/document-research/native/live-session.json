@@ -1,0 +1,53 @@
+{
+  "date": "2026-11-17",
+  "codeCommit": "50912fc",
+  "research": {
+    "conversationTitle": "搜索接口对比复测",
+    "status": "completed",
+    "researchFlag": true,
+    "searchProviders": ["tavily", "tavily"],
+    "fetchCount": 1,
+    "savedAnswerCharacters": 586,
+    "reasoningSteps": 0,
+    "finalStep": "text",
+    "visibleSeconds": 37
+  },
+  "pdf": {
+    "conversationTitle": "分析PDF第二页柱图",
+    "mode": "chat",
+    "finishReason": null,
+    "answer": "左柱是橙红色，右柱是绿色。右柱更高；按图像中柱体高度估算，右柱约为左柱的 **1.8 倍**（大致比例 **1:1.8**）。",
+    "selectedPages": [2],
+    "attachments": [
+      {
+        "fileName": "synthetic-charts.pdf",
+        "fileType": "application/pdf",
+        "bytes": 899
+      },
+      {
+        "fileName": "synthetic-charts.pdf [page 2].jpg",
+        "fileType": "image/jpeg",
+        "bytes": 18331
+      }
+    ],
+    "originalBytesMatch": true,
+    "networkToggle": false
+  },
+  "rendererCommit": "2d14ab5",
+  "restartVerification": {
+    "researchReportRestored": true,
+    "pdfOriginalAndPageRestored": true,
+    "pdfAnswerRestored": true,
+    "cjkStrongRenderedWithoutLiteralStars": true,
+    "researchLabelRetained": true
+  },
+  "verificationTests": {
+    "shared": 134,
+    "adapters": 100,
+    "desktop": 769,
+    "sidecar": 406,
+    "server": 653,
+    "total": 2062,
+    "fail": 0
+  }
+}

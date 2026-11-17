@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 83
+- **Total Sessions**: 84
 - **Last Active**: 2026-11-17
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~195 | Active |
+| `journal-2.md` | ~217 | Active |
 | `journal-1.md` | ~1998 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 84 | 2026-11-17 | 全部代码提交与原生实测闭环 | - | `main` |
 | 83 | 2026-11-17 | 补齐 PDF 图文输入与深度研究 | - | `main` |
 | 82 | 2026-11-16 | 完成通用网页读取和Tavily来源标签原生闭环 | - | `main` |
 | 81 | 2026-11-16 | 确认Tavily切换正常并补搜索来源标记，待解锁实看 | - | `main` |

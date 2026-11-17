@@ -133,4 +133,7 @@
 - 采用本地 PDF.js 选页渲染，不把 OpenRouter Key 当作 DeepSeek Files API Key。页面图片通过现有 vision attachment 通道发送，Agent 只在账户隔离 IndexedDB 缓存可恢复时重试；停止或缓存缺失时要求重新附加。
 - 深度研究使用现有 Search/Fetch 和 OpenAI、Anthropic、Google API adapters，禁止 MCP、Shell、Skills、CLI/ACP 和 SDK resume。外层预算为唯一搜索4、页面6、工具轮12、总时限180秒；失败请求占预算，供应商内部操作不冒充计费上限，报告引用必须来自结构化证据。
 - 实际复现 Bun/Hono multipart 在二进制 NUL 处截断并丢失重复 `files` 字段；上传改用有界 busboy，并由客户端核对回执的数量、文件名、大小和 ID。该结论已通过 loopback HTTP、Hono、临时 SQLite 和四文件字节回归。
-- 证据：`docs/audits/2026-11-17/document-research/validation.json`。真实 Files/OCR/付费研究质量仍未测。
+- 证据：`docs/audits/2026-11-17/document-research/validation.json`；下午补充真实桌面请求见同目录 `native/live-session.md` 与 `native/live-session.json`。真实 Files/OCR 与研究质量统计仍未测。
+- 用户随后明确要求提交所有代码，已将此前产品 WIP、可靠性与迁移分批提交推送。真实桌面研究首轮失败暴露重复综合与草稿误展示；50912fc 改为证据/引用均校验的完整报告直接结束，未校验草稿不当正文，综合阶段仍受 180 秒总期限约束。复测会话“搜索接口对比复测”37 秒成功，两次 Tavily 搜索、一次 Fetch，SQLite completed，最终步骤为 text，重启恢复。
+- 真实 PDF 选第 2 页（无可提取文字），关闭联网，模型识别左橙红/右绿、右柱约 1.8 倍；PDF 原件和页图已保存，原件字节一致。两个成功会话保留供用户检查，样本不能推断供应商速度/长期质量保证。
+- 2d14ab5 移除会误匹配闭合星号的原始字符串 CJK 加粗预处理，改为只处理 Markdown 普通文本节点；代码、转义字面量、链接地址不参与修复。实机重启后两个真实回答的加粗正常，最终适用测试 2062/0。

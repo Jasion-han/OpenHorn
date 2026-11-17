@@ -193,3 +193,25 @@ Topics: [.trellis/research/tool-relay-feasibility.md](../../research/tool-relay-
 ### Status
 
 [OK] **Completed**
+
+
+## Session 84: 全部代码提交与原生实测闭环
+<!-- trellis-session: v=2 fp=3f23354aaa46870e -->
+
+**Date**: 2026-11-17
+**Task**: 全部代码提交与原生实测闭环
+**Package**: agent
+**Branch**: `main`
+
+### Summary
+
+按用户扩大授权提交全部产品代码和项目记忆迁移；真实研究发现重复综合并修复，Tavily 两搜一读 37 秒完成；PDF 第2页视觉正确，重启保存恢复；中文加粗 AST 修复；最终适用回归2062/0。
+Topics: [.trellis/research/tool-relay-feasibility.md](../../research/tool-relay-feasibility.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**
