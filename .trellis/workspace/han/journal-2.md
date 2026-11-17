@@ -241,3 +241,27 @@ Topics: [.trellis/research/tool-relay-feasibility.md](../../research/tool-relay-
 ### Next Steps
 
 - 用户解锁后验证联网关闭重试拒绝并保留报告，再恢复联网并验证检索中Stop保留报告；会话为核实官方搜索接口。
+
+
+## Session 86: 解锁后完成研究重试与停止原生验收
+<!-- trellis-session: v=2 fp=e801b6838b89d635 -->
+
+**Date**: 2026-11-17
+**Task**: 解锁后完成研究重试与停止原生验收
+**Package**: agent
+**Branch**: `main`
+
+### Summary
+
+在最终桌面包真实验证关闭联网后重新生成被拒绝且保留原报告，以及出现Search步骤后Stop恢复原报告；两次只读SQLite完整assistant行与基线完全一致。切换会话重开仍完整，已恢复本会话Web Search开启，未修改产品代码。更新原验收材料，保留真实验收会话。
+Topics: [.trellis/research/tool-relay-feasibility.md](../../research/tool-relay-feasibility.md)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1b043e9` | fix(chat): 重试时读取最新联网与权限设置 |
+
+### Status
+
+[OK] **Completed**

@@ -146,3 +146,9 @@
 - 原生再次复现关闭本会话联网后重试仍搜索，定位为 memo 化消息旧回调捕获过期策略；1b043e9 改为重试/编辑点击时读取当前会话联网与全局Full Access，并保留准备期研究标记。回归夹具使用真实会话更新链路；两种开关方向和权限参数均通过。长期边界同步到 `.trellis/spec/desktop/frontend/state-management.md`。
 - 当前自动化：Shared134、Adapters100、Desktop777、Sidecar410，1421/0；Chat真实组件69组、PDF/真实IndexedDB7组通过，类型/Biome/Sidecar与Tauri构建通过；Server源码未改、未重复全量测试。代码已分批推送main，证据 `docs/audits/2026-11-17/retry-cache/README.md` 与 `validation.json`。
 - **未完成原生验收**：最终实时策略修复包重启后，桌面工具持续cgWindowNotFound，系统只读确认 `CGSSessionScreenIsLocked=true`，应用/Sidecar存活且无对应崩溃；已发送一次需要解锁通知。尚需解锁后验证“联网关闭重试拒绝且保留报告”和“已有检索步骤后Stop保留报告”。当前该验收会话联网为false，先验此状态，随后恢复true验Stop。数据库只读对比确认保存报告仍为completed且与锁屏前基线完全一致；不能把浏览器回归或进程存活记成这两项原生通过。临时原始比较快照清理，正式证据和验收会话保留。
+
+### 解锁后的最终原生验收
+
+- 用户确认解锁后，实际打开最终 OpenHorn 桌面包，在“核实官方搜索接口”会话关闭联网状态点击重新生成：立即提示深度研究需要开启 Web Search、原成功报告已保留。正文、3步/31s与16:53时间戳仍在；只读SQLite逐字段确认 `id/content/agent_run/updated_at/finish_reason` 完全不变，assistant仍只有一行。
+- 恢复该会话联网开启后再次点击重新生成，实际看到“处理中 · 10s · 1 个步骤”及 Tavily 官方文档 Search 查询，再点击Stop。原成功报告恢复，同一完整assistant行再次与基线完全一致。切换到PDF会话再回来，原报告和来源仍在，Web Search为true。31s属于原报告，不能记为被停止重试的执行耗时。
+- 上述两项取代前段“未完成原生验收”的当前状态，锁屏记录保留为历史。未发现新产品问题，未修改产品代码；更新验收材料并保留真实会话，清理本次临时比较快照。证据仍为 `docs/audits/2026-11-17/retry-cache/README.md` 与 `validation.json`。

@@ -26,12 +26,25 @@
     "latestSavedReportStatus": "completed",
     "latestSavedReportCharacters": 205,
     "baselineSavedRowUnchangedSinceLock": true,
-    "webSearchCurrentlyEnabled": false,
-    "finalPolicyFixVerification": "blocked_screen_locked",
-    "pending": [
-      "native retry after switching Web Search off on the final build",
-      "native Stop after research tool progress preserves the old report on the final build"
-    ]
+    "webSearchCurrentlyEnabled": true,
+    "finalPolicyFixVerification": "passed_after_user_unlocked",
+    "offlineRetry": {
+      "rejectedWithWebSearchRequiredMessage": true,
+      "previousReportVisiblyRetained": true,
+      "savedAssistantRowExactlyUnchanged": true
+    },
+    "stopAfterToolProgress": {
+      "observedTool": "Search",
+      "observedProgressSeconds": 10,
+      "observedSteps": 1,
+      "clickedNativeStop": true,
+      "previousReportVisiblyRestored": true,
+      "savedAssistantRowExactlyUnchanged": true
+    },
+    "comparedAssistantFields": ["id", "content", "agent_run", "updated_at", "finish_reason"],
+    "assistantRowCountAfterEachAttempt": 1,
+    "reportRetainedAfterConversationReopen": true,
+    "pending": []
   },
   "verification": {
     "typecheck": "passed",

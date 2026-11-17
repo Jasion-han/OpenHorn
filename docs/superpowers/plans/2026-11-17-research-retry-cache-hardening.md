@@ -15,4 +15,4 @@
 
 - 技术报告中的代码 URL 与来源引用必须按 Markdown 语法区分，禁止用代码中的 URL 充当唯一来源；对应修复为 553bb9f。
 - 重试与编辑重发必须在点击时读取会话联网和全局 Full Access；不能信任 MessageBubble 保留的旧回调捕获值。已复现真实设置失效并以产品会话更新链路回归，修复为 1b043e9。
-- 现阶段自动化、构建和提交完成。最终实时策略原生验收待 macOS 解锁，详见 docs/audits/2026-11-17/retry-cache/README.md；不把锁屏后未执行的两项记录为通过。
+- 自动化、构建和代码提交已完成。用户解锁后，在最终桌面构建实际验证关闭联网重试被拒绝，以及出现真实 Search 步骤后点击 Stop；两次均恢复旧报告，SQLite 完整 assistant 行不变。切换会话重开后报告仍完整，Web Search 已恢复开启。详见 docs/audits/2026-11-17/retry-cache/README.md。
