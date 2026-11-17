@@ -37,7 +37,12 @@ export async function uploadAttachments(input: {
     throw new Error(await readErrorMessage(response, "Failed to upload attachments"));
   }
 
-  const result: unknown = await response.json();
+  let result: unknown;
+  try {
+    result = await response.json();
+  } catch {
+    throw new DocumentInputError("document_upload");
+  }
   const uploaded =
     result && typeof result === "object" && "attachments" in result ? result.attachments : null;
   if (
@@ -49,6 +54,11 @@ export async function uploadAttachments(input: {
         typeof item.id !== "string" ||
         !item.id ||
         typeof item.fileType !== "string" ||
+        !item.fileType ||
+        (["application/pdf", "image/png", "image/jpeg", "image/webp"].includes(
+          input.files[index].type,
+        ) &&
+          item.fileType !== input.files[index].type) ||
         item.fileName !== input.files[index].name ||
         item.fileSize !== input.files[index].size,
     ) ||
