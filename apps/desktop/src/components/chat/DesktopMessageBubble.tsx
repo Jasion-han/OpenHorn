@@ -99,7 +99,11 @@ function MessageBubbleImpl({
 }) {
   const isAssistant = message.role === "assistant";
   const isMessageStreaming = isStreaming;
-  const label = message.mode === "agent" ? "Agent" : "Chat";
+  const label = message.agentRun?.research
+    ? getChatLabel("chat.research.title")
+    : message.mode === "agent"
+      ? "Agent"
+      : "Chat";
   const badgeIcon = message.mode === "agent" ? <Bot size={12} /> : <MessageSquare size={12} />;
   const displayContent = isAssistant
     ? stripLeadingThematicBreak(sanitizeDisplayContent(message.content, message.citations))

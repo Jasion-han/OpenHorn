@@ -75,6 +75,56 @@ test("research executes only selected search/read tools, preserves provenance an
   expect(context.includes("Actual original evidence")).toBe(true);
 });
 
+test("a complete cited report finishes once without paying for a second synthesis", async () => {
+  const report = `Verified report [Evidence](${source})`;
+  const f = fixture([
+    call("web_search", { query: "first evidence" }),
+    call("web_search", { query: "second perspective" }),
+    call("web_fetch", { url: source }),
+    { text: report, toolCalls: [], finishReason: "stop" },
+  ]);
+  await runResearchAgent(f.input, f);
+  expect(f.requests).toHaveLength(4);
+  expect(f.requests.every((request) => request.tools.length > 0)).toBe(true);
+  expect(f.events.filter((event) => event.type === "text")).toEqual([
+    { type: "text", content: report },
+  ]);
+  expect(f.events.some((event) => event.type === "reasoning")).toBe(false);
+  expect(f.events.at(-2)?.type).toBe("text");
+  expect(f.events.at(-1)?.type).toBe("done");
+});
+
+test("an unverified decision draft never appears as a finished answer", async () => {
+  const f = fixture([
+    call("web_search", { query: "first evidence" }),
+    call("web_search", { query: "second perspective" }),
+    call("web_fetch", { url: source }),
+    { text: "Draft with invented https://never-fetched.invalid/", toolCalls: [] },
+  ]);
+  await runResearchAgent(f.input, f);
+  expect(f.requests.at(-1)?.tools).toHaveLength(0);
+  expect(f.events.some((event) => event.type === "reasoning")).toBe(false);
+  expect(f.events.filter((event) => event.type === "text")).toEqual([
+    { type: "text", content: `Report [Evidence](${source})` },
+  ]);
+  expect(f.events.at(-2)?.type).toBe("text");
+  expect((f.requests.at(-1)?.requestTimeoutMs ?? 0) > 30_000).toBe(true);
+});
+
+test("a truncated decision report is synthesized again before it can be published", async () => {
+  const f = fixture([
+    call("web_search", { query: "first evidence" }),
+    call("web_search", { query: "second perspective" }),
+    call("web_fetch", { url: source }),
+    { text: `Incomplete [Evidence](${source})`, toolCalls: [], finishReason: "length" },
+  ]);
+  await runResearchAgent(f.input, f);
+  expect(f.requests.at(-1)?.tools).toHaveLength(0);
+  expect(f.events.filter((event) => event.type === "text")).toEqual([
+    { type: "text", content: `Report [Evidence](${source})` },
+  ]);
+});
+
 for (const [name, override, code] of [
   ["network disabled", { webSearchEnabled: false }, "research_network_required"],
   ["CLI runtime", { protocol: "codex_cli" }, "research_unavailable"],

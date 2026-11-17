@@ -97,6 +97,18 @@ export function validResearchReportSources(text: string, sources: string[]): boo
   );
 }
 
+function isCompleteReport(
+  report: Awaited<ReturnType<ToolCallingAdapter["runToolCallingTurn"]>>,
+  sources: string[],
+): boolean {
+  return (
+    !!report.text.trim() &&
+    validResearchReportSources(report.text, sources) &&
+    !report.toolCalls.length &&
+    (!report.finishReason || ["stop", "end_turn", "STOP"].includes(report.finishReason))
+  );
+}
+
 /** Dedicated API runtime: no MCP, local tools, SDK session, or checkpoint is mounted. */
 export async function runResearchAgent(
   input: RunDirectAgentInput,
@@ -210,9 +222,17 @@ async function executeResearch(input: RunDirectAgentInput, deps: ResearchDepende
         signal,
       );
       checkDeadline();
-      if (turn.text) emit({ type: "reasoning", content: turn.text });
       if (!turn.toolCalls.length) {
-        if (successfulSearches >= 2 && [...sources.values()].some((e) => e.kind === "page")) break;
+        if (successfulSearches >= 2 && [...sources.values()].some((e) => e.kind === "page")) {
+          if (isCompleteReport(turn, [...sources.keys()])) {
+            // A verified answer is already complete. Regenerating it adds latency,
+            // another paid request and a second chance to fail after success.
+            phase(3);
+            emit({ type: "text", content: turn.text });
+            return;
+          }
+          break;
+        }
         messages.push({ role: "assistant", content: turn.text });
         messages.push({
           role: "user",
@@ -350,29 +370,22 @@ async function executeResearch(input: RunDirectAgentInput, deps: ResearchDepende
         noRetry: true,
         maxTokens: Math.min(4000, policy.maxOutputTokens),
         signal,
-        requestTimeoutMs: Math.max(
-          1,
-          Math.min(30_000, RESEARCH_LIMITS.milliseconds - (now() - started)),
-        ),
+        requestTimeoutMs: Math.max(1, RESEARCH_LIMITS.milliseconds - (now() - started)),
       }),
       signal,
     );
     checkDeadline();
-    const validCitations = validResearchReportSources(
-      report.text,
-      evidence.map((entry) => entry.url),
-    );
     if (
-      !report.text.trim() ||
-      !validCitations ||
-      report.toolCalls.length ||
-      (report.finishReason && !["stop", "end_turn", "STOP"].includes(report.finishReason))
+      !isCompleteReport(
+        report,
+        evidence.map((entry) => entry.url),
+      )
     ) {
       fail("research_failed");
       return;
     }
-    emit({ type: "text", content: report.text });
     phase(3);
+    emit({ type: "text", content: report.text });
   } catch {
     if (!input.abortController.signal.aborted)
       fail(
