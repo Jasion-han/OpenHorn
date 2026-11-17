@@ -232,6 +232,9 @@ importers:
       adapters:
         specifier: workspace:*
         version: link:../../packages/adapters
+      micromark:
+        specifier: 4.0.2
+        version: 4.0.2
       shared:
         specifier: workspace:*
         version: link:../../packages/shared

@@ -25,6 +25,7 @@
     "@earendil-works/pi-ai": "^0.74.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "adapters": "workspace:*",
+    "micromark": "4.0.2",
     "shared": "workspace:*",
     "turndown": "^7.2.4",
     "zod": "^3.25.0"

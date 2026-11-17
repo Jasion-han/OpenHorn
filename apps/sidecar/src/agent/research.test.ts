@@ -341,6 +341,49 @@ test("valid source URLs with Markdown parentheses and escapes remain valid, whil
   expect(validResearchReportSources(`[source](${url}) https://other.invalid`, [url])).toBe(false);
 });
 
+test("API URLs inside real Markdown code are report facts, not source citations", () => {
+  const citation = `[Evidence](${source})`;
+  expect(
+    validResearchReportSources(`Use POST \`https://api.example.com/search\`. ${citation}`, [
+      source,
+    ]),
+  ).toBe(true);
+  expect(
+    validResearchReportSources(
+      `\`\`\`http\nPOST https://api.example.com/search\n\`\`\`\n${citation}`,
+      [source],
+    ),
+  ).toBe(true);
+  expect(
+    validResearchReportSources(
+      `> ~~~http\n> POST https://api.example.com/search\n> ~~~\n\n${citation}`,
+      [source],
+    ),
+  ).toBe(true);
+  expect(
+    validResearchReportSources(`    POST https://api.example.com/search\n\n${citation}`, [source]),
+  ).toBe(true);
+});
+
+test("code cannot supply the only citation or hide unverified links outside code", () => {
+  expect(validResearchReportSources(`\`${source}\``, [source])).toBe(false);
+  expect(validResearchReportSources(`\`\`\`text\n${source}\n\`\`\``, [source])).toBe(false);
+  expect(
+    validResearchReportSources(
+      `\`https://api.example.com/search\` [Source](https://invented.invalid/)`,
+      [source],
+    ),
+  ).toBe(false);
+  expect(
+    validResearchReportSources(`\\\`https://invented.invalid/\\\` [Evidence](${source})`, [source]),
+  ).toBe(false);
+  expect(
+    validResearchReportSources(`unclosed \`https://invented.invalid/ [Evidence](${source})`, [
+      source,
+    ]),
+  ).toBe(false);
+});
+
 test("all early research failures emit one terminal transport event after the error", async () => {
   const f = fixture([], { webSearchEnabled: false });
   await runResearchAgent(f.input, f);
