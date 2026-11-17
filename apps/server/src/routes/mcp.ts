@@ -4,6 +4,7 @@ import {
   deleteMCPServer,
   getMCPServerById,
   getMCPServers,
+  McpInputError,
   McpInvalidConfigError,
   testMCPServer,
   updateMCPServer,
@@ -45,7 +46,11 @@ mcp.post("/servers", async (c) => {
     return c.json(
       {
         error: error instanceof Error ? error.message : "Failed to create server",
-        ...(error instanceof McpInvalidConfigError ? { errorCode: error.code } : {}),
+        ...(error instanceof McpInvalidConfigError
+          ? { errorCode: error.code }
+          : error instanceof McpInputError
+            ? { errorCode: error.errorCode }
+            : {}),
       },
       400,
     );
@@ -67,7 +72,11 @@ mcp.put("/servers/:id", async (c) => {
     return c.json(
       {
         error: message,
-        ...(error instanceof McpInvalidConfigError ? { errorCode: error.code } : {}),
+        ...(error instanceof McpInvalidConfigError
+          ? { errorCode: error.code }
+          : error instanceof McpInputError
+            ? { errorCode: error.errorCode }
+            : {}),
       },
       status,
     );

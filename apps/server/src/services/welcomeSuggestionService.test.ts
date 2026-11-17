@@ -151,3 +151,70 @@ describe("dropEchoes", () => {
     expect(dropEchoes(["Claude SDK 用法？"], ["claude sdk用法"])).toEqual([]);
   });
 });
+
+describe("automatic refresh coordination", () => {
+  test("backs off failed refreshes, retains stale cache, recovers after cooldown", async () => {
+    const { createWelcomeSuggestionService, SUGGESTION_RETRY_MS } = await import(
+      "./welcomeSuggestionService"
+    );
+    let now = 100_000,
+      calls = 0,
+      fail = true;
+    const cache = new Map<string, string>([
+      ["a", JSON.stringify({ items: ["old"], seed: "old", generatedAt: 0 })],
+    ]);
+    const service = createWelcomeSuggestionService({
+      now: () => now,
+      readContext: async () => ({ titles: ["unrelated context"], seed: "current" }),
+      readCache: async (id) => cache.get(id),
+      writeCache: async (id, value) => {
+        cache.set(id, value);
+      },
+      generate: async () => {
+        calls++;
+        if (fail) throw new Error("synthetic");
+        return ["new suggestion"];
+      },
+    });
+    expect((await service.getWelcomeSuggestions("a")).suggestions).toEqual(["old"]);
+    // Wait for the background attempt through the same per-user in-flight gate.
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+    for (let i = 0; i < 5; i++) await service.getWelcomeSuggestions("a");
+    expect(calls).toBe(1);
+    await service.refreshWelcomeSuggestions("b");
+    expect(calls).toBe(2);
+    fail = false;
+    now += SUGGESTION_RETRY_MS;
+    expect(await service.refreshWelcomeSuggestions("a")).toEqual(["new suggestion"]);
+    expect(await service.getWelcomeSuggestions("a")).toEqual({
+      suggestions: ["new suggestion"],
+      stale: false,
+    });
+    expect(calls).toBe(3);
+  });
+
+  test("deduplicates pending generation without blocking cached reads", async () => {
+    const { createWelcomeSuggestionService } = await import("./welcomeSuggestionService");
+    let resolve!: (items: string[]) => void;
+    let calls = 0;
+    const service = createWelcomeSuggestionService({
+      readContext: async () => ({ titles: ["context"], seed: "current" }),
+      readCache: async () => undefined,
+      writeCache: async () => {},
+      generate: () => {
+        calls++;
+        return new Promise((done) => {
+          resolve = done;
+        });
+      },
+    });
+    expect((await service.getWelcomeSuggestions("a")).stale).toBe(true);
+    expect((await service.getWelcomeSuggestions("a")).suggestions).toEqual([]);
+    expect(await service.refreshWelcomeSuggestions("a")).toEqual([]);
+    expect(calls).toBe(1);
+    resolve([]);
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+    await service.refreshWelcomeSuggestions("a");
+    expect(calls).toBe(1);
+  });
+});

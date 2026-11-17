@@ -108,3 +108,50 @@ test("mcp: user isolation (account-level)", async () => {
     await db.delete(users).where(and(eq(users.id, u2)));
   }
 });
+
+test("MCP config edits persist their transport and reject malformed config without changing it", async () => {
+  const userId = crypto.randomUUID();
+  await db.insert(users).values({
+    id: userId,
+    email: `${userId}@test.local`,
+    username: "config-fixture",
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
+  try {
+    const server = await createMCPServer(userId, {
+      name: "config",
+      type: "stdio",
+      config: { command: "fixture-only" },
+    });
+    await updateMCPServer(userId, server.id, {
+      type: "http",
+      config: { url: "https://fixture.invalid/mcp" },
+    });
+    expect((await getMCPServerById(userId, server.id))?.type).toBe("http");
+    for (const config of [null, [], "invalid", 42]) {
+      await expect(
+        updateMCPServer(userId, server.id, {
+          config: config as unknown as Record<string, unknown>,
+        }),
+      ).rejects.toThrow("JSON object");
+      await expect(
+        createMCPServer(userId, {
+          name: "bad",
+          type: "stdio",
+          config: config as unknown as Record<string, unknown>,
+        }),
+      ).rejects.toThrow("JSON object");
+    }
+    await expect(
+      updateMCPServer(userId, server.id, { isEnabled: "false" as unknown as boolean }),
+    ).rejects.toThrow("boolean");
+    expect((await getMCPServers(userId)).length).toBe(1);
+    expect((await getMCPServerById(userId, server.id))?.config).toEqual({
+      url: "https://fixture.invalid/mcp",
+    });
+  } finally {
+    await db.delete(mcpServers).where(eq(mcpServers.userId, userId));
+    await db.delete(users).where(eq(users.id, userId));
+  }
+});

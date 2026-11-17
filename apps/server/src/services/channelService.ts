@@ -1599,13 +1599,14 @@ export function resolveModelIdFromChannelItem(
 /**
  * If the primary channel's circuit breaker is open, try to find an
  * alternative enabled channel whose breaker is closed (or half_open).
- * Falls back to the primary when no alternative exists — this lets the
- * half_open probe mechanism work rather than returning null.
+ * Resolving a fallback must succeed before reserving its recovery probe.
+ * A blocked primary cannot be used as a last resort: that would bypass the
+ * single-probe guarantee exactly when all channels are unhealthy.
  */
 async function applyCircuitBreakerFallback(
   userId: string,
   primary: ResolvedChannel,
-): Promise<ResolvedChannel> {
+): Promise<ResolvedChannel | null> {
   if (isChannelAvailable(primary.channel.id)) {
     return primary;
   }
@@ -1618,10 +1619,8 @@ async function applyCircuitBreakerFallback(
   for (const ch of allChannels) {
     if (ch.id === primary.channel.id) continue;
     if (!ch.enabled || !ch.hasApiKey) continue;
-    if (!isChannelAvailable(ch.id)) continue;
-
     const fallback = await getResolvedChannelForUser(userId, ch.id);
-    if (fallback) {
+    if (fallback && isChannelAvailable(ch.id)) {
       console.warn(
         `[circuit-breaker] Falling back to channel ${ch.id} (${ch.name}), model=${fallback.modelId}`,
       );
@@ -1629,9 +1628,8 @@ async function applyCircuitBreakerFallback(
     }
   }
 
-  // All channels unavailable; return primary so half_open probe can work
-  console.warn("[circuit-breaker] No fallback channel available; returning primary");
-  return primary;
+  console.warn("[circuit-breaker] No available fallback channel");
+  return null;
 }
 
 export async function getResolvedChannelForConversation(

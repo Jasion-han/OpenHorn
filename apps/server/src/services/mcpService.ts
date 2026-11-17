@@ -2,7 +2,6 @@ import { mcpServers } from "db";
 import { and, eq } from "drizzle-orm";
 import { db } from "../db";
 import { generateId } from "../utils";
-import { isRecord } from "../utils/typeGuards";
 
 type McpServerRow = typeof mcpServers.$inferSelect;
 
@@ -30,10 +29,14 @@ export interface CreateMCPServerInput {
 
 export interface UpdateMCPServerInput {
   name?: string;
+  type?: string;
   config?: Record<string, unknown>;
   isEnabled?: boolean;
 }
 
+export class McpInputError extends Error {
+  readonly errorCode = "invalid_mcp_input";
+}
 export class McpInvalidConfigError extends Error {
   readonly code = "mcp_invalid_config";
 
@@ -41,6 +44,20 @@ export class McpInvalidConfigError extends Error {
     super("MCP config must be a JSON object");
     this.name = "McpInvalidConfigError";
   }
+}
+function objectInput(input: unknown): asserts input is Record<string, unknown> {
+  if (!input || typeof input !== "object" || Array.isArray(input))
+    throw new McpInvalidConfigError();
+}
+function textField(value: unknown, field: string, limit: number): string {
+  if (typeof value !== "string" || !value.trim() || value.trim().length > limit)
+    throw new McpInputError(`Invalid MCP ${field}`);
+  return value.trim();
+}
+function configField(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    throw new McpInvalidConfigError();
+  return value as Record<string, unknown>;
 }
 
 function parseConfig(config: string): Record<string, unknown> {
@@ -91,7 +108,10 @@ export async function createMCPServer(
   userId: string,
   input: CreateMCPServerInput,
 ): Promise<MCPServerItem> {
-  if (!isRecord(input) || !isRecord(input.config)) throw new McpInvalidConfigError();
+  objectInput(input);
+  const name = textField(input.name, "name", 160);
+  const type = textField(input.type, "type", 40);
+  const config = configField(input.config);
   const id = generateId();
   const now = new Date();
   const importedFrom =
@@ -103,9 +123,9 @@ export async function createMCPServer(
   await db.insert(mcpServers).values({
     id,
     userId,
-    name: input.name,
-    type: input.type,
-    config: JSON.stringify(input.config),
+    name,
+    type,
+    config: JSON.stringify(config),
     isEnabled: true,
     importedFrom,
     importedAt,
@@ -116,9 +136,9 @@ export async function createMCPServer(
   return {
     id,
     userId,
-    name: input.name,
-    type: input.type,
-    config: input.config,
+    name,
+    type,
+    config,
     isEnabled: true,
     importedFrom,
     importedAt,
@@ -142,17 +162,17 @@ export async function updateMCPServer(
     throw new Error("MCP Server not found");
   }
 
-  // Keep the ownership 404 above; invalid supplied configs must never reach a write.
-  if (!isRecord(input) || (Object.hasOwn(input, "config") && !isRecord(input.config))) {
-    throw new McpInvalidConfigError();
-  }
+  objectInput(input);
+  if (input.isEnabled !== undefined && typeof input.isEnabled !== "boolean")
+    throw new McpInputError("MCP isEnabled must be boolean");
 
   const updates: Record<string, unknown> = {
     updatedAt: new Date(),
   };
 
-  if (input.name) updates.name = input.name;
-  if (Object.hasOwn(input, "config")) updates.config = JSON.stringify(input.config);
+  if (input.name !== undefined) updates.name = textField(input.name, "name", 160);
+  if (input.type !== undefined) updates.type = textField(input.type, "type", 40);
+  if (Object.hasOwn(input, "config")) updates.config = JSON.stringify(configField(input.config));
   if (input.isEnabled !== undefined) updates.isEnabled = input.isEnabled;
 
   await db

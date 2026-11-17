@@ -65,8 +65,20 @@ export async function createProject(userId: string, input: CreateProjectInput) {
     createdAt: now,
     updatedAt: now,
   };
-  await db.insert(projects).values(row);
-  return row;
+  const inserted = await db
+    .insert(projects)
+    .values(row)
+    .onConflictDoNothing({ target: [projects.userId, projects.rootPath] })
+    .returning();
+  if (inserted[0]) return inserted[0];
+  // Another request may have inserted the same user/folder after our first read.
+  const canonical = await db
+    .select()
+    .from(projects)
+    .where(and(eq(projects.userId, userId), eq(projects.rootPath, rootPath)))
+    .limit(1);
+  if (!canonical[0]) throw new Error("Project creation was interrupted; retry");
+  return canonical[0];
 }
 
 export async function updateProject(userId: string, projectId: string, input: UpdateProjectInput) {

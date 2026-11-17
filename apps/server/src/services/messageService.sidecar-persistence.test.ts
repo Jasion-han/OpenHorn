@@ -50,7 +50,11 @@ test("stable sidecar IDs and revisions make lost ACK retries idempotent", async 
   try {
     const first = await syncSidecarMessages(f.userId, f.input);
     const second = await syncSidecarMessages(f.userId, structuredClone(f.input));
-    expect(second).toEqual(first);
+    expect(second).toEqual({
+      userMessageId: first.userMessageId,
+      assistantMessageId: first.assistantMessageId,
+      replayed: true,
+    });
     expect(await f.rows()).toHaveLength(2);
     const meta = await db
       .select()
@@ -171,7 +175,11 @@ test("existing opaque imported IDs remain valid for pair updates and unanswered 
       };
       const first = await syncSidecarMessages(f.userId, input);
       const repeated = await syncSidecarMessages(f.userId, input);
-      expect(repeated).toEqual(first);
+      expect(repeated).toEqual({
+        userMessageId: first.userMessageId,
+        assistantMessageId: first.assistantMessageId,
+        replayed: true,
+      });
       expect(first.userMessageId).toBe(userId);
       expect(await f.rows()).toHaveLength(2);
       if (pair) expect(first.assistantMessageId).toBe(assistantId);

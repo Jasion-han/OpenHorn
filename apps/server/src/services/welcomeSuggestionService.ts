@@ -192,53 +192,66 @@ async function generate(userId: string, titles: string[]): Promise<string[]> {
   return [];
 }
 
-// One in-flight refresh per user. A burst of welcome-screen visits would
-// otherwise each fire their own generation against the same context.
-const inFlight = new Set<string>();
+export const SUGGESTION_RETRY_MS = 60_000;
 
-export async function refreshWelcomeSuggestions(userId: string): Promise<string[]> {
-  if (inFlight.has(userId)) return [];
-  inFlight.add(userId);
-  try {
-    const { titles, seed } = await readContext(userId);
-    // Nothing to personalise from — leave the cache empty so the UI keeps its
-    // built-in defaults rather than storing something generic.
-    if (titles.length === 0) return [];
-
-    const generated = await generate(userId, titles);
-    const semantic = await decisionEnhancements
-      .filterSuggestions(userId, generated, titles)
-      .catch(() => null);
-    const items = (semantic ?? dropEchoes(generated, titles)).slice(0, SUGGESTION_COUNT);
-    if (items.length === 0) return [];
-
-    const payload: CachedSuggestions = { items, generatedAt: Date.now(), seed };
-    await setSettingValue(userId, SETTING_KEY, JSON.stringify(payload));
-    return items;
-  } catch {
-    // Best-effort: a failed generation just means the UI keeps its defaults.
-    return [];
-  } finally {
-    inFlight.delete(userId);
-  }
+interface WelcomeSuggestionDeps {
+  readContext: typeof readContext;
+  readCache: (userId: string) => Promise<string | undefined>;
+  writeCache: (userId: string, value: string) => Promise<unknown>;
+  generate: typeof generate;
+  now?: () => number;
+  filter?: (userId: string, items: string[], titles: string[]) => Promise<string[] | null>;
 }
 
-/**
- * Read path for the welcome screen. Returns only what is already cached and
- * never awaits a generation — a stale or missing cache schedules a refresh whose
- * result the *next* visit picks up.
- */
-export async function getWelcomeSuggestions(
-  userId: string,
-): Promise<{ suggestions: string[]; stale: boolean }> {
-  const values = await getSettingValues(userId, [SETTING_KEY]);
-  const cache = parseCache(values[SETTING_KEY]);
-  const { seed } = await readContext(userId);
-  const fresh = cache ? isFresh(cache, seed, Date.now()) : false;
+/** Scoped coordination keeps failed automatic refreshes from becoming paid retry loops. */
+export function createWelcomeSuggestionService(deps: WelcomeSuggestionDeps) {
+  const now = deps.now ?? Date.now;
+  const inFlight = new Set<string>();
+  const retryAfter = new Map<string, number>();
 
-  if (!fresh) {
-    void refreshWelcomeSuggestions(userId);
+  async function refreshWelcomeSuggestions(userId: string): Promise<string[]> {
+    if (inFlight.has(userId) || (retryAfter.get(userId) ?? 0) > now()) return [];
+    // Prune expired cooldowns, including users who never visit again.
+    for (const [id, until] of retryAfter) if (until <= now()) retryAfter.delete(id);
+    inFlight.add(userId);
+    let succeeded = false;
+    try {
+      const { titles, seed } = await deps.readContext(userId);
+      if (titles.length === 0) return [];
+      const generated = await deps.generate(userId, titles);
+      const semantic = deps.filter
+        ? await deps.filter(userId, generated, titles).catch(() => null)
+        : null;
+      const items = (semantic ?? dropEchoes(generated, titles)).slice(0, SUGGESTION_COUNT);
+      if (items.length === 0) return [];
+      await deps.writeCache(userId, JSON.stringify({ items, generatedAt: now(), seed }));
+      succeeded = true;
+      return items;
+    } catch {
+      return [];
+    } finally {
+      if (!succeeded) retryAfter.set(userId, now() + SUGGESTION_RETRY_MS);
+      inFlight.delete(userId);
+    }
   }
 
-  return { suggestions: cache?.items ?? [], stale: !fresh };
+  async function getWelcomeSuggestions(userId: string) {
+    const cache = parseCache(await deps.readCache(userId));
+    const { seed } = await deps.readContext(userId);
+    const fresh = cache ? isFresh(cache, seed, now()) : false;
+    if (!fresh) void refreshWelcomeSuggestions(userId);
+    return { suggestions: cache?.items ?? [], stale: !fresh };
+  }
+
+  return { refreshWelcomeSuggestions, getWelcomeSuggestions };
 }
+
+const service = createWelcomeSuggestionService({
+  readContext,
+  readCache: async (userId) => (await getSettingValues(userId, [SETTING_KEY]))[SETTING_KEY],
+  writeCache: (userId, value) => setSettingValue(userId, SETTING_KEY, value),
+  generate,
+  filter: (userId, items, titles) => decisionEnhancements.filterSuggestions(userId, items, titles),
+});
+
+export const { refreshWelcomeSuggestions, getWelcomeSuggestions } = service;

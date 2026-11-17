@@ -9,8 +9,8 @@ import {
   validateChatCitations,
   validateProviderChatState,
 } from "adapters";
-import { attachments, conversations, messages } from "db";
-import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { attachments, conversations, messages, sidecarSyncReceipts } from "db";
+import { and, asc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 import { answerModelMetadata } from "shared/answer-metadata";
 import {
   boundChatContext,
@@ -32,6 +32,8 @@ import type {
   NativeWebOptions,
   ProviderChatMetadata,
   ProviderChatState,
+  SidecarSavePreconditions,
+  SidecarSaveResult,
 } from "shared/types";
 import { type ChatContentPart, type ChatMessage, createAdapter } from "../agent-adapters";
 import { client, db } from "../db";
@@ -67,6 +69,7 @@ import { deleteChunksByAttachment, retrieveContext } from "./ragService";
 import { mergeSystemPromptParts, RESPONSE_STYLE_GUARDRAILS } from "./responseStyle";
 import { buildLinkContext, SEARCH_SETTINGS_KEYS, type SearchCitation } from "./searchService";
 import { getSettingValues } from "./settingsService";
+import { completeSidecarChannelProbe, prepareWithSidecarChannelProbe } from "./sidecarChannelProbe";
 import { getRecentSummaries, maybeSummarize } from "./summaryService";
 
 const GLOBAL_SYSTEM_PROMPT_KEY = "chat.systemPrompt";
@@ -564,6 +567,8 @@ async function buildUserContentWithAttachments(
 
   const parts: ChatContentPart[] = [{ type: "text", text }];
   for (const img of images) {
+    if (/\[page \d+\]\.jpg$/i.test(img.fileName))
+      parts.push({ type: "text", text: `PDF page image: ${JSON.stringify(img.fileName)}` });
     parts.push({
       type: "image",
       mediaType: img.fileType,
@@ -788,7 +793,10 @@ export async function getMessages(conversationId: string) {
 export async function getMessagesForUser(userId: string, conversationId: string) {
   // Ownership guard: prevent cross-user reads of messages by guessing conversationId.
   await getConversationForUser(userId, conversationId);
-  return getMessages(conversationId);
+  return (await getMessages(conversationId)).map((row) => ({
+    ...row,
+    saveToken: messageSaveToken(row),
+  }));
 }
 
 export async function getMessagesForUserWithAttachments(userId: string, conversationId: string) {
@@ -797,7 +805,10 @@ export async function getMessagesForUserWithAttachments(userId: string, conversa
   // Stored rows are final: agent turns are persisted by the sidecar once they
   // end, and the legacy server-run (task-backed) turns were settled by a
   // one-time bootstrap migration — nothing on the read path needs re-syncing.
-  const result = await getMessages(conversationId);
+  const result = (await getMessages(conversationId)).map((row) => ({
+    ...row,
+    saveToken: messageSaveToken(row),
+  }));
 
   const messageIds = result.map((m) => m.id);
   if (messageIds.length === 0) return result;
@@ -1950,6 +1961,26 @@ function modeForLatestUserRequest(
   ) THEN ${mode} ELSE ${conversations.lastMode} END`;
 }
 
+const sidecarSyncOperations = new Map<string, Promise<void>>();
+
+async function withSidecarSyncOperation<T>(key: string | null, save: () => Promise<T>): Promise<T> {
+  if (key === null) return save();
+  const previous = sidecarSyncOperations.get(key);
+  let release: () => void = () => {};
+  const pending = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  sidecarSyncOperations.set(key, pending);
+  await previous;
+  try {
+    // Each retry still validates its own conversation and message identities.
+    return await save();
+  } finally {
+    release();
+    if (sidecarSyncOperations.get(key) === pending) sidecarSyncOperations.delete(key);
+  }
+}
+
 export async function syncSidecarMessages(
   userId: string,
   input: {
@@ -1966,10 +1997,10 @@ export async function syncSidecarMessages(
     assistantMessageId?: string;
     /** Idempotent reply creation for a previously persisted, unanswered user. */
     newAssistantMessageId?: string;
-    /** Orders saves from one running desktop session; not a cross-client CAS. */
+    /** Durable idempotency identity; sequence orders one session, not a cross-client CAS. */
     syncRevision?: { sessionId: string; sequence: number };
-  },
-) {
+  } & SidecarSavePreconditions,
+): Promise<SidecarSaveResult> {
   const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   const revision = input.syncRevision;
   if (
@@ -2009,147 +2040,286 @@ export async function syncSidecarMessages(
     ? { ...(input.agentRun as object), _syncRevision: revision }
     : input.agentRun;
   const now = new Date();
-  const result = await db.transaction(async (tx) => {
-    const conversation = await tx.query.conversations.findFirst({
-      where: and(eq(conversations.id, input.conversationId), eq(conversations.userId, userId)),
-    });
-    if (!conversation) throw new Error("Conversation not found");
-    const existingUser = input.userMessageId
-      ? await tx.query.messages.findFirst({ where: eq(messages.id, input.userMessageId) })
-      : undefined;
-    const requestedAssistant = input.assistantMessageId ?? input.newAssistantMessageId;
-    const existingAssistant = requestedAssistant
-      ? await tx.query.messages.findFirst({ where: eq(messages.id, requestedAssistant) })
-      : undefined;
-    for (const [message, role] of [
-      [existingUser, "user"],
-      [existingAssistant, "assistant"],
-    ] as const) {
-      if (message && (message.conversationId !== input.conversationId || message.role !== role)) {
-        throw new Error("Message identity does not belong to this conversation and role");
+  const requestedIdentity = input.assistantMessageId ?? input.newAssistantMessageId;
+  const operationKey = revision
+    ? requestedIdentity
+      ? JSON.stringify([userId, input.conversationId, requestedIdentity])
+      : JSON.stringify([userId, revision.sessionId, revision.sequence])
+    : null;
+  const result = await withSidecarSyncOperation(operationKey, () =>
+    db.transaction(async (tx) => {
+      const conversation = await tx.query.conversations.findFirst({
+        where: and(eq(conversations.id, input.conversationId), eq(conversations.userId, userId)),
+      });
+      if (!conversation) throw new Error("Conversation not found");
+      const requestedAssistant = input.assistantMessageId ?? input.newAssistantMessageId;
+      const recordReceipt = async (userMessageId: string, assistantMessageId: string) => {
+        if (!revision) return;
+        await tx.insert(sidecarSyncReceipts).values({
+          id: generateId(),
+          userId,
+          conversationId: conversation.id,
+          sessionId: revision.sessionId,
+          sequence: revision.sequence,
+          userMessageId,
+          assistantMessageId,
+          createdAt: now,
+        });
+      };
+      if (revision) {
+        const receipt = await tx.query.sidecarSyncReceipts.findFirst({
+          where: and(
+            eq(sidecarSyncReceipts.userId, userId),
+            eq(sidecarSyncReceipts.sessionId, revision.sessionId),
+            eq(sidecarSyncReceipts.sequence, revision.sequence),
+          ),
+        });
+        if (receipt) {
+          if (
+            receipt.conversationId !== conversation.id ||
+            (input.userMessageId !== undefined && receipt.userMessageId !== input.userMessageId) ||
+            (requestedAssistant !== undefined && receipt.assistantMessageId !== requestedAssistant)
+          ) {
+            throw new Error("Sidecar sync revision belongs to different message identities");
+          }
+          return {
+            userMessageId: receipt.userMessageId,
+            assistantMessageId: receipt.assistantMessageId,
+            changed: false,
+            inserted: false,
+            replayed: true,
+          };
+        }
+        if (input.userMessageId && requestedAssistant) {
+          const newer = await tx.query.sidecarSyncReceipts.findFirst({
+            where: and(
+              eq(sidecarSyncReceipts.userId, userId),
+              eq(sidecarSyncReceipts.conversationId, conversation.id),
+              eq(sidecarSyncReceipts.sessionId, revision.sessionId),
+              gt(sidecarSyncReceipts.sequence, revision.sequence),
+              eq(sidecarSyncReceipts.userMessageId, input.userMessageId),
+              eq(sidecarSyncReceipts.assistantMessageId, requestedAssistant),
+            ),
+          });
+          if (newer) {
+            await recordReceipt(newer.userMessageId, newer.assistantMessageId);
+            return {
+              userMessageId: newer.userMessageId,
+              assistantMessageId: newer.assistantMessageId,
+              changed: false,
+              inserted: false,
+              replayed: true,
+            };
+          }
+        }
       }
-    }
-    if (input.assistantMessageId && Boolean(existingUser) !== Boolean(existingAssistant)) {
-      throw new Error("The message pair is incomplete");
-    }
-    if (input.newAssistantMessageId && !existingUser) throw new Error("User message not found");
-    // Imported/legacy rows may have opaque TEXT identifiers. Only newly created
-    // client-selected IDs need UUIDs; existing IDs are validated by role and owner.
-    if (
-      (!existingUser && input.assistantMessageId && !uuid.test(input.userMessageId ?? "")) ||
-      (!existingAssistant && requestedAssistant && !uuid.test(requestedAssistant))
-    ) {
-      throw new Error("New message ids must be UUIDs");
-    }
-    const userMessageId =
-      existingUser?.id ??
-      (input.assistantMessageId ? input.userMessageId : undefined) ??
-      generateId();
-    const assistantMessageId = requestedAssistant ?? generateId();
-    if (userMessageId === assistantMessageId) throw new Error("Message ids must be distinct");
-    if (revision && existingAssistant?.agentRun) {
-      let previous: unknown;
+      // Old disk records must not use the legacy undefined-token path. Known
+      // receipts above are still safe to acknowledge without touching content.
+      if (
+        input.recovery === true &&
+        (input.expectedUserToken === undefined || input.expectedAssistantToken === undefined)
+      ) {
+        throw new SidecarSaveConflictError();
+      }
+      for (const expected of [input.expectedUserToken, input.expectedAssistantToken]) {
+        if (
+          expected !== undefined &&
+          expected !== null &&
+          (typeof expected !== "string" || expected.length === 0)
+        ) {
+          throw new Error("Invalid expected message token");
+        }
+      }
+      const existingUser = input.userMessageId
+        ? await tx.query.messages.findFirst({ where: eq(messages.id, input.userMessageId) })
+        : undefined;
+      const existingAssistant = requestedAssistant
+        ? await tx.query.messages.findFirst({ where: eq(messages.id, requestedAssistant) })
+        : undefined;
+      for (const [message, role] of [
+        [existingUser, "user"],
+        [existingAssistant, "assistant"],
+      ] as const) {
+        if (message && (message.conversationId !== input.conversationId || message.role !== role)) {
+          throw new Error("Message identity does not belong to this conversation and role");
+        }
+      }
+      let previous: { sessionId?: unknown; sequence?: unknown } | undefined;
       try {
-        previous = JSON.parse(existingAssistant.agentRun)?._syncRevision;
+        previous = existingAssistant?.agentRun
+          ? JSON.parse(existingAssistant.agentRun)?._syncRevision
+          : undefined;
       } catch {
         /* legacy run */
       }
-      if (
-        previous &&
-        typeof previous === "object" &&
-        "sessionId" in previous &&
-        "sequence" in previous &&
-        previous.sessionId === revision.sessionId &&
+      const sameSessionNewer =
+        !!revision &&
+        previous?.sessionId === revision.sessionId &&
         typeof previous.sequence === "number" &&
-        previous.sequence >= revision.sequence
+        previous.sequence < revision.sequence;
+      if (!sameSessionNewer) {
+        for (const [row, expected] of [
+          [existingUser, input.expectedUserToken],
+          [existingAssistant, input.expectedAssistantToken],
+        ] as const) {
+          if (expected === undefined) continue;
+          if (expected === null ? !!row : !row || messageSaveToken(row) !== expected) {
+            throw new SidecarSaveConflictError();
+          }
+        }
+      }
+      if (input.assistantMessageId && Boolean(existingUser) !== Boolean(existingAssistant)) {
+        throw new Error("The message pair is incomplete");
+      }
+      if (input.newAssistantMessageId && !existingUser) throw new Error("User message not found");
+      // Imported/legacy rows may have opaque TEXT identifiers. Only newly created
+      // client-selected IDs need UUIDs; existing IDs are validated by role and owner.
+      if (
+        (!existingUser && input.assistantMessageId && !uuid.test(input.userMessageId ?? "")) ||
+        (!existingAssistant && requestedAssistant && !uuid.test(requestedAssistant))
       ) {
-        // ACK loss may repeat the same save; an older request cannot overwrite a newer run.
-        return { userMessageId, assistantMessageId, changed: false, inserted: false };
+        throw new Error("New message ids must be UUIDs");
       }
-    }
-    if (existingUser) {
-      await tx
-        .update(messages)
-        .set({ content: input.userContent })
-        .where(eq(messages.id, userMessageId));
-    } else {
-      await tx.insert(messages).values({
-        id: userMessageId,
-        conversationId: input.conversationId,
-        role: "user",
-        content: input.userContent,
+      const userMessageId =
+        existingUser?.id ??
+        (input.assistantMessageId ? input.userMessageId : undefined) ??
+        generateId();
+      const assistantMessageId = requestedAssistant ?? generateId();
+      if (userMessageId === assistantMessageId) throw new Error("Message ids must be distinct");
+      if (revision && existingAssistant?.agentRun) {
+        if (
+          previous &&
+          typeof previous === "object" &&
+          "sessionId" in previous &&
+          "sequence" in previous &&
+          previous.sessionId === revision.sessionId &&
+          typeof previous.sequence === "number" &&
+          previous.sequence >= revision.sequence
+        ) {
+          // ACK loss may repeat the same save; an older request cannot overwrite a newer run.
+          // Acknowledged no-ops need receipts too: after a later session saves,
+          // this older operation must still never become applicable again.
+          await recordReceipt(userMessageId, assistantMessageId);
+          return {
+            userMessageId,
+            assistantMessageId,
+            changed: false,
+            inserted: false,
+            replayed: true,
+          };
+        }
+      }
+      if (existingUser) {
+        await tx
+          .update(messages)
+          .set({ content: input.userContent })
+          .where(eq(messages.id, userMessageId));
+      } else {
+        await tx.insert(messages).values({
+          id: userMessageId,
+          conversationId: input.conversationId,
+          role: "user",
+          content: input.userContent,
+          mode,
+          attachments: null,
+          agentRun: null,
+          createdAt: now,
+        });
+      }
+      const values = {
+        content: assistantContent,
+        model: input.model || null,
         mode,
-        attachments: null,
-        agentRun: null,
-        createdAt: now,
-      });
-    }
-    const values = {
-      content: assistantContent,
-      model: input.model || null,
-      mode,
-      agentRun: storedRun ? JSON.stringify(storedRun) : null,
-      usage: input.usage ? JSON.stringify(input.usage) : null,
-      finishReason,
-      liveMetadata: null,
-      citations: null,
-    };
-    if (existingAssistant) {
-      await tx
-        .update(messages)
-        .set({ ...values, updatedAt: now })
-        .where(eq(messages.id, assistantMessageId));
-    } else {
-      await tx.insert(messages).values({
-        ...values,
-        id: assistantMessageId,
-        conversationId: input.conversationId,
-        role: "assistant",
-        attachments: null,
-        createdAt: existingUser
-          ? new Date(Math.max(now.getTime(), existingUser.createdAt.getTime() + 1000))
-          : new Date(now.getTime() + 1),
-      });
-    }
-    if (Array.isArray(input.attachmentsMeta)) {
-      await tx.delete(attachments).where(eq(attachments.messageId, userMessageId));
-      await insertSidecarAttachmentMeta(
-        input.conversationId,
-        userMessageId,
-        input.attachmentsMeta,
-        now,
-        tx,
-      );
-    }
-    await tx
-      .update(conversations)
-      .set({
-        updatedAt: now,
-        lastMode: modeForLatestUserRequest(input.conversationId, userMessageId, mode),
-      })
-      .where(and(eq(conversations.id, input.conversationId), eq(conversations.userId, userId)));
-    // Keep search in the same save order as the primary rows. Post-commit FTS
-    // writes from an older request could otherwise overtake a newer revision.
-    try {
-      for (const [id, content] of [
-        [userMessageId, input.userContent],
-        [assistantMessageId, assistantContent],
-      ]) {
-        await tx.run(sql`DELETE FROM messages_fts WHERE message_id = ${id}`);
-        if (content)
-          await tx.run(
-            sql`INSERT INTO messages_fts(message_id, conversation_id, content) VALUES (${id}, ${input.conversationId}, ${content.substring(0, 5000)})`,
-          );
+        agentRun: storedRun ? JSON.stringify(storedRun) : null,
+        usage: input.usage ? JSON.stringify(input.usage) : null,
+        finishReason,
+        liveMetadata: null,
+        citations: null,
+      };
+      if (existingAssistant) {
+        await tx
+          .update(messages)
+          .set({ ...values, updatedAt: now })
+          .where(eq(messages.id, assistantMessageId));
+      } else {
+        await tx.insert(messages).values({
+          ...values,
+          id: assistantMessageId,
+          conversationId: input.conversationId,
+          role: "assistant",
+          attachments: null,
+          createdAt: existingUser
+            ? new Date(Math.max(now.getTime(), existingUser.createdAt.getTime() + 1000))
+            : new Date(now.getTime() + 1),
+        });
       }
-    } catch {
-      // FTS is optional in databases that have not bootstrapped its virtual table.
-    }
-    return { userMessageId, assistantMessageId, changed: true, inserted: !existingAssistant };
-  });
+      if (Array.isArray(input.attachmentsMeta)) {
+        await tx.delete(attachments).where(eq(attachments.messageId, userMessageId));
+        await insertSidecarAttachmentMeta(
+          input.conversationId,
+          userMessageId,
+          input.attachmentsMeta,
+          now,
+          tx,
+        );
+      }
+      await tx
+        .update(conversations)
+        .set({
+          updatedAt: now,
+          lastMode: modeForLatestUserRequest(input.conversationId, userMessageId, mode),
+        })
+        .where(and(eq(conversations.id, input.conversationId), eq(conversations.userId, userId)));
+      // Keep search in the same save order as the primary rows. Post-commit FTS
+      // writes from an older request could otherwise overtake a newer revision.
+      try {
+        for (const [id, content] of [
+          [userMessageId, input.userContent],
+          [assistantMessageId, assistantContent],
+        ]) {
+          await tx.run(sql`DELETE FROM messages_fts WHERE message_id = ${id}`);
+          if (content)
+            await tx.run(
+              sql`INSERT INTO messages_fts(message_id, conversation_id, content) VALUES (${id}, ${input.conversationId}, ${content.substring(0, 5000)})`,
+            );
+        }
+      } catch {
+        // FTS is optional in databases that have not bootstrapped its virtual table.
+      }
+      await recordReceipt(userMessageId, assistantMessageId);
+      const savedUser = await tx.query.messages.findFirst({
+        where: eq(messages.id, userMessageId),
+      });
+      const savedAssistant = await tx.query.messages.findFirst({
+        where: eq(messages.id, assistantMessageId),
+      });
+      if (!savedUser || !savedAssistant)
+        throw new Error("Saved message identities are unavailable");
+      return {
+        userMessageId,
+        assistantMessageId,
+        saveTokens: {
+          user: messageSaveToken(savedUser),
+          assistant: messageSaveToken(savedAssistant),
+        },
+        changed: true,
+        inserted: !existingAssistant,
+        replayed: false,
+      };
+    }),
+  );
   if (result.changed) {
     if (result.inserted) void maybeSummarize(userId, input.conversationId).catch(() => {});
   }
-  return { userMessageId: result.userMessageId, assistantMessageId: result.assistantMessageId };
+  return {
+    userMessageId: result.userMessageId,
+    assistantMessageId: result.assistantMessageId,
+    ...(result.replayed
+      ? { replayed: true }
+      : "saveTokens" in result
+        ? { saveTokens: result.saveTokens }
+        : {}),
+  };
 }
 
 export async function stopChatPreparation(
@@ -2219,160 +2389,165 @@ export async function prepareChatForSidecar(
       throw new Error(message);
     }
 
-    const settings = await getSettingValues(userId, [
-      GLOBAL_SYSTEM_PROMPT_KEY,
+    return await prepareWithSidecarChannelProbe(
+      { userId, conversationId: conversation.id, channelId: resolvedChannel.channel.id },
+      async () => {
+        const settings = await getSettingValues(userId, [
+          GLOBAL_SYSTEM_PROMPT_KEY,
 
-      ...SEARCH_SETTINGS_KEYS,
-    ]);
-    const baseSystemPrompt =
-      conversation.systemPrompt || settings[GLOBAL_SYSTEM_PROMPT_KEY] || null;
+          ...SEARCH_SETTINGS_KEYS,
+        ]);
+        const baseSystemPrompt =
+          conversation.systemPrompt || settings[GLOBAL_SYSTEM_PROMPT_KEY] || null;
 
-    let liveContext: ChatLiveContext;
-    try {
-      liveContext = await buildExternalChatContext({
-        userId,
-        signal: preparationSignal,
-        prompt: input.content,
-        userSettings: settings,
-        tavilyEnvKey: process.env.TAVILY_API_KEY ?? null,
-        forceWebSearch: Boolean(conversation.forceWebSearch),
-        dataOnly: isDataOnlyPrompt(baseSystemPrompt),
-      });
-    } catch (error) {
-      if (!preparation.signal.aborted || input.signal?.aborted) throw error;
-      liveContext = { status: "offline", route: "direct_model", source: { type: "none" } };
-    }
-    input.signal?.throwIfAborted();
-    // Freeze supported official identity even with tools off: a regular response
-    // can still be refused, and its metadata must complete under the same source.
-    const identity = supportsDeepSeekNativeWeb(
-      resolvedChannel.channel.protocol,
-      resolvedChannel.channel.baseUrl,
-      resolvedChannel.modelId,
-    )
-      ? deepseekNativeWebIdentity(resolvedChannel.channel.baseUrl, resolvedChannel.modelId)
-      : null;
-    const now = new Date();
-    const userMessageId = generateId();
-    await db.insert(messages).values({
-      id: userMessageId,
-      conversationId: input.conversationId,
-      role: "user",
-      content: input.content,
-      mode: "chat",
-      attachments: input.attachments ? JSON.stringify(input.attachments) : null,
-      agentRun: null,
-      createdAt: now,
-    });
-    await ftsUpsert(userMessageId, input.conversationId, input.content);
-    if (input.stoppedBeforeStart && input.stoppedAttachmentMeta?.length)
-      await insertSidecarAttachmentMeta(
-        input.conversationId,
-        userMessageId,
-        input.stoppedAttachmentMeta,
-        now,
-      );
-
-    if (input.attachments?.length) {
-      await linkAttachmentsToMessage(input.attachments, userMessageId, userId);
-    }
-
-    const assistantMessageId = generateId();
-    const assistantCreatedAt = new Date(now.getTime() + 1);
-
-    await db
-      .update(conversations)
-      .set({
-        updatedAt: now,
-        lastMode: modeForLatestUserRequest(input.conversationId, userMessageId, "chat"),
-        runStatus: null,
-      })
-      .where(eq(conversations.id, input.conversationId));
-
-    let [preparedAssistant] = await db
-      .insert(messages)
-      .values({
-        id: assistantMessageId,
-        conversationId: input.conversationId,
-        role: "assistant",
-        content: "",
-        model: resolvedChannel.modelId,
-        mode: "chat",
-        attachments: null,
-        agentRun: null,
-        liveMetadata: serializeLiveMetadata(liveContext),
-        citations: serializeCitations(liveContext.citations),
-        providerState: identity
-          ? JSON.stringify({ provider: "deepseek", ...identity, serverToolCalls: [] })
-          : null,
-        completionVersion: generateId(),
-        finishReason: preparation.signal.aborted ? "stopped" : null,
-        createdAt: assistantCreatedAt,
-      })
-      .returning();
-
-    let chatMessages: ChatMessage[] = [];
-    if (!preparation.signal.aborted) {
-      try {
-        const conversationMessages = await getMessages(input.conversationId);
-        chatMessages = await buildChatMessagesForTurn(
-          userId,
-          conversationMessages,
-          buildEffectiveSystemPrompt(baseSystemPrompt, liveContext),
-          input.conversationId,
-          {
-            userMessageId,
-            assistantMessageId,
-            model: resolvedChannel.modelId,
-            contextWindow: resolvedChannel.contextWindow,
-            contextMetadata: resolvedChannel.contextMetadata,
-            protocol: resolvedChannel.channel.protocol,
-            baseUrl: resolvedChannel.channel.baseUrl,
-            createdAt: assistantCreatedAt,
-          },
-        );
-      } catch (error) {
-        if (!preparation.signal.aborted || input.signal?.aborted) throw error;
-      }
-    }
-    if (preparation.signal.aborted) {
-      const [stopped] = await db
-        .update(messages)
-        .set({
-          content: "",
-          finishReason: "stopped",
-          usage: null,
-          liveMetadata: serializeLiveMetadata(liveContext),
-          citations: serializeCitations(liveContext.citations),
-          updatedAt: new Date(),
-        })
-        .where(
-          and(
-            eq(messages.id, preparedAssistant.id),
-            eq(messages.conversationId, input.conversationId),
-          ),
+        let liveContext: ChatLiveContext;
+        try {
+          liveContext = await buildExternalChatContext({
+            userId,
+            signal: preparationSignal,
+            prompt: input.content,
+            userSettings: settings,
+            tavilyEnvKey: process.env.TAVILY_API_KEY ?? null,
+            forceWebSearch: Boolean(conversation.forceWebSearch),
+            dataOnly: isDataOnlyPrompt(baseSystemPrompt),
+          });
+        } catch (error) {
+          if (!preparation.signal.aborted || input.signal?.aborted) throw error;
+          liveContext = { status: "offline", route: "direct_model", source: { type: "none" } };
+        }
+        input.signal?.throwIfAborted();
+        // Freeze supported official identity even with tools off: a regular response
+        // can still be refused, and its metadata must complete under the same source.
+        const identity = supportsDeepSeekNativeWeb(
+          resolvedChannel.channel.protocol,
+          resolvedChannel.channel.baseUrl,
+          resolvedChannel.modelId,
         )
-        .returning();
-      if (!stopped) throw new Error("chat_preparation_superseded");
-      preparedAssistant = stopped;
-      chatMessages = [];
-    }
+          ? deepseekNativeWebIdentity(resolvedChannel.channel.baseUrl, resolvedChannel.modelId)
+          : null;
+        const now = new Date();
+        const userMessageId = generateId();
+        await db.insert(messages).values({
+          id: userMessageId,
+          conversationId: input.conversationId,
+          role: "user",
+          content: input.content,
+          mode: "chat",
+          attachments: input.attachments ? JSON.stringify(input.attachments) : null,
+          agentRun: null,
+          createdAt: now,
+        });
+        await ftsUpsert(userMessageId, input.conversationId, input.content);
+        if (input.stoppedBeforeStart && input.stoppedAttachmentMeta?.length)
+          await insertSidecarAttachmentMeta(
+            input.conversationId,
+            userMessageId,
+            input.stoppedAttachmentMeta,
+            now,
+          );
 
-    return {
-      preparationStopped: preparation.signal.aborted,
-      saveToken: messageSaveToken(preparedAssistant),
-      contextWindow: resolvedChannel.contextWindow ?? null,
-      contextMetadata: resolvedChannel.contextMetadata ?? null,
-      apiKey: resolvedChannel.apiKey,
-      baseUrl: resolvedChannel.channel.baseUrl || null,
-      protocol: resolvedChannel.channel.protocol,
-      model: resolvedChannel.modelId,
-      messages: chatMessages,
-      ...(liveContext.citations?.length ? { citations: liveContext.citations } : {}),
-      liveMetadata: JSON.parse(serializeLiveMetadata(liveContext)),
-      userMessageId,
-      assistantMessageId,
-    };
+        if (input.attachments?.length) {
+          await linkAttachmentsToMessage(input.attachments, userMessageId, userId);
+        }
+
+        const assistantMessageId = generateId();
+        const assistantCreatedAt = new Date(now.getTime() + 1);
+
+        await db
+          .update(conversations)
+          .set({
+            updatedAt: now,
+            lastMode: modeForLatestUserRequest(input.conversationId, userMessageId, "chat"),
+            runStatus: null,
+          })
+          .where(eq(conversations.id, input.conversationId));
+
+        let [preparedAssistant] = await db
+          .insert(messages)
+          .values({
+            id: assistantMessageId,
+            conversationId: input.conversationId,
+            role: "assistant",
+            content: "",
+            model: resolvedChannel.modelId,
+            mode: "chat",
+            attachments: null,
+            agentRun: null,
+            liveMetadata: serializeLiveMetadata(liveContext),
+            citations: serializeCitations(liveContext.citations),
+            providerState: identity
+              ? JSON.stringify({ provider: "deepseek", ...identity, serverToolCalls: [] })
+              : null,
+            completionVersion: generateId(),
+            finishReason: preparation.signal.aborted ? "stopped" : null,
+            createdAt: assistantCreatedAt,
+          })
+          .returning();
+
+        let chatMessages: ChatMessage[] = [];
+        if (!preparation.signal.aborted) {
+          try {
+            const conversationMessages = await getMessages(input.conversationId);
+            chatMessages = await buildChatMessagesForTurn(
+              userId,
+              conversationMessages,
+              buildEffectiveSystemPrompt(baseSystemPrompt, liveContext),
+              input.conversationId,
+              {
+                userMessageId,
+                assistantMessageId,
+                model: resolvedChannel.modelId,
+                contextWindow: resolvedChannel.contextWindow,
+                contextMetadata: resolvedChannel.contextMetadata,
+                protocol: resolvedChannel.channel.protocol,
+                baseUrl: resolvedChannel.channel.baseUrl,
+                createdAt: assistantCreatedAt,
+              },
+            );
+          } catch (error) {
+            if (!preparation.signal.aborted || input.signal?.aborted) throw error;
+          }
+        }
+        if (preparation.signal.aborted) {
+          const [stopped] = await db
+            .update(messages)
+            .set({
+              content: "",
+              finishReason: "stopped",
+              usage: null,
+              liveMetadata: serializeLiveMetadata(liveContext),
+              citations: serializeCitations(liveContext.citations),
+              updatedAt: new Date(),
+            })
+            .where(
+              and(
+                eq(messages.id, preparedAssistant.id),
+                eq(messages.conversationId, input.conversationId),
+              ),
+            )
+            .returning();
+          if (!stopped) throw new Error("chat_preparation_superseded");
+          preparedAssistant = stopped;
+          chatMessages = [];
+        }
+
+        return {
+          preparationStopped: preparation.signal.aborted,
+          saveToken: messageSaveToken(preparedAssistant),
+          contextWindow: resolvedChannel.contextWindow ?? null,
+          contextMetadata: resolvedChannel.contextMetadata ?? null,
+          apiKey: resolvedChannel.apiKey,
+          baseUrl: resolvedChannel.channel.baseUrl || null,
+          protocol: resolvedChannel.channel.protocol,
+          model: resolvedChannel.modelId,
+          messages: chatMessages,
+          ...(liveContext.citations?.length ? { citations: liveContext.citations } : {}),
+          liveMetadata: JSON.parse(serializeLiveMetadata(liveContext)),
+          userMessageId,
+          assistantMessageId,
+        };
+      },
+    );
   } finally {
     preparation.finish();
   }
@@ -2572,6 +2747,12 @@ export async function completeChatFromSidecar(
       .set({ updatedAt: new Date(), runStatus: null })
       .where(eq(conversations.id, conversation.id));
   });
+
+  const finishReason = assistantFinishReason(input.finishReason, null);
+  completeSidecarChannelProbe(
+    { userId, conversationId: conversation.id, assistantMessageId: input.assistantMessageId },
+    finishReason === null || finishReason === "length" ? "success" : "abandoned",
+  );
 
   // Fire-and-forget: generate summary if the conversation is long enough
   void maybeSummarize(userId, input.conversationId).catch(() => {});

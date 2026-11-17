@@ -213,6 +213,35 @@ export const messages = sqliteTable(
   (table) => [index("messages_conversation_created_idx").on(table.conversationId, table.createdAt)],
 );
 
+/** Saved-operation receipts survive message deletion so an old outbox cannot revive it. */
+export const sidecarSyncReceipts = sqliteTable(
+  "sidecar_sync_receipts",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    conversationId: text("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    sessionId: text("session_id").notNull(),
+    sequence: integer("sequence").notNull(),
+    // Deliberately no message FK: these identities remain acknowledged even
+    // when the user deletes either or both saved messages.
+    userMessageId: text("user_message_id").notNull(),
+    assistantMessageId: text("assistant_message_id").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("sidecar_sync_receipts_operation_unique").on(
+      table.userId,
+      table.sessionId,
+      table.sequence,
+    ),
+    index("sidecar_sync_receipts_conversation_idx").on(table.conversationId),
+  ],
+);
+
 export const agentSessions = sqliteTable(
   "agent_sessions",
   {

@@ -326,6 +326,9 @@ messages.post("/sync-sidecar", async (c) => {
     });
     return c.json(result);
   } catch (error) {
+    if (error instanceof SidecarSaveConflictError) {
+      return c.json({ errorCode: error.code, error: error.message }, 409);
+    }
     return c.json({ error: error instanceof Error ? error.message : "Failed to sync" }, 400);
   }
 });

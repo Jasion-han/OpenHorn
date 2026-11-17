@@ -156,6 +156,23 @@ const SCHEMA_DDL: string[] = [
 	    FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
 	  );`,
 
+  `CREATE TABLE IF NOT EXISTS sidecar_sync_receipts (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    conversation_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    sequence INTEGER NOT NULL,
+    user_message_id TEXT NOT NULL,
+    assistant_message_id TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+  );`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS sidecar_sync_receipts_operation_unique
+    ON sidecar_sync_receipts(user_id, session_id, sequence);`,
+  `CREATE INDEX IF NOT EXISTS sidecar_sync_receipts_conversation_idx
+    ON sidecar_sync_receipts(conversation_id);`,
+
   `CREATE TABLE IF NOT EXISTS agent_sessions (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,

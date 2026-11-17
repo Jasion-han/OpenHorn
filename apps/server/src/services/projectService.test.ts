@@ -53,6 +53,25 @@ test("createProject dedupes on rootPath and listProjects orders starred first th
   }
 });
 
+test("concurrent additions of the same folder all return the one canonical project", async () => {
+  const userId = await seedUser();
+  try {
+    const results = await Promise.allSettled(
+      Array.from({ length: 6 }, (_, index) =>
+        createProject(userId, { name: `request-${index}`, rootPath: `/tmp/${userId}/same-folder` }),
+      ),
+    );
+    expect(results.every((result) => result.status === "fulfilled")).toBe(true);
+    const ids = results.flatMap((result) =>
+      result.status === "fulfilled" ? [result.value.id] : [],
+    );
+    expect(new Set(ids).size).toBe(1);
+    expect(await listProjects(userId)).toHaveLength(1);
+  } finally {
+    await cleanup(userId);
+  }
+});
+
 test("updateProject only touches the caller's own project", async () => {
   const owner = await seedUser();
   const other = await seedUser();
