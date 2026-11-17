@@ -1,0 +1,47 @@
+{
+  "date": "2026-11-17",
+  "codeCommit": "1b043e9",
+  "tests": {
+    "shared": 134,
+    "adapters": 100,
+    "desktop": 777,
+    "sidecar": 410,
+    "total": 1421,
+    "fail": 0
+  },
+  "browser": {
+    "chatChecks": 69,
+    "documentCacheChecks": 7,
+    "documentPageErrors": 0,
+    "unexpectedDocumentRequests": 0
+  },
+  "native": {
+    "conversation": "核实官方搜索接口",
+    "selectedModel": "gpt-6-astra",
+    "searchProvider": "tavily",
+    "methodEndpointReportCompleted": true,
+    "observedSuccessfulSeconds": 26,
+    "firstClickRetryObserved": true,
+    "staleNetworkPreferenceReproducedBeforeFinalFix": true,
+    "latestSavedReportStatus": "completed",
+    "latestSavedReportCharacters": 205,
+    "baselineSavedRowUnchangedSinceLock": true,
+    "webSearchCurrentlyEnabled": false,
+    "finalPolicyFixVerification": "blocked_screen_locked",
+    "pending": [
+      "native retry after switching Web Search off on the final build",
+      "native Stop after research tool progress preserves the old report on the final build"
+    ]
+  },
+  "verification": {
+    "typecheck": "passed",
+    "biome": "passed",
+    "hostSidecarCompile": "passed",
+    "tauriDebugAppBuild": "passed"
+  },
+  "notMeasured": [
+    "DeepSeek official Files/OCR",
+    "long-running provider stability",
+    "large-sample research quality"
+  ]
+}

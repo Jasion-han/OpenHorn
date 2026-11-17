@@ -215,3 +215,29 @@ Topics: [.trellis/research/tool-relay-feasibility.md](../../research/tool-relay-
 ### Status
 
 [OK] **Completed**
+
+
+## Session 85: 研究重试与缓存边界修复及锁屏交接
+<!-- trellis-session: v=2 fp=fd70de59dfa33e9b -->
+
+**Date**: 2026-11-17
+**Task**: 研究重试与缓存边界修复及锁屏交接
+**Package**: agent
+**Branch**: `main`
+
+### Summary
+
+修复原报告保留、缓存容量/回收、上传回执、技术URL引用和实时联网/权限旧回调；1421项及69/7组浏览器通过，代码推送。最终两项原生策略验收因系统锁屏待解锁，不计通过。
+Topics: [.trellis/research/tool-relay-feasibility.md](../../research/tool-relay-feasibility.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 用户解锁后验证联网关闭重试拒绝并保留报告，再恢复联网并验证检索中Stop保留报告；会话为核实官方搜索接口。

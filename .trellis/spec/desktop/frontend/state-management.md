@@ -456,3 +456,18 @@ Verification: docs/2026-11-11_backup-drafts-results.md.
   required groups load successfully.
 
 Evidence: docs/2026-11-11_restore-handoff-readiness-results.md.
+
+
+## Memoized message actions
+
+`MessageBubble` intentionally ignores callback identity to avoid rerendering old
+messages on each stream token. Retry/edit actions must snapshot the current
+conversation (including Web Search) and `desktopShellStore.fullAccessEnabled`
+from live stores at invocation. Captured render-time values are not an authority
+for a later action. Preserve the research marker during optimistic preparation.
+
+Research retries replace a completed report only after producing new formal reply
+text. Tool-only failure, Stop or empty termination restores the previous report
+without overwriting its saved row; ordinary Agent file/tool history retains its
+existing Stop semantics. Document snapshots are bounded to 12 MiB per entry,
+50 MiB per account and seven days; quota rejection must not evict unexpired data.
