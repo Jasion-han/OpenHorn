@@ -24,6 +24,9 @@ Object.assign(window, {
     async recover(key: string, owner = scope) {
       return readDocumentInput(owner, key);
     },
+    async save(parts: AttachmentPart[], owner = scope) {
+      return saveDocumentInput(owner, parts);
+    },
     owner: scope,
   },
 });

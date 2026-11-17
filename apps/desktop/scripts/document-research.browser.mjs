@@ -136,6 +136,121 @@ try {
   pass(
     "IndexedDB restores exact image/text inputs across reload and rejects a different account scope",
   );
+  const capacity = await page.evaluate(async () => {
+    const image = "A".repeat(Math.ceil((1024 * 1024) / 3) * 4);
+    const parts = Array.from({ length: 6 }, (_, i) => ({
+      kind: "image",
+      fileName: `synthetic.pdf [page ${i + 1}].jpg`,
+      mediaType: "image/jpeg",
+      dataBase64: image,
+    }));
+    parts.push({
+      kind: "file",
+      fileName: "synthetic.pdf",
+      mediaType: "application/pdf",
+      text: "Original extracted text ".repeat(10_000),
+    });
+    const key = await window.documentResearch.save(parts);
+    return { key, count: (await window.documentResearch.recover(key)).length };
+  });
+  assert.equal(capacity.count, 7);
+  pass("six maximum-size page images plus extracted text fit the recovery snapshot budget");
+  const retention = await page.evaluate(async () => {
+    const opened = indexedDB.open("openhorn-document-input", 1);
+    const db = await new Promise((resolve, reject) => {
+      opened.onsuccess = () => resolve(opened.result);
+      opened.onerror = () => reject(opened.error);
+    });
+    const parts = [
+      { kind: "file", fileName: "test.pdf", mediaType: "application/pdf", text: "Text" },
+    ];
+    const bytes = new TextEncoder().encode(JSON.stringify(parts)).length;
+    const expiredKey = crypto.randomUUID(),
+      foreignKey = crypto.randomUUID(),
+      expiredOwnKey = crypto.randomUUID();
+    const tx = db.transaction("snapshots", "readwrite"),
+      table = tx.objectStore("snapshots");
+    const write = new Promise((resolve, reject) => {
+      tx.oncomplete = resolve;
+      tx.onerror = reject;
+    });
+    const expired = Date.now() - 8 * 24 * 60 * 60 * 1000;
+    table.put({ key: expiredKey, scope: "expired-owner", createdAt: expired, parts, bytes });
+    table.put({ key: foreignKey, scope: "different-owner", createdAt: Date.now(), parts, bytes });
+    table.put({
+      key: expiredOwnKey,
+      scope: window.documentResearch.owner,
+      createdAt: expired,
+      parts,
+      bytes,
+    });
+    await write;
+    let expiredReadRejected = false;
+    try {
+      await window.documentResearch.recover(expiredOwnKey);
+    } catch {
+      expiredReadRejected = true;
+    }
+    const getAll = IDBObjectStore.prototype.getAll;
+    IDBObjectStore.prototype.getAll = () => {
+      throw new Error("Full snapshot materialization is forbidden");
+    };
+    try {
+      await window.documentResearch.save(parts);
+    } finally {
+      IDBObjectStore.prototype.getAll = getAll;
+    }
+    const inspect = db.transaction("snapshots", "readonly").objectStore("snapshots");
+    const get = (key) =>
+      new Promise((resolve, reject) => {
+        const task = inspect.get(key);
+        task.onsuccess = () => resolve(task.result);
+        task.onerror = reject;
+      });
+    const [oldForeign, activeForeign, oldOwned] = await Promise.all([
+      get(expiredKey),
+      get(foreignKey),
+      get(expiredOwnKey),
+    ]);
+    db.close();
+    return {
+      expiredReadRejected,
+      expiredPurged: !oldForeign && !oldOwned,
+      foreignPreserved: !!activeForeign,
+    };
+  });
+  assert.deepEqual(retention, {
+    expiredReadRejected: true,
+    expiredPurged: true,
+    foreignPreserved: true,
+  });
+  pass(
+    "expired snapshots are removed with bounded cursors while unexpired foreign-account data remains intact",
+  );
+
+  const quota = await page.evaluate(async () => {
+    const parts = [
+      {
+        kind: "file",
+        fileName: "large.pdf",
+        mediaType: "application/pdf",
+        text: "x".repeat(11 * 1024 * 1024),
+      },
+    ];
+    const keys = [];
+    for (let i = 0; i < 4; i++) keys.push(await window.documentResearch.save(parts, "quota-owner"));
+    let code;
+    try {
+      await window.documentResearch.save(parts, "quota-owner");
+    } catch (error) {
+      code = error.code;
+    }
+    const recovered = await window.documentResearch.recover(keys[0], "quota-owner");
+    return { code, priorLength: recovered[0].text.length };
+  });
+  assert.equal(quota.code, "document_cache");
+  assert.equal(quota.priorLength, 11 * 1024 * 1024);
+  pass("the account quota rejects excess writes without evicting an existing unexpired snapshot");
   await page
     .locator('input[type="file"]')
     .setInputFiles({ name: "synthetic-charts.pdf", mimeType: "application/pdf", buffer: sample });
