@@ -1,13 +1,14 @@
 import { existsSync } from "node:fs";
-import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { agentSessions, attachments, channels, conversations, messages } from "db";
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "../db";
 import { decrypt, generateId } from "../utils";
+import { MAX_ATTACHMENT_SIZE } from "./attachmentLimits";
 import { formatAttachmentContext, parseAttachmentContent } from "./attachmentParser";
 
-export const MAX_ATTACHMENT_SIZE = 20 * 1024 * 1024;
+export { MAX_ATTACHMENT_SIZE } from "./attachmentLimits";
 
 /**
  * Marker prefix used as `filePath` for attachments that were only ever
@@ -100,31 +101,29 @@ export async function getEmbeddingApiKey(
     .from(channels)
     .where(and(eq(channels.userId, userId), eq(channels.enabled, true)));
 
-  // Prefer a channel whose protocol is explicitly "openai" (or null/empty,
-  // which defaults to OpenAI-compatible).
-  const openaiRow = rows.find((ch) => {
+  const compatible = rows.filter((ch) => {
     const p = (ch.protocol || "").toLowerCase();
     return p === "openai" || p === "";
   });
 
-  const row = openaiRow || rows[0];
-  if (!row?.apiKey) return null;
-
-  const apiKey = decrypt(row.apiKey);
-  // Skip CLI-OAuth channels — they don't support the embeddings endpoint.
-  if (apiKey.startsWith("__cli_oauth__")) return null;
-
-  let baseUrl: string | undefined;
-  if (row.baseUrl) {
-    // Ensure the base URL ends with /v1 for OpenAI-compatible calls.
-    let url = row.baseUrl.replace(/\/+$/, "");
-    if (!url.match(/\/v\d+$/)) {
-      url = `${url}/v1`;
+  for (const row of compatible) {
+    if (!row.apiKey) continue;
+    const apiKey = decrypt(row.apiKey);
+    // CLI credentials are not embedding API keys; try the next compatible channel.
+    if (!apiKey || apiKey.startsWith("__cli_oauth__")) continue;
+    let baseUrl: string | undefined;
+    if (row.baseUrl) {
+      // Ensure the base URL ends with /v1 for OpenAI-compatible calls.
+      let url = row.baseUrl.replace(/\/+$/, "");
+      if (!url.match(/\/v\d+$/)) {
+        url = `${url}/v1`;
+      }
+      baseUrl = url;
     }
-    baseUrl = url;
-  }
 
-  return { apiKey, baseUrl };
+    return { apiKey, baseUrl };
+  }
+  return null;
 }
 
 export async function storeAttachment(params: {
@@ -152,19 +151,44 @@ export async function storeAttachment(params: {
   const filePath = join(dir, `${id}-${safeName}`);
   const buffer = Buffer.from(await params.file.arrayBuffer());
 
-  await writeFile(filePath, buffer);
-
-  await db.insert(attachments).values({
-    id,
-    conversationId: params.conversationId || null,
-    sessionId: params.sessionId || null,
-    messageId: null,
-    fileName: params.file.name,
-    filePath,
-    fileType: resolvedType,
-    fileSize: params.file.size,
-    createdAt: new Date(),
-  });
+  const handle = await open(filePath, "wx");
+  let insertAttempted = false;
+  try {
+    await handle.writeFile(buffer);
+    await handle.close();
+    insertAttempted = true;
+    await db.insert(attachments).values({
+      id,
+      conversationId: params.conversationId || null,
+      sessionId: params.sessionId || null,
+      messageId: null,
+      fileName: params.file.name,
+      filePath,
+      fileType: resolvedType,
+      fileSize: params.file.size,
+      createdAt: new Date(),
+    });
+  } catch (error) {
+    await handle.close().catch(() => {});
+    let mayBeStored = insertAttempted;
+    if (insertAttempted) {
+      try {
+        mayBeStored =
+          (
+            await db
+              .select({ id: attachments.id })
+              .from(attachments)
+              .where(eq(attachments.id, id))
+              .limit(1)
+          ).length > 0;
+      } catch {
+        // An uncertain database acknowledgement must not destroy a possibly committed blob.
+        console.error("[attachments] upload state uncertain; retaining blob", id);
+      }
+    }
+    if (!mayBeStored) await removeAttachmentFiles([filePath]);
+    throw error;
+  }
 
   // Fire-and-forget: asynchronously index text-based attachments into the
   // vector store for RAG retrieval. Images are skipped (no text to embed).
@@ -368,9 +392,21 @@ export async function buildAttachmentPayloadFromIds(attachmentIds: string[], use
         filePath: record.filePath,
         fileType: record.fileType,
       });
-      parsed.push({ fileName: record.fileName, text });
+      parsed.push({
+        fileName: record.fileName,
+        text:
+          !text.trim() && record.fileType === "application/pdf"
+            ? "This PDF has no extracted text. Use only any explicitly attached page images; do not infer unseen pages."
+            : text,
+      });
     } catch {
-      parsed.push({ fileName: record.fileName, text: "" });
+      parsed.push({
+        fileName: record.fileName,
+        text:
+          record.fileType === "application/pdf"
+            ? "PDF text extraction failed. No text was obtained; use only any explicitly attached page images."
+            : "",
+      });
     }
   }
 

@@ -3,6 +3,10 @@ import { agentSessions, attachments as attachmentsTable, conversations } from "d
 import { and, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { db } from "../db";
+import {
+  AttachmentMultipartError,
+  parseAttachmentMultipart,
+} from "../services/attachmentMultipart";
 import { storeAttachment } from "../services/attachmentService";
 import { requireUser, type UserEnv } from "../utils/requestUser";
 
@@ -36,9 +40,24 @@ function contentDisposition(mode: "inline" | "attachment", fileName: string): st
 attachments.post("/upload", async (c) => {
   const user = c.get("user");
 
-  const body = await c.req.parseBody();
-  const conversationId = body.conversationId?.toString() || undefined;
-  const sessionId = body.sessionId?.toString() || undefined;
+  let body: Awaited<ReturnType<typeof parseAttachmentMultipart>>;
+  try {
+    body = await parseAttachmentMultipart(c.req.raw);
+  } catch (error) {
+    const code =
+      error instanceof AttachmentMultipartError ? error.code : "invalid_attachment_multipart";
+    return c.json(
+      { errorCode: code, error: code },
+      code === "attachment_payload_too_large" ? 413 : 400,
+    );
+  }
+  if (
+    (body.conversationId !== undefined && typeof body.conversationId !== "string") ||
+    (body.sessionId !== undefined && typeof body.sessionId !== "string")
+  )
+    return c.json({ error: "Invalid attachment scope" }, 400);
+  const conversationId = typeof body.conversationId === "string" ? body.conversationId : undefined;
+  const sessionId = typeof body.sessionId === "string" ? body.sessionId : undefined;
 
   if (!conversationId && !sessionId) {
     return c.json({ error: "conversationId or sessionId is required" }, 400);
