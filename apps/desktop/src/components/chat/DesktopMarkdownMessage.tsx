@@ -19,6 +19,7 @@ import { blockStateKey } from "../../lib/genui/blockState";
 import { endsInsideOpenFence, genUiKindOf } from "../../lib/genui/fence";
 import { formatPreviewLabel, getPreviewLabel } from "../../lib/i18n/agent";
 import { localPathErrorLabel, parseInlineLocalPath } from "../../lib/localPathReference";
+import { remarkCjkStrong } from "../../lib/markdownCjkStrong";
 import { notifyError } from "../../lib/notify";
 import { classifyReferenceHref, referenceUrlTransform } from "../../lib/referenceLink";
 import { openLocalPath, openWorkspaceFile } from "../../lib/tauriBridge";
@@ -33,17 +34,6 @@ import { DesktopLocalPathLink, LocalPathLinkContext } from "./DesktopLocalPathLi
 import styles from "./desktop-markdown.module.css";
 import { HtmlUiBlock } from "./genui/HtmlUiBlock";
 import { LazyGenUiBlock } from "./genui/lazy";
-
-// Micromark fails to recognise **…** as bold when a CJK character sits
-// directly before the opening ** (CommonMark left-flanking delimiter rule).
-// Inserting a hair space (U+200A) before the opening ** fixes this without
-// a visible layout change.
-const CJK_BOLD_PAIR_RE =
-  /(?<=[⺀-鿿豈-﫿\u{20000}-\u{2FA1F}\u{3000}-\u{303F}\u{2018}-\u{201F}！-｠])\*\*([^*\n]+?)\*\*/gu;
-
-function fixCjkBold(text: string): string {
-  return text.replace(CJK_BOLD_PAIR_RE, " **$1**");
-}
 
 const LANGUAGE_META: Record<string, { label: string; syntax: string; accent: string }> = {
   bash: { label: "Bash", syntax: "bash", accent: "#16a34a" },
@@ -334,7 +324,7 @@ function DesktopMarkdownMessageImpl({
   streaming = false,
   genUiScope,
 }: DesktopMarkdownMessageProps) {
-  const normalized = fixCjkBold((content || "").replace(/\r\n/g, "\n").trim());
+  const normalized = (content || "").replace(/\r\n/g, "\n").trim();
   const [isDark, setIsDark] = useState(false);
   const openTail = useMemo(() => endsInsideOpenFence(normalized), [normalized]);
   // Read by the `code` renderer at render time instead of being memo
@@ -591,7 +581,7 @@ function DesktopMarkdownMessageImpl({
   return (
     <div className={styles.root}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkBreaks]}
+        remarkPlugins={[remarkGfm, remarkBreaks, remarkCjkStrong]}
         components={components}
         urlTransform={referenceUrlTransform}
       >
