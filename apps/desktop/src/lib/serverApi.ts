@@ -498,7 +498,7 @@ export function createServerApi(options?: { baseUrl?: string; fetch?: FetchLike 
 
   return {
     conversations: {
-      list: () => fetchJson(fetchImpl, baseUrl, "/conversations"),
+      list: () => fetchJson(fetchImpl, baseUrl, "/conversations?view=desktop"),
       create: (data) =>
         fetchJson(fetchImpl, baseUrl, "/conversations", {
           method: "POST",

@@ -1,5 +1,5 @@
 import { agentEvents, agentSessions, conversations, messages } from "db";
-import { and, asc, desc, eq, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, getTableColumns, isNull } from "drizzle-orm";
 import { assistantMessageContent } from "shared/message-text";
 import { db } from "../db";
 import { generateId } from "../utils";
@@ -241,10 +241,18 @@ export async function ensureLegacyAgentSessionsMigrated(userId: string) {
   }
 }
 
-export async function listUnifiedConversations(userId: string) {
+const conversationColumns = getTableColumns(conversations);
+const {
+  summary: _summary,
+  keyFacts: _facts,
+  lastSummarizedAt: _summarized,
+  ...desktopColumns
+} = conversationColumns;
+
+export async function listUnifiedConversations(userId: string, desktopView = false) {
   await ensureLegacyAgentSessionsMigrated(userId);
   return db
-    .select()
+    .select(desktopView ? desktopColumns : conversationColumns)
     .from(conversations)
     .where(eq(conversations.userId, userId))
     .orderBy(desc(conversations.updatedAt));

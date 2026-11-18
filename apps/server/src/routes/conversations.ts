@@ -20,7 +20,7 @@ conversations.use("*", requireUser);
 conversations.get("/", async (c) => {
   const user = c.get("user");
 
-  const result = await listUnifiedConversations(user.id);
+  const result = await listUnifiedConversations(user.id, c.req.query("view") === "desktop");
   return c.json({ conversations: result });
 });
 
