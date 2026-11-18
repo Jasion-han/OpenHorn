@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { attachments, conversations, messages, users } from "db";
@@ -25,11 +25,14 @@ async function seedUser() {
 }
 
 /** Creates a conversation + message + attachment whose blob really exists on disk. */
-async function seedAttachment(userId: string) {
+async function seedAttachment(userId: string, root?: string) {
   const now = new Date();
   const conversationId = generateId();
   const messageId = generateId();
-  const dir = mkdtempSync(path.join(os.tmpdir(), "openhorn-blob-"));
+  const dir = root
+    ? path.join(root, "attachments", conversationId)
+    : mkdtempSync(path.join(os.tmpdir(), "openhorn-blob-"));
+  mkdirSync(dir, { recursive: true });
   const filePath = path.join(dir, "payload.png");
   writeFileSync(filePath, "binary-ish");
 
@@ -66,17 +69,26 @@ describe("attachment blobs are reclaimed on delete", () => {
   test("deleting a conversation removes its attachment files", async () => {
     await bootstrapDatabase();
     const userId = await seedUser();
-    const { conversationId, filePath } = await seedAttachment(userId);
-    expect(existsSync(filePath)).toBe(true);
+    const root = mkdtempSync(path.join(os.tmpdir(), "openhorn-owned-"));
+    const old = process.env.OPENHORN_DATA_DIR;
+    process.env.OPENHORN_DATA_DIR = root;
+    try {
+      const { conversationId, filePath } = await seedAttachment(userId, root);
+      expect(existsSync(filePath)).toBe(true);
 
-    await deleteConversation(userId, conversationId);
+      await deleteConversation(userId, conversationId);
 
-    expect(existsSync(filePath)).toBe(false);
-    const rows = await db
-      .select()
-      .from(attachments)
-      .where(eq(attachments.conversationId, conversationId));
-    expect(rows).toHaveLength(0);
+      expect(existsSync(filePath)).toBe(false);
+      const rows = await db
+        .select()
+        .from(attachments)
+        .where(eq(attachments.conversationId, conversationId));
+      expect(rows).toHaveLength(0);
+    } finally {
+      if (old === undefined) delete process.env.OPENHORN_DATA_DIR;
+      else process.env.OPENHORN_DATA_DIR = old;
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test("deleting a single message removes its attachment files", async () => {

@@ -345,6 +345,10 @@ const SCHEMA_DDL: string[] = [
     id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES scheduled_tasks(id) ON DELETE CASCADE,
     run_id TEXT NOT NULL, conversation_id TEXT NOT NULL
   );`,
+  `CREATE TABLE IF NOT EXISTS attachment_file_deletes (
+    file_path TEXT PRIMARY KEY, conversation_id TEXT NOT NULL
+  );`,
+  `CREATE INDEX IF NOT EXISTS attachment_file_deletes_conv_idx ON attachment_file_deletes(conversation_id);`,
   `CREATE TABLE IF NOT EXISTS scheduled_task_runs (
     id TEXT PRIMARY KEY,
     task_id TEXT NOT NULL,

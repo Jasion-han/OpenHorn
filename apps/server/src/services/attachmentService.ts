@@ -71,7 +71,7 @@ function sanitizeFileName(name: string) {
   return name.replace(/[^a-zA-Z0-9._-]/g, "_");
 }
 
-function resolveDataDir() {
+export function resolveDataDir() {
   if (process.env.OPENHORN_DATA_DIR) {
     return process.env.OPENHORN_DATA_DIR;
   }

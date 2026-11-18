@@ -7,6 +7,7 @@ import {
   agentSessions,
   agentTaskEvents,
   agentTasks,
+  attachmentFileDeletes,
   attachments,
   conversations,
   messages,
@@ -14,7 +15,7 @@ import {
 import { and, desc, eq, inArray, isNull, ne, notExists, or, sql } from "drizzle-orm";
 import { db } from "../db";
 import { generateId } from "../utils";
-import { removeAttachmentFiles } from "./attachmentService";
+import { drainAttachmentFileDeletes } from "./attachmentFileDeletes";
 import { invalidateConversationChatMutations } from "./chatMutationOwnership";
 import { ftsDeleteConversation } from "./messageService";
 import { deleteChunksByConversation } from "./ragService";
@@ -299,7 +300,6 @@ export interface ConversationDeletionPlan {
   messageIds: string[];
   sessionIds: string[];
   taskIds: string[];
-  attachmentFilePaths: string[];
 }
 
 /*
@@ -344,25 +344,7 @@ export async function planConversationDeletion(
   const sessionIds = sessionRows.map((row) => row.id);
   const taskIds = taskRows.map((row) => row.id);
 
-  // Collect the blob paths BEFORE the transaction removes the rows — afterwards
-  // there is no way to find the files again. The unlink itself happens after
-  // commit, so a rolled-back delete cannot destroy files it did not remove.
-  const attachmentConditions = [eq(attachments.conversationId, conversationId)];
-  if (messageIds.length > 0) {
-    attachmentConditions.push(inArray(attachments.messageId, messageIds));
-  }
-  if (sessionIds.length > 0) {
-    attachmentConditions.push(inArray(attachments.sessionId, sessionIds));
-  }
-  const attachmentFileRows = await db
-    .select({ filePath: attachments.filePath })
-    .from(attachments)
-    .where(or(...attachmentConditions));
-  const attachmentFilePaths = [
-    ...new Set(attachmentFileRows.map((row) => row.filePath).filter(Boolean)),
-  ];
-
-  return { conversationId, userId, messageIds, sessionIds, taskIds, attachmentFilePaths };
+  return { conversationId, userId, messageIds, sessionIds, taskIds };
 }
 
 /**
@@ -374,6 +356,36 @@ export async function applyConversationDeletion(
   plan: ConversationDeletionPlan,
 ): Promise<void> {
   const { conversationId, userId, messageIds, sessionIds, taskIds } = plan;
+
+  const ownedMessages = tx
+    .select({ id: messages.id })
+    .from(messages)
+    .where(eq(messages.conversationId, conversationId));
+  const ownedSessions = tx
+    .select({ id: agentSessions.id })
+    .from(agentSessions)
+    .where(and(eq(agentSessions.userId, userId), eq(agentSessions.conversationId, conversationId)));
+  await tx
+    .insert(attachmentFileDeletes)
+    .select(
+      tx
+        .select({
+          filePath: attachments.filePath,
+          conversationId: sql<string>`${conversationId}`.as("conversation_id"),
+        })
+        .from(attachments)
+        .where(
+          and(
+            sql`${attachments.filePath} != '' AND ${attachments.filePath} NOT LIKE 'local:%'`,
+            or(
+              eq(attachments.conversationId, conversationId),
+              inArray(attachments.messageId, ownedMessages),
+              inArray(attachments.sessionId, ownedSessions),
+            ),
+          ),
+        ),
+    )
+    .onConflictDoNothing();
 
   if (messageIds.length > 0) {
     await tx.delete(attachments).where(inArray(attachments.messageId, messageIds));
@@ -427,7 +439,9 @@ export async function applyConversationDeletion(
 export async function finishConversationDeletion(plan: ConversationDeletionPlan): Promise<void> {
   invalidateConversationChatMutations(plan.userId, plan.conversationId, plan.messageIds);
   await ftsDeleteConversation(plan.conversationId);
-  await removeAttachmentFiles(plan.attachmentFilePaths);
+  await drainAttachmentFileDeletes(plan.conversationId).catch(() =>
+    console.warn("[attachments] cleanup deferred until restart"),
+  );
   await deleteChunksByConversation(plan.conversationId).catch(() => {});
 }
 

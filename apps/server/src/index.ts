@@ -20,10 +20,13 @@ import reviewWorkspaceRoutes from "./routes/reviewWorkspaces";
 import scheduledTaskRoutes from "./routes/scheduledTasks";
 import searchRoutes from "./routes/search";
 import settingsRoutes from "./routes/settings";
-
+import { drainAttachmentFileDeletes } from "./services/attachmentFileDeletes";
 import { startScheduler } from "./services/scheduledTaskScheduler";
 
 await bootstrapDatabase();
+void drainAttachmentFileDeletes().catch(() =>
+  console.warn("[attachments] startup cleanup deferred"),
+);
 startScheduler();
 
 const app = new Hono();

@@ -509,6 +509,15 @@ export const manualTaskReceipts = sqliteTable("manual_task_receipts", {
   conversationId: text("conversation_id").notNull(),
 });
 
+export const attachmentFileDeletes = sqliteTable(
+  "attachment_file_deletes",
+  {
+    filePath: text("file_path").primaryKey(),
+    conversationId: text("conversation_id").notNull(),
+  },
+  (table) => [index("attachment_file_deletes_conv_idx").on(table.conversationId)],
+);
+
 export const scheduledTaskRuns = sqliteTable(
   "scheduled_task_runs",
   {
