@@ -11,7 +11,7 @@ async function unlinkManaged(file: string) {
   const dir = path.dirname(file);
   const roots = [
     path.resolve(resolveDataDir(), "attachments"),
-    path.resolve(process.env.OPENHORN_DATA_DIR || path.join(process.cwd(), "data"), "uploads"),
+    path.resolve(resolveDataDir(), "uploads"),
   ];
   const root = roots.find((r) => file.startsWith(r + path.sep));
   if (!root) return;
