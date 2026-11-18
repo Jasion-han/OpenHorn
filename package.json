@@ -6,7 +6,6 @@
     "dev:server": "pnpm --filter server dev",
     "dev": "turbo dev",
     "build": "turbo build",
-    "build:server": "pnpm --filter server build",
     "build:desktop": "pnpm --filter desktop build",
     "lint": "biome lint .",
     "check": "biome check .",
