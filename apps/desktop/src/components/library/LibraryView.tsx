@@ -472,6 +472,15 @@ function LibrarySession({ userId }: { userId: string }) {
               <p className="max-w-sm text-xs leading-6 text-muted-foreground">
                 {label("library.emptyHint")}
               </p>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={scope.kind === "all" || busy}
+                onClick={() => setDialog("upload")}
+              >
+                <Upload size={14} />
+                {label("library.import")}
+              </Button>
             </div>
           ) : (
             <div className="grid min-h-[420px] grid-cols-1 gap-6 md:grid-cols-[260px_minmax(0,1fr)]">

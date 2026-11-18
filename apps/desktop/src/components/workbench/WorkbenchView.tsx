@@ -107,6 +107,9 @@ export function WorkbenchView() {
           <header className="flex flex-wrap items-start justify-between gap-4 border-b pb-4">
             <div className="min-w-0 space-y-1">
               <h1 className="text-xl font-semibold tracking-tight">{label("workbench.title")}</h1>
+              <p className="max-w-2xl text-sm text-muted-foreground">
+                {label("workbench.subtitle")}
+              </p>
             </div>
             <nav aria-label={label("workbench.title")} className="flex flex-wrap gap-1">
               {(["recipes", "artifacts", "reviews"] as const).map((value) => (
@@ -129,6 +132,15 @@ export function WorkbenchView() {
               ))}
             </nav>
           </header>
+          <div className="rounded-xl border bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
+            {label(
+              tab === "recipes"
+                ? "workbench.recipes.roleDescription"
+                : tab === "reviews"
+                  ? "reviews.description"
+                  : "workbench.artifacts.roleDescription",
+            )}
+          </div>
           {tab === "recipes" ? (
             <RecipePanel key={sessionKey} />
           ) : tab === "reviews" ? (

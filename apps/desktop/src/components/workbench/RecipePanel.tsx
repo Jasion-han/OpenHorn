@@ -411,7 +411,21 @@ export function RecipePanel() {
           ))}
         </nav>
         {!loading && !listError && recipes.length === 0 && (
-          <p className="text-sm text-muted-foreground">{label("workbench.recipes.empty")}</p>
+          <div className="space-y-2 rounded-lg border border-dashed p-3">
+            <p className="text-sm font-medium">{label("workbench.recipes.empty")}</p>
+            <p className="text-xs leading-5 text-muted-foreground">
+              {label("workbench.recipes.emptyHint")}
+            </p>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busy}
+              onClick={() => setEditor({ spec: recipePresets()[0] ?? emptyRecipe() })}
+            >
+              <Plus size={14} />
+              {label("workbench.recipes.templates")}
+            </Button>
+          </div>
         )}
         {!loading && recipes.length > 0 && visible.length === 0 && (
           <div aria-live="polite" className="space-y-2 text-sm text-muted-foreground">
