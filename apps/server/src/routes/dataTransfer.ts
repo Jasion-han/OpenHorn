@@ -60,7 +60,10 @@ router.use("*", requireUser);
 
 router.get("/export/estimate", async (c) => {
   const user = c.get("user");
-  const estimate = await estimateExportSize(user.id);
+  const estimate = await estimateExportSize(
+    user.id,
+    c.req.query("format") === "dti" ? "dti" : "backup",
+  );
   return c.json(estimate);
 });
 

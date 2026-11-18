@@ -31,7 +31,7 @@ import {
   taskRecipes,
   taskRecipeVersions,
 } from "db";
-import { eq } from "drizzle-orm";
+import { count, eq, type SQLWrapper, sql } from "drizzle-orm";
 import { db } from "../db";
 import { BackupArchiveBudget } from "./backupArchiveBudget";
 import { isSafeBackupSetting, sanitizeBackupEndpoint, sanitizeBackupMcp } from "./backupSanitizer";
@@ -367,31 +367,129 @@ function resolveAttachmentPath(filePath: string): string | null {
 /**
  * Estimate export size in bytes (rough approximation for UI display).
  */
-export async function estimateExportSize(userId: string): Promise<{
+export async function estimateExportSize(
+  userId: string,
+  format: "backup" | "dti" = "backup",
+): Promise<{
   conversations: number;
   messages: number;
   attachments: number;
   estimatedBytes: number;
 }> {
-  const data = await collectExportData(userId);
-
-  let attachmentBytes = 0;
-  for (const att of data.attachments) {
-    attachmentBytes += att.fileSize ?? 0;
-  }
-
-  const jsonBytes =
-    Buffer.byteLength(JSON.stringify(data.libraryDocuments), "utf8") +
-    Buffer.byteLength(JSON.stringify(data.libraryQuestions), "utf8") +
-    JSON.stringify(data.conversations).length +
-    JSON.stringify(data.messages).length +
-    JSON.stringify(data.channels).length +
-    JSON.stringify(data.settings).length;
-
-  return {
-    conversations: data.conversations.length,
-    messages: data.messages.length,
-    attachments: data.attachments.length,
-    estimatedBytes: jsonBytes + attachmentBytes,
+  // Uncompressed approximation: count UTF-8 bytes of dominant fields and allow
+  // for JSON metadata per row. Never materialize originals or message bodies in JS.
+  const backup = format === "backup";
+  const bytes = (...fields: SQLWrapper[]) =>
+    sql<number>`coalesce(sum(${sql.join(
+      fields.map((f) => sql`coalesce(length(cast(${f} as blob)),0)`),
+      sql` + `,
+    )}),0)`;
+  const [conv, msg] = await db.batch([
+    db
+      .select({
+        n: count(),
+        b: bytes(
+          conversations.title,
+          ...(backup
+            ? [conversations.systemPrompt, conversations.summary, conversations.keyFacts]
+            : []),
+        ),
+      })
+      .from(conversations)
+      .where(eq(conversations.userId, userId)),
+    db
+      .select({
+        n: count(),
+        b: bytes(
+          messages.content,
+          messages.model,
+          ...(backup
+            ? [
+                messages.agentRun,
+                messages.attachments,
+                messages.contextPaths,
+                messages.liveMetadata,
+                messages.citations,
+                messages.providerState,
+              ]
+            : []),
+        ),
+      })
+      .from(messages)
+      .innerJoin(conversations, eq(messages.conversationId, conversations.id))
+      .where(eq(conversations.userId, userId)),
+  ]);
+  const estimate = {
+    conversations: conv[0].n,
+    messages: msg[0].n,
+    attachments: 0,
+    estimatedBytes:
+      conv[0].b + msg[0].b + conv[0].n * (backup ? 400 : 130) + msg[0].n * (backup ? 300 : 80),
   };
+  if (!backup) return estimate;
+  const [att, ...sections] = await db.batch([
+    db
+      .select({ n: count(), b: sql<number>`coalesce(sum(${attachments.fileSize}),0)` })
+      .from(attachments)
+      .innerJoin(conversations, eq(attachments.conversationId, conversations.id))
+      .where(eq(conversations.userId, userId)),
+    db
+      .select({ b: sql<number>`coalesce(sum(4*((${libraryDocuments.fileSize}+2)/3)),0)` })
+      .from(libraryDocuments)
+      .where(eq(libraryDocuments.userId, userId)),
+    db
+      .select({
+        b: bytes(libraryQuestions.sources, libraryQuestions.prompt, libraryQuestions.question),
+      })
+      .from(libraryQuestions)
+      .where(eq(libraryQuestions.userId, userId)),
+    db
+      .select({ b: bytes(savedArtifactVersions.content) })
+      .from(savedArtifactVersions)
+      .innerJoin(savedArtifacts, eq(savedArtifactVersions.artifactId, savedArtifacts.id))
+      .where(eq(savedArtifacts.userId, userId)),
+    db
+      .select({ b: bytes(taskRecipes.spec) })
+      .from(taskRecipes)
+      .where(eq(taskRecipes.userId, userId)),
+    db
+      .select({ b: bytes(taskRecipeVersions.spec) })
+      .from(taskRecipeVersions)
+      .innerJoin(taskRecipes, eq(taskRecipeVersions.recipeId, taskRecipes.id))
+      .where(eq(taskRecipes.userId, userId)),
+    db
+      .select({ b: bytes(reviewWorkspaces.data) })
+      .from(reviewWorkspaces)
+      .where(eq(reviewWorkspaces.userId, userId)),
+    db
+      .select({
+        b: bytes(scheduledTasks.title, scheduledTasks.prompt, scheduledTasks.recipeSnapshot),
+      })
+      .from(scheduledTasks)
+      .where(eq(scheduledTasks.userId, userId)),
+    db
+      .select({ b: bytes(projects.name, projects.rootPath) })
+      .from(projects)
+      .where(eq(projects.userId, userId)),
+    db
+      .select({ b: sql<number>`count(*)*160 + ${bytes(channels.name)}` })
+      .from(channels)
+      .where(eq(channels.userId, userId)),
+    db
+      .select({
+        b: bytes(channelModels.modelId, channelModels.displayName, channelModels.contextMetadata),
+      })
+      .from(channelModels)
+      .innerJoin(channels, eq(channelModels.channelId, channels.id))
+      .where(eq(channels.userId, userId)),
+    // Only a bounded, sanitized description is portable, not raw MCP config or secret settings.
+    db
+      .select({ b: sql<number>`count(*)*160 + ${bytes(mcpServers.name)}` })
+      .from(mcpServers)
+      .where(eq(mcpServers.userId, userId)),
+  ]);
+  estimate.attachments = att[0].n;
+  // Manifest, section headers and the bounded settings whitelist.
+  estimate.estimatedBytes += 2048 + att[0].b + sections.reduce((sum, rows) => sum + rows[0].b, 0);
+  return estimate;
 }

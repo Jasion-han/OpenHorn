@@ -78,7 +78,7 @@ export function DataTransferSettings() {
     const request = ++estimatingRequest.current;
     setEstimating(true);
     try {
-      const est = await api.dataTransfer.estimateExport();
+      const est = await api.dataTransfer.estimateExport("dti");
       if (request !== estimatingRequest.current) return;
       setEstimate(est);
       completedExport.current = false;

@@ -265,7 +265,7 @@ export interface ServerApi {
     testServer: (id: string) => Promise<{ success: boolean; error?: string }>;
   };
   dataTransfer: {
-    estimateExport: () => Promise<ExportEstimate>;
+    estimateExport: (format?: "backup" | "dti") => Promise<ExportEstimate>;
     exportBackup: (outputDir?: string) => Promise<ExportBackupResult>;
     exportDTI: () => Promise<object[]>;
     detectFormat: (filePath: string) => Promise<{ format: string }>;
@@ -731,7 +731,8 @@ export function createServerApi(options?: { baseUrl?: string; fetch?: FetchLike 
     },
 
     dataTransfer: {
-      estimateExport: () => fetchJson(fetchImpl, baseUrl, "/data-transfer/export/estimate"),
+      estimateExport: (format = "backup") =>
+        fetchJson(fetchImpl, baseUrl, `/data-transfer/export/estimate?format=${format}`),
       exportBackup: (outputDir) =>
         fetchJson(fetchImpl, baseUrl, "/data-transfer/export/backup", {
           method: "POST",

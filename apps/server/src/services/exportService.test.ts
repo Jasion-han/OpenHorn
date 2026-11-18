@@ -31,7 +31,7 @@ import {
   getArtifactDetail,
   listArtifacts,
 } from "./artifactService";
-import { exportBackup } from "./exportService";
+import { estimateExportSize, exportBackup } from "./exportService";
 import { getImportRecord } from "./importRecordsService";
 import { importOpenHornBackup } from "./importService";
 import {
@@ -53,6 +53,30 @@ async function seedUser() {
   });
   return id;
 }
+
+test("DTI estimate excludes attachments and other accounts; backup includes attachment bytes", async () => {
+  const id = await seedUser();
+  const other = await seedUser();
+  try {
+    const conv = await seedConversation(id);
+    await seedConversation(other);
+    const dti = await estimateExportSize(id, "dti");
+    const before = await estimateExportSize(id);
+    await seedAttachment(conv, "local:synthetic");
+    await db
+      .update(attachments)
+      .set({ fileSize: 1_000_000 })
+      .where(eq(attachments.conversationId, conv));
+    expect(await estimateExportSize(id, "dti")).toEqual(dti);
+    expect(dti).toMatchObject({ conversations: 1, messages: 1, attachments: 0 });
+    const backup = await estimateExportSize(id);
+    expect(backup.attachments).toBe(1);
+    expect(backup.estimatedBytes - before.estimatedBytes).toBeGreaterThanOrEqual(1_000_000);
+  } finally {
+    await cleanupUser(id);
+    await cleanupUser(other);
+  }
+});
 async function cleanupUser(userId: string) {
   const rows = await db
     .select({ id: conversations.id })
