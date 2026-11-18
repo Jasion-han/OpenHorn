@@ -935,7 +935,12 @@ export function createDesktopChatStore(
     },
 
     async autoTitleConversation(conversationId, prompt) {
+      const epoch = metadataEpoch;
+      const readTitle = () => get().conversations.find((row) => row.id === conversationId)?.title;
+      const expected = readTitle();
+      if (expected === undefined) return { success: false };
       const result = await adapter.autoTitleConversation(conversationId, prompt);
+      if (epoch !== metadataEpoch || readTitle() !== expected) return { success: false };
       if (!result.success || !result.title) {
         return result;
       }

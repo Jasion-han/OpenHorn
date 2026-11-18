@@ -265,6 +265,26 @@ export async function updateConversation(
   return { success: true };
 }
 
+export async function applyGeneratedTitle(
+  userId: string,
+  conversationId: string,
+  expectedTitle: string,
+  title: string,
+) {
+  const changed = await db
+    .update(conversations)
+    .set({ title, updatedAt: new Date() })
+    .where(
+      and(
+        eq(conversations.userId, userId),
+        eq(conversations.id, conversationId),
+        eq(conversations.title, expectedTitle),
+      ),
+    )
+    .returning({ id: conversations.id });
+  return changed.length === 1;
+}
+
 /** Drizzle transaction handle for the libsql driver, as passed to `db.transaction((tx) => ...)`. */
 export type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 

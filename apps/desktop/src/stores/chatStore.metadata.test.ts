@@ -24,6 +24,23 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
+test("delayed auto-title response cannot replace a manual title in the list or selected chat", async () => {
+  const response = deferred<{ success: boolean; title: string }>();
+  const adapter = {
+    autoTitleConversation: () => response.promise,
+    updateConversation: async () => {},
+  } as unknown as ChatAdapter;
+  const store = createDesktopChatStore(adapter);
+  const chat = { ...original, title: "新会话" };
+  store.setState({ conversations: [chat], currentConversation: chat });
+  const pending = store.getState().autoTitleConversation(chat.id, "seed");
+  await store.getState().updateConversation(chat.id, { title: "Manual" });
+  response.resolve({ success: true, title: "Automatic" });
+  expect((await pending).success).toBe(false);
+  expect(store.getState().currentConversation?.title).toBe("Manual");
+  expect(store.getState().conversations[0]?.title).toBe("Manual");
+});
+
 test("native refusal clears streamed text and citations while preserving structured process metadata", () => {
   const store = createDesktopChatStore({} as ChatAdapter);
   store.setState({

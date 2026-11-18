@@ -15,9 +15,7 @@ export function displayConversationTitle(title: string): string {
 }
 
 /** True for both the new "新会话" and the legacy "新会话 MM-DD HH:mm" default titles. */
-export function isDefaultConversationTitle(title: string): boolean {
-  return /^新会话( \d{2}-\d{2} \d{2}:\d{2})?$/.test(title.trim());
-}
+export { isDefaultConversationTitle } from "shared/constants";
 
 /**
  * "YYYY-MM-DD HH:mm" — full timestamp for individual messages.

@@ -1,6 +1,8 @@
 import { Hono } from "hono";
+import { isDefaultConversationTitle } from "shared/constants";
 import { generateAutoTitle } from "../services/autoTitleService";
 import {
+  applyGeneratedTitle,
   createConversation,
   deleteConversation,
   updateConversation,
@@ -87,6 +89,7 @@ conversations.post("/:id/auto-title", async (c) => {
     if (!conversation) {
       return c.json({ error: "Conversation not found" }, 404);
     }
+    if (!isDefaultConversationTitle(conversation.title)) return c.json({ success: false });
     const body = await c.req.json().catch(() => ({}));
     const prompt = typeof body.prompt === "string" ? body.prompt : "";
     if (!prompt.trim()) {
@@ -96,7 +99,8 @@ conversations.post("/:id/auto-title", async (c) => {
     if (!title) {
       return c.json({ success: false, error: "Failed to generate title" });
     }
-    await updateConversation(user.id, conversationId, { title });
+    if (!(await applyGeneratedTitle(user.id, conversationId, conversation.title, title)))
+      return c.json({ success: false });
     return c.json({ success: true, title });
   } catch (error) {
     return c.json({ success: false, error: error instanceof Error ? error.message : "Failed" });

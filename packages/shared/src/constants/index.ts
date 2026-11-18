@@ -27,6 +27,11 @@ export const PROVIDERS = {
 
 export const DEFAULT_CONTEXT_LENGTH = 4096;
 
+/** Recognize both the placeholder and its timestamped legacy form. */
+export function isDefaultConversationTitle(title: string): boolean {
+  return /^新会话( \d{2}-\d{2} \d{2}:\d{2})?$/.test(title.trim());
+}
+
 export const MAX_CONTEXT_LENGTH = 100000;
 
 // --- Import center ---
