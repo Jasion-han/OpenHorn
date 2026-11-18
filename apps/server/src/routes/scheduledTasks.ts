@@ -89,7 +89,11 @@ router.patch("/:id/toggle", async (c) => {
 });
 
 router.post("/:id/run", async (c) => {
-  const receipt = await enqueueManualTask(c.get("user").id, c.req.param("id"), crypto.randomUUID());
+  const requestId = c.req.header("Idempotency-Key") ?? c.req.header("X-Request-ID");
+  if (!requestId || !/^[a-zA-Z0-9_-]{16,128}$/.test(requestId)) {
+    return c.json({ error: "Idempotency-Key is required" }, 400);
+  }
+  const receipt = await enqueueManualTask(c.get("user").id, c.req.param("id"), requestId);
   if (!receipt) return c.json({ error: "not found" }, 404);
   rescheduleScheduler();
   return c.json({ success: true, ...receipt });

@@ -13,6 +13,7 @@ test("manual task routes enqueue real pending work and fence owner completion", 
   expect(child.exitCode).toBe(0);
   const result = JSON.parse(child.stdout.toString());
   expect(result.manualStatus).toBe(200);
+  expect(result.missingKeyStatus).toBe(400);
   expect(result.legacy).toEqual({ id: "synthetic-legacy-run", status: "running" });
   for (const name of ["owner_token", "lease_expires_at", "error_code"]) {
     expect(result.leaseColumns.filter((column: string) => column === name)).toHaveLength(1);

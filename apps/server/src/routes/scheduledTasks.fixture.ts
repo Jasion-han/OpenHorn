@@ -25,7 +25,11 @@ const task = await createScheduledTask(localUserId, {
 if (!task) throw new Error("Missing synthetic task");
 const { default: routes } = await import("./scheduledTasks");
 const app = new Hono().route("/scheduled-tasks", routes);
-const manualResponse = await app.request(`/scheduled-tasks/${task.id}/run`, { method: "POST" });
+const missingKey = await app.request(`/scheduled-tasks/${task.id}/run`, { method: "POST" });
+const manualResponse = await app.request(`/scheduled-tasks/${task.id}/run`, {
+  method: "POST",
+  headers: { "Idempotency-Key": "synthetic-manual-request-0001" },
+});
 const manual = (await manualResponse.json()) as { runId: string; conversationId: string };
 const pendingResponse = await app.request("/scheduled-tasks/runs/pending");
 const pending = (await pendingResponse.json()) as {
@@ -107,6 +111,7 @@ console.log(
     leaseColumns,
     legacy,
     manualStatus: manualResponse.status,
+    missingKeyStatus: missingKey.status,
     pending: pending.runs,
     noTokenStatus: noToken.status,
     claimed: await claim.json(),

@@ -96,7 +96,11 @@ try {
   };
   const schedule = await request(`/recipes/${id}/schedule`, "POST", scheduleInput);
   const retrySchedule = await request(`/recipes/${id}/schedule`, "POST", scheduleInput);
-  const manual = await request(`/scheduled-tasks/${schedule.body.task?.id}/run`, "POST");
+  const manualResponse = await app.request(`/scheduled-tasks/${schedule.body.task?.id}/run`, {
+    method: "POST",
+    headers: { "Idempotency-Key": "synthetic-recipe-manual-0001" },
+  });
+  const manual = { status: manualResponse.status, body: (await manualResponse.json()) as Data };
   const manualProject = manual.body.conversationId
     ? (
         await client.execute({
