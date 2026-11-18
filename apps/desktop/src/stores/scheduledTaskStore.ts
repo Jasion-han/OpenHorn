@@ -44,6 +44,7 @@ export function createScheduledTaskStore(request = fetchWithBackendStatus) {
   let tasksRequest = 0;
   let runsRevision = 0;
   const runsRequests = new Map<string, number>();
+  const unansweredRuns = new Map<string, string>();
   return create<ScheduledTaskState>((set, get) => {
     const reserve = (id: string, action: ScheduledTaskState["pendingTasks"][string]) => {
       if (get().pendingTasks[id]) return false;
@@ -230,11 +231,19 @@ export function createScheduledTaskStore(request = fetchWithBackendStatus) {
         if (!reserve(id, "run")) return null;
         try {
           const base = getDesktopBackendBase();
-          const res = await request(`${base}/scheduled-tasks/${encodeURIComponent(id)}/run`, {
-            method: "POST",
+          const scope = `${base}/scheduled-tasks/${encodeURIComponent(id)}`;
+          const requestId = unansweredRuns.get(scope) ?? crypto.randomUUID();
+          unansweredRuns.set(scope, requestId);
+          const res = await request(`${scope}/manual-runs/${requestId}`, {
+            method: "PUT",
           });
-          if (!res.ok) return null;
+          if (!res.ok) {
+            if (res.status >= 400 && res.status < 500 && res.status !== 408)
+              unansweredRuns.delete(scope);
+            return null;
+          }
           const json = (await res.json()) as { conversationId?: string };
+          if (json.conversationId) unansweredRuns.delete(scope);
           return json.conversationId ?? null;
         } catch {
           return null;

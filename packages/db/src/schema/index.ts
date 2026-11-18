@@ -499,6 +499,16 @@ export const scheduledTasks = sqliteTable(
   ],
 );
 
+/** Intentionally independent of run history: deleting a run must not replay a click. */
+export const manualTaskReceipts = sqliteTable("manual_task_receipts", {
+  id: text("id").primaryKey(),
+  taskId: text("task_id")
+    .notNull()
+    .references(() => scheduledTasks.id, { onDelete: "cascade" }),
+  runId: text("run_id").notNull(),
+  conversationId: text("conversation_id").notNull(),
+});
+
 export const scheduledTaskRuns = sqliteTable(
   "scheduled_task_runs",
   {

@@ -21,6 +21,21 @@ const run = {
   startedAt: new Date(),
 } as ScheduledTaskRun;
 
+test("a lost manual-run receipt reuses the key until acknowledged, then a new click gets a new key", async () => {
+  const urls: string[] = [];
+  const store = createScheduledTaskStore(async (url, init) => {
+    expect(init?.method).toBe("PUT");
+    urls.push(url);
+    if (urls.length === 1) throw new Error("lost receipt");
+    return Response.json({ conversationId: "chat" });
+  });
+  expect(await store.getState().runTaskNow(task.id)).toBe(null);
+  expect(await store.getState().runTaskNow(task.id)).toBe("chat");
+  expect(await store.getState().runTaskNow(task.id)).toBe("chat");
+  expect(urls[0]).toBe(urls[1]);
+  expect(urls[2] !== urls[1]).toBe(true);
+});
+
 test("failed deletes and toggles preserve task/run state and report failure", async () => {
   const store = createScheduledTaskStore(async () =>
     Response.json({ error: "synthetic" }, { status: 503 }),

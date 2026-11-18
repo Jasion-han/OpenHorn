@@ -1,16 +1,12 @@
 import { Hono } from "hono";
-import { getResolvedChannelForUser } from "../services/channelService";
-import { createConversation } from "../services/conversationService";
+import { enqueueManualTask } from "../services/manualTaskRun";
 import { rescheduleScheduler } from "../services/scheduledTaskScheduler";
 import {
-  advanceNextRunAt,
   claimTaskRun,
   createScheduledTask,
-  createTaskRun,
   deleteScheduledTask,
   deleteTaskRun,
   finishTaskRun,
-  getScheduledTask,
   heartbeatTaskRun,
   isTaskRunOwnerToken,
   listPendingTaskRuns,
@@ -93,32 +89,19 @@ router.patch("/:id/toggle", async (c) => {
 });
 
 router.post("/:id/run", async (c) => {
-  const user = c.get("user");
-  const id = c.req.param("id");
-  const task = await getScheduledTask(user.id, id);
-  if (!task) return c.json({ error: "not found" }, 404);
-
-  let channelId = task.channelId;
-  let modelId = task.modelId;
-  if (!channelId) {
-    const resolved = await getResolvedChannelForUser(user.id);
-    if (resolved) {
-      channelId = resolved.channel.id;
-      modelId = resolved.modelId;
-    }
-  }
-  const conversation = await createConversation(user.id, {
-    title: task.title,
-    channelId,
-    modelId,
-    forceNew: true,
-    scheduledTaskId: task.id,
-    projectId: task.projectId,
-  });
-  const runId = await createTaskRun(task.id, user.id, conversation.id, "pending");
-  await advanceNextRunAt(task.id);
+  const receipt = await enqueueManualTask(c.get("user").id, c.req.param("id"), crypto.randomUUID());
+  if (!receipt) return c.json({ error: "not found" }, 404);
   rescheduleScheduler();
-  return c.json({ success: true, runId, conversationId: conversation.id });
+  return c.json({ success: true, ...receipt });
+});
+
+router.put("/:id/manual-runs/:requestId", async (c) => {
+  const key = c.req.param("requestId");
+  if (!/^[a-zA-Z0-9_-]{16,128}$/.test(key)) return c.json({ error: "invalid request id" }, 400);
+  const receipt = await enqueueManualTask(c.get("user").id, c.req.param("id"), key);
+  if (!receipt) return c.json({ error: "not found" }, 404);
+  rescheduleScheduler();
+  return c.json({ success: true, ...receipt });
 });
 
 router.get("/:id/runs", async (c) => {

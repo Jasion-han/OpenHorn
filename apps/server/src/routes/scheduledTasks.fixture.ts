@@ -1,7 +1,11 @@
-export {};
-// A fresh in-memory server exercises routes without ambient users or credentials.
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
+const root = mkdtempSync(path.join(tmpdir(), "openhorn-manual-"));
+process.on("exit", () => rmSync(root, { recursive: true, force: true }));
 process.env.NODE_ENV = "test";
-process.env.DATABASE_URL = "file::memory:";
+process.env.DATABASE_URL = `file:${path.join(root, "tasks.db")}`;
 const { Hono } = await import("hono");
 const { bootstrapDatabase } = await import("../db/bootstrap");
 const { client } = await import("../db");
@@ -28,6 +32,36 @@ const pending = (await pendingResponse.json()) as {
   runs: Array<{ id: string; status: string; ownerToken?: string }>;
 };
 const ownerToken = "synthetic-owner-000000001";
+const send = (key: string) =>
+  app.request(`/scheduled-tasks/${task.id}/manual-runs/${key}`, { method: "PUT" });
+const count = async (table: string) =>
+  Number((await client.execute(`SELECT count(*) n FROM ${table}`)).rows[0].n);
+const snapshot = async () =>
+  Promise.all(["conversations", "scheduled_task_runs", "manual_task_receipts"].map(count));
+const before = await snapshot();
+await client.execute(
+  "CREATE TRIGGER fail_receipt BEFORE INSERT ON manual_task_receipts BEGIN SELECT RAISE(ABORT,'synthetic failure'); END",
+);
+const failed = await send("synthetic-manual-attempt");
+await client.execute("DROP TRIGGER fail_receipt");
+if (failed.status !== 500 || JSON.stringify(before) !== JSON.stringify(await snapshot()))
+  throw new Error("partial manual enqueue");
+const tries = await Promise.all([
+  send("synthetic-manual-attempt"),
+  send("synthetic-manual-attempt"),
+]);
+const readReceipt = async (r: Response) => (await r.json()) as typeof manual;
+const receipts = await Promise.all(tries.map(readReceipt));
+const second = await readReceipt(await send("synthetic-independent-click"));
+if (
+  !receipts[0].runId ||
+  receipts[0].runId !== receipts[1].runId ||
+  receipts[0].conversationId !== receipts[1].conversationId ||
+  !second.runId ||
+  second.runId === receipts[0].runId ||
+  (await snapshot()).some((n, i) => n !== before[i] + 2)
+)
+  throw new Error("duplicate or missing run");
 const json = (body: unknown) => ({
   method: "PATCH",
   headers: { "Content-Type": "application/json" },

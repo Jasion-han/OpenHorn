@@ -341,6 +341,10 @@ const SCHEMA_DDL: string[] = [
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   );`,
 
+  `CREATE TABLE IF NOT EXISTS manual_task_receipts (
+    id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES scheduled_tasks(id) ON DELETE CASCADE,
+    run_id TEXT NOT NULL, conversation_id TEXT NOT NULL
+  );`,
   `CREATE TABLE IF NOT EXISTS scheduled_task_runs (
     id TEXT PRIMARY KEY,
     task_id TEXT NOT NULL,

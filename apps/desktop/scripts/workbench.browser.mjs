@@ -276,7 +276,7 @@ try {
       task.enabled = !task.enabled;
       return json({ task });
     }
-    if (endpoint.match(/^\/scheduled-tasks\/[^/]+\/run$/) && method === "POST") {
+    if (endpoint.match(/^\/scheduled-tasks\/[^/]+\/manual-runs\/[\w-]+$/) && method === "PUT") {
       manualRunEntered?.();
       if (holdManualRun) await holdManualRun;
       const taskId = endpoint.split("/")[2];
@@ -657,7 +657,10 @@ try {
   manualRunEntered = null;
   await page.getByText("已加入执行队列", { exact: true }).waitFor();
   await page.getByRole("heading", { name: "工作台", exact: true }).waitFor();
-  assert.equal(requests.filter((r) => r.path === "/scheduled-tasks/manual-task/run").length, 1);
+  assert.equal(
+    requests.filter((r) => r.path.startsWith("/scheduled-tasks/manual-task/manual-runs/")).length,
+    1,
+  );
   pass("late manual-run acceptance reports queued without stealing the newer page");
 
   pass(
