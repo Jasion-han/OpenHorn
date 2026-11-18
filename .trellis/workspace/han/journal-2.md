@@ -265,3 +265,25 @@ Topics: [.trellis/research/tool-relay-feasibility.md](../../research/tool-relay-
 ### Status
 
 [OK] **Completed**
+
+
+## Session 87: 定时任务入队、标题竞态与大库读取
+<!-- trellis-session: v=2 fp=802891323ea3a635 -->
+
+**Date**: 2026-11-18
+**Task**: 定时任务入队、标题竞态与大库读取
+**Package**: agent
+**Branch**: `main`
+
+### Summary
+
+自动标题条件写入且桌面端丢弃过期回执；按到期时间以事务发布定时任务；增加独立内存库读路径基准。
+Topics: [.trellis/spec/desktop/frontend/state-management.md](../../spec/desktop/frontend/state-management.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**

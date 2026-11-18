@@ -45,6 +45,9 @@ Questions to answer:
   that choice changes while the refresh is pending.
 - Explicit conversation selection and creation restore the selected
   conversation's saved mode. A metadata refresh is not a selection event.
+- Auto-title is conditional: the server may replace only the original default
+  title, and desktop ignores results after reset or a change of the local title.
+  The desktop list omits model summaries, not conversation IDs or editor settings.
 - Serialize metadata writes per conversation. On failure, roll back only fields
   that operation still owns; never restore an entire old conversation row over
   another accepted change or newer runtime metadata. Reset cancels queued writes.
