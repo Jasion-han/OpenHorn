@@ -1,12 +1,14 @@
 import { expect, test } from "bun:test";
-import { scheduledTaskRuns, scheduledTasks, users } from "db";
+import { conversations, scheduledTaskRuns, scheduledTasks, users } from "db";
 import { eq } from "drizzle-orm";
-import { db } from "../db";
+import { client, db } from "../db";
+import { settleDueTask } from "./scheduledTaskScheduler";
 import {
   claimTaskRun,
   createScheduledTask,
   createTaskRun,
   finishTaskRun,
+  getScheduledTask,
   heartbeatTaskRun,
   listPendingTaskRuns,
   reconcileExpiredTaskRuns,
@@ -37,6 +39,43 @@ async function fixture() {
     },
   };
 }
+
+test("a due occurrence rolls back on enqueue failure and cannot be published twice", async () => {
+  const f = await fixture();
+  try {
+    const dueAt = new Date(Math.floor(Date.now() / 1000) * 1000 - 60_000);
+    const due = { ...f.task, nextRunAt: dueAt };
+    const model = { channelId: null, modelId: null };
+    const conversationRows = () =>
+      db.select().from(conversations).where(eq(conversations.userId, f.id));
+    const runRows = () =>
+      db.select().from(scheduledTaskRuns).where(eq(scheduledTaskRuns.userId, f.id));
+    await db.update(scheduledTasks).set({ nextRunAt: dueAt }).where(eq(scheduledTasks.id, due.id));
+    await client.execute(
+      `CREATE TRIGGER stop_fixture_enqueue BEFORE INSERT ON scheduled_task_runs WHEN NEW.user_id = '${f.id}' BEGIN SELECT RAISE(ABORT,'injected failure'); END`,
+    );
+    try {
+      await expect(settleDueTask(due, model)).rejects.toThrow();
+    } finally {
+      await client.execute("DROP TRIGGER stop_fixture_enqueue");
+    }
+    expect(await conversationRows()).toHaveLength(0);
+    expect(await runRows()).toHaveLength(0);
+    expect((await getScheduledTask(f.id, due.id))?.nextRunAt).toEqual(dueAt);
+    expect(await settleDueTask(due, model)).toBe(true);
+    expect(await settleDueTask(due, model)).toBe(false);
+    expect(await settleDueTask(due, { error: "late failure" })).toBe(false);
+    const rows = await conversationRows();
+    expect(rows).toHaveLength(1);
+    expect((await runRows()).map((r) => [r.status, r.conversationId])).toEqual([
+      ["pending", rows[0].id],
+    ]);
+  } finally {
+    await db.delete(scheduledTaskRuns).where(eq(scheduledTaskRuns.userId, f.id));
+    await db.delete(conversations).where(eq(conversations.userId, f.id));
+    await f.cleanup();
+  }
+});
 
 test("a run admits one owner, owner retries are idempotent and terminal writes are fenced", async () => {
   const f = await fixture();

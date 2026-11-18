@@ -114,8 +114,9 @@ async function findReusableBlankConversation(
   title: string,
   projectId: string | null,
   excludeConversationId?: string,
+  connection: DbTransaction | typeof db = db,
 ) {
-  const rows = await db
+  const rows = await connection
     .select()
     .from(conversations)
     .where(
@@ -141,7 +142,11 @@ async function findReusableBlankConversation(
   return rows[0] ?? null;
 }
 
-export async function createConversation(userId: string, input: CreateConversationInput) {
+export async function createConversation(
+  userId: string,
+  input: CreateConversationInput,
+  connection: DbTransaction | typeof db = db,
+) {
   const id = generateId();
   const now = new Date();
   const model = normalizeConversationModelInput(input);
@@ -160,6 +165,7 @@ export async function createConversation(userId: string, input: CreateConversati
         input.title,
         projectId,
         input.excludeConversationId,
+        connection,
       );
   if (reusable) {
     // Adopt this call's settings: the caller may have picked a different model or
@@ -174,11 +180,11 @@ export async function createConversation(userId: string, input: CreateConversati
       forceWebSearch,
       updatedAt: now,
     };
-    await db.update(conversations).set(adopted).where(eq(conversations.id, reusable.id));
+    await connection.update(conversations).set(adopted).where(eq(conversations.id, reusable.id));
     return { ...reusable, ...adopted };
   }
 
-  await db.insert(conversations).values({
+  await connection.insert(conversations).values({
     id,
     userId,
     channelId: model.channelId,

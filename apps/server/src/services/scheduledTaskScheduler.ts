@@ -1,15 +1,11 @@
-import { scheduledTasks } from "db";
+import { scheduledTaskRuns, scheduledTasks } from "db";
 import { and, asc, eq, isNotNull } from "drizzle-orm";
+import type { ScheduledTaskFrequency } from "shared/types";
 import { db } from "../db";
+import { generateId } from "../utils";
 import { getResolvedChannelForUser } from "./channelService";
 import { createConversation } from "./conversationService";
-import {
-  advanceNextRunAt,
-  createTaskRun,
-  failPendingTaskRun,
-  getDueTasks,
-  reconcileExpiredTaskRuns,
-} from "./scheduledTaskService";
+import { computeNextRunAt, getDueTasks, reconcileExpiredTaskRuns } from "./scheduledTaskService";
 
 let timerHandle: ReturnType<typeof setTimeout> | null = null;
 let stopped = true;
@@ -20,6 +16,59 @@ let executing = false;
 // guards against changes that bypass the routes (another process, a clock
 // jump), at the cost of one indexed SELECT per minute.
 const MAX_SLEEP_MS = 60_000;
+
+type DueTask = Awaited<ReturnType<typeof getDueTasks>>[number];
+
+export async function settleDueTask(
+  task: DueTask,
+  outcome: { channelId: string | null; modelId: string | null } | { error: string },
+) {
+  const dueAt = task.nextRunAt;
+  if (!dueAt || dueAt.getTime() > Date.now()) return false;
+  return db.transaction(async (tx) => {
+    const now = new Date();
+    // A replay (including after an ambiguous commit) no longer owns this occurrence.
+    const claimed = await tx
+      .update(scheduledTasks)
+      .set({
+        lastRunAt: now,
+        updatedAt: now,
+        nextRunAt: computeNextRunAt(task.frequency as ScheduledTaskFrequency, task.time),
+      })
+      .where(
+        and(
+          eq(scheduledTasks.id, task.id),
+          eq(scheduledTasks.userId, task.userId),
+          eq(scheduledTasks.enabled, true),
+          eq(scheduledTasks.nextRunAt, dueAt),
+        ),
+      )
+      .returning({ id: scheduledTasks.id });
+    if (!claimed.length) return false;
+    const base = { id: generateId(), taskId: task.id, userId: task.userId, startedAt: now };
+    if ("error" in outcome) {
+      await tx
+        .insert(scheduledTaskRuns)
+        .values({ ...base, status: "failed", error: outcome.error, completedAt: now });
+    } else {
+      const conversation = await createConversation(
+        task.userId,
+        {
+          title: task.title,
+          ...outcome,
+          forceNew: true,
+          scheduledTaskId: task.id,
+          projectId: task.projectId,
+        },
+        tx,
+      );
+      await tx
+        .insert(scheduledTaskRuns)
+        .values({ ...base, status: "pending", conversationId: conversation.id });
+    }
+    return true;
+  });
+}
 
 async function executeDueTasks() {
   if (stopped || executing) return;
@@ -39,31 +88,9 @@ async function executeDueTasks() {
           }
         }
 
-        // One conversation per run: never adopt a blank one left by an earlier run.
-        const conversation = await createConversation(task.userId, {
-          title: task.title,
-          channelId,
-          modelId,
-          forceNew: true,
-          scheduledTaskId: task.id,
-          projectId: task.projectId,
-        });
-
-        // The server is only the clock: it records that the task is due and
-        // hands the run to the desktop as `pending`. Execution needs the local
-        // sidecar (MCP, skills, workspace), so the desktop claims the run,
-        // executes it through the same pipeline as a typed chat message, and
-        // reports completed / failed with the result.
-        await createTaskRun(task.id, task.userId, conversation.id, "pending");
-        await advanceNextRunAt(task.id);
+        await settleDueTask(task, { channelId, modelId });
       } catch (err) {
-        const runId = await createTaskRun(task.id, task.userId, undefined, "pending");
-        await failPendingTaskRun(
-          task.userId,
-          runId,
-          err instanceof Error ? err.message : String(err),
-        );
-        await advanceNextRunAt(task.id);
+        await settleDueTask(task, { error: err instanceof Error ? err.message : String(err) });
         console.error("[scheduler] task failed:", task.id, err);
       }
     }
