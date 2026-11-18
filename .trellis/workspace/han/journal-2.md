@@ -287,3 +287,25 @@ Topics: [.trellis/spec/desktop/frontend/state-management.md](../../spec/desktop/
 ### Status
 
 [OK] **Completed**
+
+
+## Session 88: 导入、索引与远程备份优化
+<!-- trellis-session: v=2 fp=ac87935c2ea9b8bf -->
+
+**Date**: 2026-11-18
+**Task**: 导入、索引与远程备份优化
+**Package**: agent
+**Branch**: `main`
+
+### Summary
+
+完成附件目录统一、会话与任务复合索引、手动任务幂等键、ChatGPT/Claude 导入事务与稳定去重、ZIP 内容复用与 JSON 大小上限，以及 Docker 备份临时下载到桌面目录。验证 Server 657、Desktop 779、类型检查、Biome、Rust cargo check、UI 构建和浏览器工作台。
+Topics: [.trellis/spec/desktop/frontend/component-guidelines.md](../../spec/desktop/frontend/component-guidelines.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**

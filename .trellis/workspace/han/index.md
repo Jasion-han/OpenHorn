@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 87
+- **Total Sessions**: 88
 - **Last Active**: 2026-11-18
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~289 | Active |
+| `journal-2.md` | ~311 | Active |
 | `journal-1.md` | ~1998 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 88 | 2026-11-18 | 导入、索引与远程备份优化 | - | `main` |
 | 87 | 2026-11-18 | 定时任务入队、标题竞态与大库读取 | - | `main` |
 | 86 | 2026-11-17 | 解锁后完成研究重试与停止原生验收 | `1b043e9` | `main` |
 | 85 | 2026-11-17 | 研究重试与缓存边界修复及锁屏交接 | - | `main` |
