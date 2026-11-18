@@ -156,6 +156,20 @@ export async function pickExportDir(): Promise<string | null> {
   return (await invoke("pick_workspace_dir")) as string | null;
 }
 
+export async function saveBytesToDirectory(
+  directory: string,
+  bytes: Uint8Array,
+  fileName: string,
+): Promise<string> {
+  if (!isTauriRuntime()) throw new Error("Native file writing unavailable");
+  const { invoke } = await import("@tauri-apps/api/core");
+  return await invoke<string>("save_bytes_to_directory", {
+    directory,
+    bytes: Array.from(bytes),
+    fileName,
+  });
+}
+
 /** One editor bundle found on this machine by `external_editors_detect`. */
 export interface DetectedEditor {
   id: string;

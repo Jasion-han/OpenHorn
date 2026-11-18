@@ -402,8 +402,10 @@ export interface ExportEstimate {
 }
 
 export interface ExportBackupResult {
-  filePath: string;
+  filePath?: string;
+  fileName?: string;
   manifest: Record<string, unknown>;
+  data?: Blob;
 }
 
 export interface ImportResult {

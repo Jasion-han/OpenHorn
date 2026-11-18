@@ -63,6 +63,7 @@ test("chatgpt import: thoughts, tool calls, tool outputs and interim text are st
       file,
       JSON.stringify([
         {
+          id: "chatgpt-1",
           title: "Weather thread",
           create_time: t,
           update_time: t + 100,
@@ -166,6 +167,10 @@ test("chatgpt import: thoughts, tool calls, tool outputs and interim text are st
         { type: "text", content: "Paris is 18°C and 2+2 is 4." },
       ],
     });
+    const retry = await importChatGPT(userId, file);
+    expect(retry.conversations.imported).toBe(0);
+    expect(retry.conversations.skipped).toBe(1);
+    expect(retry.messages.imported).toBe(0);
   } finally {
     await rm(dir, { recursive: true, force: true });
     await cleanupUser(userId);
@@ -268,6 +273,10 @@ test("claude.ai import: thinking, tool_use and tool_result blocks are steps in o
     // A plain text reply stays a chat row with no run attached.
     expect(rows[3].mode).toBe("chat");
     expect(rows[3].agentRun).toBeNull();
+    const retry = await importClaude(userId, file);
+    expect(retry.conversations.imported).toBe(0);
+    expect(retry.conversations.skipped).toBe(1);
+    expect(retry.messages.imported).toBe(0);
   } finally {
     await rm(dir, { recursive: true, force: true });
     await cleanupUser(userId);

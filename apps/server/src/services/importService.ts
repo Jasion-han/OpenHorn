@@ -66,6 +66,7 @@ import { prepareLibraryBackup, restorePreparedLibraryBackup } from "./libraryBac
 import { libraryTransaction } from "./libraryService";
 
 const FILE_IMPORT_SOURCE = "file";
+export const MAX_IMPORT_JSON_BYTES = BACKUP_ARCHIVE_LIMITS.totalBytes;
 
 export interface ImportResult {
   format: "openhorn" | "chatgpt" | "claude" | "deepseek";
@@ -263,6 +264,18 @@ export async function extractZipEntries(zipPath: string): Promise<Map<string, Bu
   });
 }
 
+export type PreparedImport = {
+  format: DetectedFormat;
+  zipEntries?: Map<string, Buffer>;
+  jsonText?: string;
+};
+
+async function readBoundedJson(filePath: string): Promise<string> {
+  const info = await stat(filePath);
+  if (info.size > MAX_IMPORT_JSON_BYTES) throw new Error("Import JSON exceeds size limit");
+  return readFile(filePath, "utf8");
+}
+
 function parseJsonEntry<T>(entries: Map<string, Buffer>, name: string): T | null {
   const buf = entries.get(name);
   if (!buf) return null;
@@ -321,39 +334,43 @@ function detectConversationJson(parsed: unknown): DetectedFormat {
   return "unknown";
 }
 
-export async function detectFormat(filePath: string): Promise<DetectedFormat> {
+export async function prepareImportFile(filePath: string): Promise<PreparedImport> {
   const ext = path.extname(filePath).toLowerCase();
 
   if (ext === ".zip") {
     const entries = await extractZipEntries(filePath);
     if (entries.has("manifest.json")) {
       const manifest = parseJsonEntry<unknown>(entries, "manifest.json");
-      if (isOpenHornManifest(manifest)) return "openhorn";
-      if (isDeepSeekManifest(manifest)) return "deepseek";
-      return "unknown";
+      if (isOpenHornManifest(manifest)) return { format: "openhorn", zipEntries: entries };
+      if (isDeepSeekManifest(manifest)) return { format: "deepseek", zipEntries: entries };
+      return { format: "unknown", zipEntries: entries };
     }
     if (entries.has("conversations.json")) {
       const raw = entries.get("conversations.json")?.toString("utf8").trim() ?? "";
-      if (!raw) return "unknown";
+      if (!raw) return { format: "unknown", zipEntries: entries };
       try {
-        return detectConversationJson(JSON.parse(raw));
+        return { format: detectConversationJson(JSON.parse(raw)), zipEntries: entries };
       } catch {
-        return "unknown";
+        return { format: "unknown", zipEntries: entries };
       }
     }
-    return "unknown";
+    return { format: "unknown", zipEntries: entries };
   }
 
   if (ext === ".json") {
-    const raw = await readFile(filePath, "utf8");
+    const raw = await readBoundedJson(filePath);
     try {
-      return detectConversationJson(JSON.parse(raw));
+      return { format: detectConversationJson(JSON.parse(raw)), jsonText: raw };
     } catch {
-      return "unknown";
+      return { format: "unknown", jsonText: raw };
     }
   }
 
-  return "unknown";
+  return { format: "unknown" };
+}
+
+export async function detectFormat(filePath: string): Promise<DetectedFormat> {
+  return (await prepareImportFile(filePath)).format;
 }
 
 // ---------------------------------------------------------------------------
@@ -361,7 +378,11 @@ export async function detectFormat(filePath: string): Promise<DetectedFormat> {
 // ---------------------------------------------------------------------------
 
 const activeBackupImports = new Map<string, Promise<void>>();
-export async function importOpenHornBackup(userId: string, zipPath: string): Promise<ImportResult> {
+export async function importOpenHornBackup(
+  userId: string,
+  zipPath: string,
+  zipEntries?: Map<string, Buffer>,
+): Promise<ImportResult> {
   const previous = activeBackupImports.get(userId);
   let release = () => {};
   const pending = new Promise<void>((done) => {
@@ -370,18 +391,22 @@ export async function importOpenHornBackup(userId: string, zipPath: string): Pro
   activeBackupImports.set(userId, pending);
   await previous;
   try {
-    return await importBackupOnce(userId, zipPath);
+    return await importBackupOnce(userId, zipPath, zipEntries);
   } finally {
     release();
     if (activeBackupImports.get(userId) === pending) activeBackupImports.delete(userId);
   }
 }
-async function importBackupOnce(userId: string, zipPath: string): Promise<ImportResult> {
+async function importBackupOnce(
+  userId: string,
+  zipPath: string,
+  zipEntries?: Map<string, Buffer>,
+): Promise<ImportResult> {
   const result = emptyResult("openhorn");
   const collector = new PartCollector();
   const progress = { writing: false, section: "archive" };
   try {
-    await applyOpenHornBackup(userId, zipPath, result, collector, progress);
+    await applyOpenHornBackup(userId, zipPath, result, collector, progress, zipEntries);
   } catch {
     result.backupFailure = progress.writing ? "interrupted" : "validation";
     result.errors.push(
@@ -400,9 +425,10 @@ async function applyOpenHornBackup(
   result: ImportResult,
   collector: PartCollector,
   progress: { writing: boolean; section: string },
+  preparedEntries?: Map<string, Buffer>,
 ): Promise<void> {
   const importedAt = new Date();
-  const entries = await extractZipEntries(zipPath);
+  const entries = preparedEntries ?? (await extractZipEntries(zipPath));
   const archiveDigest = createHash("sha256");
   for (const name of [...entries.keys()].sort()) {
     archiveDigest.update(JSON.stringify([name, entries.get(name)?.length]));
@@ -1221,12 +1247,16 @@ async function applyOpenHornBackup(
 // DeepSeek import — merge by a durable per-user source identity, never restore.
 // ---------------------------------------------------------------------------
 
-export async function importDeepSeek(userId: string, filePath: string): Promise<ImportResult> {
+export async function importDeepSeek(
+  userId: string,
+  filePath: string,
+  preparedEntries?: Map<string, Buffer>,
+): Promise<ImportResult> {
   const result = emptyResult("deepseek");
   const collector = new PartCollector();
   let prepared: ReturnType<typeof prepareDeepSeekArchive>;
   try {
-    prepared = prepareDeepSeekArchive(await extractZipEntries(filePath));
+    prepared = prepareDeepSeekArchive(preparedEntries ?? (await extractZipEntries(filePath)));
   } catch {
     result.errors.push("Invalid DeepSeek archive: validation failed; no conversations imported");
     return finishImport(userId, result, collector);
@@ -1395,6 +1425,8 @@ export async function importDeepSeek(userId: string, filePath: string): Promise<
 // ---------------------------------------------------------------------------
 
 interface ChatGPTConversation {
+  id?: string;
+  conversation_id?: string;
   title?: string;
   create_time?: number;
   update_time?: number;
@@ -1416,6 +1448,23 @@ interface ChatGPTConversation {
     }
   >;
   current_node?: string;
+}
+
+function stableImportedConversationId(
+  userId: string,
+  format: "chatgpt" | "claude",
+  sourceId: string,
+) {
+  const hex = createHash("sha256")
+    .update(JSON.stringify(["openhorn-file-import", userId, format, sourceId]))
+    .digest("hex");
+  return [
+    hex.slice(0, 8),
+    hex.slice(8, 12),
+    `4${hex.slice(13, 16)}`,
+    `8${hex.slice(17, 20)}`,
+    hex.slice(20, 32),
+  ].join("-");
 }
 
 /** One row to insert; assistant rows carry the turn's steps. */
@@ -1623,7 +1672,11 @@ function linearizeChatGPT(conv: ChatGPTConversation): LinearMessage[] {
   return result;
 }
 
-export async function importChatGPT(userId: string, filePath: string): Promise<ImportResult> {
+export async function importChatGPT(
+  userId: string,
+  filePath: string,
+  prepared?: PreparedImport,
+): Promise<ImportResult> {
   const result = emptyResult("chatgpt");
   const collector = new PartCollector();
   const importedAt = new Date();
@@ -1631,7 +1684,7 @@ export async function importChatGPT(userId: string, filePath: string): Promise<I
   let convs: ChatGPTConversation[];
   const ext = path.extname(filePath).toLowerCase();
   if (ext === ".zip") {
-    const entries = await extractZipEntries(filePath);
+    const entries = prepared?.zipEntries ?? (await extractZipEntries(filePath));
     const raw = entries.get("conversations.json");
     if (!raw) {
       result.errors.push("ZIP 中未找到 conversations.json");
@@ -1639,51 +1692,69 @@ export async function importChatGPT(userId: string, filePath: string): Promise<I
     }
     convs = JSON.parse(raw.toString("utf8"));
   } else {
-    convs = JSON.parse(await readFile(filePath, "utf8"));
+    convs = JSON.parse(prepared?.jsonText ?? (await readBoundedJson(filePath)));
   }
 
   for (const conv of convs) {
     const linearMessages = linearizeChatGPT(conv);
     if (linearMessages.length === 0) continue;
 
-    const convId = crypto.randomUUID();
-    const convCreatedAt = new Date((conv.create_time ?? Date.now() / 1000) * 1000);
-
+    const sourceId = conv.conversation_id ?? conv.id;
+    const convId = sourceId
+      ? stableImportedConversationId(userId, "chatgpt", sourceId)
+      : crypto.randomUUID();
+    const [existing] = await db
+      .select({ id: conversations.id })
+      .from(conversations)
+      .where(eq(conversations.id, convId))
+      .limit(1);
     const title = conv.title || "ChatGPT 导入";
-    await db.insert(conversations).values({
-      id: convId,
-      userId,
-      title,
-      contextLength: 4096,
-      defaultMode: "chat",
-      lastMode: "chat",
-      isPinned: false,
-      importedFrom: FILE_IMPORT_SOURCE,
-      importedAt,
-      createdAt: convCreatedAt,
-      updatedAt: new Date((conv.update_time ?? conv.create_time ?? Date.now() / 1000) * 1000),
+    if (existing) {
+      result.conversations.skipped++;
+      collector.add("conversations", {
+        label: title,
+        detail: IMPORT_DETAIL.alreadyExists,
+        status: "skipped",
+        link: { kind: "conversation", id: convId },
+      });
+      continue;
+    }
+    const convCreatedAt = new Date((conv.create_time ?? Date.now() / 1000) * 1000);
+    await db.transaction(async (tx) => {
+      await tx.insert(conversations).values({
+        id: convId,
+        userId,
+        title,
+        contextLength: 4096,
+        defaultMode: "chat",
+        lastMode: "chat",
+        isPinned: false,
+        importedFrom: FILE_IMPORT_SOURCE,
+        importedAt,
+        createdAt: convCreatedAt,
+        updatedAt: new Date((conv.update_time ?? conv.create_time ?? Date.now() / 1000) * 1000),
+      });
+      for (const msg of linearMessages) {
+        const agentRun = buildImportedAgentRun(msg.steps ?? [], msg.content);
+        await tx.insert(messages).values({
+          id: crypto.randomUUID(),
+          conversationId: convId,
+          role: msg.role,
+          content: assistantMessageContent(msg.content, agentRun),
+          model: msg.model,
+          ...(agentRun ? { mode: "agent", agentRun } : {}),
+          createdAt: msg.createdAt,
+        });
+      }
     });
     result.conversations.imported++;
+    result.messages.imported += linearMessages.length;
     collector.add("conversations", {
       label: title,
       detail: IMPORT_DETAIL.messageCount(linearMessages.length),
       status: "imported",
       link: { kind: "conversation", id: convId },
     });
-
-    for (const msg of linearMessages) {
-      const agentRun = buildImportedAgentRun(msg.steps ?? [], msg.content);
-      await db.insert(messages).values({
-        id: crypto.randomUUID(),
-        conversationId: convId,
-        role: msg.role,
-        content: assistantMessageContent(msg.content, agentRun),
-        model: msg.model,
-        ...(agentRun ? { mode: "agent", agentRun } : {}),
-        createdAt: msg.createdAt,
-      });
-      result.messages.imported++;
-    }
   }
   collector.noteMessages(result.messages.imported);
 
@@ -1765,7 +1836,11 @@ function claudeExportHumanText(
   return msg.text ?? "";
 }
 
-export async function importClaude(userId: string, filePath: string): Promise<ImportResult> {
+export async function importClaude(
+  userId: string,
+  filePath: string,
+  prepared?: PreparedImport,
+): Promise<ImportResult> {
   const result = emptyResult("claude");
   const collector = new PartCollector();
   const importedAt = new Date();
@@ -1773,7 +1848,7 @@ export async function importClaude(userId: string, filePath: string): Promise<Im
   let convs: ClaudeConversation[];
   const ext = path.extname(filePath).toLowerCase();
   if (ext === ".zip") {
-    const entries = await extractZipEntries(filePath);
+    const entries = prepared?.zipEntries ?? (await extractZipEntries(filePath));
     const raw = entries.get("conversations.json");
     if (!raw) {
       result.errors.push("ZIP 中未找到 conversations.json");
@@ -1781,76 +1856,95 @@ export async function importClaude(userId: string, filePath: string): Promise<Im
     }
     convs = JSON.parse(raw.toString("utf8"));
   } else {
-    convs = JSON.parse(await readFile(filePath, "utf8"));
+    convs = JSON.parse(prepared?.jsonText ?? (await readBoundedJson(filePath)));
   }
 
   for (const conv of convs) {
     const chatMessages = conv.chat_messages ?? [];
     if (chatMessages.length === 0) continue;
 
-    const convId = crypto.randomUUID();
+    const sourceId = conv.uuid;
+    const convId = sourceId
+      ? stableImportedConversationId(userId, "claude", sourceId)
+      : crypto.randomUUID();
+    const [existing] = await db
+      .select({ id: conversations.id })
+      .from(conversations)
+      .where(eq(conversations.id, convId))
+      .limit(1);
     const now = new Date();
-
     const title = conv.name || "Claude 导入";
-    await db.insert(conversations).values({
-      id: convId,
-      userId,
-      title,
-      contextLength: 4096,
-      defaultMode: "chat",
-      lastMode: "chat",
-      isPinned: false,
-      importedFrom: FILE_IMPORT_SOURCE,
-      importedAt,
-      createdAt: conv.created_at ? new Date(conv.created_at) : now,
-      updatedAt: conv.updated_at ? new Date(conv.updated_at) : now,
+    if (existing) {
+      result.conversations.skipped++;
+      collector.add("conversations", {
+        label: title,
+        detail: IMPORT_DETAIL.alreadyExists,
+        status: "skipped",
+        link: { kind: "conversation", id: convId },
+      });
+      continue;
+    }
+
+    const importedMessages = await db.transaction(async (tx) => {
+      await tx.insert(conversations).values({
+        id: convId,
+        userId,
+        title,
+        contextLength: 4096,
+        defaultMode: "chat",
+        lastMode: "chat",
+        isPinned: false,
+        importedFrom: FILE_IMPORT_SOURCE,
+        importedAt,
+        createdAt: conv.created_at ? new Date(conv.created_at) : now,
+        updatedAt: conv.updated_at ? new Date(conv.updated_at) : now,
+      });
+      let count = 0;
+      const turn = new ImportTurnBuilder();
+      const insertTurn = async (fallback: number) => {
+        const folded = turn.flush(fallback);
+        if (!folded) return;
+        if (!folded.content.trim() && folded.steps.length === 0) return;
+        const agentRun = buildImportedAgentRun(folded.steps, folded.content);
+        await tx.insert(messages).values({
+          id: crypto.randomUUID(),
+          conversationId: convId,
+          role: "assistant",
+          content: assistantMessageContent(folded.content, agentRun),
+          model: folded.model ?? conv.model ?? null,
+          ...(agentRun ? { mode: "agent", agentRun } : {}),
+          createdAt: new Date(folded.createdAt),
+        });
+        count++;
+      };
+      let lastTs = now.getTime();
+      for (const msg of chatMessages) {
+        const ts = msg.created_at ? new Date(msg.created_at).getTime() : now.getTime();
+        lastTs = ts;
+        if (msg.sender === "assistant") {
+          turn.touch(ts);
+          claudeExportBlocksToTurn(turn, msg);
+          continue;
+        }
+        if (msg.sender !== "human") continue;
+        const content = claudeExportHumanText(msg);
+        if (!content.trim()) continue;
+        await insertTurn(ts);
+        await tx.insert(messages).values({
+          id: crypto.randomUUID(),
+          conversationId: convId,
+          role: "user",
+          content,
+          model: conv.model ?? null,
+          createdAt: new Date(ts),
+        });
+        count++;
+      }
+      await insertTurn(lastTs);
+      return count;
     });
     result.conversations.imported++;
-    let importedMessages = 0;
-
-    const turn = new ImportTurnBuilder();
-    const insertTurn = async (fallback: number) => {
-      const folded = turn.flush(fallback);
-      if (!folded) return;
-      if (!folded.content.trim() && folded.steps.length === 0) return;
-      const agentRun = buildImportedAgentRun(folded.steps, folded.content);
-      await db.insert(messages).values({
-        id: crypto.randomUUID(),
-        conversationId: convId,
-        role: "assistant",
-        content: assistantMessageContent(folded.content, agentRun),
-        model: folded.model ?? conv.model ?? null,
-        ...(agentRun ? { mode: "agent", agentRun } : {}),
-        createdAt: new Date(folded.createdAt),
-      });
-      result.messages.imported++;
-      importedMessages++;
-    };
-    let lastTs = now.getTime();
-    for (const msg of chatMessages) {
-      const ts = msg.created_at ? new Date(msg.created_at).getTime() : now.getTime();
-      lastTs = ts;
-      if (msg.sender === "assistant") {
-        turn.touch(ts);
-        claudeExportBlocksToTurn(turn, msg);
-        continue;
-      }
-      if (msg.sender !== "human") continue;
-      const content = claudeExportHumanText(msg);
-      if (!content.trim()) continue;
-      await insertTurn(ts);
-      await db.insert(messages).values({
-        id: crypto.randomUUID(),
-        conversationId: convId,
-        role: "user",
-        content,
-        model: conv.model ?? null,
-        createdAt: new Date(ts),
-      });
-      result.messages.imported++;
-      importedMessages++;
-    }
-    await insertTurn(lastTs);
+    result.messages.imported += importedMessages;
     collector.add("conversations", {
       label: title,
       detail: IMPORT_DETAIL.messageCount(importedMessages),

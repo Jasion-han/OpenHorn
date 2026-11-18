@@ -88,6 +88,30 @@ pub async fn save_attachment(
     .map_err(|e| e.to_string())?
 }
 
+#[tauri::command]
+pub async fn save_bytes_to_directory(
+    directory: String,
+    bytes: Vec<u8>,
+    file_name: String,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let name = safe_name(&file_name);
+        if name.is_empty() {
+            return Err("Invalid filename".to_string());
+        }
+        let directory = std::path::PathBuf::from(directory);
+        let metadata = std::fs::metadata(&directory).map_err(|e| e.to_string())?;
+        if !metadata.is_dir() {
+            return Err("Export directory is not a directory".to_string());
+        }
+        let path = directory.join(name);
+        std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
+        Ok(path.to_string_lossy().into_owned())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 fn private_directory(path: &Path) -> Result<(), String> {
     let mut builder = std::fs::DirBuilder::new();
     #[cfg(unix)]

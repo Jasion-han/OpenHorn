@@ -1059,6 +1059,7 @@ pub fn run() {
             pick_workspace_dir,
             pick_import_file,
             attachment_preview::save_attachment,
+            attachment_preview::save_bytes_to_directory,
             attachment_preview::open_attachment,
             local_path::inspect_local_path,
             local_path::read_local_path,

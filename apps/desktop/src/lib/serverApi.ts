@@ -733,11 +733,26 @@ export function createServerApi(options?: { baseUrl?: string; fetch?: FetchLike 
     dataTransfer: {
       estimateExport: (format = "backup") =>
         fetchJson(fetchImpl, baseUrl, `/data-transfer/export/estimate?format=${format}`),
-      exportBackup: (outputDir) =>
-        fetchJson(fetchImpl, baseUrl, "/data-transfer/export/backup", {
-          method: "POST",
-          body: JSON.stringify({ outputDir }),
-        }),
+      exportBackup: async () => {
+        const info = await fetchJson<{
+          filePath?: string;
+          fileName: string;
+          manifest: Record<string, unknown>;
+          downloadToken: string;
+        }>(fetchImpl, baseUrl, "/data-transfer/export/backup", { method: "POST" });
+        const response = await requestWithBackendStatus(
+          fetchImpl,
+          `${baseUrl}/data-transfer/export/backup/${encodeURIComponent(info.downloadToken)}`,
+          { credentials: "include" },
+        );
+        if (!response.ok) throw new Error(`Backup download failed (${response.status})`);
+        return {
+          filePath: info.filePath,
+          fileName: info.fileName,
+          manifest: info.manifest,
+          data: await response.blob(),
+        };
+      },
       exportDTI: () =>
         fetchJson(fetchImpl, baseUrl, "/data-transfer/export/dti", {
           method: "POST",

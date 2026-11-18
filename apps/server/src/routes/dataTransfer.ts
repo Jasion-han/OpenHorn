@@ -1,19 +1,33 @@
-import { stat } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { createReadStream } from "node:fs";
+import { rm, stat } from "node:fs/promises";
 import path from "node:path";
+import { Readable } from "node:stream";
 import { Hono } from "hono";
 import type { DataTransferImportErrorCode, DataTransferImportErrorResponse } from "shared/types";
 import { BackupSizeLimitError } from "../services/backupArchiveBudget";
 import { estimateExportSize, exportBackup, exportDTI } from "../services/exportService";
 import {
-  detectFormat,
+  type detectFormat,
   importChatGPT,
   importClaude,
   importDeepSeek,
   importOpenHornBackup,
+  prepareImportFile,
 } from "../services/importService";
 import { requireUser, type UserEnv } from "../utils/requestUser";
 
 const router = new Hono<UserEnv>();
+const pendingExports = new Map<
+  string,
+  {
+    userId: string;
+    filePath: string;
+    fileName: string;
+    manifest: Record<string, unknown>;
+    expiresAt: number;
+  }
+>();
 
 function importError(
   errorCode: DataTransferImportErrorCode,
@@ -44,13 +58,18 @@ function fileError(error: unknown): DataTransferImportErrorResponse | null {
   return null;
 }
 
-async function detectImportFile(
-  filePath: string,
-): Promise<{ format: Awaited<ReturnType<typeof detectFormat>> } | DataTransferImportErrorResponse> {
+async function detectImportFile(filePath: string): Promise<
+  | {
+      format: Awaited<ReturnType<typeof detectFormat>>;
+      prepared: Awaited<ReturnType<typeof prepareImportFile>>;
+    }
+  | DataTransferImportErrorResponse
+> {
   try {
     const info = await stat(filePath);
     if (!info.isFile()) return importError("import_file_unreadable", "Import file is not readable");
-    return { format: await detectFormat(filePath) };
+    const prepared = await prepareImportFile(filePath);
+    return { format: prepared.format, prepared };
   } catch (error) {
     return fileError(error) ?? importError("import_invalid_archive", "Invalid import archive");
   }
@@ -69,16 +88,52 @@ router.get("/export/estimate", async (c) => {
 
 router.post("/export/backup", async (c) => {
   const user = c.get("user");
-  const body = await c.req.json<{ outputDir?: string }>().catch(() => ({ outputDir: undefined }));
-  const outputDir = body.outputDir || path.join(process.cwd(), "data", "exports");
+  const outputDir = path.join(process.cwd(), "data", "exports");
 
   try {
     const { filePath, manifest } = await exportBackup(user.id, outputDir);
-    return c.json({ filePath, manifest });
+    const token = randomUUID();
+    const fileName = path.basename(filePath);
+    pendingExports.set(token, {
+      userId: user.id,
+      filePath,
+      fileName,
+      manifest: manifest as unknown as Record<string, unknown>,
+      expiresAt: Date.now() + 10 * 60_000,
+    });
+    setTimeout(() => {
+      const current = pendingExports.get(token);
+      if (!current) return;
+      pendingExports.delete(token);
+      void rm(current.filePath, { force: true }).catch(() => {});
+    }, 10 * 60_000);
+    return c.json({ filePath, fileName, manifest, downloadToken: token });
   } catch (error) {
     if (error instanceof BackupSizeLimitError) return c.json({ errorCode: error.code }, 413);
     throw error;
   }
+});
+
+router.get("/export/backup/:token", async (c) => {
+  const user = c.get("user");
+  const token = c.req.param("token");
+  const pending = pendingExports.get(token);
+  if (!pending || pending.userId !== user.id || pending.expiresAt < Date.now()) {
+    if (pending?.expiresAt < Date.now()) pendingExports.delete(token);
+    return c.json({ error: "Export not found" }, 404);
+  }
+  pendingExports.delete(token);
+  const stream = createReadStream(pending.filePath);
+  const cleanup = () => void rm(pending.filePath, { force: true }).catch(() => {});
+  stream.once("close", cleanup);
+  stream.once("error", cleanup);
+  return new Response(Readable.toWeb(stream) as ReadableStream, {
+    headers: {
+      "Content-Type": "application/zip",
+      "Content-Disposition": `attachment; filename="${pending.fileName}"`,
+      "Cache-Control": "no-store",
+    },
+  });
 });
 
 router.post("/export/dti", async (c) => {
@@ -91,7 +146,7 @@ router.post("/import/detect", async (c) => {
   const body = importRequest(await c.req.json().catch(() => null));
   if (!body) return c.json(importError("import_invalid_request", "filePath is required"), 400);
   const detected = await detectImportFile(body.filePath);
-  return "errorCode" in detected ? c.json(detected, 400) : c.json(detected);
+  return "errorCode" in detected ? c.json(detected, 400) : c.json({ format: detected.format });
 });
 
 router.post("/import", async (c) => {
@@ -102,7 +157,7 @@ router.post("/import", async (c) => {
   // `format` is a UI hint, never authorization to enter a different importer.
   const detected = await detectImportFile(body.filePath);
   if ("errorCode" in detected) return c.json(detected, 400);
-  const { format } = detected;
+  const { format, prepared } = detected;
   if (body.format !== undefined && body.format !== format) {
     return c.json(
       importError("import_format_mismatch", "Import format does not match file contents"),
@@ -113,13 +168,13 @@ router.post("/import", async (c) => {
   try {
     switch (format) {
       case "openhorn":
-        return c.json(await importOpenHornBackup(user.id, body.filePath));
+        return c.json(await importOpenHornBackup(user.id, body.filePath, prepared.zipEntries));
       case "chatgpt":
-        return c.json(await importChatGPT(user.id, body.filePath));
+        return c.json(await importChatGPT(user.id, body.filePath, prepared));
       case "claude":
-        return c.json(await importClaude(user.id, body.filePath));
+        return c.json(await importClaude(user.id, body.filePath, prepared));
       case "deepseek":
-        return c.json(await importDeepSeek(user.id, body.filePath));
+        return c.json(await importDeepSeek(user.id, body.filePath, prepared.zipEntries));
       default:
         return c.json(
           importError(

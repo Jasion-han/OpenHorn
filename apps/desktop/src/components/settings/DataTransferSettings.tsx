@@ -119,7 +119,14 @@ export function DataTransferSettings() {
           setExportDialogOpen(false);
           return;
         }
-        const result = await api.dataTransfer.exportBackup(dir);
+        const result = await api.dataTransfer.exportBackup();
+        const { saveBytesToDirectory } = await import("../../lib/tauriBridge");
+        if (!result.data || !result.fileName) throw new Error("Backup download is unavailable");
+        const savedPath = await saveBytesToDirectory(
+          dir,
+          new Uint8Array(await result.data.arrayBuffer()),
+          result.fileName,
+        );
         const manifest = result.manifest as {
           attachmentFiles?: { missing?: unknown[] };
           configuration?: { mcpRequiresSetup?: unknown[]; omittedSettings?: number };
@@ -157,7 +164,7 @@ export function DataTransferSettings() {
         notifySuccess(
           getDataTransferLabel("settings.data.export.successTitle"),
           formatDataTransferLabel("settings.data.export.successBody", {
-            path: result.filePath,
+            path: savedPath,
           }),
         );
       } else {
