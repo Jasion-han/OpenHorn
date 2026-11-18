@@ -518,6 +518,7 @@ const SCHEMA_DDL: string[] = [
   `CREATE INDEX IF NOT EXISTS attachments_conversation_idx ON attachments(conversation_id);`,
   `CREATE INDEX IF NOT EXISTS attachments_session_idx ON attachments(session_id);`,
   `CREATE INDEX IF NOT EXISTS conversations_user_idx ON conversations(user_id);`,
+  `CREATE INDEX IF NOT EXISTS conversations_user_updated_idx ON conversations(user_id, updated_at);`,
   `CREATE INDEX IF NOT EXISTS conversations_channel_idx ON conversations(channel_id);`,
   `CREATE INDEX IF NOT EXISTS projects_user_idx ON projects(user_id);`,
   `CREATE UNIQUE INDEX IF NOT EXISTS projects_user_root_path_idx ON projects(user_id, root_path);`,
@@ -544,6 +545,8 @@ const SCHEMA_DDL: string[] = [
   `CREATE INDEX IF NOT EXISTS scheduled_tasks_next_run_idx ON scheduled_tasks(next_run_at);`,
   `CREATE INDEX IF NOT EXISTS scheduled_task_runs_task_idx ON scheduled_task_runs(task_id);`,
   `CREATE INDEX IF NOT EXISTS scheduled_task_runs_user_idx ON scheduled_task_runs(user_id);`,
+  `CREATE INDEX IF NOT EXISTS scheduled_task_runs_user_started_idx ON scheduled_task_runs(user_id, started_at);`,
+  `CREATE INDEX IF NOT EXISTS scheduled_task_runs_task_user_started_idx ON scheduled_task_runs(task_id, user_id, started_at);`,
   `CREATE INDEX IF NOT EXISTS scheduled_task_runs_pending_idx ON scheduled_task_runs(user_id, status, started_at);`,
   `CREATE INDEX IF NOT EXISTS import_records_user_created_idx ON import_records(user_id, created_at);`,
   // Duplicate (user_id, key) rows on old databases are removed by

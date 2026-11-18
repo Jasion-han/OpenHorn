@@ -142,6 +142,7 @@ export const conversations = sqliteTable(
   },
   (table) => [
     index("conversations_user_idx").on(table.userId),
+    index("conversations_user_updated_idx").on(table.userId, table.updatedAt),
     index("conversations_channel_idx").on(table.channelId),
     index("conversations_project_idx").on(table.projectId),
   ],
@@ -541,6 +542,12 @@ export const scheduledTaskRuns = sqliteTable(
   (table) => [
     index("scheduled_task_runs_task_idx").on(table.taskId),
     index("scheduled_task_runs_user_idx").on(table.userId),
+    index("scheduled_task_runs_user_started_idx").on(table.userId, table.startedAt),
+    index("scheduled_task_runs_task_user_started_idx").on(
+      table.taskId,
+      table.userId,
+      table.startedAt,
+    ),
     index("scheduled_task_runs_pending_idx").on(table.userId, table.status, table.startedAt),
   ],
 );
