@@ -1024,7 +1024,15 @@ export function DesktopLeftSidebar() {
 
                     {projects.map((project) => {
                       const items = byProject.get(project.id) ?? [];
-                      const open = projectsExpanded[project.id] ?? false;
+                      // Project conversations are part of the history. Keep a
+                      // populated project visible until the user explicitly
+                      // collapses it, so a refresh cannot make recent chats
+                      // appear to disappear into the project row.
+                      const open =
+                        projectsExpanded[project.id] ??
+                        (project.id === activeProjectId ||
+                          project.id === currentConversation?.projectId ||
+                          items.length > 0);
                       const visibleCount = projectVisibleCounts[project.id] ?? PROJECT_PAGE_SIZE;
                       const visible = items.slice(0, visibleCount);
                       const remaining = items.length - visible.length;
