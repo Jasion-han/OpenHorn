@@ -336,8 +336,8 @@ export function RecipePanel() {
         .join(" · ")
     : "";
   return (
-    <div className="grid min-h-0 gap-6 lg:grid-cols-[14rem_minmax(0,1fr)]">
-      <aside className="min-w-0 space-y-3 border-b pb-4 lg:border-b-0 lg:border-r lg:pr-5">
+    <div className="grid min-h-0 gap-6 lg:grid-cols-[18rem_minmax(0,1fr)]">
+      <aside className="min-w-0 space-y-3 bg-muted/20 p-3">
         <div className="flex items-center justify-between gap-2">
           <span className="text-xs text-muted-foreground">
             {formatWorkbenchLabel("workbench.recipes.count", { count: recipes.length })}
@@ -411,21 +411,7 @@ export function RecipePanel() {
           ))}
         </nav>
         {!loading && !listError && recipes.length === 0 && (
-          <div className="space-y-2 rounded-lg border border-dashed p-3">
-            <p className="text-sm font-medium">{label("workbench.recipes.empty")}</p>
-            <p className="text-xs leading-5 text-muted-foreground">
-              {label("workbench.recipes.emptyHint")}
-            </p>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={busy}
-              onClick={() => setEditor({ spec: recipePresets()[0] ?? emptyRecipe() })}
-            >
-              <Plus size={14} />
-              {label("workbench.recipes.templates")}
-            </Button>
-          </div>
+          <p className="text-sm text-muted-foreground">{label("workbench.recipes.empty")}</p>
         )}
         {!loading && recipes.length > 0 && visible.length === 0 && (
           <div aria-live="polite" className="space-y-2 text-sm text-muted-foreground">
@@ -449,7 +435,12 @@ export function RecipePanel() {
           <>
             <header className="flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0 space-y-2">
-                <h2 className="break-words text-xl font-medium">{selected.spec.title}</h2>
+                <div className="mb-2 text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
+                  {label("workbench.surface.task")}
+                </div>
+                <h2 className="break-words text-2xl font-semibold tracking-tight">
+                  {selected.spec.title}
+                </h2>
                 {selected.spec.description && (
                   <p className="whitespace-pre-wrap break-words text-sm text-muted-foreground">
                     {selected.spec.description}
@@ -512,60 +503,73 @@ export function RecipePanel() {
               />
             ) : (
               <form
-                className="max-w-2xl space-y-4"
+                className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_18rem]"
                 onSubmit={(event) => {
                   event.preventDefault();
                   void run();
                 }}
               >
-                {selected.spec.parameters.map((p) => (
-                  <div key={p.key} className="space-y-1.5">
-                    <Label htmlFor={`recipe-value-${p.key}`}>
-                      {p.label}
-                      {p.required ? " *" : ""}
-                    </Label>
-                    {p.type === "multiline" ? (
-                      <Textarea
-                        id={`recipe-value-${p.key}`}
-                        value={String(values[p.key] ?? "")}
-                        onChange={(event) => changeValue(p.key, event.target.value)}
-                        required={p.required}
-                        disabled={busy}
-                      />
-                    ) : (
-                      <Input
-                        id={`recipe-value-${p.key}`}
-                        type={p.type === "number" ? "number" : "text"}
-                        step={p.type === "number" ? "any" : undefined}
-                        value={String(values[p.key] ?? "")}
-                        onChange={(event) => changeValue(p.key, event.target.value)}
-                        required={p.required}
-                        disabled={busy}
-                      />
-                    )}
+                <div className="space-y-4 rounded-xl bg-muted/20 p-4">
+                  <div className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
+                    {label("workbench.surface.run")}
                   </div>
-                ))}
-                {missing.length > 0 && (
-                  <div role="alert" className="space-y-1 text-sm text-destructive">
-                    {missing.map((item) => (
-                      <p key={item}>{missingLabel(item)}</p>
-                    ))}
+                  {selected.spec.parameters.map((p) => (
+                    <div key={p.key} className="space-y-1.5">
+                      <Label htmlFor={`recipe-value-${p.key}`}>
+                        {p.label}
+                        {p.required ? " *" : ""}
+                      </Label>
+                      {p.type === "multiline" ? (
+                        <Textarea
+                          id={`recipe-value-${p.key}`}
+                          value={String(values[p.key] ?? "")}
+                          onChange={(event) => changeValue(p.key, event.target.value)}
+                          required={p.required}
+                          disabled={busy}
+                        />
+                      ) : (
+                        <Input
+                          id={`recipe-value-${p.key}`}
+                          type={p.type === "number" ? "number" : "text"}
+                          step={p.type === "number" ? "any" : undefined}
+                          value={String(values[p.key] ?? "")}
+                          onChange={(event) => changeValue(p.key, event.target.value)}
+                          required={p.required}
+                          disabled={busy}
+                        />
+                      )}
+                    </div>
+                  ))}
+                  {missing.length > 0 && (
+                    <div role="alert" className="space-y-1 text-sm text-destructive">
+                      {missing.map((item) => (
+                        <p key={item}>{missingLabel(item)}</p>
+                      ))}
+                    </div>
+                  )}
+                  <div className="pt-1">
+                    <Button type="submit" disabled={busy} className="w-full justify-center">
+                      <Play size={14} />
+                      {label(busy ? "workbench.recipes.busy" : "workbench.recipes.runOnce")}
+                    </Button>
                   </div>
-                )}
+                </div>
                 <details
-                  className="group border-t pt-3"
+                  className="group h-fit rounded-xl bg-muted/30 p-4"
                   key={selected.id}
                   data-testid="recipe-task-details"
                 >
                   <summary className="flex cursor-pointer list-none items-center justify-between gap-2 rounded text-sm font-medium focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
-                    <span>{label("workbench.recipes.previewTask")}</span>
+                    <span className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
+                      {label("workbench.surface.preview")}
+                    </span>
                     <ChevronDown
                       size={16}
                       aria-hidden="true"
                       className="shrink-0 text-muted-foreground group-open:rotate-180"
                     />
                   </summary>
-                  <p className="mt-2 text-xs text-muted-foreground">{bindings}</p>
+                  <p className="mt-3 text-xs leading-5 text-muted-foreground">{bindings}</p>
                   <p className="mt-2 text-xs text-muted-foreground">
                     {label("workbench.recipes.inputDraftHint")}
                   </p>
@@ -588,12 +592,6 @@ export function RecipePanel() {
                     {label("workbench.recipes.scheduleHint")}
                   </p>
                 </details>
-                <div className="flex flex-wrap items-center gap-2 pt-1">
-                  <Button type="submit" disabled={busy}>
-                    <Play size={14} />
-                    {label(busy ? "workbench.recipes.busy" : "workbench.recipes.runOnce")}
-                  </Button>
-                </div>
               </form>
             )}
           </>

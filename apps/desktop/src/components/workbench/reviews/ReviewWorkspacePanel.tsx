@@ -531,8 +531,11 @@ function ReviewWorkspaceSession({ userId }: { userId: string }) {
       )}
       {workspace && (
         <>
-          <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="flex flex-wrap items-start justify-between gap-3 border-b pb-4">
             <div className="min-w-0 space-y-1">
+              <div className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
+                {label("workbench.surface.review")}
+              </div>
               <h2 className="break-words text-lg font-semibold">{workspace.title}</h2>
               <p className="break-words text-xs text-muted-foreground">
                 {format("reviews.savedRevision", {

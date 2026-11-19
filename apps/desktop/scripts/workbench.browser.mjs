@@ -354,6 +354,7 @@ try {
   );
   await page.goto(`${origin}/tests/workbench.html`, { waitUntil: "domcontentloaded" });
   await page.getByRole("heading", { name: "工作台", exact: true }).waitFor();
+  await page.getByRole("button", { name: "任务配方", exact: true }).click();
   original = await page.evaluate(() => window.workbenchTest.source().content);
   await page.getByRole("button", { name: "竞品周报", exact: false }).click();
   const dialog = page.getByRole("dialog");

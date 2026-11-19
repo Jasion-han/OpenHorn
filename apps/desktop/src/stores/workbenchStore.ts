@@ -19,7 +19,7 @@ interface WorkbenchState {
   navigationTarget: { tab: "recipes" | "artifacts" | "reviews"; id: string; token: string } | null;
   openItem(tab: "recipes" | "artifacts" | "reviews", id: string): void;
   clearNavigation(token: string): void;
-  tab: "recipes" | "artifacts" | "reviews";
+  tab: "home" | "recipes" | "artifacts" | "reviews";
   recipeDraft: string | null;
   artifactMessageId: string | null;
   artifactConversationId: string | null;
@@ -44,7 +44,7 @@ export function createWorkbenchStore(deps: { openScheduledTasks?: () => void } =
       })),
     clearNavigation: (token) =>
       set((state) => (state.navigationTarget?.token === token ? { navigationTarget: null } : {})),
-    tab: "recipes",
+    tab: "home",
     recipeDraft: null,
     artifactMessageId: null,
     artifactConversationId: null,

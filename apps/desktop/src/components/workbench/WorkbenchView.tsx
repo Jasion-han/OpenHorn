@@ -15,6 +15,7 @@ import { useWorkbenchStore } from "../../stores/workbenchStore";
 import { ArtifactPanel, artifactPreviewContent } from "./ArtifactPanel";
 import { RecipePanel } from "./RecipePanel";
 import { ReviewWorkspacePanel } from "./reviews/ReviewWorkspacePanel";
+import { WorkbenchHome } from "./WorkbenchHome";
 
 const api = createServerApi();
 export function WorkbenchView() {
@@ -107,12 +108,9 @@ export function WorkbenchView() {
           <header className="flex flex-wrap items-start justify-between gap-4 border-b pb-4">
             <div className="min-w-0 space-y-1">
               <h1 className="text-xl font-semibold tracking-tight">{label("workbench.title")}</h1>
-              <p className="max-w-2xl text-sm text-muted-foreground">
-                {label("workbench.subtitle")}
-              </p>
             </div>
             <nav aria-label={label("workbench.title")} className="flex flex-wrap gap-1">
-              {(["recipes", "artifacts", "reviews"] as const).map((value) => (
+              {(["home", "recipes", "artifacts", "reviews"] as const).map((value) => (
                 <Button
                   key={value}
                   variant="ghost"
@@ -122,26 +120,21 @@ export function WorkbenchView() {
                   onClick={() => setTab(value)}
                 >
                   {label(
-                    value === "recipes"
-                      ? "workbench.recipes.title"
-                      : value === "reviews"
-                        ? "reviews.title"
-                        : "workbench.artifacts.title",
+                    value === "home"
+                      ? "workbench.nav.recent"
+                      : value === "recipes"
+                        ? "workbench.nav.recurring"
+                        : value === "reviews"
+                          ? "workbench.nav.reviews"
+                          : "workbench.nav.outputs",
                   )}
                 </Button>
               ))}
             </nav>
           </header>
-          <div className="rounded-xl border bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
-            {label(
-              tab === "recipes"
-                ? "workbench.recipes.roleDescription"
-                : tab === "reviews"
-                  ? "reviews.description"
-                  : "workbench.artifacts.roleDescription",
-            )}
-          </div>
-          {tab === "recipes" ? (
+          {tab === "home" ? (
+            <WorkbenchHome />
+          ) : tab === "recipes" ? (
             <RecipePanel key={sessionKey} />
           ) : tab === "reviews" ? (
             <ReviewWorkspacePanel />

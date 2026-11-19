@@ -289,10 +289,10 @@ export function ArtifactPanel({ refreshToken = 0, onContinue, onOpenSource }: Ar
   );
   return (
     <div
-      className="grid min-h-0 gap-6 lg:grid-cols-[15rem_minmax(0,1fr)]"
+      className="grid min-h-0 gap-6 lg:grid-cols-[18rem_minmax(0,1fr)]"
       data-testid="artifact-panel"
     >
-      <aside className="min-w-0 space-y-3 border-b border-border pb-5 lg:border-b-0 lg:border-r lg:pb-0 lg:pr-5">
+      <aside className="min-w-0 space-y-3 bg-muted/20 p-3">
         <div className="flex items-center justify-between gap-2">
           <span className="text-xs text-muted-foreground">
             {formatWorkbenchLabel("workbench.artifacts.count", { count: artifacts.length })}
@@ -397,9 +397,12 @@ export function ArtifactPanel({ refreshToken = 0, onContinue, onOpenSource }: Ar
         ) : null}
         {detail ? (
           <>
-            <header className="space-y-4">
+            <header className="space-y-4 border-b pb-4">
               <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0 flex-1 space-y-2">
+                  <div className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
+                    {getWorkbenchLabel("workbench.surface.output")}
+                  </div>
                   {renaming ? (
                     <form
                       className="flex flex-wrap gap-2"
