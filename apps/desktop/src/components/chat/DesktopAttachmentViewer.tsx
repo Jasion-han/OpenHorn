@@ -205,6 +205,7 @@ export function DesktopAttachmentViewer({
   allowExport = true,
   allowExpand = true,
   closeLabel = getChatLabel("chat.attachment.close"),
+  imageOnly = false,
 }: {
   attachments: MessageAttachmentMeta[];
   index: number;
@@ -216,6 +217,7 @@ export function DesktopAttachmentViewer({
   allowExport?: boolean;
   allowExpand?: boolean;
   closeLabel?: string;
+  imageOnly?: boolean;
 }) {
   const att = attachments[index];
   const [expanded, setExpanded] = useState(false);
@@ -303,6 +305,33 @@ export function DesktopAttachmentViewer({
       navigateImage(1);
     }
   };
+  const imageOnlyContent =
+    kind === "image" ? (
+      <div className="relative h-[94vh] w-[94vw] overflow-hidden">
+        {error ? (
+          <p role="alert" className="text-sm text-muted-foreground">
+            {getChatLabel("chat.attachment.mediaFailed")}
+          </p>
+        ) : !source ? (
+          <output className="text-sm text-muted-foreground">
+            {getChatLabel("chat.attachment.loading")}
+          </output>
+        ) : mediaError ? (
+          <p role="alert" className="text-sm text-muted-foreground">
+            {getChatLabel("chat.attachment.mediaFailed")}
+          </p>
+        ) : (
+          <img
+            src={source.url}
+            alt={att.fileName}
+            onError={() => setMediaError(true)}
+            className="absolute left-1/2 top-1/2 max-h-full max-w-full -translate-x-1/2 -translate-y-1/2 object-contain"
+            style={zoom === 1 ? undefined : { width: `${zoom * 100}%`, maxWidth: "none" }}
+          />
+        )}
+      </div>
+    ) : null;
+
   const content = (
     <>
       <div className="relative shrink-0 border-b px-5 pb-3 pr-12 pt-5">
@@ -524,7 +553,21 @@ export function DesktopAttachmentViewer({
       }}
     >
       <DialogContent
-        className="flex h-[min(820px,90vh)] w-[94vw] max-w-5xl flex-col gap-0 overflow-hidden p-0"
+        className={cn(
+          imageOnly
+            ? "!flex !h-[94vh] !w-[94vw] !max-h-[94vh] !max-w-[94vw] items-center justify-center overflow-hidden !bg-transparent !p-0 !shadow-none"
+            : "flex h-[min(820px,90vh)] w-[94vw] max-w-5xl flex-col gap-0 overflow-hidden p-0",
+        )}
+        hideClose={imageOnly}
+        onPointerDownOutside={imageOnly ? () => onClose() : undefined}
+        onClick={
+          imageOnly
+            ? (event) => {
+                const target = event.target;
+                if (!(target instanceof Element) || !target.closest("img")) onClose();
+              }
+            : undefined
+        }
         onKeyDown={handleKeyDown}
         onCloseAutoFocus={(e) => {
           if (presentation === "panel") {
@@ -533,7 +576,7 @@ export function DesktopAttachmentViewer({
           }
         }}
       >
-        {content}
+        {imageOnly ? imageOnlyContent : content}
       </DialogContent>
     </Dialog>
   );

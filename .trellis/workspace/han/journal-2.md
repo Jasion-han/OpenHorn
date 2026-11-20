@@ -309,3 +309,399 @@ Topics: [.trellis/spec/desktop/frontend/component-guidelines.md](../../spec/desk
 ### Status
 
 [OK] **Completed**
+
+
+## Session 89: 资料库批量导入
+<!-- trellis-session: v=2 fp=987b89fc3ec6f4c3 -->
+
+**Date**: 2026-11-19
+**Task**: 资料库批量导入
+**Package**: agent
+**Branch**: `main`
+
+### Summary
+
+桌面资料导入支持多选和拖放，逐份提交、失败保留、暂停和导航后接收在途回执。修复老库版本列补齐前创建索引的问题，在隔离库验证连续两次启动和原件保留。
+Topics: [.trellis/spec/server/backend/project-library.md](../../spec/server/backend/project-library.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 90: 资料库标题、标签和收藏
+<!-- trellis-session: v=2 fp=f57b669c16a48dbd -->
+
+**Date**: 2026-11-19
+**Task**: 资料库标题、标签和收藏
+**Package**: agent
+**Branch**: `main`
+
+### Summary
+
+资料组织元数据按版本链同步，新版本继承。收藏可独立切换，标签和收藏适用于当前范围浏览及检索。统一搜索支持显示名称，备份恢复保留元数据并兼容旧归档。
+Topics: [.trellis/spec/server/backend/project-library.md](../../spec/server/backend/project-library.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 91: 资料库文件夹
+<!-- trellis-session: v=2 fp=a948e996ca183994 -->
+
+**Date**: 2026-11-19
+**Task**: 资料库文件夹
+**Package**: agent
+**Branch**: `main`
+
+### Summary
+
+资料库支持个人或项目范围内的文件夹，新增资料可进入当前文件夹，删除文件夹将资料移回未分类。文件夹和资料关系纳入备份恢复，浏览器验证完成。
+Topics: [.trellis/spec/server/backend/project-library.md](../../spec/server/backend/project-library.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 92: 资料库原文定位
+<!-- trellis-session: v=2 fp=eac9b12be3db0091 -->
+
+**Date**: 2026-11-19
+**Task**: 资料库原文定位
+**Package**: agent
+**Branch**: `main`
+
+### Summary
+
+资料库检索与来源快照携带已确认的 PDF 物理页码或文本行号。浏览器验证打开第 2 页、从问答记录打开原件及正文高亮。专项覆盖跨页片段、OCR 空白页、精确偏移及旧备份兼容。
+Topics: [.trellis/spec/server/backend/project-library.md](../../spec/server/backend/project-library.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 93: 资料库检索覆盖和片段翻看
+<!-- trellis-session: v=2 fp=32463c4b89656468 -->
+
+**Date**: 2026-11-19
+**Task**: 资料库检索覆盖和片段翻看
+**Package**: agent
+**Branch**: `main`
+
+### Summary
+
+文件名、标题、正文及全角匹配统一返回，每份资料统计实际命中片段。片段切换复用原检索范围和文档版本。隔离库覆盖 85 个命中片段，浏览器验证文件名命中与第二处原文定位。
+Topics: [.trellis/spec/server/backend/project-library.md](../../spec/server/backend/project-library.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 94: 资料库命中片段直接提问
+<!-- trellis-session: v=2 fp=8effe03a7cc75bf8 -->
+
+**Date**: 2026-11-20
+**Task**: 资料库命中片段直接提问
+**Package**: agent
+**Branch**: `main`
+
+### Summary
+
+检索片段可直接准备聊天草稿，范围由资料归属确定。服务端以文档、片段和修订号冻结唯一来源。旧引用提示重新选择，同一片段可接续原问题，成功请求照常重放快照。浏览器通过 26 项检查，资料库专项及桌面端和服务端类型检查通过。
+Topics: [.trellis/spec/server/backend/project-library.md](../../spec/server/backend/project-library.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 95: 返回资料库恢复检索位置
+<!-- trellis-session: v=2 fp=608a0dc96440f0fa -->
+
+**Date**: 2026-11-20
+**Task**: 返回资料库恢复检索位置
+**Package**: agent
+**Branch**: `main`
+
+### Summary
+
+桌面端按后端和账号在内存保存浏览位置。返回时重新读取范围、筛选下的资料和检索结果，修订号一致才恢复原命中位置。Playwright 27 项通过，包含聊天返回、索引更新回退和账号切换。桌面端类型及 Biome 检查通过。
+Topics: [.trellis/spec/desktop/frontend/state-management.md](../../spec/desktop/frontend/state-management.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 96: 资料库批量移动
+<!-- trellis-session: v=2 fp=a43aa91a48f98062 -->
+
+**Date**: 2026-11-20
+**Task**: 资料库批量移动
+**Package**: agent
+**Branch**: `main`
+
+### Summary
+
+个人和项目资料支持勾选或全选当前列表，整批移动到文件夹或未分类。服务端在单事务校验归属、当前版本、修订和索引租约，随后更新版本组。Playwright 通过 28 项回归，资料库专项、两端类型及 Biome 检查通过。
+Topics: [.trellis/spec/server/backend/project-library.md](../../spec/server/backend/project-library.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 97: 导入窗口选择目标文件夹
+<!-- trellis-session: v=2 fp=dba74f76cc81fd1d -->
+
+**Date**: 2026-11-20
+**Task**: 导入窗口选择目标文件夹
+**Package**: agent
+**Branch**: `main`
+
+### Summary
+
+导入弹窗内可选择当前范围的文件夹。队列记住目标，提交期间锁定，暂停或重新打开后可为剩余文件改选。服务端区分省略位置与明确未分类。Playwright 29 项回归、8 项专项、两端类型及 Biome 检查通过。
+Topics: [.trellis/spec/server/backend/project-library.md](../../spec/server/backend/project-library.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 98: 资料库聊天草稿分离问题与引用
+<!-- trellis-session: v=2 fp=2b66dd2cccd4c253 -->
+
+**Date**: 2026-11-20
+**Task**: 资料库聊天草稿分离问题与引用
+**Package**: agent
+**Branch**: `main`
+
+### Summary
+
+聊天草稿只编辑问题，引用可展开看文件、位置和原文。显式发送及编辑重发重新打包原来源。开发环境验证编辑跨导航保留并通过真实后端到本地模型替身，浏览器 29 项、专项 10 项和桌面类型检查通过。
+Topics: [.trellis/spec/server/backend/project-library.md](../../spec/server/backend/project-library.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 99: 聊天消息保留可展开的资料引用
+<!-- trellis-session: v=2 fp=358bb622f61904a0 -->
+
+**Date**: 2026-11-20
+**Task**: 聊天消息保留可展开的资料引用
+**Package**: agent
+**Branch**: `main`
+
+### Summary
+
+已发送的资料库问题在气泡内展示冻结引用。应用首页验证展开文件与行号，编辑重发的本地模型收到相同片段，刷新后仍可查看。
+Topics: [.trellis/spec/server/backend/project-library.md](../../spec/server/backend/project-library.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 100: 聊天引用打开原文
+<!-- trellis-session: v=2 fp=32d1b7cc73d4ae8f -->
+
+**Date**: 2026-11-20
+**Task**: 聊天引用打开原文
+**Package**: agent
+**Branch**: `main`
+
+### Summary
+
+聊天中可预览对应原件。PDF 打开引用页，文本仅在偏移和片段一致时高亮。原件不可用或位置变化时展示快照。应用首页验证两类预览、异常回退与关闭后的键盘焦点，29 项浏览器回归以及桌面类型检查通过。
+Topics: [.trellis/spec/server/backend/project-library.md](../../spec/server/backend/project-library.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 101: 回答内引用直达原文
+<!-- trellis-session: v=2 fp=350740511f6ce032 -->
+
+**Date**: 2026-11-20
+**Task**: 回答内引用直达原文
+**Package**: agent
+**Branch**: `main`
+
+### Summary
+
+资料库回答中的引用按同一轮冻结来源编号解析。带文件名和片段号的标记同时核对两项，点击复用正文或 PDF 预览。真实应用验证精确定位、保留未匹配文本、键盘焦点和刷新后的入口。
+Topics: [.trellis/spec/server/backend/project-library.md](../../spec/server/backend/project-library.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 102: 资料库追问沿用引用资料
+<!-- trellis-session: v=2 fp=b39e7ca441f7251b -->
+
+**Date**: 2026-11-20
+**Task**: 资料库追问沿用引用资料
+**Package**: agent
+**Branch**: `main`
+
+### Summary
+
+资料库追问沿用同会话最新已保存的问题引用，输入框显示将随追问发送的片段。应用首页验收真实后端的追问载荷、本地模型替身的输入及刷新后的回答出处，九项专项与桌面类型检查通过。
+Topics: [.trellis/spec/server/backend/project-library.md](../../spec/server/backend/project-library.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 103: 资料库追问可勾选引用片段
+<!-- trellis-session: v=2 fp=d318f35895a3abd8 -->
+
+**Date**: 2026-11-20
+**Task**: 资料库追问可勾选引用片段
+**Package**: agent
+**Branch**: `main`
+
+### Summary
+
+追问输入框支持勾选本轮片段，切换会话保留选择，完整旧快照仍可重新选择。服务端在有本轮快照时保留历史对话文字并移除较早的引用载荷。独立实例验证键盘选择、请求内容和重编号出处，两端类型检查与十八项专项通过。
+Topics: [.trellis/spec/server/backend/project-library.md](../../spec/server/backend/project-library.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 104: 资料库界面精简与问答追加片段
+<!-- trellis-session: v=2 fp=698bc34e133f5850 -->
+
+**Date**: 2026-11-20
+**Task**: 资料库界面精简与问答追加片段
+**Package**: agent
+**Branch**: `main`
+
+### Summary
+
+删减资料库及聊天的重复说明，引用以计数、文件名和位置为主。检索片段可加入同范围的当前问答草稿。浏览器实测追加、原文预览、焦点返回，29 项资料库回归通过。
+Topics: [.trellis/spec/desktop/frontend/component-guidelines.md](../../spec/desktop/frontend/component-guidelines.md), [.trellis/spec/server/backend/project-library.md](../../spec/server/backend/project-library.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 105: 图片附件改为纯图片弹窗
+<!-- trellis-session: v=2 fp=f164396d916c7a9a -->
+
+**Date**: 2026-11-20
+**Task**: 图片附件改为纯图片弹窗
+**Package**: agent
+**Branch**: `main`
+
+### Summary
+
+正常 OpenHorn 桌面端重启后历史记录恢复。图片附件改为透明居中弹窗，仅显示图片和关闭按钮。PDF、文本及其他文件继续使用右侧预览栏。类型检查、聊天组件测试和正常桌面打包通过。
+Topics: [.trellis/spec/desktop/frontend/component-guidelines.md](../../spec/desktop/frontend/component-guidelines.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 106: 修复图片弹窗空白点击关闭
+<!-- trellis-session: v=2 fp=9858d40c6d625da5 -->
+
+**Date**: 2026-11-20
+**Task**: 修复图片弹窗空白点击关闭
+**Package**: agent
+**Branch**: `main`
+
+### Summary
+
+确认图片弹窗外部暗色区域和弹窗内部图片之外的空白都应关闭，图片本身保持可见；关闭逻辑放在 DialogContent 的 click 与 Radix outside 事件，避免 pointerdown 抢到打开手势导致弹窗立即关闭。已重打包并在 macOS 桌面端实测。
+Topics: [.trellis/spec/desktop/frontend/component-guidelines.md](../../spec/desktop/frontend/component-guidelines.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**

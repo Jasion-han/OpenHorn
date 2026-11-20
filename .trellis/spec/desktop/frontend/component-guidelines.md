@@ -44,6 +44,12 @@ Questions to answer:
 
 ---
 
+### Library copy
+
+Use short action labels and let the current scope, selection count, and file name carry context. Keep limits, errors, and consent information where they affect an action.
+Image attachments from chat open in a transparent modal with image-only content. PDF, text, audio, video, and generic files continue using the preview panel.
+In image-only attachment dialogs, the image element is the only interactive surface. Clicking dialog whitespace or the overlay closes the dialog. Keep the internal close handler on click rather than pointerdown, because pointerdown on DialogContent can consume the opening gesture and immediately close the dialog.
+
 ## Accessibility
 
 <!-- A11y requirements and patterns -->

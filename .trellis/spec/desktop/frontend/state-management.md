@@ -61,6 +61,11 @@ Questions to answer:
   cannot append to a newly refreshed list or overwrite its cursor, and old reads
   cannot restore deleted records. Picked MCP additions must not mutate an earlier
   scan snapshot. Regressions: `importStore.lifecycle.test.ts`.
+- The Library keeps its last settled browsing position in memory for one
+  backend and account. Restore the range, filters, query and document through
+  fresh reads. Restore a match index only when the document revision still
+  agrees. An explicit unified-search target takes precedence over the saved
+  position. Account changes clear the position.
 - MCP rosters treat configured names as own data keys, including `__proto__`;
   mapping and JSON serialization must not silently lose such entries.
 - Keep the `chatStore.test.ts` regressions for both saved modes, foreground and
