@@ -1,13 +1,15 @@
 import { Bot, MessageSquare } from "lucide-react";
-import { memo } from "react";
+import { memo, useMemo } from "react";
 import { hasAgentReplyTextSteps } from "shared/message-text";
 import { cn } from "ui";
 import { sanitizeDisplayContent } from "../../lib/citations";
 import { formatMessageTime, formatTokenCount } from "../../lib/conversationTitle";
 import { getChatLabel } from "../../lib/i18n/agent";
+import { readLibraryChatQuestion } from "../../lib/libraryChatDraft";
 import type { SlashCommandType } from "../../lib/slashToken";
 import { resolvePlainReplyEndState } from "../../lib/stopTurn";
 import type { Message } from "../../types/chat";
+import { useLibrarySourcePreview } from "../library/useLibrarySourcePreview";
 import { AgentRunPanel } from "./DesktopAgentRunPanel";
 import { DesktopAgentTaskMetaLine } from "./DesktopAgentTaskMetaLine";
 import { DesktopCitationList } from "./DesktopCitationList";
@@ -84,6 +86,8 @@ function MessageBubbleImpl({
   assistantWidth,
   userMaxWidth,
   knownCommands,
+  libraryConversation,
+  libraryQuestionContent,
 }: {
   message: Message;
   isStreaming: boolean;
@@ -96,8 +100,18 @@ function MessageBubbleImpl({
   assistantWidth: string;
   userMaxWidth: string;
   knownCommands?: Map<string, SlashCommandType>;
+  libraryConversation?: boolean;
+  libraryQuestionContent?: string;
 }) {
   const isAssistant = message.role === "assistant";
+  const { open, dialog } = useLibrarySourcePreview();
+  const answerCitations = useMemo(() => {
+    const question =
+      libraryConversation && libraryQuestionContent
+        ? readLibraryChatQuestion(libraryQuestionContent)
+        : null;
+    return question ? { sources: question.sources, open } : undefined;
+  }, [libraryConversation, libraryQuestionContent, open]);
   const isMessageStreaming = isStreaming;
   const label = message.agentRun?.research
     ? getChatLabel("chat.research.title")
@@ -105,9 +119,13 @@ function MessageBubbleImpl({
       ? "Agent"
       : "Chat";
   const badgeIcon = message.mode === "agent" ? <Bot size={12} /> : <MessageSquare size={12} />;
+  const sourcedQuestion =
+    libraryConversation && message.role === "user"
+      ? readLibraryChatQuestion(message.content)
+      : null;
   const displayContent = isAssistant
     ? stripLeadingThematicBreak(sanitizeDisplayContent(message.content, message.citations))
-    : message.content;
+    : (sourcedQuestion?.question ?? message.content);
   const hasAssistantText = isAssistant && Boolean((displayContent || "").trim());
   const isAssistantPlaceholder = isAssistant && isMessageStreaming && !hasAssistantText;
   const isFlatAgentAssistant = isAssistant && message.mode === "agent";
@@ -200,6 +218,7 @@ function MessageBubbleImpl({
                   pulseKey={message.streamPulseKey ?? 0}
                   genUiScope={message.id}
                   streaming={isMessageStreaming && !isFlatAgentAssistant}
+                  libraryCitations={answerCitations}
                 />
               ) : isMessageStreaming && !isFlatAgentAssistant ? (
                 <TypingIndicator />
@@ -208,12 +227,12 @@ function MessageBubbleImpl({
             </div>
             <DesktopCitationList citations={message.citations} content={displayContent} />
           </div>
-        ) : !isAssistant ? (
+        ) : (
           <DesktopUserMessageContent
-            content={message.content || ""}
-            knownCommands={knownCommands}
+            content={displayContent || ""}
+            knownCommands={sourcedQuestion ? undefined : knownCommands}
           />
-        ) : null}
+        )}
         {liveIndicator === "trailing" && (
           <section className="mt-0.5 px-1 pt-0 pb-1">
             <DesktopAgentTaskMetaLine text="Working" active />
@@ -239,6 +258,7 @@ function MessageBubbleImpl({
           ) : null}
         </span>
       )}
+      {dialog}
       <MessageActionBar
         message={message}
         copyValue={displayContent}
@@ -270,5 +290,7 @@ export const MessageBubble = memo(
     prev.canDelete === next.canDelete &&
     prev.assistantWidth === next.assistantWidth &&
     prev.userMaxWidth === next.userMaxWidth &&
-    prev.knownCommands === next.knownCommands,
+    prev.knownCommands === next.knownCommands &&
+    prev.libraryConversation === next.libraryConversation &&
+    prev.libraryQuestionContent === next.libraryQuestionContent,
 );

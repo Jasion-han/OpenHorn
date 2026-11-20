@@ -1,4 +1,4 @@
-import type { RecipeRequirements } from "shared/types";
+import type { LibrarySource, RecipeRequirements } from "shared/types";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
@@ -18,6 +18,15 @@ export interface ChatMessageJump {
   messageId: string;
 }
 
+interface PendingPrompt {
+  text: string;
+  files: File[];
+  conversationId?: string;
+  requirements?: RecipeRequirements;
+  autoSend?: boolean;
+  librarySources?: LibrarySource[];
+}
+
 export interface DesktopShellState {
   activeView: DesktopActiveView;
   sidebarCollapsed: boolean;
@@ -35,13 +44,7 @@ export interface DesktopShellState {
    * update inside `createConversation` flushes the chat area's effects (and
    * hence the send) before the welcome screen's `await` even resumes.
    */
-  pendingPrompt: {
-    text: string;
-    files: File[];
-    conversationId?: string;
-    requirements?: RecipeRequirements;
-    autoSend?: boolean;
-  } | null;
+  pendingPrompt: PendingPrompt | null;
   prefillComposer: string | null;
   messageJump: ChatMessageJump | null;
   scheduledTasksTab: "tasks" | "runs";
@@ -55,15 +58,7 @@ export interface DesktopShellState {
   setSettingsTab: (tab: DesktopSettingsTab) => void;
   openSettings: (tab?: DesktopSettingsTab) => void;
   toggleFullAccess: () => void;
-  setPendingPrompt: (
-    prompt: {
-      text: string;
-      files: File[];
-      conversationId?: string;
-      requirements?: RecipeRequirements;
-      autoSend?: boolean;
-    } | null,
-  ) => void;
+  setPendingPrompt: (prompt: PendingPrompt | null) => void;
   setPrefillComposer: (text: string | null) => void;
   openScheduledTasks: (tab?: "tasks" | "runs", taskId?: string) => void;
   openRunDetail: (runId: string) => void;
@@ -75,13 +70,7 @@ const INITIAL_STATE = {
   sidebarCollapsed: false,
   settingsTab: "channels" as DesktopSettingsTab,
   fullAccessEnabled: false,
-  pendingPrompt: null as {
-    text: string;
-    files: File[];
-    conversationId?: string;
-    requirements?: RecipeRequirements;
-    autoSend?: boolean;
-  } | null,
+  pendingPrompt: null as PendingPrompt | null,
   prefillComposer: null as string | null,
   messageJump: null as ChatMessageJump | null,
   scheduledTasksTab: "tasks" as "tasks" | "runs",

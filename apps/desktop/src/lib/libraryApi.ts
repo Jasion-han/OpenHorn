@@ -2,11 +2,19 @@ import type {
   LibraryDocument,
   LibraryDocumentDetail,
   LibraryFilter,
+  LibraryFolder,
+  LibraryListOptions,
   LibraryQuestion,
+  LibraryQuestionSourceRef,
   LibraryScope,
+  LibrarySearchMatchRequest,
   LibrarySearchResult,
+  LibrarySource,
+  LibraryStats,
+  MoveLibraryDocumentsInput,
   PreparedLibraryQuestion,
   PrepareLibraryQuestionInput,
+  UpdateLibraryDocumentMetadataInput,
 } from "shared/types";
 import { getDesktopBackendBase } from "./backendBase";
 import { getLibraryLabel as label } from "./i18n/agent";
@@ -39,24 +47,71 @@ const scopeQuery = (scope: LibraryFilter) =>
 const id = encodeURIComponent;
 export const libraryApi = {
   list: (scope: LibraryFilter) =>
-    request<{ documents: LibraryDocument[] }>(`?${scopeQuery(scope)}`),
+    request<{ documents: LibraryDocument[]; stats: LibraryStats; folders: LibraryFolder[] }>(
+      `?${scopeQuery(scope)}`,
+    ),
+  moveDocuments: (input: MoveLibraryDocumentsInput) =>
+    request<{ moved: number }>("/documents/move", "POST", input),
+  folderCreate: (scope: LibraryScope, name: string) =>
+    request<{ folder: LibraryFolder }>("/folders", "POST", { scope, name }),
+  folderRename: (folderId: string, expectedRevision: number, name: string) =>
+    request<{ folder: LibraryFolder }>(`/folders/${id(folderId)}`, "PATCH", {
+      expectedRevision,
+      name,
+    }),
+  folderDelete: (folderId: string, expectedRevision: number) =>
+    request<{ success: boolean }>(`/folders/${id(folderId)}`, "DELETE", { expectedRevision }),
   get: (documentId: string) => request<{ document: LibraryDocumentDetail }>(`/${id(documentId)}`),
-  upload: (scope: LibraryScope, file: File) => {
+  upload: (scope: LibraryScope, file: File, folderId?: string | null) => {
     const form = new FormData();
     form.set("scope", JSON.stringify(scope));
     form.set("file", file);
+    if (folderId !== undefined) form.set("folderId", folderId ?? "");
     return request<{ document: LibraryDocument; reused: boolean }>("", "POST", form);
   },
   index: (documentId: string) =>
     request<{ document: LibraryDocument }>(`/${id(documentId)}/index`, "POST"),
+  versions: (documentId: string) =>
+    request<{ versions: LibraryDocument[] }>(`/${id(documentId)}/versions`),
+  restore: (documentId: string, expectedRevision: number) =>
+    request<{ document: LibraryDocument }>(`/${id(documentId)}/restore`, "POST", {
+      expectedRevision,
+    }),
+  updateMetadata: (documentId: string, input: UpdateLibraryDocumentMetadataInput) =>
+    request<{ document: LibraryDocumentDetail }>(`/${id(documentId)}`, "PATCH", input),
   ocr: (documentId: string, connectionToken?: string) =>
     request<{ document: LibraryDocument }>(`/${id(documentId)}/ocr`, "POST", { connectionToken }),
   delete: (documentId: string, expectedRevision: number) =>
     request<{ success: boolean }>(`/${id(documentId)}`, "DELETE", { expectedRevision }),
-  search: (scope: LibraryFilter, query: string) =>
-    request<{ results: LibrarySearchResult[] }>(
-      `/search?${scopeQuery(scope)}&q=${encodeURIComponent(query)}`,
-    ),
+  search: (
+    scope: LibraryFilter,
+    query: string,
+    options: LibraryListOptions = {},
+    match?: LibrarySearchMatchRequest,
+  ) => {
+    const params = new URLSearchParams(scopeQuery(scope));
+    params.set("q", query);
+    if (options.favoriteOnly) params.set("favorite", "true");
+    if (options.tag) params.set("tag", options.tag);
+    if (options.folderId === null) params.set("folderId", "");
+    else if (options.folderId) params.set("folderId", options.folderId);
+    if (match) {
+      params.set("documentId", match.documentId);
+      params.set("matchIndex", String(match.index));
+      params.set("revision", String(match.revision));
+    }
+    return request<{ results: LibrarySearchResult[] }>(`/search?${params}`);
+  },
+  conversationSource: (conversationId: string, source: LibraryQuestionSourceRef) => {
+    const params = new URLSearchParams({
+      documentId: source.documentId,
+      chunkIndex: String(source.chunkIndex),
+      revision: String(source.revision),
+    });
+    return request<{ source: LibrarySource }>(
+      `/conversations/${id(conversationId)}/source?${params}`,
+    );
+  },
   questions: () => request<{ questions: LibraryQuestion[] }>("/questions"),
   question: (questionId: string) =>
     request<PreparedLibraryQuestion>(`/questions/${id(questionId)}`),
@@ -126,6 +181,10 @@ export function libraryError(error: unknown): string {
       return label("library.errors.pdfLimit");
     case "library_parse_failed":
       return label("library.errors.parse");
+    case "library_draft_sources_limit":
+      return label("library.errors.draftSourcesLimit");
+    case "library_source_changed":
+      return label("library.errors.sourceChanged");
     case "library_no_sources":
       return label("library.errors.sources");
     case "library_channel_unavailable":
@@ -137,6 +196,18 @@ export function libraryError(error: unknown): string {
       return label("library.errors.conflict");
     case "library_not_found":
       return label("library.errors.notFound");
+    case "library_invalid_folder_name":
+      return label("library.errors.folderName");
+    case "library_folder_duplicate":
+      return label("library.errors.folderDuplicate");
+    case "library_folder_limit":
+      return label("library.errors.folderLimit");
+    case "library_folder_not_found":
+      return label("library.errors.folderNotFound");
+    case "library_invalid_tags":
+      return label("library.errors.tags");
+    case "library_invalid_display_name":
+      return label("library.errors.displayName");
     case "library_invalid_question":
     case "library_invalid_data":
       return label("library.errors.input");

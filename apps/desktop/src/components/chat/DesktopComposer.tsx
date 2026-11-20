@@ -3,6 +3,7 @@ import type {
   ClipboardEvent,
   DragEvent,
   KeyboardEvent as ReactKeyboardEvent,
+  ReactNode,
   RefObject,
 } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -51,6 +52,7 @@ export function DesktopComposer({
   disabled,
   onAddAttachments,
   onRemoveAttachment,
+  afterAttach,
   mode,
   visionAvailable = false,
   researchMode = false,
@@ -97,6 +99,7 @@ export function DesktopComposer({
   disabled: boolean;
   onAddAttachments: (files: File[]) => void;
   onRemoveAttachment: (file: File) => void;
+  afterAttach?: ReactNode;
   mode: ChatMode;
   onModeChange: (mode: ChatMode) => void;
   agentModeAvailable?: boolean;
@@ -447,6 +450,7 @@ export function DesktopComposer({
         <DesktopComposerToolbar
           onAttach={() => fileInputRef.current?.click()}
           attachDisabled={disabled}
+          afterAttach={afterAttach}
           mode={mode}
           researchMode={researchMode}
           researchAvailable={researchAvailable}

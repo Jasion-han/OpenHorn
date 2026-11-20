@@ -4,9 +4,11 @@ import {
   useVirtualizer,
   type Virtualizer,
 } from "@tanstack/react-virtual";
+import { BookOpen } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { answerModelMetadata } from "shared/answer-metadata";
 import { fileKey } from "shared/format";
+import { LIBRARY_SYSTEM_TAG } from "shared/library";
 import { chatFailureFinishReason } from "shared/message-text";
 import {
   isResearchProtocol,
@@ -62,7 +64,13 @@ import { saveDocumentInput } from "../../lib/documentInputCache";
 import { getEffectiveModelForConversation } from "../../lib/effectiveModel";
 import { type ActiveTurn, activeTurnRef, beginTurn, endTurn } from "../../lib/foregroundTurn";
 import { withGenUiMessages, withGenUiPrompt } from "../../lib/genui/promptMerge";
-import { getChatLabel, getSlashLabel } from "../../lib/i18n/agent";
+import { getChatLabel, getLibraryLabel, getSlashLabel } from "../../lib/i18n/agent";
+import {
+  libraryChatDraftSources,
+  librarySourceKey,
+  readLibraryChatQuestion,
+  serializeLibraryChatQuestion,
+} from "../../lib/libraryChatDraft";
 import {
   findGroupIndexByMessageId,
   groupMessagesByRound,
@@ -99,6 +107,7 @@ import { useGenUiStore } from "../../stores/genUiStore";
 import { useImportStore } from "../../stores/importStore";
 import { useSidecarStore } from "../../stores/sidecarStore";
 import type { ChatStreamEvent, Message, MessageAttachmentMeta } from "../../types/chat";
+import { LibraryComposerSources } from "../library/LibraryComposerSources";
 import { DesktopChatHeader } from "./DesktopChatHeader";
 import { DesktopCheckpointNotice } from "./DesktopCheckpointNotice";
 import { DesktopComposer, type SlashHighlightRange, type SlashPanelItem } from "./DesktopComposer";
@@ -224,7 +233,7 @@ export function DesktopChatArea() {
   const error = useChatStore((state) => state.error);
   const isStreaming = useChatStore((state) => state.isStreaming);
   const streamingConversationId = useChatStore((state) => state.streamingConversationId);
-  const composerMode = useChatStore((state) => state.composerMode);
+  const configuredComposerMode = useChatStore((state) => state.composerMode);
   const setComposerMode = useChatStore((state) => state.setComposerMode);
   const addMessage = useChatStore((state) => state.addMessage);
   const autoTitleConversation = useChatStore((state) => state.autoTitleConversation);
@@ -243,13 +252,40 @@ export function DesktopChatArea() {
     draft: composerDraft,
     setText: setInput,
     setFiles: setPendingAttachments,
+    setLibrarySources,
+    setLibrarySourceSelection,
   } = useConversationDraft(currentConversation?.id ?? null);
+  const libraryConversation =
+    currentConversation?.systemPrompt?.trimStart().startsWith(LIBRARY_SYSTEM_TAG) ?? false;
+  const currentConversationId = currentConversation?.id ?? null;
+  const { librarySources, libraryOptions, canSelectSources } = useMemo(
+    () =>
+      libraryConversation && currentConversationId
+        ? libraryChatDraftSources(messages, currentConversationId, composerDraft)
+        : {},
+    [composerDraft, currentConversationId, libraryConversation, messages],
+  );
+  const composerMode = librarySources ? "chat" : configuredComposerMode;
   const input = composerDraft.text;
+  const libraryPayload = useMemo(
+    () =>
+      librarySources?.length && input.trim()
+        ? serializeLibraryChatQuestion(input.trim(), librarySources)
+        : null,
+    [input, librarySources],
+  );
+  const libraryLengthIssue = Boolean(
+    librarySources?.length && input.trim() && libraryPayload === null,
+  );
   const pendingAttachments = composerDraft.files;
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editingContent, setEditingContent] = useState("");
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [librarySourcePanel, setLibrarySourcePanel] = useState<string | null>(null);
+  const librarySourcePanelOpen =
+    currentConversationId !== null && librarySourcePanel === currentConversationId;
+
   const viewportRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   // ↑/↓ recall of sent messages (shell-style). Reset on edit / send / switch.
@@ -361,26 +397,37 @@ export function DesktopChatArea() {
     !sidecarRun.isBusy &&
     !sidecarRun.isRollingBack &&
     !isUploading &&
-    (hasInput || hasFiles);
-  const researchIssue = researchInputIssue({
-    text: input,
-    webSearchEnabled: forceWebSearch,
-    hasAttachments: hasFiles,
-    protocol: selectedProtocol,
-    runtimeAvailable: researchRuntimeReady,
-  });
+    (librarySources ? libraryPayload !== null : hasInput || hasFiles);
+  const researchIssue = librarySources
+    ? null
+    : researchInputIssue({
+        text: input,
+        webSearchEnabled: forceWebSearch,
+        hasAttachments: hasFiles,
+        protocol: selectedProtocol,
+        runtimeAvailable: researchRuntimeReady,
+      });
   const canSendWithResearch = canSend && !researchIssue;
   // Memoized: during streaming `messages` changes on every token, and without
   // this the whole round-grouping array would be rebuilt each token even though
   // the grouping only depends on the message list.
   const groupedMessages = useMemo(() => groupMessagesByRound(messages), [messages]);
-  const currentConversationId = currentConversation?.id ?? null;
   const composerHistory = useMemo(
     () =>
       currentConversationId
-        ? buildComposerHistory(messages.filter((m) => m.conversationId === currentConversationId))
+        ? buildComposerHistory(
+            messages
+              .filter((m) => m.conversationId === currentConversationId)
+              .map((message) => {
+                const source =
+                  libraryConversation && message.role === "user"
+                    ? readLibraryChatQuestion(message.content)
+                    : null;
+                return source ? { ...message, content: source.question } : message;
+              }),
+          )
         : [],
-    [messages, currentConversationId],
+    [messages, currentConversationId, libraryConversation],
   );
 
   const previewVirtualizerRef = useRef<Virtualizer<HTMLDivElement, Element> | null>(null);
@@ -1147,7 +1194,11 @@ export function DesktopChatArea() {
     }
 
     const conversationId = currentConversation.id;
-    const question = researchQuestion(input);
+    if (librarySources && useSidecarStore.getState().status !== "ready") {
+      setError(getChatLabel("chat.error.sidecarNotReady"));
+      return;
+    }
+    const question = librarySources ? null : researchQuestion(input);
     const research = question !== null;
     const mode = research ? "agent" : composerMode;
     const trimmed = input.trim();
@@ -1187,7 +1238,8 @@ export function DesktopChatArea() {
       builtinNames.set(c.name.toLowerCase(), "command");
       builtinNames.set(c.id.toLowerCase(), "command");
     }
-    const builtinToken = research ? null : findKnownSlashToken(trimmed, builtinNames);
+    const builtinToken =
+      research || librarySources ? null : findKnownSlashToken(trimmed, builtinNames);
     if (builtinToken) {
       const typed = builtinToken.name.toLowerCase();
       const cmd = builtinCommands.find(
@@ -1204,9 +1256,14 @@ export function DesktopChatArea() {
     // `sendContent` is what we transmit to the model (may carry a strong skill
     // instruction); `displayContent` is what the user's bubble shows/stores
     // (their request with the normalized `/token` preserved for the chip).
-    const { sendContent, displayContent, titleContent, targetMcpServer } = resolveSkillMcpSlash(
-      research ? (question ?? "") : trimmed,
-    );
+    const { sendContent, displayContent, titleContent, targetMcpServer } = libraryPayload
+      ? {
+          sendContent: libraryPayload,
+          displayContent: libraryPayload,
+          titleContent: trimmed,
+          targetMcpServer: undefined,
+        }
+      : resolveSkillMcpSlash(research ? (question ?? "") : trimmed);
     if (research && targetMcpServer) {
       notifyWarning(getChatLabel("chat.research.title"), getChatLabel("chat.research_unavailable"));
       return;
@@ -1243,6 +1300,7 @@ export function DesktopChatArea() {
     }
 
     let attachmentIds: string[] | undefined;
+    let libraryTurnAccepted = false;
     const turn = beginTurn();
     const documentController = new AbortController();
     let documentInputKey: string | undefined;
@@ -1297,6 +1355,11 @@ export function DesktopChatArea() {
       });
       pendingScrollTargetRef.current = { type: "message", id: userMessageId };
       setInput("");
+      if (librarySources) {
+        setLibrarySourcePanel(null);
+        setLibrarySources(undefined);
+        setLibrarySourceSelection(undefined);
+      }
       historyNavRef.current = resetHistoryNav();
       setSlashOpen(false);
       setLoading(true);
@@ -1482,6 +1545,7 @@ export function DesktopChatArea() {
           content: sendContent,
           attachments: attachmentIds,
         });
+        libraryTurnAccepted = true;
       } finally {
         finishPreparation();
       }
@@ -1713,6 +1777,17 @@ export function DesktopChatArea() {
       setLoading(false);
       setStreaming(false);
       setStreamingAssistantId(null);
+      if (librarySources && !libraryTurnAccepted && !(error instanceof ChatPreparationFailure)) {
+        setInput((current) => current || trimmed);
+        setLibrarySources((current) => current ?? librarySources);
+        setLibrarySourceSelection((current) => current ?? composerDraft.librarySourceSelection);
+        const store = useChatStore.getState();
+        store.replaceMessages(
+          store.messages.filter(
+            (message) => message.id !== userMessageId && message.id !== assistantMessageId,
+          ),
+        );
+      }
       if (isAbortError(error)) {
         return;
       }
@@ -1773,10 +1848,12 @@ export function DesktopChatArea() {
       text: pendingPrompt.text,
       files: pendingPrompt.files,
       autoSend: pendingPrompt.autoSend,
+      librarySources: libraryConversation ? pendingPrompt.librarySources : undefined,
     });
     const nextText = merged.text;
     setInput(nextText);
     setPendingAttachments(merged.files);
+    setLibrarySources(merged.librarySources);
     autoSendRef.current = merged.autoSend;
     if (merged.needsReview)
       notifyWarning(
@@ -1806,6 +1883,8 @@ export function DesktopChatArea() {
     composerDraft,
     setInput,
     setPendingAttachments,
+    setLibrarySources,
+    libraryConversation,
   ]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: handleSend is re-created every render; adding it would re-run this on every render
@@ -2115,7 +2194,10 @@ export function DesktopChatArea() {
     const editable = getEditableMessageRound(message.id);
     if (!editable) return;
     setEditingMessageId(message.id);
-    setEditingContent(message.content);
+    setEditingContent(
+      (libraryConversation && readLibraryChatQuestion(message.content)?.question) ||
+        message.content,
+    );
   };
 
   const handleCancelEdit = () => {
@@ -2130,15 +2212,6 @@ export function DesktopChatArea() {
     const nextContent = editingContent.trim();
     if (!currentConversation || !nextContent || hasRunningTurn()) return;
 
-    // Resolve slash commands just like a fresh send, so editing a `/web-access …`
-    // message re-triggers the skill (wrapped prompt) instead of sending the raw
-    // slash text — which would run tools but yield no final answer.
-    const {
-      sendContent: editSendContent,
-      displayContent: editDisplayContent,
-      targetMcpServer: editTargetMcpServer,
-    } = resolveSkillMcpSlash(nextContent);
-
     const editable = getEditableMessageRound(messageId);
     if (!editable) {
       notifyWarning(getChatLabel("chat.notEditableTitle"), getChatLabel("chat.notEditableBody"));
@@ -2147,6 +2220,22 @@ export function DesktopChatArea() {
     }
 
     const { userMessage, assistantMessage: existingAssistantMessage } = editable;
+    const sourcedTurn = libraryConversation ? readLibraryChatQuestion(userMessage.content) : null;
+    const editPayload = sourcedTurn
+      ? serializeLibraryChatQuestion(nextContent, sourcedTurn.sources)
+      : null;
+    if (sourcedTurn && !editPayload) {
+      setError(getLibraryLabel("library.errors.composerLength"));
+      return;
+    }
+    const {
+      sendContent: editSendContent,
+      displayContent: editDisplayContent,
+      targetMcpServer: editTargetMcpServer,
+    } = editPayload
+      ? { sendContent: editPayload, displayContent: editPayload, targetMcpServer: undefined }
+      : resolveSkillMcpSlash(nextContent);
+
     // The round's mode is the user message's: an editable round's reply, when
     // there is one, has the same mode. A user message with no reply yet is still
     // an agent round and runs in the sidecar like a fresh send. A refused rerun
@@ -2282,7 +2371,7 @@ export function DesktopChatArea() {
       } else {
         const genUiSection = await loadCurrentGenUiSection();
         if (activeTurnRef.current !== turn) return;
-        const response = await editUserMessage(userMessage.id, nextContent, {
+        const response = await editUserMessage(userMessage.id, editPayload ?? nextContent, {
           appendSystemPrompt: genUiSection ?? undefined,
         });
         // Stopped while the request was going out: abort it now. The server has
@@ -2382,7 +2471,7 @@ export function DesktopChatArea() {
     return <DesktopWelcomeScreen />;
   }
 
-  const renderMessageRow = (message: Message) => (
+  const renderMessageRow = (message: Message, libraryQuestionContent?: string) => (
     <div
       data-chat-message-id={message.id}
       tabIndex={-1}
@@ -2411,6 +2500,8 @@ export function DesktopChatArea() {
         return (
           <MessageBubble
             message={message}
+            libraryConversation={libraryConversation}
+            libraryQuestionContent={libraryQuestionContent}
             isStreaming={isMessageStreaming}
             canEdit={editableMessageIds.has(message.id)}
             canRetry={
@@ -2534,7 +2625,12 @@ export function DesktopChatArea() {
                   >
                     <div className="flex min-w-0 flex-col gap-2">
                       {group.user ? renderMessageRow(group.user.msg) : null}
-                      {group.assistant ? renderMessageRow(group.assistant.msg) : null}
+                      {group.assistant
+                        ? renderMessageRow(
+                            group.assistant.msg,
+                            libraryConversation ? group.user?.msg.content : undefined,
+                          )
+                        : null}
                     </div>
                   </div>
                 );
@@ -2608,12 +2704,56 @@ export function DesktopChatArea() {
             )}
           </p>
         ) : null}
+        {librarySources && librarySourcePanelOpen && (
+          <div className="mb-2">
+            <LibraryComposerSources
+              id="chat-library-sources"
+              key={currentConversation.id}
+              sources={libraryOptions ?? librarySources}
+              selection={
+                canSelectSources &&
+                libraryOptions &&
+                (libraryOptions.length > 1 || !librarySources.length)
+                  ? {
+                      keys: librarySources.map(librarySourceKey),
+                      disabled: isLoading || isStreaming || isUploading,
+                      onChange: setLibrarySourceSelection,
+                    }
+                  : undefined
+              }
+            />
+          </div>
+        )}
+        {libraryLengthIssue && (
+          <p role="alert" className="mb-2 px-2 text-sm text-destructive">
+            {getLibraryLabel("library.errors.composerLength")}
+          </p>
+        )}
         <DesktopComposer
           value={input}
+          afterAttach={
+            librarySources && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                className="size-[30px] shrink-0 rounded-full text-foreground/60 hover:bg-amber-50 hover:text-foreground aria-expanded:bg-amber-100 aria-expanded:text-amber-950"
+                aria-label={getLibraryLabel("library.composerSourceToggle")}
+                title={getLibraryLabel("library.composerSourceToggle")}
+                aria-expanded={librarySourcePanelOpen}
+                aria-controls={librarySourcePanelOpen ? "chat-library-sources" : undefined}
+                onClick={() =>
+                  setLibrarySourcePanel(librarySourcePanelOpen ? null : currentConversation.id)
+                }
+              >
+                <BookOpen className="size-4" />
+              </Button>
+            )
+          }
           onChange={handleInputChange}
           onKeyDown={handleKeyDown}
           slashHighlight={slashHighlight}
-          slashOpen={slashOpen}
+          slashOpen={!librarySources && slashOpen}
           slashItems={slashItems}
           slashIndex={slashIndex}
           slashEmptyLabel={getSlashLabel("slash.empty")}
@@ -2632,9 +2772,10 @@ export function DesktopChatArea() {
             modelSupportsVision(effectiveModel.modelId) &&
             isResearchProtocol(selectedProtocol ?? "openai")
           }
-          researchMode={researchQuestion(input) !== null}
+          researchMode={!librarySources && researchQuestion(input) !== null}
           researchAvailable={
             isResearchProtocol(selectedProtocol ?? "openai") &&
+            !librarySources &&
             agentModeSupported &&
             researchRuntimeReady
           }
@@ -2643,6 +2784,7 @@ export function DesktopChatArea() {
             setInput(withResearchCommand(input));
           }}
           onModeChange={(nextMode) => {
+            if (librarySources) return;
             if (nextMode === "agent" && !agentModeSupported) {
               notifyWarning(
                 getChatLabel("chat.agentUnavailableTitle"),
@@ -2653,7 +2795,7 @@ export function DesktopChatArea() {
             setInput(withoutResearchCommand(input));
             setComposerMode(nextMode);
           }}
-          agentModeAvailable={agentModeSupported}
+          agentModeAvailable={agentModeSupported && !librarySources}
           agentModeDisabledReason={agentModeDisabledReason}
           onSubmit={() => void handleSend()}
           modelProvider={effectiveModel.ok ? effectiveModel.provider : null}

@@ -86,3 +86,28 @@ test("delete and account ABA changes fence callbacks from the old draft lifetime
   put();
   expect(store.getState().drafts.one).toBe(undefined);
 });
+
+test("sourced drafts retain edited questions and stay manual across handoffs", () => {
+  const store = createConversationDraftStore("owner");
+  const librarySources = [
+    { documentId: "doc", fileName: "terms.md", chunkIndex: 1, text: "Shipping terms" },
+  ];
+  store.getState().update("owner", "one", () => ({ text: "Question", files: [], librarySources }));
+  store.getState().update("owner", "one", (draft) => ({ ...draft, text: "My edit" }));
+  expect(
+    mergeComposerHandoff(store.getState().drafts.one, {
+      text: "Question",
+      files: [],
+      autoSend: false,
+      librarySources,
+    }),
+  ).toMatchObject({
+    text: "My edit",
+    autoSend: false,
+    librarySources,
+  });
+  store.getState().update("owner", "one", (draft) => ({ ...draft, text: "" }));
+  expect(store.getState().drafts.one.librarySources).toEqual(librarySources);
+  store.getState().update("owner", "one", (draft) => ({ ...draft, librarySources: undefined }));
+  expect(store.getState().drafts.one).toBe(undefined);
+});

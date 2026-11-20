@@ -45,8 +45,10 @@ function questionHarness(discard: boolean) {
       lock,
       retry: { current: null },
       crypto,
-      libraryScopeKey: () => "personal",
-      useLibraryDraftStore: { getState: () => ({ setQuestion: (v: unknown) => writes.push(v) }) },
+      source: undefined,
+      onReselect: undefined,
+      draftKey: "personal",
+      writeDraft: (value: unknown) => writes.push(value),
       setBusy: (v: boolean) => busy.push(v),
       onPrepare: async (input: PrepareLibraryQuestionInput) => {
         payloads.push(input);

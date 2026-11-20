@@ -3,14 +3,18 @@ import type { LibraryQuestion } from "shared/types";
 import { Button, Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "ui";
 import { formatLibraryLabel as format, getLibraryLabel as label } from "../../lib/i18n/agent";
 import { libraryApi, libraryError } from "../../lib/libraryApi";
+import type { LibraryPdfSource } from "./LibraryPdfSourceDialog";
+import { formatLibraryLocation } from "./LibrarySourceLocation";
 export function LibraryHistoryDialog({
   onClose,
   onOpen,
+  onPreview,
   owns,
   errorMessage,
 }: {
   onClose(): void;
   onOpen(id: string): Promise<void>;
+  onPreview(source: LibraryPdfSource): void;
   owns(): boolean;
   errorMessage: string;
 }) {
@@ -56,7 +60,9 @@ export function LibraryHistoryDialog({
       <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{label("library.history")}</DialogTitle>
-          <DialogDescription>{label("library.questionHistoryHint")}</DialogDescription>
+          <DialogDescription className="sr-only">
+            {label("library.questionHistoryHint")}
+          </DialogDescription>
         </DialogHeader>
         {(error || errorMessage) && (
           <div role="alert" className="space-y-2 text-sm text-destructive">
@@ -110,20 +116,44 @@ export function LibraryHistoryDialog({
                   <summary className="w-fit cursor-pointer rounded text-xs text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring">
                     {label("library.sourceSnapshot")} · {item.sources.length}
                   </summary>
-                  {item.sources.map((source, index) => (
-                    <section
-                      key={`${source.documentId}:${source.chunkIndex}`}
-                      className="space-y-2 border-l-2 pl-3"
-                    >
-                      <h3 className="break-words text-xs font-medium">
-                        {index + 1}. {source.fileName} ·{" "}
-                        {format("library.chunk", { number: source.chunkIndex + 1 })}
-                      </h3>
-                      <pre className="whitespace-pre-wrap break-words font-sans text-xs text-muted-foreground">
-                        {source.text}
-                      </pre>
-                    </section>
-                  ))}
+                  {item.sources.map((source, index) => {
+                    const page = source.location?.pageStart;
+                    return (
+                      <section
+                        key={`${source.documentId}:${source.chunkIndex}`}
+                        className="space-y-2 border-l-2 pl-3"
+                      >
+                        <h3 className="break-words text-xs font-medium">
+                          {index + 1}.{" "}
+                          {[
+                            source.fileName,
+                            formatLibraryLocation(source.location),
+                            format("library.chunk", { number: source.chunkIndex + 1 }),
+                          ]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </h3>
+                        <pre className="whitespace-pre-wrap break-words font-sans text-xs text-muted-foreground">
+                          {source.text}
+                        </pre>
+                        {page !== undefined && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() =>
+                              onPreview({
+                                documentId: source.documentId,
+                                fileName: source.fileName,
+                                page,
+                              })
+                            }
+                          >
+                            {format("library.openPdfPage", { number: page })}
+                          </Button>
+                        )}
+                      </section>
+                    );
+                  })}
                   <Button
                     size="sm"
                     variant="ghost"

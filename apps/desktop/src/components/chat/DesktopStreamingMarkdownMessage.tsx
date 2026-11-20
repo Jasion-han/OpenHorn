@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useState } from "react";
+import type { LibraryMarkdownCitations } from "../../lib/markdownLibraryCitations";
 import { createTextStreamSmoother, type TextStreamSmoother } from "../../lib/textStreamSmoother";
 import { DesktopMarkdownMessage } from "./DesktopMarkdownMessage";
 
@@ -7,12 +8,14 @@ export function DesktopStreamingMarkdownMessage({
   pulseKey,
   genUiScope,
   streaming = true,
+  libraryCitations,
 }: {
   content: string;
   pulseKey: number;
   genUiScope?: string | null;
   /** Keep this renderer mounted when a live reply becomes a completed reply. */
   streaming?: boolean;
+  libraryCitations?: LibraryMarkdownCitations;
 }) {
   const [renderedContent, setRenderedContent] = useState(streaming ? "" : content);
   const smootherRef = useRef<TextStreamSmoother | null>(null);
@@ -102,6 +105,7 @@ export function DesktopStreamingMarkdownMessage({
       content={streaming ? renderedContent : content}
       streaming={streaming}
       genUiScope={genUiScope}
+      libraryCitations={libraryCitations}
     />
   );
 }

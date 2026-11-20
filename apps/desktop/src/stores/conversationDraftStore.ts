@@ -1,5 +1,6 @@
 import type { Dispatch, SetStateAction } from "react";
 import { useCallback, useEffect } from "react";
+import type { LibrarySource } from "shared/types";
 import { create } from "zustand";
 import { getDesktopBackendBase } from "../lib/backendBase";
 import { useAuthStore } from "./authStore";
@@ -8,6 +9,8 @@ export interface ConversationDraft {
   text: string;
   files: File[];
   research?: boolean;
+  librarySources?: LibrarySource[];
+  librarySourceSelection?: string[];
 }
 interface DraftLease {
   generation: number;
@@ -41,6 +44,7 @@ export function mergeComposerHandoff(
       current.files.some((file) => !incoming.files.includes(file)) ||
       (!!current.text.trim() && !!current.research !== !!incoming.research));
   const research = autoCollision ? current.research : incoming.research;
+  const librarySources = incoming.librarySources ?? current.librarySources;
   return {
     text:
       incoming.autoSend === false && current.text.trim()
@@ -49,9 +53,10 @@ export function mergeComposerHandoff(
           ? `${current.text.trimEnd()}\n\n${incoming.text}`
           : incoming.text,
     files: [...new Set([...current.files, ...incoming.files])],
-    autoSend: incoming.autoSend !== false && !autoCollision,
+    autoSend: incoming.autoSend !== false && !autoCollision && !librarySources?.length,
     needsReview: autoCollision,
     ...(research ? { research: true } : {}),
+    ...(librarySources?.length ? { librarySources } : {}),
   };
 }
 
@@ -104,12 +109,23 @@ export function createConversationDraftStore(owner: string | null = null) {
           emptyDrafts(),
           state.drafts,
         );
-        if (!next.text && next.files.length === 0 && !next.research) delete drafts[id];
+        if (
+          !next.text &&
+          next.files.length === 0 &&
+          !next.research &&
+          !next.librarySources?.length &&
+          !next.librarySourceSelection?.length
+        )
+          delete drafts[id];
         else
           drafts[id] = {
             text: next.text,
             files: [...next.files],
             ...(next.research ? { research: true } : {}),
+            ...(next.librarySources?.length ? { librarySources: next.librarySources } : {}),
+            ...(next.librarySourceSelection?.length
+              ? { librarySourceSelection: next.librarySourceSelection }
+              : {}),
           };
         return { drafts };
       }),
@@ -175,5 +191,34 @@ export function useConversationDraft(id: string | null) {
     },
     [owner, id, generation, revision],
   );
-  return { draft, setText, setFiles, setResearch };
+  const setLibrarySources: Dispatch<SetStateAction<LibrarySource[] | undefined>> = useCallback(
+    (value) => {
+      useConversationDraftStore.getState().update(
+        owner,
+        id,
+        (current) => ({
+          ...current,
+          librarySources: typeof value === "function" ? value(current.librarySources) : value,
+        }),
+        { generation, revision },
+      );
+    },
+    [owner, id, generation, revision],
+  );
+  const setLibrarySourceSelection: Dispatch<SetStateAction<string[] | undefined>> = useCallback(
+    (value) => {
+      useConversationDraftStore.getState().update(
+        owner,
+        id,
+        (current) => ({
+          ...current,
+          librarySourceSelection:
+            typeof value === "function" ? value(current.librarySourceSelection) : value,
+        }),
+        { generation, revision },
+      );
+    },
+    [owner, id, generation, revision],
+  );
+  return { draft, setText, setFiles, setResearch, setLibrarySources, setLibrarySourceSelection };
 }

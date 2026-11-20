@@ -16,6 +16,7 @@ import { DesktopProviderLogo } from "./DesktopProviderLogo";
 export function DesktopComposerToolbar({
   onAttach,
   attachDisabled = false,
+  afterAttach,
   mode,
   onModeChange,
   modeDisabled = false,
@@ -41,6 +42,7 @@ export function DesktopComposerToolbar({
   onResearch?: () => void;
   onAttach: () => void;
   attachDisabled?: boolean;
+  afterAttach?: ReactNode;
   mode: ChatMode;
   onModeChange: (mode: ChatMode) => void;
   modeDisabled?: boolean;
@@ -89,6 +91,8 @@ export function DesktopComposerToolbar({
             <p>Add Attachments</p>
           </TooltipContent>
         </Tooltip>
+
+        {afterAttach}
 
         <DesktopComposerModeChip
           mode={mode}

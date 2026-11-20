@@ -1021,6 +1021,8 @@ pub fn run() {
             let builder = WebviewWindowBuilder::new(app, "main", url)
                 .title("OpenHorn")
                 .inner_size(1200.0, 800.0)
+                // The Library and chat composer consume DOM File objects from drops.
+                .disable_drag_drop_handler()
                 .resizable(true);
 
             // macOS: let the webview run under the title bar so the sidebar reaches

@@ -17,9 +17,13 @@ import { captureLocalPathScrollAnchor } from "../../lib/chatScrollAnchor";
 import { getDomainBadge } from "../../lib/domainBadge";
 import { blockStateKey } from "../../lib/genui/blockState";
 import { endsInsideOpenFence, genUiKindOf } from "../../lib/genui/fence";
-import { formatPreviewLabel, getPreviewLabel } from "../../lib/i18n/agent";
+import { formatLibraryLabel, formatPreviewLabel, getPreviewLabel } from "../../lib/i18n/agent";
 import { localPathErrorLabel, parseInlineLocalPath } from "../../lib/localPathReference";
 import { remarkCjkStrong } from "../../lib/markdownCjkStrong";
+import {
+  type LibraryMarkdownCitations,
+  remarkLibraryCitations,
+} from "../../lib/markdownLibraryCitations";
 import { notifyError } from "../../lib/notify";
 import { classifyReferenceHref, referenceUrlTransform } from "../../lib/referenceLink";
 import { openLocalPath, openWorkspaceFile } from "../../lib/tauriBridge";
@@ -315,6 +319,7 @@ type DesktopMarkdownMessageProps = {
    * generative UI blocks can be persisted. Omit to keep that state in memory.
    */
   genUiScope?: string | null;
+  libraryCitations?: LibraryMarkdownCitations;
 };
 
 type HastPosition = { start?: { offset?: number }; end?: { offset?: number } };
@@ -323,9 +328,13 @@ function DesktopMarkdownMessageImpl({
   content,
   streaming = false,
   genUiScope,
+  libraryCitations,
 }: DesktopMarkdownMessageProps) {
   const normalized = (content || "").replace(/\r\n/g, "\n").trim();
   const [isDark, setIsDark] = useState(false);
+  const citationRef = useRef(libraryCitations);
+  citationRef.current = libraryCitations;
+
   const openTail = useMemo(() => endsInsideOpenFence(normalized), [normalized]);
   // Read by the `code` renderer at render time instead of being memo
   // dependencies: recreating `components` on every delta would remount every
@@ -360,6 +369,29 @@ function DesktopMarkdownMessageImpl({
   // the Copy button (visible flicker) and re-runs Prism on every keystroke.
   const components: Components = useMemo(
     () => ({
+      span({ node, children, ...props }) {
+        const number =
+          node?.properties["data-library-citation"] ?? node?.properties.dataLibraryCitation;
+        const citations = citationRef.current;
+        const source = typeof number === "number" ? citations?.sources[number - 1] : undefined;
+        if (!citations || !source || typeof number !== "number")
+          return <span {...props}>{children}</span>;
+        const title = formatLibraryLabel("library.answerSourceTitle", {
+          number,
+          file: source.fileName,
+        });
+        return (
+          <button
+            type="button"
+            aria-label={title}
+            title={title}
+            className="ml-1 rounded-sm text-xs text-muted-foreground underline decoration-stone-400 underline-offset-2 hover:bg-amber-50 hover:text-amber-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-600"
+            onClick={(event) => citations.open(source, event.currentTarget)}
+          >
+            {formatLibraryLabel("library.answerSource", { number })}
+          </button>
+        );
+      },
       a({ href, children, ...props }: LinkProps) {
         const linkText = reactNodeToText(children);
         // Classified without the workspace root: only the kind matters for
@@ -581,7 +613,16 @@ function DesktopMarkdownMessageImpl({
   return (
     <div className={styles.root}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkBreaks, remarkCjkStrong]}
+        remarkPlugins={
+          libraryCitations
+            ? [
+                remarkGfm,
+                remarkBreaks,
+                remarkCjkStrong,
+                [remarkLibraryCitations, libraryCitations.sources],
+              ]
+            : [remarkGfm, remarkBreaks, remarkCjkStrong]
+        }
         components={components}
         urlTransform={referenceUrlTransform}
       >
@@ -596,5 +637,6 @@ export const DesktopMarkdownMessage = memo(
   (prev, next) =>
     prev.content === next.content &&
     prev.streaming === next.streaming &&
-    prev.genUiScope === next.genUiScope,
+    prev.genUiScope === next.genUiScope &&
+    prev.libraryCitations === next.libraryCitations,
 );

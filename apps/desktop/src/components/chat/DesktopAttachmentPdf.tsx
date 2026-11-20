@@ -2,9 +2,17 @@ import type { PDFDocumentProxy } from "pdfjs-dist";
 import { useEffect, useRef, useState } from "react";
 import { getChatLabel } from "../../lib/i18n/agent";
 
-export function DesktopAttachmentPdf({ blob, onError }: { blob: Blob; onError: () => void }) {
+export function DesktopAttachmentPdf({
+  blob,
+  onError,
+  initialPage = 1,
+}: {
+  blob: Blob;
+  onError: () => void;
+  initialPage?: number;
+}) {
   const [doc, setDoc] = useState<PDFDocumentProxy | null>(null);
-  const [page, setPage] = useState(1);
+  const [page, setPage] = useState(initialPage);
   const [zoom, setZoom] = useState(1);
   const [query, setQuery] = useState("");
   const [foundPages, setFoundPages] = useState<number[]>([]);
