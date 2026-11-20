@@ -703,6 +703,24 @@ export const savedArtifactVersions = sqliteTable(
   ],
 );
 
+export const libraryFolders = sqliteTable(
+  "library_folders",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    projectId: text("project_id").references(() => projects.id, { onDelete: "cascade" }),
+    scopeKey: text("scope_key").notNull(),
+    name: text("name").notNull(),
+    nameKey: text("name_key").notNull(),
+    revision: integer("revision").notNull().default(1),
+  },
+  (table) => [
+    uniqueIndex("library_folders_name_unique").on(table.userId, table.scopeKey, table.nameKey),
+    index("library_folders_project_idx").on(table.projectId),
+  ],
+);
 export const libraryDocuments = sqliteTable(
   "library_documents",
   {
@@ -711,8 +729,16 @@ export const libraryDocuments = sqliteTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     projectId: text("project_id").references(() => projects.id, { onDelete: "cascade" }),
+    folderId: text("folder_id").references(() => libraryFolders.id, { onDelete: "set null" }),
     scopeKey: text("scope_key").notNull(),
     fileName: text("file_name").notNull(),
+    displayName: text("display_name").notNull(),
+    tags: text("tags").notNull().default("[]"),
+    isFavorite: integer("is_favorite", { mode: "boolean" }).notNull().default(false),
+    versionGroupId: text("version_group_id").notNull(),
+    version: integer("version").notNull().default(1),
+    isCurrent: integer("is_current", { mode: "boolean" }).notNull().default(true),
+    previousVersionId: text("previous_version_id"),
     fileType: text("file_type").notNull(),
     fileSize: integer("file_size").notNull(),
     sha256: text("sha256").notNull(),
@@ -738,6 +764,13 @@ export const libraryDocuments = sqliteTable(
     ),
     index("library_documents_user_scope_idx").on(table.userId, table.scopeKey),
     index("library_documents_project_idx").on(table.projectId),
+    index("library_documents_version_group_idx").on(
+      table.userId,
+      table.scopeKey,
+      table.versionGroupId,
+    ),
+    index("library_documents_folder_idx").on(table.folderId),
+    index("library_documents_current_idx").on(table.userId, table.scopeKey, table.isCurrent),
   ],
 );
 export const libraryChunks = sqliteTable(
@@ -750,6 +783,12 @@ export const libraryChunks = sqliteTable(
     chunkIndex: integer("chunk_index").notNull(),
     text: text("text").notNull(),
     heading: text("heading"),
+    pageStart: integer("page_start"),
+    pageEnd: integer("page_end"),
+    startOffset: integer("start_offset"),
+    endOffset: integer("end_offset"),
+    lineStart: integer("line_start"),
+    lineEnd: integer("line_end"),
   },
   (table) => [
     uniqueIndex("library_chunks_document_index_unique").on(table.documentId, table.chunkIndex),

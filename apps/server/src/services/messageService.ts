@@ -21,6 +21,7 @@ import {
 } from "shared/context-budget";
 import { resolveContextPolicy } from "shared/context-policy";
 import { isDataOnlyPrompt } from "shared/data-only";
+import { LIBRARY_SYSTEM_TAG, readLibraryChatQuestion } from "shared/library";
 import {
   assistantFinishReason,
   assistantMessageContent,
@@ -622,6 +623,14 @@ export async function buildChatMessages(
   // latest query and append them to the system prompt so the model can reference
   // uploaded documents during the conversation.
   const lastUserMsg = conversationMessages.filter((m) => m.role === "user").pop();
+  const currentLibrarySources =
+    effectiveSystemPrompt.trimStart().startsWith(LIBRARY_SYSTEM_TAG) &&
+    !!lastUserMsg &&
+    !!readLibraryChatQuestion(lastUserMsg.content);
+  if (currentLibrarySources) {
+    effectiveSystemPrompt +=
+      "\nUse only the sources in the latest question as evidence and use that question's source numbering. Earlier questions and answers are context for understanding the follow-up.";
+  }
   if (lastUserMsg && !dataOnly) {
     try {
       const embeddingCreds = await getEmbeddingApiKey(userId);
@@ -660,10 +669,18 @@ export async function buildChatMessages(
     (message, index) => index >= startIndex || message.role === "system",
   );
   type StoredMessage = (typeof coarseMessages)[number];
-  const expandMessage = async (message: StoredMessage): Promise<ChatMessage | null> => {
+  const expandMessage = async (
+    message: StoredMessage,
+    historical = false,
+  ): Promise<ChatMessage | null> => {
     if (message.role !== "user" && message.role !== "assistant" && message.role !== "system") {
       return null;
     }
+    const earlierLibraryTurn = historical && currentLibrarySources;
+    const contentText =
+      earlierLibraryTurn && message.role === "user"
+        ? (readLibraryChatQuestion(message.content)?.question ?? message.content)
+        : message.content;
     if (message.role === "user" && message.attachments) {
       let attachmentIds: string[] = [];
       try {
@@ -671,12 +688,14 @@ export async function buildChatMessages(
       } catch {
         attachmentIds = [];
       }
-      const content = await buildUserContentWithAttachments(userId, message.content, attachmentIds);
+      const content = await buildUserContentWithAttachments(userId, contentText, attachmentIds);
       const normalized = normalizeChatContent(content);
       return normalized ? { role: "user", content: normalized } : null;
     }
     const state =
-      message.role === "assistant" ? validateProviderChatState(message.providerState) : null;
+      message.role === "assistant" && !earlierLibraryTurn
+        ? validateProviderChatState(message.providerState)
+        : null;
     // Empty tool-bearing assistant messages still carry the signed URL context.
     if (state) {
       const candidate: ChatMessage = {
@@ -690,7 +709,7 @@ export async function buildChatMessages(
         : candidate;
       if (filtered.providerState) return filtered;
     }
-    const normalized = normalizeChatContent(message.content);
+    const normalized = normalizeChatContent(contentText);
     return normalized ? { role: message.role, content: normalized } : null;
   };
 
@@ -731,7 +750,7 @@ export async function buildChatMessages(
     if (!group) continue;
     const expanded: ChatMessage[] = [];
     for (const message of group) {
-      const normalized = await expandMessage(message);
+      const normalized = await expandMessage(message, true);
       if (normalized) expanded.push(normalized);
     }
     expandedHistoryRows += group.length;

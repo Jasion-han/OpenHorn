@@ -19,6 +19,7 @@ import {
   channels,
   conversations,
   libraryDocuments,
+  libraryFolders,
   libraryQuestions,
   mcpServers,
   messages,
@@ -31,7 +32,7 @@ import {
   taskRecipes,
   taskRecipeVersions,
 } from "db";
-import { count, eq, type SQLWrapper, sql } from "drizzle-orm";
+import { asc, count, eq, type SQLWrapper, sql } from "drizzle-orm";
 import { db } from "../db";
 import { BackupArchiveBudget } from "./backupArchiveBudget";
 import { isSafeBackupSetting, sanitizeBackupEndpoint, sanitizeBackupMcp } from "./backupSanitizer";
@@ -102,6 +103,7 @@ async function collectExportData(userId: string) {
     artifactVersionRows,
     reviewRows,
     libraryRows,
+    libraryFolderRows,
     libraryQuestionRows,
   ] = await db.batch([
     db.select().from(conversations).where(eq(conversations.userId, userId)),
@@ -138,7 +140,16 @@ async function collectExportData(userId: string) {
       .innerJoin(savedArtifacts, eq(savedArtifactVersions.artifactId, savedArtifacts.id))
       .where(eq(savedArtifacts.userId, userId)),
     db.select().from(reviewWorkspaces).where(eq(reviewWorkspaces.userId, userId)),
-    db.select().from(libraryDocuments).where(eq(libraryDocuments.userId, userId)),
+    db
+      .select()
+      .from(libraryDocuments)
+      .where(eq(libraryDocuments.userId, userId))
+      .orderBy(
+        asc(libraryDocuments.scopeKey),
+        asc(libraryDocuments.fileName),
+        asc(libraryDocuments.version),
+      ),
+    db.select().from(libraryFolders).where(eq(libraryFolders.userId, userId)),
     db.select().from(libraryQuestions).where(eq(libraryQuestions.userId, userId)),
   ]);
 
@@ -172,6 +183,7 @@ async function collectExportData(userId: string) {
         ...row
       }) => row,
     ),
+    libraryFolders: libraryFolderRows,
     libraryQuestions: libraryQuestionRows,
   };
 }
@@ -260,6 +272,7 @@ export async function exportBackup(
     "saved-artifact-versions.json": data.artifactVersions,
     "review-workspaces.json": data.reviewWorkspaces,
     "library-documents.json": data.libraryDocuments,
+    "library-folders.json": data.libraryFolders,
     "library-questions.json": data.libraryQuestions,
   };
   const serialized = Object.entries(entries).map(
@@ -437,6 +450,12 @@ export async function estimateExportSize(
       .select({ b: sql<number>`coalesce(sum(4*((${libraryDocuments.fileSize}+2)/3)),0)` })
       .from(libraryDocuments)
       .where(eq(libraryDocuments.userId, userId)),
+    db
+      .select({
+        b: sql<number>`coalesce(sum(250 + length(cast(${libraryFolders.name} AS BLOB)) * 2), 0)`,
+      })
+      .from(libraryFolders)
+      .where(eq(libraryFolders.userId, userId)),
     db
       .select({
         b: bytes(libraryQuestions.sources, libraryQuestions.prompt, libraryQuestions.question),

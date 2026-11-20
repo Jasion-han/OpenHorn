@@ -26,6 +26,10 @@ export class LibraryParseError extends Error {
     super(code);
   }
 }
+export interface LibraryParsedDocument {
+  text: string;
+  pages?: string[];
+}
 // A bounded worker gate; original uploads are independently bounded by user quotas.
 let parsing = 0;
 const waiting: Array<() => void> = [];
@@ -40,14 +44,18 @@ async function pdfSlot<T>(work: () => Promise<T>): Promise<T> {
     else parsing--;
   }
 }
-export async function parseLibraryOriginal(bytes: Buffer, fileType: string): Promise<string> {
+export async function parseLibraryOriginalDetailed(
+  bytes: Buffer,
+  fileType: string,
+): Promise<LibraryParsedDocument> {
   if (fileType !== "text/plain" && fileType !== "application/pdf")
     throw new LibraryParseError("library_cloud_required");
-  let text: string;
+  let parsed: LibraryParsedDocument;
   if (fileType === "application/pdf") {
-    text = await pdfSlot(async () => {
+    parsed = await pdfSlot(async () => {
       let length = 0;
       let pages = 0;
+      const pageTexts: string[] = [];
       let extractionFailure: LibraryParseError | undefined;
       const result = await pdf(bytes, {
         max: LIBRARY_LIMITS.pdfPages + 1,
@@ -64,6 +72,7 @@ export async function parseLibraryOriginal(bytes: Buffer, fileType: string): Pro
             if (length > LIBRARY_LIMITS.textBytes)
               throw new LibraryParseError("library_text_limit");
             pages++;
+            pageTexts.push(value);
             return value;
           } catch (error) {
             extractionFailure =
@@ -79,9 +88,10 @@ export async function parseLibraryOriginal(bytes: Buffer, fileType: string): Pro
       if (extractionFailure) throw extractionFailure;
       if (pages !== result.numpages || pages === 0)
         throw new LibraryParseError("library_parse_failed");
-      return result.text;
+      return { text: pageTexts.join("\n\n"), pages: pageTexts };
     });
   } else {
+    let text: string;
     try {
       text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
     } catch {
@@ -90,10 +100,15 @@ export async function parseLibraryOriginal(bytes: Buffer, fileType: string): Pro
     // biome-ignore lint/suspicious/noControlCharactersInRegex: reject binary control bytes in imported text
     if (/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(text))
       throw new LibraryParseError("library_invalid_text");
+    parsed = { text };
   }
-  if (!text.trim()) throw new LibraryParseError("library_empty_text");
-  if (utf8Bytes(text) > LIBRARY_LIMITS.textBytes) throw new LibraryParseError("library_text_limit");
-  return text;
+  if (!parsed.text.trim()) throw new LibraryParseError("library_empty_text");
+  if (utf8Bytes(parsed.text) > LIBRARY_LIMITS.textBytes)
+    throw new LibraryParseError("library_text_limit");
+  return parsed;
+}
+export async function parseLibraryOriginal(bytes: Buffer, fileType: string): Promise<string> {
+  return (await parseLibraryOriginalDetailed(bytes, fileType)).text;
 }
 
 /** Cheap signature checks and a local PDF page preflight before any paid request. */

@@ -14,10 +14,21 @@ export interface TextChunk {
   heading?: string;
 }
 
+export interface PositionedTextChunk extends TextChunk {
+  startOffset: number;
+  endOffset: number;
+}
+
 const MAX_CHUNK_CHARS = 2800; // ~800 tokens
 const OVERLAP_CHARS = 200;
 
 export function chunkText(text: string, fileName?: string): TextChunk[] {
+  return chunkTextWithOffsets(text, fileName).map(
+    ({ startOffset: _start, endOffset: _end, ...chunk }) => chunk,
+  );
+}
+
+export function chunkTextWithOffsets(text: string, fileName?: string): PositionedTextChunk[] {
   if (!text || text.trim().length === 0) return [];
 
   // Markdown: split by headings
@@ -29,19 +40,29 @@ export function chunkText(text: string, fileName?: string): TextChunk[] {
   return chunkByParagraphs(text);
 }
 
-function chunkByHeadings(text: string): TextChunk[] {
+function chunkByHeadings(text: string): PositionedTextChunk[] {
   const sections = text.split(/(?=^#{1,3}\s)/m);
-  const chunks: TextChunk[] = [];
+  const chunks: PositionedTextChunk[] = [];
 
+  let offset = 0;
   for (const section of sections) {
-    const trimmed = section.trim();
+    const left = section.trimStart();
+    const startOffset = offset + section.length - left.length;
+    offset += section.length;
+    const trimmed = left.trimEnd();
     if (!trimmed) continue;
 
     const headingMatch = trimmed.match(/^(#{1,3})\s+(.+)/);
     const heading = headingMatch?.[2] || undefined;
 
     if (trimmed.length <= MAX_CHUNK_CHARS) {
-      chunks.push({ index: chunks.length, text: trimmed, heading });
+      chunks.push({
+        index: chunks.length,
+        text: trimmed,
+        heading,
+        startOffset,
+        endOffset: startOffset + trimmed.length,
+      });
     } else {
       // Section too long — sub-chunk by paragraphs
       const subChunks = chunkByParagraphs(trimmed);
@@ -50,6 +71,8 @@ function chunkByHeadings(text: string): TextChunk[] {
           index: chunks.length,
           text: sub.text,
           heading: heading || sub.heading,
+          startOffset: startOffset + sub.startOffset,
+          endOffset: startOffset + sub.endOffset,
         });
       }
     }
@@ -58,8 +81,8 @@ function chunkByHeadings(text: string): TextChunk[] {
   return chunks;
 }
 
-function chunkByParagraphs(text: string): TextChunk[] {
-  const chunks: TextChunk[] = [];
+function chunkByParagraphs(text: string): PositionedTextChunk[] {
+  const chunks: PositionedTextChunk[] = [];
   let start = 0;
   while (start < text.length) {
     let end = Math.min(start + MAX_CHUNK_CHARS, text.length);
@@ -79,8 +102,18 @@ function chunkByParagraphs(text: string): TextChunk[] {
       // JS counts UTF-16 code units; never cut an astral character in half.
       if (isLowSurrogate(text.charCodeAt(end))) end--;
     }
-    const value = text.slice(start, end).trim();
-    if (value) chunks.push({ index: chunks.length, text: value });
+    const slice = text.slice(start, end);
+    const left = slice.trimStart();
+    const value = left.trimEnd();
+    if (value) {
+      const startOffset = end - left.length;
+      chunks.push({
+        index: chunks.length,
+        text: value,
+        startOffset,
+        endOffset: startOffset + value.length,
+      });
+    }
     if (end === text.length) break;
     const next = end - OVERLAP_CHARS;
     start = isLowSurrogate(text.charCodeAt(next)) ? next - 1 : next;

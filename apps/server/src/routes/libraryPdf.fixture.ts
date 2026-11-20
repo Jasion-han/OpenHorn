@@ -1,12 +1,16 @@
 /** Tiny deterministic PDF generator, only for parser boundary tests. */
-export function libraryTestPdf(pages: number, text = "Shipping costs twelve coins") {
+export function libraryTestPdf(
+  pages: number,
+  text: string | ((index: number) => string) = "Shipping costs twelve coins",
+) {
   const objects = [
     "<< /Type /Catalog /Pages 2 0 R >>",
     `<< /Type /Pages /Kids [${Array.from({ length: pages }, (_, i) => `${4 + i * 2} 0 R`).join(" ")}] /Count ${pages} >>`,
     "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
   ];
   for (let i = 0; i < pages; i++) {
-    const stream = `BT /F1 12 Tf 40 750 Td (${text}) Tj ET`;
+    const pageText = typeof text === "function" ? text(i) : text;
+    const stream = `BT /F1 12 Tf 40 750 Td (${pageText}) Tj ET`;
     objects.push(
       `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents ${5 + i * 2} 0 R >>`,
       `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,

@@ -483,8 +483,9 @@ async function applyOpenHornBackup(
   const reviewRows = rows("review-workspaces.json");
   const libraryDocuments = rows("library-documents.json");
   const libraryQuestions = rows("library-questions.json");
+  const libraryFolders = rows("library-folders.json");
   progress.section = "library";
-  const libraryBackup = prepareLibraryBackup(libraryDocuments, libraryQuestions);
+  const libraryBackup = prepareLibraryBackup(libraryDocuments, libraryQuestions, libraryFolders);
   const groupVersions = (versions: Row[], key: "recipeId" | "artifactId") => {
     const histories = new Map<string, Row[]>();
     for (const version of versions) {
@@ -1181,7 +1182,11 @@ async function applyOpenHornBackup(
     });
     if (result.reviewWorkspaces) result.reviewWorkspaces.imported++;
   }
-  if (entries.has("library-documents.json") || entries.has("library-questions.json")) {
+  if (
+    entries.has("library-documents.json") ||
+    entries.has("library-questions.json") ||
+    entries.has("library-folders.json")
+  ) {
     progress.section = "library";
     const restored = await restorePreparedLibraryBackup(userId, libraryBackup, {
       project: (value) => reference(projectIds, value),

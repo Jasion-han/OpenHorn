@@ -2,12 +2,16 @@ import { createHash } from "node:crypto";
 import { conversations, libraryQuestions } from "db";
 import { and, eq, sql } from "drizzle-orm";
 import { LIBRARY_LIMITS, libraryQuestionPayload, utf8Bytes } from "shared/library";
-import type { LibraryScope, LibrarySource } from "shared/types";
+import type { LibraryScope, LibrarySource, LibrarySourceLocation } from "shared/types";
 import { db } from "../db";
 import {
+  createLibraryFolder,
   indexLibraryDocument,
   insertLibraryOriginal,
   LibraryError,
+  libraryDisplayName,
+  libraryFolderName,
+  libraryTags,
   libraryTransaction,
   validateLibraryFileName,
   validateLibraryScope,
@@ -48,13 +52,64 @@ export function validateLibraryBackupOriginal(value: unknown) {
   if (typeof row.fileName !== "string") throw new Error("Invalid library filename");
   validateLibraryFileName(row.fileName);
   if (typeof row.id !== "string" || !row.id) throw new Error("Invalid library document id");
-  return { id: row.id, projectId: row.projectId, bytes, fileName: row.fileName };
+  const displayName =
+    row.displayName === undefined || row.displayName === row.fileName
+      ? row.fileName
+      : libraryDisplayName(row.displayName);
+  const tags =
+    row.tags === undefined
+      ? []
+      : libraryTags(typeof row.tags === "string" ? JSON.parse(row.tags) : row.tags);
+  if (row.isFavorite !== undefined && typeof row.isFavorite !== "boolean")
+    throw new Error("Invalid library favorite");
+  if (
+    row.folderId != null &&
+    (typeof row.folderId !== "string" || !row.folderId || row.folderId.length > 200)
+  )
+    throw new Error("Invalid library folder reference");
+  return {
+    id: row.id,
+    projectId: row.projectId,
+    folderId: typeof row.folderId === "string" ? row.folderId : null,
+    bytes,
+    fileName: row.fileName,
+    metadata: { displayName, tags, isFavorite: row.isFavorite === true },
+  };
 }
 export interface LibraryBackupBindings {
   project(value: unknown): string | null;
   conversation(value: unknown): string | null;
   channel(value: unknown): string | null;
   stable(kind: string, value: string): string;
+}
+function validateSourceLocation(value: unknown): LibrarySourceLocation {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    throw new Error("Invalid library source location");
+  const input = value as Record<string, unknown>;
+  const location: LibrarySourceLocation = {};
+  for (const [startKey, endKey, minimum, maximum] of [
+    ["pageStart", "pageEnd", 1, LIBRARY_LIMITS.pdfPages],
+    ["lineStart", "lineEnd", 1, LIBRARY_LIMITS.textBytes],
+    ["startOffset", "endOffset", 0, LIBRARY_LIMITS.textBytes],
+  ] as const) {
+    const start = input[startKey],
+      end = input[endKey];
+    if (start === undefined && end === undefined) continue;
+    if (
+      typeof start !== "number" ||
+      typeof end !== "number" ||
+      !Number.isSafeInteger(start) ||
+      !Number.isSafeInteger(end) ||
+      start < minimum ||
+      end < start ||
+      end > maximum ||
+      (minimum === 0 && end === start)
+    )
+      throw new Error("Invalid library source location");
+    location[startKey] = start;
+    location[endKey] = end;
+  }
+  return location;
 }
 function validateLibraryBackupQuestion(value: unknown) {
   if (!value || typeof value !== "object") throw new Error("Invalid library question");
@@ -104,6 +159,9 @@ function validateLibraryBackupQuestion(value: unknown) {
       chunkIndex: source.chunkIndex,
       text: source.text,
       ...(source.heading === undefined ? {} : { heading: source.heading }),
+      ...(source.location === undefined
+        ? {}
+        : { location: validateSourceLocation(source.location) }),
     };
   });
   const prompt = libraryQuestionPayload(row.question, sources);
@@ -126,25 +184,59 @@ function validateLibraryBackupQuestion(value: unknown) {
   };
 }
 
-export function prepareLibraryBackup(docs: unknown[], questions: unknown[]) {
+export function prepareLibraryBackup(
+  docs: unknown[],
+  questions: unknown[],
+  folders: unknown[] = [],
+) {
+  if (folders.length > LIBRARY_LIMITS.folders) throw new Error("Library folder limit");
+  const folderMap = new Map<string, { id: string; projectId: string | null; name: string }>();
+  for (const value of folders) {
+    if (!value || typeof value !== "object") throw new Error("Invalid library folder");
+    const { id, projectId, name } = value as Record<string, unknown>;
+    if (
+      typeof id !== "string" ||
+      !id ||
+      id.length > 200 ||
+      folderMap.has(id) ||
+      (projectId !== null && (typeof projectId !== "string" || !projectId))
+    )
+      throw new Error("Invalid library folder identity");
+    folderMap.set(id, {
+      id,
+      projectId: projectId as string | null,
+      name: libraryFolderName(name),
+    });
+  }
   if (docs.length > LIBRARY_LIMITS.documents || questions.length > LIBRARY_LIMITS.questions)
     throw new Error("Library backup record limit");
   let bytes = 0;
   const documents = docs.map((value) => {
     const original = validateLibraryBackupOriginal(value);
+    if (original.folderId && folderMap.get(original.folderId)?.projectId !== original.projectId)
+      throw new Error("Invalid library folder scope in backup");
     bytes += original.bytes.length;
     if (bytes > LIBRARY_LIMITS.totalBytes) throw new Error("Library backup original size limit");
     return original;
   });
-  return { documents, questions: questions.map(validateLibraryBackupQuestion) };
+  return {
+    documents,
+    folders: [...folderMap.values()],
+    questions: questions.map(validateLibraryBackupQuestion),
+  };
 }
 export function restoreLibraryBackup(
   userId: string,
   docs: unknown[],
   questions: unknown[],
+  folders: unknown[],
   bindings: LibraryBackupBindings,
 ) {
-  return restorePreparedLibraryBackup(userId, prepareLibraryBackup(docs, questions), bindings);
+  return restorePreparedLibraryBackup(
+    userId,
+    prepareLibraryBackup(docs, questions, folders),
+    bindings,
+  );
 }
 export async function restorePreparedLibraryBackup(
   userId: string,
@@ -152,6 +244,31 @@ export async function restorePreparedLibraryBackup(
   bindings: LibraryBackupBindings,
 ) {
   const counts = { imported: 0, skipped: 0, errors: [] as string[] };
+  const folderMap = new Map<string, string>();
+  for (const row of backup.folders) {
+    const projectId = bindings.project(row.projectId);
+    if (row.projectId !== null && !projectId) {
+      counts.skipped++;
+      counts.errors.push(`Library folder project unavailable: ${row.name}`);
+      continue;
+    }
+    const scope: LibraryScope = projectId ? { kind: "project", projectId } : { kind: "personal" };
+    try {
+      const { folder, reused } = await createLibraryFolder(
+        userId,
+        scope,
+        row.name,
+        bindings.stable("library-folder", row.id),
+      );
+      folderMap.set(row.id, folder.id);
+      if (reused) counts.skipped++;
+      else counts.imported++;
+    } catch (error) {
+      if (!(error instanceof LibraryError)) throw error;
+      counts.skipped++;
+      counts.errors.push(`Library folder could not be restored: ${row.name}`);
+    }
+  }
   const documentMap = new Map<string, string>();
   for (const row of backup.documents) {
     const { bytes, fileName } = row;
@@ -179,6 +296,8 @@ export async function restorePreparedLibraryBackup(
           fileName,
           bytes,
           bindings.stable("library-document", row.id),
+          row.metadata,
+          row.folderId ? folderMap.get(row.folderId) : undefined,
         ),
       );
     } catch {

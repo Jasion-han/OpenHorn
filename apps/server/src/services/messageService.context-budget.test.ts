@@ -1,4 +1,5 @@
 import { expect, mock, test } from "bun:test";
+import { LIBRARY_SYSTEM_PROMPT, libraryQuestionPayload } from "shared/library";
 import * as attachmentNamespace from "./attachmentService";
 
 const realAttachmentService = { ...attachmentNamespace };
@@ -105,4 +106,35 @@ test("large history stops attachment expansion after the first non-fitting whole
   } finally {
     mock.module("./attachmentService", () => realAttachmentService);
   }
+});
+
+test("a sourced follow-up presents only its current source snapshot as evidence", async () => {
+  const retained = {
+    documentId: "doc",
+    fileName: "quote.md",
+    chunkIndex: 1,
+    text: "SELECTED-SNAPSHOT",
+  };
+  const excluded = { ...retained, chunkIndex: 0, text: "EXCLUDED-SNAPSHOT" };
+  const first = libraryQuestionPayload("Original question", [retained, excluded]);
+  const followUp = libraryQuestionPayload("Focused question", [retained]);
+  const earlier = [
+    { role: "user", content: first },
+    { role: "assistant", content: "Earlier reply" },
+  ];
+  const context = await buildChatMessages(
+    "context-budget-no-provider",
+    [...earlier, { role: "user", content: followUp }],
+    LIBRARY_SYSTEM_PROMPT,
+  );
+  expect(context.map((entry) => entry.content)).toContain("Original question");
+  expect(context.map((entry) => entry.content)).toContain("Earlier reply");
+  expect(context.at(-1)?.content).toBe(followUp);
+  expect(JSON.stringify(context)).not.toContain("EXCLUDED-SNAPSHOT");
+  const legacy = await buildChatMessages(
+    "context-budget-no-provider",
+    [...earlier, { role: "user", content: "Legacy question" }],
+    LIBRARY_SYSTEM_PROMPT,
+  );
+  expect(legacy.map((entry) => entry.content)).toContain(first);
 });

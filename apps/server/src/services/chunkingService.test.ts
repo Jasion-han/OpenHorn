@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { chunkText } from "./chunkingService";
+import { chunkText, chunkTextWithOffsets } from "./chunkingService";
 
 for (const [name, text, fileName] of [
   ["single paragraph", "x".repeat(10_000), "long.txt"],
@@ -56,4 +56,14 @@ test("paragraph and word boundary preferences preserve every source token", () =
   expect(words.every((word) => combined.includes(word))).toBe(true);
   expect(chunkText(" \n\t")).toEqual([]);
   expect(chunkText("short text")).toEqual([{ index: 0, text: "short text" }]);
+});
+
+test("offsets preserve exact slices across repeated Markdown sections and overlaps", () => {
+  const section = `## Repeat\n${"word 𐐀 ".repeat(520)}\n`;
+  const source = ` \n\n${section}${section}`;
+  const chunks = chunkTextWithOffsets(source, "repeat.md");
+  expect(chunks[0].startOffset).toBe(3);
+  expect(chunks.some((chunk) => chunk.startOffset === section.length + 3)).toBe(true);
+  for (const chunk of chunks)
+    expect(source.slice(chunk.startOffset, chunk.endOffset)).toBe(chunk.text);
 });

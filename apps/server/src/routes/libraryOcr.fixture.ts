@@ -158,6 +158,24 @@ try {
   const twoPagePdf = await upload("two-page-scan.pdf", libraryTestPdf(2, ""));
   respond = async () => Response.json(result("only one returned page"));
   check((await ocr(twoPagePdf.id)).body.document.errorCode, "library_ocr_incomplete");
+  respond = async () =>
+    Response.json({
+      ...result(""),
+      page_count: 2,
+      pages: [
+        { index: 1, text: "Verified scan result", finish_reason: "stop" },
+        { index: 0, text: "", finish_reason: "stop" },
+      ],
+    });
+  check((await ocr(twoPagePdf.id)).body.document.status, "ready");
+  const [scanHit] = await service.searchLibrary(owner, { kind: "personal" }, "Verified");
+  check(scanHit.location?.pageStart, 2);
+  check(scanHit.location?.pageEnd, 2);
+  check(
+    (await service.searchLibrary(owner, { kind: "personal" }, "Shipping"))[0].location?.pageStart,
+    undefined,
+  );
+
   for (const [name, bytes] of [
     ["report.docx", Buffer.from("504b030400000000", "hex")],
     ["slides.ppt", Buffer.from("d0cf11e0a1b11ae100000000", "hex")],

@@ -468,10 +468,21 @@ const SCHEMA_DDL: string[] = [
   `CREATE INDEX IF NOT EXISTS saved_artifact_versions_source_message_idx
     ON saved_artifact_versions(source_message_id);`,
 
+  `CREATE TABLE IF NOT EXISTS library_folders (
+    id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    project_id TEXT REFERENCES projects(id) ON DELETE CASCADE, scope_key TEXT NOT NULL,
+    name TEXT NOT NULL, name_key TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 1
+  );`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS library_folders_name_unique ON library_folders(user_id, scope_key, name_key);`,
+  `CREATE INDEX IF NOT EXISTS library_folders_project_idx ON library_folders(project_id);`,
   `CREATE TABLE IF NOT EXISTS library_documents (
     id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     project_id TEXT REFERENCES projects(id) ON DELETE CASCADE, scope_key TEXT NOT NULL,
-    file_name TEXT NOT NULL, file_type TEXT NOT NULL, file_size INTEGER NOT NULL, sha256 TEXT NOT NULL,
+    folder_id TEXT REFERENCES library_folders(id) ON DELETE SET NULL,
+    file_name TEXT NOT NULL, display_name TEXT NOT NULL, tags TEXT NOT NULL DEFAULT '[]',
+    is_favorite INTEGER NOT NULL DEFAULT 0, version_group_id TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1, is_current INTEGER NOT NULL DEFAULT 1,
+    previous_version_id TEXT, file_type TEXT NOT NULL, file_size INTEGER NOT NULL, sha256 TEXT NOT NULL,
     original_base64 TEXT NOT NULL, text_content TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'pending',
     error_code TEXT, chunk_count INTEGER NOT NULL DEFAULT 0, revision INTEGER NOT NULL DEFAULT 1,
     index_token TEXT, lease_until INTEGER, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
@@ -481,7 +492,9 @@ const SCHEMA_DDL: string[] = [
   `CREATE INDEX IF NOT EXISTS library_documents_project_idx ON library_documents(project_id);`,
   `CREATE TABLE IF NOT EXISTS library_chunks (
     id TEXT PRIMARY KEY, document_id TEXT NOT NULL REFERENCES library_documents(id) ON DELETE CASCADE,
-    chunk_index INTEGER NOT NULL, text TEXT NOT NULL, heading TEXT
+    chunk_index INTEGER NOT NULL, text TEXT NOT NULL, heading TEXT,
+    page_start INTEGER, page_end INTEGER, start_offset INTEGER, end_offset INTEGER,
+    line_start INTEGER, line_end INTEGER
   );`,
   `CREATE UNIQUE INDEX IF NOT EXISTS library_chunks_document_index_unique ON library_chunks(document_id, chunk_index);`,
   `CREATE TABLE IF NOT EXISTS library_questions (
@@ -858,6 +871,70 @@ async function ensureUserTokenVersionColumn(): Promise<void> {
   const rows = getRows(result);
   if (!hasColumnNamed(rows, "token_version")) {
     await client.execute(`ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0;`);
+  }
+}
+
+async function ensureLibraryColumns(): Promise<void> {
+  const result = await client.execute(`PRAGMA table_info('library_documents');`);
+  const rows = getRows(result);
+  if (!hasColumnNamed(rows, "folder_id"))
+    await client.execute(
+      `ALTER TABLE library_documents ADD COLUMN folder_id TEXT REFERENCES library_folders(id) ON DELETE SET NULL;`,
+    );
+  await client.execute(
+    `CREATE INDEX IF NOT EXISTS library_documents_folder_idx ON library_documents(folder_id);`,
+  );
+  if (!hasColumnNamed(rows, "display_name"))
+    await client.execute(
+      `ALTER TABLE library_documents ADD COLUMN display_name TEXT NOT NULL DEFAULT '';`,
+    );
+  if (!hasColumnNamed(rows, "tags"))
+    await client.execute(
+      `ALTER TABLE library_documents ADD COLUMN tags TEXT NOT NULL DEFAULT '[]';`,
+    );
+  if (!hasColumnNamed(rows, "is_favorite"))
+    await client.execute(
+      `ALTER TABLE library_documents ADD COLUMN is_favorite INTEGER NOT NULL DEFAULT 0;`,
+    );
+  if (!hasColumnNamed(rows, "version_group_id"))
+    await client.execute(
+      `ALTER TABLE library_documents ADD COLUMN version_group_id TEXT NOT NULL DEFAULT '';`,
+    );
+  if (!hasColumnNamed(rows, "version"))
+    await client.execute(
+      `ALTER TABLE library_documents ADD COLUMN version INTEGER NOT NULL DEFAULT 1;`,
+    );
+  if (!hasColumnNamed(rows, "is_current"))
+    await client.execute(
+      `ALTER TABLE library_documents ADD COLUMN is_current INTEGER NOT NULL DEFAULT 1;`,
+    );
+  if (!hasColumnNamed(rows, "previous_version_id"))
+    await client.execute(`ALTER TABLE library_documents ADD COLUMN previous_version_id TEXT;`);
+  await client.execute(`
+    UPDATE library_documents
+    SET display_name = CASE WHEN display_name = '' THEN file_name ELSE display_name END,
+        version_group_id = CASE WHEN version_group_id = '' THEN id ELSE version_group_id END
+    WHERE display_name = '' OR version_group_id = '';
+  `);
+  await client.execute(
+    `CREATE INDEX IF NOT EXISTS library_documents_version_group_idx
+     ON library_documents(user_id, scope_key, version_group_id);`,
+  );
+  await client.execute(
+    `CREATE INDEX IF NOT EXISTS library_documents_current_idx
+     ON library_documents(user_id, scope_key, is_current);`,
+  );
+  const chunkColumns = getRows(await client.execute(`PRAGMA table_info('library_chunks');`));
+  for (const name of [
+    "page_start",
+    "page_end",
+    "start_offset",
+    "end_offset",
+    "line_start",
+    "line_end",
+  ]) {
+    if (!hasColumnNamed(chunkColumns, name))
+      await client.execute(`ALTER TABLE library_chunks ADD COLUMN ${name} INTEGER;`);
   }
 }
 
@@ -1567,6 +1644,27 @@ async function ensureMessagesFtsTable(): Promise<void> {
   );
 }
 
+async function ensureLibraryChunksFtsTable(): Promise<void> {
+  const check = await client.execute(
+    `SELECT name FROM sqlite_master WHERE type='table' AND name='library_chunks_fts';`,
+  );
+  if (getRows(check).length > 0) return;
+
+  await client.execute(
+    `CREATE VIRTUAL TABLE library_chunks_fts USING fts5(
+      document_id UNINDEXED,
+      chunk_index UNINDEXED,
+      heading,
+      text,
+      tokenize='trigram'
+    );`,
+  );
+  await client.execute(
+    `INSERT INTO library_chunks_fts(document_id, chunk_index, heading, text)
+     SELECT document_id, chunk_index, coalesce(heading, ''), text FROM library_chunks;`,
+  );
+}
+
 /**
  * Brings every stored agent reply in line with the reply-text invariant —
  * `content` = the run's text steps, failures in `agentRun.error` — and re-points
@@ -1722,6 +1820,7 @@ export async function bootstrapDatabase(options: BootstrapOptions = {}): Promise
 
   // Backward compatible alter for databases created before model_id existed.
   await ensureUserTokenVersionColumn();
+  await ensureLibraryColumns();
   await ensureChannelProtocolColumn();
   await ensureChannelModelContextWindowColumn();
   await ensureChannelModelContextMetadataColumn();
@@ -1784,6 +1883,9 @@ export async function bootstrapDatabase(options: BootstrapOptions = {}): Promise
   // after the rebuilds (which may recreate the messages table) so the backfill
   // reads the final rows.
   await ensureMessagesFtsTable();
+  // Library chunks use the same trigram index so explicit Library search stays
+  // fast as a user's document collection grows. The table is a derived index.
+  await ensureLibraryChunksFtsTable();
 
   // After the FTS table exists, so backfilled text is indexed too. Reads
   // agent_tasks / agent_runs / agent_artifacts, all created above.

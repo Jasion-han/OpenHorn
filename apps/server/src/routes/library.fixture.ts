@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import type { LibraryDocument } from "shared/types";
+import type { LibraryDocument, LibrarySearchResult, PreparedLibraryQuestion } from "shared/types";
 
 const directory = mkdtempSync(path.join(tmpdir(), "openhorn-library-test-"));
 process.env.NODE_ENV = "test";
@@ -126,6 +126,40 @@ try {
     await assert.rejects(work, { code });
     checks++;
   };
+  // Recreate the exact pre-versioning shape before booting an upgrade in this isolated DB.
+  await client.batch(
+    [
+      "DROP INDEX library_documents_version_group_idx",
+      "DROP INDEX library_documents_current_idx",
+      ...["page_start", "page_end", "start_offset", "end_offset", "line_start", "line_end"].map(
+        (column) => `ALTER TABLE library_chunks DROP COLUMN ${column}`,
+      ),
+      "ALTER TABLE library_documents DROP COLUMN display_name",
+      "ALTER TABLE library_documents DROP COLUMN tags",
+      "ALTER TABLE library_documents DROP COLUMN is_favorite",
+      "ALTER TABLE library_documents DROP COLUMN version_group_id",
+      "ALTER TABLE library_documents DROP COLUMN version",
+      "ALTER TABLE library_documents DROP COLUMN is_current",
+      "ALTER TABLE library_documents DROP COLUMN previous_version_id",
+      {
+        sql: `INSERT INTO library_documents
+        (id,user_id,scope_key,file_name,file_type,file_size,sha256,original_base64,created_at,updated_at)
+        VALUES ('legacy-library',?,'personal','legacy.txt','text/plain',6,'fixture','bGVnYWN5',12,34)`,
+        args: [userId],
+      },
+    ],
+    "write",
+  );
+  await bootstrapDatabase({ backup: null });
+  await bootstrapDatabase({ backup: null });
+  const legacy = await service.getLibraryDocument(userId, "legacy-library");
+  check([legacy.tags, legacy.isFavorite], [[], false]);
+  check(
+    [legacy.displayName, legacy.versionGroupId, legacy.version, legacy.isCurrent],
+    ["legacy.txt", "legacy-library", 1, true],
+  );
+  check((await service.getLibraryOriginal(userId, legacy.id)).bytes.toString(), "legacy");
+  await service.deleteLibraryDocument(userId, legacy.id, legacy.revision);
   const request = (url: string, method = "GET", data?: unknown) =>
     app.request(`/library${url}`, {
       method,
@@ -137,10 +171,16 @@ try {
   check((await request("?scope=project&projectId=missing")).status, 404);
   const personal = { kind: "personal" } as const,
     project = { kind: "project", projectId: `project-${userId}` } as const;
-  const upload = async (fileName: string, content: string, scope: unknown = personal) => {
+  const upload = async (
+    fileName: string,
+    content: string,
+    scope: unknown = personal,
+    folderId?: string | null,
+  ) => {
     const form = new FormData();
     form.set("file", new File([content], fileName));
     form.set("scope", JSON.stringify(scope));
+    if (folderId !== undefined) form.set("folderId", folderId ?? "");
     const response = await app.request("/library", { method: "POST", body: form });
     return {
       status: response.status,
@@ -154,6 +194,17 @@ try {
   check(first.status, 201);
   check(first.body.document.status, "ready");
   check(first.body.document.chunkCount, 1);
+  check(
+    Number(
+      (
+        await client.execute({
+          sql: "SELECT count(*) AS count FROM library_chunks_fts WHERE document_id = ?",
+          args: [first.body.document.id],
+        })
+      ).rows[0]?.count,
+    ),
+    1,
+  );
   check(
     (await upload("synthetic.md", "# Shipping\nShipping costs 12 coins. Returns take 7 days.")).body
       .document.id,
@@ -187,8 +238,366 @@ try {
     true,
   );
   check((await service.searchLibrary(other, { kind: "all" }, "shipping")).length, 0);
-  check((await upload("bad.exe", "abc")).status, 400);
-  check((await upload("empty.txt", "")).status, 413);
+  const largeSearch = (
+    await upload(
+      "large-search.md",
+      Array.from({ length: 85 }, (_, n) => `## Section ${n + 1}\nCoverage needle ${n + 1}.`).join(
+        "\n\n",
+      ),
+    )
+  ).body.document;
+  const widthSearch = (await upload("width-search.md", "Cｏｖｅｒａｇｅ needle.")).body.document;
+  const titleSearch = (await upload("coverage.docx", "Stored original without a text index.")).body
+    .document;
+  const [coverageNames, coverageMatches] = await Promise.all([
+    service.searchLibrary(userId, personal, "coverage"),
+    service.searchLibrary(userId, personal, "coverage needle"),
+  ]);
+  check(coverageNames.length, 3);
+  check(coverageNames.find((row) => row.documentId === titleSearch.id)?.matchCount, 0);
+  check(coverageNames.find((row) => row.documentId === widthSearch.id)?.matchCount, 1);
+  check(coverageMatches.find((row) => row.documentId === largeSearch.id)?.matchCount, 85);
+  const targetParams = new URLSearchParams({
+    q: "coverage needle",
+    documentId: largeSearch.id,
+    matchIndex: "84",
+    revision: String(largeSearch.revision),
+  });
+  const coveragePage = await request(`/search?${targetParams}`);
+  check(coveragePage.status, 200);
+  const [lastCoverageHit] = (
+    (await coveragePage.json()) as {
+      results: LibrarySearchResult[];
+    }
+  ).results;
+  check(
+    [lastCoverageHit.matchIndex, lastCoverageHit.heading, lastCoverageHit.location?.lineStart],
+    [84, "Section 85", 253],
+  );
+  check(
+    (await request(`/search?scope=project&projectId=${project.projectId}&${targetParams}`)).status,
+    409,
+  );
+  await reject(
+    () =>
+      service.searchLibrary(
+        other,
+        { kind: "all" },
+        "coverage needle",
+        {},
+        {
+          documentId: largeSearch.id,
+          index: 84,
+          revision: largeSearch.revision,
+        },
+      ),
+    "library_conflict",
+  );
+  await client.execute("DROP TABLE library_chunks_fts");
+  check(
+    (await service.searchLibrary(userId, personal, "coverage")).find(
+      (row) => row.documentId === largeSearch.id,
+    )?.matchCount,
+    85,
+  );
+  await bootstrapDatabase({ backup: null });
+  const source = {
+    documentId: lastCoverageHit.documentId,
+    chunkIndex: lastCoverageHit.chunkIndex,
+    revision: lastCoverageHit.revision,
+  };
+  const selectedInput = {
+    scope: personal,
+    channelId: `channel-${userId}`,
+    modelId: "synthetic",
+    requestId: crypto.randomUUID(),
+    question: "Nonsuch interpretation?",
+    // Extra client fields are ignored. The snapshot uses the stored text.
+    source: { ...source, text: "Client-provided text" },
+  };
+  const beforeSelected = providerAttempts;
+  const selectedResponse = await request("/questions", "POST", selectedInput);
+  check(selectedResponse.status, 201);
+  const selectedQuestion = (await selectedResponse.json()) as PreparedLibraryQuestion;
+  const { documentId, chunkIndex, fileName, text, heading, location } = lastCoverageHit;
+  check(selectedQuestion.question.sources, [
+    { documentId, chunkIndex, fileName, text, heading, location },
+  ]);
+  check(JSON.parse(selectedQuestion.question.prompt).sources.length, 1);
+  check(providerAttempts, beforeSelected);
+  const selectedConversation = selectedQuestion.question.conversationId as string;
+  const makeSourceQuery = (ref: { documentId: string; chunkIndex: number; revision?: number }) =>
+    new URLSearchParams({
+      documentId: ref.documentId,
+      chunkIndex: String(ref.chunkIndex),
+      revision: String(ref.revision),
+    });
+  const selectedSourcePath = `/conversations/${selectedConversation}/source?${makeSourceQuery(source)}`;
+  const existingSource = await request(selectedSourcePath);
+  check(existingSource.status, 200);
+  check(await existingSource.json(), { source: selectedQuestion.question.sources[0] });
+  await reject(
+    () => service.getSourceForLibraryConversation(other, selectedConversation, source),
+    "library_not_found",
+  );
+  const scopedSource = await request(
+    `/conversations/${selectedConversation}/source?${makeSourceQuery({ documentId: projectDoc.id, chunkIndex: 0, revision: projectDoc.revision })}`,
+  );
+  check(scopedSource.status, 409);
+  await reject(
+    () => service.prepareLibraryQuestion(userId, { ...selectedInput, source: undefined }),
+    "library_request_conflict",
+  );
+  await reject(
+    () =>
+      service.prepareLibraryQuestion(userId, {
+        ...selectedInput,
+        source: { ...source, chunkIndex: 0 },
+      }),
+    "library_request_conflict",
+  );
+  const freshSelection = { ...selectedInput, requestId: crypto.randomUUID() };
+  await reject(
+    () => service.prepareLibraryQuestion(userId, { ...freshSelection, scope: project }),
+    "library_source_changed",
+  );
+  await reject(
+    () =>
+      service.prepareLibraryQuestion(other, { ...freshSelection, channelId: `channel-${other}` }),
+    "library_source_changed",
+  );
+  await reject(
+    () =>
+      service.prepareLibraryQuestion(userId, {
+        ...freshSelection,
+        source: { ...source, chunkIndex: -1 },
+      }),
+    "library_invalid_question",
+  );
+  await service.indexLibraryDocument(userId, largeSearch.id);
+  check((await request(`/search?${targetParams}`)).status, 409);
+  check((await request(selectedSourcePath)).status, 409);
+  await reject(
+    () => service.prepareLibraryQuestion(userId, freshSelection),
+    "library_source_changed",
+  );
+  check(await service.prepareLibraryQuestion(userId, selectedInput), selectedQuestion);
+  check((await service.listLibraryQuestions(userId)).length, 1);
+  await service.deleteLibraryQuestion(userId, selectedQuestion.question.id);
+  await db
+    .delete(conversations)
+    .where(eq(conversations.id, selectedQuestion.question.conversationId as string));
+  for (const record of [largeSearch, widthSearch, titleSearch]) {
+    const current = await service.getLibraryDocument(userId, record.id);
+    await service.deleteLibraryDocument(userId, record.id, current.revision);
+  }
+  const versionOne = await upload("versioned.md", "# Version one\nOriginal text.");
+  const versionTwo = await upload("versioned.md", "# Version two\nUpdated text.");
+  check(versionTwo.body.document.version, 2);
+  check(
+    (await service.listLibraryDocuments(userId, personal)).some(
+      (row) => row.id === versionOne.body.document.id,
+    ),
+    false,
+  );
+  const versions = await service.listLibraryDocumentVersions(userId, versionTwo.body.document.id);
+  check(
+    versions.map((row) => row.version),
+    [2, 1],
+  );
+  const restoredVersion = await service.restoreLibraryDocument(
+    userId,
+    versionOne.body.document.id,
+    versions[1].revision,
+  );
+  check(restoredVersion.isCurrent, true);
+  await service.deleteLibraryDocument(userId, restoredVersion.id, restoredVersion.revision);
+  check(
+    (await service.listLibraryDocuments(userId, personal)).some(
+      (row) => row.id === versionTwo.body.document.id && row.isCurrent,
+    ),
+    true,
+  );
+  const currentVersionTwo = (
+    await service.listLibraryDocumentVersions(userId, versionTwo.body.document.id)
+  ).find((row) => row.isCurrent);
+  if (!currentVersionTwo) throw new Error("current version missing");
+  await service.deleteLibraryDocument(userId, currentVersionTwo.id, currentVersionTwo.revision);
+  const metadataDoc = await upload("metadata.md", "# Metadata\nProject reference.");
+  const saved = await request(`/${metadataDoc.body.document.id}`, "PATCH", {
+    expectedRevision: metadataDoc.body.document.revision,
+    displayName: "Saved notes",
+    tags: ["work", "work", "  notes  "],
+    isFavorite: true,
+  });
+  check(saved.status, 200);
+  const { document: updated } = (await saved.json()) as { document: LibraryDocument };
+  check(
+    [updated.displayName, updated.tags, updated.isFavorite],
+    ["Saved notes", ["work", "notes"], true],
+  );
+  const latest = (await upload("metadata.md", "# Metadata\nNewest reference.")).body.document;
+  check(
+    [latest.displayName, latest.tags, latest.isFavorite],
+    [updated.displayName, updated.tags, true],
+  );
+  const modified = await service.updateLibraryDocumentMetadata(userId, latest.id, {
+    expectedRevision: latest.revision,
+    tags: ["work", "guide"],
+  });
+  check(
+    (await service.listLibraryDocumentVersions(userId, modified.id)).map((row) => row.tags),
+    [
+      ["work", "guide"],
+      ["work", "guide"],
+    ],
+  );
+  check(
+    (
+      await service.searchLibrary(userId, personal, "Saved notes", {
+        favoriteOnly: true,
+        tag: "work",
+      })
+    ).map((row) => row.documentId),
+    [modified.id],
+  );
+  check(
+    (await service.searchLibrary(userId, project, "reference", { favoriteOnly: true })).length,
+    0,
+  );
+  check(
+    (
+      await service.listLibraryDocuments(
+        other,
+        { kind: "all" },
+        { favoriteOnly: true, tag: "work" },
+      )
+    ).length,
+    0,
+  );
+  await reject(
+    () =>
+      service.updateLibraryDocumentMetadata(userId, modified.id, {
+        expectedRevision: latest.revision,
+        isFavorite: false,
+      }),
+    "library_conflict",
+  );
+  await reject(
+    () =>
+      service.updateLibraryDocumentMetadata(userId, modified.id, {
+        expectedRevision: modified.revision,
+        tags: ["x".repeat(41)],
+      }),
+    "library_invalid_tags",
+  );
+  const folder = await service.createLibraryFolder(userId, personal, "Research");
+  const foldered = await upload(
+    "foldered.md",
+    "# Foldered\nResearch material.",
+    personal,
+    folder.folder.id,
+  );
+  check(
+    (await service.getLibraryDocument(userId, foldered.body.document.id)).folderId,
+    folder.folder.id,
+  );
+  const renamed = await service.renameLibraryFolder(
+    userId,
+    folder.folder.id,
+    folder.folder.revision,
+    "Renamed",
+  );
+  check(renamed.name, "Renamed");
+  const moveEntry = (doc: LibraryDocument) => ({
+    documentId: doc.id,
+    expectedRevision: doc.revision,
+  });
+  const unfiled = await request("/documents/move", "POST", {
+    scope: personal,
+    folderId: null,
+    documents: [moveEntry(foldered.body.document), moveEntry(modified)],
+  });
+  check(unfiled.status, 200);
+  check(await unfiled.json(), { moved: 1 });
+  const freshlyUnfiled = await service.getLibraryDocument(userId, foldered.body.document.id);
+  check(freshlyUnfiled.folderId, null);
+  check((await service.getLibraryDocument(userId, modified.id)).revision, modified.revision);
+  const bulkMove = {
+    scope: personal,
+    folderId: renamed.id,
+    documents: [moveEntry(modified), moveEntry(freshlyUnfiled)],
+  };
+  const staleBatch = await request("/documents/move", "POST", {
+    ...bulkMove,
+    documents: [moveEntry(modified), moveEntry(foldered.body.document)],
+  });
+  check(staleBatch.status, 409);
+  check(await staleBatch.json(), { errorCode: "library_conflict" });
+  const mixedScope = await request("/documents/move", "POST", {
+    ...bulkMove,
+    documents: [moveEntry(modified), moveEntry(projectDoc)],
+  });
+  check(mixedScope.status, 409);
+  const projectFolder = await service.createLibraryFolder(userId, project, "Project archive");
+  const wrongFolder = await request("/documents/move", "POST", {
+    ...bulkMove,
+    folderId: projectFolder.folder.id,
+  });
+  check(wrongFolder.status, 404);
+  await reject(() => service.moveLibraryDocuments(other, bulkMove), "library_folder_not_found");
+  await reject(
+    () =>
+      service.moveLibraryDocuments(userId, {
+        ...bulkMove,
+        documents: [moveEntry(modified), moveEntry(modified)],
+      }),
+    "library_invalid_data",
+  );
+  check((await service.getLibraryDocument(userId, modified.id)).folderId, null);
+  check((await service.getLibraryDocument(userId, modified.id)).revision, modified.revision);
+  const completedMove = await request("/documents/move", "POST", bulkMove);
+  check(completedMove.status, 200);
+  check(await completedMove.json(), { moved: 2 });
+  check(
+    (await service.listLibraryDocumentVersions(userId, modified.id)).map((row) => row.folderId),
+    [renamed.id, renamed.id],
+  );
+  check((await service.getLibraryDocument(userId, freshlyUnfiled.id)).folderId, renamed.id);
+  const inheritedFolder = await upload("foldered.md", "An update without a folder.");
+  check(inheritedFolder.status, 201);
+  check(inheritedFolder.body.document.folderId, renamed.id);
+  const explicitUncategorized = await upload(
+    "foldered.md",
+    "An update saved in Uncategorized.",
+    personal,
+    null,
+  );
+  check(explicitUncategorized.status, 201);
+  check(explicitUncategorized.body.document.folderId, null);
+  check(explicitUncategorized.body.document.previousVersionId, inheritedFolder.body.document.id);
+  await service.deleteLibraryFolder(userId, projectFolder.folder.id, projectFolder.folder.revision);
+  await service.deleteLibraryFolder(userId, renamed.id, renamed.revision);
+  check((await service.getLibraryDocument(userId, foldered.body.document.id)).folderId, null);
+  const provenance = await service.uploadLibraryDocument(
+    userId,
+    personal,
+    "provenance.pdf",
+    libraryTestPdf(3, (index) => (index === 0 ? "" : "Page provenance")),
+  );
+  const [pageHit] = await service.searchLibrary(userId, personal, "provenance");
+  check(pageHit.documentId, provenance.document.id);
+  check(pageHit.location, { pageStart: 2, pageEnd: 3, startOffset: 2, endOffset: 34 });
+  check((await service.searchLibrary(userId, personal, "Pa"))[0].location, pageHit.location);
+  const [firstTextHit] = await service.searchLibrary(userId, personal, "shipping");
+  check(firstTextHit.location?.startOffset, 0);
+  check(firstTextHit.location?.lineStart, 1);
+  const backupFolder = await service.createLibraryFolder(userId, personal, "Backup folder");
+  await upload("backup-folder.md", "Backup folder material.", personal, backupFolder.folder.id);
+  const badUpload = await upload("bad.exe", "abc");
+  const emptyUpload = await upload("empty.txt", "");
+  check(badUpload.status, 400);
+  check(emptyUpload.status, 413);
   const binary = await service.uploadLibraryDocument(
     userId,
     personal,
@@ -205,13 +614,10 @@ try {
     code: "library_invalid_text",
   });
   checks++;
-  check((await upload("scan.pdf", "not a PDF")).body.document.status, "failed");
-  check(
-    (await parseLibraryOriginal(libraryTestPdf(1), "application/pdf")).includes(
-      "Shipping costs twelve coins",
-    ),
-    true,
-  );
+  const scanUpload = await upload("scan.pdf", "not a PDF");
+  check(scanUpload.body.document.status, "failed");
+  const parsedPdf = await parseLibraryOriginal(libraryTestPdf(1), "application/pdf");
+  check(parsedPdf.includes("Shipping costs twelve coins"), true);
   await assert.rejects(() => parseLibraryOriginal(libraryTestPdf(101), "application/pdf"), {
     code: "library_pdf_limit",
   });
@@ -365,6 +771,17 @@ try {
   await service.deleteLibraryDocument(userId, first.body.document.id, first.body.document.revision);
   check((await service.searchLibrary(userId, personal, "shipping")).length, 0);
   check(
+    Number(
+      (
+        await client.execute({
+          sql: "SELECT count(*) AS count FROM library_chunks_fts WHERE document_id = ?",
+          args: [first.body.document.id],
+        })
+      ).rows[0]?.count,
+    ),
+    0,
+  );
+  check(
     (await service.prepareLibraryQuestion(userId, prepare)).question.prompt,
     prepared.question.prompt,
   );
@@ -405,6 +822,15 @@ try {
   finish("stale text");
   await reject(() => indexing, "library_conflict");
   check((await service.getLibraryDocument(userId, newer.id)).text, "newest shipping text");
+  check(
+    (
+      await client.execute({
+        sql: "SELECT text FROM library_chunks_fts WHERE document_id = ?",
+        args: [newer.id],
+      })
+    ).rows.map((row) => String(row.text)),
+    ["newest shipping text"],
+  );
   const active = service.indexLibraryDocument(userId, newer.id, async () => {
     await service.deleteLibraryDocument(userId, newer.id, newer.revision + 1);
     return "deleted";
@@ -436,7 +862,21 @@ try {
     ),
     false,
   );
+  const pdfQuestion = await service.prepareLibraryQuestion(userId, {
+    ...prepare,
+    question: "provenance",
+    requestId: crypto.randomUUID(),
+  });
+  check(JSON.parse(pdfQuestion.question.prompt).sources[0].location, pageHit.location);
+  // Exercise compatibility with a source snapshot created before positions were stored.
+  const { location: _oldLocation, ...oldSource } = prepared.question.sources[0];
+  await db
+    .update(libraryQuestions)
+    .set({ sources: JSON.stringify([oldSource]) })
+    .where(eq(libraryQuestions.id, prepared.question.id));
   const backupDoc = await upload("backup.md", "Shipping backup original.");
+  const backupNewer = await upload("backup.md", "Shipping backup newer.");
+  check(backupNewer.body.document.version, 2);
   const estimate = await estimateExportSize(userId);
   check(estimate.estimatedBytes > 0, true);
   const backup = await exportBackup(userId, directory);
@@ -449,15 +889,45 @@ try {
   const restored = await importOpenHornBackup(other, backup.filePath);
   check((restored.library?.imported ?? 0) >= 3, true);
   check((await service.searchLibrary(other, personal, "shipping")).length, 1);
+  const restoredBackup = (await service.listLibraryDocuments(other, personal)).find(
+    (row) => row.fileName === "backup.md",
+  );
+  if (!restoredBackup) throw new Error("restored versioned backup missing");
+  check(
+    (await service.listLibraryDocumentVersions(other, restoredBackup.id)).map((row) => row.version),
+    [2, 1],
+  );
+  const restoredFoldered = (await service.listLibraryDocuments(other, personal)).find(
+    (row) => row.fileName === "backup-folder.md",
+  );
+  check(restoredFoldered?.folderId !== null && restoredFoldered?.folderId !== undefined, true);
+  const importedMetadata = (
+    await service.listLibraryDocuments(other, personal, { favoriteOnly: true, tag: "guide" })
+  )[0];
+  check(
+    [importedMetadata.displayName, importedMetadata.tags, importedMetadata.isFavorite],
+    ["Saved notes", ["work", "guide"], true],
+  );
+  check((await service.listLibraryDocumentVersions(other, importedMetadata.id)).length, 2);
   const restoredQuestions = await service.listLibraryQuestions(other);
-  check(restoredQuestions.length, 2);
+  check(restoredQuestions.length, 3);
+  check(
+    restoredQuestions.find((q) => q.question === "provenance")?.sources[0]?.location,
+    pageHit.location,
+  );
+  check(
+    restoredQuestions.find((q) => q.scope.kind === "personal" && q.question === "shipping")
+      ?.sources[0]?.location,
+    undefined,
+  );
+  check((await service.searchLibrary(other, personal, "provenance"))[0].location, pageHit.location);
   check(
     restoredQuestions.some((q) => q.scope.kind === "project" && !q.scopeAvailable),
     true,
   );
   const again = await importOpenHornBackup(other, backup.filePath);
   check(again.library?.imported, 0);
-  check((await service.listLibraryQuestions(other)).length, 2);
+  check((await service.listLibraryQuestions(other)).length, 3);
   check(
     (await service.getLibraryOriginal(userId, backupDoc.body.document.id)).bytes.toString(),
     "Shipping backup original.",
@@ -478,14 +948,15 @@ try {
   check(invalid, true);
   const missing = await restoreLibraryBackup(
     other,
-    [{ ...exportedDocs[0], projectId: "missing", scopeKey: "project:missing" }],
+    [{ ...exportedDocs[0], projectId: "missing", scopeKey: "project:missing", folderId: null }],
+    [],
     [],
     { project: () => null, channel: () => null, conversation: () => null, stable: (_, v) => v },
   );
   check(missing.skipped, 1);
   check(missing.errors.length, 1);
   check(await service.deleteLibraryQuestion(userId, prepared.question.id), true);
-  check((await service.listLibraryQuestions(userId)).length, 1);
+  check((await service.listLibraryQuestions(userId)).length, 2);
   // Large originals must pass canonical validation without regex recursion limits.
   const fullBytes = Buffer.alloc(LIBRARY_LIMITS.fileBytes, 65);
   const fullDoc = await service.uploadLibraryDocument(userId, personal, "large.txt", fullBytes);

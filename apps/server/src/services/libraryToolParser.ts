@@ -6,8 +6,8 @@ import {
   toolObject,
 } from "shared/search";
 import type { ToolConnection } from "shared/tool-connection";
-import { requestLibraryOcr } from "./libraryOcr";
-import { LibraryParseError } from "./libraryParser";
+import { requestLibraryOcrDetailed } from "./libraryOcr";
+import { type LibraryParsedDocument, LibraryParseError } from "./libraryParser";
 
 /** PDF parser annotations are source text; a model's reply is never indexed as OCR. */
 export function parseOpenRouterDocument(payload: unknown, fileName: string): string {
@@ -48,19 +48,27 @@ export function parseOpenRouterDocument(payload: unknown, fileName: string): str
   return text;
 }
 
-export async function requestLibraryToolParse(
+export async function requestLibraryToolParseDetailed(
   bytes: Buffer,
   fileName: string,
   fileType: string,
   connection: ToolConnection,
   expectedPages?: number,
   options: Omit<ToolRequestOptions, "connection"> = {},
-): Promise<string> {
+): Promise<LibraryParsedDocument> {
   if (connection.kind === "deepseek") {
-    return requestLibraryOcr(bytes, fileName, fileType, connection.apiKey, expectedPages, {
-      ...options,
-      baseUrl: connection.baseUrl,
-    });
+    const result = await requestLibraryOcrDetailed(
+      bytes,
+      fileName,
+      fileType,
+      connection.apiKey,
+      expectedPages,
+      {
+        ...options,
+        baseUrl: connection.baseUrl,
+      },
+    );
+    return fileType === "application/pdf" ? result : { text: result.text };
   }
   if (fileType !== "application/pdf") throw new LibraryParseError("library_ocr_format");
   try {
@@ -92,7 +100,7 @@ export async function requestLibraryToolParse(
       },
       { ...options, connection, timeoutMs: options.timeoutMs ?? LIBRARY_LIMITS.ocrTimeoutMs },
     );
-    return parseOpenRouterDocument(result, fileName);
+    return { text: parseOpenRouterDocument(result, fileName) };
   } catch (error) {
     if (error instanceof LibraryParseError) throw error;
     const message = error instanceof Error ? error.message : "";
@@ -106,4 +114,10 @@ export async function requestLibraryToolParse(
             : "library_ocr_failed",
     );
   }
+}
+
+export async function requestLibraryToolParse(
+  ...args: Parameters<typeof requestLibraryToolParseDetailed>
+): Promise<string> {
+  return (await requestLibraryToolParseDetailed(...args)).text;
 }

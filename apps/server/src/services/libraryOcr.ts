@@ -41,6 +41,10 @@ export function cleanLibraryOcrText(text: string): string {
 }
 
 export function parseLibraryOcrResult(payload: unknown, expectedPages?: number): string {
+  return parseLibraryOcrPages(payload, expectedPages).text;
+}
+
+function parseLibraryOcrPages(payload: unknown, expectedPages?: number) {
   const value = object(payload);
   if (!value || "error" in value) throw providerError(payload, 200);
   const count = value.page_count;
@@ -76,16 +80,17 @@ export function parseLibraryOcrResult(payload: unknown, expectedPages?: number):
     if (bytes > LIBRARY_LIMITS.textBytes) throw new LibraryParseError("library_text_limit");
     pages.set(page.index, cleanLibraryOcrText(page.text));
   }
-  const text = Array.from({ length: count }, (_, index) => pages.get(index)).join("\n\n");
+  const pageTexts = Array.from({ length: count }, (_, index) => pages.get(index) ?? "");
+  const text = pageTexts.join("\n\n");
   // biome-ignore lint/suspicious/noControlCharactersInRegex: match the local library text contract
   if (/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(text))
     throw new LibraryParseError("library_invalid_text");
   if (!text.trim()) throw new LibraryParseError("library_empty_text");
-  return text;
+  return { text, pages: pageTexts };
 }
 
 /** One request, one deadline including response streaming; never automatically retry billing. */
-export async function requestLibraryOcr(
+export async function requestLibraryOcrDetailed(
   bytes: Buffer,
   fileName: string,
   fileType: string,
@@ -96,7 +101,7 @@ export async function requestLibraryOcr(
     resolveHostname?: ResolveWebHostname;
     fetchImpl?: WebToolsFetchFn;
   } = {},
-): Promise<string> {
+) {
   const signal = AbortSignal.timeout(LIBRARY_LIMITS.ocrTimeoutMs);
   let reader:
     | Pick<ReadableStreamDefaultReader<Uint8Array>, "read" | "cancel" | "releaseLock">
@@ -152,7 +157,7 @@ export async function requestLibraryOcr(
           throw providerError(null, response.status);
         }
         if (!response.ok) throw providerError(payload, response.status);
-        return parseLibraryOcrResult(payload, expectedPages);
+        return parseLibraryOcrPages(payload, expectedPages);
       })(),
     ]);
   } catch (error) {
@@ -167,4 +172,10 @@ export async function requestLibraryOcr(
       .catch(() => {})
       .finally(() => completedReader.releaseLock());
   }
+}
+
+export async function requestLibraryOcr(
+  ...args: Parameters<typeof requestLibraryOcrDetailed>
+): Promise<string> {
+  return (await requestLibraryOcrDetailed(...args)).text;
 }
